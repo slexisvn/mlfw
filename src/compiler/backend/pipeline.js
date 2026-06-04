@@ -1,0 +1,57 @@
+import { TargetKind } from './target.js';
+import { CPUCodegen } from './cpu/codegen.js';
+import { GPUCodegen } from './gpu/codegen.js';
+import { createCPULibrarySelector, createGPULibrarySelector } from './library_selector.js';
+
+export class CompiledKernel {
+  constructor(name, source, target, metadata = {}) {
+    this.name = name;
+    this.source = source;
+    this.target = target;
+    this.metadata = metadata;
+  }
+}
+
+export class BackendPipeline {
+  constructor(target) {
+    this.target = target;
+    this.librarySelector = target.isCPU()
+      ? createCPULibrarySelector(target)
+      : createGPULibrarySelector(target);
+  }
+
+  compile(primFunc) {
+    if (this.target.isCPU()) {
+      return this._compileCPU(primFunc);
+    }
+    if (this.target.isGPU()) {
+      return this._compileGPU(primFunc);
+    }
+    throw new Error(`Unsupported target kind: ${this.target.kind}`);
+  }
+
+  compileAll(primFuncs) {
+    return primFuncs.map(f => this.compile(f));
+  }
+
+  _compileCPU(primFunc) {
+    const codegen = new CPUCodegen(this.target);
+    const source = codegen.generate(primFunc);
+    return new CompiledKernel(primFunc.name, source, this.target, {
+      kind: 'js',
+      paramCount: primFunc.params.length
+    });
+  }
+
+  _compileGPU(primFunc) {
+    const codegen = new GPUCodegen(this.target);
+    const kernel = codegen.generate(primFunc);
+    return new CompiledKernel(primFunc.name, kernel.source, this.target, {
+      kind: 'cuda',
+      blockDim: kernel.blockDim,
+      gridDim: kernel.gridDim,
+      sharedMemBytes: kernel.sharedMemBytes,
+      params: kernel.params
+    });
+  }
+}

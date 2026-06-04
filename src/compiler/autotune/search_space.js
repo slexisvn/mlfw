@@ -1,0 +1,216 @@
+import { ForKind } from '../ir/tensor/nodes.js';
+import { TargetKind } from '../backend/target.js';
+import { ScheduleTrace } from '../schedule/trace.js';
+
+export class SearchVariable {
+  constructor(name, candidates) {
+    this.name = name;
+    this.candidates = candidates;
+  }
+
+  sample(rng) {
+    return this.candidates[rng(this.candidates.length)];
+  }
+}
+
+export class ScheduleSketch {
+  constructor(name, variables, apply) {
+    this.name = name;
+    this.variables = variables;
+    this._apply = apply;
+  }
+
+  instantiate(params) {
+    return (schedule, blockName, target) => {
+      this._apply(schedule, blockName, target, params);
+    };
+  }
+
+  sampleParams(rng) {
+    const params = {};
+    for (const v of this.variables) {
+      params[v.name] = v.sample(rng);
+    }
+    return params;
+  }
+}
+
+const TILE_CANDIDATES = [1, 2, 4, 8, 16, 32, 64, 128, 256];
+const BLOCK_SIZE_CANDIDATES = [32, 64, 128, 256, 512, 1024];
+const UNROLL_CANDIDATES = [1, 2, 4, 8, 16];
+const VECTOR_CANDIDATES = [1, 2, 4, 8, 16];
+
+export function createElementwiseCPUSketch() {
+  return new ScheduleSketch('elementwise_cpu', [
+    new SearchVariable('tile_size', TILE_CANDIDATES),
+    new SearchVariable('vector_width', VECTOR_CANDIDATES)
+  ], (schedule, blockName, target, params) => {
+    const loops = schedule.getLoops(blockName);
+    if (loops.length === 0) return;
+
+    if (loops.length === 1) {
+      const extent = loops[0].extent;
+      if (extent.type === 'IntImmNode' && extent.value >= params.vector_width * 2) {
+        const [outer, inner] = schedule.split(loops[0], params.vector_width);
+        schedule.parallelize(outer);
+        schedule.vectorize(inner);
+      } else {
+        schedule.parallelize(loops[0]);
+      }
+      return;
+    }
+
+    schedule.parallelize(loops[0]);
+    const innermost = loops[loops.length - 1];
+    const extent = innermost.extent;
+    if (extent.type === 'IntImmNode' && extent.value >= params.vector_width) {
+      const [, vi] = schedule.split(innermost, params.vector_width);
+      schedule.vectorize(vi);
+    }
+  });
+}
+
+export function createElementwiseGPUSketch() {
+  return new ScheduleSketch('elementwise_gpu', [
+    new SearchVariable('block_size', BLOCK_SIZE_CANDIDATES)
+  ], (schedule, blockName, target, params) => {
+    const loops = schedule.getLoops(blockName);
+    if (loops.length === 0) return;
+
+    let fusedLoop = loops[0];
+    for (let i = 1; i < loops.length; i++) {
+      const currentLoops = schedule.getLoops(blockName);
+      const nextLoop = currentLoops.find(l => l.loopVar.name === loops[i].loopVar.name);
+      if (nextLoop && fusedLoop.body === nextLoop) {
+        fusedLoop = schedule.fuseLoops(fusedLoop, nextLoop);
+      }
+    }
+
+    const extent = fusedLoop.extent;
+    if (extent.type !== 'IntImmNode') {
+      schedule.bindThread(fusedLoop, 'threadIdx.x');
+      return;
+    }
+
+    const totalElements = extent.value;
+    const blockSize = Math.min(params.block_size, totalElements);
+    if (totalElements > blockSize) {
+      const [bx, tx] = schedule.split(fusedLoop, blockSize);
+      schedule.bindThread(bx, 'blockIdx.x');
+      schedule.bindThread(tx, 'threadIdx.x');
+    } else {
+      schedule.bindThread(fusedLoop, 'threadIdx.x');
+    }
+  });
+}
+
+export function createReductionCPUSketch() {
+  return new ScheduleSketch('reduction_cpu', [
+    new SearchVariable('tile_size', TILE_CANDIDATES)
+  ], (schedule, blockName, target, params) => {
+    const loops = schedule.getLoops(blockName);
+    if (loops.length > 0) {
+      schedule.parallelize(loops[0]);
+    }
+  });
+}
+
+export function createMatmulCPUSketch() {
+  return new ScheduleSketch('matmul_cpu', [
+    new SearchVariable('tile_m', TILE_CANDIDATES),
+    new SearchVariable('tile_n', TILE_CANDIDATES),
+    new SearchVariable('tile_k', [1, 2, 4, 8, 16, 32])
+  ], (schedule, blockName, target, params) => {
+    const loops = schedule.getLoops(blockName);
+    if (loops.length < 3) return;
+
+    const mLoop = loops[0];
+    const nLoop = loops[1];
+
+    const mExtent = mLoop.extent.type === 'IntImmNode' ? mLoop.extent.value : null;
+    const nExtent = nLoop.extent.type === 'IntImmNode' ? nLoop.extent.value : null;
+
+    if (mExtent && mExtent >= params.tile_m) {
+      const [mo, mi] = schedule.split(mLoop, params.tile_m);
+      schedule.parallelize(mo);
+    }
+
+    const updatedLoops = schedule.getLoops(blockName);
+    const currentN = updatedLoops.find(l => l.loopVar.name === nLoop.loopVar.name);
+    if (currentN && nExtent && nExtent >= params.tile_n) {
+      schedule.split(currentN, params.tile_n);
+    }
+  });
+}
+
+export function createMatmulGPUSketch() {
+  return new ScheduleSketch('matmul_gpu', [
+    new SearchVariable('block_tile_m', [32, 64, 128]),
+    new SearchVariable('block_tile_n', [32, 64, 128]),
+    new SearchVariable('thread_tile_m', [4, 8, 16]),
+    new SearchVariable('thread_tile_n', [4, 8, 16])
+  ], (schedule, blockName, target, params) => {
+    const loops = schedule.getLoops(blockName);
+    if (loops.length < 3) return;
+
+    const mLoop = loops[0];
+    const nLoop = loops[1];
+    const mExtent = mLoop.extent.type === 'IntImmNode' ? mLoop.extent.value : null;
+    const nExtent = nLoop.extent.type === 'IntImmNode' ? nLoop.extent.value : null;
+
+    if (mExtent && mExtent >= params.block_tile_m) {
+      const [mBlock, mRem] = schedule.split(mLoop, params.block_tile_m);
+      schedule.bindThread(mBlock, 'blockIdx.y');
+      const updated = schedule.getLoops(blockName);
+      const cur = updated.find(l => l.loopVar.name === mRem.loopVar.name);
+      if (cur && params.thread_tile_m <= params.block_tile_m) {
+        const [mto] = schedule.split(cur, params.thread_tile_m);
+        schedule.bindThread(mto, 'threadIdx.y');
+      }
+    }
+
+    const updated2 = schedule.getLoops(blockName);
+    const currentN = updated2.find(l => l.loopVar.name === nLoop.loopVar.name);
+    if (currentN && nExtent && nExtent >= params.block_tile_n) {
+      const [nBlock, nRem] = schedule.split(currentN, params.block_tile_n);
+      schedule.bindThread(nBlock, 'blockIdx.x');
+      const updated3 = schedule.getLoops(blockName);
+      const curN = updated3.find(l => l.loopVar.name === nRem.loopVar.name);
+      if (curN && params.thread_tile_n <= params.block_tile_n) {
+        const [nto] = schedule.split(curN, params.thread_tile_n);
+        schedule.bindThread(nto, 'threadIdx.x');
+      }
+    }
+  });
+}
+
+function classifyBlockForSketch(primFunc, blockName) {
+  let hasReduction = false;
+  let isMatmul = blockName.includes('matmul');
+  const visit = (node) => {
+    if (!node) return;
+    if (node.type === 'BlockNode' && node.name === blockName) {
+      if (node.initBody) hasReduction = true;
+    }
+    if (node.body) visit(node.body);
+    if (node.stmts) for (const s of node.stmts) visit(s);
+  };
+  visit(primFunc.body);
+  return { hasReduction, isMatmul };
+}
+
+export function getSketchesForBlock(primFunc, blockName, target) {
+  const info = classifyBlockForSketch(primFunc, blockName);
+  const sketches = [];
+
+  if (target.kind === TargetKind.CPU) {
+    if (info.isMatmul) sketches.push(createMatmulCPUSketch());
+    else if (info.hasReduction) sketches.push(createReductionCPUSketch());
+    else sketches.push(createElementwiseCPUSketch());
+  } else if (target.kind === TargetKind.GPU) {
+    if (info.isMatmul) sketches.push(createMatmulGPUSketch());
+    else sketches.push(createElementwiseGPUSketch());
+  }
+
+  return sketches;
+}

@@ -1,0 +1,14 @@
+{
+  "name": "mlc",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/",
+    "test:ir": "node --test tests/compiler/ir/",
+    "test:analysis": "node --test tests/compiler/analysis/",
+    "test:passes": "node --test tests/compiler/passes/",
+    "test:schedule": "node --test tests/compiler/schedule/",
+    "test:backend": "node --test tests/compiler/backend/",
+    "test:integration": "node --test tests/compiler/integration/"
+  }
+}
