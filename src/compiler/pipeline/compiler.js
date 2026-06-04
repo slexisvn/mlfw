@@ -7,6 +7,11 @@ import { CSEPass } from '../passes/simplify/cse.js';
 import { DCEPass } from '../passes/simplify/dce.js';
 import { FusionPass } from '../passes/fusion/fusion_pass.js';
 import { EpilogueFusionPass } from '../passes/fusion/epilogue_fusion.js';
+import { FusionMergerPass } from '../passes/fusion/fusion_merger.js';
+import { MultiOutputFusionPass } from '../passes/fusion/multi_output_fusion.js';
+import { DominatorFusionPass } from '../passes/fusion/dominator_fusion.js';
+import { LayoutTransformPass } from '../passes/layout/layout_transform.js';
+import { QuantizationPass } from '../passes/quantization/quantization_pass.js';
 import { lowerGraphToPrimFunc } from '../passes/lowering/graph_to_tensor.js';
 import { Schedule } from '../schedule/schedule.js';
 import { SchedulePolicy } from '../schedule/rules.js';
@@ -16,21 +21,58 @@ import { RuntimeModule } from '../runtime/runtime.js';
 import { Autotuner } from '../autotune/autotuner.js';
 import { TensorVerifier } from '../ir/tensor/verifier.js';
 import { verifyModule } from '../ir/verifier/verifier.js';
+import { CalibrationCollector } from '../analysis/calibration.js';
+import { DecompositionPass } from '../passes/decompose/decomposition_pass.js';
+import { RematerializationPass } from '../passes/memory/rematerialization.js';
 
 export class CompilerConfig {
   constructor(opts = {}) {
     this.target = opts.target;
-    this.enableFusion = opts.enableFusion !== false;
-    this.enableEpilogueFusion = opts.enableEpilogueFusion;
-    this.enableSchedule = opts.enableSchedule || false;
-    this.enableAutotune = opts.enableAutotune || false;
-    this.autotuneConfig = opts.autotuneConfig || {};
-    this.fusionConfig = opts.fusionConfig || {};
-    this.memoryAlignment = opts.memoryAlignment || 64;
-    this.enableInplaceReuse = opts.enableInplaceReuse !== false;
     this.verify = opts.verify !== false;
     this.enableDiagnostics = opts.enableDiagnostics || false;
+
+    const f = opts.fusion || {};
+    this.fusion = {
+      enabled:   f.enabled   ?? opts.enableFusion ?? true,
+      strategy:  f.strategy  ?? opts.fusionStrategy ?? 'xla',
+      epilogue:  f.epilogue  ?? opts.enableEpilogueFusion,
+      ...spread(opts.fusionConfig), ...omit(f, 'enabled', 'strategy', 'epilogue'),
+    };
+
+    const s = opts.scheduling || {};
+    this.scheduling = {
+      enabled:  s.enabled  ?? opts.enableSchedule ?? false,
+      autotune: s.autotune ?? opts.enableAutotune ?? false,
+      ...spread(opts.autotuneConfig), ...omit(s, 'enabled', 'autotune'),
+    };
+
+    const q = opts.quantization || {};
+    this.quantization = {
+      enabled: q.enabled ?? opts.enableQuantization ?? false,
+      ...spread(opts.quantizationConfig), ...omit(q, 'enabled'),
+    };
+
+    const o = opts.optimization || {};
+    this.optimization = {
+      layout:            o.layout            ?? opts.enableLayoutOptimization ?? false,
+      rematerialization: o.rematerialization ?? opts.enableRematerialization ?? false,
+      rematConfig:       o.rematConfig       ?? opts.rematerializationConfig ?? {},
+    };
+
+    const m = opts.memory || {};
+    this.memory = {
+      alignment:    m.alignment    ?? opts.memoryAlignment ?? 64,
+      inplaceReuse: m.inplaceReuse ?? opts.enableInplaceReuse ?? true,
+    };
   }
+}
+
+function spread(obj) { return obj && typeof obj === 'object' ? obj : {}; }
+function omit(obj, ...keys) {
+  const s = new Set(keys);
+  const r = {};
+  for (const k of Object.keys(obj)) { if (!s.has(k)) r[k] = obj[k]; }
+  return r;
 }
 
 export class CompilationResult {
@@ -59,7 +101,7 @@ export class Compiler {
   }
 
   compile(graphModule) {
-    const diag = this.config.enableDiagnostics ? new CompilerDiagnostics() : null;
+    const diag = this.config.enableDiagnostics ? new CompilerDiagnostics(this.config.target.name) : null;
 
     if (this.config.verify) {
       this._verifyGraph(graphModule, 'before graph passes');
@@ -92,17 +134,37 @@ export class Compiler {
     return this.compile(mod);
   }
 
+  calibrate(graphModule, mode = 'minmax') {
+    const collector = new CalibrationCollector(mode);
+    for (const func of graphModule) {
+      collector.attach(func);
+    }
+    return collector;
+  }
+
   _runGraphPasses(graphModule, diag) {
     const pm = new PassManager();
 
+    pm.addPass(new DecompositionPass());
     pm.addPass(new CanonicalizePass());
     pm.addPass(new AlgebraicSimplificationPass());
     pm.addPass(new ConstantFoldPass());
     pm.addPass(new CSEPass());
     pm.addPass(new DCEPass());
 
-    const shouldEpilogueFuse = this.config.enableEpilogueFusion !== undefined
-      ? this.config.enableEpilogueFusion
+    if (this.config.optimization.layout && this.config.target) {
+      pm.addPass(new LayoutTransformPass({ target: this.config.target }));
+      pm.addPass(new DCEPass());
+    }
+
+    if (this.config.quantization.enabled) {
+      pm.addPass(new QuantizationPass({ ...this.config.quantization, target: this.config.target }));
+      pm.addPass(new CanonicalizePass());
+      pm.addPass(new DCEPass());
+    }
+
+    const shouldEpilogueFuse = this.config.fusion.epilogue !== undefined
+      ? this.config.fusion.epilogue
       : (this.config.target && this.config.target.enableEpilogueFusion);
 
     if (shouldEpilogueFuse) {
@@ -110,13 +172,20 @@ export class Compiler {
       pm.addPass(new DCEPass());
     }
 
-    if (this.config.enableFusion) {
-      pm.addPass(new FusionPass({
-        target: this.config.target,
-        cost: { launchOverheadUs: 5 },
-        ...this.config.fusionConfig,
-      }));
+    if (this.config.fusion.enabled) {
+      const fCfg = this.config.fusion;
+      if (fCfg.strategy === 'dominator') {
+        pm.addPass(new DominatorFusionPass({ target: this.config.target, ...fCfg }));
+      } else {
+        pm.addPass(new FusionPass({ target: this.config.target, cost: { launchOverheadUs: 5 }, ...fCfg }));
+        pm.addPass(new FusionMergerPass({ maxFusionSize: this.config.target?.maxFusionSize, ...fCfg }));
+        pm.addPass(new MultiOutputFusionPass({ maxFusionSize: this.config.target?.maxFusionSize, ...fCfg }));
+      }
       pm.addPass(new DCEPass());
+    }
+
+    if (this.config.optimization.rematerialization) {
+      pm.addPass(new RematerializationPass(this.config.optimization.rematConfig));
     }
 
     if (diag) diag.record('graphPasses', 'start');
@@ -135,13 +204,14 @@ export class Compiler {
   }
 
   _scheduleAll(primFuncs, diag) {
-    if (this.config.enableAutotune) {
-      const autotuner = new Autotuner(this.config.target, this.config.autotuneConfig);
+    const sCfg = this.config.scheduling;
+    if (sCfg.autotune) {
+      const autotuner = new Autotuner(this.config.target, sCfg);
       for (const pf of primFuncs) {
         if (diag) diag.record('autotune', pf.name);
         autotuner.tuneAndApply(pf);
       }
-    } else if (this.config.enableSchedule) {
+    } else if (sCfg.enabled) {
       const policy = new SchedulePolicy(this.config.target);
       for (const pf of primFuncs) {
         if (diag) diag.record('schedule', pf.name);
@@ -152,9 +222,12 @@ export class Compiler {
   }
 
   _planMemory(primFuncs, diag) {
+    const alignment = this.config.memory.alignment
+      || this.config.target?.cacheLineSizeBytes
+      || 64;
     const planner = new MemoryPlanner({
-      alignment: this.config.memoryAlignment,
-      enableInplace: this.config.enableInplaceReuse
+      alignment,
+      enableInplace: this.config.memory.inplaceReuse
     });
     const plans = [];
     for (const pf of primFuncs) {
@@ -198,7 +271,8 @@ export class Compiler {
 }
 
 class CompilerDiagnostics {
-  constructor() {
+  constructor(targetName) {
+    this.targetName = targetName || 'unknown';
     this.entries = [];
   }
 

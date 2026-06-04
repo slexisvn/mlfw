@@ -33,7 +33,8 @@ export function classifyFusionKind(ops) {
   return FusionKind.ELEMENTWISE;
 }
 
-function classifyOp(def) {
+export function classifyOpPattern(op) {
+  const def = registry.get(op.opName);
   if (!def || def.isOpaque) return FusionKind.OPAQUE;
   if (def.isReduction) return FusionKind.REDUCTION;
   if (def.isInjective) return FusionKind.INJECTIVE;
@@ -92,8 +93,8 @@ export class FusionLegality {
       return { legal: false, reason: 'consumer is opaque' };
     }
 
-    const pKind = classifyOp(pDef);
-    const cKind = classifyOp(cDef);
+    const pKind = classifyOpPattern(producer);
+    const cKind = classifyOpPattern(consumer);
 
     if (pKind === FusionKind.ELEMENTWISE && cKind === FusionKind.ELEMENTWISE) {
       return this._checkElementwisePair(producer, consumer);

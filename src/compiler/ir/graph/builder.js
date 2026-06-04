@@ -266,39 +266,38 @@ export class IRBuilder {
   }
 
   softmax(input, axis = -1) {
-    const rank = input.type.rank;
-    const dim = axis < 0 ? rank + axis : axis;
-    const maxOp = this.reduce(input, this.scalarConstant(-Infinity, input.type.dtype).getResult(0), [dim], 'max');
-    const broadcastMax = this.broadcast(maxOp.getResult(0), input.type.shape, broadcastDimsExcluding(rank, dim));
-    const shifted = this.sub(input, broadcastMax.getResult(0));
-    const exps = this.exp(shifted.getResult(0));
-    const sumOp = this.reduce(exps.getResult(0), this.scalarConstant(0, input.type.dtype).getResult(0), [dim], 'sum');
-    const broadcastSum = this.broadcast(sumOp.getResult(0), input.type.shape, broadcastDimsExcluding(rank, dim));
-    return this.div(exps.getResult(0), broadcastSum.getResult(0));
+    const dim = axis < 0 ? input.type.rank + axis : axis;
+    return this._inferAndBuild('softmax', [input], { axis: dim });
+  }
+
+  logSoftmax(input, axis = -1) {
+    const dim = axis < 0 ? input.type.rank + axis : axis;
+    return this._inferAndBuild('log_softmax', [input], { axis: dim });
+  }
+
+  sigmoid(x) {
+    return this._inferAndBuild('sigmoid', [x]);
+  }
+
+  gelu(x) {
+    return this._inferAndBuild('gelu', [x]);
+  }
+
+  silu(x) {
+    return this._inferAndBuild('silu', [x]);
   }
 
   layernorm(input, gamma, beta, axis = -1, eps = 1e-5) {
-    const rank = input.type.rank;
-    const dim = axis < 0 ? rank + axis : axis;
-    const meanOp = this.reduce(input, this.scalarConstant(0, input.type.dtype).getResult(0), [dim], 'mean');
-    const broadcastMean = this.broadcast(meanOp.getResult(0), input.type.shape, broadcastDimsExcluding(rank, dim));
-    const centered = this.sub(input, broadcastMean.getResult(0));
-    const sq = this.mul(centered.getResult(0), centered.getResult(0));
-    const variance = this.reduce(sq.getResult(0), this.scalarConstant(0, input.type.dtype).getResult(0), [dim], 'mean');
-    const epsConst = this.scalarConstant(eps, input.type.dtype);
-    const broadcastEps = this.broadcast(epsConst.getResult(0), variance.getResult(0).type.shape, []);
-    const varPlusEps = this.add(variance.getResult(0), broadcastEps.getResult(0));
-    const rstd = this.rsqrt(varPlusEps.getResult(0));
-    const broadcastRstd = this.broadcast(rstd.getResult(0), input.type.shape, broadcastDimsExcluding(rank, dim));
-    const normalized = this.mul(centered.getResult(0), broadcastRstd.getResult(0));
-    const broadcastGamma = this.broadcast(gamma, input.type.shape, [dim]);
-    const scaled = this.mul(normalized.getResult(0), broadcastGamma.getResult(0));
-    const broadcastBeta = this.broadcast(beta, input.type.shape, [dim]);
-    return this.add(scaled.getResult(0), broadcastBeta.getResult(0));
+    const dim = axis < 0 ? input.type.rank + axis : axis;
+    return this._inferAndBuild('layer_norm', [input, gamma, beta], { axis: dim, epsilon: eps });
+  }
+
+  batchnorm(input, gamma, beta, mean, variance, axis = 1, eps = 1e-5) {
+    return this._inferAndBuild('batch_norm', [input, gamma, beta, mean, variance], { axis, epsilon: eps });
   }
 }
 
-function broadcastDimsExcluding(rank, excludedDim) {
+export function broadcastDimsExcluding(rank, excludedDim) {
   const dims = [];
   for (let i = 0; i < rank; i++) {
     if (i !== excludedDim) dims.push(i);

@@ -62,30 +62,45 @@ export class GPUCodegen {
     this._indent--;
     this._emit('}');
 
+    const t = this.target;
+    const blockDim = [
+      Math.min(this._blockDim[0], t.maxBlockDimX),
+      Math.min(this._blockDim[1], t.maxBlockDimY),
+      Math.min(this._blockDim[2], t.maxBlockDimZ),
+    ];
+    const gridDim = [
+      Math.min(this._gridDim[0], t.maxGridDimX),
+      Math.min(this._gridDim[1], t.maxGridDimY),
+      Math.min(this._gridDim[2], t.maxGridDimZ),
+    ];
+
     return new GPUKernel(
       primFunc.name,
       this._lines.join('\n'),
-      [this._blockDim[0], this._blockDim[1], this._blockDim[2]],
-      [this._gridDim[0], this._gridDim[1], this._gridDim[2]],
+      blockDim, gridDim,
       this._sharedBuffers.reduce((sum, b) => sum + Math.max(b.sizeInBytes(), 0), 0),
       paramNames
     );
   }
 
-  _scanBindings(node) {
-    if (!node) return;
-    if (node.type === 'ForNode' && node.kind === ForKind.THREAD_BINDING && node.threadTag) {
-      const extent = node.extent.type === 'IntImmNode' ? node.extent.value : 1;
-      this._threadBindings.set(node.threadTag, { varName: node.loopVar.name, extent });
-      this._applyBindingDim(node.threadTag, extent);
+  _scanBindings(root) {
+    const stack = [root];
+    while (stack.length > 0) {
+      const node = stack.pop();
+      if (!node) continue;
+      if (node.type === 'ForNode' && node.kind === ForKind.THREAD_BINDING && node.threadTag) {
+        const extent = node.extent.type === 'IntImmNode' ? node.extent.value : 1;
+        this._threadBindings.set(node.threadTag, { varName: node.loopVar.name, extent });
+        this._applyBindingDim(node.threadTag, extent);
+      }
+      if (node.type === 'AllocateNode' && node.scope === 'shared') {
+        this._sharedBuffers.push(node.buffer);
+      }
+      if (node.body) stack.push(node.body);
+      if (node.stmts) for (const s of node.stmts) stack.push(s);
+      if (node.thenBody) stack.push(node.thenBody);
+      if (node.elseBody) stack.push(node.elseBody);
     }
-    if (node.type === 'AllocateNode' && node.scope === 'shared') {
-      this._sharedBuffers.push(node.buffer);
-    }
-    if (node.body) this._scanBindings(node.body);
-    if (node.stmts) for (const s of node.stmts) this._scanBindings(s);
-    if (node.thenBody) this._scanBindings(node.thenBody);
-    if (node.elseBody) this._scanBindings(node.elseBody);
   }
 
   _applyBindingDim(tag, extent) {
@@ -103,18 +118,27 @@ export class GPUCodegen {
   }
 
   _visitNode(node) {
-    if (!node) return;
-    switch (node.type) {
-      case 'SeqNode': for (const s of node.stmts) this._visitNode(s); return;
-      case 'ForNode': this._visitForNode(node); return;
-      case 'BlockNode': this._visitBlockNode(node); return;
-      case 'AllocateNode': this._visitAllocateNode(node); return;
-      case 'IfThenElseNode': this._visitIfStmt(node); return;
-      case 'LetStmtNode': this._visitLetStmtNode(node); return;
-      case 'BufferStoreNode': this._visitBufferStoreNode(node); return;
-      case 'WhileNode': this._visitWhileNode(node); return;
-      case 'EvaluateNode': return;
-      default: return;
+    const stack = [node];
+    while (stack.length > 0) {
+      const cur = stack.pop();
+      if (!cur) continue;
+      switch (cur.type) {
+        case 'SeqNode':
+          for (let i = cur.stmts.length - 1; i >= 0; i--) stack.push(cur.stmts[i]);
+          continue;
+        case 'AllocateNode':
+          this._visitAllocateNode(cur);
+          stack.push(cur.body);
+          continue;
+        case 'ForNode': this._visitForNode(cur); continue;
+        case 'BlockNode': this._visitBlockNode(cur); continue;
+        case 'IfThenElseNode': this._visitIfStmt(cur); continue;
+        case 'LetStmtNode': this._visitLetStmtNode(cur); continue;
+        case 'BufferStoreNode': this._visitBufferStoreNode(cur); continue;
+        case 'WhileNode': this._visitWhileNode(cur); continue;
+        case 'EvaluateNode': continue;
+        default: continue;
+      }
     }
   }
 
@@ -148,7 +172,6 @@ export class GPUCodegen {
       const numel = node.buffer.numel();
       this._emit(`${cType(node.buffer.dtype)} ${node.buffer.name}[${numel > 0 ? numel : 1}];`);
     }
-    this._visitNode(node.body);
   }
 
   _visitIfStmt(node) {

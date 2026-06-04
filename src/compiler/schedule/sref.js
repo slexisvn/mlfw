@@ -66,44 +66,44 @@ export class SRefTree {
     this.root = this._build(primFunc.body, null);
   }
 
-  _build(node, parentSRef) {
-    if (!node) return null;
-
-    switch (node.type) {
-      case 'ForNode': {
-        const sref = new SRef(node, parentSRef);
-        this._nodeToSRef.set(node, sref);
-        this._loopSRefs.push(sref);
-        if (parentSRef) parentSRef.children.push(sref);
-        this._build(node.body, sref);
-        return sref;
+  _build(rootNode, rootParent) {
+    const stack = [{ node: rootNode, parentSRef: rootParent }];
+    while (stack.length > 0) {
+      const { node, parentSRef } = stack.pop();
+      if (!node) continue;
+      switch (node.type) {
+        case 'ForNode': {
+          const sref = new SRef(node, parentSRef);
+          this._nodeToSRef.set(node, sref);
+          this._loopSRefs.push(sref);
+          if (parentSRef) parentSRef.children.push(sref);
+          stack.push({ node: node.body, parentSRef: sref });
+          break;
+        }
+        case 'BlockNode': {
+          const sref = new SRef(node, parentSRef);
+          this._nodeToSRef.set(node, sref);
+          this._blockNameToSRef.set(node.name, sref);
+          this._blockSRefs.push(sref);
+          if (parentSRef) parentSRef.children.push(sref);
+          stack.push({ node: node.body, parentSRef: sref });
+          if (node.initBody) stack.push({ node: node.initBody, parentSRef: sref });
+          break;
+        }
+        case 'SeqNode':
+          for (let i = node.stmts.length - 1; i >= 0; i--) stack.push({ node: node.stmts[i], parentSRef });
+          break;
+        case 'IfThenElseNode':
+          if (node.elseBody) stack.push({ node: node.elseBody, parentSRef });
+          stack.push({ node: node.thenBody, parentSRef });
+          break;
+        case 'AllocateNode':
+        case 'LetStmtNode':
+          stack.push({ node: node.body, parentSRef });
+          break;
       }
-      case 'BlockNode': {
-        const sref = new SRef(node, parentSRef);
-        this._nodeToSRef.set(node, sref);
-        this._blockNameToSRef.set(node.name, sref);
-        this._blockSRefs.push(sref);
-        if (parentSRef) parentSRef.children.push(sref);
-        if (node.initBody) this._build(node.initBody, sref);
-        this._build(node.body, sref);
-        return sref;
-      }
-      case 'SeqNode':
-        for (const s of node.stmts) this._build(s, parentSRef);
-        return null;
-      case 'IfThenElseNode':
-        this._build(node.thenBody, parentSRef);
-        if (node.elseBody) this._build(node.elseBody, parentSRef);
-        return null;
-      case 'AllocateNode':
-        this._build(node.body, parentSRef);
-        return null;
-      case 'LetStmtNode':
-        this._build(node.body, parentSRef);
-        return null;
-      default:
-        return null;
     }
+    return this._nodeToSRef.get(rootNode) || null;
   }
 
   getSRef(node) {
@@ -126,5 +126,56 @@ export class SRefTree {
     const blockSRef = this._blockNameToSRef.get(blockName);
     if (!blockSRef) return [];
     return blockSRef.loopAncestors().reverse();
+  }
+
+  replaceLoop(oldLoop, outerLoop, innerLoop) {
+    const oldSRef = this._nodeToSRef.get(oldLoop);
+    if (!oldSRef) return;
+
+    const parent = oldSRef.parent;
+    const outerSRef = new SRef(outerLoop, parent);
+    const innerSRef = new SRef(innerLoop, outerSRef);
+
+    outerSRef.children.push(innerSRef);
+    for (const child of oldSRef.children) {
+      child.parent = innerSRef;
+      innerSRef.children.push(child);
+    }
+
+    if (parent) {
+      const idx = parent.children.indexOf(oldSRef);
+      if (idx >= 0) parent.children[idx] = outerSRef;
+    } else {
+      this.root = outerSRef;
+    }
+
+    this._nodeToSRef.delete(oldLoop);
+    this._nodeToSRef.set(outerLoop, outerSRef);
+    this._nodeToSRef.set(innerLoop, innerSRef);
+    this._loopSRefs.push(outerSRef, innerSRef);
+  }
+
+  replaceNode(oldNode, newNode) {
+    const oldSRef = this._nodeToSRef.get(oldNode);
+    if (!oldSRef) return;
+
+    const newSRef = new SRef(newNode, oldSRef.parent);
+    newSRef.children = oldSRef.children;
+    for (const child of newSRef.children) child.parent = newSRef;
+
+    if (oldSRef.parent) {
+      const idx = oldSRef.parent.children.indexOf(oldSRef);
+      if (idx >= 0) oldSRef.parent.children[idx] = newSRef;
+    } else {
+      this.root = newSRef;
+    }
+
+    this._nodeToSRef.delete(oldNode);
+    this._nodeToSRef.set(newNode, newSRef);
+
+    if (newNode.type === 'BlockNode') {
+      this._blockNameToSRef.delete(oldNode.name);
+      this._blockNameToSRef.set(newNode.name, newSRef);
+    }
   }
 }

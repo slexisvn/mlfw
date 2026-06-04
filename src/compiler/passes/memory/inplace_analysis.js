@@ -13,7 +13,25 @@ export class InplaceAnalysis {
     const blocks = [];
     collectBlocks(primFunc.body, blocks);
 
+    const blockIdx = new Map();
+    for (const entry of livenessResult.stmtOrder) {
+      blockIdx.set(entry.node, entry.idx);
+    }
+
+    const bufferLastReadIdx = new Map();
+    for (const entry of livenessResult.stmtOrder) {
+      for (const r of entry.node.reads) {
+        const prev = bufferLastReadIdx.get(r.buffer);
+        if (prev === undefined || entry.idx > prev) {
+          bufferLastReadIdx.set(r.buffer, entry.idx);
+        }
+      }
+    }
+
     for (const block of blocks) {
+      const currentIdx = blockIdx.get(block);
+      if (currentIdx === undefined) continue;
+
       for (const writeEntry of block.writes) {
         const dstBuf = writeEntry.buffer;
         if (livenessResult.isParam(dstBuf)) continue;
@@ -32,7 +50,8 @@ export class InplaceAnalysis {
           if (!srcInterval || !dstInterval) continue;
 
           if (srcInterval.lastUse <= dstInterval.firstUse) {
-            if (!hasOtherUsersAfter(srcBuf, block, livenessResult)) {
+            const lastRead = bufferLastReadIdx.get(srcBuf);
+            if (lastRead === undefined || lastRead <= currentIdx) {
               candidates.push(new InplaceCandidate(
                 srcBuf, dstBuf,
                 `${srcBuf.name} last used at ${srcInterval.lastUse}, ${dstBuf.name} first used at ${dstInterval.firstUse}`
@@ -55,37 +74,16 @@ function shapesMatch(a, b) {
   return true;
 }
 
-function hasOtherUsersAfter(buffer, currentBlock, livenessResult) {
-  const interval = livenessResult.intervals.get(buffer);
-  if (!interval) return false;
-  const currentIdx = findBlockIdx(currentBlock, livenessResult.stmtOrder);
-  for (const entry of livenessResult.stmtOrder) {
-    if (entry.idx <= currentIdx) continue;
-    const block = entry.node;
-    for (const r of block.reads) {
-      if (r.buffer === buffer) return true;
-    }
-  }
-  return false;
-}
-
-function findBlockIdx(block, stmtOrder) {
-  for (const entry of stmtOrder) {
-    if (entry.node === block) return entry.idx;
-  }
-  return -1;
-}
-
 function collectBlocks(node, result) {
-  if (!node) return;
-  if (node.type === 'BlockNode') {
-    result.push(node);
+  const stack = [node];
+  while (stack.length > 0) {
+    const cur = stack.pop();
+    if (!cur) continue;
+    if (cur.type === 'BlockNode') result.push(cur);
+    if (cur.body) stack.push(cur.body);
+    if (cur.stmts) for (const s of cur.stmts) stack.push(s);
+    if (cur.thenBody) stack.push(cur.thenBody);
+    if (cur.elseBody) stack.push(cur.elseBody);
+    if (cur.initBody) stack.push(cur.initBody);
   }
-  if (node.body) collectBlocks(node.body, result);
-  if (node.stmts) {
-    for (const s of node.stmts) collectBlocks(s, result);
-  }
-  if (node.thenBody) collectBlocks(node.thenBody, result);
-  if (node.elseBody) collectBlocks(node.elseBody, result);
-  if (node.initBody) collectBlocks(node.initBody, result);
 }

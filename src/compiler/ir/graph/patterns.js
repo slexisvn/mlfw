@@ -375,3 +375,45 @@ export class DoubleConvert extends Pattern {
     return true;
   }
 }
+
+export class LayoutTransformIdentity extends Pattern {
+  constructor() { super('layout_transform_identity', 10); this.rootOpName = 'layout_transform'; }
+  match(op) {
+    const src = op.getAttr('src_layout');
+    const dst = op.getAttr('dst_layout');
+    if (!src || !dst || src.length !== dst.length) return false;
+    for (let i = 0; i < src.length; i++) {
+      if (src[i] !== dst[i]) return false;
+    }
+    return true;
+  }
+  rewrite(op, builder) {
+    op.replaceAllResultsWith([op.getOperand(0)]);
+    op.erase();
+    return true;
+  }
+}
+
+export class LayoutTransformCompose extends Pattern {
+  constructor() { super('layout_transform_compose', 10); this.rootOpName = 'layout_transform'; }
+  match(op) {
+    const inputOp = op.getOperand(0).definingOp;
+    return inputOp && inputOp.opName === 'layout_transform';
+  }
+  rewrite(op, builder) {
+    const innerOp = op.getOperand(0).definingOp;
+    const srcLayout = innerOp.getAttr('src_layout');
+    const midLayout = innerOp.getAttr('dst_layout');
+    const dstLayout = op.getAttr('dst_layout');
+    const composed = new Array(srcLayout.length);
+    for (let i = 0; i < dstLayout.length; i++) {
+      composed[i] = srcLayout[midLayout.indexOf(dstLayout[i])];
+    }
+    const original = innerOp.getOperand(0);
+    const newOp = builder._inferAndBuild('layout_transform', [original],
+      { src_layout: srcLayout, dst_layout: composed });
+    op.replaceAllResultsWith([newOp.getResult(0)]);
+    op.erase();
+    return true;
+  }
+}

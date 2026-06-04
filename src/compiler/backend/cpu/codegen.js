@@ -53,32 +53,36 @@ export class CPUCodegen {
     return this._lines.join('\n');
   }
 
-  _scanTree(node, usedBuffers, allocatedBuffers) {
-    if (!node || typeof node !== 'object') return;
-    switch (node.type) {
-      case 'BufferStoreNode':
-      case 'BufferLoadNode':
-        if (node.buffer) usedBuffers.set(node.buffer.name, node.buffer);
-        break;
-      case 'AllocateNode':
-        if (node.buffer) allocatedBuffers.add(node.buffer.name);
-        break;
+  _scanTree(root, usedBuffers, allocatedBuffers) {
+    const stack = [root];
+    while (stack.length > 0) {
+      const node = stack.pop();
+      if (!node || typeof node !== 'object') continue;
+      switch (node.type) {
+        case 'BufferStoreNode':
+        case 'BufferLoadNode':
+          if (node.buffer) usedBuffers.set(node.buffer.name, node.buffer);
+          break;
+        case 'AllocateNode':
+          if (node.buffer) allocatedBuffers.add(node.buffer.name);
+          break;
+      }
+      if (node.body) stack.push(node.body);
+      if (node.value && typeof node.value === 'object' && node.value.type) stack.push(node.value);
+      if (node.stmts) for (const s of node.stmts) stack.push(s);
+      if (node.thenBody) stack.push(node.thenBody);
+      if (node.elseBody) stack.push(node.elseBody);
+      if (node.initBody) stack.push(node.initBody);
+      if (node.condition && typeof node.condition === 'object' && node.condition.type) stack.push(node.condition);
+      if (node.a && typeof node.a === 'object' && node.a.type) stack.push(node.a);
+      if (node.b && typeof node.b === 'object' && node.b.type) stack.push(node.b);
+      if (node.expr && typeof node.expr === 'object' && node.expr.type) stack.push(node.expr);
+      if (node.args) for (const a of node.args) { if (typeof a === 'object' && a !== null && a.type) stack.push(a); }
+      if (node.indices) for (const idx of node.indices) { if (typeof idx === 'object' && idx !== null && idx.type) stack.push(idx); }
+      if (node.reads) for (const r of node.reads) { if (r.buffer) usedBuffers.set(r.buffer.name, r.buffer); }
+      if (node.writes) for (const w of node.writes) { if (w.buffer) usedBuffers.set(w.buffer.name, w.buffer); }
+      if (node.iterVars) for (const iv of node.iterVars) { if (iv.binding && typeof iv.binding === 'object' && iv.binding.type) stack.push(iv.binding); }
     }
-    if (node.body) this._scanTree(node.body, usedBuffers, allocatedBuffers);
-    if (node.value && typeof node.value === 'object' && node.value.type) this._scanTree(node.value, usedBuffers, allocatedBuffers);
-    if (node.stmts) for (const s of node.stmts) this._scanTree(s, usedBuffers, allocatedBuffers);
-    if (node.thenBody) this._scanTree(node.thenBody, usedBuffers, allocatedBuffers);
-    if (node.elseBody) this._scanTree(node.elseBody, usedBuffers, allocatedBuffers);
-    if (node.initBody) this._scanTree(node.initBody, usedBuffers, allocatedBuffers);
-    if (node.condition && typeof node.condition === 'object' && node.condition.type) this._scanTree(node.condition, usedBuffers, allocatedBuffers);
-    if (node.a && typeof node.a === 'object' && node.a.type) this._scanTree(node.a, usedBuffers, allocatedBuffers);
-    if (node.b && typeof node.b === 'object' && node.b.type) this._scanTree(node.b, usedBuffers, allocatedBuffers);
-    if (node.expr && typeof node.expr === 'object' && node.expr.type) this._scanTree(node.expr, usedBuffers, allocatedBuffers);
-    if (node.args) for (const a of node.args) { if (typeof a === 'object' && a !== null && a.type) this._scanTree(a, usedBuffers, allocatedBuffers); }
-    if (node.indices) for (const idx of node.indices) { if (typeof idx === 'object' && idx !== null && idx.type) this._scanTree(idx, usedBuffers, allocatedBuffers); }
-    if (node.reads) for (const r of node.reads) { if (r.buffer) usedBuffers.set(r.buffer.name, r.buffer); }
-    if (node.writes) for (const w of node.writes) { if (w.buffer) usedBuffers.set(w.buffer.name, w.buffer); }
-    if (node.iterVars) for (const iv of node.iterVars) { if (iv.binding && typeof iv.binding === 'object' && iv.binding.type) this._scanTree(iv.binding, usedBuffers, allocatedBuffers); }
   }
 
   _emit(line) {
@@ -86,18 +90,27 @@ export class CPUCodegen {
   }
 
   _visitNode(node) {
-    if (!node) return;
-    switch (node.type) {
-      case 'SeqNode': for (const s of node.stmts) this._visitNode(s); return;
-      case 'ForNode': this._visitForNode(node); return;
-      case 'BlockNode': this._visitBlockNode(node); return;
-      case 'AllocateNode': this._visitAllocateNode(node); return;
-      case 'IfThenElseNode': this._visitIfThenElseStmt(node); return;
-      case 'LetStmtNode': this._visitLetStmtNode(node); return;
-      case 'BufferStoreNode': this._visitBufferStoreNode(node); return;
-      case 'WhileNode': this._visitWhileNode(node); return;
-      case 'EvaluateNode': return;
-      default: return;
+    const stack = [node];
+    while (stack.length > 0) {
+      const cur = stack.pop();
+      if (!cur) continue;
+      switch (cur.type) {
+        case 'SeqNode':
+          for (let i = cur.stmts.length - 1; i >= 0; i--) stack.push(cur.stmts[i]);
+          continue;
+        case 'AllocateNode':
+          this._visitAllocateNode(cur);
+          stack.push(cur.body);
+          continue;
+        case 'ForNode': this._visitForNode(cur); continue;
+        case 'BlockNode': this._visitBlockNode(cur); continue;
+        case 'IfThenElseNode': this._visitIfThenElseStmt(cur); continue;
+        case 'LetStmtNode': this._visitLetStmtNode(cur); continue;
+        case 'BufferStoreNode': this._visitBufferStoreNode(cur); continue;
+        case 'WhileNode': this._visitWhileNode(cur); continue;
+        case 'EvaluateNode': continue;
+        default: continue;
+      }
     }
   }
 
@@ -157,7 +170,6 @@ export class CPUCodegen {
     if (numel > 0) {
       this._emit(`const ${buf.name} = new ${jsTypedArray(buf.dtype)}(${numel});`);
     }
-    this._visitNode(node.body);
   }
 
   _visitIfThenElseStmt(node) {

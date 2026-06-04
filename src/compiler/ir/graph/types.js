@@ -6,6 +6,7 @@ export const ScalarType = Object.freeze({
   I16: 'i16',
   I32: 'i32',
   I64: 'i64',
+  UI8: 'ui8',
   BOOL: 'bool',
   INDEX: 'index'
 });
@@ -18,12 +19,13 @@ const SCALAR_BYTES = Object.freeze({
   [ScalarType.I16]: 2,
   [ScalarType.I32]: 4,
   [ScalarType.I64]: 8,
+  [ScalarType.UI8]: 1,
   [ScalarType.BOOL]: 1,
   [ScalarType.INDEX]: 4
 });
 
 const FLOAT_TYPES = new Set([ScalarType.F16, ScalarType.F32, ScalarType.F64]);
-const INT_TYPES = new Set([ScalarType.I8, ScalarType.I16, ScalarType.I32, ScalarType.I64]);
+const INT_TYPES = new Set([ScalarType.I8, ScalarType.I16, ScalarType.I32, ScalarType.I64, ScalarType.UI8]);
 
 export const DYNAMIC = -1;
 

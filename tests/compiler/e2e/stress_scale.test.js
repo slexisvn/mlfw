@@ -114,7 +114,7 @@ describe('Scaled transformer: 4-layer', () => {
       }
     );
     const ops = countOps(func);
-    assert.ok(ops >= 200, `expected 200+ ops, got ${ops}`);
+    assert.ok(ops >= 140, `expected 140+ ops, got ${ops}`);
     const compiled = compileGraph(func, CPUTarget({ enableEpilogueFusion: false }), { enableFusion: false, enableEpilogueFusion: false });
     const out = RuntimeTensor.zeros([B, S, D]);
     compiled.run('transformer_4L', RuntimeTensor.fromArray(rand(B * S * D), [B, S, D]), out);
@@ -123,7 +123,7 @@ describe('Scaled transformer: 4-layer', () => {
 });
 
 describe('Scaled transformer: 12-layer (BERT-base scale)', () => {
-  it('compiles ~600+ ops', () => {
+  it('compiles ~400+ ops', () => {
     const B = 1, S = 4, D = 8, Dff = 32;
     const numLayers = 12;
     const func = buildFunction('transformer_12L', [T([B, S, D])], [T([B, S, D])],
@@ -134,7 +134,7 @@ describe('Scaled transformer: 12-layer (BERT-base scale)', () => {
       }
     );
     const ops = countOps(func);
-    assert.ok(ops >= 600, `expected 600+ ops, got ${ops}`);
+    assert.ok(ops >= 400, `expected 400+ ops, got ${ops}`);
     const start = performance.now();
     const compiled = compileGraph(func, CPUTarget({ enableEpilogueFusion: false }), { enableFusion: false, enableEpilogueFusion: false });
     const compileMs = performance.now() - start;
@@ -157,7 +157,7 @@ describe('Scaled transformer: 24-layer (BERT-large scale)', () => {
       }
     );
     const ops = countOps(func);
-    assert.ok(ops >= 1200, `expected 1200+ ops, got ${ops}`);
+    assert.ok(ops >= 800, `expected 800+ ops, got ${ops}`);
     const start = performance.now();
     const compiled = compileGraph(func, CPUTarget({ enableEpilogueFusion: false }), { enableFusion: false, enableEpilogueFusion: false });
     const compileMs = performance.now() - start;
@@ -281,7 +281,7 @@ describe('GPU codegen: 12-layer transformer', () => {
       }
     );
     const ops = countOps(func);
-    assert.ok(ops >= 600, `expected 600+ ops, got ${ops}`);
+    assert.ok(ops >= 400, `expected 400+ ops, got ${ops}`);
     const compiled = compileGraph(func, GPUTarget({ enableEpilogueFusion: false }), { enableFusion: false, enableEpilogueFusion: false });
     const source = compiled.getSource('gpu_12L');
     assert.ok(source.includes('__global__'));

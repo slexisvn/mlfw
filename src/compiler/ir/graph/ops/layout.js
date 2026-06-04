@@ -1,0 +1,43 @@
+import { OpDef, OpTrait } from '../op_registry.js';
+import { TensorType, Layout } from '../types.js';
+import * as pat from '../patterns.js';
+
+export function register(registry) {
+  registry.register(new OpDef({
+    name: 'layout_transform',
+    numOperands: 1,
+    numResults: 1,
+    traits: [OpTrait.VIEW],
+    attrs: [
+      { name: 'src_layout', type: 'array', required: true },
+      { name: 'dst_layout', type: 'array', required: true }
+    ],
+    inferResultTypes(operandTypes, attrs) {
+      if (operandTypes.length !== 1) return null;
+      const inp = operandTypes[0];
+      if (!(inp instanceof TensorType)) return null;
+      const dstOrder = attrs.get ? attrs.get('dst_layout') : attrs.dst_layout;
+      if (!dstOrder) return null;
+      return [new TensorType(inp.shape, inp.dtype, new Layout(dstOrder))];
+    },
+    verify(op) {
+      const errs = [];
+      if (op.numOperands !== 1) { errs.push('layout_transform expects 1 operand'); return errs; }
+      if (!op.hasAttr('src_layout')) errs.push('layout_transform missing src_layout');
+      if (!op.hasAttr('dst_layout')) errs.push('layout_transform missing dst_layout');
+      if (errs.length === 0) {
+        const inp = op.getOperand(0).type;
+        const src = op.getAttr('src_layout');
+        const dst = op.getAttr('dst_layout');
+        if (inp instanceof TensorType) {
+          if (src.length !== inp.rank) errs.push(`src_layout length ${src.length} != input rank ${inp.rank}`);
+          if (dst.length !== inp.rank) errs.push(`dst_layout length ${dst.length} != input rank ${inp.rank}`);
+        }
+      }
+      return errs;
+    },
+    getCanonicalizationPatterns() {
+      return [new pat.LayoutTransformIdentity(), new pat.LayoutTransformCompose()];
+    }
+  }));
+}

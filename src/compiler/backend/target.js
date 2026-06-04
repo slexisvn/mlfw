@@ -29,6 +29,10 @@ export class TargetFeatures {
     this.supportsTensorCore = config.supportsTensorCore ?? false;
     this.libraryOps = config.libraryOps || new Set();
     this.enableEpilogueFusion = config.enableEpilogueFusion ?? false;
+    this.preferredConvLayout = config.preferredConvLayout || null;
+    this.preferredBlockFactor = config.preferredBlockFactor || 0;
+    this.supportsBlockedLayout = config.supportsBlockedLayout ?? false;
+    this.supportsInt8 = config.supportsInt8 ?? false;
   }
 
   isGPU() {
@@ -69,6 +73,9 @@ export const CPUTarget = (overrides = {}) => new TargetFeatures({
   l2CacheBytes: 256 * 1024,
   memoryBandwidthGBs: 50,
   computeTFLOPs: 0.5,
+  supportsBlockedLayout: true,
+  preferredBlockFactor: 8,
+  supportsInt8: true,
   ...overrides
 });
 
@@ -93,5 +100,6 @@ export const GPUTarget = (overrides = {}) => new TargetFeatures({
   supportsTensorCore: false,
   libraryOps: new Set(['dot', 'conv']),
   enableEpilogueFusion: true,
+  supportsInt8: true,
   ...overrides
 });

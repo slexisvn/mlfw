@@ -91,7 +91,8 @@ export class AnalyticalCostModel {
   }
 
   _scoreIntensity(f) {
-    return Math.min(1.0, f.arithmeticIntensity * 10);
+    const boost = this.target.supportsFloat16 ? 1.5 : 1.0;
+    return Math.min(1.0, f.arithmeticIntensity * 10 * boost);
   }
 
   _scoreOverhead(f) {

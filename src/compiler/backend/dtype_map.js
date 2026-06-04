@@ -6,6 +6,7 @@ const DTYPE_TABLE = {
   'i16':  { js: 'Int16Array',   c: 'int16_t',    cPtr: 'int16_t*',    bytes: 2, suffix: '',  mathSuffix: '',   isFloat: false, isInt: true  },
   'i32':  { js: 'Int32Array',   c: 'int',        cPtr: 'int*',        bytes: 4, suffix: '',  mathSuffix: '',   isFloat: false, isInt: true  },
   'i64':  { js: 'BigInt64Array', c: 'int64_t',   cPtr: 'int64_t*',    bytes: 8, suffix: 'LL', mathSuffix: '',  isFloat: false, isInt: true  },
+  'ui8':  { js: 'Uint8Array',   c: 'uint8_t',    cPtr: 'uint8_t*',    bytes: 1, suffix: '',  mathSuffix: '',   isFloat: false, isInt: true  },
   'bool': { js: 'Uint8Array',   c: 'bool',       cPtr: 'bool*',       bytes: 1, suffix: '',  mathSuffix: '',   isFloat: false, isInt: false },
   'index':{ js: 'Int32Array',   c: 'int',        cPtr: 'int*',        bytes: 4, suffix: '',  mathSuffix: '',   isFloat: false, isInt: true  },
 };
@@ -77,6 +78,13 @@ const LIBRARY_FUNC_TABLE = {
   },
   'conv': {
     'cudnn': { 'f32': 'cudnnConvolutionForward', 'f16': 'cudnnConvolutionForward' },
+  },
+  'quantized_dot': {
+    'blas':   { 'i8': 'cblas_gemm_s8u8s32' },
+    'cublas': { 'i8': 'cublasGemmEx' },
+  },
+  'quantized_conv': {
+    'cudnn': { 'i8': 'cudnnConvolutionForward' },
   }
 };
 

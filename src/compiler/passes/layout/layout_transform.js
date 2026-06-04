@@ -1,47 +1,72 @@
 import { FunctionPass, PassResult } from '../pass.js';
 import { Operation } from '../../ir/graph/operation.js';
 import { TensorType, Layout } from '../../ir/graph/types.js';
-import { registry } from '../../ir/graph/ops.js';
+import { LayoutPolicy } from './layout_policy.js';
+import { LayoutAnalysis } from '../../analysis/layout_analysis.js';
+import { UseDefAnalysis } from '../../analysis/use_def.js';
 
 export class LayoutTransformPass extends FunctionPass {
-  constructor() {
+  constructor(config = {}) {
     super('LayoutTransformPass');
+    this.target = config.target || null;
+    this._policy = null;
   }
 
-  run(func) {
-    let changed = false;
-    for (const op of [...func.ops()]) {
-      if (op.opName === 'return' || op.opName === 'yield') continue;
-      const def = registry.get(op.opName);
-      if (!def || !def.isElementwise) continue;
+  run(func, analysisManager) {
+    if (!this.target) return PassResult.UNCHANGED;
 
-      let targetLayout = null;
-      for (let i = 0; i < op.numOperands; i++) {
-        const t = op.getOperand(i).type;
-        if (t instanceof TensorType && t.layout && !t.layout.isIdentity()) {
-          targetLayout = t.layout;
-          break;
-        }
-      }
-      if (!targetLayout) continue;
-
-      for (let i = 0; i < op.numOperands; i++) {
-        const operand = op.getOperand(i);
-        const t = operand.type;
-        if (!(t instanceof TensorType)) continue;
-        if (t.layout && t.layout.equals(targetLayout)) continue;
-        if (t.layout && t.layout.isIdentity() && !targetLayout.isIdentity()) {
-          const perm = targetLayout.order;
-          const newShape = perm.map(j => t.shape[j]);
-          const transposeOp = new Operation('transpose', [operand], [new TensorType(newShape, t.dtype, targetLayout)], { permutation: perm });
-          if (op.parentBlock) {
-            op.parentBlock.insertBefore(transposeOp, op);
-            op.replaceOperand(i, transposeOp.getResult(0));
-            changed = true;
-          }
-        }
-      }
+    if (!this._policy) {
+      this._policy = new LayoutPolicy(this.target);
     }
-    return changed ? PassResult.CHANGED : PassResult.UNCHANGED;
+
+    const useDef = analysisManager
+      ? analysisManager.getAnalysis(UseDefAnalysis, func)
+      : UseDefAnalysis.compute(func);
+
+    const result = LayoutAnalysis.compute(func, { useDef }, this._policy);
+
+    if (result.conversions.length === 0) return PassResult.UNCHANGED;
+
+    const insertedTransforms = new Map();
+
+    for (let i = 0; i < result.conversions.length; i++) {
+      const conv = result.conversions[i];
+      const { value, consumer, operandIdx, from, to } = conv;
+
+      const key = valueLayoutKey(value, from, to);
+      let transformResult = insertedTransforms.get(key);
+
+      if (!transformResult) {
+        const srcOrder = from instanceof Layout ? from.order : Array.from({ length: value.type.rank }, (_, k) => k);
+        const dstOrder = to instanceof Layout ? to.order : Array.from({ length: value.type.rank }, (_, k) => k);
+
+        const resultType = new TensorType(value.type.shape, value.type.dtype, to);
+        const transformOp = new Operation('layout_transform', [value], [resultType], {
+          src_layout: [...srcOrder],
+          dst_layout: [...dstOrder]
+        });
+
+        const defOp = value.definingOp;
+        if (defOp && defOp.parentBlock) {
+          defOp.parentBlock.insertAfter(transformOp, defOp);
+        } else if (consumer.parentBlock) {
+          consumer.parentBlock.insertBefore(transformOp, consumer);
+        }
+
+        transformResult = transformOp.getResult(0);
+        insertedTransforms.set(key, transformResult);
+      }
+
+      consumer.replaceOperand(operandIdx, transformResult);
+    }
+
+    return PassResult.CHANGED;
   }
+}
+
+function valueLayoutKey(value, from, to) {
+  const vid = value.definingOp ? value.definingOp.opName + ':' + value.resultIndex : 'arg';
+  const fh = from.hash ? from.hash() : 0;
+  const th = to.hash ? to.hash() : 0;
+  return `${vid}:${fh}:${th}`;
 }

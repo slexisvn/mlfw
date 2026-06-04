@@ -23,129 +23,120 @@ export class TensorVerifier {
     return this.errors;
   }
 
-  visit(node) {
-    if (!node) return;
-    const method = 'visit' + node.type;
-    if (this[method]) {
-      this[method](node);
-    } else {
-      this.errors.push(`Unrecognized node type: ${node.type}`);
-    }
-  }
-
-  visitSeqNode(node) {
-    for (const stmt of node.stmts) {
-      this.visit(stmt);
-    }
-  }
-
-  visitForNode(node) {
-    if (this.boundVars.has(node.loopVar.name)) {
-      this.errors.push(`Loop variable ${node.loopVar.name} already bound`);
-    }
-    this.boundVars.add(node.loopVar.name);
-    this.visit(node.body);
-    this.boundVars.delete(node.loopVar.name);
-  }
-
-  visitBlockNode(node) {
-    for (const r of node.iterVars) {
-      if (r.iterVar) {
-        if (this.boundVars.has(r.iterVar.name)) {
-          this.errors.push(`Block variable ${r.iterVar.name} already bound`);
-        }
-        this.boundVars.add(r.iterVar.name);
+  visit(root) {
+    const stack = [root];
+    while (stack.length > 0) {
+      const node = stack.pop();
+      if (!node) continue;
+      switch (node.type) {
+        case 'SeqNode':
+          for (let i = node.stmts.length - 1; i >= 0; i--) stack.push(node.stmts[i]);
+          break;
+        case 'ForNode':
+          if (this.boundVars.has(node.loopVar.name)) {
+            this.errors.push(`Loop variable ${node.loopVar.name} already bound`);
+          }
+          this.boundVars.add(node.loopVar.name);
+          stack.push({ type: '_unbind', name: node.loopVar.name });
+          stack.push(node.body);
+          break;
+        case 'BlockNode':
+          for (const r of node.iterVars) {
+            if (r.iterVar) {
+              if (this.boundVars.has(r.iterVar.name)) {
+                this.errors.push(`Block variable ${r.iterVar.name} already bound`);
+              }
+              this.boundVars.add(r.iterVar.name);
+            }
+          }
+          for (let i = node.iterVars.length - 1; i >= 0; i--) {
+            if (node.iterVars[i].iterVar) stack.push({ type: '_unbind', name: node.iterVars[i].iterVar.name });
+          }
+          stack.push(node.body);
+          if (node.initBody) stack.push(node.initBody);
+          break;
+        case 'AllocateNode':
+          if (!node.buffer) this.errors.push('Allocate missing buffer');
+          stack.push(node.body);
+          break;
+        case 'LetStmtNode':
+          this._visitExpr(node.value);
+          this.boundVars.add(node.variable.name);
+          stack.push({ type: '_unbind', name: node.variable.name });
+          stack.push(node.body);
+          break;
+        case 'IfThenElseNode':
+          this._visitExpr(node.condition);
+          if (node.elseBody) stack.push(node.elseBody);
+          stack.push(node.thenBody);
+          break;
+        case 'WhileNode':
+          if (!node.condVar) this.errors.push('WhileNode missing condition variable');
+          stack.push(node.loopBody);
+          stack.push(node.condBody);
+          break;
+        case 'BufferStoreNode':
+          if (!node.buffer) this.errors.push('BufferStore missing buffer');
+          if (!node.indices || node.indices.length !== node.buffer.shape.length) {
+            this.errors.push(`BufferStore rank mismatch for ${node.buffer ? node.buffer.name : 'unknown'}`);
+          }
+          if (node.indices) for (const idx of node.indices) this._visitExpr(idx);
+          this._visitExpr(node.value);
+          break;
+        case 'EvaluateNode':
+          this._visitExpr(node.value);
+          break;
+        case '_unbind':
+          this.boundVars.delete(node.name);
+          break;
+        default:
+          this._visitExpr(node);
+          break;
       }
     }
+  }
 
-    if (node.initBody) this.visit(node.initBody);
-    this.visit(node.body);
-
-    for (const r of node.iterVars) {
-      if (r.iterVar) this.boundVars.delete(r.iterVar.name);
+  _visitExpr(node) {
+    if (!node) return;
+    switch (node.type) {
+      case 'BufferLoadNode':
+        if (!node.buffer) this.errors.push('BufferLoad missing buffer');
+        if (!node.indices || node.indices.length !== node.buffer.shape.length) {
+          this.errors.push(`BufferLoad rank mismatch for ${node.buffer ? node.buffer.name : 'unknown'}`);
+        }
+        if (node.indices) for (const idx of node.indices) this._visitExpr(idx);
+        break;
+      case 'MathOpNode':
+        this._visitExpr(node.a);
+        if (node.b) this._visitExpr(node.b);
+        break;
+      case 'CompareNode':
+        this._visitExpr(node.a);
+        this._visitExpr(node.b);
+        break;
+      case 'CastNode':
+        this._visitExpr(node.expr);
+        break;
+      case 'CallExternNode':
+        if (!node.externName) this.errors.push('CallExtern missing function name');
+        for (const arg of node.args) this._visitExpr(arg);
+        break;
+      case 'IfThenElseNode':
+        this._visitExpr(node.condition);
+        this._visitExpr(node.thenBody);
+        if (node.elseBody) this._visitExpr(node.elseBody);
+        break;
+      case 'VariableNode':
+        if (!this.boundVars.has(node.name)) {
+          this.errors.push(`Unbound variable used: ${node.name}`);
+        }
+        break;
+      case 'BlockRealizeNode':
+        if (node.binding) this._visitExpr(node.binding);
+        break;
+      case 'IntImmNode':
+      case 'FloatImmNode':
+        break;
     }
   }
-
-  visitBlockRealizeNode(node) {
-    if (node.binding) this.visit(node.binding);
-  }
-
-  visitBufferStoreNode(node) {
-    if (!node.buffer) this.errors.push('BufferStore missing buffer');
-    if (!node.indices || node.indices.length !== node.buffer.shape.length) {
-      this.errors.push(`BufferStore rank mismatch for ${node.buffer ? node.buffer.name : 'unknown'}`);
-    }
-    if (node.indices) {
-      for (const idx of node.indices) this.visit(idx);
-    }
-    this.visit(node.value);
-  }
-
-  visitBufferLoadNode(node) {
-    if (!node.buffer) this.errors.push('BufferLoad missing buffer');
-    if (!node.indices || node.indices.length !== node.buffer.shape.length) {
-      this.errors.push(`BufferLoad rank mismatch for ${node.buffer ? node.buffer.name : 'unknown'}`);
-    }
-    if (node.indices) {
-      for (const idx of node.indices) this.visit(idx);
-    }
-  }
-
-  visitIfThenElseNode(node) {
-    this.visit(node.condition);
-    this.visit(node.thenBody);
-    if (node.elseBody) this.visit(node.elseBody);
-  }
-
-  visitLetStmtNode(node) {
-    this.visit(node.value);
-    this.boundVars.add(node.variable.name);
-    this.visit(node.body);
-    this.boundVars.delete(node.variable.name);
-  }
-
-  visitAllocateNode(node) {
-    if (!node.buffer) this.errors.push('Allocate missing buffer');
-    this.visit(node.body);
-  }
-
-  visitEvaluateNode(node) {
-    this.visit(node.value);
-  }
-
-  visitCallExternNode(node) {
-    if (!node.externName) this.errors.push('CallExtern missing function name');
-    for (const arg of node.args) {
-      this.visit(arg);
-    }
-  }
-
-  visitMathOpNode(node) {
-    this.visit(node.a);
-    if (node.b) this.visit(node.b);
-  }
-
-  visitCompareNode(node) {
-    this.visit(node.a);
-    this.visit(node.b);
-  }
-
-  visitCastNode(node) {
-    this.visit(node.expr);
-  }
-
-  visitWhileNode(node) {
-    if (!node.condVar) this.errors.push('WhileNode missing condition variable');
-    this.visit(node.condBody);
-    this.visit(node.loopBody);
-  }
-
-  visitVariableNode(node) {
-    if (!this.boundVars.has(node.name)) {
-      this.errors.push(`Unbound variable used: ${node.name}`);
-    }
-  }
-
-  visitIntImmNode() {}
-  visitFloatImmNode() {}
 }

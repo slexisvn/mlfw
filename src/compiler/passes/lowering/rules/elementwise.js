@@ -1,0 +1,59 @@
+import {
+  MathOpNode, FloatImmNode, CompareNode, IfThenElseNode,
+  CallExternNode, CastNode
+} from '../../../ir/tensor/nodes.js';
+import { registerLoweringRule, lowerPointwise } from '../lowering_registry.js';
+
+const BINARY_ARITH = new Set(['+', '-', '*', '/']);
+
+const ELEMENTWISE_OPS = {
+  'add': '+', 'sub': '-', 'mul': '*', 'div': '/',
+  'max': 'max', 'min': 'min', 'exp': 'exp', 'log': 'log',
+  'sqrt': 'sqrt', 'rsqrt': 'rsqrt', 'tanh': 'tanh', 'abs': 'abs',
+  'ceil': 'ceil', 'floor': 'floor', 'neg': '-',
+  'maximum': 'max', 'minimum': 'min',
+  'sin': 'sin', 'cos': 'cos', 'round': 'round', 'sign': 'sign',
+  'pow': 'pow', 'rem': 'fmod'
+};
+
+export { ELEMENTWISE_OPS };
+
+export function buildElementwiseExpr(opName, loadArgs, dtype) {
+  const jsOp = ELEMENTWISE_OPS[opName];
+  if (!jsOp) return null;
+  if (loadArgs.length === 2 && BINARY_ARITH.has(jsOp)) {
+    return new MathOpNode(jsOp, loadArgs[0], loadArgs[1]);
+  }
+  if (loadArgs.length === 1 && jsOp === '-') {
+    return new MathOpNode('-', new FloatImmNode(0), loadArgs[0]);
+  }
+  return new CallExternNode(jsOp, loadArgs, dtype);
+}
+
+export function register() {
+  for (const opName of Object.keys(ELEMENTWISE_OPS)) {
+    registerLoweringRule(opName, (ctx, op, inputs, outputs) =>
+      lowerPointwise(ctx, op, inputs, outputs, (o, loads, dtype) => buildElementwiseExpr(o.opName, loads, dtype))
+    );
+  }
+
+  registerLoweringRule('compare', (ctx, op, inputs, outputs) =>
+    lowerPointwise(ctx, op, inputs, outputs, (o, loads) =>
+      new CompareNode(o.getAttr('direction') || 'eq', loads[0], loads[1]))
+  );
+
+  registerLoweringRule('select', (ctx, op, inputs, outputs) =>
+    lowerPointwise(ctx, op, inputs, outputs, (o, loads) =>
+      new IfThenElseNode(loads[0], loads[1], loads[2]))
+  );
+
+  registerLoweringRule('clamp', (ctx, op, inputs, outputs) =>
+    lowerPointwise(ctx, op, inputs, outputs, (o, loads, dtype) =>
+      new CallExternNode('min', [new CallExternNode('max', [loads[1], loads[0]], dtype), loads[2]], dtype))
+  );
+
+  registerLoweringRule('convert', (ctx, op, inputs, outputs) =>
+    lowerPointwise(ctx, op, inputs, outputs, (o, loads) =>
+      new CastNode(loads[0], inputs[0].dtype, outputs[0].dtype))
+  );
+}

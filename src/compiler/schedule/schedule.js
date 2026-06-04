@@ -8,86 +8,7 @@ import { MemoryScope } from '../ir/tensor/tensor_types.js';
 import { ScheduleTrace } from './trace.js';
 import { ScheduleValidator } from './validator.js';
 import { ScheduleState } from './schedule_state.js';
-
-function collectBlocks(node, result = new Map()) {
-  if (!node) return result;
-  if (node instanceof BlockNode || node.type === 'BlockNode') {
-    result.set(node.name, node);
-  }
-  if (node.body) collectBlocks(node.body, result);
-  if (node.stmts) {
-    for (const s of node.stmts) collectBlocks(s, result);
-  }
-  if (node.thenBody) collectBlocks(node.thenBody, result);
-  if (node.elseBody) collectBlocks(node.elseBody, result);
-  if (node.initBody) collectBlocks(node.initBody, result);
-  return result;
-}
-
-function findLoopsForBlock(root, blockName) {
-  const result = [];
-  const search = (node, loopStack) => {
-    if (!node) return false;
-    if (node.type === 'ForNode') {
-      loopStack.push(node);
-      if (search(node.body, loopStack)) return true;
-      loopStack.pop();
-      return false;
-    }
-    if (node.type === 'BlockNode' && node.name === blockName) {
-      result.push(...loopStack);
-      return true;
-    }
-    if (node.type === 'SeqNode') {
-      for (const s of node.stmts) {
-        if (search(s, [...loopStack])) return true;
-      }
-    }
-    if (node.type === 'IfThenElseNode') {
-      if (search(node.thenBody, [...loopStack])) return true;
-      if (search(node.elseBody, [...loopStack])) return true;
-    }
-    return false;
-  };
-  search(root, []);
-  return result;
-}
-
-function findParent(root, target) {
-  const search = (node) => {
-    if (!node) return null;
-    for (const key of Object.keys(node)) {
-      const child = node[key];
-      if (child === target) return { parent: node, key, index: -1 };
-      if (Array.isArray(child)) {
-        for (let i = 0; i < child.length; i++) {
-          if (child[i] === target) return { parent: node, key, index: i };
-          if (typeof child[i] === 'object' && child[i] !== null) {
-            const r = search(child[i]);
-            if (r) return r;
-          }
-        }
-      } else if (typeof child === 'object' && child !== null && child.type) {
-        const r = search(child);
-        if (r) return r;
-      }
-    }
-    return null;
-  };
-  return search(root);
-}
-
-function replaceInParent(root, oldNode, newNode) {
-  if (root === oldNode) return newNode;
-  const ref = findParent(root, oldNode);
-  if (!ref) throw new Error('Cannot find node in tree for replacement');
-  if (ref.index >= 0) {
-    ref.parent[ref.key][ref.index] = newNode;
-  } else {
-    ref.parent[ref.key] = newNode;
-  }
-  return root;
-}
+import { SRefTree } from './sref.js';
 
 function substituteVar(node, oldName, exprFactory) {
   if (!node || typeof node !== 'object') return node;
@@ -131,29 +52,22 @@ export class Schedule {
     this.trace = new ScheduleTrace();
     this.state = new ScheduleState(primFunc);
     this._replaying = false;
-    this._blockCache = null;
+    this._srefTree = new SRefTree(primFunc);
   }
 
-  _invalidateCache() {
-    this._blockCache = null;
+  _rebuild() {
+    this._srefTree = new SRefTree(this.func);
     this.state.invalidate();
   }
 
-  _blocks() {
-    if (!this._blockCache) {
-      this._blockCache = collectBlocks(this.func.body);
-    }
-    return this._blockCache;
-  }
-
   getBlock(name) {
-    const b = this._blocks().get(name);
-    if (!b) throw new Error(`Block '${name}' not found`);
-    return b;
+    const sref = this._srefTree.getBlockSRef(name);
+    if (!sref) throw new Error(`Block '${name}' not found`);
+    return sref.node;
   }
 
   getLoops(blockName) {
-    return findLoopsForBlock(this.func.body, blockName);
+    return this._srefTree.loopsOf(blockName).map(sref => sref.node);
   }
 
   split(loop, factor) {
@@ -205,8 +119,8 @@ export class Schedule {
       )
     );
 
-    replaceInParent(this.func, loop, outerLoop);
-    this._invalidateCache();
+    this._replaceNode(loop, outerLoop);
+    this._srefTree.replaceLoop(loop, outerLoop, innerLoop);
 
     if (!this._replaying) {
       this.trace.record('split', [loop.loopVar.name, factor]);
@@ -253,7 +167,8 @@ export class Schedule {
     const innermostOriginal = sorted[sorted.length - 1];
     const innermostBody = innermostOriginal.body;
 
-    const topmostParent = findParent(this.func, topmostLoop);
+    const topmostSRef = this._srefTree.getSRef(topmostLoop);
+    const topmostParent = topmostSRef ? topmostSRef.parent : null;
 
     for (let i = 0; i < newOrder.length; i++) {
       if (i < newOrder.length - 1) {
@@ -263,17 +178,8 @@ export class Schedule {
       }
     }
 
-    if (topmostParent) {
-      if (topmostParent.index >= 0) {
-        topmostParent.parent[topmostParent.key][topmostParent.index] = newOrder[0];
-      } else {
-        topmostParent.parent[topmostParent.key] = newOrder[0];
-      }
-    } else {
-      this.func.body = newOrder[0];
-    }
-
-    this._invalidateCache();
+    this._replaceNode(topmostLoop, newOrder[0]);
+    this._rebuild();
 
     if (!this._replaying) {
       this.trace.record('reorder', [newOrder.map(l => l.loopVar.name)]);
@@ -314,8 +220,8 @@ export class Schedule {
       new MathOpNode('%', fusedVar, new IntImmNode(innerExtent))
     );
 
-    replaceInParent(this.func, outer, fusedLoop);
-    this._invalidateCache();
+    this._replaceNode(outer, fusedLoop);
+    this._srefTree.replaceNode(outer, fusedLoop);
 
     if (!this._replaying) {
       this.trace.record('fuseLoops', [outerName, innerName]);
@@ -370,7 +276,6 @@ export class Schedule {
     const extent = getConstExtent(loop.extent);
     if (extent === null) throw new Error('Cannot vectorize loop with non-constant extent');
     loop.kind = ForKind.VECTORIZED;
-    this._invalidateCache();
     if (!this._replaying) {
       this.trace.record('vectorize', [loop.loopVar.name]);
     }
@@ -379,7 +284,6 @@ export class Schedule {
   unroll(loop) {
     if (loop.type !== 'ForNode') throw new Error('unroll expects ForNode');
     loop.kind = ForKind.UNROLLED;
-    this._invalidateCache();
     if (!this._replaying) {
       this.trace.record('unroll', [loop.loopVar.name]);
     }
@@ -388,7 +292,6 @@ export class Schedule {
   parallelize(loop) {
     if (loop.type !== 'ForNode') throw new Error('parallelize expects ForNode');
     loop.kind = ForKind.PARALLEL;
-    this._invalidateCache();
     if (!this._replaying) {
       this.trace.record('parallelize', [loop.loopVar.name]);
     }
@@ -405,7 +308,6 @@ export class Schedule {
     }
     loop.kind = ForKind.THREAD_BINDING;
     loop.threadTag = threadTag;
-    this._invalidateCache();
     if (!this._replaying) {
       this.trace.record('bindThread', [loop.loopVar.name, threadTag]);
     }
@@ -428,10 +330,8 @@ export class Schedule {
 
     const loops = this.getLoops(blockName);
     const loopVars = [];
-    const loopBinds = [];
     for (let i = 0; i < origBuf.shape.length; i++) {
-      const v = freshVar(`cache_i${i}`);
-      loopVars.push(v);
+      loopVars.push(freshVar(`cache_i${i}`));
     }
 
     const indices = loopVars.map(v => v);
@@ -457,25 +357,15 @@ export class Schedule {
     }
 
     substituteBufferInBlock(block, origBuf, cacheBuf);
-
     readEntry.buffer = cacheBuf;
 
     const outerLoop = loops.length > 0 ? loops[0] : null;
     if (outerLoop) {
-      const parentRef = findParent(this.func, outerLoop);
       const seq = new SeqNode([cacheBody, outerLoop]);
-      if (parentRef) {
-        if (parentRef.index >= 0) {
-          parentRef.parent[parentRef.key][parentRef.index] = seq;
-        } else {
-          parentRef.parent[parentRef.key] = seq;
-        }
-      } else {
-        this.func.body = seq;
-      }
+      this._replaceNode(outerLoop, seq);
     }
 
-    this._invalidateCache();
+    this._rebuild();
     if (!this._replaying) {
       this.trace.record('cacheRead', [blockName, bufferName, cacheScope]);
     }
@@ -531,20 +421,11 @@ export class Schedule {
 
     const outerLoop = loops.length > 0 ? loops[0] : null;
     if (outerLoop) {
-      const parentRef = findParent(this.func, outerLoop);
       const seq = new SeqNode([outerLoop, writebackBody]);
-      if (parentRef) {
-        if (parentRef.index >= 0) {
-          parentRef.parent[parentRef.key][parentRef.index] = seq;
-        } else {
-          parentRef.parent[parentRef.key] = seq;
-        }
-      } else {
-        this.func.body = seq;
-      }
+      this._replaceNode(outerLoop, seq);
     }
 
-    this._invalidateCache();
+    this._rebuild();
     if (!this._replaying) {
       this.trace.record('cacheWrite', [blockName, bufferName, cacheScope]);
     }
@@ -567,6 +448,29 @@ export class Schedule {
 
   verify() {
     return ScheduleValidator.validate(this.func);
+  }
+
+  _replaceNode(oldNode, newNode) {
+    if (this.func.body === oldNode) { this.func.body = newNode; return; }
+
+    const sref = this._srefTree.getSRef(oldNode);
+    const ancestor = sref && sref.parent ? sref.parent.node : this.func;
+
+    const stack = [ancestor];
+    while (stack.length > 0) {
+      const cur = stack.pop();
+      if (!cur) continue;
+      for (const key of ['body', 'thenBody', 'elseBody', 'initBody']) {
+        if (cur[key] === oldNode) { cur[key] = newNode; return; }
+      }
+      if (cur.stmts) {
+        for (let i = 0; i < cur.stmts.length; i++) {
+          if (cur.stmts[i] === oldNode) { cur.stmts[i] = newNode; return; }
+        }
+      }
+      if (cur.body) stack.push(cur.body);
+      if (cur.stmts) for (const s of cur.stmts) if (s) stack.push(s);
+    }
   }
 }
 

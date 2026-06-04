@@ -16,40 +16,39 @@ export class ScheduleRule {
 }
 
 function classifyBlock(primFunc, blockName) {
-  const blocks = new Map();
-  collectBlockInfo(primFunc.body, blocks, []);
-  return blocks.get(blockName) || null;
+  if (!primFunc._blockInfoCache) {
+    primFunc._blockInfoCache = new Map();
+    collectBlockInfo(primFunc.body, primFunc._blockInfoCache, []);
+  }
+  return primFunc._blockInfoCache.get(blockName) || null;
 }
 
-function collectBlockInfo(node, result, loopStack) {
-  if (!node) return;
-  if (node.type === 'ForNode') {
-    loopStack.push(node);
-    collectBlockInfo(node.body, result, loopStack);
-    loopStack.pop();
-    return;
-  }
-  if (node.type === 'BlockNode') {
-    const hasReduction = node.initBody !== null;
-    const readBuffers = node.reads.map(r => r.buffer.name);
-    const writeBuffers = node.writes.map(r => r.buffer.name);
-    result.set(node.name, {
-      loopCount: loopStack.length,
-      hasReduction,
-      readBuffers,
-      writeBuffers,
-      loops: [...loopStack]
-    });
-    collectBlockInfo(node.body, result, loopStack);
-    return;
-  }
-  if (node.type === 'SeqNode') {
-    for (const s of node.stmts) collectBlockInfo(s, result, loopStack);
-    return;
-  }
-  if (node.type === 'IfThenElseNode') {
-    collectBlockInfo(node.thenBody, result, loopStack);
-    if (node.elseBody) collectBlockInfo(node.elseBody, result, loopStack);
+function collectBlockInfo(root, result, initialLoopStack) {
+  const stack = [{ node: root, loops: [...initialLoopStack] }];
+  while (stack.length > 0) {
+    const { node, loops } = stack.pop();
+    if (!node) continue;
+    if (node.type === 'ForNode') {
+      stack.push({ node: node.body, loops: [...loops, node] });
+    } else if (node.type === 'BlockNode') {
+      result.set(node.name, {
+        loopCount: loops.length,
+        hasReduction: node.initBody !== null,
+        readBuffers: node.reads.map(r => r.buffer.name),
+        writeBuffers: node.writes.map(r => r.buffer.name),
+        loops: [...loops]
+      });
+      stack.push({ node: node.body, loops });
+    } else if (node.type === 'SeqNode') {
+      for (let i = node.stmts.length - 1; i >= 0; i--) stack.push({ node: node.stmts[i], loops });
+    } else if (node.type === 'IfThenElseNode') {
+      if (node.elseBody) stack.push({ node: node.elseBody, loops });
+      stack.push({ node: node.thenBody, loops });
+    } else if (node.type === 'AllocateNode') {
+      stack.push({ node: node.body, loops });
+    } else if (node.type === 'LetStmtNode') {
+      stack.push({ node: node.body, loops });
+    }
   }
 }
 
@@ -72,6 +71,18 @@ export class ElementwiseCPURule extends ScheduleRule {
     if (loops.length === 1) {
       const extent = loops[0].extent;
       if (extent.type === 'IntImmNode' && extent.value >= target.vectorWidth * 2) {
+        const l2Elems = target.l2CacheBytes > 0 ? Math.floor(target.l2CacheBytes / 4) : 0;
+        if (l2Elems > 0 && extent.value > l2Elems) {
+          const [l2o, l2i] = schedule.split(loops[0], l2Elems);
+          schedule.parallelize(l2o);
+          const innerLoops = schedule.getLoops(blockName);
+          const curInner = innerLoops.find(l => l.loopVar.name === l2i.loopVar.name);
+          if (curInner) {
+            const [_, vi] = schedule.split(curInner, target.vectorWidth);
+            schedule.vectorize(vi);
+          }
+          return;
+        }
         const [outer, inner] = schedule.split(loops[0], target.vectorWidth);
         schedule.parallelize(outer);
         schedule.vectorize(inner);
@@ -229,13 +240,13 @@ export class MatmulTiledCPURule extends ScheduleRule {
     const loops = schedule.getLoops(blockName);
     if (loops.length < 3) return;
 
-    const tileM = 32;
-    const tileN = 32;
-    const tileK = 8;
+    const cacheBytes = target.l1CacheBytes || 32768;
+    const tileDim = Math.max(8, Math.min(64, Math.floor(Math.sqrt(cacheBytes / 4))));
+    const tileM = tileDim;
+    const tileN = tileDim;
 
     const mLoop = loops[0];
     const nLoop = loops[1];
-    const kLoop = loops[2];
 
     const mExtent = mLoop.extent.type === 'IntImmNode' ? mLoop.extent.value : null;
     const nExtent = nLoop.extent.type === 'IntImmNode' ? nLoop.extent.value : null;
@@ -272,10 +283,14 @@ export class MatmulTiledGPURule extends ScheduleRule {
     const mLoop = loops[0];
     const nLoop = loops[1];
 
-    const blockTileM = 64;
-    const blockTileN = 64;
-    const threadTileM = 8;
-    const threadTileN = 8;
+    const smemBytes = target.sharedMemoryBytes || 49152;
+    const tcScale = target.supportsTensorCore ? 2 : 1;
+    const blockTileDim = Math.max(16, Math.min(128, Math.floor(Math.sqrt(smemBytes / 4)) * tcScale));
+    const blockTileM = blockTileDim;
+    const blockTileN = blockTileDim;
+    const warp = target.warpSize || 32;
+    const threadTileM = Math.max(4, Math.min(16, Math.floor(blockTileM / (warp / 4))));
+    const threadTileN = Math.max(4, Math.min(16, Math.floor(blockTileN / (warp / 4))));
 
     const mExtent = mLoop.extent.type === 'IntImmNode' ? mLoop.extent.value : null;
     const nExtent = nLoop.extent.type === 'IntImmNode' ? nLoop.extent.value : null;
@@ -383,6 +398,7 @@ export class SchedulePolicy {
   }
 
   applyToAllBlocks(schedule) {
+    delete schedule.func._blockInfoCache;
     const blocks = collectAllBlockNames(schedule.func.body);
     const applied = new Map();
     for (const name of blocks) {
@@ -393,17 +409,18 @@ export class SchedulePolicy {
   }
 }
 
-function collectAllBlockNames(node, result = []) {
-  if (!node) return result;
-  if (node.type === 'BlockNode') {
-    result.push(node.name);
+function collectAllBlockNames(root) {
+  const result = [];
+  const stack = [root];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (!node) continue;
+    if (node.type === 'BlockNode') result.push(node.name);
+    if (node.body) stack.push(node.body);
+    if (node.stmts) for (const s of node.stmts) stack.push(s);
+    if (node.thenBody) stack.push(node.thenBody);
+    if (node.elseBody) stack.push(node.elseBody);
+    if (node.initBody) stack.push(node.initBody);
   }
-  if (node.body) collectAllBlockNames(node.body, result);
-  if (node.stmts) {
-    for (const s of node.stmts) collectAllBlockNames(s, result);
-  }
-  if (node.thenBody) collectAllBlockNames(node.thenBody, result);
-  if (node.elseBody) collectAllBlockNames(node.elseBody, result);
-  if (node.initBody) collectAllBlockNames(node.initBody, result);
   return result;
 }
