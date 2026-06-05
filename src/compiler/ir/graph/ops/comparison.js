@@ -42,6 +42,19 @@ export function register(registry) {
   }));
 
   registry.register(new OpDef({
+    name: 'where',
+    numOperands: 3,
+    numResults: 1,
+    traits: [OpTrait.ELEMENTWISE],
+    inferResultTypes(operandTypes) {
+      if (operandTypes.length !== 3) return null;
+      const x = operandTypes[1];
+      if (!(x instanceof TensorType)) return null;
+      return [new TensorType(x.shape, x.dtype)];
+    }
+  }));
+
+  registry.register(new OpDef({
     name: 'clamp',
     numOperands: 3,
     numResults: 1,

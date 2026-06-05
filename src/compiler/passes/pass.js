@@ -9,6 +9,7 @@ export class Pass {
     this.name = name;
     this.preservedAnalyses = new Set();
     this.invalidatedAnalyses = new Set();
+    this.trace = null;
   }
 
   run(target, analysisManager) {

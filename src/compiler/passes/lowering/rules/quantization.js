@@ -49,7 +49,7 @@ export function register() {
     const out = outputs[0];
     const geo = buildDotGeometry(ctx, op, lhs, rhs);
 
-    const initNest = buildSpatialNest(ctx, 'qdi', Array.from({ length: out.shape.length }, (_, i) => i), out.shape);
+    const initNest = buildSpatialNest(ctx, 'qdi', Array.from({ length: out.shape.length }, (_, i) => i), out.shape, out);
     const initStore = new BufferStoreNode(out, initNest.indices, new IntImmNode(0));
     const initBlock = new BlockNode('qmatmul_init', initNest.ivs, [], [{ buffer: out }], initStore);
     const initBody = initNest.wrap(initBlock);
@@ -87,7 +87,7 @@ export function register() {
     const inputZP = op.getAttr('input_zero_point') || 0;
     const kernelZP = op.getAttr('kernel_zero_point') || 0;
 
-    const initNest = buildSpatialNest(ctx, 'qci', Array.from({ length: outShape.length }, (_, i) => i), outShape);
+    const initNest = buildSpatialNest(ctx, 'qci', Array.from({ length: outShape.length }, (_, i) => i), outShape, outBuf);
     const initStore = new BufferStoreNode(outBuf, initNest.indices, new IntImmNode(0));
     const initBlock = new BlockNode('qconv_init', initNest.ivs, [], [{ buffer: outBuf }], initStore);
     const initBody = initNest.wrap(initBlock);

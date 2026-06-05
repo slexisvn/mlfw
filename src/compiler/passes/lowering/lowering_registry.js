@@ -131,7 +131,7 @@ export function buildSpatialNest(ctx, prefix, dims, shape, buf) {
     vars[i] = ctx.allocVar(`${prefix}${dims[i]}`);
     ivs[i] = new BlockRealizeNode(ctx.allocVar(`${prefix}v${dims[i]}`), vars[i]);
     indices[i] = ivs[i].iterVar;
-    extentNodes[i] = buf ? ctx.extentNode(shape[dims[i]], buf, dims[i]) : new IntImmNode(shape[dims[i]]);
+    extentNodes[i] = ctx.extentNode(shape[dims[i]], buf, dims[i]);
   }
   return {
     vars, ivs, indices, extentNodes,
@@ -249,18 +249,18 @@ export function buildDotGeometry(ctx, op, lhs, rhs) {
   const allIvs = concatIterVars(bIvs, lsIvs, rsIvs, cIvs);
 
   const loopGroups = [
-    { vars: bVars, dims: lhsBatch, shape: lhs.shape },
-    { vars: lsVars, dims: lhsSpatial, shape: lhs.shape },
-    { vars: rsVars, dims: rhsSpatial, shape: rhs.shape },
-    { vars: cVars, dims: lhsContracting, shape: lhs.shape },
+    { vars: bVars, dims: lhsBatch, buf: lhs },
+    { vars: lsVars, dims: lhsSpatial, buf: lhs },
+    { vars: rsVars, dims: rhsSpatial, buf: rhs },
+    { vars: cVars, dims: lhsContracting, buf: lhs },
   ];
 
   function wrapAccBody(body) {
     let result = body;
     for (let g = loopGroups.length - 1; g >= 0; g--) {
-      const { vars, dims, shape } = loopGroups[g];
+      const { vars, dims, buf } = loopGroups[g];
       for (let i = vars.length - 1; i >= 0; i--) {
-        result = new ForNode(vars[i], new IntImmNode(0), new IntImmNode(shape[dims[i]]), ForKind.SERIAL, result);
+        result = new ForNode(vars[i], new IntImmNode(0), ctx.extentNode(buf.shape[dims[i]], buf, dims[i]), ForKind.SERIAL, result);
       }
     }
     return result;

@@ -4,6 +4,7 @@ import { TensorType, Layout } from '../../ir/graph/types.js';
 import { LayoutPolicy } from './layout_policy.js';
 import { LayoutAnalysis } from '../../analysis/layout_analysis.js';
 import { UseDefAnalysis } from '../../analysis/use_def.js';
+import { TraceLevel } from '../../pipeline/trace.js';
 
 export class LayoutTransformPass extends FunctionPass {
   constructor(config = {}) {
@@ -58,6 +59,15 @@ export class LayoutTransformPass extends FunctionPass {
       }
 
       consumer.replaceOperand(operandIdx, transformResult);
+    }
+
+    if (this.trace && this.trace.level >= TraceLevel.DEBUG) {
+      this.trace.emit({
+        type: 'pass_detail', passName: this.name,
+        conversions: result.conversions.length,
+        uniqueTransforms: insertedTransforms.size,
+        level: TraceLevel.DEBUG,
+      });
     }
 
     return PassResult.CHANGED;

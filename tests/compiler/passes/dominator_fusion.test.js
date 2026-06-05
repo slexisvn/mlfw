@@ -7,7 +7,7 @@ import { DominatorFusionPass } from '../../../src/compiler/passes/fusion/dominat
 import { PassResult } from '../../../src/compiler/passes/pass.js';
 import { PassManager } from '../../../src/compiler/passes/pass_manager.js';
 import { GraphModule } from '../../../src/compiler/ir/graph/module.js';
-import { CPUTarget } from '../../../src/compiler/backend/target.js';
+import { CPUTarget } from '../../../src/backend/target.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
 
 const f32 = ScalarType.F32;

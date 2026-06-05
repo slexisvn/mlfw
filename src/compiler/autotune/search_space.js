@@ -1,5 +1,5 @@
 import { ForKind } from '../ir/tensor/nodes.js';
-import { TargetKind } from '../backend/target.js';
+import { TargetKind } from '../../backend/target.js';
 import { ScheduleTrace } from '../schedule/trace.js';
 
 export class SearchVariable {

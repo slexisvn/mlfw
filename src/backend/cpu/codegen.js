@@ -1,4 +1,4 @@
-import { ForKind } from '../../ir/tensor/nodes.js';
+import { ForKind } from '../../compiler/ir/tensor/nodes.js';
 import { jsTypedArray, isJSMathFunc, isDtypeInt } from '../dtype_map.js';
 
 export class CPUCodegen {
@@ -128,11 +128,11 @@ export class CPUCodegen {
     const varName = node.loopVar.name;
     const extent = this._exprToJS(node.extent);
 
-    if (node.kind === ForKind.UNROLLED) {
+    if (node.kind === ForKind.UNROLLED || node.kind === ForKind.VECTORIZED) {
       const constExtent = node.extent.type === 'IntImmNode' ? node.extent.value : null;
-      if (constExtent && constExtent <= 16) {
+      if (constExtent && constExtent <= 32) {
         for (let i = 0; i < constExtent; i++) {
-          this._emit(`{ const ${varName} = ${i};`);
+          this._emit('{ const ' + varName + ' = ' + i + ';');
           this._indent++;
           this._loopStack.push(varName);
           this._visitNode(node.body);
@@ -144,7 +144,28 @@ export class CPUCodegen {
       }
     }
 
-    this._emit(`for (let ${varName} = 0; ${varName} < ${extent}; ${varName}++) {`);
+    const accInfo = this._detectReductionAcc(node);
+    if (accInfo) {
+      const accVar = '_acc_' + (this._accCounter = (this._accCounter || 0) + 1);
+      const prevAcc = this._accTarget;
+      const prevVar = this._accVar;
+      this._accTarget = accInfo;
+      this._accVar = accVar;
+      this._emit('let ' + accVar + ' = ' + accInfo.bufName + '[' + accInfo.outerIdxExpr + '];');
+      this._emit('for (let ' + varName + ' = 0; ' + varName + ' < ' + extent + '; ' + varName + '++) {');
+      this._indent++;
+      this._loopStack.push(varName);
+      this._visitNode(node.body);
+      this._loopStack.pop();
+      this._indent--;
+      this._emit('}');
+      this._emit(accInfo.bufName + '[' + accInfo.outerIdxExpr + '] = ' + accVar + ';');
+      this._accTarget = prevAcc;
+      this._accVar = prevVar;
+      return;
+    }
+
+    this._emit('for (let ' + varName + ' = 0; ' + varName + ' < ' + extent + '; ' + varName + '++) {');
     this._indent++;
     this._loopStack.push(varName);
     this._visitNode(node.body);
@@ -153,16 +174,47 @@ export class CPUCodegen {
     this._emit('}');
   }
 
+  _detectReductionAcc(forNode) {
+    let block = forNode.body;
+    if (!block || block.type !== 'BlockNode') return null;
+    const inner = block.body;
+    if (!inner || inner.type !== 'BufferStoreNode') return null;
+    const store = inner;
+    const val = store.value;
+    if (!val || val.type !== 'MathOpNode' || val.op !== '+') return null;
+    let loadSide = null;
+    if (val.a && val.a.type === 'BufferLoadNode' && val.a.buffer.name === store.buffer.name) loadSide = val.a;
+    else if (val.b && val.b.type === 'BufferLoadNode' && val.b.buffer.name === store.buffer.name) loadSide = val.b;
+    if (!loadSide) return null;
+    const storeIdx = this._flatIndex(store.buffer, store.indices);
+    const loadIdx = this._flatIndex(loadSide.buffer, loadSide.indices);
+    if (storeIdx !== loadIdx) return null;
+    const bindMap = new Map();
+    for (const bind of block.iterVars) {
+      if (bind.iterVar && bind.binding) {
+        bindMap.set(bind.iterVar.name, this._exprToJS(bind.binding));
+      }
+    }
+    let resolvedIdx = storeIdx;
+    for (const [varName, expr] of bindMap) {
+      resolvedIdx = resolvedIdx.split(varName).join(expr);
+    }
+    const loopVar = forNode.loopVar.name;
+    if (resolvedIdx.includes(loopVar)) return null;
+    return { bufName: store.buffer.name, idxExpr: storeIdx, outerIdxExpr: resolvedIdx };
+  }
+
   _visitBlockNode(node) {
     for (const bind of node.iterVars) {
       if (bind.iterVar && bind.binding) {
-        this._emit(`const ${bind.iterVar.name} = ${this._exprToJS(bind.binding)};`);
+        this._emit('const ' + bind.iterVar.name + ' = ' + this._exprToJS(bind.binding) + ';');
       }
     }
+
     if (node.initBody) {
       const reductionVar = this._loopStack.length > 0 ? this._loopStack[this._loopStack.length - 1] : null;
       if (reductionVar) {
-        this._emit(`if (${reductionVar} === 0) {`);
+        this._emit('if (' + reductionVar + ' === 0) {');
         this._indent++;
         this._visitNode(node.initBody);
         this._indent--;
@@ -173,6 +225,7 @@ export class CPUCodegen {
     }
     this._visitNode(node.body);
   }
+
 
   _visitIfThenElseStmt(node) {
     this._emit(`if (${this._exprToJS(node.condition)}) {`);
@@ -204,7 +257,12 @@ export class CPUCodegen {
   }
 
   _visitBufferStoreNode(node) {
-    this._emit(`${node.buffer.name}[${this._flatIndex(node.buffer, node.indices)}] = ${this._exprToJS(node.value)};`);
+    if (this._accTarget && node.buffer.name === this._accTarget.bufName
+        && this._flatIndex(node.buffer, node.indices) === this._accTarget.idxExpr) {
+      this._emit(this._accVar + ' = ' + this._exprToJS(node.value) + ';');
+      return;
+    }
+    this._emit(node.buffer.name + '[' + this._flatIndex(node.buffer, node.indices) + '] = ' + this._exprToJS(node.value) + ';');
   }
 
   _exprToJS(root) {
@@ -222,7 +280,15 @@ export class CPUCodegen {
         case 'IntImmNode': work.pop(); vals.push(String(node.value)); continue;
         case 'FloatImmNode': work.pop(); vals.push(String(node.value)); continue;
         case 'VariableNode': work.pop(); vals.push(node.name); continue;
-        case 'BufferLoadNode': work.pop(); vals.push(`${node.buffer.name}[${this._flatIndex(node.buffer, node.indices)}]`); continue;
+        case 'BufferLoadNode': {
+          work.pop();
+          if (this._accTarget && node.buffer.name === this._accTarget.bufName && this._flatIndex(node.buffer, node.indices) === this._accTarget.idxExpr) {
+            vals.push(this._accVar);
+          } else {
+            vals.push(node.buffer.name + '[' + this._flatIndex(node.buffer, node.indices) + ']');
+          }
+          continue;
+        }
 
         case 'MathOpNode':
           if (top.phase === 0) { top.phase = 1; work.push({ node: node.a, phase: 0 }); }

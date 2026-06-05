@@ -1,3 +1,4 @@
+import { performance } from 'node:perf_hooks';
 import { GraphModule } from '../ir/graph/module.js';
 import { PassManager } from '../passes/pass_manager.js';
 import { CanonicalizePass } from '../passes/canonicalize/canonicalize.js';
@@ -16,22 +17,36 @@ import { lowerGraphToPrimFunc } from '../passes/lowering/graph_to_tensor.js';
 import { Schedule } from '../schedule/schedule.js';
 import { SchedulePolicy } from '../schedule/rules.js';
 import { MemoryPlanner } from '../passes/memory/memory_planning.js';
-import { BackendPipeline } from '../backend/pipeline.js';
+import { BackendPipeline } from '../../backend/pipeline.js';
 import { RuntimeModule } from '../runtime/runtime.js';
 import { Autotuner } from '../autotune/autotuner.js';
 import { TensorVerifier } from '../ir/tensor/verifier.js';
-import { verifyModule } from '../ir/verifier/verifier.js';
+import { verifyModule, verifyFunction } from '../ir/verifier/verifier.js';
 import { CalibrationCollector } from '../analysis/calibration.js';
 import { DecompositionPass } from '../passes/decompose/decomposition_pass.js';
 import { RematerializationPass } from '../passes/memory/rematerialization.js';
 import { GraphPartitionPass, PartitionMaterializationPass } from '../passes/partition/partition_pass.js';
-import { TargetFeatures } from '../backend/target.js';
+import { TargetFeatures } from '../../backend/target.js';
+import { TraceLog, TraceLevel, CompilationError } from './trace.js';
+import { IRPrinter } from '../ir/printer/printer.js';
+import { printTensorIR } from '../ir/tensor/printer.js';
+
+function spread(obj) { return obj && typeof obj === 'object' ? obj : {}; }
+
+function omit(obj, ...keys) {
+  const s = new Set(keys);
+  const r = {};
+  for (const k of Object.keys(obj)) { if (!s.has(k)) r[k] = obj[k]; }
+  return r;
+}
+
+export { CompilationError } from './trace.js';
 
 export class CompilerConfig {
   constructor(opts = {}) {
     this.target = opts.target;
     this.verify = opts.verify !== false;
-    this.enableDiagnostics = opts.enableDiagnostics || false;
+    this.errorMode = opts.errorMode || 'strict';
 
     const f = opts.fusion || {};
     this.fusion = {
@@ -77,21 +92,34 @@ export class CompilerConfig {
       minPartitionSize: p.minPartitionSize || 1,
       costWeights: p.costWeights || {},
     };
+
+    const t = opts.trace || {};
+    this.trace = {
+      level: t.level ?? TraceLevel.SILENT,
+      sink:  t.sink  ?? null,
+      irSnapshot: {
+        afterGraphPasses: false,
+        afterLowering: false,
+        afterScheduling: false,
+        ...spread(t.irSnapshot),
+      },
+    };
   }
 }
 
-function spread(obj) { return obj && typeof obj === 'object' ? obj : {}; }
-function omit(obj, ...keys) {
-  const s = new Set(keys);
-  const r = {};
-  for (const k of Object.keys(obj)) { if (!s.has(k)) r[k] = obj[k]; }
-  return r;
-}
-
 export class CompilationResult {
-  constructor(runtimeModule, diagnostics) {
+  constructor(runtimeModule, trace, errors) {
     this.module = runtimeModule;
-    this.diagnostics = diagnostics;
+    this.trace = trace;
+    this.errors = errors || [];
+  }
+
+  get succeeded() { return this.errors.length === 0; }
+
+  get failedFunctions() {
+    const names = new Set();
+    for (const e of this.errors) if (e.funcName) names.add(e.funcName);
+    return names;
   }
 
   run(funcName, ...args) {
@@ -114,35 +142,46 @@ export class Compiler {
   }
 
   compile(graphModule) {
-    const diag = this.config.enableDiagnostics ? new CompilerDiagnostics(this.config.target.name) : null;
+    const trace = new TraceLog(this.config.trace);
+    const resilient = this.config.errorMode === 'resilient';
+    const errors = [];
+    const failed = new Set();
+    const t0 = performance.now();
+    trace.phaseStart('compile');
 
     if (this.config.verify) {
-      this._verifyGraph(graphModule, 'before graph passes');
+      this._verifyGraph(graphModule, 'before graph passes', trace, errors, failed, resilient);
     }
 
-    this._runGraphPasses(graphModule, diag);
+    this._runGraphPasses(graphModule, trace, errors, failed, resilient);
 
     if (this.config.partition.enabled && this.config.partition.targets.length >= 2) {
-      this._runPartitioning(graphModule, diag);
+      this._runPartitioning(graphModule, trace);
     }
 
     if (this.config.verify) {
-      this._verifyGraph(graphModule, 'after graph passes');
+      this._verifyGraph(graphModule, 'after graph passes', trace, errors, failed, resilient);
     }
 
-    const primFuncs = this._lowerAll(graphModule, diag);
+    const primFuncs = this._lowerAll(graphModule, trace, errors, failed, resilient);
 
-    this._scheduleAll(primFuncs, diag);
+    this._scheduleAll(primFuncs, trace, errors, failed, resilient);
 
-    const memoryPlans = this._planMemory(primFuncs, diag);
+    this._planMemory(primFuncs, trace, errors, failed, resilient);
 
     if (this.config.verify) {
-      this._verifyAll(primFuncs, diag);
+      this._verifyAll(primFuncs, errors, failed, resilient);
     }
 
-    const runtimeModule = this._codegen(primFuncs, diag);
+    const runtimeModule = this._codegen(primFuncs, trace, errors, failed, resilient);
 
-    return new CompilationResult(runtimeModule, diag);
+    trace.phaseEnd('compile', performance.now() - t0);
+
+    if (!resilient && errors.length > 0) {
+      throw new Error(errors[0].toString());
+    }
+
+    return new CompilationResult(runtimeModule, trace, errors);
   }
 
   compileFunction(graphFunc) {
@@ -159,7 +198,7 @@ export class Compiler {
     return collector;
   }
 
-  _runGraphPasses(graphModule, diag) {
+  _runGraphPasses(graphModule, trace, errors, failed, resilient) {
     const pm = new PassManager();
 
     pm.addPass(new DecompositionPass());
@@ -205,147 +244,235 @@ export class Compiler {
       pm.addPass(new RematerializationPass(this.config.optimization.rematConfig));
     }
 
-    if (diag) diag.record('graphPasses', 'start');
-    const result = pm.run(graphModule);
-    if (diag) diag.record('graphPasses', 'done', { changed: result.changed });
+    pm.setTrace(trace);
+
+    trace.phaseStart('graphPasses');
+    const t0 = performance.now();
+    const result = pm.run(graphModule, { errorMode: resilient ? 'resilient' : 'strict' });
+    if (result.errors) {
+      for (const e of result.errors) {
+        errors.push(e);
+        trace.errorEvent(e.phase, e.funcName, e.message, e.passName);
+      }
+      if (result.failedFunctions) {
+        for (const name of result.failedFunctions) failed.add(name);
+      }
+    }
+    trace.phaseEnd('graphPasses', performance.now() - t0);
+
+    if (trace.shouldSnapshot('afterGraphPasses')) {
+      const printer = new IRPrinter();
+      trace.irDump('afterGraphPasses', printer.printModule(graphModule));
+    }
   }
 
-  _runPartitioning(graphModule, diag) {
+  _runPartitioning(graphModule, trace) {
     const pm = new PassManager();
     pm.addPass(new GraphPartitionPass(this.config.partition));
     pm.addPass(new PartitionMaterializationPass({
       targets: this.config.partition.targets,
     }));
-    if (diag) diag.record('partition', 'start');
-    const result = pm.run(graphModule);
-    if (diag) diag.record('partition', 'done', { changed: result.changed });
+
+    pm.setTrace(trace);
+
+    trace.phaseStart('partition');
+    const t0 = performance.now();
+    pm.run(graphModule);
+    trace.phaseEnd('partition', performance.now() - t0);
   }
 
-  _lowerAll(graphModule, diag) {
+  _lowerAll(graphModule, trace, errors, failed, resilient) {
+    trace.phaseStart('lowering');
+    const t0 = performance.now();
     const primFuncs = [];
     for (const func of graphModule) {
-      if (diag) diag.record('lowering', func.name);
-      const primFunc = lowerGraphToPrimFunc(func);
-      primFuncs.push(primFunc);
+      if (failed.has(func.name)) continue;
+      try {
+        const ft0 = performance.now();
+        const primFunc = lowerGraphToPrimFunc(func);
+        trace.functionEvent('lowering', func.name, { durationMs: performance.now() - ft0 });
+        primFuncs.push(primFunc);
+        if (trace.shouldSnapshot('afterLowering')) {
+          trace.irDump('afterLowering:' + func.name, printTensorIR(primFunc));
+        }
+      } catch (e) {
+        const err = new CompilationError('lowering', func.name, e.message);
+        errors.push(err);
+        failed.add(func.name);
+        trace.errorEvent('lowering', func.name, e.message);
+        if (!resilient) break;
+      }
     }
+    trace.phaseEnd('lowering', performance.now() - t0);
     return primFuncs;
   }
 
-  _scheduleAll(primFuncs, diag) {
+  _scheduleAll(primFuncs, trace, errors, failed, resilient) {
+    trace.phaseStart('scheduling');
+    const t0 = performance.now();
     const sCfg = this.config.scheduling;
     if (sCfg.autotune) {
       const autotuner = new Autotuner(this.config.target, sCfg);
       for (const pf of primFuncs) {
-        if (diag) diag.record('autotune', pf.name);
-        autotuner.tuneAndApply(pf);
+        if (failed.has(pf.name)) continue;
+        try {
+          const ft0 = performance.now();
+          const tuneResult = autotuner.tuneAndApply(pf);
+          const durationMs = performance.now() - ft0;
+          let cacheHits = 0, blockCount = 0;
+          if (tuneResult && tuneResult.results) {
+            blockCount = tuneResult.results.size;
+            for (const [, r] of tuneResult.results) { if (r.fromCache) cacheHits++; }
+          }
+          trace.autotuneStats(pf.name, { durationMs, blockCount, applied: !!(tuneResult && tuneResult.applied), cacheHits });
+        } catch (e) {
+          const err = new CompilationError('scheduling', pf.name, e.message);
+          errors.push(err);
+          failed.add(pf.name);
+          trace.errorEvent('scheduling', pf.name, e.message);
+          if (!resilient) break;
+        }
       }
     } else if (sCfg.enabled) {
       const policy = new SchedulePolicy(this.config.target);
       for (const pf of primFuncs) {
-        if (diag) diag.record('schedule', pf.name);
-        const sch = new Schedule(pf);
-        policy.applyToAllBlocks(sch);
+        if (failed.has(pf.name)) continue;
+        try {
+          const ft0 = performance.now();
+          const sch = new Schedule(pf);
+          policy.applyToAllBlocks(sch);
+          trace.functionEvent('scheduling', pf.name, { durationMs: performance.now() - ft0 });
+        } catch (e) {
+          const err = new CompilationError('scheduling', pf.name, e.message);
+          errors.push(err);
+          failed.add(pf.name);
+          trace.errorEvent('scheduling', pf.name, e.message);
+          if (!resilient) break;
+        }
+      }
+    }
+    trace.phaseEnd('scheduling', performance.now() - t0);
+
+    if (trace.shouldSnapshot('afterScheduling')) {
+      for (const pf of primFuncs) {
+        if (!failed.has(pf.name)) trace.irDump('afterScheduling:' + pf.name, printTensorIR(pf));
       }
     }
   }
 
-  _planMemory(primFuncs, diag) {
-    const alignment = this.config.memory.alignment
-      || this.config.target?.cacheLineSizeBytes
-      || 64;
-    const planner = new MemoryPlanner({
-      alignment,
-      enableInplace: this.config.memory.inplaceReuse
-    });
-    const plans = [];
+  _planMemory(primFuncs, trace, errors, failed, resilient) {
+    trace.phaseStart('memoryPlanning');
+    const t0 = performance.now();
+    const alignment = this.config.memory.alignment || this.config.target?.cacheLineSizeBytes || 64;
+    const planner = new MemoryPlanner({ alignment, enableInplace: this.config.memory.inplaceReuse });
     for (const pf of primFuncs) {
-      if (diag) diag.record('memoryPlan', pf.name);
-      const { plan } = planner.planAndRewrite(pf);
-      plans.push(plan);
-      if (diag) diag.record('memoryPlan', pf.name, { peak: plan.peakMemory() });
+      if (failed.has(pf.name)) continue;
+      try {
+        const ft0 = performance.now();
+        const { plan } = planner.planAndRewrite(pf);
+        const report = plan.getReport();
+        trace.memoryStats(pf.name, {
+          durationMs: performance.now() - ft0,
+          peakMemory: report.peakMemory,
+          totalTemporaries: report.totalTemporaries,
+          totalInplace: report.totalInplace,
+        });
+      } catch (e) {
+        const err = new CompilationError('memoryPlanning', pf.name, e.message);
+        errors.push(err);
+        failed.add(pf.name);
+        trace.errorEvent('memoryPlanning', pf.name, e.message);
+        if (!resilient) break;
+      }
     }
-    return plans;
+    trace.phaseEnd('memoryPlanning', performance.now() - t0);
   }
 
-  _verifyGraph(graphModule, phase) {
-    const errors = verifyModule(graphModule);
-    if (errors.length > 0) {
-      throw new Error(`Graph verification failed (${phase}): ${errors.map(e => e.toString()).join('; ')}`);
+  _verifyGraph(graphModule, phase, trace, errors, failed, resilient) {
+    if (resilient) {
+      for (const func of graphModule) {
+        if (failed.has(func.name)) continue;
+        const funcErrors = verifyFunction ? verifyFunction(func) : [];
+        if (funcErrors.length > 0) {
+          const msg = funcErrors.map(e => e.toString()).join('; ');
+          errors.push(new CompilationError('verification', func.name, msg));
+          failed.add(func.name);
+          trace.errorEvent('verification', func.name, msg);
+        }
+      }
+      return;
+    }
+    const moduleErrors = verifyModule(graphModule);
+    if (moduleErrors.length > 0) {
+      throw new Error('Graph verification failed (' + phase + '): ' + moduleErrors.map(e => e.toString()).join('; '));
     }
   }
 
-  _verifyAll(primFuncs, diag) {
+  _verifyAll(primFuncs, errors, failed, resilient) {
     const verifier = new TensorVerifier();
     for (const pf of primFuncs) {
-      const errors = verifier.verify(pf);
-      if (errors.length > 0) {
-        throw new Error(`TensorIR verification failed for ${pf.name}: ${errors.join('; ')}`);
+      if (failed.has(pf.name)) continue;
+      const pfErrors = verifier.verify(pf);
+      if (pfErrors.length > 0) {
+        const msg = pfErrors.join('; ');
+        if (resilient) {
+          errors.push(new CompilationError('verification', pf.name, msg));
+          failed.add(pf.name);
+        } else {
+          throw new Error('TensorIR verification failed for ' + pf.name + ': ' + msg);
+        }
       }
     }
   }
 
-  _codegen(primFuncs, diag) {
+  _codegen(primFuncs, trace, errors, failed, resilient) {
+    trace.phaseStart('codegen');
+    const t0 = performance.now();
     const runtimeMod = new RuntimeModule('compiled');
 
-    if (this.config.partition.enabled && this.config.partition.targets.length >= 2) {
-      const backendCache = new Map();
-      const getBackend = (target) => {
-        if (!backendCache.has(target.name)) {
-          backendCache.set(target.name, new BackendPipeline(target));
-        }
-        return backendCache.get(target.name);
-      };
+    const usePartition = this.config.partition.enabled && this.config.partition.targets.length >= 2;
+    const backendCache = new Map();
+    const getBackend = (target) => {
+      if (!backendCache.has(target.name)) backendCache.set(target.name, new BackendPipeline(target));
+      return backendCache.get(target.name);
+    };
+    const defaultBackend = usePartition ? null : new BackendPipeline(this.config.target);
 
-      for (const pf of primFuncs) {
-        if (diag) diag.record('codegen', pf.name);
-        const targetName = pf._partitionTarget;
-        const target = targetName
-          ? this.config.partition.targets.find(t => t.name === targetName)
-          : this.config.target;
-        const backend = getBackend(target || this.config.target);
+    for (const pf of primFuncs) {
+      if (failed.has(pf.name)) continue;
+      try {
+        const ft0 = performance.now();
+        let backend;
+        if (usePartition) {
+          const targetName = pf._partitionTarget;
+          const target = targetName
+            ? this.config.partition.targets.find(t => t.name === targetName)
+            : this.config.target;
+          backend = getBackend(target || this.config.target);
+        } else {
+          backend = defaultBackend;
+        }
         const compiled = backend.compile(pf);
         runtimeMod.addCompiledKernel(compiled);
         if (pf.shapeParamMap && pf.shapeParamMap.size > 0) {
           runtimeMod.setShapeParamMap(pf.name, pf.shapeParamMap);
         }
-      }
-    } else {
-      const backend = new BackendPipeline(this.config.target);
-      for (const pf of primFuncs) {
-        if (diag) diag.record('codegen', pf.name);
-        const compiled = backend.compile(pf);
-        runtimeMod.addCompiledKernel(compiled);
-        if (pf.shapeParamMap && pf.shapeParamMap.size > 0) {
-          runtimeMod.setShapeParamMap(pf.name, pf.shapeParamMap);
-        }
+        trace.codegenStats(pf.name, {
+          durationMs: performance.now() - ft0,
+          sourceSize: compiled.source.length,
+          targetName: compiled.target.name,
+        });
+      } catch (e) {
+        const err = new CompilationError('codegen', pf.name, e.message);
+        errors.push(err);
+        failed.add(pf.name);
+        trace.errorEvent('codegen', pf.name, e.message);
+        if (!resilient) break;
       }
     }
 
+    trace.phaseEnd('codegen', performance.now() - t0);
     return runtimeMod;
-  }
-}
-
-class CompilerDiagnostics {
-  constructor(targetName) {
-    this.targetName = targetName || 'unknown';
-    this.entries = [];
-  }
-
-  record(phase, detail, extra = null) {
-    this.entries.push({ phase, detail, extra, timestamp: Date.now() });
-  }
-
-  getPhase(phase) {
-    return this.entries.filter(e => e.phase === phase);
-  }
-
-  summary() {
-    const phases = new Map();
-    for (const e of this.entries) {
-      if (!phases.has(e.phase)) phases.set(e.phase, []);
-      phases.get(e.phase).push(e);
-    }
-    return phases;
   }
 }
 

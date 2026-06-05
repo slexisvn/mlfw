@@ -3,6 +3,7 @@ import { Operation } from '../../ir/graph/operation.js';
 import { Block, Region } from '../../ir/graph/block.js';
 import { TensorType, DYNAMIC } from '../../ir/graph/types.js';
 import { classifyFusionKind } from './fusion_analysis.js';
+import { TraceLevel } from '../../pipeline/trace.js';
 import {
   getYieldOp, countInnerOps, countReductions,
   allInnerOpsFusable, remapOperands
@@ -28,6 +29,7 @@ export class MultiOutputFusionPass extends FunctionPass {
     if (candidates.length === 0) return PassResult.UNCHANGED;
 
     let changed = false;
+    let mergeCount = 0;
     const merged = new Set();
 
     for (const { left, right, sharedInputs, sharedBytes } of candidates) {
@@ -39,6 +41,15 @@ export class MultiOutputFusionPass extends FunctionPass {
       merged.add(left);
       merged.add(right);
       changed = true;
+      mergeCount++;
+    }
+
+    if (this.trace && this.trace.level >= TraceLevel.DEBUG) {
+      this.trace.emit({
+        type: 'pass_detail', passName: this.name,
+        fusionOps: fusionOps.length, candidates: candidates.length, mergeCount,
+        level: TraceLevel.DEBUG,
+      });
     }
 
     return changed ? PassResult.CHANGED : PassResult.UNCHANGED;

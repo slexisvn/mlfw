@@ -6,7 +6,7 @@ import {
 } from '../../../src/compiler/ir/tensor/nodes.js';
 import { Buffer } from '../../../src/compiler/ir/tensor/buffer.js';
 import { resetVarCounter } from '../../../src/compiler/schedule/schedule.js';
-import { CPUTarget } from '../../../src/compiler/backend/target.js';
+import { CPUTarget } from '../../../src/backend/target.js';
 import { Autotuner, AutotuneConfig } from '../../../src/compiler/autotune/autotuner.js';
 import { BenchmarkRunner } from '../../../src/compiler/autotune/benchmark.js';
 import { computeWorkloadKey } from '../../../src/compiler/autotune/workload_key.js';
@@ -54,7 +54,7 @@ describe('Structural workload key', () => {
   });
 
   it('produces different key for different targets', async () => {
-    const { GPUTarget } = await import('../../../src/compiler/backend/target.js');
+    const { GPUTarget } = await import('../../../src/backend/target.js');
     const func = makeElementwiseFunc(256);
     const key1 = computeWorkloadKey(func, 'add_block', CPUTarget());
     const key2 = computeWorkloadKey(func, 'add_block', GPUTarget());

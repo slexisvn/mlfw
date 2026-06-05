@@ -3,9 +3,10 @@ import { strict as assert } from 'node:assert';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { buildFunction, buildModule } from '../../../src/compiler/ir/graph/builder.js';
 import { GraphModule } from '../../../src/compiler/ir/graph/module.js';
-import { CPUTarget, GPUTarget } from '../../../src/compiler/backend/target.js';
+import { CPUTarget, GPUTarget } from '../../../src/backend/target.js';
 import { RuntimeTensor } from '../../../src/compiler/runtime/runtime.js';
 import { Compiler, CompilerConfig, compileGraph } from '../../../src/compiler/pipeline/compiler.js';
+import { TraceLevel } from '../../../src/compiler/pipeline/trace.js';
 
 const f32 = ScalarType.F32;
 
@@ -191,27 +192,67 @@ describe('E2E: autotune pipeline', () => {
   });
 });
 
-describe('E2E: diagnostics', () => {
-  it('collects phase diagnostics when enabled', () => {
+describe('E2E: trace log', () => {
+  it('collects structured events at INFO level', () => {
+    const events = [];
     const f32_4 = new TensorType([4], f32);
-    const func = buildFunction('diag', [f32_4], [f32_4], (b, [x]) => {
+    const func = buildFunction('traced', [f32_4], [f32_4], (b, [x]) => {
       b.returnOp([b.exp(x).getResult(0)]);
     });
-    const compiled = compileGraph(func, CPUTarget(), { enableDiagnostics: true });
-    assert.ok(compiled.diagnostics);
-    assert.ok(compiled.diagnostics.entries.length > 0);
-    const phases = compiled.diagnostics.summary();
-    assert.ok(phases.has('graphPasses'));
-    assert.ok(phases.has('lowering'));
-    assert.ok(phases.has('codegen'));
+    const compiled = compileGraph(func, CPUTarget(), {
+      trace: { level: TraceLevel.INFO, sink: e => events.push(e) },
+    });
+    const phaseNames = events.filter(e => e.type === 'phase').map(e => e.phase);
+    assert.ok(phaseNames.includes('compile'));
+    assert.ok(phaseNames.includes('graphPasses'));
+    assert.ok(phaseNames.includes('lowering'));
+    assert.ok(phaseNames.includes('codegen'));
   });
 
-  it('no diagnostics when disabled', () => {
+  it('collects per-pass events at VERBOSE level', () => {
+    const events = [];
     const f32_4 = new TensorType([4], f32);
-    const func = buildFunction('nodiag', [f32_4], [f32_4], (b, [x]) => {
+    const func = buildFunction('verbose', [f32_4], [f32_4], (b, [x]) => {
       b.returnOp([b.exp(x).getResult(0)]);
     });
-    const compiled = compileGraph(func, CPUTarget(), { enableDiagnostics: false });
-    assert.equal(compiled.diagnostics, null);
+    compileGraph(func, CPUTarget(), {
+      trace: { level: TraceLevel.VERBOSE, sink: e => events.push(e) },
+    });
+    const passEvents = events.filter(e => e.type === 'pass');
+    assert.ok(passEvents.length > 0);
+    for (const pe of passEvents) {
+      assert.ok(typeof pe.passName === 'string');
+      assert.ok(typeof pe.changed === 'boolean');
+      assert.ok(typeof pe.durationMs === 'number');
+    }
+    const codegenEvents = events.filter(e => e.type === 'codegen');
+    assert.ok(codegenEvents.length > 0);
+    assert.ok(codegenEvents[0].sourceSize > 0);
+  });
+
+  it('emits nothing at SILENT level', () => {
+    const events = [];
+    const f32_4 = new TensorType([4], f32);
+    const func = buildFunction('silent', [f32_4], [f32_4], (b, [x]) => {
+      b.returnOp([b.exp(x).getResult(0)]);
+    });
+    compileGraph(func, CPUTarget(), {
+      trace: { level: TraceLevel.SILENT, sink: e => events.push(e) },
+    });
+    assert.equal(events.length, 0);
+  });
+
+  it('emits memory stats at VERBOSE level', () => {
+    const events = [];
+    const f32_4 = new TensorType([4], f32);
+    const func = buildFunction('mem', [f32_4], [f32_4], (b, [x]) => {
+      b.returnOp([b.exp(x).getResult(0)]);
+    });
+    compileGraph(func, CPUTarget(), {
+      trace: { level: TraceLevel.VERBOSE, sink: e => events.push(e) },
+    });
+    const memEvents = events.filter(e => e.type === 'memory');
+    assert.ok(memEvents.length > 0);
+    assert.ok(typeof memEvents[0].peakMemory === 'number');
   });
 });

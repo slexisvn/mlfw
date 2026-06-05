@@ -2,12 +2,12 @@ import { describe, it } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
-import { CPUTarget, GPUTarget } from '../../../src/compiler/backend/target.js';
+import { CPUTarget, GPUTarget } from '../../../src/backend/target.js';
 import { RuntimeTensor } from '../../../src/compiler/runtime/runtime.js';
 import { RuntimeMemoryManager } from '../../../src/compiler/runtime/runtime.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
-import { dtypeInfo, cType, cPtrType, jsTypedArray, cMathFunc, libraryFunc } from '../../../src/compiler/backend/dtype_map.js';
-import { createCPULibrarySelector, createGPULibrarySelector } from '../../../src/compiler/backend/library_selector.js';
+import { dtypeInfo, cType, cPtrType, jsTypedArray, cMathFunc, libraryFunc } from '../../../src/backend/dtype_map.js';
+import { createCPULibrarySelector, createGPULibrarySelector } from '../../../src/backend/library_selector.js';
 
 describe('dtype_map', () => {
   it('f32 maps to Float32Array and float', () => {

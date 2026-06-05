@@ -1,6 +1,7 @@
 import { ModulePass, PassResult } from './pass.js';
 import { Schedule } from '../schedule/schedule.js';
 import { SchedulePolicy } from '../schedule/rules.js';
+import { TraceLevel } from '../pipeline/trace.js';
 
 export class SchedulePlanningPass extends ModulePass {
   constructor(target, options = {}) {
@@ -38,6 +39,14 @@ export class SchedulePlanningPass extends ModulePass {
       if (errors.length > 0) {
         throw new Error(`Schedule validation failed for ${func.name}: ${errors.join('; ')}`);
       }
+    }
+
+    if (this.trace && this.trace.level >= TraceLevel.DEBUG) {
+      this.trace.emit({
+        type: 'pass_detail', passName: this.name,
+        totalFuncs: funcs.length, changed,
+        level: TraceLevel.DEBUG,
+      });
     }
 
     return changed ? PassResult.CHANGED : PassResult.UNCHANGED;

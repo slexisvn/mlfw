@@ -5,6 +5,7 @@ import { registry } from '../../ir/graph/ops.js';
 import { OpTrait } from '../../ir/graph/op_registry.js';
 import { UseDefAnalysis } from '../../analysis/use_def.js';
 import { QuantizationScheme, QuantizationParams } from '../../ir/graph/quantization_types.js';
+import { TraceLevel } from '../../pipeline/trace.js';
 
 const DEFAULT_EXCLUDE_OPS = new Set(['softmax', 'sqrt', 'div', 'rsqrt', 'log', 'exp', 'tanh']);
 const DEFAULT_QUANTIZABLE_OPS = new Set(['dot', 'conv', 'add', 'mul', 'sub']);
@@ -86,6 +87,14 @@ export class QuantizationPass extends FunctionPass {
       }
     }
 
+    if (this.trace && this.trace.level >= TraceLevel.DEBUG && changed) {
+      this.trace.emit({
+        type: 'pass_detail', passName: this.name,
+        opsProcessed: topo.length, changed,
+        level: TraceLevel.DEBUG,
+      });
+    }
+
     return changed ? PassResult.CHANGED : PassResult.UNCHANGED;
   }
 
@@ -93,16 +102,16 @@ export class QuantizationPass extends FunctionPass {
     if (cfg.calibration && cfg.calibration.hasData(value)) {
       return cfg.calibration.getQuantParams(value, cfg.scheme, cfg.targetDtype);
     }
+    const defOp = value.definingOp;
+    if (defOp && defOp.opName === 'constant') {
+      const val = defOp.getAttr('value');
+      if (typeof val === 'number') return QuantizationParams.fromRange(-Math.abs(val) || -1, Math.abs(val) || 1, cfg.scheme, cfg.targetDtype);
+      if (val && typeof val.length === 'number') return QuantizationParams.fromConstantArray(val, cfg.scheme, cfg.targetDtype);
+    }
+    if (value.type instanceof TensorType && isFloatType(value.type.dtype)) {
+      return QuantizationParams.defaultForActivation(cfg.scheme, cfg.targetDtype);
+    }
     return null;
-  }
-
-  _getConstantQuantParams(op, operandIdx, cfg) {
-    const operand = op.getOperand(operandIdx);
-    const defOp = operand.definingOp;
-    if (!defOp || defOp.opName !== 'constant') return null;
-    const val = defOp.getAttr('value');
-    if (typeof val !== 'number') return null;
-    return QuantizationParams.fromRange(-Math.abs(val), Math.abs(val), cfg.scheme, cfg.targetDtype);
   }
 
   _insertQuantizeAfter(op, resultIdx, cfg) {
@@ -224,14 +233,10 @@ export class QuantizationPass extends FunctionPass {
       attrs[`${prefix}_zero_point`] = qp.getScalarZeroPoint();
     }
 
-    const outputQP = this._getQuantParams(op.getResult(0), cfg);
-    if (outputQP) {
-      attrs.output_scale = outputQP.getScalarScale();
-      attrs.output_zero_point = outputQP.getScalarZeroPoint();
-    } else {
-      attrs.output_scale = 1;
-      attrs.output_zero_point = 0;
-    }
+    const lhsScale = attrs.lhs_scale || attrs.input_scale || 1;
+    const rhsScale = attrs.rhs_scale || attrs.kernel_scale || 1;
+    attrs.output_scale = lhsScale * rhsScale;
+    attrs.output_zero_point = 0;
 
     const resultType = new TensorType(op.getResult(0).type.shape, ScalarType.I32);
     const quantizedOp = new Operation(nativeOpName, quantizedInputs, [resultType], attrs);

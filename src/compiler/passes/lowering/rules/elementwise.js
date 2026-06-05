@@ -56,4 +56,8 @@ export function register() {
     lowerPointwise(ctx, op, inputs, outputs, (o, loads) =>
       new CastNode(loads[0], inputs[0].dtype, outputs[0].dtype))
   );
+
+  registerLoweringRule('copy_to_device', (ctx, op, inputs, outputs) =>
+    lowerPointwise(ctx, op, inputs, outputs, (o, loads) => loads[0])
+  );
 }

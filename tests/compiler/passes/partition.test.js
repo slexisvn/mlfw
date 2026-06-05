@@ -5,7 +5,7 @@ import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js'
 import { buildFunction, buildModule } from '../../../src/compiler/ir/graph/builder.js';
 import { Operation } from '../../../src/compiler/ir/graph/operation.js';
 import { registry } from '../../../src/compiler/ir/graph/ops.js';
-import { CPUTarget, GPUTarget, WasmTarget } from '../../../src/compiler/backend/target.js';
+import { CPUTarget, GPUTarget, WasmTarget } from '../../../src/backend/target.js';
 
 import { GraphPartitioner, PartitionerConfig, Partition, PartitionResult } from '../../../src/compiler/analysis/partitioner.js';
 import { GraphPartitionPass, PartitionMaterializationPass } from '../../../src/compiler/passes/partition/partition_pass.js';

@@ -1,4 +1,4 @@
-import { wasmBytes } from '../backend/dtype_map.js';
+import { wasmBytes } from '../../backend/dtype_map.js';
 
 export class WasmKernelInstance {
   constructor(wasmInstance, memory, bufferOffsets, paramNames, bufferMap) {

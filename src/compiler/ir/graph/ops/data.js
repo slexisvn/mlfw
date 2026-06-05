@@ -1,5 +1,5 @@
 import { OpDef, SideEffectKind, OpTrait } from '../op_registry.js';
-import { TensorType, TupleType } from '../types.js';
+import { TensorType, TupleType, ScalarType } from '../types.js';
 
 export function register(registry) {
   registry.register(new OpDef({
@@ -68,6 +68,31 @@ export function register(registry) {
       if (!(inp instanceof TensorType)) return null;
       const dt = attrs.get ? attrs.get('target_dtype') : attrs.target_dtype;
       return [new TensorType(inp.shape, dt)];
+    }
+  }));
+
+  registry.register(new OpDef({
+    name: 'one_hot',
+    numOperands: 1,
+    numResults: 1,
+    attrs: [
+      { name: 'depth', type: 'number', required: true },
+      { name: 'axis', type: 'number', required: false },
+      { name: 'on_value', type: 'number', required: false },
+      { name: 'off_value', type: 'number', required: false },
+      { name: 'dtype', type: 'string', required: false }
+    ],
+    inferResultTypes(operandTypes, attrs) {
+      if (operandTypes.length < 1) return null;
+      const indices = operandTypes[0];
+      if (!(indices instanceof TensorType)) return null;
+      const depth = attrs.get ? attrs.get('depth') : attrs.depth;
+      const axis = (attrs.get ? attrs.get('axis') : attrs.axis) ?? -1;
+      const dtype = (attrs.get ? attrs.get('dtype') : attrs.dtype) || ScalarType.F32;
+      const shape = [...indices.shape];
+      const insertAt = axis < 0 ? shape.length + 1 + axis : axis;
+      shape.splice(insertAt, 0, depth);
+      return [new TensorType(shape, dtype)];
     }
   }));
 }

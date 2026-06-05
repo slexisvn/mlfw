@@ -2,6 +2,7 @@ import { FunctionPass, PassResult } from '../pass.js';
 import { MemoryEffectAnalysis } from '../../analysis/memory_effect.js';
 import { UseDefAnalysis } from '../../analysis/use_def.js';
 import { ShapeAnalysis } from '../../analysis/shape_analysis.js';
+import { TraceLevel } from '../../pipeline/trace.js';
 
 export class DCEPass extends FunctionPass {
   constructor() {
@@ -23,6 +24,8 @@ export class DCEPass extends FunctionPass {
       }
     }
 
+    let erasedCount = 0;
+
     while (worklist.length > 0) {
       const op = worklist.pop();
       if (!op.parentBlock) continue;
@@ -36,12 +39,20 @@ export class DCEPass extends FunctionPass {
 
       op.erase();
       changed = true;
+      erasedCount++;
 
       for (const defOp of operandDefs) {
         if (defOp.parentBlock && this._isDead(defOp, memEffects)) {
           worklist.push(defOp);
         }
       }
+    }
+
+    if (this.trace && this.trace.level >= TraceLevel.DEBUG && erasedCount > 0) {
+      this.trace.emit({
+        type: 'pass_detail', passName: this.name,
+        erasedCount, level: TraceLevel.DEBUG,
+      });
     }
 
     return changed ? PassResult.CHANGED : PassResult.UNCHANGED;

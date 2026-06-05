@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { TensorType, ScalarType, DYNAMIC } from '../../../src/compiler/ir/graph/types.js';
 import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
-import { CPUTarget } from '../../../src/compiler/backend/target.js';
+import { CPUTarget } from '../../../src/backend/target.js';
 import { RuntimeTensor } from '../../../src/compiler/runtime/runtime.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
 import { lowerGraphToPrimFunc } from '../../../src/compiler/passes/lowering/graph_to_tensor.js';
@@ -57,7 +57,7 @@ describe('Dynamic shape: CPU codegen includes shape params', () => {
 
 describe('Dynamic shape: GPU codegen includes shape params', () => {
   it('CUDA kernel signature has int shape param', async () => {
-    const { GPUTarget } = await import('../../../src/compiler/backend/target.js');
+    const { GPUTarget } = await import('../../../src/backend/target.js');
     const func = buildFunction('gpu_dyn',
       [new TensorType([DYNAMIC, 4], f32)],
       [new TensorType([DYNAMIC, 4], f32)],

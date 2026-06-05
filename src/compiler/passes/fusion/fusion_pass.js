@@ -4,6 +4,7 @@ import { Block, Region } from '../../ir/graph/block.js';
 import { FusionLegality, FusionKind } from './fusion_analysis.js';
 import { FusionGroupBuilder } from './fusion_groups.js';
 import { FusionCostModel } from './fusion_cost.js';
+import { TraceLevel } from '../../pipeline/trace.js';
 
 export class FusionPass extends FunctionPass {
   constructor(config = {}) {
@@ -24,11 +25,9 @@ export class FusionPass extends FunctionPass {
       ...config.cost,
     });
     this.groupBuilder = new FusionGroupBuilder(this.legality);
-    this.enableDiagnostics = config.diagnostics || false;
   }
 
   run(func, analysisManager) {
-    const decisions = this.enableDiagnostics ? [] : null;
     const groups = this.groupBuilder.buildAllGroups(func);
 
     const validGroups = [];
@@ -41,11 +40,11 @@ export class FusionPass extends FunctionPass {
     const filteredGroups = [];
     for (const group of validGroups) {
       if (!group.allOpsInlineFusable()) {
-        if (decisions) decisions.push({ group, decision: { fuse: false, reason: 'group contains ops without inline fusion support' } });
+        this._traceDecision(group, false, 'group contains ops without inline fusion support');
         continue;
       }
       const decision = this.costModel.shouldFuse(group);
-      if (decisions) decisions.push({ group, decision });
+      this._traceDecision(group, decision.fuse, decision.reason);
       if (decision.fuse) {
         filteredGroups.push(group);
       }
@@ -57,13 +56,19 @@ export class FusionPass extends FunctionPass {
       this._materializeFusion(func, group);
     }
 
-    if (decisions) this._lastDecisions = decisions;
-
     return PassResult.CHANGED;
   }
 
-  getDecisions() {
-    return this._lastDecisions || [];
+  _traceDecision(group, fuse, reason) {
+    if (!this.trace || this.trace.level < TraceLevel.DEBUG) return;
+    this.trace.emit({
+      type: 'fusion_decision',
+      passName: this.name,
+      groupSize: group.ops.length,
+      fuse,
+      reason: reason || null,
+      level: TraceLevel.DEBUG,
+    });
   }
 
   _createsCycle(func, group) {
@@ -143,7 +148,7 @@ export class FusionPass extends FunctionPass {
     const yieldValues = outputValues.map(v => {
       const mapped = valueMap.get(v);
       if (mapped === undefined) {
-        throw new Error(`Fusion materialization: output value not found in valueMap`);
+        throw new Error('Fusion materialization: output value not found in valueMap');
       }
       return mapped;
     });

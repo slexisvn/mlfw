@@ -295,6 +295,57 @@ export class IRBuilder {
   batchnorm(input, gamma, beta, mean, variance, axis = 1, eps = 1e-5) {
     return this._inferAndBuild('batch_norm', [input, gamma, beta, mean, variance], { axis, epsilon: eps });
   }
+
+  where(condition, x, y) {
+    return this._inferAndBuild('where', [condition, x, y]);
+  }
+
+  split(input, dimension, splitSizes) {
+    return this._inferAndBuild('split', [input], { dimension, split_sizes: splitSizes });
+  }
+
+  oneHot(indices, depth, opts = {}) {
+    return this._inferAndBuild('one_hot', [indices], {
+      depth,
+      axis: opts.axis ?? -1,
+      on_value: opts.onValue ?? 1,
+      off_value: opts.offValue ?? 0,
+      dtype: opts.dtype || indices.type.dtype,
+    });
+  }
+
+  embedding(weight, indices) {
+    return this._inferAndBuild('embedding', [weight, indices]);
+  }
+
+  argmax(input, axis, keepDims = false) {
+    return this._inferAndBuild('argmax', [input], { axis, keep_dims: keepDims });
+  }
+
+  argmin(input, axis, keepDims = false) {
+    return this._inferAndBuild('argmin', [input], { axis, keep_dims: keepDims });
+  }
+
+  pool2d(input, poolType, kernelSize, strides, padding, opts = {}) {
+    return this._inferAndBuild('pool2d', [input], {
+      pool_type: poolType,
+      kernel_size: kernelSize,
+      strides,
+      padding,
+      ceil_mode: opts.ceilMode || false,
+      count_include_pad: opts.countIncludePad || false,
+      layout: opts.layout || 'NCHW',
+    });
+  }
+
+  resize(input, outputSize, method, opts = {}) {
+    return this._inferAndBuild('resize', [input], {
+      output_size: outputSize,
+      method,
+      coordinate_mode: opts.coordinateMode || 'asymmetric',
+      layout: opts.layout || 'NCHW',
+    });
+  }
 }
 
 export function broadcastDimsExcluding(rank, excludedDim) {

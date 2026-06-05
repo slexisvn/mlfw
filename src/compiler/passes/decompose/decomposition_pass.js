@@ -1,6 +1,7 @@
 import { FunctionPass, PassResult } from '../pass.js';
 import { IRBuilder, broadcastDimsExcluding } from '../../ir/graph/builder.js';
-import { ScalarType } from '../../ir/graph/types.js';
+import { ScalarType, TensorType } from '../../ir/graph/types.js';
+import { TraceLevel } from '../../pipeline/trace.js';
 
 const decompositionRules = new Map();
 
@@ -25,13 +26,25 @@ export class DecompositionPass extends FunctionPass {
     if (worklist.length === 0) return PassResult.UNCHANGED;
 
     const builder = new IRBuilder(func);
+    const decomposed = [];
 
     for (const op of worklist) {
       if (!op.parentBlock) continue;
       const rule = decompositionRules.get(op.opName);
       builder.block = op.parentBlock;
       builder.setInsertionPoint(op);
+      decomposed.push(op.opName);
       rule(op, builder);
+    }
+
+    if (this.trace && this.trace.level >= TraceLevel.DEBUG) {
+      const counts = {};
+      for (const name of decomposed) counts[name] = (counts[name] || 0) + 1;
+      this.trace.emit({
+        type: 'pass_detail', passName: this.name,
+        decomposed: counts, totalDecomposed: decomposed.length,
+        level: TraceLevel.DEBUG,
+      });
     }
 
     return PassResult.CHANGED;
@@ -183,5 +196,75 @@ registerDecomposition('batch_norm', (op, b) => {
   const result = b.add(scaled.getResult(0), bcastBeta.getResult(0));
 
   op.replaceAllResultsWith([result.getResult(0)]);
+  op.erase();
+});
+
+registerDecomposition('where', (op, b) => {
+  let cond = op.getOperand(0);
+  if (cond.type.dtype !== ScalarType.BOOL) {
+    const zero = b.broadcast(b.scalarConstant(0, cond.type.dtype).getResult(0), cond.type.shape, []);
+    cond = b.compare(cond, zero.getResult(0), 'ne').getResult(0);
+  }
+  const sel = b.select(cond, op.getOperand(1), op.getOperand(2));
+  op.replaceAllResultsWith([sel.getResult(0)]);
+  op.erase();
+});
+
+registerDecomposition('split', (op, b) => {
+  const input = op.getOperand(0);
+  const dim = op.getAttr('dimension');
+  const sizes = op.getAttr('split_sizes');
+  const shape = input.type.shape;
+  const results = [];
+  let offset = 0;
+  for (const size of sizes) {
+    const starts = shape.map((_, i) => i === dim ? offset : 0);
+    const limits = shape.map((s, i) => i === dim ? offset + size : s);
+    results.push(b.slice(input, starts, limits).getResult(0));
+    offset += size;
+  }
+  op.replaceAllResultsWith(results);
+  op.erase();
+});
+
+registerDecomposition('one_hot', (op, b) => {
+  const indices = op.getOperand(0);
+  const depth = op.getAttr('depth');
+  const axis = op.getAttr('axis') ?? -1;
+  const onVal = op.getAttr('on_value') ?? 1;
+  const offVal = op.getAttr('off_value') ?? 0;
+  const resultType = op.getResult(0).type;
+  const dtype = resultType.dtype;
+  const resultShape = resultType.shape;
+  const resolvedAxis = axis < 0 ? indices.type.rank + 1 + axis : axis;
+  const iotaType = new TensorType(resultShape, ScalarType.I32);
+  const iotaOp = b._inferAndBuild('iota', [], { iota_dimension: resolvedAxis, tensor_type: iotaType });
+  const expandedShape = [...indices.type.shape];
+  expandedShape.splice(resolvedAxis, 0, 1);
+  const reshaped = b.reshape(indices, expandedShape);
+  const bcastDims = Array.from({length: expandedShape.length}, (_, i) => i);
+  const bcastIndices = b.broadcast(reshaped.getResult(0), resultShape, bcastDims);
+  const converted = b.convert(bcastIndices.getResult(0), ScalarType.I32);
+  const cmp = b.compare(converted.getResult(0), iotaOp.getResult(0), 'eq');
+  const onBcast = b.broadcast(b.scalarConstant(onVal, dtype).getResult(0), resultShape, []);
+  const offBcast = b.broadcast(b.scalarConstant(offVal, dtype).getResult(0), resultShape, []);
+  const sel = b.select(cmp.getResult(0), onBcast.getResult(0), offBcast.getResult(0));
+  op.replaceAllResultsWith([sel.getResult(0)]);
+  op.erase();
+});
+
+registerDecomposition('embedding', (op, b) => {
+  const weight = op.getOperand(0);
+  const indices = op.getOperand(1);
+  const D = weight.type.shape[weight.type.rank - 1];
+  const idxRank = indices.type.rank;
+  const gatherOp = b._inferAndBuild('gather', [weight, indices], {
+    offset_dims: Array.from({length: 1}, (_, i) => idxRank + i),
+    collapsed_slice_dims: [0],
+    start_index_map: [0],
+    slice_sizes: [1, D],
+    index_vector_dim: idxRank,
+  });
+  op.replaceAllResultsWith([gatherOp.getResult(0)]);
   op.erase();
 });

@@ -2,6 +2,7 @@ import { FunctionPass, PassResult } from '../pass.js';
 import { Operation } from '../../ir/graph/operation.js';
 import { registry } from '../../ir/graph/ops.js';
 import { TensorType } from '../../ir/graph/types.js';
+import { TraceLevel } from '../../pipeline/trace.js';
 
 const CONSTANT_OPS = new Set(['constant', 'scalar_constant']);
 const BROADCAST_OPS = new Set(['broadcast_in_dim', 'broadcast']);
@@ -168,6 +169,14 @@ export class EpilogueFusionPass extends FunctionPass {
       if (dotOp.parentBlock) dotOp.parentBlock.removeOp(dotOp);
 
       changed = true;
+    }
+
+    if (this.trace && this.trace.level >= TraceLevel.DEBUG) {
+      this.trace.emit({
+        type: 'pass_detail', passName: this.name,
+        dotsFound: dots.length, changed,
+        level: TraceLevel.DEBUG,
+      });
     }
 
     return changed ? PassResult.CHANGED : PassResult.UNCHANGED;

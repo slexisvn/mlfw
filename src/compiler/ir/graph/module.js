@@ -9,6 +9,7 @@ export class GraphModule {
 
   addFunction(func) {
     this._functions.set(func.name, func);
+    func._module = this;
     this._version++;
     return func;
   }

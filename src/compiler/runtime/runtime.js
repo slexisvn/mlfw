@@ -1,3 +1,5 @@
+import { encodeWat } from '../../backend/wasm/wat_encoder.js';
+
 const TYPED_ARRAY_CTORS = {
   'f16':  Float32Array,
   'f32':  Float32Array,
@@ -71,21 +73,10 @@ export class KernelRegistry {
     this._kernels = new Map();
   }
 
-  register(name, kernel) {
-    this._kernels.set(name, kernel);
-  }
-
-  get(name) {
-    return this._kernels.get(name) || null;
-  }
-
-  has(name) {
-    return this._kernels.has(name);
-  }
-
-  names() {
-    return [...this._kernels.keys()];
-  }
+  register(name, kernel) { this._kernels.set(name, kernel); }
+  get(name) { return this._kernels.get(name) || null; }
+  has(name) { return this._kernels.has(name); }
+  names() { return [...this._kernels.keys()]; }
 }
 
 const SCOPE_PRIORITY = { 'register': 0, 'local': 1, 'shared': 2, 'global': 3 };
@@ -101,7 +92,7 @@ export class RuntimeMemoryManager {
     const Ctor = typedArrayCtor(dtype);
     const bytesPerElement = Ctor.BYTES_PER_ELEMENT;
     const count = Math.ceil(sizeBytes / bytesPerElement);
-    const poolKey = `${dtype}:${scope}`;
+    const poolKey = dtype + ':' + scope;
     let pool = this._pools.get(poolKey);
     if (pool && pool.length > 0) {
       const buf = pool.pop();
@@ -119,17 +110,101 @@ export class RuntimeMemoryManager {
 
   release(data, sizeBytes, dtype = 'f32', scope = 'global') {
     this._allocated -= sizeBytes;
-    const poolKey = `${dtype}:${scope}`;
+    const poolKey = dtype + ':' + scope;
     let pool = this._pools.get(poolKey);
-    if (!pool) {
-      pool = [];
-      this._pools.set(poolKey, pool);
-    }
+    if (!pool) { pool = []; this._pools.set(poolKey, pool); }
     if (pool.length < 32) pool.push(data);
   }
 
   get peakUsage() { return this._peak; }
   get currentUsage() { return this._allocated; }
+}
+
+const MATH_IMPORTS = {
+  exp: Math.exp, log: Math.log, sin: Math.sin, cos: Math.cos,
+  tan: Math.tan, tanh: Math.tanh, pow: Math.pow, fmod: (a, b) => a % b,
+  rsqrt: x => 1 / Math.sqrt(x), sign: Math.sign, round: Math.round,
+};
+
+function instantiateWasm(kernel) {
+  const binary = encodeWat(kernel.source);
+  const mod = new WebAssembly.Module(binary);
+  const mathImports = {};
+  if (kernel.metadata.imports) {
+    for (const [name] of kernel.metadata.imports) {
+      mathImports[name] = MATH_IMPORTS[name] || Math[name] || (x => x);
+    }
+  }
+  const instance = new WebAssembly.Instance(mod, { math: mathImports });
+  return {
+    exports: instance.exports,
+    memory: instance.exports.memory,
+    bufferOffsets: kernel.metadata.bufferOffsets,
+    funcName: kernel.name,
+  };
+}
+
+function runWasmKernel(wasmInstance, name, tensorArgs, shapeValues) {
+  const { exports, memory, bufferOffsets } = wasmInstance;
+  const fn = exports[name];
+  const offsets = [...bufferOffsets.values()];
+  const nBufs = Math.min(offsets.length, tensorArgs.length);
+
+  for (let i = 0; i < nBufs; i++) {
+    const data = tensorArgs[i];
+    if (data instanceof Float32Array) {
+      new Float32Array(memory.buffer, offsets[i], data.length).set(data);
+    }
+  }
+
+  const callArgs = offsets.slice(0, nBufs);
+  if (shapeValues) {
+    for (const v of shapeValues) callArgs.push(v);
+  }
+  fn(...callArgs);
+
+  for (let i = 0; i < nBufs; i++) {
+    const data = tensorArgs[i];
+    if (data instanceof Float32Array) {
+      data.set(new Float32Array(memory.buffer, offsets[i], data.length));
+    }
+  }
+}
+
+export class WasmTensorPool {
+  constructor(wasmInstance) {
+    this._inst = wasmInstance;
+    this._views = new Map();
+  }
+
+  bind(slotIndex, tensor) {
+    const offsets = [...this._inst.bufferOffsets.values()];
+    const offset = offsets[slotIndex];
+    const mem = this._inst.memory;
+    new Float32Array(mem.buffer, offset, tensor.data.length).set(tensor.data);
+    const view = new Float32Array(mem.buffer, offset, tensor.data.length);
+    this._views.set(slotIndex, { tensor, view, offset });
+    return view;
+  }
+
+  sync(slotIndex) {
+    const entry = this._views.get(slotIndex);
+    if (entry) entry.tensor.data.set(entry.view);
+  }
+
+  syncAll() {
+    for (const [, entry] of this._views) entry.tensor.data.set(entry.view);
+  }
+
+  runDirect(name, shapeValues) {
+    const { exports, bufferOffsets } = this._inst;
+    const offsets = [...bufferOffsets.values()];
+    const callArgs = [...offsets];
+    if (shapeValues) {
+      for (const v of shapeValues) callArgs.push(v);
+    }
+    exports[name](...callArgs);
+  }
 }
 
 export class RuntimeModule {
@@ -138,20 +213,17 @@ export class RuntimeModule {
     this.kernels = new KernelRegistry();
     this.memory = new RuntimeMemoryManager();
     this._compiledFuncs = new Map();
-    this._compileErrors = null;
+    this._wasmInstances = new Map();
   }
 
   addCompiledKernel(compiledKernel) {
     this.kernels.register(compiledKernel.name, compiledKernel);
     if (compiledKernel.metadata.kind === 'js') {
-      try {
-        const fn = new Function('return ' + compiledKernel.source)();
-        this._compiledFuncs.set(compiledKernel.name, fn);
-      } catch (e) {
-        if (!this._compileErrors) this._compileErrors = new Map();
-        this._compileErrors.set(compiledKernel.name, e.message);
-        this._compiledFuncs.set(compiledKernel.name, null);
-      }
+      const fn = new Function('return ' + compiledKernel.source)();
+      this._compiledFuncs.set(compiledKernel.name, fn);
+    } else if (compiledKernel.metadata.kind === 'wasm') {
+      const inst = instantiateWasm(compiledKernel);
+      this._wasmInstances.set(compiledKernel.name, inst);
     }
   }
 
@@ -165,11 +237,6 @@ export class RuntimeModule {
   }
 
   run(name, ...args) {
-    const fn = this._compiledFuncs.get(name);
-    if (!fn) {
-      const err = this._compileErrors && this._compileErrors.get(name);
-      throw new Error(`Kernel '${name}' not found or not executable${err ? ': ' + err : ''}`);
-    }
     const tensorArgs = [];
     const tensorShapes = new Map();
     for (let i = 0; i < args.length; i++) {
@@ -182,12 +249,24 @@ export class RuntimeModule {
     }
 
     const shapeParamMap = this._shapeParamMaps && this._shapeParamMaps.get(name);
+    let shapeValues = null;
     if (shapeParamMap && shapeParamMap.size > 0) {
-      const shapeValues = RuntimeModule._extractShapeParams(shapeParamMap, tensorShapes, args);
-      for (const v of shapeValues) tensorArgs.push(v);
+      shapeValues = RuntimeModule._extractShapeParams(shapeParamMap, tensorShapes, args);
     }
 
-    return fn(...tensorArgs);
+    const wasmInst = this._wasmInstances.get(name);
+    if (wasmInst) {
+      runWasmKernel(wasmInst, name, tensorArgs, shapeValues);
+      return;
+    }
+
+    const fn = this._compiledFuncs.get(name);
+    if (fn) {
+      const callArgs = shapeValues ? [...tensorArgs, ...shapeValues] : tensorArgs;
+      return fn(...callArgs);
+    }
+
+    throw new Error('Kernel \'' + name + '\' not found or not executable');
   }
 
   static _extractShapeParams(shapeParamMap, tensorShapes, args) {
@@ -208,6 +287,12 @@ export class RuntimeModule {
       result.push(resolved !== null ? resolved : 1);
     }
     return result;
+  }
+
+  getWasmPool(name) {
+    const inst = this._wasmInstances.get(name);
+    if (!inst) return null;
+    return new WasmTensorPool(inst);
   }
 
   getKernelSource(name) {

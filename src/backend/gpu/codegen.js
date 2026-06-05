@@ -1,4 +1,4 @@
-import { ForKind } from '../../ir/tensor/nodes.js';
+import { ForKind } from '../../compiler/ir/tensor/nodes.js';
 import { cType, cPtrType, cLiteralSuffix, cMathFunc } from '../dtype_map.js';
 
 export class GPUKernel {

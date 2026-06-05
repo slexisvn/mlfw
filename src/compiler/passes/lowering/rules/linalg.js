@@ -47,7 +47,7 @@ export function register() {
     const out = outputs[0];
     const geo = buildDotGeometry(ctx, op, lhs, rhs);
 
-    const initNest = buildSpatialNest(ctx, 'di', Array.from({ length: out.shape.length }, (_, i) => i), out.shape);
+    const initNest = buildSpatialNest(ctx, 'di', Array.from({ length: out.shape.length }, (_, i) => i), out.shape, out);
     const initStore = new BufferStoreNode(out, initNest.indices, new FloatImmNode(0));
     const initBlock = new BlockNode('matmul_init', initNest.ivs, [], [{ buffer: out }], initStore);
     const initBody = initNest.wrap(initBlock);
@@ -76,7 +76,7 @@ export function register() {
     const inChannelsPerGroup = kerBuf.shape[kLayout['I']];
     const outShape = outBuf.shape;
 
-    const initNest = buildSpatialNest(ctx, 'ci', Array.from({ length: outShape.length }, (_, i) => i), outShape);
+    const initNest = buildSpatialNest(ctx, 'ci', Array.from({ length: outShape.length }, (_, i) => i), outShape, outBuf);
     const initStore = new BufferStoreNode(outBuf, initNest.indices, new FloatImmNode(0));
     const initBlock = new BlockNode('conv_init', initNest.ivs, [], [{ buffer: outBuf }], initStore);
     const initBody = initNest.wrap(initBlock);
@@ -208,6 +208,62 @@ export function register() {
     return wrapInLoops(block, loopVars, outBuf.shape);
   });
 
+  registerLoweringRule('scatter', (ctx, op, inputs, outputs) => {
+    const operandBuf = inputs[0];
+    const indicesBuf = inputs[1];
+    const updatesBuf = inputs[2];
+    const outBuf = outputs[0];
+    const insertedWindowDims = new Set(op.getAttr('inserted_window_dims'));
+    const scatterDimsToOperandDims = op.getAttr('scatter_dims_to_operand_dims');
+    const indexVectorDim = op.getAttr('index_vector_dim');
+    const updateWindowDims = new Set(op.getAttr('update_window_dims'));
+
+    const copyNest = makeLoopNest(ctx, operandBuf.shape, operandBuf);
+    const copyStore = new BufferStoreNode(outBuf, copyNest.indices, new BufferLoadNode(operandBuf, copyNest.indices));
+    const copyBlock = new BlockNode('scatter_copy', copyNest.loopBinds, [{ buffer: operandBuf }], [{ buffer: outBuf }], copyStore);
+    const copyBody = wrapInLoops(copyBlock, copyNest.loopVars, operandBuf.shape, copyNest.extentNodes);
+
+    const { loopVars: uVars, loopBinds: uBinds, indices: uIndices } = makeLoopNest(ctx, updatesBuf.shape, updatesBuf);
+
+    const batchIndices = [];
+    const windowIndices = [];
+    for (let i = 0; i < updatesBuf.shape.length; i++) {
+      if (updateWindowDims.has(i)) windowIndices.push(uIndices[i]);
+      else batchIndices.push(uIndices[i]);
+    }
+
+    const operandIndices = new Array(operandBuf.shape.length);
+    let windowIdx = 0;
+    for (let i = 0; i < operandBuf.shape.length; i++) {
+      if (insertedWindowDims.has(i)) {
+        operandIndices[i] = new IntImmNode(0);
+      } else {
+        operandIndices[i] = windowIndices[windowIdx++];
+      }
+    }
+
+    for (let k = 0; k < scatterDimsToOperandDims.length; k++) {
+      const idxLookup = new Array(indicesBuf.shape.length);
+      let batchIdx = 0;
+      for (let d = 0; d < indicesBuf.shape.length; d++) {
+        if (d === indexVectorDim) idxLookup[d] = new IntImmNode(k);
+        else idxLookup[d] = batchIndices[batchIdx++];
+      }
+      const startVal = new BufferLoadNode(indicesBuf, idxLookup);
+      const targetDim = scatterDimsToOperandDims[k];
+      operandIndices[targetDim] = new MathOpNode('+', operandIndices[targetDim], startVal);
+    }
+
+    const updateLoad = new BufferLoadNode(updatesBuf, uIndices);
+    const existingLoad = new BufferLoadNode(outBuf, operandIndices);
+    const combined = new MathOpNode('+', existingLoad, updateLoad);
+    const scatterStore = new BufferStoreNode(outBuf, operandIndices, combined);
+    const scatterBlock = new BlockNode('scatter_update', uBinds, [{ buffer: updatesBuf }, { buffer: indicesBuf }], [{ buffer: outBuf }], scatterStore);
+    const scatterBody = wrapInLoops(scatterBlock, uVars, updatesBuf.shape);
+
+    return new SeqNode([copyBody, scatterBody]);
+  });
+
   registerLoweringRule('fused_dot_epilogue', (ctx, op, inputs, outputs) => {
     const numDotOperands = op.getAttr('num_dot_operands') || 2;
     const lhs = inputs[0];
@@ -217,7 +273,7 @@ export function register() {
     const epilogueTags = op.getAttr('epilogue_tags') || [];
     const geo = buildDotGeometry(ctx, op, lhs, rhs);
 
-    const initNest = buildSpatialNest(ctx, 'ei', Array.from({ length: out.shape.length }, (_, i) => i), out.shape);
+    const initNest = buildSpatialNest(ctx, 'ei', Array.from({ length: out.shape.length }, (_, i) => i), out.shape, out);
     const initStore = new BufferStoreNode(out, initNest.indices, new FloatImmNode(0));
     const initBlock = new BlockNode('matmul_init', initNest.ivs, [], [{ buffer: out }], initStore);
     const initBody = initNest.wrap(initBlock);
@@ -231,7 +287,7 @@ export function register() {
       return new SeqNode([initBody, accBody]);
     }
 
-    const epiNest = buildSpatialNest(ctx, 'ep', Array.from({ length: out.shape.length }, (_, i) => i), out.shape);
+    const epiNest = buildSpatialNest(ctx, 'ep', Array.from({ length: out.shape.length }, (_, i) => i), out.shape, out);
     const epiIdx = epiNest.indices;
 
     let expr = new BufferLoadNode(out, epiIdx);

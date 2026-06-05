@@ -1,5 +1,5 @@
 import { OpDef, OpTrait } from '../op_registry.js';
-import { TensorType } from '../types.js';
+import { TensorType, ScalarType } from '../types.js';
 
 const VALID_REDUCE_TYPES = new Set(['sum', 'max', 'min', 'prod', 'mean', 'and', 'or']);
 
@@ -38,5 +38,44 @@ export function register(registry) {
       }
       return errs;
     }
+  }));
+
+  function inferArgReduceTypes(operandTypes, attrs) {
+    if (operandTypes.length < 1) return null;
+    const inp = operandTypes[0];
+    if (!(inp instanceof TensorType)) return null;
+    const axis = attrs.get ? attrs.get('axis') : attrs.axis;
+    if (axis === undefined) return null;
+    const keepDims = (attrs.get ? attrs.get('keep_dims') : attrs.keep_dims) || false;
+    const newShape = [];
+    for (let i = 0; i < inp.rank; i++) {
+      if (i === axis) { if (keepDims) newShape.push(1); }
+      else newShape.push(inp.shape[i]);
+    }
+    return [new TensorType(newShape, ScalarType.I32)];
+  }
+
+  registry.register(new OpDef({
+    name: 'argmax',
+    numOperands: 1,
+    numResults: 1,
+    attrs: [
+      { name: 'axis', type: 'number', required: true },
+      { name: 'keep_dims', type: 'boolean', required: false }
+    ],
+    traits: [OpTrait.REDUCTION],
+    inferResultTypes: inferArgReduceTypes
+  }));
+
+  registry.register(new OpDef({
+    name: 'argmin',
+    numOperands: 1,
+    numResults: 1,
+    attrs: [
+      { name: 'axis', type: 'number', required: true },
+      { name: 'keep_dims', type: 'boolean', required: false }
+    ],
+    traits: [OpTrait.REDUCTION],
+    inferResultTypes: inferArgReduceTypes
   }));
 }

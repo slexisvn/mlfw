@@ -28,7 +28,7 @@ export class CanonicalizePass extends FunctionPass {
   run(func, analysisManager) {
     const patterns = getCanonicalizationPatterns();
     const applicator = new PatternApplicator(patterns);
-    return applicator.applyPatterns(func);
+    return applicator.applyPatterns(func, 10, this.trace);
   }
 }
 

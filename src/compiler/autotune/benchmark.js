@@ -1,4 +1,4 @@
-import { BackendPipeline } from '../backend/pipeline.js';
+import { BackendPipeline } from '../../backend/pipeline.js';
 
 export class BenchmarkResult {
   constructor(medianMs, minMs, samples, totalBytes) {

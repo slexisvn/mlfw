@@ -29,6 +29,6 @@ export class AlgebraicSimplificationPass extends FunctionPass {
 
   run(func, analysisManager) {
     const applicator = new PatternApplicator(_algebraicPatterns);
-    return applicator.applyPatterns(func);
+    return applicator.applyPatterns(func, 10, this.trace);
   }
 }

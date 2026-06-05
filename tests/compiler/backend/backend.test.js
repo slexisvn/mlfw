@@ -9,11 +9,11 @@ import {
   VariableNode, IntImmNode, FloatImmNode, MathOpNode, BlockRealizeNode,
   ForKind, AllocateNode, CallExternNode
 } from '../../../src/compiler/ir/tensor/nodes.js';
-import { CPUCodegen } from '../../../src/compiler/backend/cpu/codegen.js';
-import { GPUCodegen } from '../../../src/compiler/backend/gpu/codegen.js';
-import { BackendPipeline } from '../../../src/compiler/backend/pipeline.js';
-import { CPUTarget, GPUTarget } from '../../../src/compiler/backend/target.js';
-import { LibrarySelector, LibraryCall, createCPULibrarySelector } from '../../../src/compiler/backend/library_selector.js';
+import { CPUCodegen } from '../../../src/backend/cpu/codegen.js';
+import { GPUCodegen } from '../../../src/backend/gpu/codegen.js';
+import { BackendPipeline } from '../../../src/backend/pipeline.js';
+import { CPUTarget, GPUTarget } from '../../../src/backend/target.js';
+import { LibrarySelector, LibraryCall, createCPULibrarySelector } from '../../../src/backend/library_selector.js';
 import { RuntimeModule, RuntimeTensor } from '../../../src/compiler/runtime/runtime.js';
 import { Schedule, resetVarCounter } from '../../../src/compiler/schedule/schedule.js';
 

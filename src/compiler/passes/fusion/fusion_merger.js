@@ -3,6 +3,7 @@ import { Operation } from '../../ir/graph/operation.js';
 import { Block, Region } from '../../ir/graph/block.js';
 import { TensorType, DYNAMIC } from '../../ir/graph/types.js';
 import { registry } from '../../ir/graph/ops.js';
+import { TraceLevel } from '../../pipeline/trace.js';
 import { classifyFusionKind } from './fusion_analysis.js';
 import {
   getYieldOp, countInnerOps, countReductions,
@@ -30,6 +31,7 @@ export class FusionMergerPass extends FunctionPass {
     if (edges.length === 0) return PassResult.UNCHANGED;
 
     let changed = false;
+    let mergeCount = 0;
     const merged = new Set();
 
     for (const { producer, consumer, sharedResults } of edges) {
@@ -41,6 +43,15 @@ export class FusionMergerPass extends FunctionPass {
       this._merge(producer, consumer, sharedResults);
       merged.add(producer);
       changed = true;
+      mergeCount++;
+    }
+
+    if (this.trace && this.trace.level >= TraceLevel.DEBUG) {
+      this.trace.emit({
+        type: 'pass_detail', passName: this.name,
+        fusionOps: fusionOps.length, edges: edges.length, mergeCount,
+        level: TraceLevel.DEBUG,
+      });
     }
 
     return changed ? PassResult.CHANGED : PassResult.UNCHANGED;

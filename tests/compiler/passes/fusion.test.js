@@ -11,10 +11,11 @@ import { FusionGroupBuilder, FusionGroup } from '../../../src/compiler/passes/fu
 import { FusionLegality, FusionKind } from '../../../src/compiler/passes/fusion/fusion_analysis.js';
 import { FusionCostModel } from '../../../src/compiler/passes/fusion/fusion_cost.js';
 
-import { CPUTarget, GPUTarget } from '../../../src/compiler/backend/target.js';
+import { CPUTarget, GPUTarget } from '../../../src/backend/target.js';
 import { RuntimeTensor } from '../../../src/compiler/runtime/runtime.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
 import { canInlineFuse } from '../../../src/compiler/passes/lowering/graph_to_tensor.js';
+import { TraceLog, TraceLevel } from '../../../src/compiler/pipeline/trace.js';
 
 const f32 = ScalarType.F32;
 const f32_4x4 = new TensorType([4, 4], f32);
@@ -181,26 +182,26 @@ describe('FusionPass', () => {
     assert.ok(typeof pass.run === 'function');
   });
 
-  it('diagnostics only collected when enabled', () => {
+  it('emits fusion decisions via trace at DEBUG level', () => {
+    const events = [];
+    const trace = new TraceLog({ level: TraceLevel.DEBUG, sink: e => events.push(e) });
+
     const func = buildFunction('test', [f32_4x4, f32_4x4], [f32_4x4], (b, [x, y]) => {
       const add = b.add(x, y);
       const mul = b.mul(add.getResult(0), x);
       b.returnOp([mul.getResult(0)]);
     });
 
-    const passNoDiag = new FusionPass({ cost: { launchOverheadUs: 100 } });
-    passNoDiag.run(func, null);
-    assert.deepEqual(passNoDiag.getDecisions(), []);
+    const pass = new FusionPass({ cost: { launchOverheadUs: 100 } });
+    pass.trace = trace;
+    pass.run(func, null);
 
-    const func2 = buildFunction('test2', [f32_4x4, f32_4x4], [f32_4x4], (b, [x, y]) => {
-      const add = b.add(x, y);
-      const mul = b.mul(add.getResult(0), x);
-      b.returnOp([mul.getResult(0)]);
-    });
-
-    const passDiag = new FusionPass({ diagnostics: true, cost: { launchOverheadUs: 100 } });
-    passDiag.run(func2, null);
-    assert.ok(passDiag.getDecisions().length > 0);
+    const decisions = events.filter(e => e.type === 'fusion_decision');
+    assert.ok(decisions.length > 0);
+    for (const d of decisions) {
+      assert.ok(typeof d.fuse === 'boolean');
+      assert.ok(typeof d.groupSize === 'number');
+    }
   });
 });
 

@@ -3,6 +3,7 @@ import { TensorType, ScalarType, DYNAMIC, isFloatType } from '../types.js';
 import * as qpat from '../quantization_patterns.js';
 
 const QUANTIZED_INT_DTYPES = new Set([ScalarType.I8, ScalarType.UI8]);
+const DEQUANT_INPUT_DTYPES = new Set([ScalarType.I8, ScalarType.UI8, ScalarType.I32]);
 
 export function register(registry) {
   registry.register(new OpDef({
@@ -78,8 +79,8 @@ export function register(registry) {
       const errs = [];
       if (op.numOperands !== 1) { errs.push('dequantize expects 1 operand'); return errs; }
       const inp = op.getOperand(0).type;
-      if (inp instanceof TensorType && !QUANTIZED_INT_DTYPES.has(inp.dtype)) {
-        errs.push(`dequantize input must be i8 or ui8, got ${inp.dtype}`);
+      if (inp instanceof TensorType && !DEQUANT_INPUT_DTYPES.has(inp.dtype)) {
+        errs.push('dequantize input must be i8, ui8, or i32, got ' + inp.dtype);
       }
       const tgt = op.getAttr('target_dtype');
       if (tgt && !isFloatType(tgt)) {

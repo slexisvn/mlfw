@@ -3,6 +3,7 @@ import { Operation } from '../../ir/graph/operation.js';
 import { TensorType, DYNAMIC } from '../../ir/graph/types.js';
 import { registry } from '../../ir/graph/ops.js';
 import { LivenessAnalysis } from '../../analysis/liveness.js';
+import { TraceLevel } from '../../pipeline/trace.js';
 import { UseDefAnalysis } from '../../analysis/use_def.js';
 
 const NEVER_REMAT = new Set(['return', 'yield', 'constant', 'scalar_constant']);
@@ -30,9 +31,12 @@ export class RematerializationPass extends FunctionPass {
     let changed = false;
     let iterations = 0;
 
+    let lastPeak = 0;
+
     while (iterations < this.config.maxIterations) {
       const useDef = UseDefAnalysis.compute(func);
       const { peakPressure, candidates } = this._analyzeIntervalPressure(func, useDef);
+      lastPeak = peakPressure;
       if (peakPressure <= this.config.memoryBudget) break;
       if (candidates.length === 0) break;
 
@@ -40,6 +44,15 @@ export class RematerializationPass extends FunctionPass {
       this._rematerialize(func, candidates[0]);
       changed = true;
       iterations++;
+    }
+
+    if (this.trace && this.trace.level >= TraceLevel.DEBUG) {
+      this.trace.emit({
+        type: 'pass_detail', passName: this.name,
+        iterations, peakPressure: lastPeak,
+        budget: this.config.memoryBudget, changed,
+        level: TraceLevel.DEBUG,
+      });
     }
 
     return changed ? PassResult.CHANGED : PassResult.UNCHANGED;

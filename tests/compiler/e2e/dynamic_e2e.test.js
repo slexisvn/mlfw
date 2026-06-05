@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { TensorType, ScalarType, DYNAMIC } from '../../../src/compiler/ir/graph/types.js';
 import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
-import { CPUTarget, GPUTarget, WasmTarget } from '../../../src/compiler/backend/target.js';
+import { CPUTarget, GPUTarget, WasmTarget } from '../../../src/backend/target.js';
 import { RuntimeTensor } from '../../../src/compiler/runtime/runtime.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
 import { lowerGraphToPrimFunc } from '../../../src/compiler/passes/lowering/graph_to_tensor.js';

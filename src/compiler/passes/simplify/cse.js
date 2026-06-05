@@ -2,6 +2,7 @@ import { FunctionPass, PassResult } from '../pass.js';
 import { registry } from '../../ir/graph/ops.js';
 import { OpTrait } from '../../ir/graph/op_registry.js';
 import { ShapeAnalysis } from '../../analysis/shape_analysis.js';
+import { TraceLevel } from '../../pipeline/trace.js';
 
 export class CSEPass extends FunctionPass {
   constructor() {
@@ -11,6 +12,7 @@ export class CSEPass extends FunctionPass {
 
   run(func, analysisManager) {
     let changed = false;
+    let eliminated = 0;
     const available = new Map();
 
     for (const op of [...func.opsArray()]) {
@@ -41,6 +43,7 @@ export class CSEPass extends FunctionPass {
           op.replaceAllResultsWith(results);
           op.erase();
           changed = true;
+          eliminated++;
           replaced = true;
           break;
         }
@@ -49,6 +52,13 @@ export class CSEPass extends FunctionPass {
       if (!replaced) {
         candidates.push(op);
       }
+    }
+
+    if (this.trace && this.trace.level >= TraceLevel.DEBUG && eliminated > 0) {
+      this.trace.emit({
+        type: 'pass_detail', passName: this.name,
+        eliminated, level: TraceLevel.DEBUG,
+      });
     }
 
     return changed ? PassResult.CHANGED : PassResult.UNCHANGED;

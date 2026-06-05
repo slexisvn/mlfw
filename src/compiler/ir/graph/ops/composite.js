@@ -110,4 +110,18 @@ export function register(registry) {
       return errs;
     }
   }));
+
+  registry.register(new OpDef({
+    name: 'embedding',
+    numOperands: 2,
+    numResults: 1,
+    inferResultTypes(operandTypes) {
+      if (operandTypes.length < 2) return null;
+      const weight = operandTypes[0];
+      const indices = operandTypes[1];
+      if (!(weight instanceof TensorType) || !(indices instanceof TensorType)) return null;
+      const shape = [...indices.shape, weight.shape[weight.rank - 1]];
+      return [new TensorType(shape, weight.dtype)];
+    }
+  }));
 }

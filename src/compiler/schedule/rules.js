@@ -1,5 +1,5 @@
 import { ForKind } from '../ir/tensor/nodes.js';
-import { TargetKind } from '../backend/target.js';
+import { TargetKind } from '../../backend/target.js';
 
 export class ScheduleRule {
   constructor(name) {
@@ -361,6 +361,40 @@ export class MatmulTiledGPURule extends ScheduleRule {
   }
 }
 
+export class ElementwiseWasmRule extends ScheduleRule {
+  constructor() {
+    super('elementwise_wasm');
+  }
+
+  matches(primFunc, blockName, target) {
+    if (target.kind !== TargetKind.WASM) return false;
+    const info = classifyBlock(primFunc, blockName);
+    if (!info) return false;
+    if (info.hasReduction || info.loopCount < 1) return false;
+    if (info.loops.length > 0 && hasMultipleBlocks(info.loops[0])) return false;
+    return true;
+  }
+
+  apply(schedule, blockName, target) {
+    const loops = schedule.getLoops(blockName);
+    if (loops.length === 0) return;
+
+    const innermost = loops[loops.length - 1];
+    const extent = innermost.extent;
+    const vectorWidth = target.vectorWidth || 4;
+
+    if (extent.type === 'IntImmNode' && extent.value >= vectorWidth * 2) {
+      const [outer, inner] = schedule.split(innermost, vectorWidth);
+      schedule.vectorize(inner);
+      return;
+    }
+
+    if (extent.type === 'IntImmNode' && extent.value >= vectorWidth) {
+      schedule.vectorize(innermost);
+    }
+  }
+}
+
 export class FallbackRule extends ScheduleRule {
   constructor() {
     super('fallback');
@@ -413,6 +447,7 @@ export class SchedulePolicy {
       new ReductionGPURule(),
       new ElementwiseCPURule(),
       new ElementwiseGPURule(),
+      new ElementwiseWasmRule(),
       new FallbackRule()
     ];
   }

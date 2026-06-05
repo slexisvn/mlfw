@@ -14,7 +14,7 @@ import {
 import { RandomSearch, EvolutionarySearch } from '../../../src/compiler/autotune/search.js';
 import { TuningDatabase, TuningRecord } from '../../../src/compiler/autotune/tuning_db.js';
 import { Autotuner, AutotuneConfig } from '../../../src/compiler/autotune/autotuner.js';
-import { CPUTarget, GPUTarget } from '../../../src/compiler/backend/target.js';
+import { CPUTarget, GPUTarget } from '../../../src/backend/target.js';
 import { Schedule } from '../../../src/compiler/schedule/schedule.js';
 
 function makeElemFunc(size) {

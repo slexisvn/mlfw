@@ -8,7 +8,7 @@ import { LayoutTransformPass } from '../../../src/compiler/passes/layout/layout_
 import { LayoutPolicy } from '../../../src/compiler/passes/layout/layout_policy.js';
 import { PassManager } from '../../../src/compiler/passes/pass_manager.js';
 import { GraphModule } from '../../../src/compiler/ir/graph/module.js';
-import { CPUTarget, GPUTarget } from '../../../src/compiler/backend/target.js';
+import { CPUTarget, GPUTarget } from '../../../src/backend/target.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
 
 const f32 = ScalarType.F32;

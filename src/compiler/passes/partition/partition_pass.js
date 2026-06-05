@@ -3,6 +3,7 @@ import { Operation } from '../../ir/graph/operation.js';
 import { Block, Region } from '../../ir/graph/block.js';
 import { GraphFunction } from '../../ir/graph/function.js';
 import { GraphPartitioner, PartitionerConfig } from '../../analysis/partitioner.js';
+import { TraceLevel } from '../../pipeline/trace.js';
 
 export class GraphPartitionPass extends FunctionPass {
   constructor(config = {}) {
@@ -21,6 +22,15 @@ export class GraphPartitionPass extends FunctionPass {
 
     this._annotateOps();
     this._insertTransferOps(func);
+
+    if (this.trace && this.trace.level >= TraceLevel.DEBUG) {
+      this.trace.emit({
+        type: 'pass_detail', passName: this.name,
+        numPartitions: this.partitionResult.numPartitions,
+        transferEdges: this.partitionResult.transferEdges.length,
+        level: TraceLevel.DEBUG,
+      });
+    }
 
     func.bumpVersion();
     return PassResult.CHANGED;
@@ -105,6 +115,15 @@ export class PartitionMaterializationPass extends FunctionPass {
     }
 
     this._rewriteOriginalFunction(func, subFunctions, partitionMap);
+
+    if (this.trace && this.trace.level >= TraceLevel.DEBUG) {
+      this.trace.emit({
+        type: 'pass_detail', passName: this.name,
+        partitions: partitionMap.size,
+        subFunctions: subFunctions.length,
+        level: TraceLevel.DEBUG,
+      });
+    }
 
     func.bumpVersion();
     return PassResult.CHANGED;

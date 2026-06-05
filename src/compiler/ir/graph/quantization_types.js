@@ -174,6 +174,22 @@ export class QuantizationParams {
     });
   }
 
+  static defaultForActivation(scheme, dtype = ScalarType.I8, numBits = 8) {
+    return QuantizationParams.fromRange(-6, 6, scheme, dtype, numBits);
+  }
+
+  static fromConstantArray(data, scheme, dtype = ScalarType.I8, numBits = 8) {
+    let min = Infinity, max = -Infinity;
+    for (let i = 0; i < data.length; i++) {
+      if (data[i] < min) min = data[i];
+      if (data[i] > max) max = data[i];
+    }
+    if (!isFinite(min)) min = -1;
+    if (!isFinite(max)) max = 1;
+    if (min === max) { min -= 0.5; max += 0.5; }
+    return QuantizationParams.fromRange(min, max, scheme, dtype, numBits);
+  }
+
   static isQuantizableDtype(dtype) {
     return QUANTIZABLE_DTYPES.has(dtype);
   }

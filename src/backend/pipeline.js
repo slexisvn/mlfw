@@ -52,7 +52,7 @@ export class BackendPipeline {
       bufferOffsets: result.bufferOffsets,
       imports: result.imports,
       params: result.params,
-      bufferMap: primFunc.bufferMap
+      bufferMap: primFunc.bufferMap,
     });
   }
 

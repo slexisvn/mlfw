@@ -15,6 +15,8 @@ import {
   canInlineFuse, lowerFusion, canLowerAsElementwiseFusion,
   lowerFusionAsIndividualOps, registerInlineFusionBuilder
 } from './rules/fusion.js';
+import { register as registerPooling } from './rules/pooling.js';
+import { register as registerResize } from './rules/resize.js';
 
 registerElementwise();
 registerShape();
@@ -24,6 +26,8 @@ registerControlFlow();
 registerLayout();
 registerQuantization();
 registerFusion();
+registerPooling();
+registerResize();
 
 export { LoweringContext, hasLoweringRule, registerLoweringRule, canInlineFuse, registerInlineFusionBuilder };
 

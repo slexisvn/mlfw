@@ -1,5 +1,6 @@
 import { PassResult } from '../pass.js';
 import { IRBuilder } from '../../ir/graph/builder.js';
+import { TraceLevel } from '../../pipeline/trace.js';
 
 export class Pattern {
   constructor(name, benefit = 1) {
@@ -78,9 +79,10 @@ export class PatternApplicator {
     this.patternSet = patternSet;
   }
 
-  applyPatterns(func, maxIterations = 10) {
+  applyPatterns(func, maxIterations = 10, trace = null) {
     let changed = false;
     let iteration = 0;
+    let totalRewrites = 0;
     const builder = new IRBuilder(func);
 
     while (iteration < maxIterations) {
@@ -96,6 +98,7 @@ export class PatternApplicator {
             if (pattern.rewrite(op, builder)) {
               iterChanged = true;
               changed = true;
+              totalRewrites++;
               break;
             }
           }
@@ -103,6 +106,15 @@ export class PatternApplicator {
       }
       if (!iterChanged) break;
       iteration++;
+    }
+
+    if (trace && trace.level >= TraceLevel.DEBUG && totalRewrites > 0) {
+      trace.emit({
+        type: 'pass_detail', passName: 'PatternApplicator',
+        iterations: iteration, totalRewrites,
+        patternCount: this.patternSet.patterns.length,
+        level: TraceLevel.DEBUG,
+      });
     }
 
     return changed ? PassResult.CHANGED : PassResult.UNCHANGED;

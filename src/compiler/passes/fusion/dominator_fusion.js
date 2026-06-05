@@ -6,6 +6,7 @@ import { FusionKind, classifyFusionKind, classifyOpPattern } from './fusion_anal
 import { FusionGroup } from './fusion_groups.js';
 import { FusionCostModel } from './fusion_cost.js';
 import { PostDominanceAnalysis } from '../../analysis/dominance.js';
+import { TraceLevel } from '../../pipeline/trace.js';
 import { UseDefAnalysis } from '../../analysis/use_def.js';
 
 const SKIP_OPS = new Set(['return', 'yield', 'constant', 'scalar_constant']);
@@ -49,6 +50,14 @@ export class DominatorFusionPass extends FunctionPass {
 
     for (const group of filtered) {
       this._materialize(func, group);
+    }
+
+    if (this.trace && this.trace.level >= TraceLevel.DEBUG) {
+      this.trace.emit({
+        type: 'pass_detail', passName: this.name,
+        groupsBuilt: groups.length, groupsFused: filtered.length,
+        level: TraceLevel.DEBUG,
+      });
     }
 
     return PassResult.CHANGED;

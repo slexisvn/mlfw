@@ -11,6 +11,8 @@ import { register as registerLayout } from './ops/layout.js';
 import { register as registerQuantization } from './ops/quantization.js';
 import { register as registerComposite } from './ops/composite.js';
 import { register as registerTransfer } from './ops/transfer.js';
+import { register as registerPooling } from './ops/pooling.js';
+import { register as registerResize } from './ops/resize.js';
 
 export const registry = new OpRegistry();
 
@@ -26,3 +28,5 @@ registerLayout(registry);
 registerQuantization(registry);
 registerComposite(registry);
 registerTransfer(registry);
+registerPooling(registry);
+registerResize(registry);

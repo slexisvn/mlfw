@@ -14,7 +14,7 @@ import {
   ReductionCPURule, ReductionGPURule, MatmulTiledCPURule,
   MatmulTiledGPURule, FallbackRule
 } from '../../../src/compiler/schedule/rules.js';
-import { CPUTarget, GPUTarget } from '../../../src/compiler/backend/target.js';
+import { CPUTarget, GPUTarget } from '../../../src/backend/target.js';
 import { printTensorIR } from '../../../src/compiler/ir/tensor/printer.js';
 
 function makeElementwiseFunc(shape) {

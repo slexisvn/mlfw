@@ -4,7 +4,7 @@ import { strict as assert } from 'node:assert';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 
-import { CPUTarget, GPUTarget } from '../../../src/compiler/backend/target.js';
+import { CPUTarget, GPUTarget } from '../../../src/backend/target.js';
 
 import { RuntimeTensor } from '../../../src/compiler/runtime/runtime.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
@@ -147,7 +147,7 @@ describe('E2E: compare+select fused', () => {
 
 describe('E2E: GPU codegen for compare', () => {
   it('produces valid CUDA compare operators', async () => {
-    const { GPUTarget } = await import('../../../src/compiler/backend/target.js');
+    const { GPUTarget } = await import('../../../src/backend/target.js');
     const f32_4 = new TensorType([4], f32);
     const bool_4 = new TensorType([4], bool);
     const func = buildFunction('gpu_cmp', [f32_4, f32_4], [bool_4], (b, [x, y]) => {

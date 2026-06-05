@@ -36,6 +36,10 @@ export function register(registry) {
       }
       return [resShape];
     },
+    fold(values) {
+      if (values.length === 1 && typeof values[0] === 'number') return values[0];
+      return undefined;
+    },
     verify(op) {
       const errs = [];
       if (!op.hasAttr('broadcast_dimensions')) errs.push('broadcast_in_dim missing broadcast_dimensions');
@@ -289,11 +293,34 @@ export function register(registry) {
     hasRegions: true,
     numRegions: 1,
     sideEffects: 2,
-    inferResultTypes(operandTypes, attrs) {
-      if (operandTypes.length !== 1) return null;
+    inferResultTypes(operandTypes) {
+      if (operandTypes.length < 1) return null;
       const inp = operandTypes[0];
       if (!(inp instanceof TensorType)) return null;
-      return [new TensorType(attrs.new_shape, inp.dtype, inp.layout)];
+      return [new TensorType(inp.shape, inp.dtype)];
+    }
+  }));
+
+  registry.register(new OpDef({
+    name: 'split',
+    numOperands: 1,
+    numResults: -1,
+    attrs: [
+      { name: 'dimension', type: 'number', required: true },
+      { name: 'split_sizes', type: 'array', required: true }
+    ],
+    inferResultTypes(operandTypes, attrs) {
+      if (operandTypes.length < 1) return null;
+      const inp = operandTypes[0];
+      if (!(inp instanceof TensorType)) return null;
+      const dim = attrs.get ? attrs.get('dimension') : attrs.dimension;
+      const sizes = attrs.get ? attrs.get('split_sizes') : attrs.split_sizes;
+      if (dim === undefined || !sizes) return null;
+      return sizes.map(s => {
+        const shape = [...inp.shape];
+        shape[dim] = s;
+        return new TensorType(shape, inp.dtype);
+      });
     }
   }));
 }

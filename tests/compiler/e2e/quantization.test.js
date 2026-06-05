@@ -3,7 +3,7 @@ import { strict as assert } from 'node:assert';
 
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
-import { CPUTarget } from '../../../src/compiler/backend/target.js';
+import { CPUTarget } from '../../../src/backend/target.js';
 import { Compiler, compileGraph } from '../../../src/compiler/pipeline/compiler.js';
 import { QuantizationParams, QuantizationScheme } from '../../../src/compiler/ir/graph/quantization_types.js';
 import { CalibrationCollector } from '../../../src/compiler/analysis/calibration.js';
