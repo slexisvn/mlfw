@@ -1,6 +1,7 @@
 import { TargetKind } from './target.js';
 import { CPUCodegen } from './cpu/codegen.js';
 import { GPUCodegen } from './gpu/codegen.js';
+import { WasmCodegen } from './wasm/codegen.js';
 import { createCPULibrarySelector, createGPULibrarySelector } from './library_selector.js';
 
 export class CompiledKernel {
@@ -17,16 +18,15 @@ export class BackendPipeline {
     this.target = target;
     this.librarySelector = target.isCPU()
       ? createCPULibrarySelector(target)
-      : createGPULibrarySelector(target);
+      : target.isGPU()
+        ? createGPULibrarySelector(target)
+        : null;
   }
 
   compile(primFunc) {
-    if (this.target.isCPU()) {
-      return this._compileCPU(primFunc);
-    }
-    if (this.target.isGPU()) {
-      return this._compileGPU(primFunc);
-    }
+    if (this.target.isWasm()) return this._compileWasm(primFunc);
+    if (this.target.isCPU()) return this._compileCPU(primFunc);
+    if (this.target.isGPU()) return this._compileGPU(primFunc);
     throw new Error(`Unsupported target kind: ${this.target.kind}`);
   }
 
@@ -40,6 +40,19 @@ export class BackendPipeline {
     return new CompiledKernel(primFunc.name, source, this.target, {
       kind: 'js',
       paramCount: primFunc.params.length
+    });
+  }
+
+  _compileWasm(primFunc) {
+    const codegen = new WasmCodegen(this.target);
+    const result = codegen.generate(primFunc);
+    return new CompiledKernel(primFunc.name, result.wat, this.target, {
+      kind: 'wasm',
+      memoryPages: result.memoryPages,
+      bufferOffsets: result.bufferOffsets,
+      imports: result.imports,
+      params: result.params,
+      bufferMap: primFunc.bufferMap
     });
   }
 

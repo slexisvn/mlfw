@@ -31,6 +31,7 @@ export class GPUCodegen {
     this._sharedBuffers = [];
     this._blockDim = [1, 1, 1];
     this._gridDim = [1, 1, 1];
+    this._primFunc = primFunc;
 
     this._scanBindings(primFunc.body);
 
@@ -89,9 +90,10 @@ export class GPUCodegen {
       const node = stack.pop();
       if (!node) continue;
       if (node.type === 'ForNode' && node.kind === ForKind.THREAD_BINDING && node.threadTag) {
-        const extent = node.extent.type === 'IntImmNode' ? node.extent.value : 1;
-        this._threadBindings.set(node.threadTag, { varName: node.loopVar.name, extent });
-        this._applyBindingDim(node.threadTag, extent);
+        const extent = node.extent.type === 'IntImmNode' ? node.extent.value : 0;
+        const isDynamic = node.extent.type !== 'IntImmNode';
+        this._threadBindings.set(node.threadTag, { varName: node.loopVar.name, extent, isDynamic, extentNode: node.extent });
+        if (!isDynamic) this._applyBindingDim(node.threadTag, extent);
       }
       if (node.type === 'AllocateNode' && node.scope === 'shared') {
         this._sharedBuffers.push(node.buffer);
@@ -170,7 +172,11 @@ export class GPUCodegen {
   _visitAllocateNode(node) {
     if (node.scope !== 'shared') {
       const numel = node.buffer.numel();
-      this._emit(`${cType(node.buffer.dtype)} ${node.buffer.name}[${numel > 0 ? numel : 1}];`);
+      if (numel > 0) {
+        this._emit(`${cType(node.buffer.dtype)} ${node.buffer.name}[${numel}];`);
+      } else {
+        this._emit(`${cType(node.buffer.dtype)}* ${node.buffer.name} = (${cType(node.buffer.dtype)}*)alloca(${this._dynamicNumel(node.buffer)} * sizeof(${cType(node.buffer.dtype)}));`);
+      }
     }
   }
 
@@ -258,8 +264,50 @@ export class GPUCodegen {
     const parts = new Array(indices.length);
     for (let i = 0; i < indices.length; i++) {
       const idx = this._exprToC(indices[i]);
-      parts[i] = buffer.strides[i] === 1 ? idx : `${idx} * ${buffer.strides[i]}`;
+      const stride = buffer.strides[i];
+      if (stride === 1) {
+        parts[i] = idx;
+      } else if (typeof stride === 'number' && stride >= 0) {
+        parts[i] = `${idx} * ${stride}`;
+      } else {
+        parts[i] = `${idx} * ${this._computeDynamicStride(buffer, i)}`;
+      }
     }
     return parts.join(' + ');
+  }
+
+  _computeDynamicStride(buffer, dimIdx) {
+    const parts = [];
+    for (let j = dimIdx + 1; j < buffer.shape.length; j++) {
+      const d = buffer.shape[j];
+      if (typeof d === 'number' && d >= 0) {
+        parts.push(String(d));
+      } else {
+        parts.push(this._resolveShapeParam(buffer, j));
+      }
+    }
+    return parts.length === 0 ? '1' : parts.join(' * ');
+  }
+
+  _dynamicNumel(buffer) {
+    const parts = [];
+    for (let d = 0; d < buffer.shape.length; d++) {
+      const dim = buffer.shape[d];
+      if (typeof dim === 'number' && dim >= 0) {
+        parts.push(String(dim));
+      } else {
+        parts.push(this._resolveShapeParam(buffer, d));
+      }
+    }
+    return parts.length === 0 ? '1' : parts.join(' * ');
+  }
+
+  _resolveShapeParam(buffer, dimIdx) {
+    if (this._primFunc && this._primFunc.shapeParamMap) {
+      const key = `${buffer.name}:${dimIdx}`;
+      const v = this._primFunc.shapeParamMap.get(key);
+      if (v) return v.name;
+    }
+    return '1';
   }
 }

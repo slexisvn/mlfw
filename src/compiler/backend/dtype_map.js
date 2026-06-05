@@ -11,6 +11,26 @@ const DTYPE_TABLE = {
   'index':{ js: 'Int32Array',   c: 'int',        cPtr: 'int*',        bytes: 4, suffix: '',  mathSuffix: '',   isFloat: false, isInt: true  },
 };
 
+const WASM_TYPE_TABLE = {
+  'f16':  { wasm: 'f32', load: 'f32.load', store: 'f32.store', bytes: 4 },
+  'f32':  { wasm: 'f32', load: 'f32.load', store: 'f32.store', bytes: 4 },
+  'f64':  { wasm: 'f64', load: 'f64.load', store: 'f64.store', bytes: 8 },
+  'i8':   { wasm: 'i32', load: 'i32.load8_s', store: 'i32.store8', bytes: 1 },
+  'i16':  { wasm: 'i32', load: 'i32.load16_s', store: 'i32.store16', bytes: 2 },
+  'i32':  { wasm: 'i32', load: 'i32.load', store: 'i32.store', bytes: 4 },
+  'i64':  { wasm: 'i64', load: 'i64.load', store: 'i64.store', bytes: 8 },
+  'ui8':  { wasm: 'i32', load: 'i32.load8_u', store: 'i32.store8', bytes: 1 },
+  'bool': { wasm: 'i32', load: 'i32.load8_u', store: 'i32.store8', bytes: 1 },
+  'index':{ wasm: 'i32', load: 'i32.load', store: 'i32.store', bytes: 4 },
+};
+
+const DEFAULT_WASM_ENTRY = WASM_TYPE_TABLE['f32'];
+
+export function wasmType(dtype) { return (WASM_TYPE_TABLE[dtype] || DEFAULT_WASM_ENTRY).wasm; }
+export function wasmLoad(dtype) { return (WASM_TYPE_TABLE[dtype] || DEFAULT_WASM_ENTRY).load; }
+export function wasmStore(dtype) { return (WASM_TYPE_TABLE[dtype] || DEFAULT_WASM_ENTRY).store; }
+export function wasmBytes(dtype) { return (WASM_TYPE_TABLE[dtype] || DEFAULT_WASM_ENTRY).bytes; }
+
 const DEFAULT_ENTRY = DTYPE_TABLE['f32'];
 
 export function dtypeInfo(dtype) {

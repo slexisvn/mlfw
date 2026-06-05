@@ -6,7 +6,7 @@ import { getSketchesForBlock } from './search_space.js';
 import { RandomSearch, EvolutionarySearch } from './search.js';
 import { TuningRecord, TuningDatabase } from './tuning_db.js';
 import { BenchmarkRunner } from './benchmark.js';
-import { computeWorkloadKey } from './workload_key.js';
+import { buildBlockMap, computeWorkloadKey } from './workload_key.js';
 import { PrimFunc } from '../ir/tensor/nodes.js';
 
 export class AutotuneConfig {
@@ -41,17 +41,78 @@ function clonePrimFunc(primFunc) {
     if (!node || typeof node !== 'object') return node;
     if (Array.isArray(node)) return node.map(cloneNode);
     const copy = Object.create(Object.getPrototypeOf(node));
-    for (const key of Object.keys(node)) {
-      const val = node[key];
-      if (val instanceof Map) {
-        copy[key] = new Map(val);
-      } else if (Array.isArray(val)) {
-        copy[key] = val.map(cloneNode);
-      } else if (typeof val === 'object' && val !== null && val.type) {
-        copy[key] = cloneNode(val);
-      } else {
-        copy[key] = val;
-      }
+    copy.type = node.type;
+    copy._parent = null;
+    copy._parentKey = null;
+    copy._parentIdx = -1;
+    switch (node.type) {
+      case 'PrimFunc':
+        copy.name = node.name;
+        copy.params = node.params;
+        copy.body = cloneNode(node.body);
+        copy.bufferMap = new Map(node.bufferMap);
+        copy.shapeParams = node.shapeParams;
+        copy._setChild('body', copy.body);
+        break;
+      case 'ForNode':
+        copy.loopVar = node.loopVar;
+        copy.min = cloneNode(node.min);
+        copy.extent = cloneNode(node.extent);
+        copy.kind = node.kind;
+        copy.body = cloneNode(node.body);
+        copy.threadTag = node.threadTag;
+        copy._setChild('body', copy.body);
+        break;
+      case 'BlockNode':
+        copy.name = node.name;
+        copy.iterVars = node.iterVars.map(cloneNode);
+        copy.reads = node.reads;
+        copy.writes = node.writes;
+        copy.body = cloneNode(node.body);
+        copy.initBody = cloneNode(node.initBody);
+        copy._setChild('body', copy.body);
+        copy._setChild('initBody', copy.initBody);
+        break;
+      case 'SeqNode':
+        copy.stmts = node.stmts.map(cloneNode);
+        copy._setChildren('stmts', copy.stmts);
+        break;
+      case 'AllocateNode':
+        copy.buffer = node.buffer;
+        copy.scope = node.scope;
+        copy.body = cloneNode(node.body);
+        copy._setChild('body', copy.body);
+        break;
+      case 'LetStmtNode':
+        copy.variable = node.variable;
+        copy.value = cloneNode(node.value);
+        copy.body = cloneNode(node.body);
+        copy._setChild('body', copy.body);
+        break;
+      case 'IfThenElseNode':
+        copy.condition = cloneNode(node.condition);
+        copy.thenBody = cloneNode(node.thenBody);
+        copy.elseBody = cloneNode(node.elseBody);
+        copy._setChild('thenBody', copy.thenBody);
+        copy._setChild('elseBody', copy.elseBody);
+        break;
+      case 'WhileNode':
+        copy.condVar = node.condVar;
+        copy.condBody = cloneNode(node.condBody);
+        copy.loopBody = cloneNode(node.loopBody);
+        copy._setChild('condBody', copy.condBody);
+        copy._setChild('loopBody', copy.loopBody);
+        break;
+      default:
+        for (const key of Object.keys(node)) {
+          if (key === '_parent' || key === '_parentKey' || key === '_parentIdx') continue;
+          const val = node[key];
+          if (val instanceof Map) copy[key] = new Map(val);
+          else if (Array.isArray(val)) copy[key] = val.map(cloneNode);
+          else if (typeof val === 'object' && val !== null && val.type) copy[key] = cloneNode(val);
+          else copy[key] = val;
+        }
+        break;
     }
     return copy;
   };
@@ -72,11 +133,21 @@ export class Autotuner {
 
   tune(primFunc, blockName = null) {
     const blockNames = blockName ? [blockName] : collectBlockNames(primFunc.body);
+    const blockMap = buildBlockMap(primFunc.body);
     const results = new Map();
+    const keyToResult = new Map();
 
     for (const name of blockNames) {
-      const result = this._tuneBlock(primFunc, name);
-      if (result) results.set(name, result);
+      const key = computeWorkloadKey(primFunc, name, this.target, blockMap);
+      if (keyToResult.has(key)) {
+        results.set(name, keyToResult.get(key));
+        continue;
+      }
+      const result = this._tuneBlock(primFunc, name, blockMap);
+      if (result) {
+        results.set(name, result);
+        keyToResult.set(key, result);
+      }
     }
 
     return results;
@@ -102,15 +173,15 @@ export class Autotuner {
     return { func: primFunc, results: tuneResults, applied: false };
   }
 
-  _tuneBlock(primFunc, blockName) {
-    const workloadKey = this._computeWorkloadKey(primFunc, blockName);
+  _tuneBlock(primFunc, blockName, blockMap) {
+    const workloadKey = computeWorkloadKey(primFunc, blockName, this.target, blockMap);
 
     if (this.config.useTuningDB && this.db.has(workloadKey)) {
       const cached = this.db.lookup(workloadKey);
       return { sketchName: cached.sketchName, params: cached.params, score: cached.score, fromCache: true };
     }
 
-    const sketches = getSketchesForBlock(primFunc, blockName, this.target);
+    const sketches = getSketchesForBlock(primFunc, blockName, this.target, blockMap);
     if (sketches.length === 0) return null;
 
     const evaluator = (sketch, params) => {
@@ -179,9 +250,13 @@ export class Autotuner {
   _applyBestSchedule(primFunc, tuneResults) {
     try {
       const sch = new Schedule(primFunc);
+      const blockMap = buildBlockMap(primFunc.body);
+      const applied = new Set();
       for (const [blockName, result] of tuneResults) {
         if (result.fromCache) continue;
-        const sketches = getSketchesForBlock(primFunc, blockName, this.target);
+        if (applied.has(result)) continue;
+        applied.add(result);
+        const sketches = getSketchesForBlock(primFunc, blockName, this.target, blockMap);
         const sketch = sketches.find(s => s.name === result.sketchName);
         if (sketch) {
           const apply = sketch.instantiate(result.params);
@@ -232,7 +307,4 @@ export class Autotuner {
     return measured;
   }
 
-  _computeWorkloadKey(primFunc, blockName) {
-    return computeWorkloadKey(primFunc, blockName, this.target);
-  }
 }

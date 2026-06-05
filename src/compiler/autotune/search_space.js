@@ -184,23 +184,16 @@ export function createMatmulGPUSketch() {
   });
 }
 
-function classifyBlockForSketch(primFunc, blockName) {
-  let hasReduction = false;
-  let isMatmul = blockName.includes('matmul');
-  const visit = (node) => {
-    if (!node) return;
-    if (node.type === 'BlockNode' && node.name === blockName) {
-      if (node.initBody) hasReduction = true;
-    }
-    if (node.body) visit(node.body);
-    if (node.stmts) for (const s of node.stmts) visit(s);
+function classifyBlockForSketch(blockName, blockMap) {
+  const block = blockMap ? blockMap.get(blockName) : null;
+  return {
+    hasReduction: block ? block.initBody !== null : false,
+    isMatmul: blockName.includes('matmul')
   };
-  visit(primFunc.body);
-  return { hasReduction, isMatmul };
 }
 
-export function getSketchesForBlock(primFunc, blockName, target) {
-  const info = classifyBlockForSketch(primFunc, blockName);
+export function getSketchesForBlock(primFunc, blockName, target, blockMap) {
+  const info = classifyBlockForSketch(blockName, blockMap);
   const sketches = [];
 
   if (target.kind === TargetKind.CPU) {

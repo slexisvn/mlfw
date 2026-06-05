@@ -1,10 +1,8 @@
 import {
-  PrimFunc, ForNode, BlockNode, SeqNode, BufferStoreNode, BufferLoadNode,
-  VariableNode, IntImmNode, MathOpNode, AllocateNode, ForKind, LetStmtNode,
-  IfThenElseNode
+  ForNode, BlockNode, SeqNode, BufferStoreNode, BufferLoadNode,
+  VariableNode, IntImmNode, MathOpNode, ForKind, IfThenElseNode
 } from '../ir/tensor/nodes.js';
 import { Buffer } from '../ir/tensor/buffer.js';
-import { MemoryScope } from '../ir/tensor/tensor_types.js';
 import { ScheduleTrace } from './trace.js';
 import { ScheduleValidator } from './validator.js';
 import { ScheduleState } from './schedule_state.js';
@@ -12,24 +10,131 @@ import { SRefTree } from './sref.js';
 
 function substituteVar(node, oldName, exprFactory) {
   if (!node || typeof node !== 'object') return node;
-  if (node.type === 'VariableNode' && node.name === oldName) {
-    return exprFactory();
-  }
-  for (const key of Object.keys(node)) {
-    const child = node[key];
-    if (Array.isArray(child)) {
-      for (let i = 0; i < child.length; i++) {
-        if (typeof child[i] === 'object' && child[i] !== null) {
-          const replaced = substituteVar(child[i], oldName, exprFactory);
-          if (replaced !== child[i]) child[i] = replaced;
-        }
+  if (node.type === 'VariableNode' && node.name === oldName) return exprFactory();
+
+  switch (node.type) {
+    case 'MathOpNode':
+      node.a = substituteVar(node.a, oldName, exprFactory);
+      if (node.b) node.b = substituteVar(node.b, oldName, exprFactory);
+      break;
+    case 'CompareNode':
+      node.a = substituteVar(node.a, oldName, exprFactory);
+      node.b = substituteVar(node.b, oldName, exprFactory);
+      break;
+    case 'BufferLoadNode':
+      for (let i = 0; i < node.indices.length; i++)
+        node.indices[i] = substituteVar(node.indices[i], oldName, exprFactory);
+      break;
+    case 'BufferStoreNode':
+      for (let i = 0; i < node.indices.length; i++)
+        node.indices[i] = substituteVar(node.indices[i], oldName, exprFactory);
+      node.value = substituteVar(node.value, oldName, exprFactory);
+      break;
+    case 'CallExternNode':
+      for (let i = 0; i < node.args.length; i++)
+        node.args[i] = substituteVar(node.args[i], oldName, exprFactory);
+      break;
+    case 'CastNode':
+      node.expr = substituteVar(node.expr, oldName, exprFactory);
+      break;
+    case 'IfThenElseNode':
+      node.condition = substituteVar(node.condition, oldName, exprFactory);
+      node.thenBody = substituteVar(node.thenBody, oldName, exprFactory);
+      if (node.elseBody) node.elseBody = substituteVar(node.elseBody, oldName, exprFactory);
+      break;
+    case 'ForNode':
+      node.body = substituteVar(node.body, oldName, exprFactory);
+      break;
+    case 'BlockNode':
+      node.body = substituteVar(node.body, oldName, exprFactory);
+      if (node.initBody) node.initBody = substituteVar(node.initBody, oldName, exprFactory);
+      for (let i = 0; i < node.iterVars.length; i++) {
+        if (node.iterVars[i].binding)
+          node.iterVars[i].binding = substituteVar(node.iterVars[i].binding, oldName, exprFactory);
       }
-    } else if (typeof child === 'object' && child !== null && child.type) {
-      const replaced = substituteVar(child, oldName, exprFactory);
-      if (replaced !== child) node[key] = replaced;
-    }
+      break;
+    case 'SeqNode':
+      for (let i = 0; i < node.stmts.length; i++)
+        node.stmts[i] = substituteVar(node.stmts[i], oldName, exprFactory);
+      break;
+    case 'LetStmtNode':
+      node.value = substituteVar(node.value, oldName, exprFactory);
+      node.body = substituteVar(node.body, oldName, exprFactory);
+      break;
+    case 'BlockRealizeNode':
+      if (node.binding) node.binding = substituteVar(node.binding, oldName, exprFactory);
+      break;
   }
   return node;
+}
+
+function cloneExprTree(node) {
+  if (!node || typeof node !== 'object') return node;
+  if (Array.isArray(node)) return node.map(cloneExprTree);
+  const copy = Object.create(Object.getPrototypeOf(node));
+  copy.type = node.type;
+  copy._parent = null;
+  copy._parentKey = null;
+  copy._parentIdx = -1;
+  switch (node.type) {
+    case 'ForNode':
+      copy.loopVar = node.loopVar; copy.min = cloneExprTree(node.min);
+      copy.extent = cloneExprTree(node.extent); copy.kind = node.kind;
+      copy.body = cloneExprTree(node.body); copy.threadTag = node.threadTag;
+      copy._setChild('body', copy.body);
+      break;
+    case 'BlockNode':
+      copy.name = node.name; copy.iterVars = node.iterVars.map(cloneExprTree);
+      copy.reads = node.reads; copy.writes = node.writes;
+      copy.body = cloneExprTree(node.body);
+      copy.initBody = node.initBody ? cloneExprTree(node.initBody) : null;
+      copy._setChild('body', copy.body);
+      copy._setChild('initBody', copy.initBody);
+      break;
+    case 'SeqNode':
+      copy.stmts = node.stmts.map(cloneExprTree);
+      copy._setChildren('stmts', copy.stmts);
+      break;
+    case 'IfThenElseNode':
+      copy.condition = cloneExprTree(node.condition);
+      copy.thenBody = cloneExprTree(node.thenBody);
+      copy.elseBody = node.elseBody ? cloneExprTree(node.elseBody) : null;
+      copy._setChild('thenBody', copy.thenBody);
+      copy._setChild('elseBody', copy.elseBody);
+      break;
+    case 'BufferStoreNode':
+      copy.buffer = node.buffer;
+      copy.indices = node.indices.map(cloneExprTree);
+      copy.value = cloneExprTree(node.value);
+      break;
+    case 'BufferLoadNode':
+      copy.buffer = node.buffer;
+      copy.indices = node.indices.map(cloneExprTree);
+      break;
+    case 'BlockRealizeNode':
+      copy.iterVar = node.iterVar;
+      copy.binding = cloneExprTree(node.binding);
+      break;
+    case 'MathOpNode':
+      copy.op = node.op; copy.a = cloneExprTree(node.a); copy.b = cloneExprTree(node.b);
+      break;
+    case 'CompareNode':
+      copy.direction = node.direction; copy.a = cloneExprTree(node.a); copy.b = cloneExprTree(node.b);
+      break;
+    case 'CastNode':
+      copy.expr = cloneExprTree(node.expr); copy.fromDtype = node.fromDtype; copy.toDtype = node.toDtype;
+      break;
+    case 'CallExternNode':
+      copy.externName = node.externName; copy.args = node.args.map(cloneExprTree); copy.dtype = node.dtype;
+      break;
+    default:
+      for (const key of Object.keys(node)) {
+        if (key === '_parent' || key === '_parentKey' || key === '_parentIdx') continue;
+        copy[key] = node[key];
+      }
+      break;
+  }
+  return copy;
 }
 
 function getConstExtent(node) {
@@ -55,8 +160,8 @@ export class Schedule {
     this._srefTree = new SRefTree(primFunc);
   }
 
-  _rebuild() {
-    this._srefTree = new SRefTree(this.func);
+  _rebuildSRefTree() {
+    this._srefTree.rebuildFrom(this.func.body);
     this.state.invalidate();
   }
 
@@ -84,12 +189,13 @@ export class Schedule {
     const innerVar = freshVar(`${loop.loopVar.name}_i`);
     const oldVarName = loop.loopVar.name;
 
+    const clonedBody = cloneExprTree(loop.body);
     const innerLoop = new ForNode(
       innerVar,
       new IntImmNode(0),
       new IntImmNode(factor),
       loop.kind,
-      loop.body,
+      clonedBody,
       loop.threadTag
     );
 
@@ -100,7 +206,9 @@ export class Schedule {
         innerVar
       );
       const guard = new MathOpNode('<', flatIdx, new IntImmNode(extent));
-      innerLoop.body = new IfThenElseNode(guard, innerLoop.body);
+      const guarded = new IfThenElseNode(guard, innerLoop.body);
+      innerLoop.body = guarded;
+      innerLoop._setChild('body', guarded);
     }
 
     const outerLoop = new ForNode(
@@ -170,16 +278,15 @@ export class Schedule {
     const topmostSRef = this._srefTree.getSRef(topmostLoop);
     const topmostParent = topmostSRef ? topmostSRef.parent : null;
 
+    this._replaceNode(topmostLoop, newOrder[0]);
+
     for (let i = 0; i < newOrder.length; i++) {
-      if (i < newOrder.length - 1) {
-        newOrder[i].body = newOrder[i + 1];
-      } else {
-        newOrder[i].body = innermostBody;
-      }
+      const child = i < newOrder.length - 1 ? newOrder[i + 1] : innermostBody;
+      newOrder[i].body = child;
+      newOrder[i]._setChild('body', child);
     }
 
-    this._replaceNode(topmostLoop, newOrder[0]);
-    this._rebuild();
+    this._rebuildSRefTree();
 
     if (!this._replaying) {
       this.trace.record('reorder', [newOrder.map(l => l.loopVar.name)]);
@@ -365,7 +472,7 @@ export class Schedule {
       this._replaceNode(outerLoop, seq);
     }
 
-    this._rebuild();
+    this._rebuildSRefTree();
     if (!this._replaying) {
       this.trace.record('cacheRead', [blockName, bufferName, cacheScope]);
     }
@@ -425,7 +532,7 @@ export class Schedule {
       this._replaceNode(outerLoop, seq);
     }
 
-    this._rebuild();
+    this._rebuildSRefTree();
     if (!this._replaying) {
       this.trace.record('cacheWrite', [blockName, bufferName, cacheScope]);
     }
@@ -451,25 +558,13 @@ export class Schedule {
   }
 
   _replaceNode(oldNode, newNode) {
-    if (this.func.body === oldNode) { this.func.body = newNode; return; }
-
-    const sref = this._srefTree.getSRef(oldNode);
-    const ancestor = sref && sref.parent ? sref.parent.node : this.func;
-
-    const stack = [ancestor];
-    while (stack.length > 0) {
-      const cur = stack.pop();
-      if (!cur) continue;
-      for (const key of ['body', 'thenBody', 'elseBody', 'initBody']) {
-        if (cur[key] === oldNode) { cur[key] = newNode; return; }
-      }
-      if (cur.stmts) {
-        for (let i = 0; i < cur.stmts.length; i++) {
-          if (cur.stmts[i] === oldNode) { cur.stmts[i] = newNode; return; }
-        }
-      }
-      if (cur.body) stack.push(cur.body);
-      if (cur.stmts) for (const s of cur.stmts) if (s) stack.push(s);
+    if (oldNode._parent) {
+      oldNode.replaceWith(newNode);
+      return;
+    }
+    if (this.func.body === oldNode || this.func.body === undefined) {
+      this.func.body = newNode;
+      if (this.func._setChild) this.func._setChild('body', newNode);
     }
   }
 }
@@ -477,19 +572,23 @@ export class Schedule {
 function substituteBufferInBlock(block, oldBuf, newBuf) {
   const visit = (node) => {
     if (!node || typeof node !== 'object') return;
-    if ((node.type === 'BufferLoadNode' || node.type === 'BufferStoreNode') && node.buffer === oldBuf) {
-      node.buffer = newBuf;
+    if (node.type === 'BufferLoadNode' && node.buffer === oldBuf) node.buffer = newBuf;
+    if (node.type === 'BufferStoreNode' && node.buffer === oldBuf) node.buffer = newBuf;
+    if (node.type === 'BufferLoadNode' || node.type === 'BufferStoreNode') {
+      for (const idx of node.indices) visit(idx);
+      if (node.value) visit(node.value);
+      return;
     }
-    for (const key of Object.keys(node)) {
-      const child = node[key];
-      if (Array.isArray(child)) {
-        for (const c of child) {
-          if (typeof c === 'object' && c !== null) visit(c);
-        }
-      } else if (typeof child === 'object' && child !== null && child.type) {
-        visit(child);
-      }
-    }
+    if (node.a) visit(node.a);
+    if (node.b) visit(node.b);
+    if (node.expr) visit(node.expr);
+    if (node.args) for (const a of node.args) visit(a);
+    if (node.body) visit(node.body);
+    if (node.initBody) visit(node.initBody);
+    if (node.stmts) for (const s of node.stmts) visit(s);
+    if (node.condition) visit(node.condition);
+    if (node.thenBody) visit(node.thenBody);
+    if (node.elseBody) visit(node.elseBody);
   };
   visit(block.body);
   if (block.initBody) visit(block.initBody);

@@ -84,10 +84,11 @@ export class MemoryPlanner {
       const assignment = plan.assignment.getAssignment(buf);
       if (!assignment) continue;
       if (assignment.inplaceOf) continue;
-      body = new AllocateNode(buf, assignment.scope, body);
+      body = new AllocateNode(buf, assignment.isDynamic ? 'dynamic' : assignment.scope, body);
     }
 
     primFunc.body = body;
+    primFunc._setChild('body', body);
     return primFunc;
   }
 }

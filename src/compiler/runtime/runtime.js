@@ -155,17 +155,59 @@ export class RuntimeModule {
     }
   }
 
+  setShapeParamMap(name, shapeParamMap, bufferMap) {
+    if (!this._shapeParamMaps) this._shapeParamMaps = new Map();
+    this._shapeParamMaps.set(name, shapeParamMap);
+    if (bufferMap) {
+      if (!this._bufferMaps) this._bufferMaps = new Map();
+      this._bufferMaps.set(name, bufferMap);
+    }
+  }
+
   run(name, ...args) {
     const fn = this._compiledFuncs.get(name);
     if (!fn) {
       const err = this._compileErrors && this._compileErrors.get(name);
       throw new Error(`Kernel '${name}' not found or not executable${err ? ': ' + err : ''}`);
     }
-    const tensorArgs = new Array(args.length);
+    const tensorArgs = [];
+    const tensorShapes = new Map();
     for (let i = 0; i < args.length; i++) {
-      tensorArgs[i] = args[i] instanceof RuntimeTensor ? args[i].data : args[i];
+      if (args[i] instanceof RuntimeTensor) {
+        tensorArgs.push(args[i].data);
+        tensorShapes.set(i, args[i].shape);
+      } else {
+        tensorArgs.push(args[i]);
+      }
     }
+
+    const shapeParamMap = this._shapeParamMaps && this._shapeParamMaps.get(name);
+    if (shapeParamMap && shapeParamMap.size > 0) {
+      const shapeValues = RuntimeModule._extractShapeParams(shapeParamMap, tensorShapes, args);
+      for (const v of shapeValues) tensorArgs.push(v);
+    }
+
     return fn(...tensorArgs);
+  }
+
+  static _extractShapeParams(shapeParamMap, tensorShapes, args) {
+    const seen = new Map();
+    const result = [];
+    for (const [key, varNode] of shapeParamMap) {
+      if (seen.has(varNode.name)) continue;
+      seen.set(varNode.name, true);
+      const sepIdx = key.lastIndexOf(':');
+      const dimIdx = parseInt(key.substring(sepIdx + 1), 10);
+      let resolved = null;
+      for (const [, shape] of tensorShapes) {
+        if (dimIdx < shape.length && shape[dimIdx] > 0) {
+          resolved = shape[dimIdx];
+          break;
+        }
+      }
+      result.push(resolved !== null ? resolved : 1);
+    }
+    return result;
   }
 
   getKernelSource(name) {

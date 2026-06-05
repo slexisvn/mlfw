@@ -1,6 +1,7 @@
 export const TargetKind = Object.freeze({
   CPU: 'cpu',
   GPU: 'gpu',
+  WASM: 'wasm',
   ACCELERATOR: 'accelerator'
 });
 
@@ -41,6 +42,10 @@ export class TargetFeatures {
 
   isCPU() {
     return this.kind === TargetKind.CPU;
+  }
+
+  isWasm() {
+    return this.kind === TargetKind.WASM;
   }
 
   supportsThreadBinding() {
@@ -101,5 +106,18 @@ export const GPUTarget = (overrides = {}) => new TargetFeatures({
   libraryOps: new Set(['dot', 'conv']),
   enableEpilogueFusion: true,
   supportsInt8: true,
+  ...overrides
+});
+
+export const WasmTarget = (overrides = {}) => new TargetFeatures({
+  kind: TargetKind.WASM,
+  name: 'wasm_generic',
+  vectorWidth: 4,
+  numCores: 1,
+  cacheLineSizeBytes: 64,
+  memoryBandwidthGBs: 10,
+  computeTFLOPs: 0.1,
+  supportsInt8: true,
+  simd: true,
   ...overrides
 });

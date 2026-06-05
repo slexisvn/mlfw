@@ -75,7 +75,7 @@ export class FeatureExtractor {
       tileFactors: []
     };
 
-    FeatureExtractor._visit(primFunc.body, ctx);
+    FeatureExtractor._visitIterative(primFunc.body, ctx);
 
     const bytes = ctx.totalBufferBytes;
     const ops = ctx.numMathOps + ctx.numExternCalls;
@@ -84,82 +84,69 @@ export class FeatureExtractor {
     return new ScheduleFeatures(ctx);
   }
 
-  static _visit(node, ctx) {
-    if (!node) return;
+  static _visitIterative(root, ctx) {
+    const stack = [{ node: root, action: 'enter' }];
+    while (stack.length > 0) {
+      const { node, action } = stack.pop();
+      if (!node) continue;
 
-    switch (node.type) {
-      case 'ForNode':
-        FeatureExtractor._visitFor(node, ctx);
-        break;
-      case 'BlockNode':
-        FeatureExtractor._visitBlock(node, ctx);
-        break;
-      case 'SeqNode':
-        for (const s of node.stmts) FeatureExtractor._visit(s, ctx);
-        break;
-      case 'AllocateNode':
-        FeatureExtractor._visitBuffer(node.buffer, ctx);
-        FeatureExtractor._visit(node.body, ctx);
-        break;
-      case 'IfThenElseNode':
-        FeatureExtractor._visit(node.thenBody, ctx);
-        if (node.elseBody) FeatureExtractor._visit(node.elseBody, ctx);
-        break;
-      case 'LetStmtNode':
-        FeatureExtractor._visit(node.body, ctx);
-        break;
-      case 'BufferStoreNode':
-        ctx.numBufferWrites++;
-        FeatureExtractor._visitBuffer(node.buffer, ctx);
-        FeatureExtractor._checkStride(node.buffer, node.indices, ctx);
-        FeatureExtractor._visitExpr(node.value, ctx);
-        break;
-      default:
-        break;
-    }
-  }
+      if (action === 'leave_for') { ctx.currentDepth--; continue; }
 
-  static _visitFor(node, ctx) {
-    ctx.numLoops++;
-    ctx.currentDepth++;
-    if (ctx.currentDepth > ctx.maxLoopDepth) ctx.maxLoopDepth = ctx.currentDepth;
-
-    const extent = node.extent.type === 'IntImmNode' ? node.extent.value : 1;
-    ctx.loopExtents.push(extent);
-
-    if (ctx.numLoops === 1) ctx.outermostExtent = extent;
-    ctx.innermostExtent = extent;
-
-    switch (node.kind) {
-      case ForKind.PARALLEL: ctx.numParallelLoops++; break;
-      case ForKind.VECTORIZED: ctx.numVectorizedLoops++; break;
-      case ForKind.UNROLLED: ctx.numUnrolledLoops++; break;
-      case ForKind.THREAD_BINDING:
-        ctx.numThreadBound++;
-        if (node.threadTag && node.threadTag.startsWith('threadIdx')) {
-          ctx.threadBlockSize *= extent;
-        } else if (node.threadTag && node.threadTag.startsWith('blockIdx')) {
-          ctx.gridSize *= extent;
+      switch (node.type) {
+        case 'ForNode': {
+          ctx.numLoops++;
+          ctx.currentDepth++;
+          if (ctx.currentDepth > ctx.maxLoopDepth) ctx.maxLoopDepth = ctx.currentDepth;
+          const extent = node.extent.type === 'IntImmNode' ? node.extent.value : 1;
+          ctx.loopExtents.push(extent);
+          if (ctx.numLoops === 1) ctx.outermostExtent = extent;
+          ctx.innermostExtent = extent;
+          switch (node.kind) {
+            case ForKind.PARALLEL: ctx.numParallelLoops++; break;
+            case ForKind.VECTORIZED: ctx.numVectorizedLoops++; break;
+            case ForKind.UNROLLED: ctx.numUnrolledLoops++; break;
+            case ForKind.THREAD_BINDING:
+              ctx.numThreadBound++;
+              if (node.threadTag && node.threadTag.startsWith('threadIdx')) ctx.threadBlockSize *= extent;
+              else if (node.threadTag && node.threadTag.startsWith('blockIdx')) ctx.gridSize *= extent;
+              break;
+            default: ctx.numSerialLoops++; break;
+          }
+          ctx.totalIterations *= extent;
+          stack.push({ node: null, action: 'leave_for' });
+          stack.push({ node: node.body, action: 'enter' });
+          break;
         }
-        break;
-      default: ctx.numSerialLoops++; break;
+        case 'BlockNode':
+          ctx.numBlocks++;
+          if (node.initBody) { ctx.hasReduction = true; ctx.reductionDepth = ctx.currentDepth; }
+          for (const r of node.reads) FeatureExtractor._visitBuffer(r.buffer, ctx);
+          for (const w of node.writes) FeatureExtractor._visitBuffer(w.buffer, ctx);
+          stack.push({ node: node.body, action: 'enter' });
+          if (node.initBody) stack.push({ node: node.initBody, action: 'enter' });
+          break;
+        case 'SeqNode':
+          for (let i = node.stmts.length - 1; i >= 0; i--) stack.push({ node: node.stmts[i], action: 'enter' });
+          break;
+        case 'AllocateNode':
+          FeatureExtractor._visitBuffer(node.buffer, ctx);
+          stack.push({ node: node.body, action: 'enter' });
+          break;
+        case 'IfThenElseNode':
+          if (node.elseBody) stack.push({ node: node.elseBody, action: 'enter' });
+          stack.push({ node: node.thenBody, action: 'enter' });
+          break;
+        case 'LetStmtNode':
+          stack.push({ node: node.body, action: 'enter' });
+          break;
+        case 'BufferStoreNode':
+          ctx.numBufferWrites++;
+          FeatureExtractor._visitBuffer(node.buffer, ctx);
+          FeatureExtractor._checkStride(node.buffer, node.indices, ctx);
+          FeatureExtractor._visitExpr(node.value, ctx);
+          break;
+      }
     }
-
-    ctx.totalIterations *= extent;
-    FeatureExtractor._visit(node.body, ctx);
-    ctx.currentDepth--;
-  }
-
-  static _visitBlock(node, ctx) {
-    ctx.numBlocks++;
-    if (node.initBody) {
-      ctx.hasReduction = true;
-      ctx.reductionDepth = ctx.currentDepth;
-    }
-    for (const r of node.reads) FeatureExtractor._visitBuffer(r.buffer, ctx);
-    for (const w of node.writes) FeatureExtractor._visitBuffer(w.buffer, ctx);
-    if (node.initBody) FeatureExtractor._visit(node.initBody, ctx);
-    FeatureExtractor._visit(node.body, ctx);
   }
 
   static _visitBuffer(buffer, ctx) {

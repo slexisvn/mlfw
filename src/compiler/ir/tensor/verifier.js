@@ -18,6 +18,11 @@ export class TensorVerifier {
     for (const param of func.params) {
       this.boundVars.add(param.name);
     }
+    if (func.shapeParams) {
+      for (const sp of func.shapeParams) {
+        this.boundVars.add(sp.name);
+      }
+    }
 
     this.visit(func.body);
     return this.errors;

@@ -10,6 +10,7 @@ import { register as registerControlFlow } from './ops/control_flow.js';
 import { register as registerLayout } from './ops/layout.js';
 import { register as registerQuantization } from './ops/quantization.js';
 import { register as registerComposite } from './ops/composite.js';
+import { register as registerTransfer } from './ops/transfer.js';
 
 export const registry = new OpRegistry();
 
@@ -24,3 +25,4 @@ registerControlFlow(registry);
 registerLayout(registry);
 registerQuantization(registry);
 registerComposite(registry);
+registerTransfer(registry);

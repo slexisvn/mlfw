@@ -126,7 +126,7 @@ describe('Autotuner with benchmark', () => {
     const func = makeElementwiseFunc(256);
     const target = CPUTarget();
     const tuner = new Autotuner(target, { strategy: 'random', numTrials: 4, seed: 42 });
-    const key = tuner._computeWorkloadKey(func, 'add_block');
+    const key = computeWorkloadKey(func, 'add_block', target);
     assert.ok(/^[0-9a-f]{8}$/.test(key));
   });
 

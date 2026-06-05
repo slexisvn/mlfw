@@ -9,17 +9,60 @@ export const ForKind = Object.freeze({
 export class TensorNode {
   constructor() {
     this.type = this.constructor.name;
+    this._parent = null;
+    this._parentKey = null;
+    this._parentIdx = -1;
+  }
+
+  _setChild(key, child, idx = -1) {
+    if (child instanceof TensorNode) {
+      child._parent = this;
+      child._parentKey = key;
+      child._parentIdx = idx;
+    }
+  }
+
+  _setChildren(key, arr) {
+    if (!arr) return;
+    for (let i = 0; i < arr.length; i++) {
+      if (arr[i] instanceof TensorNode) {
+        arr[i]._parent = this;
+        arr[i]._parentKey = key;
+        arr[i]._parentIdx = i;
+      }
+    }
+  }
+
+  replaceWith(newNode) {
+    const p = this._parent;
+    if (!p) return false;
+    if (this._parentIdx >= 0) {
+      p[this._parentKey][this._parentIdx] = newNode;
+    } else {
+      p[this._parentKey] = newNode;
+    }
+    if (newNode instanceof TensorNode) {
+      newNode._parent = p;
+      newNode._parentKey = this._parentKey;
+      newNode._parentIdx = this._parentIdx;
+    }
+    this._parent = null;
+    this._parentKey = null;
+    this._parentIdx = -1;
+    return true;
   }
 }
 
 export class PrimFunc extends TensorNode {
-  constructor(name, params, body, bufferMap = new Map(), shapeParams = []) {
+  constructor(name, params, body, bufferMap = new Map(), shapeParams = [], shapeParamMap = null) {
     super();
     this.name = name;
     this.params = params;
     this.body = body;
     this.bufferMap = bufferMap;
     this.shapeParams = shapeParams;
+    this.shapeParamMap = shapeParamMap || new Map();
+    this._setChild('body', body);
   }
 }
 
@@ -32,6 +75,7 @@ export class ForNode extends TensorNode {
     this.kind = kind;
     this.body = body;
     this.threadTag = threadTag;
+    this._setChild('body', body);
   }
 }
 
@@ -44,6 +88,8 @@ export class BlockNode extends TensorNode {
     this.writes = writes;
     this.body = body;
     this.initBody = initBody;
+    this._setChild('body', body);
+    this._setChild('initBody', initBody);
   }
 }
 
@@ -78,6 +124,8 @@ export class IfThenElseNode extends TensorNode {
     this.condition = condition;
     this.thenBody = thenBody;
     this.elseBody = elseBody;
+    this._setChild('thenBody', thenBody);
+    this._setChild('elseBody', elseBody);
   }
 }
 
@@ -87,6 +135,7 @@ export class LetStmtNode extends TensorNode {
     this.variable = variable;
     this.value = value;
     this.body = body;
+    this._setChild('body', body);
   }
 }
 
@@ -96,6 +145,7 @@ export class AllocateNode extends TensorNode {
     this.buffer = buffer;
     this.scope = scope;
     this.body = body;
+    this._setChild('body', body);
   }
 }
 
@@ -103,6 +153,7 @@ export class SeqNode extends TensorNode {
   constructor(stmts) {
     super();
     this.stmts = stmts;
+    this._setChildren('stmts', stmts);
   }
 }
 
@@ -112,6 +163,8 @@ export class WhileNode extends TensorNode {
     this.condVar = condVar;
     this.condBody = condBody;
     this.loopBody = loopBody;
+    this._setChild('condBody', condBody);
+    this._setChild('loopBody', loopBody);
   }
 }
 

@@ -46,9 +46,9 @@ export class LoweringContext {
     return buf;
   }
 
-  extentNode(dim, buf) {
+  extentNode(dim, buf, dimIdx = -1) {
     if (dim !== DYNAMIC) return new IntImmNode(dim);
-    const key = `${buf.name}:${buf.shape.indexOf(dim)}`;
+    const key = dimIdx >= 0 ? `${buf.name}:${dimIdx}` : `${buf.name}:dyn`;
     let v = this.shapeParams.get(key);
     if (!v) {
       v = this.allocVar(`_ds`);
@@ -131,7 +131,7 @@ export function buildSpatialNest(ctx, prefix, dims, shape, buf) {
     vars[i] = ctx.allocVar(`${prefix}${dims[i]}`);
     ivs[i] = new BlockRealizeNode(ctx.allocVar(`${prefix}v${dims[i]}`), vars[i]);
     indices[i] = ivs[i].iterVar;
-    extentNodes[i] = buf ? ctx.extentNode(shape[dims[i]], buf) : new IntImmNode(shape[dims[i]]);
+    extentNodes[i] = buf ? ctx.extentNode(shape[dims[i]], buf, dims[i]) : new IntImmNode(shape[dims[i]]);
   }
   return {
     vars, ivs, indices, extentNodes,

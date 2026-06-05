@@ -1,53 +1,40 @@
-export function computeWorkloadKey(primFunc, blockName, target) {
-  const parts = [];
-
-  parts.push(blockName);
-
-  const paramShapes = [];
-  for (const [, buf] of primFunc.bufferMap) {
-    paramShapes.push(`${buf.name}:${buf.shape.join('x')}:${buf.dtype}`);
+export function buildBlockMap(root) {
+  const map = new Map();
+  const stack = [root];
+  while (stack.length > 0) {
+    const n = stack.pop();
+    if (!n) continue;
+    if (n.type === 'BlockNode') map.set(n.name, n);
+    if (n.body) stack.push(n.body);
+    if (n.stmts) for (const s of n.stmts) stack.push(s);
+    if (n.thenBody) stack.push(n.thenBody);
+    if (n.elseBody) stack.push(n.elseBody);
+    if (n.initBody) stack.push(n.initBody);
   }
-  parts.push(paramShapes.join(','));
+  return map;
+}
 
-  const ops = [];
-  collectOpSignature(primFunc.body, blockName, ops);
-  parts.push(ops.join(';'));
+export function computeWorkloadKey(primFunc, blockName, target, blockMap = null) {
+  const map = blockMap || buildBlockMap(primFunc.body);
+  const block = map.get(blockName) || null;
+  const parts = [blockName];
+
+  if (block) {
+    const bufShapes = [];
+    for (const r of block.reads) bufShapes.push(`${r.buffer.shape.join('x')}:${r.buffer.dtype}`);
+    for (const w of block.writes) bufShapes.push(`${w.buffer.shape.join('x')}:${w.buffer.dtype}`);
+    parts.push(bufShapes.join(','));
+
+    const ops = [];
+    collectBlockOps(block.body, ops);
+    if (block.initBody) collectBlockOps(block.initBody, ops);
+    parts.push(ops.join(';'));
+  }
 
   parts.push(target.name);
   parts.push(target.kind);
 
   return fnv1a(parts.join('|'));
-}
-
-function collectOpSignature(node, targetBlock, ops) {
-  if (!node) return false;
-  switch (node.type) {
-    case 'BlockNode':
-      if (node.name === targetBlock) {
-        collectBlockOps(node.body, ops);
-        if (node.initBody) collectBlockOps(node.initBody, ops);
-        return true;
-      }
-      if (node.initBody && collectOpSignature(node.initBody, targetBlock, ops)) return true;
-      return collectOpSignature(node.body, targetBlock, ops);
-    case 'ForNode':
-      return collectOpSignature(node.body, targetBlock, ops);
-    case 'SeqNode':
-      for (const s of node.stmts) {
-        if (collectOpSignature(s, targetBlock, ops)) return true;
-      }
-      return false;
-    case 'IfThenElseNode':
-      if (collectOpSignature(node.thenBody, targetBlock, ops)) return true;
-      if (node.elseBody) return collectOpSignature(node.elseBody, targetBlock, ops);
-      return false;
-    case 'AllocateNode':
-      return collectOpSignature(node.body, targetBlock, ops);
-    case 'LetStmtNode':
-      return collectOpSignature(node.body, targetBlock, ops);
-    default:
-      return false;
-  }
 }
 
 function collectBlockOps(node, ops) {

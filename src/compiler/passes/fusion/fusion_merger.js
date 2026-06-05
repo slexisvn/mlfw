@@ -3,7 +3,7 @@ import { Operation } from '../../ir/graph/operation.js';
 import { Block, Region } from '../../ir/graph/block.js';
 import { TensorType, DYNAMIC } from '../../ir/graph/types.js';
 import { registry } from '../../ir/graph/ops.js';
-import { FusionKind, classifyFusionKind } from './fusion_analysis.js';
+import { classifyFusionKind } from './fusion_analysis.js';
 import {
   getYieldOp, countInnerOps, countReductions,
   allInnerOpsFusable, remapOperands

@@ -84,8 +84,16 @@ export class BufferAssignment {
     }
 
     const sorted = [...intervals].sort((a, b) => {
-      const sizeDiff = b.size - a.size;
-      if (sizeDiff !== 0) return sizeDiff;
+      const aSize = a.size;
+      const bSize = b.size;
+      const aStatic = aSize > 0;
+      const bStatic = bSize > 0;
+      if (aStatic && bStatic) {
+        const sizeDiff = bSize - aSize;
+        if (sizeDiff !== 0) return sizeDiff;
+      } else if (aStatic !== bStatic) {
+        return aStatic ? -1 : 1;
+      }
       return a.firstUse - b.firstUse;
     });
 
@@ -110,7 +118,18 @@ export class BufferAssignment {
       }
 
       const size = interval.size;
-      if (size <= 0) continue;
+      if (size === 0) continue;
+      if (size < 0) {
+        this.assignments.set(buf, {
+          offset: 0,
+          size: 0,
+          scope: interval.scope,
+          pool: interval.scope,
+          inplaceOf: null,
+          isDynamic: true
+        });
+        continue;
+      }
 
       const scope = interval.scope;
       let pool = this.pools.get(scope);

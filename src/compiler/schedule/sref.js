@@ -155,6 +155,55 @@ export class SRefTree {
     this._loopSRefs.push(outerSRef, innerSRef);
   }
 
+  reorderLoops(newOrder, topmostOld, innermostBody) {
+    const srefs = newOrder.map(loop => this._nodeToSRef.get(loop)).filter(Boolean);
+    if (srefs.length < 2) return;
+
+    const topSRef = this._nodeToSRef.get(topmostOld);
+    const parentOfTop = topSRef ? topSRef.parent : null;
+
+    if (parentOfTop) {
+      const idx = parentOfTop.children.indexOf(topSRef);
+      if (idx >= 0) parentOfTop.children[idx] = srefs[0];
+    } else {
+      this.root = srefs[0];
+    }
+
+    for (let i = 0; i < srefs.length; i++) {
+      srefs[i].parent = i === 0 ? parentOfTop : srefs[i - 1];
+      srefs[i].children = i < srefs.length - 1 ? [srefs[i + 1]] : [];
+    }
+
+    const lastSRef = srefs[srefs.length - 1];
+    const bodyChildren = topSRef ? this._collectDescendantsNotIn(topSRef, new Set(srefs)) : [];
+    for (const child of bodyChildren) {
+      child.parent = lastSRef;
+      lastSRef.children.push(child);
+    }
+  }
+
+  _collectDescendantsNotIn(sref, excludeSet) {
+    const result = [];
+    const stack = [...sref.children];
+    while (stack.length > 0) {
+      const child = stack.pop();
+      if (excludeSet.has(child)) {
+        for (const cc of child.children) stack.push(cc);
+      } else {
+        result.push(child);
+      }
+    }
+    return result;
+  }
+
+  rebuildFrom(rootNode) {
+    this._nodeToSRef.clear();
+    this._blockNameToSRef.clear();
+    this._loopSRefs.length = 0;
+    this._blockSRefs.length = 0;
+    this.root = this._build(rootNode, null);
+  }
+
   replaceNode(oldNode, newNode) {
     const oldSRef = this._nodeToSRef.get(oldNode);
     if (!oldSRef) return;

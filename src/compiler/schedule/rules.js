@@ -15,12 +15,21 @@ export class ScheduleRule {
   }
 }
 
+let _classifyCache = null;
+let _classifyCacheOwner = null;
+
 function classifyBlock(primFunc, blockName) {
-  if (!primFunc._blockInfoCache) {
-    primFunc._blockInfoCache = new Map();
-    collectBlockInfo(primFunc.body, primFunc._blockInfoCache, []);
+  if (_classifyCacheOwner !== primFunc || !_classifyCache) {
+    _classifyCache = new Map();
+    collectBlockInfo(primFunc.body, _classifyCache, []);
+    _classifyCacheOwner = primFunc;
   }
-  return primFunc._blockInfoCache.get(blockName) || null;
+  return _classifyCache.get(blockName) || null;
+}
+
+function invalidateClassifyCache() {
+  _classifyCache = null;
+  _classifyCacheOwner = null;
 }
 
 function collectBlockInfo(root, result, initialLoopStack) {
@@ -52,6 +61,19 @@ function collectBlockInfo(root, result, initialLoopStack) {
   }
 }
 
+function hasMultipleBlocks(loop) {
+  let count = 0;
+  const stack = [loop.body];
+  while (stack.length > 0) {
+    const n = stack.pop();
+    if (!n) continue;
+    if (n.type === 'BlockNode') { count++; if (count > 1) return true; }
+    if (n.type === 'ForNode') stack.push(n.body);
+    if (n.type === 'SeqNode') for (const s of n.stmts) stack.push(s);
+  }
+  return false;
+}
+
 export class ElementwiseCPURule extends ScheduleRule {
   constructor() {
     super('elementwise_cpu');
@@ -61,7 +83,14 @@ export class ElementwiseCPURule extends ScheduleRule {
     if (target.kind !== TargetKind.CPU) return false;
     const info = classifyBlock(primFunc, blockName);
     if (!info) return false;
-    return !info.hasReduction && info.loopCount >= 1;
+    if (info.hasReduction || info.loopCount < 1) return false;
+    if (info.loops.length > 0 && hasMultipleBlocks(info.loops[0])) return false;
+    let totalIters = 1;
+    for (const l of info.loops) {
+      const e = l.extent && l.extent.type === 'IntImmNode' ? l.extent.value : 1;
+      totalIters *= e;
+    }
+    return totalIters >= target.numCores * target.vectorWidth;
   }
 
   apply(schedule, blockName, target) {
@@ -71,18 +100,6 @@ export class ElementwiseCPURule extends ScheduleRule {
     if (loops.length === 1) {
       const extent = loops[0].extent;
       if (extent.type === 'IntImmNode' && extent.value >= target.vectorWidth * 2) {
-        const l2Elems = target.l2CacheBytes > 0 ? Math.floor(target.l2CacheBytes / 4) : 0;
-        if (l2Elems > 0 && extent.value > l2Elems) {
-          const [l2o, l2i] = schedule.split(loops[0], l2Elems);
-          schedule.parallelize(l2o);
-          const innerLoops = schedule.getLoops(blockName);
-          const curInner = innerLoops.find(l => l.loopVar.name === l2i.loopVar.name);
-          if (curInner) {
-            const [_, vi] = schedule.split(curInner, target.vectorWidth);
-            schedule.vectorize(vi);
-          }
-          return;
-        }
         const [outer, inner] = schedule.split(loops[0], target.vectorWidth);
         schedule.parallelize(outer);
         schedule.vectorize(inner);
@@ -236,14 +253,27 @@ export class MatmulTiledCPURule extends ScheduleRule {
     return info.hasReduction && blockName.includes('matmul');
   }
 
+  matches(primFunc, blockName, target) {
+    if (target.kind !== TargetKind.CPU) return false;
+    const info = classifyBlock(primFunc, blockName);
+    if (!info) return false;
+    if (!info.hasReduction || !blockName.includes('matmul')) return false;
+    if (info.loopCount < 3) return false;
+    const cacheBytes = target.l1CacheBytes || 32768;
+    const tileDim = Math.max(8, Math.min(64, Math.floor(Math.sqrt(cacheBytes / 4))));
+    const maxExtent = info.loops.reduce((m, l) => {
+      const e = l.extent && l.extent.type === 'IntImmNode' ? l.extent.value : 0;
+      return e > m ? e : m;
+    }, 0);
+    return maxExtent >= tileDim;
+  }
+
   apply(schedule, blockName, target) {
     const loops = schedule.getLoops(blockName);
     if (loops.length < 3) return;
 
     const cacheBytes = target.l1CacheBytes || 32768;
     const tileDim = Math.max(8, Math.min(64, Math.floor(Math.sqrt(cacheBytes / 4))));
-    const tileM = tileDim;
-    const tileN = tileDim;
 
     const mLoop = loops[0];
     const nLoop = loops[1];
@@ -251,15 +281,15 @@ export class MatmulTiledCPURule extends ScheduleRule {
     const mExtent = mLoop.extent.type === 'IntImmNode' ? mLoop.extent.value : null;
     const nExtent = nLoop.extent.type === 'IntImmNode' ? nLoop.extent.value : null;
 
-    if (mExtent && mExtent >= tileM) {
-      const [mo, mi] = schedule.split(mLoop, tileM);
+    if (mExtent && mExtent >= tileDim) {
+      const [mo] = schedule.split(mLoop, tileDim);
       schedule.parallelize(mo);
     }
 
     const updatedLoops = schedule.getLoops(blockName);
     const currentN = updatedLoops.find(l => l.loopVar.name === nLoop.loopVar.name);
-    if (currentN && nExtent && nExtent >= tileN) {
-      schedule.split(currentN, tileN);
+    if (currentN && nExtent && nExtent >= tileDim) {
+      schedule.split(currentN, tileDim);
     }
   }
 }
@@ -273,7 +303,15 @@ export class MatmulTiledGPURule extends ScheduleRule {
     if (target.kind !== TargetKind.GPU) return false;
     const info = classifyBlock(primFunc, blockName);
     if (!info) return false;
-    return info.hasReduction && blockName.includes('matmul');
+    if (!info.hasReduction || !blockName.includes('matmul')) return false;
+    if (info.loopCount < 3) return false;
+    const smemBytes = target.sharedMemoryBytes || 49152;
+    const tileDim = Math.max(16, Math.min(128, Math.floor(Math.sqrt(smemBytes / 4))));
+    const maxExtent = info.loops.reduce((m, l) => {
+      const e = l.extent && l.extent.type === 'IntImmNode' ? l.extent.value : 0;
+      return e > m ? e : m;
+    }, 0);
+    return maxExtent >= tileDim;
   }
 
   apply(schedule, blockName, target) {
@@ -392,13 +430,14 @@ export class SchedulePolicy {
     const rule = this.selectRule(schedule.func, blockName);
     if (rule) {
       rule.apply(schedule, blockName, this.target);
+      invalidateClassifyCache();
       return rule.name;
     }
     return null;
   }
 
   applyToAllBlocks(schedule) {
-    delete schedule.func._blockInfoCache;
+    invalidateClassifyCache();
     const blocks = collectAllBlockNames(schedule.func.body);
     const applied = new Map();
     for (const name of blocks) {

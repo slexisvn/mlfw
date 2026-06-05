@@ -24,6 +24,8 @@ import { verifyModule } from '../ir/verifier/verifier.js';
 import { CalibrationCollector } from '../analysis/calibration.js';
 import { DecompositionPass } from '../passes/decompose/decomposition_pass.js';
 import { RematerializationPass } from '../passes/memory/rematerialization.js';
+import { GraphPartitionPass, PartitionMaterializationPass } from '../passes/partition/partition_pass.js';
+import { TargetFeatures } from '../backend/target.js';
 
 export class CompilerConfig {
   constructor(opts = {}) {
@@ -63,6 +65,17 @@ export class CompilerConfig {
     this.memory = {
       alignment:    m.alignment    ?? opts.memoryAlignment ?? 64,
       inplaceReuse: m.inplaceReuse ?? opts.enableInplaceReuse ?? true,
+    };
+
+    const p = opts.partition || {};
+    this.partition = {
+      enabled: p.enabled ?? false,
+      targets: p.targets || [],
+      defaultTarget: p.defaultTarget || null,
+      opTargetOverrides: p.opTargetOverrides || new Map(),
+      memoryLimits: p.memoryLimits || new Map(),
+      minPartitionSize: p.minPartitionSize || 1,
+      costWeights: p.costWeights || {},
     };
   }
 }
@@ -108,6 +121,10 @@ export class Compiler {
     }
 
     this._runGraphPasses(graphModule, diag);
+
+    if (this.config.partition.enabled && this.config.partition.targets.length >= 2) {
+      this._runPartitioning(graphModule, diag);
+    }
 
     if (this.config.verify) {
       this._verifyGraph(graphModule, 'after graph passes');
@@ -193,6 +210,17 @@ export class Compiler {
     if (diag) diag.record('graphPasses', 'done', { changed: result.changed });
   }
 
+  _runPartitioning(graphModule, diag) {
+    const pm = new PassManager();
+    pm.addPass(new GraphPartitionPass(this.config.partition));
+    pm.addPass(new PartitionMaterializationPass({
+      targets: this.config.partition.targets,
+    }));
+    if (diag) diag.record('partition', 'start');
+    const result = pm.run(graphModule);
+    if (diag) diag.record('partition', 'done', { changed: result.changed });
+  }
+
   _lowerAll(graphModule, diag) {
     const primFuncs = [];
     for (const func of graphModule) {
@@ -257,13 +285,40 @@ export class Compiler {
   }
 
   _codegen(primFuncs, diag) {
-    const backend = new BackendPipeline(this.config.target);
     const runtimeMod = new RuntimeModule('compiled');
 
-    for (const pf of primFuncs) {
-      if (diag) diag.record('codegen', pf.name);
-      const compiled = backend.compile(pf);
-      runtimeMod.addCompiledKernel(compiled);
+    if (this.config.partition.enabled && this.config.partition.targets.length >= 2) {
+      const backendCache = new Map();
+      const getBackend = (target) => {
+        if (!backendCache.has(target.name)) {
+          backendCache.set(target.name, new BackendPipeline(target));
+        }
+        return backendCache.get(target.name);
+      };
+
+      for (const pf of primFuncs) {
+        if (diag) diag.record('codegen', pf.name);
+        const targetName = pf._partitionTarget;
+        const target = targetName
+          ? this.config.partition.targets.find(t => t.name === targetName)
+          : this.config.target;
+        const backend = getBackend(target || this.config.target);
+        const compiled = backend.compile(pf);
+        runtimeMod.addCompiledKernel(compiled);
+        if (pf.shapeParamMap && pf.shapeParamMap.size > 0) {
+          runtimeMod.setShapeParamMap(pf.name, pf.shapeParamMap);
+        }
+      }
+    } else {
+      const backend = new BackendPipeline(this.config.target);
+      for (const pf of primFuncs) {
+        if (diag) diag.record('codegen', pf.name);
+        const compiled = backend.compile(pf);
+        runtimeMod.addCompiledKernel(compiled);
+        if (pf.shapeParamMap && pf.shapeParamMap.size > 0) {
+          runtimeMod.setShapeParamMap(pf.name, pf.shapeParamMap);
+        }
+      }
     }
 
     return runtimeMod;
