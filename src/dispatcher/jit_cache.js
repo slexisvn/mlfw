@@ -1,8 +1,13 @@
 import { buildFunction } from '../compiler/ir/graph/builder.js';
+import { GraphModule } from '../compiler/ir/graph/module.js';
 import { TensorType, ScalarType } from '../compiler/ir/graph/types.js';
 import { lowerGraphToPrimFunc } from '../compiler/passes/lowering/graph_to_tensor.js';
 import { BackendPipeline } from '../backend/pipeline.js';
 import { RuntimeModule } from '../compiler/runtime/runtime.js';
+import { PassManager } from '../compiler/passes/pass_manager.js';
+import { DecompositionPass } from '../compiler/passes/decompose/decomposition_pass.js';
+import { CanonicalizePass } from '../compiler/passes/canonicalize/canonicalize.js';
+import { DCEPass } from '../compiler/passes/simplify/dce.js';
 
 const _cache = new Map();
 const _runtimeModules = new Map();
@@ -113,6 +118,15 @@ export function jitCompile(opName, tensorArgs, scalarArgs, target) {
   if (entry) return entry;
 
   const func = _buildGraphFunc(opName, tensorArgs, scalarArgs);
+
+  const mod = new GraphModule(opName + '_jit_mod');
+  mod.addFunction(func);
+  const pm = new PassManager();
+  pm.addPass(new DecompositionPass());
+  pm.addPass(new CanonicalizePass());
+  pm.addPass(new DCEPass());
+  pm.run(mod);
+
   const primFunc = lowerGraphToPrimFunc(func);
   const backend = new BackendPipeline(target);
   const compiled = backend.compile(primFunc);

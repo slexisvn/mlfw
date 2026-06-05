@@ -13,6 +13,7 @@ export class CPUCodegen {
     this._indent = 0;
     this._lines = [];
     this._primFunc = primFunc;
+    this._aliases = new Map();
 
     const paramBuffers = new Set();
     const paramNames = [];
@@ -33,6 +34,7 @@ export class CPUCodegen {
     this._indent++;
 
     for (const [bufName, buf] of usedBuffers) {
+      if (this._zeroBuffers && this._zeroBuffers.has(bufName)) continue;
       if (!paramBuffers.has(bufName) && !allocatedBuffers.has(bufName)) {
         const numel = buf.numel();
         if (numel > 0) {
@@ -47,11 +49,13 @@ export class CPUCodegen {
       }
     }
 
+    this._zeroBuffers = this._findZeroOnlyBuffers(primFunc.body, paramBuffers);
+
     this._visitNode(primFunc.body);
     this._indent--;
     this._emit('}');
 
-    return this._lines.join('\n');
+    return this._cleanupSource(this._lines.join('\n'));
   }
 
   _scanTree(root, usedBuffers, allocatedBuffers) {
@@ -151,7 +155,7 @@ export class CPUCodegen {
       const prevVar = this._accVar;
       this._accTarget = accInfo;
       this._accVar = accVar;
-      this._emit('let ' + accVar + ' = ' + accInfo.bufName + '[' + accInfo.outerIdxExpr + '];');
+      this._emit('let ' + accVar + ' = ' + accInfo.bufName + '[' + accInfo.idxExpr + '];');
       this._emit('for (let ' + varName + ' = 0; ' + varName + ' < ' + extent + '; ' + varName + '++) {');
       this._indent++;
       this._loopStack.push(varName);
@@ -159,7 +163,7 @@ export class CPUCodegen {
       this._loopStack.pop();
       this._indent--;
       this._emit('}');
-      this._emit(accInfo.bufName + '[' + accInfo.outerIdxExpr + '] = ' + accVar + ';');
+      this._emit(accInfo.bufName + '[' + accInfo.idxExpr + '] = ' + accVar + ';');
       this._accTarget = prevAcc;
       this._accVar = prevVar;
       return;
@@ -186,28 +190,27 @@ export class CPUCodegen {
     if (val.a && val.a.type === 'BufferLoadNode' && val.a.buffer.name === store.buffer.name) loadSide = val.a;
     else if (val.b && val.b.type === 'BufferLoadNode' && val.b.buffer.name === store.buffer.name) loadSide = val.b;
     if (!loadSide) return null;
+
+    for (const bind of block.iterVars) {
+      if (bind.iterVar && bind.binding) {
+        this._aliases.set(bind.iterVar.name, this._exprToJS(bind.binding));
+      }
+    }
+
     const storeIdx = this._flatIndex(store.buffer, store.indices);
     const loadIdx = this._flatIndex(loadSide.buffer, loadSide.indices);
     if (storeIdx !== loadIdx) return null;
-    const bindMap = new Map();
-    for (const bind of block.iterVars) {
-      if (bind.iterVar && bind.binding) {
-        bindMap.set(bind.iterVar.name, this._exprToJS(bind.binding));
-      }
-    }
-    let resolvedIdx = storeIdx;
-    for (const [varName, expr] of bindMap) {
-      resolvedIdx = resolvedIdx.split(varName).join(expr);
-    }
+
     const loopVar = forNode.loopVar.name;
-    if (resolvedIdx.includes(loopVar)) return null;
-    return { bufName: store.buffer.name, idxExpr: storeIdx, outerIdxExpr: resolvedIdx };
+    if (storeIdx.includes(loopVar)) return null;
+    return { bufName: store.buffer.name, idxExpr: storeIdx };
   }
 
   _visitBlockNode(node) {
     for (const bind of node.iterVars) {
       if (bind.iterVar && bind.binding) {
-        this._emit('const ' + bind.iterVar.name + ' = ' + this._exprToJS(bind.binding) + ';');
+        const expr = this._exprToJS(bind.binding);
+        this._aliases.set(bind.iterVar.name, expr);
       }
     }
 
@@ -257,6 +260,7 @@ export class CPUCodegen {
   }
 
   _visitBufferStoreNode(node) {
+    if (this._zeroBuffers && this._zeroBuffers.has(node.buffer.name)) return;
     if (this._accTarget && node.buffer.name === this._accTarget.bufName
         && this._flatIndex(node.buffer, node.indices) === this._accTarget.idxExpr) {
       this._emit(this._accVar + ' = ' + this._exprToJS(node.value) + ';');
@@ -279,10 +283,12 @@ export class CPUCodegen {
       switch (node.type) {
         case 'IntImmNode': work.pop(); vals.push(String(node.value)); continue;
         case 'FloatImmNode': work.pop(); vals.push(String(node.value)); continue;
-        case 'VariableNode': work.pop(); vals.push(node.name); continue;
+        case 'VariableNode': work.pop(); vals.push(this._aliases.get(node.name) || node.name); continue;
         case 'BufferLoadNode': {
           work.pop();
-          if (this._accTarget && node.buffer.name === this._accTarget.bufName && this._flatIndex(node.buffer, node.indices) === this._accTarget.idxExpr) {
+          if (this._zeroBuffers && this._zeroBuffers.has(node.buffer.name)) {
+            vals.push('0');
+          } else if (this._accTarget && node.buffer.name === this._accTarget.bufName && this._flatIndex(node.buffer, node.indices) === this._accTarget.idxExpr) {
             vals.push(this._accVar);
           } else {
             vals.push(node.buffer.name + '[' + this._flatIndex(node.buffer, node.indices) + ']');
@@ -400,5 +406,181 @@ export class CPUCodegen {
       if (v) return v.name;
     }
     return '1';
+  }
+
+  _cleanupSource(src) {
+    let lines = src.split('\n');
+    let changed = true;
+    while (changed) {
+      changed = false;
+      const next = [];
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (/^\s*for\s*\(/.test(line) && line.includes('{')) {
+          if (i + 1 < lines.length && /^\s*\}\s*$/.test(lines[i + 1])) {
+            i++;
+            changed = true;
+            continue;
+          }
+          if (i + 2 < lines.length && /^\s*for\s*\(/.test(lines[i + 1]) && lines[i + 1].includes('{') &&
+              /^\s*\}\s*$/.test(lines[i + 2]) && i + 3 < lines.length && /^\s*\}\s*$/.test(lines[i + 3])) {
+            i += 3;
+            changed = true;
+            continue;
+          }
+        }
+        const allocMatch = line.match(/^\s*const (\w+) = new \w+Array\(\d+\);\s*$/);
+        if (allocMatch) {
+          const bufName = allocMatch[1];
+          let used = false;
+          for (let j = i + 1; j < lines.length; j++) {
+            if (lines[j].includes(bufName)) { used = true; break; }
+          }
+          if (!used) { changed = true; continue; }
+        }
+        next.push(line);
+      }
+      lines = next;
+    }
+    return lines.join('\n');
+  }
+
+  _findZeroOnlyBuffers(root, paramBuffers) {
+    const bufWrites = new Map();
+    const stack = [root];
+    while (stack.length > 0) {
+      const node = stack.pop();
+      if (!node || typeof node !== 'object') continue;
+      if (node.type === 'BufferStoreNode') {
+        const name = node.buffer.name;
+        if (!paramBuffers.has(name)) {
+          if (!bufWrites.has(name)) bufWrites.set(name, []);
+          bufWrites.get(name).push(node.value);
+        }
+      }
+      if (node.body) stack.push(node.body);
+      if (node.stmts) for (const s of node.stmts) stack.push(s);
+      if (node.thenBody) stack.push(node.thenBody);
+      if (node.elseBody) stack.push(node.elseBody);
+      if (node.initBody) stack.push(node.initBody);
+    }
+    const result = new Set();
+    for (const [name, writes] of bufWrites) {
+      if (writes.length > 0 && writes.every(v =>
+        (v.type === 'FloatImmNode' && v.value === 0) ||
+        (v.type === 'IntImmNode' && v.value === 0)
+      )) {
+        result.add(name);
+      }
+    }
+    return result;
+  }
+
+  _optimizeSource(src) {
+    const lines = src.split('\n');
+    const allocRe = /^\s*const (\w+) = new \w+Array\(\d+\);\s*$/;
+    const tempBufs = new Set();
+    const writtenValues = new Map();
+
+    for (const line of lines) {
+      const am = line.match(allocRe);
+      if (am) tempBufs.add(am[1]);
+    }
+
+    for (const buf of tempBufs) {
+      const writeRe = new RegExp('^\\s*' + buf + '\\[.+\\]\\s*=\\s*(.+);\\s*$');
+      const values = new Set();
+      for (const line of lines) {
+        const wm = line.match(writeRe);
+        if (wm) values.add(wm[1].trim());
+      }
+      if (values.size === 1 && values.has('0')) {
+        writtenValues.set(buf, '0');
+      }
+    }
+
+    const zeroOnlyBufs = new Set();
+    for (const [buf, val] of writtenValues) {
+      if (val !== '0') continue;
+      let readInNonTrivial = false;
+      const readRe = new RegExp(buf + '\\[[^\\]]+\\]');
+      for (const line of lines) {
+        if (readRe.test(line) && !line.match(new RegExp('^\\s*' + buf + '\\['))) {
+          readInNonTrivial = true;
+          break;
+        }
+      }
+      if (readInNonTrivial) zeroOnlyBufs.add(buf);
+    }
+
+    if (zeroOnlyBufs.size === 0) return src;
+
+    const result = [];
+    let skipDepth = 0;
+    let skipping = null;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+
+      if (skipping) {
+        for (const ch of line) {
+          if (ch === '{') skipDepth++;
+          if (ch === '}') skipDepth--;
+        }
+        if (skipDepth <= 0) { skipping = null; skipDepth = 0; }
+        continue;
+      }
+
+      const am = line.match(allocRe);
+      if (am && zeroOnlyBufs.has(am[1])) continue;
+
+      let isZeroWrite = false;
+      for (const buf of zeroOnlyBufs) {
+        if (line.match(new RegExp('^\\s*' + buf + '\\[.+\\]\\s*=\\s*0;'))) {
+          isZeroWrite = true;
+          break;
+        }
+      }
+      if (isZeroWrite) continue;
+
+      let isForLoopForZeroBuf = false;
+      if (/^\s*for\s*\(/.test(line)) {
+        let blockLines = '';
+        let depth = 0;
+        for (let j = i; j < Math.min(i + 8, lines.length); j++) {
+          blockLines += lines[j] + '\n';
+          for (const ch of lines[j]) {
+            if (ch === '{') depth++;
+            if (ch === '}') depth--;
+          }
+          if (depth <= 0 && j > i) break;
+        }
+        for (const buf of zeroOnlyBufs) {
+          if (blockLines.includes(buf + '[') && blockLines.includes('= 0;')) {
+            const nonZeroWrite = blockLines.match(new RegExp(buf + '\\[.+\\]\\s*=\\s*(?!0;)'));
+            if (!nonZeroWrite) {
+              isForLoopForZeroBuf = true;
+              skipDepth = 0;
+              for (const ch of line) {
+                if (ch === '{') skipDepth++;
+                if (ch === '}') skipDepth--;
+              }
+              if (skipDepth > 0) skipping = buf;
+              break;
+            }
+          }
+        }
+      }
+      if (isForLoopForZeroBuf) continue;
+
+      let optimizedLine = line;
+      for (const buf of zeroOnlyBufs) {
+        const re = new RegExp(buf + '\\[[^\\]]+\\]', 'g');
+        optimizedLine = optimizedLine.replace(re, '0');
+      }
+      result.push(optimizedLine);
+    }
+
+    return result.join('\n');
   }
 }

@@ -153,19 +153,27 @@ export function wrapWithAutograd(opName, handle) {
   };
 }
 
+function _makePassthrough(handle) {
+  return (keySet, ...args) => {
+    const stripped = keySet.subtract(AUTOGRAD_KEY_SET);
+    return dispatcher.redispatch(handle, stripped, ...args);
+  };
+}
+
 export function registerAutogradKernels() {
   const ops = dispatcher.listOps();
+  const keys = [DispatchKey.AUTOGRAD, DispatchKey.AUTOGRAD_CPU, DispatchKey.AUTOGRAD_GPU, DispatchKey.AUTOGRAD_WASM];
+
   for (const opKey of ops) {
     const handle = dispatcher.findOp(opKey);
     if (!handle) continue;
     const opName = handle.name;
 
-    if (!hasGradFn(opName)) continue;
+    const fn = hasGradFn(opName)
+      ? wrapWithAutograd(opName, handle)
+      : _makePassthrough(handle);
 
-    const kernel = KernelFunction.fromUnboxed(wrapWithAutograd(opName, handle));
-    handle.entry.registerKernel(DispatchKey.AUTOGRAD, kernel);
-    handle.entry.registerKernel(DispatchKey.AUTOGRAD_CPU, kernel);
-    handle.entry.registerKernel(DispatchKey.AUTOGRAD_GPU, kernel);
-    handle.entry.registerKernel(DispatchKey.AUTOGRAD_WASM, kernel);
+    const kernel = KernelFunction.fromUnboxed(fn);
+    for (const key of keys) handle.entry.registerKernel(key, kernel);
   }
 }

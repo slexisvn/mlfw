@@ -68,6 +68,8 @@ export class Tracer {
     this._func = null;
     this._builder = null;
     this._module = null;
+    this._capturedParams = new Map();
+    this._capturedParamOrder = [];
   }
 
   get shapeEnv() {
@@ -128,11 +130,23 @@ export class Tracer {
   }
 
   captureConstant(tensor) {
-    const data = tensor.data;
+    let cached = this._capturedParams.get(tensor);
+    if (cached) return cached;
+
     const tt = new TensorType(tensor.shape, tensor.dtype);
-    const constOp = this._builder.constant(data ? Array.from(data) : [], tt);
-    const irValue = constOp.getResult(0);
-    return new SymbolicTensor(irValue, tensor.shape, tensor.dtype, this);
+    this._func.inputTypes = Object.freeze([...this._func.inputTypes, tt]);
+
+    const block = this._func.entryBlock;
+    const irValue = block.addArgument(tt);
+
+    const sym = new SymbolicTensor(irValue, tensor.shape, tensor.dtype, this);
+    this._capturedParams.set(tensor, sym);
+    this._capturedParamOrder.push(tensor);
+    return sym;
+  }
+
+  get capturedParams() {
+    return this._capturedParamOrder;
   }
 
   markOutput(symbolicTensor) {
