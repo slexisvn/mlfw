@@ -2,13 +2,24 @@
   "name": "mlc",
   "version": "0.1.0",
   "type": "module",
+  "bin": {
+    "mlfw": "./src/cli/index.js"
+  },
   "scripts": {
-    "test": "node --test tests/",
-    "test:ir": "node --test tests/compiler/ir/",
-    "test:analysis": "node --test tests/compiler/analysis/",
-    "test:passes": "node --test tests/compiler/passes/",
-    "test:schedule": "node --test tests/compiler/schedule/",
-    "test:backend": "node --test tests/compiler/backend/",
-    "test:integration": "node --test tests/compiler/integration/"
+    "start": "node src/cli/index.js",
+    "test": "vitest run --exclude tests/stress/**",
+    "test:stress": "vitest run tests/stress",
+    "test:all": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "postinstall": "patch-package"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.1.8",
+    "patch-package": "^8.0.1",
+    "vitest": "^4.1.8"
+  },
+  "dependencies": {
+    "cli-highlight": "^2.1.11",
+    "terminal-kit": "^3.1.2"
   }
 }

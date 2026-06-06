@@ -28,7 +28,9 @@ export function adaptive_avg_pool2d(input, outputSize) {
 function _normalizePadding(padding) {
   if (typeof padding === 'number') return [[padding, padding], [padding, padding]];
   if (Array.isArray(padding) && typeof padding[0] === 'number') {
-    return padding.map(p => [p, p]);
+    const pairs = padding.map(p => [p, p]);
+    if (pairs.length === 1) return [pairs[0], pairs[0]];
+    return pairs;
   }
   return padding;
 }

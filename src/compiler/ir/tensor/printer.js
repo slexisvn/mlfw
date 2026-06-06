@@ -213,6 +213,12 @@ export class TensorIRPrinter {
   visitFloatImmNode(node) {
     this.push(node.value.toString());
   }
+
+  visitCastNode(node) {
+    this.push(`cast<${node.toDtype}>(`);
+    this.visit(node.expr);
+    this.push(`)`);
+  }
 }
 
 export function printTensorIR(node) {

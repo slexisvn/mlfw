@@ -1,0 +1,167 @@
+import { describe, it, expect } from 'vitest';
+import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
+import { TensorType, ScalarType, Layout } from '../../../src/compiler/ir/graph/types.js';
+import { LayoutPolicy, LayoutPreference } from '../../../src/compiler/passes/layout/layout_policy.js';
+import { CPUTarget, GPUTarget, WasmTarget } from '../../../src/backend/target.js';
+
+function ops(func) {
+  const list = [];
+  for (const op of func.ops()) {
+    if (op.opName !== 'return') list.push(op);
+  }
+  return list;
+}
+
+describe('LayoutPolicy conv rule', () => {
+  it('GPU conv prefers NHWC layout for input and output', () => {
+    const inp = new TensorType([1, 3, 224, 224], ScalarType.F32);
+    const ker = new TensorType([64, 3, 3, 3], ScalarType.F32);
+    const out = new TensorType([1, 64, 222, 222], ScalarType.F32);
+    const func = buildFunction('f', [inp, ker], [out], (b, args) => {
+      b.returnOp([b.conv(args[0], args[1], [1, 1], [0, 0, 0, 0]).getResult(0)]);
+    });
+
+    const policy = new LayoutPolicy(GPUTarget());
+    const pref = policy.getPreference(ops(func)[0]);
+    const nhwc = new Layout([0, 2, 3, 1]);
+    expect(pref.inputs[0].equals(nhwc)).toBe(true);
+    expect(pref.inputs[1]).toBeNull();
+    expect(pref.outputs[0].equals(nhwc)).toBe(true);
+  });
+
+  it('CPU conv also prefers NHWC for rank-4', () => {
+    const inp = new TensorType([1, 3, 32, 32], ScalarType.F32);
+    const ker = new TensorType([16, 3, 3, 3], ScalarType.F32);
+    const out = new TensorType([1, 16, 30, 30], ScalarType.F32);
+    const func = buildFunction('f', [inp, ker], [out], (b, args) => {
+      b.returnOp([b.conv(args[0], args[1], [1, 1], [0, 0, 0, 0]).getResult(0)]);
+    });
+
+    const policy = new LayoutPolicy(CPUTarget());
+    const pref = policy.getPreference(ops(func)[0]);
+    expect(pref.inputs[0].equals(new Layout([0, 2, 3, 1]))).toBe(true);
+  });
+
+  it('preferredConvLayout overrides default NHWC', () => {
+    const custom = new Layout([0, 3, 1, 2]);
+    const target = GPUTarget({ preferredConvLayout: custom });
+    const inp = new TensorType([1, 3, 32, 32], ScalarType.F32);
+    const ker = new TensorType([16, 3, 3, 3], ScalarType.F32);
+    const out = new TensorType([1, 16, 30, 30], ScalarType.F32);
+    const func = buildFunction('f', [inp, ker], [out], (b, args) => {
+      b.returnOp([b.conv(args[0], args[1], [1, 1], [0, 0, 0, 0]).getResult(0)]);
+    });
+
+    const pref = new LayoutPolicy(target).getPreference(ops(func)[0]);
+    expect(pref.inputs[0].equals(custom)).toBe(true);
+    expect(pref.outputs[0].equals(custom)).toBe(true);
+  });
+});
+
+describe('LayoutPolicy dot rule', () => {
+  it('CPU dot: LHS row-major, RHS column-major for rank-2', () => {
+    const lhs = new TensorType([4, 8], ScalarType.F32);
+    const rhs = new TensorType([8, 6], ScalarType.F32);
+    const out = new TensorType([4, 6], ScalarType.F32);
+    const func = buildFunction('f', [lhs, rhs], [out], (b, args) => {
+      b.returnOp([b.matmul(args[0], args[1]).getResult(0)]);
+    });
+
+    const pref = new LayoutPolicy(CPUTarget()).getPreference(ops(func)[0]);
+    expect(pref.inputs[0].equals(Layout.rowMajor(2))).toBe(true);
+    expect(pref.inputs[1].equals(Layout.columnMajor(2))).toBe(true);
+    expect(pref.outputs[0].equals(Layout.rowMajor(2))).toBe(true);
+  });
+
+  it('GPU dot: both LHS and RHS row-major', () => {
+    const lhs = new TensorType([4, 8], ScalarType.F32);
+    const rhs = new TensorType([8, 6], ScalarType.F32);
+    const out = new TensorType([4, 6], ScalarType.F32);
+    const func = buildFunction('f', [lhs, rhs], [out], (b, args) => {
+      b.returnOp([b.matmul(args[0], args[1]).getResult(0)]);
+    });
+
+    const pref = new LayoutPolicy(GPUTarget()).getPreference(ops(func)[0]);
+    expect(pref.inputs[0].equals(Layout.rowMajor(2))).toBe(true);
+    expect(pref.inputs[1].equals(Layout.rowMajor(2))).toBe(true);
+  });
+
+  it('CPU dot with rank-3 RHS: RHS stays row-major (column-major only for rank-2)', () => {
+    const lhs = new TensorType([2, 4, 8], ScalarType.F32);
+    const rhs = new TensorType([2, 8, 6], ScalarType.F32);
+    const out = new TensorType([2, 4, 6], ScalarType.F32);
+    const func = buildFunction('f', [lhs, rhs], [out], (b, args) => {
+      b.returnOp([b.matmul(args[0], args[1]).getResult(0)]);
+    });
+
+    const pref = new LayoutPolicy(CPUTarget()).getPreference(ops(func)[0]);
+    expect(pref.inputs[1].equals(Layout.rowMajor(3))).toBe(true);
+  });
+});
+
+describe('LayoutPolicy reduce rule', () => {
+  it('reduce output uses row-major layout', () => {
+    const t = new TensorType([4, 8], ScalarType.F32);
+    const s = new TensorType([], ScalarType.F32);
+    const outT = new TensorType([4], ScalarType.F32);
+    const func = buildFunction('f', [t, s], [outT], (b, args) => {
+      b.returnOp([b.reduce(args[0], args[1], [1], 'sum').getResult(0)]);
+    });
+
+    const pref = new LayoutPolicy(CPUTarget()).getPreference(ops(func)[0]);
+    expect(pref.outputs[0].equals(Layout.rowMajor(1))).toBe(true);
+    expect(pref.inputs[0]).toBeNull();
+  });
+});
+
+describe('LayoutPolicy.getPreference', () => {
+  it('returns null for ops without a registered rule', () => {
+    const t = new TensorType([4], ScalarType.F32);
+    const func = buildFunction('f', [t, t], [t], (b, args) => {
+      b.returnOp([b.add(args[0], args[1]).getResult(0)]);
+    });
+
+    expect(new LayoutPolicy(CPUTarget()).getPreference(ops(func)[0])).toBeNull();
+  });
+
+  it('registerRule overrides default rule', () => {
+    const policy = new LayoutPolicy(CPUTarget());
+    const custom = new Layout([1, 0]);
+
+    policy.registerRule('dot', () => new LayoutPreference([custom, custom], [custom]));
+
+    const lhs = new TensorType([4, 8], ScalarType.F32);
+    const rhs = new TensorType([8, 6], ScalarType.F32);
+    const func = buildFunction('f', [lhs, rhs], [new TensorType([4, 6], ScalarType.F32)], (b, args) => {
+      b.returnOp([b.matmul(args[0], args[1]).getResult(0)]);
+    });
+
+    const pref = policy.getPreference(ops(func)[0]);
+    expect(pref.inputs[0].equals(custom)).toBe(true);
+    expect(pref.inputs[1].equals(custom)).toBe(true);
+  });
+});
+
+describe('LayoutPolicy.estimateConversionCost', () => {
+  it('same layout costs 0', () => {
+    const policy = new LayoutPolicy(CPUTarget());
+    const layout = Layout.rowMajor(2);
+    expect(policy.estimateConversionCost(layout, layout, new TensorType([4, 8], ScalarType.F32))).toBe(0);
+  });
+
+  it('different layouts cost = numel * 2', () => {
+    const policy = new LayoutPolicy(CPUTarget());
+    const from = Layout.rowMajor(2);
+    const to = Layout.columnMajor(2);
+    const t = new TensorType([4, 8], ScalarType.F32);
+    expect(policy.estimateConversionCost(from, to, t)).toBe(32 * 2);
+  });
+
+  it('DYNAMIC shape costs a fixed fallback (1024)', () => {
+    const policy = new LayoutPolicy(CPUTarget());
+    const from = Layout.rowMajor(2);
+    const to = Layout.columnMajor(2);
+    const t = new TensorType([-1, 8], ScalarType.F32);
+    expect(policy.estimateConversionCost(from, to, t)).toBe(1024);
+  });
+});

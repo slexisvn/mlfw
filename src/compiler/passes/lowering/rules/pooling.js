@@ -32,7 +32,7 @@ export function register() {
 
     const initNest = buildSpatialNest(ctx, 'pi', [0, 1, 2, 3], outBuf.shape, outBuf);
     const initStore = new BufferStoreNode(outBuf, initNest.indices, initVal);
-    const initBlock = new BlockNode('pool_init', initNest.ivs, [], [{ buffer: outBuf }], initStore);
+    const initBlock = new BlockNode(ctx.blockName('pool_init'), initNest.ivs, [], [{ buffer: outBuf }], initStore);
     const initBody = initNest.wrap(initBlock);
 
     const nVar = ctx.allocVar('pn');
@@ -75,7 +75,7 @@ export function register() {
     }
 
     const accStore = new BufferStoreNode(outBuf, outIdx, accExpr);
-    const accBlock = new BlockNode('pool_acc', allBinds, [{ buffer: inBuf }], [{ buffer: outBuf }], accStore);
+    const accBlock = new BlockNode(ctx.blockName('pool_acc'), allBinds, [{ buffer: inBuf }], [{ buffer: outBuf }], accStore);
 
     let accBody = accBlock;
     accBody = new ForNode(kwVar, new IntImmNode(0), new IntImmNode(kW), ForKind.SERIAL, accBody);
@@ -92,7 +92,7 @@ export function register() {
       const divNest = buildSpatialNest(ctx, 'pd', [0, 1, 2, 3], outBuf.shape, outBuf);
       const divExpr = new MathOpNode('*', new BufferLoadNode(outBuf, divNest.indices), new FloatImmNode(1.0 / divVal));
       const divStore = new BufferStoreNode(outBuf, divNest.indices, divExpr);
-      const divBlock = new BlockNode('pool_div', divNest.ivs, [{ buffer: outBuf }], [{ buffer: outBuf }], divStore);
+      const divBlock = new BlockNode(ctx.blockName('pool_div'), divNest.ivs, [{ buffer: outBuf }], [{ buffer: outBuf }], divStore);
       parts.push(divNest.wrap(divBlock));
     }
 

@@ -7,7 +7,7 @@ import { RandomSearch, EvolutionarySearch } from './search.js';
 import { TuningRecord, TuningDatabase } from './tuning_db.js';
 import { BenchmarkRunner } from './benchmark.js';
 import { buildBlockMap, computeWorkloadKey } from './workload_key.js';
-import { PrimFunc } from '../ir/tensor/nodes.js';
+import { PrimFunc, ForNode, SeqNode, BlockNode } from '../ir/tensor/nodes.js';
 
 export class AutotuneConfig {
   constructor(opts = {}) {
@@ -119,6 +119,75 @@ function clonePrimFunc(primFunc) {
   return cloneNode(primFunc);
 }
 
+function extractBlockMini(primFunc, blockName, blockMap) {
+  const block = blockMap.get(blockName);
+  if (!block) return null;
+
+  const path = [];
+  let cur = block._parent;
+  while (cur && cur !== primFunc) {
+    if (cur.type === 'ForNode') path.push(cur);
+    cur = cur._parent;
+  }
+  path.reverse();
+
+  let body = cloneBlockSubtree(block);
+
+  for (let i = path.length - 1; i >= 0; i--) {
+    const loop = path[i];
+    const wrapper = new ForNode(
+      loop.loopVar,
+      cloneBlockSubtree(loop.min),
+      cloneBlockSubtree(loop.extent),
+      loop.kind,
+      body,
+      loop.threadTag
+    );
+    wrapper._setChild('body', body);
+    body = wrapper;
+  }
+
+  const bufs = new Map();
+  for (const r of block.reads) bufs.set(r.buffer.name, r.buffer);
+  for (const w of block.writes) bufs.set(w.buffer.name, w.buffer);
+
+  const params = [];
+  for (const p of primFunc.params) {
+    if (bufs.has(p.name)) params.push(p);
+  }
+
+  return new PrimFunc('__tune_' + blockName, params, body, bufs, []);
+}
+
+function cloneBlockSubtree(block) {
+  const cloneNode = (node) => {
+    if (!node || typeof node !== 'object') return node;
+    if (Array.isArray(node)) return node.map(cloneNode);
+    const copy = Object.create(Object.getPrototypeOf(node));
+    copy.type = node.type;
+    copy._parent = null;
+    copy._parentKey = null;
+    copy._parentIdx = -1;
+    for (const key of Object.keys(node)) {
+      if (key === '_parent' || key === '_parentKey' || key === '_parentIdx') continue;
+      const val = node[key];
+      if (val instanceof Map) copy[key] = new Map(val);
+      else if (Array.isArray(val)) copy[key] = val.map(cloneNode);
+      else if (typeof val === 'object' && val !== null && val.type) copy[key] = cloneNode(val);
+      else copy[key] = val;
+    }
+    if (copy._setChild) {
+      if (copy.body) copy._setChild('body', copy.body);
+      if (copy.initBody) copy._setChild('initBody', copy.initBody);
+      if (copy.thenBody) copy._setChild('thenBody', copy.thenBody);
+      if (copy.elseBody) copy._setChild('elseBody', copy.elseBody);
+    }
+    if (copy._setChildren && copy.stmts) copy._setChildren('stmts', copy.stmts);
+    return copy;
+  };
+  return cloneNode(block);
+}
+
 export class Autotuner {
   constructor(target, config = {}) {
     this.target = target;
@@ -184,8 +253,12 @@ export class Autotuner {
     const sketches = getSketchesForBlock(primFunc, blockName, this.target, blockMap);
     if (sketches.length === 0) return null;
 
+    const mini = extractBlockMini(primFunc, blockName, blockMap);
+    const miniBlockName = mini ? blockName : null;
+    const evalTarget = mini || primFunc;
+
     const evaluator = (sketch, params) => {
-      return this._evaluate(primFunc, blockName, sketch, params);
+      return this._evaluate(evalTarget, miniBlockName || blockName, sketch, params);
     };
 
     let candidates;

@@ -1,6 +1,6 @@
 import { Tensor } from '../core/tensor.js';
 import { TensorImpl } from '../core/tensor_impl.js';
-import { inferReshape } from '../utils/shape_utils.js';
+import { inferReshape, computeStrides } from '../utils/shape_utils.js';
 import {
   computeTranspose,
   computePermute,
@@ -94,11 +94,7 @@ function _copyContiguous(tensor) {
   const srcOffset = tensor._impl.storageOffset;
   const n = tensor.numel;
 
-  const { StorageImpl } = require('./storage_impl_loader.js');
-  const { computeStrides } = require('../utils/shape_utils.js');
-
   const dstStrides = computeStrides(sizes);
-  const Storage = tensor._impl.storage.constructor;
 
   const newStorage = tensor._impl.storage.clone();
   const dstData = newStorage.data;

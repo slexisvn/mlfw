@@ -394,6 +394,45 @@ export class LayoutTransformIdentity extends Pattern {
   }
 }
 
+export class FoldTransposeIntoDot extends Pattern {
+  constructor() { super('fold_transpose_into_dot', 10); this.rootOpName = 'dot'; }
+  match(op) {
+    for (let i = 0; i < 2; i++) {
+      const def = op.getOperand(i).definingOp;
+      if (!def || def.opName !== 'transpose') continue;
+      const perm = def.getAttr('permutation');
+      if (!perm || perm.length !== 2) continue;
+      if (perm[0] !== 1 || perm[1] !== 0) continue;
+      return true;
+    }
+    return false;
+  }
+  rewrite(op, builder) {
+    const operands = [op.getOperand(0), op.getOperand(1)];
+    const lhsC = [...op.getAttr('lhs_contracting')];
+    const rhsC = [...op.getAttr('rhs_contracting')];
+    const lhsB = [...(op.getAttr('lhs_batch') || [])];
+    const rhsB = [...(op.getAttr('rhs_batch') || [])];
+    for (let i = 0; i < 2; i++) {
+      const def = operands[i].definingOp;
+      if (!def || def.opName !== 'transpose') continue;
+      const perm = def.getAttr('permutation');
+      if (!perm || perm.length !== 2 || perm[0] !== 1 || perm[1] !== 0) continue;
+      operands[i] = def.getOperand(0);
+      const dims = i === 0 ? lhsC : rhsC;
+      const batch = i === 0 ? lhsB : rhsB;
+      for (let j = 0; j < dims.length; j++) dims[j] = dims[j] === 0 ? 1 : 0;
+      for (let j = 0; j < batch.length; j++) batch[j] = batch[j] === 0 ? 1 : 0;
+    }
+    const newDot = builder.dot(operands[0], operands[1], lhsC, rhsC);
+    if (lhsB.length > 0) newDot.setAttr('lhs_batch', lhsB);
+    if (rhsB.length > 0) newDot.setAttr('rhs_batch', rhsB);
+    op.replaceAllResultsWith([newDot.getResult(0)]);
+    op.erase();
+    return true;
+  }
+}
+
 export class LayoutTransformCompose extends Pattern {
   constructor() { super('layout_transform_compose', 10); this.rootOpName = 'layout_transform'; }
   match(op) {

@@ -32,7 +32,7 @@ export function register() {
 
     const initNest = buildSpatialNest(ctx, 'si', spatialDims, inBuf.shape, inBuf);
     const initStore = new BufferStoreNode(outBuf, initNest.indices, new BufferLoadNode(initBuf, []));
-    const initBlock = new BlockNode('reduce_init', initNest.ivs, [{ buffer: initBuf }], [{ buffer: outBuf }], initStore);
+    const initBlock = new BlockNode(ctx.blockName('reduce_init'), initNest.ivs, [{ buffer: initBuf }], [{ buffer: outBuf }], initStore);
     const initBody = spatialDims.length > 0 ? initNest.wrap(initBlock) : initBlock;
 
     const accNest = buildSpatialNest(ctx, 'sa', spatialDims, inBuf.shape, inBuf);
@@ -47,7 +47,7 @@ export function register() {
     const store = new BufferStoreNode(outBuf, accNest.indices, combiner(loadA, loadB, outBuf.dtype));
     const rExtentNodes = new Array(reduceDims.length);
     for (let i = 0; i < reduceDims.length; i++) rExtentNodes[i] = ctx.extentNode(inBuf.shape[reduceDims[i]], inBuf, reduceDims[i]);
-    const accBlock = new BlockNode('reduce_acc', concatIterVars(accNest.ivs, rIvs), [{ buffer: inBuf }], [{ buffer: outBuf }], store);
+    const accBlock = new BlockNode(ctx.blockName('reduce_acc'), concatIterVars(accNest.ivs, rIvs), [{ buffer: inBuf }], [{ buffer: outBuf }], store);
     let accBody = wrapLoopsWithNodes(accBlock, rVars, rExtentNodes);
     accBody = accNest.wrap(accBody);
 
@@ -59,7 +59,7 @@ export function register() {
       const meanNest = buildSpatialNest(ctx, 'sm', spatialDims, inBuf.shape, inBuf);
       const divExpr = new MathOpNode('*', new BufferLoadNode(outBuf, meanNest.indices), new FloatImmNode(1.0 / reduceSize));
       const meanStore = new BufferStoreNode(outBuf, meanNest.indices, divExpr);
-      const meanBlock = new BlockNode('mean_div', meanNest.ivs, [{ buffer: outBuf }], [{ buffer: outBuf }], meanStore);
+      const meanBlock = new BlockNode(ctx.blockName('mean_div'), meanNest.ivs, [{ buffer: outBuf }], [{ buffer: outBuf }], meanStore);
       parts.push(spatialDims.length > 0 ? meanNest.wrap(meanBlock) : meanBlock);
     }
 
@@ -84,7 +84,7 @@ export function register() {
       const initNest = buildSpatialNest(ctx, 'ai', spatialDims, inBuf.shape, inBuf);
       const initValStore = new BufferStoreNode(bestValBuf, initNest.indices, new FloatImmNode(compareFn === 'gt' ? -Infinity : Infinity));
       const initIdxStore = new BufferStoreNode(outBuf, initNest.indices, new IntImmNode(0));
-      const initBlock = new BlockNode('arg_init', initNest.ivs, [], [{ buffer: bestValBuf }, { buffer: outBuf }], new SeqNode([initValStore, initIdxStore]));
+      const initBlock = new BlockNode(ctx.blockName('arg_init'), initNest.ivs, [], [{ buffer: bestValBuf }, { buffer: outBuf }], new SeqNode([initValStore, initIdxStore]));
       const initBody = spatialDims.length > 0 ? initNest.wrap(initBlock) : initBlock;
 
       const accNest = buildSpatialNest(ctx, 'as', spatialDims, inBuf.shape, inBuf);
@@ -102,7 +102,7 @@ export function register() {
       const newIdx = new IfThenElseNode(isBetter, rBind[0].iterVar, loadIdx);
       const storeIdx = new BufferStoreNode(outBuf, accNest.indices, newIdx);
       const storeVal = new BufferStoreNode(bestValBuf, accNest.indices, newBest);
-      const accBlock = new BlockNode('arg_acc', concatIterVars(accNest.ivs, rBind),
+      const accBlock = new BlockNode(ctx.blockName('arg_acc'), concatIterVars(accNest.ivs, rBind),
         [{ buffer: inBuf }, { buffer: bestValBuf }], [{ buffer: bestValBuf }, { buffer: outBuf }],
         new SeqNode([storeIdx, storeVal]));
       const rExtent = ctx.extentNode(inBuf.shape[reduceDim], inBuf, reduceDim);

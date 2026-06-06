@@ -30,11 +30,15 @@ export class CPUCodegen {
     const allocatedBuffers = new Set();
     this._scanTree(primFunc.body, usedBuffers, allocatedBuffers);
 
+    this._zeroBuffers = this._findZeroOnlyBuffers(primFunc.body, paramBuffers);
+    this._localBuffers = new Set();
+
     this._emit(`function ${primFunc.name}(${paramNames.join(', ')}) {`);
     this._indent++;
 
     for (const [bufName, buf] of usedBuffers) {
-      if (this._zeroBuffers && this._zeroBuffers.has(bufName)) continue;
+      if (this._zeroBuffers.has(bufName)) continue;
+      if (this._constantBuffers.has(bufName)) continue;
       if (!paramBuffers.has(bufName) && !allocatedBuffers.has(bufName)) {
         const numel = buf.numel();
         if (numel > 0) {
@@ -48,8 +52,11 @@ export class CPUCodegen {
         }
       }
     }
-
-    this._zeroBuffers = this._findZeroOnlyBuffers(primFunc.body, paramBuffers);
+    for (const [, buf] of usedBuffers) {
+      if (!paramBuffers.has(buf.name)) {
+        this._localBuffers.add(buf.name);
+      }
+    }
 
     this._visitNode(primFunc.body);
     this._indent--;
@@ -129,7 +136,16 @@ export class CPUCodegen {
   }
 
   _visitForNode(node) {
+    if (this._isRedundantZeroFill(node)) return;
+
     const varName = node.loopVar.name;
+
+    if (node.extent.type === 'IntImmNode' && node.extent.value === 1) {
+      this._aliases.set(varName, '0');
+      this._visitNode(node.body);
+      return;
+    }
+
     const extent = this._exprToJS(node.extent);
 
     if (node.kind === ForKind.UNROLLED || node.kind === ForKind.VECTORIZED) {
@@ -261,6 +277,7 @@ export class CPUCodegen {
 
   _visitBufferStoreNode(node) {
     if (this._zeroBuffers && this._zeroBuffers.has(node.buffer.name)) return;
+    if (this._constantBuffers && this._constantBuffers.has(node.buffer.name)) return;
     if (this._accTarget && node.buffer.name === this._accTarget.bufName
         && this._flatIndex(node.buffer, node.indices) === this._accTarget.idxExpr) {
       this._emit(this._accVar + ' = ' + this._exprToJS(node.value) + ';');
@@ -288,6 +305,8 @@ export class CPUCodegen {
           work.pop();
           if (this._zeroBuffers && this._zeroBuffers.has(node.buffer.name)) {
             vals.push('0');
+          } else if (this._constantBuffers && this._constantBuffers.has(node.buffer.name)) {
+            vals.push(this._constantBuffers.get(node.buffer.name));
           } else if (this._accTarget && node.buffer.name === this._accTarget.bufName && this._flatIndex(node.buffer, node.indices) === this._accTarget.idxExpr) {
             vals.push(this._accVar);
           } else {
@@ -304,7 +323,12 @@ export class CPUCodegen {
             if (!node.b) { vals.push(`(${node.op}${vals.pop()})`); }
             else {
               const b = vals.pop(), a = vals.pop();
-              if (node.op === '%') vals.push(`((${a} % ${b} + ${b}) % ${b})`);
+              if ((node.op === '+' || node.op === '-') && b === '0') { vals.push(a); }
+              else if (node.op === '+' && a === '0') { vals.push(b); }
+              else if (node.op === '*' && (a === '0' || b === '0')) { vals.push('0'); }
+              else if (node.op === '*' && b === '1') { vals.push(a); }
+              else if (node.op === '*' && a === '1') { vals.push(b); }
+              else if (node.op === '%') vals.push(`((${a} % ${b} + ${b}) % ${b})`);
               else if (node.op === '//') vals.push(`((${a} / ${b}) | 0)`);
               else vals.push(`(${a} ${node.op} ${b})`);
             }
@@ -371,19 +395,20 @@ export class CPUCodegen {
   _flatIndex(buffer, indices) {
     if (indices.length === 0) return '0';
     if (indices.length === 1) return this._exprToJS(indices[0]);
-    const parts = new Array(indices.length);
+    const parts = [];
     for (let i = 0; i < indices.length; i++) {
       const idx = this._exprToJS(indices[i]);
+      if (idx === '0') continue;
       const stride = buffer.strides[i];
       if (stride === 1) {
-        parts[i] = idx;
+        parts.push(idx);
       } else if (typeof stride === 'number' && stride >= 0) {
-        parts[i] = `${idx} * ${stride}`;
+        parts.push(`${idx} * ${stride}`);
       } else {
-        parts[i] = `${idx} * ${this._computeDynamicStride(buffer, i)}`;
+        parts.push(`${idx} * ${this._computeDynamicStride(buffer, i)}`);
       }
     }
-    return parts.join(' + ');
+    return parts.length === 0 ? '0' : parts.join(' + ');
   }
 
   _computeDynamicStride(buffer, dimIdx) {
@@ -445,6 +470,27 @@ export class CPUCodegen {
     return lines.join('\n');
   }
 
+  _isRedundantZeroFill(node) {
+    let cur = node.body;
+    while (cur) {
+      if (cur.type === 'ForNode') {
+        if (cur.extent.type === 'IntImmNode' && cur.extent.value === 1) {
+          cur = cur.body;
+          continue;
+        }
+        return this._isRedundantZeroFill(cur);
+      }
+      if (cur.type === 'BlockNode') { cur = cur.body; continue; }
+      if (cur.type === 'BufferStoreNode') {
+        const val = cur.value;
+        const isZero = (val.type === 'FloatImmNode' && val.value === 0) || (val.type === 'IntImmNode' && val.value === 0);
+        return isZero;
+      }
+      return false;
+    }
+    return false;
+  }
+
   _findZeroOnlyBuffers(root, paramBuffers) {
     const bufWrites = new Map();
     const stack = [root];
@@ -465,12 +511,20 @@ export class CPUCodegen {
       if (node.initBody) stack.push(node.initBody);
     }
     const result = new Set();
+    this._constantBuffers = new Map();
     for (const [name, writes] of bufWrites) {
-      if (writes.length > 0 && writes.every(v =>
+      if (writes.length === 0) continue;
+      if (writes.every(v =>
         (v.type === 'FloatImmNode' && v.value === 0) ||
         (v.type === 'IntImmNode' && v.value === 0)
       )) {
         result.add(name);
+        continue;
+      }
+      const first = writes[0];
+      const isConst = (first.type === 'FloatImmNode' || first.type === 'IntImmNode');
+      if (isConst && writes.every(v => v.type === first.type && v.value === first.value)) {
+        this._constantBuffers.set(name, String(first.value));
       }
     }
     return result;

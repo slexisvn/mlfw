@@ -28,6 +28,11 @@ export class LoweringContext {
     this.bufferMap = new Map();
     this.varCounter = 0;
     this.shapeParams = new Map();
+    this._blockCounter = 0;
+  }
+
+  blockName(hint) {
+    return `${hint}_${this._blockCounter++}`;
   }
 
   allocVar(nameHint, dtype = 'int32') {
@@ -44,6 +49,14 @@ export class LoweringContext {
     buf = new Buffer(`buf_${this.varCounter++}`, shape, dtype, MemoryScope.GLOBAL, strides);
     this.bufferMap.set(value, buf);
     return buf;
+  }
+
+  allocFreshBuffer(value) {
+    const t = value.type;
+    const shape = t.shape || [];
+    const dtype = t.dtype || 'f32';
+    const strides = t.layout ? t.layout.computeStrides(shape) : null;
+    return new Buffer(`buf_${this.varCounter++}`, shape, dtype, MemoryScope.GLOBAL, strides);
   }
 
   extentNode(dim, buf, dimIdx = -1) {
@@ -141,6 +154,14 @@ export function buildSpatialNest(ctx, prefix, dims, shape, buf) {
 
 export function computeBroadcastIndices(inBuf, outBuf, outIndices) {
   const inRank = inBuf.shape.length;
+  if (inBuf.broadcastDims) {
+    const dims = inBuf.broadcastDims;
+    const indices = new Array(inRank);
+    for (let j = 0; j < inRank; j++) {
+      indices[j] = inBuf.shape[j] === 1 ? new IntImmNode(0) : outIndices[dims[j]];
+    }
+    return indices;
+  }
   const outRank = outBuf.shape.length;
   const offset = outRank - inRank;
   const indices = new Array(inRank);
@@ -178,10 +199,13 @@ export function lowerPointwise(ctx, op, inputs, outputs, exprBuilder) {
   const outBuf = outputs[0];
   const { loopVars, loopBinds, indices, extentNodes } = makeLoopNest(ctx, outBuf.shape, outBuf);
   const loads = new Array(inputs.length);
-  for (let i = 0; i < inputs.length; i++) loads[i] = new BufferLoadNode(inputs[i], indices);
+  for (let i = 0; i < inputs.length; i++) {
+    const inIndices = computeBroadcastIndices(inputs[i], outBuf, indices);
+    loads[i] = new BufferLoadNode(inputs[i], inIndices);
+  }
   const expr = exprBuilder(op, loads, outBuf.dtype);
   const store = new BufferStoreNode(outBuf, indices, expr);
-  const block = new BlockNode(`${op.opName}_block`, loopBinds, bufRefs(inputs), [{ buffer: outBuf }], store);
+  const block = new BlockNode(ctx.blockName(`${op.opName}_block`), loopBinds, bufRefs(inputs), [{ buffer: outBuf }], store);
   return wrapInLoops(block, loopVars, outBuf.shape, extentNodes);
 }
 
@@ -194,7 +218,7 @@ export function lowerConstant(ctx, op) {
   }
   const { loopVars, loopBinds, indices } = makeLoopNest(ctx, outBuf.shape);
   const store = new BufferStoreNode(outBuf, indices, valNode);
-  const block = new BlockNode(`${op.opName}_block`, loopBinds, [], [{ buffer: outBuf }], store);
+  const block = new BlockNode(ctx.blockName(`${op.opName}_block`), loopBinds, [], [{ buffer: outBuf }], store);
   return wrapInLoops(block, loopVars, outBuf.shape);
 }
 

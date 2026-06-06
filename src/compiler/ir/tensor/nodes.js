@@ -247,3 +247,39 @@ export class FloatImmNode extends TensorNode {
     this.value = value;
   }
 }
+
+export function mathOp(op, a, b) {
+  if (b === null || b === undefined) return new MathOpNode(op, a, b);
+
+  const aIsInt = a instanceof IntImmNode;
+  const bIsInt = b instanceof IntImmNode;
+
+  if (aIsInt && bIsInt) {
+    const av = a.value, bv = b.value;
+    switch (op) {
+      case '+': return new IntImmNode(av + bv);
+      case '-': return new IntImmNode(av - bv);
+      case '*': return new IntImmNode(av * bv);
+      case '//': return new IntImmNode(Math.trunc(av / bv));
+      case '%': return new IntImmNode(((av % bv) + bv) % bv);
+    }
+  }
+
+  if (bIsInt) {
+    const bv = b.value;
+    if ((op === '+' || op === '-') && bv === 0) return a;
+    if (op === '*' && bv === 1) return a;
+    if (op === '*' && bv === 0) return new IntImmNode(0);
+    if (op === '//' && bv === 1) return a;
+    if (op === '%' && bv === 1) return new IntImmNode(0);
+  }
+
+  if (aIsInt) {
+    const av = a.value;
+    if (op === '+' && av === 0) return b;
+    if (op === '*' && av === 1) return b;
+    if (op === '*' && av === 0) return new IntImmNode(0);
+  }
+
+  return new MathOpNode(op, a, b);
+}

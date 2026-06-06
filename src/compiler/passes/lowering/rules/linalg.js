@@ -1,7 +1,7 @@
 import {
   IntImmNode, FloatImmNode, MathOpNode, CompareNode,
   ForNode, ForKind, BufferStoreNode, BufferLoadNode,
-  BlockNode, SeqNode, IfThenElseNode, CallExternNode
+  BlockNode, SeqNode, IfThenElseNode, CallExternNode, mathOp
 } from '../../../ir/tensor/nodes.js';
 import {
   registerLoweringRule, buildSpatialNest, buildDotGeometry,
@@ -49,12 +49,12 @@ export function register() {
 
     const initNest = buildSpatialNest(ctx, 'di', Array.from({ length: out.shape.length }, (_, i) => i), out.shape, out);
     const initStore = new BufferStoreNode(out, initNest.indices, new FloatImmNode(0));
-    const initBlock = new BlockNode('matmul_init', initNest.ivs, [], [{ buffer: out }], initStore);
+    const initBlock = new BlockNode(ctx.blockName('matmul_init'), initNest.ivs, [], [{ buffer: out }], initStore);
     const initBody = initNest.wrap(initBlock);
 
     const accExpr = new MathOpNode('+', new BufferLoadNode(out, geo.outIdx), new MathOpNode('*', new BufferLoadNode(lhs, geo.lhsIdx), new BufferLoadNode(rhs, geo.rhsIdx)));
     const accStore = new BufferStoreNode(out, geo.outIdx, accExpr);
-    const accBlock = new BlockNode('matmul', geo.allIvs, [{ buffer: lhs }, { buffer: rhs }], [{ buffer: out }], accStore);
+    const accBlock = new BlockNode(ctx.blockName('matmul'), geo.allIvs, [{ buffer: lhs }, { buffer: rhs }], [{ buffer: out }], accStore);
     const accBody = geo.wrapAccBody(accBlock);
 
     return new SeqNode([initBody, accBody]);
@@ -78,7 +78,7 @@ export function register() {
 
     const initNest = buildSpatialNest(ctx, 'ci', Array.from({ length: outShape.length }, (_, i) => i), outShape, outBuf);
     const initStore = new BufferStoreNode(outBuf, initNest.indices, new FloatImmNode(0));
-    const initBlock = new BlockNode('conv_init', initNest.ivs, [], [{ buffer: outBuf }], initStore);
+    const initBlock = new BlockNode(ctx.blockName('conv_init'), initNest.ivs, [], [{ buffer: outBuf }], initStore);
     const initBody = initNest.wrap(initBlock);
 
     const nVar = ctx.allocVar('cn');
@@ -120,19 +120,21 @@ export function register() {
     for (let s = 0; s < spatialDims; s++) {
       const key = spatialLayoutKeys[s];
       const kKey = key.toLowerCase() === 'h' ? 'H' : 'W';
-      const inSpatialIdx = new MathOpNode('+',
-        new MathOpNode('*', soBinds[s].iterVar, new IntImmNode(strides[s])),
-        new MathOpNode('+',
-          new MathOpNode('*', skBinds[s].iterVar, new IntImmNode(dilation[s])),
+      const inSpatialIdx = mathOp('+',
+        mathOp('*', soBinds[s].iterVar, new IntImmNode(strides[s])),
+        mathOp('+',
+          mathOp('*', skBinds[s].iterVar, new IntImmNode(dilation[s])),
           new IntImmNode(-padding[s][0])
         )
       );
       inIdx[iLayout[key]] = inSpatialIdx;
       kerIdx[kLayout[kKey]] = skBinds[s].iterVar;
-      const ge = new CompareNode('ge', inSpatialIdx, new IntImmNode(0));
-      const lt = new CompareNode('lt', inSpatialIdx, new IntImmNode(inBuf.shape[iLayout[key]]));
-      const dimOk = new MathOpNode('*', ge, lt);
-      inBoundsExpr = inBoundsExpr ? new MathOpNode('*', inBoundsExpr, dimOk) : dimOk;
+      if (padding[s][0] !== 0 || padding[s][1] !== 0) {
+        const ge = new CompareNode('ge', inSpatialIdx, new IntImmNode(0));
+        const lt = new CompareNode('lt', inSpatialIdx, new IntImmNode(inBuf.shape[iLayout[key]]));
+        const dimOk = new MathOpNode('*', ge, lt);
+        inBoundsExpr = inBoundsExpr ? new MathOpNode('*', inBoundsExpr, dimOk) : dimOk;
+      }
     }
 
     const loadIn = new BufferLoadNode(inBuf, inIdx);
@@ -142,7 +144,7 @@ export function register() {
     const guardedProduct = inBoundsExpr ? new IfThenElseNode(inBoundsExpr, product, new FloatImmNode(0)) : product;
     const accExpr = new MathOpNode('+', loadOut, guardedProduct);
     const accStore = new BufferStoreNode(outBuf, outIdx, accExpr);
-    const accBlock = new BlockNode('conv_acc', allBinds, [{ buffer: inBuf }, { buffer: kerBuf }], [{ buffer: outBuf }], accStore);
+    const accBlock = new BlockNode(ctx.blockName('conv_acc'), allBinds, [{ buffer: inBuf }, { buffer: kerBuf }], [{ buffer: outBuf }], accStore);
 
     const kerSpatialSizes = new Array(spatialDims);
     for (let s = 0; s < spatialDims; s++) {
@@ -204,7 +206,7 @@ export function register() {
     }
 
     const store = new BufferStoreNode(outBuf, outIndices, new BufferLoadNode(operandBuf, operandIndices));
-    const block = new BlockNode('gather_block', loopBinds, [{ buffer: operandBuf }, { buffer: indicesBuf }], [{ buffer: outBuf }], store);
+    const block = new BlockNode(ctx.blockName('gather_block'), loopBinds, [{ buffer: operandBuf }, { buffer: indicesBuf }], [{ buffer: outBuf }], store);
     return wrapInLoops(block, loopVars, outBuf.shape);
   });
 
@@ -220,7 +222,7 @@ export function register() {
 
     const copyNest = makeLoopNest(ctx, operandBuf.shape, operandBuf);
     const copyStore = new BufferStoreNode(outBuf, copyNest.indices, new BufferLoadNode(operandBuf, copyNest.indices));
-    const copyBlock = new BlockNode('scatter_copy', copyNest.loopBinds, [{ buffer: operandBuf }], [{ buffer: outBuf }], copyStore);
+    const copyBlock = new BlockNode(ctx.blockName('scatter_copy'), copyNest.loopBinds, [{ buffer: operandBuf }], [{ buffer: outBuf }], copyStore);
     const copyBody = wrapInLoops(copyBlock, copyNest.loopVars, operandBuf.shape, copyNest.extentNodes);
 
     const { loopVars: uVars, loopBinds: uBinds, indices: uIndices } = makeLoopNest(ctx, updatesBuf.shape, updatesBuf);
@@ -258,7 +260,7 @@ export function register() {
     const existingLoad = new BufferLoadNode(outBuf, operandIndices);
     const combined = new MathOpNode('+', existingLoad, updateLoad);
     const scatterStore = new BufferStoreNode(outBuf, operandIndices, combined);
-    const scatterBlock = new BlockNode('scatter_update', uBinds, [{ buffer: updatesBuf }, { buffer: indicesBuf }], [{ buffer: outBuf }], scatterStore);
+    const scatterBlock = new BlockNode(ctx.blockName('scatter_update'), uBinds, [{ buffer: updatesBuf }, { buffer: indicesBuf }], [{ buffer: outBuf }], scatterStore);
     const scatterBody = wrapInLoops(scatterBlock, uVars, updatesBuf.shape);
 
     return new SeqNode([copyBody, scatterBody]);
@@ -275,12 +277,12 @@ export function register() {
 
     const initNest = buildSpatialNest(ctx, 'ei', Array.from({ length: out.shape.length }, (_, i) => i), out.shape, out);
     const initStore = new BufferStoreNode(out, initNest.indices, new FloatImmNode(0));
-    const initBlock = new BlockNode('matmul_init', initNest.ivs, [], [{ buffer: out }], initStore);
+    const initBlock = new BlockNode(ctx.blockName('matmul_init'), initNest.ivs, [], [{ buffer: out }], initStore);
     const initBody = initNest.wrap(initBlock);
 
     const accExpr = new MathOpNode('+', new BufferLoadNode(out, geo.outIdx), new MathOpNode('*', new BufferLoadNode(lhs, geo.lhsIdx), new BufferLoadNode(rhs, geo.rhsIdx)));
     const accStore = new BufferStoreNode(out, geo.outIdx, accExpr);
-    const accBlock = new BlockNode('matmul_acc', geo.allIvs, [{ buffer: lhs }, { buffer: rhs }], [{ buffer: out }], accStore);
+    const accBlock = new BlockNode(ctx.blockName('matmul_acc'), geo.allIvs, [{ buffer: lhs }, { buffer: rhs }], [{ buffer: out }], accStore);
     const accBody = geo.wrapAccBody(accBlock);
 
     if (epilogueTags.length === 0) {
@@ -299,7 +301,7 @@ export function register() {
 
     const epiReads = bufRefs([out, ...extraInputs]);
     const epiStore = new BufferStoreNode(out, epiIdx, expr);
-    const epiBlock = new BlockNode('epilogue', epiNest.ivs, epiReads, [{ buffer: out }], epiStore);
+    const epiBlock = new BlockNode(ctx.blockName('epilogue'), epiNest.ivs, epiReads, [{ buffer: out }], epiStore);
     const epiBody = epiNest.wrap(epiBlock);
 
     return new SeqNode([initBody, accBody, epiBody]);

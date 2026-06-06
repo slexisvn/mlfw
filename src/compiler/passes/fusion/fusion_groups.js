@@ -11,14 +11,20 @@ export class FusionGroup {
     this.kind = null;
     this._inputValues = null;
     this._outputValues = null;
+    this.minTopoPos = Infinity;
+    this.maxTopoPos = -Infinity;
   }
 
-  addOp(op) {
+  addOp(op, topoPos) {
     if (this.opSet.has(op)) return;
     this.ops.push(op);
     this.opSet.add(op);
     this._inputValues = null;
     this._outputValues = null;
+    if (topoPos !== undefined) {
+      if (topoPos < this.minTopoPos) this.minTopoPos = topoPos;
+      if (topoPos > this.maxTopoPos) this.maxTopoPos = topoPos;
+    }
   }
 
   hasOp(op) {
@@ -29,6 +35,8 @@ export class FusionGroup {
     for (const op of other.ops) {
       this.addOp(op);
     }
+    if (other.minTopoPos < this.minTopoPos) this.minTopoPos = other.minTopoPos;
+    if (other.maxTopoPos > this.maxTopoPos) this.maxTopoPos = other.maxTopoPos;
   }
 
   computeIO() {
@@ -101,21 +109,29 @@ export class FusionGroupBuilder {
   constructor(legality) {
     this.legality = legality;
     this._nextId = 0;
+    this._topoIndex = null;
   }
 
   buildProducerConsumerGroups(func) {
+    this._topoIndex = new Map();
+    let idx = 0;
+    for (const op of func.ops()) this._topoIndex.set(op, idx++);
+
     const groups = [];
     const opToGroup = new Map();
 
     for (const op of func.ops()) {
       const def = registry.get(op.opName);
       if (!def || def.isConstant || def.isTerminator) continue;
+      if (def.isReduction) continue;
+      const opPos = this._topoIndex.get(op);
 
       for (let i = 0; i < op.numOperands; i++) {
         const producer = op.getOperand(i).definingOp;
         if (!producer) continue;
         const pDef = registry.get(producer.opName);
         if (!pDef || pDef.isConstant) continue;
+        if (pDef.isReduction) continue;
 
         const consumerGroup = opToGroup.get(op);
         const producerGroup = opToGroup.get(producer);
@@ -124,25 +140,26 @@ export class FusionGroupBuilder {
         const result = this.legality.canFuse(producer, op);
         if (!result.legal) continue;
 
+        const producerPos = this._topoIndex.get(producer);
         if (!consumerGroup && !producerGroup) {
           const group = new FusionGroup(this._nextId++);
-          group.addOp(producer);
-          group.addOp(op);
+          group.addOp(producer, producerPos);
+          group.addOp(op, opPos);
           opToGroup.set(producer, group);
           opToGroup.set(op, group);
         } else if (consumerGroup && !producerGroup) {
-          if (consumerGroup.size < this.legality.maxFusionSize) {
-            consumerGroup.addOp(producer);
+          if (consumerGroup.size < this.legality.maxFusionSize && !this._wouldCreateCycle(consumerGroup, producer)) {
+            consumerGroup.addOp(producer, producerPos);
             opToGroup.set(producer, consumerGroup);
           }
         } else if (!consumerGroup && producerGroup) {
-          if (producerGroup.size < this.legality.maxFusionSize) {
-            producerGroup.addOp(op);
+          if (producerGroup.size < this.legality.maxFusionSize && !this._wouldCreateCycle(producerGroup, op)) {
+            producerGroup.addOp(op, opPos);
             opToGroup.set(op, producerGroup);
           }
         } else {
           const mergeResult = this.legality.canMergeGroups(consumerGroup, producerGroup);
-          if (mergeResult.legal) {
+          if (mergeResult.legal && !this._mergeWouldCreateCycle(consumerGroup, producerGroup)) {
             consumerGroup.merge(producerGroup);
             for (const pOp of producerGroup.ops) {
               opToGroup.set(pOp, consumerGroup);
@@ -160,6 +177,56 @@ export class FusionGroupBuilder {
       groups.push(group);
     }
     return groups;
+  }
+
+  _wouldCreateCycle(group, newOp) {
+    for (let i = 0; i < newOp.numOperands; i++) {
+      const producer = newOp.getOperand(i).definingOp;
+      if (!producer || group.hasOp(producer)) continue;
+      const pos = this._topoIndex.get(producer);
+      if (pos < group.minTopoPos) continue;
+      if (this._dependsOnGroup(producer, group)) return true;
+    }
+    return false;
+  }
+
+  _dependsOnOps(startOp, targetSet, minPos) {
+    const visited = new Set();
+    const worklist = [startOp];
+    visited.add(startOp);
+    while (worklist.length > 0) {
+      const op = worklist.pop();
+      for (let i = 0; i < op.numOperands; i++) {
+        const dep = op.getOperand(i).definingOp;
+        if (!dep || visited.has(dep)) continue;
+        if (targetSet.has(dep)) return true;
+        const depPos = this._topoIndex.get(dep);
+        if (depPos < minPos) continue;
+        visited.add(dep);
+        worklist.push(dep);
+      }
+    }
+    return false;
+  }
+
+  _dependsOnGroup(startOp, group) {
+    return this._dependsOnOps(startOp, group.opSet, group.minTopoPos);
+  }
+
+  _mergeWouldCreateCycle(groupA, groupB) {
+    const minPos = Math.min(groupA.minTopoPos, groupB.minTopoPos);
+    const maxPos = Math.max(groupA.maxTopoPos, groupB.maxTopoPos);
+    const mergedSet = new Set([...groupA.opSet, ...groupB.opSet]);
+    for (const op of mergedSet) {
+      for (let i = 0; i < op.numOperands; i++) {
+        const producer = op.getOperand(i).definingOp;
+        if (!producer || mergedSet.has(producer)) continue;
+        const pos = this._topoIndex.get(producer);
+        if (pos < minPos || pos > maxPos) continue;
+        if (this._dependsOnOps(producer, mergedSet, minPos)) return true;
+      }
+    }
+    return false;
   }
 
   buildHorizontalGroups(func) {

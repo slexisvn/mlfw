@@ -1,5 +1,6 @@
 import { OpDef, OpTrait } from '../op_registry.js';
 import { TensorType, DYNAMIC } from '../types.js';
+import * as pat from '../patterns.js';
 
 export function register(registry) {
   registry.register(new OpDef({
@@ -29,6 +30,7 @@ export function register(registry) {
       return 2 * outputElements * contractDim;
     },
     inferResultTypes: inferDotResultTypes,
+    getCanonicalizationPatterns() { return [new pat.FoldTransposeIntoDot()]; },
     verify(op) {
       const errs = [];
       if (op.numOperands !== 2) { errs.push('dot expects 2 operands'); return errs; }

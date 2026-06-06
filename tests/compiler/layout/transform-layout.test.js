@@ -1,0 +1,157 @@
+import { describe, it, expect } from 'vitest';
+import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
+import { TensorType, ScalarType, Layout } from '../../../src/compiler/ir/graph/types.js';
+import { LayoutTransformPass } from '../../../src/compiler/passes/layout/layout_transform.js';
+import { PassResult } from '../../../src/compiler/passes/pass.js';
+import { CPUTarget, GPUTarget } from '../../../src/backend/target.js';
+
+function run(func, target) {
+  return new LayoutTransformPass({ target }).run(func);
+}
+
+function findOps(func, opName) {
+  const result = [];
+  for (const op of func.ops()) {
+    if (op.opName === opName) result.push(op);
+  }
+  return result;
+}
+
+describe('LayoutTransformPass', () => {
+  it('returns UNCHANGED when no target is set', () => {
+    const t = new TensorType([4, 8], ScalarType.F32);
+    const func = buildFunction('f', [t, t], [t], (b, args) => {
+      b.returnOp([b.matmul(args[0], args[1]).getResult(0)]);
+    });
+    expect(run(func, null)).toBe(PassResult.UNCHANGED);
+  });
+
+  it('returns UNCHANGED when no layout conversions needed', () => {
+    const t = new TensorType([4], ScalarType.F32);
+    const func = buildFunction('f', [t, t], [t], (b, args) => {
+      b.returnOp([b.add(args[0], args[1]).getResult(0)]);
+    });
+    expect(run(func, CPUTarget())).toBe(PassResult.UNCHANGED);
+  });
+
+  it('inserts layout_transform for CPU dot RHS (row-major -> column-major)', () => {
+    const lhs = new TensorType([4, 8], ScalarType.F32);
+    const rhs = new TensorType([8, 6], ScalarType.F32);
+    const out = new TensorType([4, 6], ScalarType.F32);
+    const func = buildFunction('f', [lhs, rhs], [out], (b, args) => {
+      b.returnOp([b.matmul(args[0], args[1]).getResult(0)]);
+    });
+
+    expect(run(func, CPUTarget())).toBe(PassResult.CHANGED);
+
+    const transforms = findOps(func, 'layout_transform');
+    expect(transforms.length).toBe(1);
+
+    const srcLayout = transforms[0].getAttr('src_layout');
+    const dstLayout = transforms[0].getAttr('dst_layout');
+    expect(srcLayout).toEqual([0, 1]);
+    expect(dstLayout).toEqual([1, 0]);
+  });
+
+  it('dot RHS operand is rewired through the layout_transform', () => {
+    const lhs = new TensorType([4, 8], ScalarType.F32);
+    const rhs = new TensorType([8, 6], ScalarType.F32);
+    const out = new TensorType([4, 6], ScalarType.F32);
+    const func = buildFunction('f', [lhs, rhs], [out], (b, args) => {
+      b.returnOp([b.matmul(args[0], args[1]).getResult(0)]);
+    });
+
+    run(func, CPUTarget());
+
+    const dotOps = findOps(func, 'dot');
+    expect(dotOps.length).toBe(1);
+    expect(dotOps[0].getOperand(1).definingOp.opName).toBe('layout_transform');
+  });
+
+  it('layout_transform result type has the target layout', () => {
+    const lhs = new TensorType([4, 8], ScalarType.F32);
+    const rhs = new TensorType([8, 6], ScalarType.F32);
+    const out = new TensorType([4, 6], ScalarType.F32);
+    const func = buildFunction('f', [lhs, rhs], [out], (b, args) => {
+      b.returnOp([b.matmul(args[0], args[1]).getResult(0)]);
+    });
+
+    run(func, CPUTarget());
+
+    const transforms = findOps(func, 'layout_transform');
+    const resultType = transforms[0].getResult(0).type;
+    expect(resultType.layout.equals(Layout.columnMajor(2))).toBe(true);
+    expect(resultType.shape).toEqual([8, 6]);
+    expect(resultType.dtype).toBe(ScalarType.F32);
+  });
+
+  it('GPU dot does NOT insert layout_transform (both sides row-major)', () => {
+    const lhs = new TensorType([4, 8], ScalarType.F32);
+    const rhs = new TensorType([8, 6], ScalarType.F32);
+    const out = new TensorType([4, 6], ScalarType.F32);
+    const func = buildFunction('f', [lhs, rhs], [out], (b, args) => {
+      b.returnOp([b.matmul(args[0], args[1]).getResult(0)]);
+    });
+
+    expect(run(func, GPUTarget())).toBe(PassResult.UNCHANGED);
+    expect(findOps(func, 'layout_transform').length).toBe(0);
+  });
+
+  it('deduplicates identical transforms — same value + same layout pair inserts once', () => {
+    const lhs = new TensorType([4, 8], ScalarType.F32);
+    const rhs = new TensorType([8, 6], ScalarType.F32);
+    const out = new TensorType([4, 6], ScalarType.F32);
+    const func = buildFunction('f', [lhs, rhs], [out, out], (b, args) => {
+      const d1 = b.matmul(args[0], args[1]);
+      const d2 = b.matmul(args[0], args[1]);
+      b.returnOp([d1.getResult(0), d2.getResult(0)]);
+    });
+
+    run(func, CPUTarget());
+
+    const transforms = findOps(func, 'layout_transform');
+    expect(transforms.length).toBe(1);
+  });
+
+  it('conv on GPU inserts NCHW->NHWC transform for input', () => {
+    const inp = new TensorType([1, 3, 32, 32], ScalarType.F32);
+    const ker = new TensorType([16, 3, 3, 3], ScalarType.F32);
+    const out = new TensorType([1, 16, 30, 30], ScalarType.F32);
+    const func = buildFunction('f', [inp, ker], [out], (b, args) => {
+      b.returnOp([b.conv(args[0], args[1], [1, 1], [0, 0, 0, 0]).getResult(0)]);
+    });
+
+    expect(run(func, GPUTarget())).toBe(PassResult.CHANGED);
+
+    const transforms = findOps(func, 'layout_transform');
+    expect(transforms.length).toBeGreaterThanOrEqual(1);
+
+    const convOp = findOps(func, 'conv')[0];
+    const inputSource = convOp.getOperand(0).definingOp;
+    expect(inputSource.opName).toBe('layout_transform');
+
+    const dstLayout = inputSource.getAttr('dst_layout');
+    expect(dstLayout).toEqual([0, 2, 3, 1]);
+  });
+
+  it('elementwise after dot does NOT trigger extra transform (inherits layout)', () => {
+    const lhs = new TensorType([4, 8], ScalarType.F32);
+    const rhs = new TensorType([8, 6], ScalarType.F32);
+    const out = new TensorType([4, 6], ScalarType.F32);
+    const func = buildFunction('f', [lhs, rhs, out], [out], (b, args) => {
+      const d = b.matmul(args[0], args[1]);
+      b.returnOp([b.add(d.getResult(0), args[2]).getResult(0)]);
+    });
+
+    run(func, CPUTarget());
+
+    const transforms = findOps(func, 'layout_transform');
+    const addOp = findOps(func, 'add')[0];
+    for (let i = 0; i < addOp.numOperands; i++) {
+      const src = addOp.getOperand(i).definingOp;
+      if (src) {
+        expect(src.opName).not.toBe('layout_transform');
+      }
+    }
+  });
+});

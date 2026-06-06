@@ -1,0 +1,52 @@
+diff --git a/node_modules/terminal-kit/lib/inputField.js b/node_modules/terminal-kit/lib/inputField.js
+index ace59eb..399418f 100644
+--- a/node_modules/terminal-kit/lib/inputField.js
++++ b/node_modules/terminal-kit/lib/inputField.js
+@@ -568,6 +568,32 @@ module.exports = function inputField( options , callback ) {
+ 
+ 			if ( inputs[ inputIndex ].length >= options.maxLength ) { return ; }
+ 
++			if ( options.autoClosePairs ) {
++				var closePair = options.autoClosePairs[ key ] ;
++				var closingPairs = Object.values( options.autoClosePairs ) ;
++
++				if ( closingPairs.includes( key ) && inputs[ inputIndex ][ offset ] === key ) {
++					offset ++ ;
++					if ( echo ) {
++						computeAllCoordinate() ;
++						redraw() ;
++						if ( dynamic.autoCompleteHint ) { autoCompleteHint() ; }
++					}
++					return ;
++				}
++
++				if ( closePair ) {
++					inputs[ inputIndex ].splice( offset , 0 , key , closePair ) ;
++					offset ++ ;
++					if ( echo ) {
++						computeAllCoordinate() ;
++						redraw() ;
++						if ( dynamic.autoCompleteHint ) { autoCompleteHint() ; }
++					}
++					return ;
++				}
++			}
++
+ 			// Insert version
+ 			//inputs[ inputIndex ] = inputs[ inputIndex ].slice( 0 , offset ) + key + inputs[ inputIndex ].slice( offset ) ;
+ 			inputs[ inputIndex ].splice( offset , 0 , key ) ;
+@@ -609,6 +635,9 @@ module.exports = function inputField( options , callback ) {
+ 				case 'backDelete' :
+ 					if ( inputs[ inputIndex ].length && offset > 0 ) {
+ 						charToDelete = inputs[ inputIndex ][ offset - 1 ] ;
++						if ( options.autoClosePairs && options.autoClosePairs[ charToDelete ] === inputs[ inputIndex ][ offset ] ) {
++							inputs[ inputIndex ].splice( offset , 1 ) ;
++						}
+ 						inputs[ inputIndex ].splice( offset - 1 , 1 ) ;
+ 						offset -- ;
+ 
+@@ -1066,4 +1095,3 @@ module.exports = function inputField( options , callback ) {
+ 
+ 	return controller ;
+ } ;
+-

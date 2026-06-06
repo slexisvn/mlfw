@@ -13,6 +13,8 @@ export class Buffer {
     this.offset = offset;
     this.alignment = alignment;
 
+    this.broadcastDims = null;
+
     if (strides) {
       this.strides = strides;
     } else {

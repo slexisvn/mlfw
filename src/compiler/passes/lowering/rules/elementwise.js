@@ -25,7 +25,7 @@ export function buildElementwiseExpr(opName, loadArgs, dtype) {
     return new MathOpNode(jsOp, loadArgs[0], loadArgs[1]);
   }
   if (loadArgs.length === 1 && jsOp === '-') {
-    return new MathOpNode('-', new FloatImmNode(0), loadArgs[0]);
+    return new MathOpNode('-', loadArgs[0]);
   }
   return new CallExternNode(jsOp, loadArgs, dtype);
 }

@@ -51,7 +51,7 @@ export function register() {
 
     const initNest = buildSpatialNest(ctx, 'qdi', Array.from({ length: out.shape.length }, (_, i) => i), out.shape, out);
     const initStore = new BufferStoreNode(out, initNest.indices, new IntImmNode(0));
-    const initBlock = new BlockNode('qmatmul_init', initNest.ivs, [], [{ buffer: out }], initStore);
+    const initBlock = new BlockNode(ctx.blockName('qmatmul_init'), initNest.ivs, [], [{ buffer: out }], initStore);
     const initBody = initNest.wrap(initBlock);
 
     const lhsLoad = new CastNode(new BufferLoadNode(lhs, geo.lhsIdx), lhs.dtype, 'i32');
@@ -63,7 +63,7 @@ export function register() {
     const product = new MathOpNode('*', lhsSub, rhsSub);
     const accExpr = new MathOpNode('+', new BufferLoadNode(out, geo.outIdx), product);
     const accStore = new BufferStoreNode(out, geo.outIdx, accExpr);
-    const accBlock = new BlockNode('qmatmul_acc', geo.allIvs, [{ buffer: lhs }, { buffer: rhs }], [{ buffer: out }], accStore);
+    const accBlock = new BlockNode(ctx.blockName('qmatmul_acc'), geo.allIvs, [{ buffer: lhs }, { buffer: rhs }], [{ buffer: out }], accStore);
     const accBody = geo.wrapAccBody(accBlock);
 
     return new SeqNode([initBody, accBody]);
@@ -89,7 +89,7 @@ export function register() {
 
     const initNest = buildSpatialNest(ctx, 'qci', Array.from({ length: outShape.length }, (_, i) => i), outShape, outBuf);
     const initStore = new BufferStoreNode(outBuf, initNest.indices, new IntImmNode(0));
-    const initBlock = new BlockNode('qconv_init', initNest.ivs, [], [{ buffer: outBuf }], initStore);
+    const initBlock = new BlockNode(ctx.blockName('qconv_init'), initNest.ivs, [], [{ buffer: outBuf }], initStore);
     const initBody = initNest.wrap(initBlock);
 
     const nVar = ctx.allocVar('qcn');
@@ -155,7 +155,7 @@ export function register() {
     const loadOut = new BufferLoadNode(outBuf, outIdx);
     const accExpr = new MathOpNode('+', loadOut, guardedProduct);
     const accStore = new BufferStoreNode(outBuf, outIdx, accExpr);
-    const accBlock = new BlockNode('qconv_acc', allBinds, [{ buffer: inBuf }, { buffer: kerBuf }], [{ buffer: outBuf }], accStore);
+    const accBlock = new BlockNode(ctx.blockName('qconv_acc'), allBinds, [{ buffer: inBuf }, { buffer: kerBuf }], [{ buffer: outBuf }], accStore);
 
     const kerSpatialSizes = new Array(spatialDims);
     for (let s = 0; s < spatialDims; s++) {

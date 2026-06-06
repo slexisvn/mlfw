@@ -108,6 +108,8 @@ export class FusionPass extends FunctionPass {
     const sortedOps = this._topologicalSort(group);
     if (sortedOps === null || sortedOps.length === 0) return;
 
+    group._inputValues = null;
+    group._outputValues = null;
     const inputValues = group.getInputValues();
     const outputValues = group.getOutputValues();
 
@@ -155,7 +157,15 @@ export class FusionPass extends FunctionPass {
     const yieldOp = new Operation('yield', yieldValues, []);
     bodyBlock.pushOp(yieldOp);
 
-    const firstOp = sortedOps[0];
+    let insertAfter = null;
+    for (const val of inputValues) {
+      const producer = val.definingOp;
+      if (!producer || group.hasOp(producer)) continue;
+      if (!insertAfter || !this._comesBefore(producer, insertAfter)) {
+        insertAfter = producer;
+      }
+    }
+
     const fusionOp = new Operation(
       'fusion',
       inputValues,
@@ -164,8 +174,14 @@ export class FusionPass extends FunctionPass {
       [bodyRegion]
     );
 
-    if (!firstOp.parentBlock) return;
-    firstOp.parentBlock.insertBefore(fusionOp, firstOp);
+    const block = sortedOps[0].parentBlock;
+    if (!block) return;
+
+    if (insertAfter) {
+      block.insertAfter(fusionOp, insertAfter);
+    } else {
+      block.insertBefore(fusionOp, sortedOps[0]);
+    }
 
     for (let i = 0; i < outputValues.length; i++) {
       outputValues[i].replaceAllUsesWith(fusionOp.getResult(i));
@@ -177,6 +193,17 @@ export class FusionPass extends FunctionPass {
         op.parentBlock.removeOp(op);
       }
     }
+  }
+
+  _comesBefore(opA, opB) {
+    if (!opA.parentBlock || opA.parentBlock !== opB.parentBlock) return false;
+    let cur = opA.parentBlock.firstOp;
+    while (cur) {
+      if (cur === opA) return true;
+      if (cur === opB) return false;
+      cur = cur._next;
+    }
+    return false;
   }
 
   _topologicalSort(group) {

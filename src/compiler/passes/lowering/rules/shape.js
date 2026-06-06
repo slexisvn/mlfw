@@ -1,6 +1,6 @@
 import {
   IntImmNode, MathOpNode, BufferStoreNode, BufferLoadNode,
-  BlockNode, SeqNode, CastNode, CompareNode, IfThenElseNode
+  BlockNode, SeqNode, CastNode, CompareNode, IfThenElseNode, mathOp
 } from '../../../ir/tensor/nodes.js';
 import {
   registerLoweringRule, makeLoopNest, wrapInLoops
@@ -18,7 +18,7 @@ export function register() {
     const inIndices = new Array(inBuf.shape.length);
     for (let i = 0; i < perm.length; i++) inIndices[perm[i]] = outIndices[i];
     const store = new BufferStoreNode(outBuf, outIndices, new BufferLoadNode(inBuf, inIndices));
-    const block = new BlockNode('transpose_block', loopBinds, [{ buffer: inBuf }], [{ buffer: outBuf }], store);
+    const block = new BlockNode(ctx.blockName('transpose_block'), loopBinds, [{ buffer: inBuf }], [{ buffer: outBuf }], store);
     return wrapInLoops(block, loopVars, outBuf.shape);
   });
 
@@ -26,23 +26,33 @@ export function register() {
     const inBuf = inputs[0];
     const outBuf = outputs[0];
     const { loopVars, loopBinds, indices: outIndices } = makeLoopNest(ctx, outBuf.shape);
-    let flatIndex = outIndices[outBuf.shape.length - 1];
-    let stride = 1;
-    for (let i = outBuf.shape.length - 2; i >= 0; i--) {
-      stride *= outBuf.shape[i + 1];
-      flatIndex = new MathOpNode('+', flatIndex, new MathOpNode('*', outIndices[i], new IntImmNode(stride)));
-    }
-    const inIndices = new Array(inBuf.shape.length);
-    let cur = flatIndex;
-    for (let i = inBuf.shape.length - 1; i >= 0; i--) {
-      if (i === 0) { inIndices[i] = cur; }
-      else {
-        inIndices[i] = new MathOpNode('%', cur, new IntImmNode(inBuf.shape[i]));
-        cur = new MathOpNode('//', cur, new IntImmNode(inBuf.shape[i]));
+
+    let inIndices;
+    const isIdentity = inBuf.shape.length === outBuf.shape.length &&
+      inBuf.shape.every((d, i) => d === outBuf.shape[i]);
+
+    if (isIdentity) {
+      inIndices = outIndices;
+    } else {
+      let flatIndex = outIndices[outBuf.shape.length - 1];
+      let stride = 1;
+      for (let i = outBuf.shape.length - 2; i >= 0; i--) {
+        stride *= outBuf.shape[i + 1];
+        flatIndex = mathOp('+', flatIndex, mathOp('*', outIndices[i], new IntImmNode(stride)));
+      }
+      inIndices = new Array(inBuf.shape.length);
+      let cur = flatIndex;
+      for (let i = inBuf.shape.length - 1; i >= 0; i--) {
+        if (i === 0) { inIndices[i] = cur; }
+        else {
+          inIndices[i] = mathOp('%', cur, new IntImmNode(inBuf.shape[i]));
+          cur = mathOp('//', cur, new IntImmNode(inBuf.shape[i]));
+        }
       }
     }
+
     const store = new BufferStoreNode(outBuf, outIndices, new BufferLoadNode(inBuf, inIndices));
-    const block = new BlockNode('reshape_block', loopBinds, [{ buffer: inBuf }], [{ buffer: outBuf }], store);
+    const block = new BlockNode(ctx.blockName('reshape_block'), loopBinds, [{ buffer: inBuf }], [{ buffer: outBuf }], store);
     return wrapInLoops(block, loopVars, outBuf.shape);
   });
 
@@ -62,7 +72,7 @@ export function register() {
       }
     }
     const store = new BufferStoreNode(outBuf, outIndices, new BufferLoadNode(inBuf, inIndices));
-    const block = new BlockNode('slice_block', loopBinds, [{ buffer: inBuf }], [{ buffer: outBuf }], store);
+    const block = new BlockNode(ctx.blockName('slice_block'), loopBinds, [{ buffer: inBuf }], [{ buffer: outBuf }], store);
     return wrapInLoops(block, loopVars, outBuf.shape);
   });
 
@@ -94,7 +104,7 @@ export function register() {
     const loadPad = new BufferLoadNode(padVal, []);
     const expr = new IfThenElseNode(inBoundsExpr, loadIn, loadPad);
     const store = new BufferStoreNode(outBuf, outIndices, expr);
-    const block = new BlockNode('pad_block', loopBinds, [{ buffer: inBuf }, { buffer: padVal }], [{ buffer: outBuf }], store);
+    const block = new BlockNode(ctx.blockName('pad_block'), loopBinds, [{ buffer: inBuf }, { buffer: padVal }], [{ buffer: outBuf }], store);
     return wrapInLoops(block, loopVars, outBuf.shape);
   });
 
@@ -113,7 +123,7 @@ export function register() {
           : inIndices[d];
       }
       const store = new BufferStoreNode(outBuf, outIndices, new BufferLoadNode(inBuf, inIndices));
-      const block = new BlockNode(`concat_${k}`, loopBinds, [{ buffer: inBuf }], [{ buffer: outBuf }], store);
+      const block = new BlockNode(ctx.blockName('concat'), loopBinds, [{ buffer: inBuf }], [{ buffer: outBuf }], store);
       stmts.push(wrapInLoops(block, loopVars, inBuf.shape));
       offset += inBuf.shape[dim];
     }
@@ -126,7 +136,7 @@ export function register() {
     const { loopVars, loopBinds, indices } = makeLoopNest(ctx, outBuf.shape);
     const val = new CastNode(indices[iotaDim], 'index', outBuf.dtype);
     const store = new BufferStoreNode(outBuf, indices, val);
-    const block = new BlockNode('iota_block', loopBinds, [], [{ buffer: outBuf }], store);
+    const block = new BlockNode(ctx.blockName('iota_block'), loopBinds, [], [{ buffer: outBuf }], store);
     return wrapInLoops(block, loopVars, outBuf.shape);
   });
 }
@@ -142,6 +152,6 @@ function lowerBroadcast(ctx, op, inputs, outputs) {
     inIndices[i] = inBuf.shape[i] === 1 ? new IntImmNode(0) : outIndices[mapped];
   }
   const store = new BufferStoreNode(outBuf, outIndices, new BufferLoadNode(inBuf, inIndices));
-  const block = new BlockNode('broadcast_block', loopBinds, [{ buffer: inBuf }], [{ buffer: outBuf }], store);
+  const block = new BlockNode(ctx.blockName('broadcast_block'), loopBinds, [{ buffer: inBuf }], [{ buffer: outBuf }], store);
   return wrapInLoops(block, loopVars, outBuf.shape);
 }

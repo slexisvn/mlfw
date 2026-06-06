@@ -474,8 +474,11 @@ export class SchedulePolicy {
   applyToAllBlocks(schedule) {
     invalidateClassifyCache();
     const blocks = collectAllBlockNames(schedule.func.body);
+    const seen = new Set();
     const applied = new Map();
     for (const name of blocks) {
+      if (seen.has(name)) continue;
+      seen.add(name);
       const ruleName = this.applyToBlock(schedule, name);
       if (ruleName) applied.set(name, ruleName);
     }

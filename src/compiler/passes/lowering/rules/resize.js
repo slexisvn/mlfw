@@ -51,7 +51,7 @@ export function register() {
     }
 
     const store = new BufferStoreNode(outBuf, nest.indices, loadExpr);
-    const block = new BlockNode('resize_block', nest.ivs, [{ buffer: inBuf }], [{ buffer: outBuf }], store);
+    const block = new BlockNode(ctx.blockName('resize_block'), nest.ivs, [{ buffer: inBuf }], [{ buffer: outBuf }], store);
     return nest.wrap(block);
   });
 }

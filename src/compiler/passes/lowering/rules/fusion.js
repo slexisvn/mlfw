@@ -1,5 +1,5 @@
 import {
-  FloatImmNode, MathOpNode, CompareNode,
+  FloatImmNode, IntImmNode, MathOpNode, CompareNode,
   BufferStoreNode, BufferLoadNode,
   BlockNode, SeqNode, IfThenElseNode, CallExternNode, CastNode, LetStmtNode
 } from '../../../ir/tensor/nodes.js';
@@ -93,8 +93,49 @@ function lowerFusion(ctx, op) {
   const exprMap = new Map();
 
   const entryBlock = op.regions[0].entryBlock;
+
+  const valueDims = new Map();
+  const opsArr = [...entryBlock.ops()];
+  for (let k = opsArr.length - 1; k >= 0; k--) {
+    const innerOp = opsArr[k];
+    if (innerOp.opName === 'broadcast_in_dim' || innerOp.opName === 'broadcast') {
+      const dims = innerOp.getAttr('broadcast_dimensions');
+      if (dims && dims.length > 0) {
+        valueDims.set(innerOp.getOperand(0), dims);
+      }
+      continue;
+    }
+    if (innerOp.opName === 'yield' || CONSTANT_OPS.has(innerOp.opName)) continue;
+    for (let r = 0; r < innerOp.numResults; r++) {
+      const dims = valueDims.get(innerOp.getResult(r));
+      if (!dims) continue;
+      for (let i = 0; i < innerOp.numOperands; i++) {
+        if (!valueDims.has(innerOp.getOperand(i))) {
+          valueDims.set(innerOp.getOperand(i), dims);
+        }
+      }
+    }
+  }
+  const argBroadcastDims = new Map();
+  const blockArgs = entryBlock.arguments;
+  for (let i = 0; i < blockArgs.length; i++) {
+    const dims = valueDims.get(blockArgs[i]);
+    if (dims) argBroadcastDims.set(i, dims);
+  }
+
   for (let i = 0; i < entryBlock.arguments.length; i++) {
-    exprMap.set(entryBlock.arguments[i], new BufferLoadNode(inputs[i], computeBroadcastIndices(inputs[i], outBuf, outIndices)));
+    const explicitDims = argBroadcastDims.get(i);
+    let loadIndices;
+    if (explicitDims) {
+      const inBuf = inputs[i];
+      loadIndices = new Array(inBuf.shape.length);
+      for (let j = 0; j < inBuf.shape.length; j++) {
+        loadIndices[j] = inBuf.shape[j] === 1 ? new IntImmNode(0) : outIndices[explicitDims[j]];
+      }
+    } else {
+      loadIndices = computeBroadcastIndices(inputs[i], outBuf, outIndices);
+    }
+    exprMap.set(entryBlock.arguments[i], new BufferLoadNode(inputs[i], loadIndices));
   }
 
   const useCount = new Map();
@@ -156,7 +197,7 @@ function lowerFusion(ctx, op) {
     storeBody = new LetStmtNode(cseStmts[i].variable, cseStmts[i].value, storeBody);
   }
 
-  const block = new BlockNode('fusion_block', loopBinds, bufRefs(inputs), bufRefs(outputs), storeBody);
+  const block = new BlockNode(ctx.blockName('fusion_block'), loopBinds, bufRefs(inputs), bufRefs(outputs), storeBody);
   return wrapInLoops(block, loopVars, outBuf.shape);
 }
 
@@ -177,18 +218,18 @@ function lowerFusionAsIndividualOps(ctx, fusionOp, stmts) {
     valueMap.set(entryBlock.arguments[i], fusionOp.getOperand(i));
   }
 
-  for (const innerOp of entryBlock.ops()) {
-    if (innerOp.opName === 'yield') {
-      for (let i = 0; i < innerOp.numOperands; i++) {
-        const outerVal = valueMap.get(innerOp.getOperand(i));
-        if (outerVal) {
-          const srcBuf = ctx.getOrAllocBuffer(outerVal);
-          const dstBuf = ctx.getOrAllocBuffer(fusionOp.getResult(i));
-          if (srcBuf !== dstBuf) ctx.bufferMap.set(fusionOp.getResult(i), srcBuf);
-        }
+  const yieldedInner = new Map();
+  for (const op of entryBlock.ops()) {
+    if (op.opName === 'yield') {
+      for (let i = 0; i < op.numOperands; i++) {
+        yieldedInner.set(op.getOperand(i), fusionOp.getResult(i));
       }
-      continue;
+      break;
     }
+  }
+
+  for (const innerOp of entryBlock.ops()) {
+    if (innerOp.opName === 'yield') continue;
 
     const outerOperands = new Array(innerOp.numOperands);
     for (let i = 0; i < innerOp.numOperands; i++) {
@@ -199,9 +240,17 @@ function lowerFusionAsIndividualOps(ctx, fusionOp, stmts) {
     for (let i = 0; i < outerOperands.length; i++) inputs[i] = ctx.getOrAllocBuffer(outerOperands[i]);
     const outputs = new Array(innerOp.numResults);
     for (let i = 0; i < innerOp.numResults; i++) {
-      const proxy = { type: innerOp.getResult(i).type };
-      outputs[i] = ctx.getOrAllocBuffer(proxy);
-      valueMap.set(innerOp.getResult(i), proxy);
+      const innerVal = innerOp.getResult(i);
+      const outerResult = yieldedInner.get(innerVal);
+      if (outerResult) {
+        const outBuf = ctx.getOrAllocBuffer(outerResult);
+        outputs[i] = outBuf;
+        valueMap.set(innerVal, outerResult);
+      } else {
+        const proxy = { type: innerVal.type };
+        outputs[i] = ctx.getOrAllocBuffer(proxy);
+        valueMap.set(innerVal, proxy);
+      }
     }
 
     if (CONSTANT_OPS.has(innerOp.opName)) {

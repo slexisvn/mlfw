@@ -75,7 +75,7 @@ export class LayoutTransformPass extends FunctionPass {
 }
 
 function valueLayoutKey(value, from, to) {
-  const vid = value.definingOp ? value.definingOp.opName + ':' + value.resultIndex : 'arg';
+  const vid = value.id;
   const fh = from.hash ? from.hash() : 0;
   const th = to.hash ? to.hash() : 0;
   return `${vid}:${fh}:${th}`;

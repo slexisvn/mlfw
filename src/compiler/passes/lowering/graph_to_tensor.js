@@ -1,7 +1,8 @@
-import { PrimFunc, SeqNode } from '../../ir/tensor/nodes.js';
+import { PrimFunc, SeqNode, BufferStoreNode, BufferLoadNode, BlockNode } from '../../ir/tensor/nodes.js';
+import { Buffer } from '../../ir/tensor/buffer.js';
 import {
   LoweringContext, registerLoweringRule, hasLoweringRule, getLoweringRule,
-  lowerConstant, CONSTANT_OPS
+  lowerConstant, CONSTANT_OPS, makeLoopNest, wrapInLoops
 } from './lowering_registry.js';
 import { register as registerElementwise } from './rules/elementwise.js';
 import { register as registerShape } from './rules/shape.js';
@@ -43,10 +44,28 @@ export function lowerGraphToPrimFunc(graphFunc) {
   }
 
   const retOp = graphFunc.getReturnOp();
+  const inputBuffers = new Set();
+  for (const arg of graphFunc.args) {
+    inputBuffers.add(ctx.getOrAllocBuffer(arg));
+  }
+
+  const copyPairs = [];
   for (let i = 0; i < retOp.numOperands; i++) {
     const v = ctx.allocVar('ret');
     params.push(v);
-    bufferMap.set(v, ctx.getOrAllocBuffer(retOp.getOperand(i)));
+    const srcBuf = ctx.getOrAllocBuffer(retOp.getOperand(i));
+    if (inputBuffers.has(srcBuf)) {
+      const outBuf = ctx.allocFreshBuffer(retOp.getOperand(i));
+      bufferMap.set(v, outBuf);
+      copyPairs.push({ src: srcBuf, dst: outBuf });
+    } else {
+      bufferMap.set(v, srcBuf);
+    }
+  }
+
+  const returnedValues = new Set();
+  for (let i = 0; i < retOp.numOperands; i++) {
+    returnedValues.add(retOp.getOperand(i));
   }
 
   const stmts = [];
@@ -68,6 +87,22 @@ export function lowerGraphToPrimFunc(graphFunc) {
       continue;
     }
 
+    if ((op.opName === 'broadcast_in_dim' || op.opName === 'broadcast') && !returnedValues.has(op.getResult(0))) {
+      const srcBuf = ctx.getOrAllocBuffer(op.getOperand(0));
+      const outShape = op.getResult(0).type.shape;
+      const dims = op.getAttr('broadcast_dimensions');
+      let broadcastDims;
+      if (dims && dims.length > 0) {
+        broadcastDims = dims;
+      } else {
+        const offset = outShape.length - srcBuf.shape.length;
+        broadcastDims = Array.from({length: srcBuf.shape.length}, (_, i) => i + offset);
+      }
+      srcBuf.broadcastDims = broadcastDims;
+      ctx.bufferMap.set(op.getResult(0), srcBuf);
+      continue;
+    }
+
     const rule = getLoweringRule(op.opName);
     if (!rule) throw new Error(`No lowering rule defined for op: ${op.opName}`);
 
@@ -78,6 +113,14 @@ export function lowerGraphToPrimFunc(graphFunc) {
 
     const stmt = rule(ctx, op, inputs, outputs);
     if (stmt) stmts.push(stmt);
+  }
+
+  for (const { src, dst } of copyPairs) {
+    const { loopVars, loopBinds, indices, extentNodes } = makeLoopNest(ctx, src.shape, src);
+    const load = new BufferLoadNode(src, indices);
+    const store = new BufferStoreNode(dst, indices, load);
+    const block = new BlockNode(ctx.blockName('copy_block'), loopBinds, [{ buffer: src }], [{ buffer: dst }], store);
+    stmts.push(wrapInLoops(block, loopVars, src.shape, extentNodes));
   }
 
   const shapeParams = [...ctx.shapeParams.values()];

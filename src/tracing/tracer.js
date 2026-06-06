@@ -17,6 +17,7 @@ const _BUILDER_METHOD_MAP = {
   gelu: (b, args) => b.gelu(args[0]),
   silu: (b, args) => b.silu(args[0]),
   conv2d: (b, args, a) => b.conv(args[0], args[1], a?.strides ?? [1,1], a?.padding ?? [[0,0],[0,0]]),
+  pool2d: (b, args, a) => b.pool2d(args[0], a?.pool_type ?? 'max', a?.kernel_size ?? [2,2], a?.strides ?? [2,2], a?.padding ?? [[0,0],[0,0]]),
   maximum: (b, args) => b.maximum(args[0], args[1]),
   minimum: (b, args) => b.minimum(args[0], args[1]),
   sum: (b, args, a) => {
@@ -132,6 +133,15 @@ export class Tracer {
   captureConstant(tensor) {
     let cached = this._capturedParams.get(tensor);
     if (cached) return cached;
+
+    if (tensor.shape.length === 0 && tensor.data) {
+      const value = tensor.data[0];
+      const op = this._builder.scalarConstant(value, tensor.dtype);
+      const irValue = op.getResult(0);
+      const sym = new SymbolicTensor(irValue, [], tensor.dtype, this);
+      this._capturedParams.set(tensor, sym);
+      return sym;
+    }
 
     const tt = new TensorType(tensor.shape, tensor.dtype);
     this._func.inputTypes = Object.freeze([...this._func.inputTypes, tt]);

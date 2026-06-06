@@ -5,8 +5,8 @@ import { ones, full, zeros } from '../../tensor/factory/creation_ops.js';
 export class ExpBackward extends AutogradNode {
   constructor() { super(1); }
   apply(gradOutputs) {
-    const [result] = this.savedTensors();
-    return [ops.mul(gradOutputs[0], result.detach())];
+    const [input] = this.savedTensors();
+    return [ops.mul(gradOutputs[0], ops.exp(input.detach()))];
   }
 }
 
@@ -21,27 +21,33 @@ export class LogBackward extends AutogradNode {
 export class SqrtBackward extends AutogradNode {
   constructor() { super(1); }
   apply(gradOutputs) {
-    const [result] = this.savedTensors();
-    const two = full(result.shape, 2, { dtype: result.dtype, device: result.device });
-    return [ops.div(gradOutputs[0], ops.mul(two, result.detach()))];
+    const [input] = this.savedTensors();
+    const x = input.detach();
+    const sqrtX = ops.sqrt(x);
+    const two = full(x.shape, 2, { dtype: x.dtype, device: x.device });
+    return [ops.div(gradOutputs[0], ops.mul(two, sqrtX))];
   }
 }
 
 export class TanhBackward extends AutogradNode {
   constructor() { super(1); }
   apply(gradOutputs) {
-    const [result] = this.savedTensors();
-    const one = ones(result.shape, { dtype: result.dtype, device: result.device });
-    return [ops.mul(gradOutputs[0], ops.sub(one, ops.mul(result.detach(), result.detach())))];
+    const [input] = this.savedTensors();
+    const x = input.detach();
+    const th = ops.tanh(x);
+    const one = ones(x.shape, { dtype: x.dtype, device: x.device });
+    return [ops.mul(gradOutputs[0], ops.sub(one, ops.mul(th, th)))];
   }
 }
 
 export class SigmoidBackward extends AutogradNode {
   constructor() { super(1); }
   apply(gradOutputs) {
-    const [result] = this.savedTensors();
-    const one = ones(result.shape, { dtype: result.dtype, device: result.device });
-    return [ops.mul(gradOutputs[0], ops.mul(result.detach(), ops.sub(one, result.detach())))];
+    const [input] = this.savedTensors();
+    const x = input.detach();
+    const sig = ops.sigmoid(x);
+    const one = ones(x.shape, { dtype: x.dtype, device: x.device });
+    return [ops.mul(gradOutputs[0], ops.mul(sig, ops.sub(one, sig)))];
   }
 }
 
