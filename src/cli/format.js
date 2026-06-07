@@ -14,6 +14,10 @@ export function formatValue(value) {
   }
   if (value instanceof Module) return value.toString();
   if (value instanceof CompiledProgramView) return value.toString();
+  if (typeof value === 'function') {
+    const name = value._langName || value.name || 'anonymous';
+    return `<fn ${name}>`;
+  }
   if (Array.isArray(value)) return JSON.stringify(value);
   if (value === undefined) return '';
   if (typeof value === 'string') return value;

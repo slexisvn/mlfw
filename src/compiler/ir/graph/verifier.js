@@ -1,6 +1,6 @@
-import { TensorType, TupleType, TokenType, typeToString, DYNAMIC } from '../graph/types.js';
-import { Value, BlockArgument } from '../graph/value.js';
-import { registry } from '../graph/ops.js';
+import { TensorType, TupleType, TokenType, typeToString, DYNAMIC } from './types.js';
+import { Value, BlockArgument } from './value.js';
+import { registry } from './ops.js';
 
 export class VerificationError {
   constructor(message, op = null, func = null) {

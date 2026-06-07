@@ -1,5 +1,6 @@
 import { ForKind } from '../../compiler/ir/tensor/nodes.js';
 import { wasmType, wasmLoad, wasmStore, wasmBytes, isDtypeFloat, isDtypeInt } from '../dtype_map.js';
+import { inferDtype } from '../../compiler/ir/lir/nodes.js';
 
 export class WasmCodegen {
   constructor(target) {
@@ -14,7 +15,7 @@ export class WasmCodegen {
     this._defaultDtype = 'f32';
   }
 
-  generate(primFunc) {
+  generate(func) {
     this._lines = [];
     this._indent = 0;
     this._locals.clear();
@@ -22,16 +23,34 @@ export class WasmCodegen {
     this._imports.clear();
     this._bufferOffsets.clear();
     this._totalMemBytes = 0;
-    this._primFunc = primFunc;
+    this._primFunc = func;
+    this._wasmAcc = null;
+    this._waccCounter = 0;
 
-    this._layoutBuffers(primFunc);
-    this._scanMathImports(primFunc.body);
+    const isLIR = func.type === 'LIRFunc';
+
+    if (isLIR) {
+      for (const [name, offset] of func.metadata.memoryLayout.bufferOffsets) {
+        this._bufferOffsets.set(name, offset);
+      }
+      this._totalMemBytes = func.metadata.memoryLayout.totalBytes;
+      for (const [name, info] of func.metadata.externCalls) {
+        const sig = this._mathImportSig(name, info.argCount);
+        this._imports.set(name, sig);
+      }
+      for (const [name, dtype] of func.metadata.locals) {
+        this._ensureLocal(name, wasmType(dtype));
+      }
+    } else {
+      this._layoutBuffers(func);
+      this._scanMathImports(func.body);
+    }
 
     const paramNames = [];
-    for (const [, buf] of primFunc.bufferMap) {
+    for (const [, buf] of func.bufferMap) {
       paramNames.push(buf.name);
     }
-    for (const sp of primFunc.shapeParams) {
+    for (const sp of func.shapeParams) {
       paramNames.push(sp.name);
     }
 
@@ -46,32 +65,35 @@ export class WasmCodegen {
     }
 
     const paramDecls = [];
-    for (const [, buf] of primFunc.bufferMap) {
+    for (const [, buf] of func.bufferMap) {
       paramDecls.push('(param i32)');
     }
     const shapeParamEntries = [];
-    for (const sp of primFunc.shapeParams) {
+    for (const sp of func.shapeParams) {
       paramDecls.push('(param i32)');
       this._ensureLocal(sp.name, 'i32');
       shapeParamEntries.push(sp.name);
     }
-    this._emit('(func (export "' + primFunc.name + '") ' + paramDecls.join(' '));
+    this._emit('(func (export "' + func.name + '") ' + paramDecls.join(' '));
     this._indent++;
 
+    if (!isLIR) {
+      this._prescanLocals(func.body);
+    }
+
     const localDecls = [];
-    this._prescanLocals(primFunc.body);
     for (const [name, type] of this._locals) {
       localDecls.push('(local $' + name + ' ' + type + ')');
     }
     if (localDecls.length > 0) this._emit(localDecls.join(' '));
 
-    const bufCount = primFunc.bufferMap.size;
+    const bufCount = func.bufferMap.size;
     for (let i = 0; i < shapeParamEntries.length; i++) {
       this._emit('(local.get ' + (bufCount + i) + ')');
       this._emit('local.set $' + shapeParamEntries[i]);
     }
 
-    this._visitNode(primFunc.body);
+    this._visitNode(func.body);
 
     this._indent--;
     this._emit(')');
@@ -79,140 +101,13 @@ export class WasmCodegen {
     this._emit(')');
 
     return {
-      name: primFunc.name,
+      name: func.name,
       wat: this._lines.join('\n'),
       memoryPages: memPages,
       bufferOffsets: new Map(this._bufferOffsets),
       imports: this._imports,
       params: paramNames,
     };
-  }
-
-  _layoutBuffers(primFunc) {
-    let offset = 0;
-    const align = 16;
-    this._dynamicBuffers = new Set();
-    for (const [, buf] of primFunc.bufferMap) {
-      offset = Math.ceil(offset / align) * align;
-      this._bufferOffsets.set(buf.name, offset);
-      const numel = buf.numel();
-      if (numel > 0) {
-        offset += numel * wasmBytes(buf.dtype);
-      } else {
-        this._dynamicBuffers.add(buf.name);
-        offset += 65536;
-      }
-    }
-
-    const tempBuffers = new Map();
-    this._collectBuffers(primFunc.body, tempBuffers);
-    for (const [name, buf] of tempBuffers) {
-      if (this._bufferOffsets.has(name)) continue;
-      offset = Math.ceil(offset / align) * align;
-      this._bufferOffsets.set(name, offset);
-      const numel = buf.numel();
-      if (numel > 0) {
-        offset += numel * wasmBytes(buf.dtype);
-      } else {
-        this._dynamicBuffers.add(buf.name);
-        offset += 65536;
-      }
-    }
-
-    this._totalMemBytes = offset;
-  }
-
-  _collectBuffers(node, result) {
-    const stack = [node];
-    while (stack.length > 0) {
-      const n = stack.pop();
-      if (!n) continue;
-      if ((n.type === 'BufferStoreNode' || n.type === 'BufferLoadNode') && n.buffer) {
-        result.set(n.buffer.name, n.buffer);
-      }
-      if (n.body) stack.push(n.body);
-      if (n.stmts) for (const s of n.stmts) stack.push(s);
-      if (n.thenBody) stack.push(n.thenBody);
-      if (n.elseBody) stack.push(n.elseBody);
-      if (n.initBody) stack.push(n.initBody);
-      if (n.value && typeof n.value === 'object' && n.value.type) stack.push(n.value);
-      if (n.reads) for (const r of n.reads) if (r.buffer) result.set(r.buffer.name, r.buffer);
-      if (n.writes) for (const w of n.writes) if (w.buffer) result.set(w.buffer.name, w.buffer);
-    }
-  }
-
-  _scanMathImports(node) {
-    const stack = [node];
-    while (stack.length > 0) {
-      const n = stack.pop();
-      if (!n || typeof n !== 'object') continue;
-      if (n.type === 'CallExternNode' && n.externName) {
-        const name = n.externName;
-        if (name !== 'sqrt' && name !== 'min' && name !== 'max') {
-          const sig = this._mathImportSig(name, n.args.length);
-          this._imports.set(name, sig);
-        }
-      }
-      if (n.body) stack.push(n.body);
-      if (n.stmts) for (const s of n.stmts) stack.push(s);
-      if (n.thenBody) stack.push(n.thenBody);
-      if (n.elseBody) stack.push(n.elseBody);
-      if (n.initBody) stack.push(n.initBody);
-      if (n.value && typeof n.value === 'object' && n.value.type) stack.push(n.value);
-      if (n.a && typeof n.a === 'object') stack.push(n.a);
-      if (n.b && typeof n.b === 'object') stack.push(n.b);
-      if (n.expr && typeof n.expr === 'object') stack.push(n.expr);
-      if (n.args) for (const a of n.args) if (typeof a === 'object') stack.push(a);
-      if (n.indices) for (const idx of n.indices) if (typeof idx === 'object') stack.push(idx);
-      if (n.condition && typeof n.condition === 'object') stack.push(n.condition);
-    }
-  }
-
-  _mathImportSig(name, argc) {
-    const params = Array(argc).fill('(param f32)').join(' ');
-    return `${params} (result f32)`;
-  }
-
-  _prescanLocals(node) {
-    this._waccCounter = 0;
-    const stack = [node];
-    while (stack.length > 0) {
-      const n = stack.pop();
-      if (!n) continue;
-      if (n.type === 'ForNode') {
-        this._ensureLocal(n.loopVar.name, 'i32');
-        const accDtype = this._accPatternDtype(n);
-        if (accDtype) {
-          this._ensureLocal('_wacc_' + (++this._waccCounter), wasmType(accDtype));
-        }
-      }
-      if (n.type === 'BlockNode') {
-        for (const bind of n.iterVars) {
-          if (bind.iterVar) this._ensureLocal(bind.iterVar.name, 'i32');
-        }
-      }
-      if (n.type === 'LetStmtNode' && n.variable) {
-        this._ensureLocal(n.variable.name, wasmType(n.variable.dtype || this._defaultDtype));
-      }
-      if (n.body) stack.push(n.body);
-      if (n.stmts) for (const s of n.stmts) stack.push(s);
-      if (n.thenBody) stack.push(n.thenBody);
-      if (n.elseBody) stack.push(n.elseBody);
-      if (n.initBody) stack.push(n.initBody);
-    }
-    this._waccCounter = 0;
-  }
-
-  _accPatternDtype(forNode) {
-    let block = forNode.body;
-    if (!block || block.type !== 'BlockNode') return null;
-    const inner = block.body;
-    if (!inner || inner.type !== 'BufferStoreNode') return null;
-    const val = inner.value;
-    if (!val || val.type !== 'MathOpNode' || val.op !== '+') return null;
-    if (val.a && val.a.type === 'BufferLoadNode' && val.a.buffer.name === inner.buffer.name) return inner.buffer.dtype;
-    if (val.b && val.b.type === 'BufferLoadNode' && val.b.buffer.name === inner.buffer.name) return inner.buffer.dtype;
-    return null;
   }
 
   _ensureLocal(name, type) {
@@ -245,6 +140,9 @@ export class WasmCodegen {
         case 'BlockNode': this._visitBlock(node); return;
         case 'IfThenElseNode': this._visitIf(node); return;
         case 'BufferStoreNode': this._visitStore(node); return;
+        case 'LIRFlatStoreNode': this._visitLIRFlatStore(node); return;
+        case 'LIRBindingsNode': this._visitLIRBindings(node); return;
+        case 'LIRAccumulatorNode': this._visitLIRAccumulator(node); return;
         case 'WhileNode': this._visitWhile(node); return;
         case 'EvaluateNode': return;
         default: return;
@@ -282,6 +180,91 @@ export class WasmCodegen {
     }
 
     this._emitForLoop(varName, node.extent, node.body);
+  }
+
+  _visitLIRFlatStore(node) {
+    if (this._wasmAcc && node.buffer.name === this._wasmAcc.bufName) {
+      this._emitCoerced(node.value, isDtypeFloat(node.dtype));
+      this._emit('local.set $' + this._wasmAcc.local);
+      return;
+    }
+    this._emitFlatAddr(node.buffer, node.offsetExpr);
+    this._emitCoerced(node.value, isDtypeFloat(node.dtype));
+    this._emit(wasmStore(node.dtype));
+  }
+
+  _visitLIRBindings(node) {
+    for (const bind of node.bindings) {
+      this._emitExpr(bind.expr);
+      this._emit(`local.set $${bind.name}`);
+    }
+    this._visitNode(node.body);
+  }
+
+  _visitLIRAccumulator(node) {
+    const accLocal = node.localName;
+    const dtype = node.dtype;
+    this._ensureLocal(accLocal, wasmType(dtype));
+
+    this._emitExpr(node.initLoad);
+    this._emit('local.set $' + accLocal);
+
+    const prevAcc = this._wasmAcc;
+    this._wasmAcc = {
+      local: accLocal,
+      bufName: node.flushStore.buffer.name,
+    };
+
+    const varName = node.loopVar.name;
+    this._emit('(i32.const 0)');
+    this._emit('local.set $' + varName);
+    this._emit('(block $break_' + varName);
+    this._indent++;
+    this._emit('(loop $loop_' + varName);
+    this._indent++;
+    this._emit('(local.get $' + varName + ')');
+    this._emitExpr(node.extent);
+    this._emit('i32.ge_s');
+    this._emit('br_if $break_' + varName);
+
+    this._emit('(local.get $' + accLocal + ')');
+    this._emitCoerced(node.body, isDtypeFloat(dtype));
+    this._emit(isDtypeFloat(dtype) ? 'f32.add' : 'i32.add');
+    this._emit('local.set $' + accLocal);
+
+    this._emit('(local.get $' + varName + ')');
+    this._emit('(i32.const 1)');
+    this._emit('i32.add');
+    this._emit('local.set $' + varName);
+    this._emit('br $loop_' + varName);
+    this._indent--;
+    this._emit(')');
+    this._indent--;
+    this._emit(')');
+
+    this._emitFlatAddr(node.flushStore.buffer, node.flushStore.offsetExpr);
+    this._emit('(local.get $' + accLocal + ')');
+    this._emit(wasmStore(node.flushStore.dtype));
+
+    this._wasmAcc = prevAcc;
+  }
+
+  _emitFlatAddr(buffer, offsetExpr) {
+    const baseOffset = this._bufferOffsets.get(buffer.name) || 0;
+    const bytes = wasmBytes(buffer.dtype || 'f32');
+
+    if (!offsetExpr || (offsetExpr.type === 'IntImmNode' && offsetExpr.value === 0)) {
+      this._emit(`(i32.const ${baseOffset})`);
+      return;
+    }
+
+    this._emitExpr(offsetExpr);
+    this._emit(`(i32.const ${bytes})`);
+    this._emit('i32.mul');
+    if (baseOffset > 0) {
+      this._emit(`(i32.const ${baseOffset})`);
+      this._emit('i32.add');
+    }
   }
 
   _emitForLoop(varName, extent, body) {
@@ -454,6 +437,14 @@ export class WasmCodegen {
           this._emit(wasmLoad(node.buffer.dtype));
         }
         break;
+      case 'LIRFlatLoadNode':
+        if (this._wasmAcc && node.buffer.name === this._wasmAcc.bufName) {
+          this._emit('(local.get $' + this._wasmAcc.local + ')');
+        } else {
+          this._emitFlatAddr(node.buffer, node.offsetExpr);
+          this._emit(wasmLoad(node.dtype));
+        }
+        break;
       case 'MathOpNode':
         this._emitMathOp(node);
         break;
@@ -467,10 +458,11 @@ export class WasmCodegen {
         this._emitCallExtern(node);
         break;
       case 'IfThenElseNode': {
-        const resultIsFloat = isDtypeFloat(this._inferDtype(node.thenBody));
+        const resultDtype = node._dtype || inferDtype(node.thenBody);
+        const resultIsFloat = isDtypeFloat(resultDtype);
         const resultType = resultIsFloat ? 'f32' : 'i32';
         this._emitExpr(node.condition);
-        const condDtype = this._inferDtype(node.condition);
+        const condDtype = node.condition._dtype || inferDtype(node.condition);
         if (isDtypeFloat(condDtype)) {
           this._emit('(f32.const 0)');
           this._emit('f32.ne');
@@ -499,14 +491,15 @@ export class WasmCodegen {
 
   _emitCoerced(child, targetFloat) {
     this._emitExpr(child);
-    if (targetFloat && this._inferDtype(child) === 'i32') {
+    const childDtype = (child && child._dtype) || inferDtype(child);
+    if (targetFloat && childDtype === 'i32') {
       this._emit('f32.convert_i32_s');
     }
   }
 
   _emitMathOp(node) {
-    const da = this._inferDtype(node.a);
-    const db = node.b ? this._inferDtype(node.b) : da;
+    const da = (node.a && node.a._dtype) || inferDtype(node.a);
+    const db = node.b ? ((node.b._dtype) || inferDtype(node.b)) : da;
     const isFloat = isDtypeFloat(da) || isDtypeFloat(db);
     const prefix = isFloat ? 'f32' : 'i32';
 
@@ -543,8 +536,8 @@ export class WasmCodegen {
   }
 
   _emitCompare(node) {
-    const da = this._inferDtype(node.a);
-    const db = this._inferDtype(node.b);
+    const da = (node.a && node.a._dtype) || inferDtype(node.a);
+    const db = (node.b && node.b._dtype) || inferDtype(node.b);
     const isFloat = isDtypeFloat(da) || isDtypeFloat(db);
     const prefix = isFloat ? 'f32' : 'i32';
     this._emitCoerced(node.a, isFloat);
@@ -584,31 +577,139 @@ export class WasmCodegen {
     }
   }
 
-  _inferDtype(node) {
-    if (!node) return this._defaultDtype;
-    if (node.type === 'IntImmNode') return 'i32';
-    if (node.type === 'FloatImmNode') return 'f32';
-    if (node.type === 'BufferLoadNode') return node.buffer.dtype;
-    if (node.type === 'CastNode') return node.toDtype;
-    if (node.type === 'CallExternNode') return node.dtype || this._defaultDtype;
-    if (node.type === 'CompareNode') return 'i32';
-    if (node.type === 'VariableNode') {
-      const d = node.dtype || 'i32';
-      if (d === 'int32' || d === 'index') return 'i32';
-      if (d === 'float32') return 'f32';
-      return d;
-    }
-    if (node.type === 'MathOpNode') {
-      const da = this._inferDtype(node.a);
-      if (isDtypeFloat(da)) return da;
-      if (node.b) {
-        const db = this._inferDtype(node.b);
-        if (isDtypeFloat(db)) return db;
+  _mathImportSig(name, argc) {
+    const params = Array(argc).fill('(param f32)').join(' ');
+    return `${params} (result f32)`;
+  }
+
+  _constExtent(node) {
+    return node.type === 'IntImmNode' ? node.value : null;
+  }
+
+  _layoutBuffers(primFunc) {
+    let offset = 0;
+    const align = 16;
+    this._dynamicBuffers = new Set();
+    for (const [, buf] of primFunc.bufferMap) {
+      offset = Math.ceil(offset / align) * align;
+      this._bufferOffsets.set(buf.name, offset);
+      const numel = buf.numel();
+      if (numel > 0) {
+        offset += numel * wasmBytes(buf.dtype);
+      } else {
+        this._dynamicBuffers.add(buf.name);
+        offset += 65536;
       }
-      return da;
     }
-    if (node.type === 'IfThenElseNode') return this._inferDtype(node.thenBody);
-    return this._defaultDtype;
+
+    const tempBuffers = new Map();
+    this._collectBuffers(primFunc.body, tempBuffers);
+    for (const [name, buf] of tempBuffers) {
+      if (this._bufferOffsets.has(name)) continue;
+      offset = Math.ceil(offset / align) * align;
+      this._bufferOffsets.set(name, offset);
+      const numel = buf.numel();
+      if (numel > 0) {
+        offset += numel * wasmBytes(buf.dtype);
+      } else {
+        this._dynamicBuffers.add(buf.name);
+        offset += 65536;
+      }
+    }
+
+    this._totalMemBytes = offset;
+  }
+
+  _collectBuffers(node, result) {
+    const stack = [node];
+    while (stack.length > 0) {
+      const n = stack.pop();
+      if (!n) continue;
+      if ((n.type === 'BufferStoreNode' || n.type === 'BufferLoadNode') && n.buffer) {
+        result.set(n.buffer.name, n.buffer);
+      }
+      if (n.body) stack.push(n.body);
+      if (n.stmts) for (const s of n.stmts) stack.push(s);
+      if (n.thenBody) stack.push(n.thenBody);
+      if (n.elseBody) stack.push(n.elseBody);
+      if (n.initBody) stack.push(n.initBody);
+      if (n.value && typeof n.value === 'object' && n.value.type) stack.push(n.value);
+      if (n.reads) for (const r of n.reads) if (r.buffer) result.set(r.buffer.name, r.buffer);
+      if (n.writes) for (const w of n.writes) if (w.buffer) result.set(w.buffer.name, w.buffer);
+    }
+  }
+
+  _scanMathImports(node) {
+    const stack = [node];
+    while (stack.length > 0) {
+      const n = stack.pop();
+      if (!n || typeof n !== 'object') continue;
+      if (n.type === 'CallExternNode' && n.externName) {
+        const name = n.externName;
+        if (name !== 'sqrt' && name !== 'min' && name !== 'max') {
+          const sig = this._mathImportSig(name, n.args.length);
+          this._imports.set(name, sig);
+        }
+      }
+      if (n.body) stack.push(n.body);
+      if (n.stmts) for (const s of n.stmts) stack.push(s);
+      if (n.thenBody) stack.push(n.thenBody);
+      if (n.elseBody) stack.push(n.elseBody);
+      if (n.initBody) stack.push(n.initBody);
+      if (n.value && typeof n.value === 'object' && n.value.type) stack.push(n.value);
+      if (n.a && typeof n.a === 'object') stack.push(n.a);
+      if (n.b && typeof n.b === 'object') stack.push(n.b);
+      if (n.expr && typeof n.expr === 'object') stack.push(n.expr);
+      if (n.args) for (const a of n.args) if (typeof a === 'object') stack.push(a);
+      if (n.indices) for (const idx of n.indices) if (typeof idx === 'object') stack.push(idx);
+      if (n.condition && typeof n.condition === 'object') stack.push(n.condition);
+    }
+  }
+
+  _prescanLocals(node) {
+    this._waccCounter = 0;
+    const stack = [node];
+    while (stack.length > 0) {
+      const n = stack.pop();
+      if (!n) continue;
+      if (n.type === 'ForNode') {
+        this._ensureLocal(n.loopVar.name, 'i32');
+        const accDtype = this._accPatternDtype(n);
+        if (accDtype) {
+          this._ensureLocal('_wacc_' + (++this._waccCounter), wasmType(accDtype));
+        }
+      }
+      if (n.type === 'BlockNode') {
+        for (const bind of n.iterVars) {
+          if (bind.iterVar) this._ensureLocal(bind.iterVar.name, 'i32');
+        }
+      }
+      if (n.type === 'LetStmtNode' && n.variable) {
+        this._ensureLocal(n.variable.name, wasmType(n.variable.dtype || this._defaultDtype));
+      }
+      if (n.body) stack.push(n.body);
+      if (n.stmts) for (const s of n.stmts) stack.push(s);
+      if (n.thenBody) stack.push(n.thenBody);
+      if (n.elseBody) stack.push(n.elseBody);
+      if (n.initBody) stack.push(n.initBody);
+    }
+    this._waccCounter = 0;
+  }
+
+  _accPatternDtype(forNode) {
+    let block = forNode.body;
+    if (!block || block.type !== 'BlockNode') return null;
+    const inner = block.body;
+    if (!inner || inner.type !== 'BufferStoreNode') return null;
+    const val = inner.value;
+    if (!val || val.type !== 'MathOpNode' || val.op !== '+') return null;
+    if (val.a && val.a.type === 'BufferLoadNode' && val.a.buffer.name === inner.buffer.name) return inner.buffer.dtype;
+    if (val.b && val.b.type === 'BufferLoadNode' && val.b.buffer.name === inner.buffer.name) return inner.buffer.dtype;
+    return null;
+  }
+
+  _inferDtype(node) {
+    return (node && node._dtype) || inferDtype(node);
   }
 
   _detectWasmAcc(forNode) {
@@ -656,9 +757,5 @@ export class WasmCodegen {
     if (node.type === 'IntImmNode') return String(node.value);
     if (node.type === 'MathOpNode') return '(' + this._exprKey(node.a) + node.op + (node.b ? this._exprKey(node.b) : '') + ')';
     return '?';
-  }
-
-  _constExtent(node) {
-    return node.type === 'IntImmNode' ? node.value : null;
   }
 }

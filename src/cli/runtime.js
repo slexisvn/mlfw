@@ -15,6 +15,11 @@ class Environment {
     this.values = new Map();
   }
   define(name, value) { this.values.set(name, value); return value; }
+  set(name, value) {
+    if (this.values.has(name)) { this.values.set(name, value); return value; }
+    if (this.parent) return this.parent.set(name, value);
+    throw new Error(`Cannot assign to undefined variable '${name}'`);
+  }
   get(name) {
     if (this.values.has(name)) return this.values.get(name);
     if (this.parent) return this.parent.get(name);
@@ -42,11 +47,15 @@ export class TensorLangRuntime {
     return [...this.global.values.keys()];
   }
 
+  getVariable(name) {
+    try { return this.global.get(name); } catch { return undefined; }
+  }
+
   evaluateProgram(program, env) {
     let value;
     for (const statement of program.body) {
       const result = this.evaluateStatement(statement, env);
-      if (result && result.__return) return result;
+      if (result && (result.__return || result.__break || result.__continue)) return result;
       value = result;
     }
     return value;
@@ -55,8 +64,19 @@ export class TensorLangRuntime {
   evaluateStatement(node, env) {
     return this.withNode(node, () => {
       if (node.type === 'Assign') return env.define(node.name, this.evaluateExpression(node.value, env));
+      if (node.type === 'CompoundAssign') {
+        const current = env.get(node.name);
+        const right = this.evaluateExpression(node.value, env);
+        return env.set(node.name, this.applyBinary(node.op, current, right));
+      }
+      if (node.type === 'If') return this.evaluateIf(node, env);
+      if (node.type === 'For') return this.evaluateFor(node, env);
+      if (node.type === 'While') return this.evaluateWhile(node, env);
+      if (node.type === 'Break') return { __break: true };
+      if (node.type === 'Continue') return { __continue: true };
       if (node.type === 'ExpressionStatement') return this.evaluateExpression(node.expression, env);
       if (node.type === 'Return') return { __return: true, value: this.evaluateExpression(node.value, env) };
+      if (node.type === 'FunctionDeclaration') return this.defineFunction(node, env);
       if (node.type === 'ModelDeclaration') return this.defineModel(node, env);
       if (node.type === 'ForwardDeclaration') throw new Error('forward can only appear inside model');
       throw new Error(`Unsupported statement ${node.type}`);
@@ -70,9 +90,20 @@ export class TensorLangRuntime {
       if (node.type === 'Array') return node.elements.map(x => this.evaluateExpression(x, env));
       if (node.type === 'Unary') {
         const value = this.evaluateExpression(node.value, env);
-        return node.op === '-' ? this.applyUnaryMinus(value) : value;
+        if (node.op === '-') return this.applyUnaryMinus(value);
+        if (node.op === 'not') return this.applyUnaryNot(value);
+        return value;
       }
       if (node.type === 'Binary') {
+        if (node.op === 'and' || node.op === 'or') {
+          const left = this.evaluateExpression(node.left, env);
+          if (!isTensorValue(left)) {
+            if (node.op === 'and') return left ? this.evaluateExpression(node.right, env) : left;
+            return left ? left : this.evaluateExpression(node.right, env);
+          }
+          const right = this.evaluateExpression(node.right, env);
+          return this.applyBinary(node.op, left, right);
+        }
         return this.applyBinary(node.op, this.evaluateExpression(node.left, env), this.evaluateExpression(node.right, env));
       }
       if (node.type === 'Member') {
@@ -106,6 +137,14 @@ export class TensorLangRuntime {
     return -value;
   }
 
+  applyUnaryNot(value) {
+    if (isTensorValue(value)) {
+      const one = fw.ones(value.shape, { dtype: value.dtype, device: value.device });
+      return fw.sub(one, value);
+    }
+    return !value;
+  }
+
   applyBinary(op, left, right) {
     const tensor = isTensorValue(left) || isTensorValue(right);
     if (!tensor) {
@@ -120,14 +159,81 @@ export class TensorLangRuntime {
       if (op === '<=') return left <= right;
       if (op === '>') return left > right;
       if (op === '>=') return left >= right;
+      if (op === 'and') return left && right;
+      if (op === 'or') return left || right;
     }
     [left, right] = promoteScalars(left, right);
     const fn = {
       '+': fw.add, '-': fw.sub, '*': fw.mul, '/': fw.div, '**': fw.pow, '@': fw.matmul,
       '==': fw.eq, '!=': fw.ne, '<': fw.lt, '<=': fw.le, '>': fw.gt, '>=': fw.ge,
+      'and': fw.mul,
+      'or': (a, b) => fw.sub(fw.add(a, b), fw.mul(a, b)),
     }[op];
     if (!fn) throw new Error(`Unsupported operator '${op}'`);
     return fn(left, right);
+  }
+
+  isTruthy(value) {
+    if (isTensorValue(value)) {
+      if (value.numel !== 1) throw new Error('Condition tensor must be a scalar (single element)');
+      return Boolean(value.item());
+    }
+    return Boolean(value);
+  }
+
+  evaluateIf(node, env) {
+    if (this.isTruthy(this.evaluateExpression(node.condition, env))) {
+      return this.evaluateProgram({ type: 'Program', body: node.body }, env);
+    }
+    for (const elif of node.elifs) {
+      if (this.isTruthy(this.evaluateExpression(elif.condition, env))) {
+        return this.evaluateProgram({ type: 'Program', body: elif.body }, env);
+      }
+    }
+    if (node.elseBody) {
+      return this.evaluateProgram({ type: 'Program', body: node.elseBody }, env);
+    }
+    return undefined;
+  }
+
+  evaluateFor(node, env) {
+    const iterable = this.evaluateExpression(node.iterable, env);
+    if (!Array.isArray(iterable)) throw new Error('for...in expects an array');
+    let value;
+    for (const item of iterable) {
+      env.define(node.variable, item);
+      const result = this.evaluateProgram({ type: 'Program', body: node.body }, env);
+      if (result && result.__return) return result;
+      if (result && result.__break) break;
+      if (result && result.__continue) continue;
+      value = result;
+    }
+    return value;
+  }
+
+  evaluateWhile(node, env) {
+    let value;
+    while (this.isTruthy(this.evaluateExpression(node.condition, env))) {
+      const result = this.evaluateProgram({ type: 'Program', body: node.body }, env);
+      if (result && result.__return) return result;
+      if (result && result.__break) break;
+      if (result && result.__continue) continue;
+      value = result;
+    }
+    return value;
+  }
+
+  defineFunction(node, declarationEnv) {
+    const runtime = this;
+    const func = (...args) => {
+      const callEnv = new Environment(declarationEnv);
+      node.params.forEach((name, i) => callEnv.define(name, args[i]));
+      const result = runtime.evaluateProgram({ type: 'Program', body: node.body }, callEnv);
+      return result && result.__return ? result.value : result;
+    };
+    func._langName = node.name;
+    declarationEnv.define(node.name, func);
+    return func;
   }
 
   defineModel(node, declarationEnv) {
@@ -162,6 +268,7 @@ export class TensorLangRuntime {
       }
       return new LangModel();
     };
+    factory._langName = node.name;
     declarationEnv.define(node.name, factory);
     return factory;
   }

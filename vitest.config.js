@@ -58,7 +58,7 @@ export default defineConfig({
         'src/compiler/passes/pass_manager.js',
         'src/compiler/passes/lowering/lowering_registry.js',
         'src/compiler/pipeline/trace.js',
-        'src/compiler/cost_model/features.js',
+        'src/compiler/autotune/features.js',
         'src/compiler/schedule/dep_analysis.js',
         'src/compiler/schedule/schedule_state.js',
         'src/compiler/schedule/validator.js',

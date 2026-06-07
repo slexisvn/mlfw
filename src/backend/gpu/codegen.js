@@ -1,5 +1,6 @@
 import { ForKind } from '../../compiler/ir/tensor/nodes.js';
 import { cType, cPtrType, cLiteralSuffix, cMathFunc } from '../dtype_map.js';
+import { inferDtype } from '../../compiler/ir/lir/nodes.js';
 
 export class GPUKernel {
   constructor(name, source, blockDim, gridDim, sharedMemBytes, params) {
@@ -24,30 +25,42 @@ export class GPUCodegen {
     this._defaultDtype = 'f32';
   }
 
-  generate(primFunc) {
+  generate(func) {
     this._indent = 0;
     this._lines = [];
     this._threadBindings.clear();
     this._sharedBuffers = [];
     this._blockDim = [1, 1, 1];
     this._gridDim = [1, 1, 1];
-    this._primFunc = primFunc;
+    this._primFunc = func;
 
-    this._scanBindings(primFunc.body);
+    const isLIR = func.type === 'LIRFunc';
+
+    if (isLIR) {
+      for (const [tag, entries] of func.metadata.threadBindings) {
+        this._threadBindings.set(tag, entries);
+        for (const entry of entries) {
+          if (!entry.isDynamic) this._applyBindingDim(tag, entry.extent);
+        }
+      }
+      this._sharedBuffers = func.metadata.sharedBuffers;
+    } else {
+      this._scanBindings(func.body);
+    }
 
     const paramParts = [];
     const paramNames = [];
-    for (const [, buf] of primFunc.bufferMap) {
+    for (const [, buf] of func.bufferMap) {
       paramNames.push(buf.name);
       paramParts.push(`${cPtrType(buf.dtype)} ${buf.name}`);
       this._defaultDtype = buf.dtype;
     }
-    for (const sp of primFunc.shapeParams) {
+    for (const sp of func.shapeParams) {
       paramNames.push(sp.name);
       paramParts.push(`int ${sp.name}`);
     }
 
-    this._emit(`__global__ void ${primFunc.name}(${paramParts.join(', ')}) {`);
+    this._emit(`__global__ void ${func.name}(${paramParts.join(', ')}) {`);
     this._indent++;
 
     for (const buf of this._sharedBuffers) {
@@ -55,11 +68,17 @@ export class GPUCodegen {
       this._emit(`__shared__ ${cType(buf.dtype)} ${buf.name}[${numel > 0 ? numel : 1}];`);
     }
 
-    for (const [tag, info] of this._threadBindings) {
-      this._emit(`const int ${info.varName} = ${tag};`);
+    const declaredVars = new Set();
+    for (const [tag, bindings] of this._threadBindings) {
+      for (const info of bindings) {
+        if (!declaredVars.has(info.varName)) {
+          this._emit(`const int ${info.varName} = ${tag};`);
+          declaredVars.add(info.varName);
+        }
+      }
     }
 
-    this._visitNode(primFunc.body);
+    this._visitNode(func.body);
     this._indent--;
     this._emit('}');
 
@@ -76,7 +95,7 @@ export class GPUCodegen {
     ];
 
     return new GPUKernel(
-      primFunc.name,
+      func.name,
       this._lines.join('\n'),
       blockDim, gridDim,
       this._sharedBuffers.reduce((sum, b) => sum + Math.max(b.sizeInBytes(), 0), 0),
@@ -92,7 +111,12 @@ export class GPUCodegen {
       if (node.type === 'ForNode' && node.kind === ForKind.THREAD_BINDING && node.threadTag) {
         const extent = node.extent.type === 'IntImmNode' ? node.extent.value : 0;
         const isDynamic = node.extent.type !== 'IntImmNode';
-        this._threadBindings.set(node.threadTag, { varName: node.loopVar.name, extent, isDynamic, extentNode: node.extent });
+        const entry = { varName: node.loopVar.name, extent, isDynamic, extentNode: node.extent };
+        if (!this._threadBindings.has(node.threadTag)) {
+          this._threadBindings.set(node.threadTag, [entry]);
+        } else {
+          this._threadBindings.get(node.threadTag).push(entry);
+        }
         if (!isDynamic) this._applyBindingDim(node.threadTag, extent);
       }
       if (node.type === 'AllocateNode' && node.scope === 'shared') {
@@ -111,8 +135,8 @@ export class GPUCodegen {
     const prefix = tag.substring(0, idx);
     const axis = tag.charCodeAt(idx + 1) - 120;
     if (axis < 0 || axis > 2) return;
-    if (prefix === 'threadIdx') this._blockDim[axis] = extent;
-    else if (prefix === 'blockIdx') this._gridDim[axis] = extent;
+    if (prefix === 'threadIdx') this._blockDim[axis] = Math.max(this._blockDim[axis], extent);
+    else if (prefix === 'blockIdx') this._gridDim[axis] = Math.max(this._gridDim[axis], extent);
   }
 
   _emit(line) {
@@ -137,6 +161,9 @@ export class GPUCodegen {
         case 'IfThenElseNode': this._visitIfStmt(cur); continue;
         case 'LetStmtNode': this._visitLetStmtNode(cur); continue;
         case 'BufferStoreNode': this._visitBufferStoreNode(cur); continue;
+        case 'LIRFlatStoreNode': this._visitLIRFlatStore(cur); continue;
+        case 'LIRBindingsNode': this._visitLIRBindings(cur); continue;
+        case 'LIRAccumulatorNode': this._visitLIRAccumulator(cur); continue;
         case 'WhileNode': this._visitWhileNode(cur); continue;
         case 'EvaluateNode': continue;
         default: continue;
@@ -213,6 +240,33 @@ export class GPUCodegen {
     this._emit(`${node.buffer.name}[${this._flatIndex(node.buffer, node.indices)}] = ${this._exprToC(node.value)};`);
   }
 
+  _visitLIRFlatStore(node) {
+    this._emit(`${node.buffer.name}[${this._exprToC(node.offsetExpr)}] = ${this._exprToC(node.value)};`);
+  }
+
+  _visitLIRBindings(node) {
+    for (const bind of node.bindings) {
+      this._emit(`const int ${bind.name} = ${this._exprToC(bind.expr)};`);
+    }
+    this._visitNode(node.body);
+  }
+
+  _visitLIRAccumulator(node) {
+    const accVar = node.localName;
+    const dtype = node.dtype || this._defaultDtype;
+    this._emit(`${cType(dtype)} ${accVar} = ${this._exprToC(node.initLoad)};`);
+
+    const varName = node.loopVar.name;
+    const extent = this._exprToC(node.extent);
+    this._emit(`for (int ${varName} = 0; ${varName} < ${extent}; ${varName}++) {`);
+    this._indent++;
+    this._emit(`${accVar} = (${accVar} + ${this._exprToC(node.body)});`);
+    this._indent--;
+    this._emit('}');
+
+    this._emit(`${node.flushStore.buffer.name}[${this._exprToC(node.flushStore.offsetExpr)}] = ${accVar};`);
+  }
+
   _exprToC(node) {
     if (!node) return '0';
     switch (node.type) {
@@ -220,6 +274,7 @@ export class GPUCodegen {
       case 'FloatImmNode': return this._emitFloatLiteral(node.value);
       case 'VariableNode': return node.name;
       case 'BufferLoadNode': return `${node.buffer.name}[${this._flatIndex(node.buffer, node.indices)}]`;
+      case 'LIRFlatLoadNode': return `${node.buffer.name}[${this._exprToC(node.offsetExpr)}]`;
       case 'MathOpNode': {
         const a = this._exprToC(node.a);
         if (!node.b) return `(${node.op}${a})`;

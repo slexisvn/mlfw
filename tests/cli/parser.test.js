@@ -15,16 +15,83 @@ describe('Tensor Lang parser', () => {
     expect(expression.items[1]).toMatchObject({ type: 'Slice' });
   });
 
+  it('parses logical operators with correct precedence', () => {
+    const expr = parse('a == 1 and b == 2').body[0].expression;
+    expect(expr).toMatchObject({ type: 'Binary', op: 'and' });
+    expect(expr.left).toMatchObject({ type: 'Binary', op: '==' });
+    expect(expr.right).toMatchObject({ type: 'Binary', op: '==' });
+  });
+
+  it('parses not with higher precedence than and', () => {
+    const expr = parse('not a and b').body[0].expression;
+    expect(expr).toMatchObject({ type: 'Binary', op: 'and' });
+    expect(expr.left).toMatchObject({ type: 'Unary', op: 'not' });
+  });
+
+  it('parses or with lower precedence than and', () => {
+    const expr = parse('a and b or c').body[0].expression;
+    expect(expr).toMatchObject({ type: 'Binary', op: 'or' });
+    expect(expr.left).toMatchObject({ type: 'Binary', op: 'and' });
+  });
+
+  it('parses compound assignment operators', () => {
+    const stmt = parse('x += 1').body[0];
+    expect(stmt).toMatchObject({ type: 'CompoundAssign', name: 'x', op: '+' });
+  });
+
+  it('parses **= compound assignment', () => {
+    const stmt = parse('x **= 2').body[0];
+    expect(stmt).toMatchObject({ type: 'CompoundAssign', name: 'x', op: '**' });
+  });
+
+  it('parses function declarations', () => {
+    const stmt = parse('fn add(a, b): return a + b').body[0];
+    expect(stmt).toMatchObject({ type: 'FunctionDeclaration', name: 'add', params: ['a', 'b'] });
+    expect(stmt.body).toHaveLength(1);
+    expect(stmt.body[0]).toMatchObject({ type: 'Return' });
+  });
+
+  it('parses function declarations with no params', () => {
+    const stmt = parse('fn greet(): print("hi")').body[0];
+    expect(stmt).toMatchObject({ type: 'FunctionDeclaration', name: 'greet', params: [] });
+  });
+
+  it('parses if/elif/else', () => {
+    const stmt = parse(`if a:
+  b
+elif c:
+  d
+else:
+  e`).body[0];
+    expect(stmt).toMatchObject({ type: 'If' });
+    expect(stmt.elifs).toHaveLength(1);
+    expect(stmt.elseBody).toHaveLength(1);
+  });
+
+  it('parses for...in', () => {
+    const stmt = parse('for i in items: print(i)').body[0];
+    expect(stmt).toMatchObject({ type: 'For', variable: 'i' });
+    expect(stmt.iterable).toMatchObject({ type: 'Identifier', name: 'items' });
+  });
+
+  it('parses while', () => {
+    const stmt = parse('while x > 0: x -= 1').body[0];
+    expect(stmt).toMatchObject({ type: 'While' });
+    expect(stmt.condition).toMatchObject({ type: 'Binary', op: '>' });
+  });
+
+  it('parses break and continue', () => {
+    const program = parse('break\ncontinue');
+    expect(program.body[0]).toMatchObject({ type: 'Break' });
+    expect(program.body[1]).toMatchObject({ type: 'Continue' });
+  });
+
   it('accepts trailing commas in arrays, calls, parameters, and indices', () => {
-    expect(() => parse(`
-      model MLP(input, hidden,) {
-        forward x, {
-          return tensor([
-            [1, 2],
-            [3, 4],
-          ],)[0,]
-        }
-      }
-    `)).not.toThrow();
+    expect(() => parse(`model MLP(input, hidden,):
+  forward x,:
+    return tensor([
+      [1, 2],
+      [3, 4],
+    ],)[0,]`)).not.toThrow();
   });
 });

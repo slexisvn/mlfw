@@ -1,5 +1,5 @@
-import { TensorType, TupleType, TokenType, FunctionType, typeToString, DYNAMIC } from '../graph/types.js';
-import { BlockArgument } from '../graph/value.js';
+import { TensorType, TupleType, TokenType, FunctionType, typeToString, DYNAMIC } from './types.js';
+import { BlockArgument } from './value.js';
 
 export class IRPrinter {
   constructor(options = {}) {

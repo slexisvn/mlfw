@@ -1,11 +1,15 @@
 import { tokenize, LangSyntaxError } from './tokenizer.js';
 
 const PRECEDENCE = {
-  '==': 1, '!=': 1, '<': 1, '<=': 1, '>': 1, '>=': 1,
-  '+': 2, '-': 2,
-  '*': 3, '/': 3, '@': 3,
-  '**': 4,
+  'or': 1,
+  'and': 2,
+  '==': 3, '!=': 3, '<': 3, '<=': 3, '>': 3, '>=': 3,
+  '+': 4, '-': 4,
+  '*': 5, '/': 5, '@': 5,
+  '**': 6,
 };
+
+const COMPOUND_OPS = { '+=': '+', '-=': '-', '*=': '*', '/=': '/', '**=': '**', '@=': '@' };
 
 export function parse(source) {
   return new Parser(tokenize(source)).parseProgram();
@@ -20,7 +24,7 @@ class Parser {
   parseProgram(stop = null) {
     const body = [];
     this.skipLines();
-    while (!this.at('eof') && !(stop && this.atValue(stop))) {
+    while (!this.at('eof') && !(stop && (this.atValue(stop) || this.at(stop)))) {
       body.push(this.parseStatement());
       this.skipLines();
     }
@@ -31,41 +35,111 @@ class Parser {
     const start = this.current();
     if (this.atIdentifier('model') && this.peek(1).type === 'identifier') return this.parseModel();
     if (this.atIdentifier('forward')) return this.parseForward();
+    if (this.atIdentifier('fn')) return this.parseFunctionDeclaration();
+    if (this.atIdentifier('if')) return this.parseIf();
+    if (this.atIdentifier('for')) return this.parseFor();
+    if (this.atIdentifier('while')) return this.parseWhile();
+    if (this.atIdentifier('break')) { this.next(); return this.locate({ type: 'Break' }, start); }
+    if (this.atIdentifier('continue')) { this.next(); return this.locate({ type: 'Continue' }, start); }
     if (this.atIdentifier('return')) {
       this.next();
       return this.locate({ type: 'Return', value: this.parseExpression() }, start);
     }
 
-    if (this.at('identifier') && this.peek(1).value === '=') {
-      const name = this.next().value;
-      this.expectValue('=');
-      return this.locate({ type: 'Assign', name, value: this.parseExpression() }, start);
+    if (this.at('identifier')) {
+      const nextVal = this.peek(1).value;
+      if (nextVal === '=') {
+        const name = this.next().value;
+        this.expectValue('=');
+        return this.locate({ type: 'Assign', name, value: this.parseExpression() }, start);
+      }
+      if (COMPOUND_OPS[nextVal] !== undefined) {
+        const name = this.next().value;
+        const opToken = this.next();
+        const op = COMPOUND_OPS[opToken.value];
+        return this.locate({ type: 'CompoundAssign', name, op, value: this.parseExpression() }, start);
+      }
     }
     return this.locate({ type: 'ExpressionStatement', expression: this.parseExpression() }, start);
+  }
+
+  parseBlock() {
+    this.expectValue(':');
+    // One-line form: colon followed by statement on same line
+    if (!this.at('newline') && !this.at('indent') && !this.at('eof')) {
+      return [this.parseStatement()];
+    }
+    // Multi-line form: colon + newline + INDENT ... DEDENT
+    this.skipLines();
+    this.expect('indent');
+    const body = this.parseProgram('dedent').body;
+    this.expect('dedent');
+    return body;
+  }
+
+  parseIf() {
+    const start = this.expectIdentifier('if');
+    const condition = this.parseExpression();
+    const body = this.parseBlock();
+    const elifs = [];
+    this.skipLines();
+    while (this.atIdentifier('elif')) {
+      this.next();
+      const elifCond = this.parseExpression();
+      const elifBody = this.parseBlock();
+      this.skipLines();
+      elifs.push({ condition: elifCond, body: elifBody });
+    }
+    let elseBody = null;
+    if (this.atIdentifier('else')) {
+      this.next();
+      elseBody = this.parseBlock();
+    }
+    return this.locate({ type: 'If', condition, body, elifs, elseBody }, start);
+  }
+
+  parseFor() {
+    const start = this.expectIdentifier('for');
+    const variable = this.expect('identifier').value;
+    this.expectIdentifier('in');
+    const iterable = this.parseExpression();
+    const body = this.parseBlock();
+    return this.locate({ type: 'For', variable, iterable, body }, start);
+  }
+
+  parseWhile() {
+    const start = this.expectIdentifier('while');
+    const condition = this.parseExpression();
+    const body = this.parseBlock();
+    return this.locate({ type: 'While', condition, body }, start);
+  }
+
+  parseFunctionDeclaration() {
+    const start = this.expectIdentifier('fn');
+    const name = this.expect('identifier').value;
+    const params = this.parseNameList();
+    const body = this.parseBlock();
+    return this.locate({ type: 'FunctionDeclaration', name, params, body }, start);
   }
 
   parseModel() {
     const start = this.expectIdentifier('model');
     const name = this.expect('identifier').value;
     const params = this.parseNameList();
-    this.expectValue('{');
-    const body = this.parseProgram('}');
-    this.expectValue('}');
-    return this.locate({ type: 'ModelDeclaration', name, params, body: body.body }, start);
+    const body = this.parseBlock();
+    return this.locate({ type: 'ModelDeclaration', name, params, body }, start);
   }
 
   parseForward() {
     const start = this.expectIdentifier('forward');
     const params = [];
-    while (!this.atValue('{')) {
+    while (!this.atValue(':')) {
       params.push(this.expect('identifier').value);
       if (!this.matchValue(',')) break;
-      if (this.atValue('{')) break;
+      if (this.atValue(':')) break;
     }
-    this.expectValue('{');
-    const body = this.parseProgram('}');
-    this.expectValue('}');
-    return this.locate({ type: 'ForwardDeclaration', params, body: body.body }, start);
+    const body = this.parseBlock();
+    return this.locate({ type: 'ForwardDeclaration', params, body }, start);
   }
 
   parseNameList() {
@@ -111,7 +185,11 @@ class Parser {
     const token = this.current();
     if (token.value === '-' || token.value === '+') {
       this.next();
-      return this.locate({ type: 'Unary', op: token.value, value: this.parseExpression(5) }, token);
+      return this.locate({ type: 'Unary', op: token.value, value: this.parseExpression(7) }, token);
+    }
+    if (token.type === 'identifier' && token.value === 'not') {
+      this.next();
+      return this.locate({ type: 'Unary', op: 'not', value: this.parseExpression(7) }, token);
     }
     if (token.type === 'number' || token.type === 'string') {
       this.next();

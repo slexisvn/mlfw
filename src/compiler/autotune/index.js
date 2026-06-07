@@ -2,3 +2,5 @@ export { SearchVariable, ScheduleSketch, getSketchesForBlock, createElementwiseC
 export { RandomSearch, EvolutionarySearch, SearchCandidate } from './search.js';
 export { TuningDatabase, TuningRecord } from './tuning_db.js';
 export { Autotuner, AutotuneConfig } from './autotuner.js';
+export { FeatureExtractor, ScheduleFeatures } from './features.js';
+export { AnalyticalCostModel, LearnedCostModel, CostEstimate } from './cost_model.js';

@@ -40,9 +40,10 @@ function collectBlockInfo(root, result, initialLoopStack) {
     if (node.type === 'ForNode') {
       stack.push({ node: node.body, loops: [...loops, node] });
     } else if (node.type === 'BlockNode') {
+      const writeRank = node.writes.length > 0 ? (node.writes[0].buffer.shape?.length || 0) : 0;
       result.set(node.name, {
         loopCount: loops.length,
-        hasReduction: node.initBody !== null,
+        hasReduction: node.initBody !== null || (node.writes.length > 0 && loops.length > writeRank),
         readBuffers: node.reads.map(r => r.buffer.name),
         writeBuffers: node.writes.map(r => r.buffer.name),
         loops: [...loops]
@@ -227,16 +228,25 @@ export class ReductionGPURule extends ScheduleRule {
       }
     }
 
-    if (spatialLoops.length > 0) {
-      const blockSize = Math.min(target.maxThreadsPerBlock, 256);
-      const extent = spatialLoops[0].extent;
-      if (extent.type === 'IntImmNode' && extent.value > blockSize) {
-        const [bx, tx] = schedule.split(spatialLoops[0], blockSize);
-        schedule.bindThread(bx, 'blockIdx.x');
-        schedule.bindThread(tx, 'threadIdx.x');
-      } else {
-        schedule.bindThread(spatialLoops[0], 'threadIdx.x');
+    if (spatialLoops.length === 0) return;
+
+    let fusedSpatial = spatialLoops[0];
+    for (let i = 1; i < spatialLoops.length; i++) {
+      const currentLoops = schedule.getLoops(blockName);
+      const next = currentLoops.find(l => l.loopVar.name === spatialLoops[i].loopVar.name);
+      if (next && findDirectChild(fusedSpatial, next)) {
+        fusedSpatial = schedule.fuseLoops(fusedSpatial, next);
       }
+    }
+
+    const blockSize = Math.min(target.maxThreadsPerBlock, 256);
+    const extent = fusedSpatial.extent;
+    if (extent.type === 'IntImmNode' && extent.value > blockSize) {
+      const [bx, tx] = schedule.split(fusedSpatial, blockSize);
+      schedule.bindThread(bx, 'blockIdx.x');
+      schedule.bindThread(tx, 'threadIdx.x');
+    } else {
+      schedule.bindThread(fusedSpatial, 'threadIdx.x');
     }
   }
 }

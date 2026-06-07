@@ -8,6 +8,10 @@ export class LangSyntaxError extends Error {
 }
 
 export function tokenize(source) {
+  return addIndentation(tokenizeRaw(source));
+}
+
+function tokenizeRaw(source) {
   const tokens = [];
   let i = 0;
   let line = 1;
@@ -84,13 +88,19 @@ export function tokenize(source) {
     }
 
     const l = line, c = column;
+    const three = source.slice(i, i + 3);
+    if (three === '**=') {
+      advance(); advance(); advance();
+      push('symbol', '**=', l, c);
+      continue;
+    }
     const two = source.slice(i, i + 2);
-    if (['**', '==', '!=', '<=', '>='].includes(two)) {
+    if (['**', '==', '!=', '<=', '>=', '+=', '-=', '*=', '/=', '@='].includes(two)) {
       advance(); advance();
       push('symbol', two, l, c);
       continue;
     }
-    if ('()[]{},.=:+-*/@<>'.includes(ch)) {
+    if ('()[],.=:+-*/@<>'.includes(ch)) {
       advance();
       push('symbol', ch, l, c);
       continue;
@@ -100,4 +110,70 @@ export function tokenize(source) {
 
   push('eof', null);
   return tokens;
+}
+
+function addIndentation(tokens) {
+  const result = [];
+  const indentStack = [0];
+  let bracketDepth = 0;
+  let afterColon = false;
+
+  for (let i = 0; i < tokens.length; i++) {
+    const tok = tokens[i];
+
+    // Handle EOF: emit remaining dedents, then eof
+    if (tok.type === 'eof') {
+      while (indentStack.length > 1) {
+        indentStack.pop();
+        result.push({ type: 'dedent', value: null, line: tok.line, column: tok.column });
+      }
+      result.push(tok);
+      break;
+    }
+
+    if (tok.value === '(' || tok.value === '[') bracketDepth++;
+    if (tok.value === ')' || tok.value === ']') bracketDepth--;
+
+    if (tok.type === 'newline') {
+      if (bracketDepth > 0) continue;
+
+      // Look ahead to find next non-blank line
+      let j = i + 1;
+      while (j < tokens.length && tokens[j].type === 'newline') j++;
+      if (j >= tokens.length || tokens[j].type === 'eof') {
+        result.push(tok);
+        while (indentStack.length > 1) {
+          indentStack.pop();
+          result.push({ type: 'dedent', value: null, line: tok.line, column: tok.column });
+        }
+        i = j - 1;
+        afterColon = false;
+        continue;
+      }
+
+      const nextCol = tokens[j].column;
+      const currentIndent = indentStack[indentStack.length - 1];
+
+      result.push(tok);
+
+      if (afterColon && nextCol > currentIndent) {
+        indentStack.push(nextCol);
+        result.push({ type: 'indent', value: null, line: tokens[j].line, column: tokens[j].column });
+      } else if (nextCol < currentIndent) {
+        while (indentStack.length > 1 && indentStack[indentStack.length - 1] > nextCol) {
+          indentStack.pop();
+          result.push({ type: 'dedent', value: null, line: tokens[j].line, column: tokens[j].column });
+        }
+      }
+
+      i = j - 1;
+      afterColon = false;
+      continue;
+    }
+
+    afterColon = (tok.value === ':');
+    result.push(tok);
+  }
+
+  return result;
 }

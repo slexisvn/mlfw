@@ -1,7 +1,7 @@
 import { Schedule, resetVarCounter } from '../schedule/schedule.js';
 import { ScheduleValidator } from '../schedule/validator.js';
-import { FeatureExtractor } from '../cost_model/features.js';
-import { AnalyticalCostModel, LearnedCostModel } from '../cost_model/cost_model.js';
+import { FeatureExtractor } from './features.js';
+import { AnalyticalCostModel, LearnedCostModel } from './cost_model.js';
 import { getSketchesForBlock } from './search_space.js';
 import { RandomSearch, EvolutionarySearch } from './search.js';
 import { TuningRecord, TuningDatabase } from './tuning_db.js';

@@ -38,6 +38,18 @@ EPILOGUE_TAG_LOWERERS.set('clamp', (expr, extraInputs, idx, out, epiIdx) => {
   ], out.dtype);
 });
 
+EPILOGUE_TAG_LOWERERS.set('neg', (expr) => new MathOpNode('-', expr));
+
+EPILOGUE_TAG_LOWERERS.set('exp', (expr, extraInputs, idx, out) => new CallExternNode('exp', [expr], out.dtype));
+
+EPILOGUE_TAG_LOWERERS.set('tanh', (expr, extraInputs, idx, out) => new CallExternNode('tanh', [expr], out.dtype));
+
+EPILOGUE_TAG_LOWERERS.set('sqrt', (expr, extraInputs, idx, out) => new CallExternNode('sqrt', [expr], out.dtype));
+
+EPILOGUE_TAG_LOWERERS.set('abs', (expr, extraInputs, idx, out) => new CallExternNode('abs', [expr], out.dtype));
+
+EPILOGUE_TAG_LOWERERS.set('log', (expr, extraInputs, idx, out) => new CallExternNode('log', [expr], out.dtype));
+
 EPILOGUE_TAG_LOWERERS.set('activation', (expr) => expr);
 
 export function register() {

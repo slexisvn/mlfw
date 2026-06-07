@@ -4,12 +4,28 @@ import { TensorLangRuntime } from './runtime.js';
 import { BANNER, handleReplCommand } from './help.js';
 import { formatDiagnostic } from './diagnostics.js';
 
-const KEYWORDS = new Set(['model', 'forward', 'return', 'true', 'false', 'null']);
-const COMMANDS = ['help', 'help tensor', 'help model', 'help compile', 'examples',
+const KEYWORDS = new Set([
+  'model', 'forward', 'return', 'true', 'false', 'null',
+  'and', 'or', 'not', 'fn',
+  'if', 'elif', 'else', 'for', 'in', 'while', 'break', 'continue',
+]);
+const BUILTINS = new Set([
+  'tensor', 'zeros', 'ones', 'empty', 'full', 'randn', 'arange', 'eye', 'linspace',
+  'zerosLike', 'onesLike', 'emptyLike', 'fullLike', 'randnLike',
+  'add', 'sub', 'mul', 'div', 'neg', 'pow', 'remainder', 'maximum', 'minimum',
+  'exp', 'log', 'sqrt', 'rsqrt', 'abs', 'sin', 'cos', 'tanh', 'sigmoid', 'relu',
+  'gelu', 'silu', 'sign', 'floor', 'ceil', 'eq', 'ne', 'lt', 'le', 'gt', 'ge',
+  'where', 'matmul', 'dot', 'cat', 'stack', 'clone', 'softmax', 'log_softmax',
+  'sum', 'mean', 'max', 'min', 'argmax', 'argmin', 'prod',
+  'reshape', 'transpose', 'permute', 'expand', 'slice', 'unsqueeze', 'squeeze',
+  'narrow', 'select', 'contiguous', 'detach', 'requires_grad', 'grad', 'backward',
+  'range', 'len', 'shape', 'dtype', 'print', 'trace', 'graph', 'compile',
+]);
+const COMMANDS = ['help', 'help tensor', 'help model', 'help fn', 'help control', 'help compile', 'examples',
   'example tensor', 'example linear', 'example custom', 'example compile', 'exit', 'quit'];
 
 export async function startRepl({ term = terminalKit.terminal } = {}) {
-  const write = text => term(String(text) + '\n');
+  const write = text => term.noFormat(String(text) + '\n');
   const runtime = new TensorLangRuntime({ output: write });
   const history = [];
   let buffer = '';
@@ -22,7 +38,7 @@ export async function startRepl({ term = terminalKit.terminal } = {}) {
     term(depth > 0 ? '^K...   ^:' : '^Kmlfw> ^:');
     const controller = term.inputField({
       history,
-      autoComplete: input => completeInput(input, runtime),
+      autoComplete: input => completeInput(input, runtime, buffer),
       autoCompleteHint: true,
       autoCompleteMenu: {
         style: term.brightBlack,
@@ -32,11 +48,10 @@ export async function startRepl({ term = terminalKit.terminal } = {}) {
       autoClosePairs: {
         '(': ')',
         '[': ']',
-        '{': '}',
         '"': '"',
         "'": "'",
       },
-      tokenRegExp: /#[^\n]*|"(?:\\.|[^"])*"|'(?:\\.|[^'])*'|\b\d+(?:\.\d+)?\b|\b[A-Za-z_]\w*\b|==|!=|<=|>=|\*\*|[^\s]/g,
+      tokenRegExp: /#[^\n]*|"(?:\\.|[^"])*"|'(?:\\.|[^'])*'|\b\d+(?:\.\d+)?\b|\b[A-Za-z_]\w*\b|\*\*=?|==|!=|<=|>=|[+\-*\/@]=|[^\s]/g,
       tokenHook,
     });
     const onKey = key => {
@@ -80,7 +95,14 @@ export async function startRepl({ term = terminalKit.terminal } = {}) {
     }
 
     buffer += line + '\n';
-    depth += braceDelta(line);
+
+    if (line.trim().endsWith(':')) {
+      depth = 1;
+    } else if (depth > 0 && line.trim() === '') {
+      depth = 0;
+    } else {
+      depth += bracketDelta(line);
+    }
     if (depth > 0) continue;
 
     try {
@@ -88,7 +110,7 @@ export async function startRepl({ term = terminalKit.terminal } = {}) {
       const text = formatValue(value);
       if (text) write(text);
     } catch (error) {
-      term.red(`${formatDiagnostic(error, buffer)}\n`);
+      term.red.noFormat(`${formatDiagnostic(error, buffer)}\n`);
     }
     buffer = '';
     depth = 0;
@@ -104,13 +126,35 @@ export function shutdownTerminal(term) {
   if (typeof term.styleReset === 'function') term.styleReset();
 }
 
-export function completeInput(input, runtime) {
+export function completeInput(input, runtime, buffer = '') {
+  // Dot completion: obj.prop
+  const dotMatch = input.match(/([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)?$/);
+  if (dotMatch) {
+    const obj = runtime.getVariable(dotMatch[1]);
+    if (obj != null && typeof obj === 'object') {
+      const propPrefix = dotMatch[2] || '';
+      const pre = input.slice(0, dotMatch.index) + dotMatch[1] + '.';
+      const props = Object.keys(obj)
+        .filter(k => !k.startsWith('_') && k !== 'constructor')
+        .filter(k => k.startsWith(propPrefix))
+        .sort();
+      if (props.length === 0) return input;
+      if (props.length === 1) return pre + props[0];
+      const common = commonPrefix(props);
+      if (common.length > propPrefix.length) return pre + common;
+      props.prefix = pre;
+      return props;
+    }
+    return input;
+  }
+
   const match = input.match(/[A-Za-z_][A-Za-z0-9_]*$/);
   if (!match) return input;
 
   const prefix = input.slice(0, match.index);
   const word = match[0];
-  const candidates = [...new Set([...COMMANDS, ...KEYWORDS, ...runtime.getCompletionNames()])]
+  const bufferNames = extractBufferNames(buffer);
+  const candidates = [...new Set([...COMMANDS, ...KEYWORDS, ...runtime.getCompletionNames(), ...bufferNames])]
     .filter(name => name.startsWith(word))
     .sort();
 
@@ -120,6 +164,23 @@ export function completeInput(input, runtime) {
   if (common.length > word.length) return prefix + common;
   candidates.prefix = prefix;
   return candidates;
+}
+
+function extractBufferNames(buffer) {
+  if (!buffer) return [];
+  const names = [];
+  for (const m of buffer.matchAll(/\b([A-Za-z_][A-Za-z0-9_]*)\s*=/g)) {
+    const name = m[1];
+    if (!KEYWORDS.has(name)) names.push(name);
+  }
+  // Also extract fn/model names and parameter names
+  for (const m of buffer.matchAll(/\b(?:fn|model)\s+([A-Za-z_][A-Za-z0-9_]*)/g)) {
+    names.push(m[1]);
+  }
+  for (const m of buffer.matchAll(/\bforward\s+([A-Za-z_][A-Za-z0-9_]*)/g)) {
+    names.push(m[1]);
+  }
+  return names;
 }
 
 function commonPrefix(values) {
@@ -133,14 +194,15 @@ function commonPrefix(values) {
 export function tokenHook(token, _isEnd, _previous, term) {
   if (token.startsWith('#')) return term.brightBlack;
   if ((token.startsWith('"') && token.endsWith('"')) || (token.startsWith("'") && token.endsWith("'"))) return term.green;
-  if (/^\d+(?:\.\d+)?$/.test(token)) return term.yellow;
-  if (KEYWORDS.has(token)) return term.brightMagenta;
-  if (/^(?:==|!=|<=|>=|\*\*|[+\-*/@=<>])$/.test(token)) return term.brightCyan;
-  if (/^[A-Z]/.test(token)) return term.brightBlue;
+  if (/^\d+(?:\.\d+)?$/.test(token)) return term.magenta;
+  if (KEYWORDS.has(token)) return term.brightBlue;
+  if (BUILTINS.has(token)) return term.yellow;
+  if (/^(?:\*\*=?|==|!=|<=|>=|[+\-*\/@][=]?|[=<>])$/.test(token)) return term.brightBlack;
+  if (/^[A-Z]/.test(token)) return term.cyan;
   return term;
 }
 
-function braceDelta(line) {
+function bracketDelta(line) {
   let depth = 0;
   let quote = null;
   for (let i = 0; i < line.length; i++) {
@@ -149,8 +211,8 @@ function braceDelta(line) {
       if (ch === '\\') i++;
       else if (ch === quote) quote = null;
     } else if (ch === '"' || ch === "'") quote = ch;
-    else if (ch === '{' || ch === '(' || ch === '[') depth++;
-    else if (ch === '}' || ch === ')' || ch === ']') depth--;
+    else if (ch === '(' || ch === '[') depth++;
+    else if (ch === ')' || ch === ']') depth--;
   }
   return depth;
 }

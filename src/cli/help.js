@@ -29,6 +29,8 @@ Compiler:
 More:
   help tensor
   help model
+  help fn
+  help control
   help compile
   examples`,
 
@@ -65,20 +67,63 @@ Autograd:
   output = model(x)
 
 Custom model:
-  model MLP(input, hidden, output) {
+  model MLP(input, hidden, output):
     fc1 = Linear(input, hidden)
     fc2 = Linear(hidden, output)
 
-    forward x {
+    forward x:
       x = relu(fc1(x))
       return fc2(x)
-    }
-  }
 
 
   net = MLP(2, 4, 1)
   x = randn([8, 2])
   output = net(x)`,
+
+  fn: `Function examples:
+  fn double(x):
+    return x * 2
+  double(5)
+
+  fn normalize(x):
+    return x / sum(x)
+  normalize(tensor([3, 1, 2]))
+
+Closure (captures outer variables):
+  scale = 10
+  fn scaled_add(a, b):
+    return (a + b) * scale
+
+Multi-statement:
+  fn describe(x):
+    print(shape(x))
+    print(dtype(x))
+    return mean(x)`,
+
+  control: `Conditionals:
+  if x > 0:
+    print("positive")
+  elif x == 0:
+    print("zero")
+  else:
+    print("negative")
+
+For loop:
+  for i in range(5):
+    print(i)
+  for x in [1, 2, 3]:
+    total += x
+
+While loop:
+  x = 10
+  while x > 0:
+    x -= 1
+
+Break and continue:
+  for i in range(100):
+    if i > 10: break
+    if i == 5: continue
+    print(i)`,
 
   compile: `Compile a neural network:
   model = Sequential(Linear(2, 4), ReLU(), Linear(4, 1))
@@ -114,15 +159,13 @@ y`,
 x = randn([8, 2])
 model(x)`,
 
-  custom: `model MLP(input, hidden, output) {
+  custom: `model MLP(input, hidden, output):
   fc1 = Linear(input, hidden)
   fc2 = Linear(hidden, output)
 
-  forward x {
+  forward x:
     x = relu(fc1(x))
     return fc2(x)
-  }
-}
 
 model = MLP(2, 4, 1)
 x = randn([8, 2])

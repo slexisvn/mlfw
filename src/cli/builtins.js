@@ -3,7 +3,7 @@ import * as ops from '../tensor/ops/ops.js';
 import { Tensor } from '../tensor/core/tensor.js';
 import { SymbolicTensor } from '../tracing/symbolic_tensor.js';
 import { CompiledProgramView, formatTrace, formatValue } from './format.js';
-import { printModule } from '../compiler/ir/printer/printer.js';
+import { printModule } from '../compiler/ir/graph/printer.js';
 
 const FACTORIES = [
   'tensor', 'zeros', 'ones', 'empty', 'full', 'randn', 'arange', 'eye', 'linspace',
@@ -63,6 +63,25 @@ export function installBuiltins(runtime, define) {
   define('backward', (value, gradient = undefined) => {
     value.backward(gradient);
     return value;
+  });
+
+  define('range', (...args) => {
+    let start = 0, stop, step = 1;
+    if (args.length === 1) stop = args[0];
+    else if (args.length === 2) { start = args[0]; stop = args[1]; }
+    else { start = args[0]; stop = args[1]; step = args[2]; }
+    const result = [];
+    if (step > 0) for (let i = start; i < stop; i += step) result.push(i);
+    else if (step < 0) for (let i = start; i > stop; i += step) result.push(i);
+    else throw new Error('range() step cannot be zero');
+    return result;
+  });
+
+  define('len', value => {
+    if (Array.isArray(value)) return value.length;
+    if (typeof value === 'string') return value.length;
+    if (value instanceof Tensor || value instanceof SymbolicTensor) return value.shape[0];
+    throw new Error('len() expects an array, string, or tensor');
   });
 
   define('shape', value => value.shape);

@@ -1,5 +1,6 @@
 import { ForKind } from '../../compiler/ir/tensor/nodes.js';
 import { jsTypedArray, isJSMathFunc, isDtypeInt } from '../dtype_map.js';
+import { inferDtype } from '../../compiler/ir/lir/nodes.js';
 
 export class CPUCodegen {
   constructor(target) {
@@ -9,36 +10,53 @@ export class CPUCodegen {
     this._loopStack = [];
   }
 
-  generate(primFunc) {
+  generate(func) {
     this._indent = 0;
     this._lines = [];
-    this._primFunc = primFunc;
     this._aliases = new Map();
+    this._accTarget = null;
+    this._accVar = null;
+    this._accCounter = 0;
+
+    const isLIR = func.type === 'LIRFunc';
 
     const paramBuffers = new Set();
     const paramNames = [];
-    for (const [, buf] of primFunc.bufferMap) {
+    for (const [, buf] of func.bufferMap) {
       paramNames.push(buf.name);
       paramBuffers.add(buf.name);
     }
-    for (const sp of primFunc.shapeParams) {
+    for (const sp of func.shapeParams) {
       paramNames.push(sp.name);
     }
     this._paramBuffers = paramBuffers;
 
-    const usedBuffers = new Map();
-    const allocatedBuffers = new Set();
-    this._scanTree(primFunc.body, usedBuffers, allocatedBuffers);
+    let usedBuffers, allocatedBuffers, zeroBuffers, constantBuffers;
 
-    this._zeroBuffers = this._findZeroOnlyBuffers(primFunc.body, paramBuffers);
+    if (isLIR) {
+      usedBuffers = func.metadata.usedBuffers;
+      allocatedBuffers = func.metadata.allocatedBuffers;
+      zeroBuffers = func.metadata.zeroBuffers;
+      constantBuffers = func.metadata.constantBuffers;
+    } else {
+      usedBuffers = new Map();
+      allocatedBuffers = new Set();
+      this._scanTree(func.body, usedBuffers, allocatedBuffers);
+      zeroBuffers = this._findZeroOnlyBuffers(func.body, paramBuffers);
+      constantBuffers = this._constantBuffers;
+    }
+
+    this._zeroBuffers = zeroBuffers;
+    this._constantBuffers = constantBuffers;
     this._localBuffers = new Set();
+    this._primFunc = func;
 
-    this._emit(`function ${primFunc.name}(${paramNames.join(', ')}) {`);
+    this._emit(`function ${func.name}(${paramNames.join(', ')}) {`);
     this._indent++;
 
     for (const [bufName, buf] of usedBuffers) {
-      if (this._zeroBuffers.has(bufName)) continue;
-      if (this._constantBuffers.has(bufName)) continue;
+      if (zeroBuffers.has(bufName)) continue;
+      if (constantBuffers.has(bufName)) continue;
       if (!paramBuffers.has(bufName) && !allocatedBuffers.has(bufName)) {
         const numel = buf.numel();
         if (numel > 0) {
@@ -58,43 +76,11 @@ export class CPUCodegen {
       }
     }
 
-    this._visitNode(primFunc.body);
+    this._visitNode(func.body);
     this._indent--;
     this._emit('}');
 
     return this._cleanupSource(this._lines.join('\n'));
-  }
-
-  _scanTree(root, usedBuffers, allocatedBuffers) {
-    const stack = [root];
-    while (stack.length > 0) {
-      const node = stack.pop();
-      if (!node || typeof node !== 'object') continue;
-      switch (node.type) {
-        case 'BufferStoreNode':
-        case 'BufferLoadNode':
-          if (node.buffer) usedBuffers.set(node.buffer.name, node.buffer);
-          break;
-        case 'AllocateNode':
-          if (node.buffer) allocatedBuffers.add(node.buffer.name);
-          break;
-      }
-      if (node.body) stack.push(node.body);
-      if (node.value && typeof node.value === 'object' && node.value.type) stack.push(node.value);
-      if (node.stmts) for (const s of node.stmts) stack.push(s);
-      if (node.thenBody) stack.push(node.thenBody);
-      if (node.elseBody) stack.push(node.elseBody);
-      if (node.initBody) stack.push(node.initBody);
-      if (node.condition && typeof node.condition === 'object' && node.condition.type) stack.push(node.condition);
-      if (node.a && typeof node.a === 'object' && node.a.type) stack.push(node.a);
-      if (node.b && typeof node.b === 'object' && node.b.type) stack.push(node.b);
-      if (node.expr && typeof node.expr === 'object' && node.expr.type) stack.push(node.expr);
-      if (node.args) for (const a of node.args) { if (typeof a === 'object' && a !== null && a.type) stack.push(a); }
-      if (node.indices) for (const idx of node.indices) { if (typeof idx === 'object' && idx !== null && idx.type) stack.push(idx); }
-      if (node.reads) for (const r of node.reads) { if (r.buffer) usedBuffers.set(r.buffer.name, r.buffer); }
-      if (node.writes) for (const w of node.writes) { if (w.buffer) usedBuffers.set(w.buffer.name, w.buffer); }
-      if (node.iterVars) for (const iv of node.iterVars) { if (iv.binding && typeof iv.binding === 'object' && iv.binding.type) stack.push(iv.binding); }
-    }
   }
 
   _emit(line) {
@@ -128,6 +114,9 @@ export class CPUCodegen {
         case 'BlockNode': this._visitBlockNode(node); return;
         case 'IfThenElseNode': this._visitIfThenElseStmt(node); return;
         case 'BufferStoreNode': this._visitBufferStoreNode(node); return;
+        case 'LIRFlatStoreNode': this._visitLIRFlatStore(node); return;
+        case 'LIRBindingsNode': this._visitLIRBindings(node); return;
+        case 'LIRAccumulatorNode': this._visitLIRAccumulator(node); return;
         case 'WhileNode': this._visitWhileNode(node); return;
         case 'EvaluateNode': return;
         default: return;
@@ -192,6 +181,53 @@ export class CPUCodegen {
     this._loopStack.pop();
     this._indent--;
     this._emit('}');
+  }
+
+  _visitLIRFlatStore(node) {
+    if (this._zeroBuffers && this._zeroBuffers.has(node.buffer.name)) return;
+    if (this._constantBuffers && this._constantBuffers.has(node.buffer.name)) return;
+    if (this._accTarget && node.buffer.name === this._accTarget.bufName
+        && this._exprToJS(node.offsetExpr) === this._accTarget.idxExpr) {
+      this._emit(this._accVar + ' = ' + this._exprToJS(node.value) + ';');
+      return;
+    }
+    this._emit(node.buffer.name + '[' + this._exprToJS(node.offsetExpr) + '] = ' + this._exprToJS(node.value) + ';');
+  }
+
+  _visitLIRBindings(node) {
+    for (const bind of node.bindings) {
+      const expr = this._exprToJS(bind.expr);
+      this._aliases.set(bind.name, expr);
+    }
+    this._visitNode(node.body);
+  }
+
+  _visitLIRAccumulator(node) {
+    const accVar = node.localName;
+    const initExpr = this._exprToJS(node.initLoad);
+    this._emit('let ' + accVar + ' = ' + initExpr + ';');
+
+    const prevAcc = this._accTarget;
+    const prevVar = this._accVar;
+    this._accTarget = {
+      bufName: node.flushStore.buffer.name,
+      idxExpr: this._exprToJS(node.flushStore.offsetExpr),
+    };
+    this._accVar = accVar;
+
+    const varName = node.loopVar.name;
+    const extent = this._exprToJS(node.extent);
+    this._emit('for (let ' + varName + ' = 0; ' + varName + ' < ' + extent + '; ' + varName + '++) {');
+    this._indent++;
+    this._loopStack.push(varName);
+    this._emit(accVar + ' = (' + accVar + ' + ' + this._exprToJS(node.body) + ');');
+    this._loopStack.pop();
+    this._indent--;
+    this._emit('}');
+
+    this._emit(node.flushStore.buffer.name + '[' + this._accTarget.idxExpr + '] = ' + accVar + ';');
+    this._accTarget = prevAcc;
+    this._accVar = prevVar;
   }
 
   _detectReductionAcc(forNode) {
@@ -311,6 +347,21 @@ export class CPUCodegen {
             vals.push(this._accVar);
           } else {
             vals.push(node.buffer.name + '[' + this._flatIndex(node.buffer, node.indices) + ']');
+          }
+          continue;
+        }
+
+        case 'LIRFlatLoadNode': {
+          work.pop();
+          if (this._zeroBuffers && this._zeroBuffers.has(node.buffer.name)) {
+            vals.push('0');
+          } else if (this._constantBuffers && this._constantBuffers.has(node.buffer.name)) {
+            vals.push(String(this._constantBuffers.get(node.buffer.name)));
+          } else if (this._accTarget && node.buffer.name === this._accTarget.bufName
+                     && this._exprToJS(node.offsetExpr) === this._accTarget.idxExpr) {
+            vals.push(this._accVar);
+          } else {
+            vals.push(node.buffer.name + '[' + this._exprToJS(node.offsetExpr) + ']');
           }
           continue;
         }
@@ -486,9 +537,46 @@ export class CPUCodegen {
         const isZero = (val.type === 'FloatImmNode' && val.value === 0) || (val.type === 'IntImmNode' && val.value === 0);
         return isZero;
       }
+      if (cur.type === 'LIRFlatStoreNode') {
+        const val = cur.value;
+        const isZero = (val.type === 'FloatImmNode' && val.value === 0) || (val.type === 'IntImmNode' && val.value === 0);
+        return isZero;
+      }
       return false;
     }
     return false;
+  }
+
+  _scanTree(root, usedBuffers, allocatedBuffers) {
+    const stack = [root];
+    while (stack.length > 0) {
+      const node = stack.pop();
+      if (!node || typeof node !== 'object') continue;
+      switch (node.type) {
+        case 'BufferStoreNode':
+        case 'BufferLoadNode':
+          if (node.buffer) usedBuffers.set(node.buffer.name, node.buffer);
+          break;
+        case 'AllocateNode':
+          if (node.buffer) allocatedBuffers.add(node.buffer.name);
+          break;
+      }
+      if (node.body) stack.push(node.body);
+      if (node.value && typeof node.value === 'object' && node.value.type) stack.push(node.value);
+      if (node.stmts) for (const s of node.stmts) stack.push(s);
+      if (node.thenBody) stack.push(node.thenBody);
+      if (node.elseBody) stack.push(node.elseBody);
+      if (node.initBody) stack.push(node.initBody);
+      if (node.condition && typeof node.condition === 'object' && node.condition.type) stack.push(node.condition);
+      if (node.a && typeof node.a === 'object' && node.a.type) stack.push(node.a);
+      if (node.b && typeof node.b === 'object' && node.b.type) stack.push(node.b);
+      if (node.expr && typeof node.expr === 'object' && node.expr.type) stack.push(node.expr);
+      if (node.args) for (const a of node.args) { if (typeof a === 'object' && a !== null && a.type) stack.push(a); }
+      if (node.indices) for (const idx of node.indices) { if (typeof idx === 'object' && idx !== null && idx.type) stack.push(idx); }
+      if (node.reads) for (const r of node.reads) { if (r.buffer) usedBuffers.set(r.buffer.name, r.buffer); }
+      if (node.writes) for (const w of node.writes) { if (w.buffer) usedBuffers.set(w.buffer.name, w.buffer); }
+      if (node.iterVars) for (const iv of node.iterVars) { if (iv.binding && typeof iv.binding === 'object' && iv.binding.type) stack.push(iv.binding); }
+    }
   }
 
   _findZeroOnlyBuffers(root, paramBuffers) {
@@ -528,113 +616,5 @@ export class CPUCodegen {
       }
     }
     return result;
-  }
-
-  _optimizeSource(src) {
-    const lines = src.split('\n');
-    const allocRe = /^\s*const (\w+) = new \w+Array\(\d+\);\s*$/;
-    const tempBufs = new Set();
-    const writtenValues = new Map();
-
-    for (const line of lines) {
-      const am = line.match(allocRe);
-      if (am) tempBufs.add(am[1]);
-    }
-
-    for (const buf of tempBufs) {
-      const writeRe = new RegExp('^\\s*' + buf + '\\[.+\\]\\s*=\\s*(.+);\\s*$');
-      const values = new Set();
-      for (const line of lines) {
-        const wm = line.match(writeRe);
-        if (wm) values.add(wm[1].trim());
-      }
-      if (values.size === 1 && values.has('0')) {
-        writtenValues.set(buf, '0');
-      }
-    }
-
-    const zeroOnlyBufs = new Set();
-    for (const [buf, val] of writtenValues) {
-      if (val !== '0') continue;
-      let readInNonTrivial = false;
-      const readRe = new RegExp(buf + '\\[[^\\]]+\\]');
-      for (const line of lines) {
-        if (readRe.test(line) && !line.match(new RegExp('^\\s*' + buf + '\\['))) {
-          readInNonTrivial = true;
-          break;
-        }
-      }
-      if (readInNonTrivial) zeroOnlyBufs.add(buf);
-    }
-
-    if (zeroOnlyBufs.size === 0) return src;
-
-    const result = [];
-    let skipDepth = 0;
-    let skipping = null;
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-
-      if (skipping) {
-        for (const ch of line) {
-          if (ch === '{') skipDepth++;
-          if (ch === '}') skipDepth--;
-        }
-        if (skipDepth <= 0) { skipping = null; skipDepth = 0; }
-        continue;
-      }
-
-      const am = line.match(allocRe);
-      if (am && zeroOnlyBufs.has(am[1])) continue;
-
-      let isZeroWrite = false;
-      for (const buf of zeroOnlyBufs) {
-        if (line.match(new RegExp('^\\s*' + buf + '\\[.+\\]\\s*=\\s*0;'))) {
-          isZeroWrite = true;
-          break;
-        }
-      }
-      if (isZeroWrite) continue;
-
-      let isForLoopForZeroBuf = false;
-      if (/^\s*for\s*\(/.test(line)) {
-        let blockLines = '';
-        let depth = 0;
-        for (let j = i; j < Math.min(i + 8, lines.length); j++) {
-          blockLines += lines[j] + '\n';
-          for (const ch of lines[j]) {
-            if (ch === '{') depth++;
-            if (ch === '}') depth--;
-          }
-          if (depth <= 0 && j > i) break;
-        }
-        for (const buf of zeroOnlyBufs) {
-          if (blockLines.includes(buf + '[') && blockLines.includes('= 0;')) {
-            const nonZeroWrite = blockLines.match(new RegExp(buf + '\\[.+\\]\\s*=\\s*(?!0;)'));
-            if (!nonZeroWrite) {
-              isForLoopForZeroBuf = true;
-              skipDepth = 0;
-              for (const ch of line) {
-                if (ch === '{') skipDepth++;
-                if (ch === '}') skipDepth--;
-              }
-              if (skipDepth > 0) skipping = buf;
-              break;
-            }
-          }
-        }
-      }
-      if (isForLoopForZeroBuf) continue;
-
-      let optimizedLine = line;
-      for (const buf of zeroOnlyBufs) {
-        const re = new RegExp(buf + '\\[[^\\]]+\\]', 'g');
-        optimizedLine = optimizedLine.replace(re, '0');
-      }
-      result.push(optimizedLine);
-    }
-
-    return result.join('\n');
   }
 }

@@ -20,6 +20,12 @@ const EPILOGUE_TAG_TABLE = new Map([
   ['mul',     () => 'scale'],
   ['maximum', () => 'relu'],
   ['clamp',   () => 'clamp'],
+  ['neg',     () => 'neg'],
+  ['exp',     () => 'exp'],
+  ['tanh',    () => 'tanh'],
+  ['sqrt',    () => 'sqrt'],
+  ['abs',     () => 'abs'],
+  ['log',     () => 'log'],
 ]);
 
 function resolveOtherOperand(op, chainSet) {

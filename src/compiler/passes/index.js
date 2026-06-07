@@ -7,6 +7,5 @@ export { ConstantFoldPass } from './simplify/constant_fold.js';
 export { CSEPass } from './simplify/cse.js';
 export { DCEPass } from './simplify/dce.js';
 export { FusionPass } from './fusion/fusion_pass.js';
-export { SchedulePlanningPass } from './schedule_pass.js';
 export { lowerGraphToPrimFunc, registerLoweringRule, LoweringContext } from './lowering/graph_to_tensor.js';
 export { MemoryPlanner, MemoryPlan } from './memory/memory_planning.js';

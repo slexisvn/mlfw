@@ -21,15 +21,16 @@ import { BackendPipeline } from '../../backend/pipeline.js';
 import { RuntimeModule } from '../runtime/runtime.js';
 import { Autotuner } from '../autotune/autotuner.js';
 import { TensorVerifier } from '../ir/tensor/verifier.js';
-import { verifyModule, verifyFunction } from '../ir/verifier/verifier.js';
+import { verifyModule, verifyFunction } from '../ir/graph/verifier.js';
 import { CalibrationCollector } from '../analysis/calibration.js';
 import { DecompositionPass } from '../passes/decompose/decomposition_pass.js';
 import { RematerializationPass } from '../passes/memory/rematerialization.js';
 import { GraphPartitionPass, PartitionMaterializationPass } from '../passes/partition/partition_pass.js';
 import { TargetFeatures } from '../../backend/target.js';
 import { TraceLog, TraceLevel, CompilationError } from './trace.js';
-import { IRPrinter } from '../ir/printer/printer.js';
+import { IRPrinter } from '../ir/graph/printer.js';
 import { printTensorIR } from '../ir/tensor/printer.js';
+import { lowerToLIR } from '../passes/lowering/tensor_to_lir.js';
 
 function spread(obj) { return obj && typeof obj === 'object' ? obj : {}; }
 
@@ -173,7 +174,9 @@ export class Compiler {
       this._verifyAll(primFuncs, errors, failed, resilient);
     }
 
-    const runtimeModule = this._codegen(primFuncs, trace, errors, failed, resilient);
+    const lirFuncs = this._lowerToLIR(primFuncs, trace, errors, failed, resilient);
+
+    const runtimeModule = this._codegen(lirFuncs, trace, errors, failed, resilient);
 
     trace.phaseEnd('compile', performance.now() - t0);
 
@@ -423,6 +426,29 @@ export class Compiler {
         }
       }
     }
+  }
+
+  _lowerToLIR(primFuncs, trace, errors, failed, resilient) {
+    trace.phaseStart('lirLowering');
+    const t0 = performance.now();
+    const lirFuncs = [];
+    for (const pf of primFuncs) {
+      if (failed.has(pf.name)) continue;
+      try {
+        const ft0 = performance.now();
+        const lirFunc = lowerToLIR(pf, this.config.target);
+        trace.functionEvent('lirLowering', pf.name, { durationMs: performance.now() - ft0 });
+        lirFuncs.push(lirFunc);
+      } catch (e) {
+        const err = new CompilationError('lirLowering', pf.name, e.message);
+        errors.push(err);
+        failed.add(pf.name);
+        trace.errorEvent('lirLowering', pf.name, e.message);
+        if (!resilient) break;
+      }
+    }
+    trace.phaseEnd('lirLowering', performance.now() - t0);
+    return lirFuncs;
   }
 
   _codegen(primFuncs, trace, errors, failed, resilient) {
