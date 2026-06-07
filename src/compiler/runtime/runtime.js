@@ -5,6 +5,12 @@ async function getWebGPURuntime() {
   return _webgpuMod;
 }
 
+let _wasmPoolMod = null;
+async function getWasmPool() {
+  if (!_wasmPoolMod) _wasmPoolMod = await import('./wasm_pool.js');
+  return _wasmPoolMod;
+}
+
 const TYPED_ARRAY_CTORS = {
   'f16':  Float32Array,
   'f32':  Float32Array,
@@ -146,10 +152,11 @@ function instantiateWasm(kernel) {
     memory: instance.exports.memory,
     bufferOffsets: kernel.metadata.bufferOffsets,
     funcName: kernel.name,
+    binary,
   };
 }
 
-function runWasmKernel(wasmInstance, name, tensorArgs, shapeValues) {
+function runWasmKernel(wasmInstance, name, tensorArgs, shapeValues, parStart, parEnd) {
   const { exports, memory, bufferOffsets } = wasmInstance;
   const fn = exports[name];
   const offsets = [...bufferOffsets.values()];
@@ -165,6 +172,9 @@ function runWasmKernel(wasmInstance, name, tensorArgs, shapeValues) {
   const callArgs = offsets.slice(0, nBufs);
   if (shapeValues) {
     for (const v of shapeValues) callArgs.push(v);
+  }
+  if (parStart !== undefined && parEnd !== undefined) {
+    callArgs.push(parStart, parEnd);
   }
   fn(...callArgs);
 
@@ -229,6 +239,10 @@ export class RuntimeModule {
     } else if (compiledKernel.metadata.kind === 'wasm') {
       const inst = instantiateWasm(compiledKernel);
       this._wasmInstances.set(compiledKernel.name, inst);
+      if (compiledKernel.metadata.parallel) {
+        if (!this._wasmParallel) this._wasmParallel = new Map();
+        this._wasmParallel.set(compiledKernel.name, compiledKernel.metadata.parallel);
+      }
     } else if (compiledKernel.metadata.kind === 'webgpu') {
       if (!this._webgpuKernels) this._webgpuKernels = new Map();
       if (!this._webgpuInstances) this._webgpuInstances = new Map();
@@ -270,7 +284,12 @@ export class RuntimeModule {
 
     const wasmInst = this._wasmInstances.get(name);
     if (wasmInst) {
-      runWasmKernel(wasmInst, name, tensorArgs, shapeValues);
+      const parallel = this._wasmParallel && this._wasmParallel.get(name);
+      if (parallel) {
+        runWasmKernel(wasmInst, name, tensorArgs, shapeValues, 0, parallel.extent);
+      } else {
+        runWasmKernel(wasmInst, name, tensorArgs, shapeValues);
+      }
       return;
     }
 
@@ -284,11 +303,6 @@ export class RuntimeModule {
   }
 
   async runAsync(name, ...args) {
-    if (!this._webgpuInstances || !this._webgpuInstances.has(name)) {
-      this.run(name, ...args);
-      return;
-    }
-
     const tensorArgs = [];
     const tensorShapes = new Map();
     for (let i = 0; i < args.length; i++) {
@@ -306,13 +320,29 @@ export class RuntimeModule {
       shapeValues = RuntimeModule._extractShapeParams(shapeParamMap, tensorShapes, args);
     }
 
-    const instance = await this._webgpuInstances.get(name);
-    const { runWebGPUKernel } = await getWebGPURuntime();
-    await runWebGPUKernel(instance, tensorArgs, shapeValues);
+    if (this._wasmParallel && this._wasmParallel.has(name)) {
+      const wasmInst = this._wasmInstances.get(name);
+      const parallel = this._wasmParallel.get(name);
+      const kernel = this.kernels.get(name);
+      const mathNames = kernel.metadata.imports ? [...kernel.metadata.imports.keys()] : [];
+      const { runWasmParallel: runPar } = await getWasmPool();
+      await runPar(wasmInst, name, tensorArgs, shapeValues, parallel, mathNames);
+      return;
+    }
+
+    if (this._webgpuInstances && this._webgpuInstances.has(name)) {
+      const instance = await this._webgpuInstances.get(name);
+      const { runWebGPUKernel } = await getWebGPURuntime();
+      await runWebGPUKernel(instance, tensorArgs, shapeValues);
+      return;
+    }
+
+    this.run(name, ...args);
   }
 
   isAsync(name) {
-    return !!(this._webgpuKernels && this._webgpuKernels.has(name));
+    return !!(this._webgpuKernels && this._webgpuKernels.has(name))
+      || !!(this._wasmParallel && this._wasmParallel.has(name));
   }
 
   static _extractShapeParams(shapeParamMap, tensorShapes, args) {
@@ -344,6 +374,11 @@ export class RuntimeModule {
   getKernelSource(name) {
     const kernel = this.kernels.get(name);
     return kernel ? kernel.source : null;
+  }
+
+  getKernelSnippet(name) {
+    const kernel = this.kernels.get(name);
+    return kernel ? kernel.snippet() : null;
   }
 
   listKernels() {

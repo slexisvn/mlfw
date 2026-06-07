@@ -23,6 +23,10 @@ export class GPUCodegen {
     this._blockDim = [1, 1, 1];
     this._gridDim = [1, 1, 1];
     this._defaultDtype = 'f32';
+    this._storeBuffers = new Set();
+    this._promotedBuffers = new Set();
+    this._promotedBufferDecls = [];
+    this._needsBarriers = false;
   }
 
   generate(func) {
@@ -33,6 +37,10 @@ export class GPUCodegen {
     this._blockDim = [1, 1, 1];
     this._gridDim = [1, 1, 1];
     this._primFunc = func;
+    this._storeBuffers = new Set();
+    this._promotedBuffers = new Set();
+    this._promotedBufferDecls = [];
+    this._needsBarriers = false;
 
     const isLIR = func.type === 'LIRFunc';
 
@@ -47,6 +55,9 @@ export class GPUCodegen {
     } else {
       this._scanBindings(func.body);
     }
+
+    this._scanStoreTargets(func.body);
+    this._analyzeSharing(func);
 
     const paramParts = [];
     const paramNames = [];
@@ -67,6 +78,9 @@ export class GPUCodegen {
       const numel = buf.numel();
       this._emit(`__shared__ ${cType(buf.dtype)} ${buf.name}[${numel > 0 ? numel : 1}];`);
     }
+    for (const d of this._promotedBufferDecls) {
+      this._emit(`__shared__ ${cType(d.dtype)} ${d.name}[${d.size}];`);
+    }
 
     const declaredVars = new Set();
     for (const [tag, bindings] of this._threadBindings) {
@@ -78,6 +92,7 @@ export class GPUCodegen {
       }
     }
 
+    this._emitMissingLocalDecls(func);
     this._visitNode(func.body);
     this._indent--;
     this._emit('}');
@@ -173,7 +188,21 @@ export class GPUCodegen {
 
   _visitForNode(node) {
     if (node.kind === ForKind.THREAD_BINDING) {
-      this._visitNode(node.body);
+      const extent = node.extent.type === 'IntImmNode' ? node.extent.value : 0;
+      const tag = node.threadTag;
+      const maxExtent = this._getMaxBindingExtent(tag);
+      if (extent > 0 && maxExtent > 0 && extent < maxExtent) {
+        this._emit(`if (${tag} < ${extent}) {`);
+        this._indent++;
+        this._visitNode(node.body);
+        this._indent--;
+        this._emit('}');
+      } else {
+        this._visitNode(node.body);
+      }
+      if (this._needsBarriers) {
+        this._emit('__syncthreads();');
+      }
       return;
     }
     const varName = node.loopVar.name;
@@ -198,6 +227,7 @@ export class GPUCodegen {
 
   _visitAllocateNode(node) {
     if (node.scope !== 'shared') {
+      if (this._promotedBuffers.has(node.buffer.name)) return;
       const numel = node.buffer.numel();
       if (numel > 0) {
         this._emit(`${cType(node.buffer.dtype)} ${node.buffer.name}[${numel}];`);
@@ -355,6 +385,169 @@ export class GPUCodegen {
       }
     }
     return parts.length === 0 ? '1' : parts.join(' * ');
+  }
+
+  _getMaxBindingExtent(tag) {
+    const entries = this._threadBindings.get(tag);
+    if (!entries) return 0;
+    let max = 0;
+    for (const e of entries) if (e.extent > max) max = e.extent;
+    return max;
+  }
+
+  _scanStoreTargets(root) {
+    const stack = [root];
+    while (stack.length > 0) {
+      const node = stack.pop();
+      if (!node) continue;
+      if (node.type === 'BufferStoreNode' || node.type === 'LIRFlatStoreNode') {
+        this._storeBuffers.add(node.buffer.name);
+      }
+      if (node.type === 'LIRAccumulatorNode' && node.flushStore) {
+        this._storeBuffers.add(node.flushStore.buffer.name);
+      }
+      if (node.body) stack.push(node.body);
+      if (node.stmts) for (const s of node.stmts) stack.push(s);
+      if (node.thenBody) stack.push(node.thenBody);
+      if (node.elseBody) stack.push(node.elseBody);
+      if (node.loopBody) stack.push(node.loopBody);
+      if (node.condBody) stack.push(node.condBody);
+      if (node.initBody) stack.push(node.initBody);
+    }
+  }
+
+  _analyzeSharing(func) {
+    const extents = new Set();
+    for (const [, entries] of this._threadBindings) {
+      for (const e of entries) {
+        if (e.extent > 0) extents.add(e.extent);
+      }
+    }
+    if (extents.size <= 1) return;
+
+    this._needsBarriers = true;
+
+    const storageNames = new Set();
+    for (const [, buf] of func.bufferMap) storageNames.add(buf.name);
+
+    const stack = [func.body];
+    while (stack.length > 0) {
+      const node = stack.pop();
+      if (!node) continue;
+      if (node.type === 'AllocateNode' && node.scope !== 'shared') {
+        if (!storageNames.has(node.buffer.name)) {
+          const numel = node.buffer.numel();
+          const size = numel > 0 ? numel : this._estimateBufferSize(node.buffer);
+          if (size > 0) {
+            this._promotedBuffers.add(node.buffer.name);
+            this._promotedBufferDecls.push({ name: node.buffer.name, dtype: node.buffer.dtype, size });
+          }
+        }
+        stack.push(node.body);
+        continue;
+      }
+      if (node.body) stack.push(node.body);
+      if (node.stmts) for (const s of node.stmts) stack.push(s);
+      if (node.thenBody) stack.push(node.thenBody);
+      if (node.elseBody) stack.push(node.elseBody);
+    }
+
+    const refBuffers = new Map();
+    this._scanBufferRefs(func.body, refBuffers);
+    const allocatedNames = new Set();
+    this._scanAllocateNodes(func.body, allocatedNames);
+    for (const [name, buf] of refBuffers) {
+      if (storageNames.has(name) || allocatedNames.has(name)) continue;
+      if (this._promotedBuffers.has(name)) continue;
+      const numel = buf.numel();
+      const size = numel > 0 ? numel : this._estimateBufferSize(buf);
+      if (size > 0) {
+        this._promotedBuffers.add(name);
+        this._promotedBufferDecls.push({ name, dtype: buf.dtype, size });
+      }
+    }
+  }
+
+  _emitMissingLocalDecls(func) {
+    const storageNames = new Set();
+    for (const [, buf] of func.bufferMap) storageNames.add(buf.name);
+
+    const allocatedNames = new Set();
+    this._scanAllocateNodes(func.body, allocatedNames);
+
+    const refBuffers = new Map();
+    this._scanBufferRefs(func.body, refBuffers);
+
+    for (const [name, buf] of refBuffers) {
+      if (storageNames.has(name) || allocatedNames.has(name)) continue;
+      if (this._promotedBuffers.has(name)) continue;
+      const numel = buf.numel();
+      const size = numel > 0 ? numel : this._estimateBufferSize(buf);
+      if (size > 0) {
+        this._emit(`${cType(buf.dtype)} ${name}[${size}];`);
+      }
+    }
+  }
+
+  _scanAllocateNodes(root, names) {
+    const stack = [root];
+    while (stack.length > 0) {
+      const node = stack.pop();
+      if (!node) continue;
+      if (node.type === 'AllocateNode') {
+        names.add(node.buffer.name);
+        stack.push(node.body);
+        continue;
+      }
+      if (node.body) stack.push(node.body);
+      if (node.stmts) for (const s of node.stmts) stack.push(s);
+      if (node.thenBody) stack.push(node.thenBody);
+      if (node.elseBody) stack.push(node.elseBody);
+      if (node.loopBody) stack.push(node.loopBody);
+      if (node.condBody) stack.push(node.condBody);
+      if (node.initBody) stack.push(node.initBody);
+    }
+  }
+
+  _scanBufferRefs(root, refs) {
+    const stack = [root];
+    while (stack.length > 0) {
+      const node = stack.pop();
+      if (!node) continue;
+      if ((node.type === 'BufferLoadNode' || node.type === 'BufferStoreNode' ||
+           node.type === 'LIRFlatLoadNode' || node.type === 'LIRFlatStoreNode') && node.buffer) {
+        refs.set(node.buffer.name, node.buffer);
+      }
+      if (node.type === 'LIRAccumulatorNode') {
+        if (node.flushStore && node.flushStore.buffer) refs.set(node.flushStore.buffer.name, node.flushStore.buffer);
+        if (node.initLoad && node.initLoad.buffer) refs.set(node.initLoad.buffer.name, node.initLoad.buffer);
+      }
+      if (node.value) stack.push(node.value);
+      if (node.body) stack.push(node.body);
+      if (node.stmts) for (const s of node.stmts) stack.push(s);
+      if (node.thenBody) stack.push(node.thenBody);
+      if (node.elseBody) stack.push(node.elseBody);
+      if (node.loopBody) stack.push(node.loopBody);
+      if (node.condBody) stack.push(node.condBody);
+      if (node.initBody) stack.push(node.initBody);
+      if (node.indices) for (const idx of node.indices) stack.push(idx);
+      if (node.a) stack.push(node.a);
+      if (node.b) stack.push(node.b);
+      if (node.condition) stack.push(node.condition);
+      if (node.expr) stack.push(node.expr);
+      if (node.args) for (const a of node.args) stack.push(a);
+      if (node.offsetExpr) stack.push(node.offsetExpr);
+      if (node.extent) stack.push(node.extent);
+    }
+  }
+
+  _estimateBufferSize(buffer) {
+    let n = 1;
+    for (const d of buffer.shape) {
+      if (typeof d === 'number' && d > 0) n *= d;
+      else n *= 1;
+    }
+    return n;
   }
 
   _resolveShapeParam(buffer, dimIdx) {

@@ -11,31 +11,31 @@ describe('Tensor Lang completion', () => {
     expect(completeInput('ret', runtime)).toBe('return');
   });
 
-  it('includes names created during the session', () => {
+  it('includes names created during the session', async () => {
     const runtime = new TensorLangRuntime({ output: () => {} });
-    runtime.execute('weights = randn([2, 2])');
+    await runtime.execute('weights = randn([2, 2])');
     expect(completeInput('wei', runtime)).toBe('weights');
   });
 
-  it('completes user-defined functions and model names', () => {
+  it('completes user-defined functions and model names', async () => {
     const runtime = new TensorLangRuntime({ output: () => {} });
-    runtime.execute('fn my_normalize(x): return x / sum(x)');
+    await runtime.execute('fn my_normalize(x): return x / sum(x)');
     expect(completeInput('my_n', runtime)).toBe('my_normalize');
 
-    runtime.execute(`model MyNet:
+    await runtime.execute(`model MyNet:
   forward x:
     return relu(x)`);
     expect(completeInput('MyN', runtime)).toBe('MyNet');
   });
 
-  it('completes properties of custom model instances', () => {
+  it('completes properties of custom model instances', async () => {
     const runtime = new TensorLangRuntime({ output: () => {} });
-    runtime.execute(`model MLP(h):
+    await runtime.execute(`model MLP(h):
   fc1 = Linear(2, h)
   fc2 = Linear(h, 1)
   forward x:
     return fc2(relu(fc1(x)))`);
-    runtime.execute('net = MLP(4)');
+    await runtime.execute('net = MLP(4)');
 
     expect(completeInput('net.f', runtime)).toBe('net.fc');
     const props = completeInput('net.fc', runtime);
@@ -44,9 +44,9 @@ describe('Tensor Lang completion', () => {
     expect(props).toContain('fc2');
   });
 
-  it('completes properties of builtin modules', () => {
+  it('completes properties of builtin modules', async () => {
     const runtime = new TensorLangRuntime({ output: () => {} });
-    runtime.execute('layer = Linear(4, 2)');
+    await runtime.execute('layer = Linear(4, 2)');
     expect(completeInput('layer.w', runtime)).toBe('layer.weight');
   });
 

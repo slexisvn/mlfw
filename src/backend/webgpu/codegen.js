@@ -45,6 +45,9 @@ export class WebGPUCodegen {
     this._dispatchSize = [1, 1, 1];
     this._primFunc = func;
     this._storeBuffers = new Set();
+    this._promotedBuffers = new Set();
+    this._promotedBufferDecls = [];
+    this._needsBarriers = false;
 
     const isLIR = func.type === 'LIRFunc';
 
@@ -61,6 +64,7 @@ export class WebGPUCodegen {
     }
 
     this._scanStoreTargets(func.body);
+    this._analyzeSharing(func);
 
     const paramNames = [];
     const bindings = [];
@@ -70,14 +74,53 @@ export class WebGPUCodegen {
     if (needsF16) this._emit('enable f16;');
     if (needsF16) this._emit('');
 
-    for (const [, buf] of func.bufferMap) {
-      paramNames.push(buf.name);
-      this._defaultDtype = buf.dtype;
-      const mode = this._storeBuffers.has(buf.name) ? 'read_write' : 'read';
-      const accessMode = mode === 'read_write' ? 'storage, read_write' : 'storage, read';
-      bindings.push({ index: bindIdx, name: buf.name, mode });
-      this._emit(`@group(0) @binding(${bindIdx}) var<${accessMode}> ${buf.name}: array<${wgslType(buf.dtype)}>;`);
-      bindIdx++;
+    const bufCount = func.bufferMap.size + (func.shapeParams.length > 0 ? 1 : 0);
+    const canPack = bufCount > 6 && [...func.bufferMap.values()].every(b => b.numel() > 0);
+    this._packedMode = canPack;
+    this._packedOffsets = null;
+
+    if (canPack) {
+      this._packedOffsets = new Map();
+      const readBufs = [], writeBufs = [];
+      let readOff = 0, writeOff = 0;
+      const align4 = n => Math.ceil(n / 4) * 4;
+
+      for (const [, buf] of func.bufferMap) {
+        paramNames.push(buf.name);
+        this._defaultDtype = buf.dtype;
+        const numel = buf.numel();
+        const aligned = align4(numel);
+        if (this._storeBuffers.has(buf.name)) {
+          this._packedOffsets.set(buf.name, { storage: '_pw', offset: writeOff });
+          writeBufs.push({ name: buf.name, offset: writeOff, size: numel });
+          writeOff += aligned;
+        } else {
+          this._packedOffsets.set(buf.name, { storage: '_pr', offset: readOff });
+          readBufs.push({ name: buf.name, offset: readOff, size: numel });
+          readOff += aligned;
+        }
+      }
+
+      if (readBufs.length > 0) {
+        bindings.push({ index: bindIdx, name: '_pr', mode: 'read', packed: readBufs, packedSize: readOff });
+        this._emit(`@group(0) @binding(${bindIdx}) var<storage, read> _pr: array<${wgslType(this._defaultDtype)}>;`);
+        bindIdx++;
+      }
+      if (writeBufs.length > 0) {
+        bindings.push({ index: bindIdx, name: '_pw', mode: 'read_write', packed: writeBufs, packedSize: writeOff });
+        this._emit(`@group(0) @binding(${bindIdx}) var<storage, read_write> _pw: array<${wgslType(this._defaultDtype)}>;`);
+        bindIdx++;
+      }
+    } else {
+      for (const [, buf] of func.bufferMap) {
+        paramNames.push(buf.name);
+        this._defaultDtype = buf.dtype;
+        const mode = this._storeBuffers.has(buf.name) ? 'read_write' : 'read';
+        const accessMode = mode === 'read_write' ? 'storage, read_write' : 'storage, read';
+        bindings.push({ index: bindIdx, name: buf.name, mode });
+        this._emit(`@group(0) @binding(${bindIdx}) var<${accessMode}> ${buf.name}: array<${wgslType(buf.dtype)}>;`);
+        bindIdx++;
+      }
     }
 
     if (func.shapeParams.length > 0) {
@@ -101,7 +144,10 @@ export class WebGPUCodegen {
       const numel = buf.numel();
       this._emit(`var<workgroup> ${buf.name}: array<${wgslType(buf.dtype)}, ${numel > 0 ? numel : 1}>;`);
     }
-    if (this._sharedBuffers.length > 0) this._emit('');
+    for (const d of this._promotedBufferDecls) {
+      this._emit(`var<workgroup> ${d.name}: array<${wgslType(d.dtype)}, ${d.size}>;`);
+    }
+    if (this._sharedBuffers.length > 0 || this._promotedBufferDecls.length > 0) this._emit('');
 
     const builtins = [];
     const hasLocal = this._hasBindingPrefix('threadIdx');
@@ -109,6 +155,14 @@ export class WebGPUCodegen {
     if (hasLocal) builtins.push('@builtin(local_invocation_id) _lid: vec3u');
     if (hasWorkgroup) builtins.push('@builtin(workgroup_id) _wid: vec3u');
     if (!hasLocal && !hasWorkgroup) builtins.push('@builtin(global_invocation_id) _gid: vec3u');
+
+    const maxTotal = this.target.maxThreadsPerBlock || 256;
+    while (this._workgroupSize[0] * this._workgroupSize[1] * this._workgroupSize[2] > maxTotal) {
+      let maxIdx = 0;
+      if (this._workgroupSize[1] > this._workgroupSize[maxIdx]) maxIdx = 1;
+      if (this._workgroupSize[2] > this._workgroupSize[maxIdx]) maxIdx = 2;
+      this._workgroupSize[maxIdx] = Math.max(1, this._workgroupSize[maxIdx] >> 1);
+    }
 
     const wgx = this._workgroupSize[0];
     const wgy = this._workgroupSize[1];
@@ -238,6 +292,66 @@ export class WebGPUCodegen {
     else if (prefix === 'blockIdx') this._dispatchSize[axis] = Math.max(this._dispatchSize[axis], extent);
   }
 
+  _getMaxBindingExtent(tag) {
+    const entries = this._threadBindings.get(tag);
+    if (!entries) return 0;
+    let max = 0;
+    for (const e of entries) if (e.extent > max) max = e.extent;
+    return max;
+  }
+
+  _analyzeSharing(func) {
+    const extents = new Set();
+    for (const [, entries] of this._threadBindings) {
+      for (const e of entries) {
+        if (e.extent > 0) extents.add(e.extent);
+      }
+    }
+    if (extents.size <= 1) return;
+
+    this._needsBarriers = true;
+
+    const storageNames = new Set();
+    for (const [, buf] of func.bufferMap) storageNames.add(buf.name);
+
+    const stack = [func.body];
+    while (stack.length > 0) {
+      const node = stack.pop();
+      if (!node) continue;
+      if (node.type === 'AllocateNode' && node.scope !== 'shared') {
+        if (!storageNames.has(node.buffer.name)) {
+          const numel = node.buffer.numel();
+          const size = numel > 0 ? numel : this._estimateBufferSize(node.buffer);
+          if (size > 0) {
+            this._promotedBuffers.add(node.buffer.name);
+            this._promotedBufferDecls.push({ name: node.buffer.name, dtype: node.buffer.dtype, size });
+          }
+        }
+        stack.push(node.body);
+        continue;
+      }
+      if (node.body) stack.push(node.body);
+      if (node.stmts) for (const s of node.stmts) stack.push(s);
+      if (node.thenBody) stack.push(node.thenBody);
+      if (node.elseBody) stack.push(node.elseBody);
+    }
+
+    const refBuffers = new Map();
+    this._scanBufferRefs(func.body, refBuffers);
+    const allocatedNames = new Set();
+    this._scanAllocateNodes(func.body, allocatedNames);
+    for (const [name, buf] of refBuffers) {
+      if (storageNames.has(name) || allocatedNames.has(name)) continue;
+      if (this._promotedBuffers.has(name)) continue;
+      const numel = buf.numel();
+      const size = numel > 0 ? numel : this._estimateBufferSize(buf);
+      if (size > 0) {
+        this._promotedBuffers.add(name);
+        this._promotedBufferDecls.push({ name, dtype: buf.dtype, size });
+      }
+    }
+  }
+
   _emit(line) {
     this._lines.push('  '.repeat(this._indent) + line);
   }
@@ -272,7 +386,22 @@ export class WebGPUCodegen {
 
   _visitForNode(node) {
     if (node.kind === ForKind.THREAD_BINDING) {
-      this._visitNode(node.body);
+      const extent = node.extent.type === 'IntImmNode' ? node.extent.value : 0;
+      const tag = node.threadTag;
+      const maxExtent = this._getMaxBindingExtent(tag);
+      if (extent > 0 && maxExtent > 0 && extent < maxExtent) {
+        const src = this._wgslBuiltinAccess(tag);
+        this._emit(`if (i32(${src}) < ${extent}) {`);
+        this._indent++;
+        this._visitNode(node.body);
+        this._indent--;
+        this._emit('}');
+      } else {
+        this._visitNode(node.body);
+      }
+      if (this._needsBarriers) {
+        this._emit('workgroupBarrier();');
+      }
       return;
     }
     const varName = node.loopVar.name;
@@ -306,6 +435,7 @@ export class WebGPUCodegen {
 
     for (const [name, buf] of refBuffers) {
       if (storageNames.has(name) || allocatedNames.has(name)) continue;
+      if (this._promotedBuffers.has(name)) continue;
       const numel = buf.numel();
       const size = numel > 0 ? numel : this._estimateBufferSize(buf);
       if (size > 0) {
@@ -377,6 +507,7 @@ export class WebGPUCodegen {
 
   _visitAllocateNode(node) {
     if (node.scope !== 'shared') {
+      if (this._promotedBuffers.has(node.buffer.name)) return;
       const numel = node.buffer.numel();
       const size = numel > 0 ? numel : this._estimateBufferSize(node.buffer);
       if (size > 0) {
@@ -416,11 +547,15 @@ export class WebGPUCodegen {
   }
 
   _visitBufferStoreNode(node) {
-    this._emit(`${node.buffer.name}[${this._flatIndex(node.buffer, node.indices)}] = ${this._exprToWGSL(node.value)};`);
+    const idx = this._flatIndex(node.buffer, node.indices);
+    const target = this._packedBufAccess(node.buffer.name, idx);
+    this._emit(`${target} = ${this._exprToWGSL(node.value)};`);
   }
 
   _visitLIRFlatStore(node) {
-    this._emit(`${node.buffer.name}[${this._exprToWGSL(node.offsetExpr)}] = ${this._exprToWGSL(node.value)};`);
+    const idx = this._exprToWGSL(node.offsetExpr);
+    const target = this._packedBufAccess(node.buffer.name, idx);
+    this._emit(`${target} = ${this._exprToWGSL(node.value)};`);
   }
 
   _visitLIRBindings(node) {
@@ -443,7 +578,9 @@ export class WebGPUCodegen {
     this._indent--;
     this._emit('}');
 
-    this._emit(`${node.flushStore.buffer.name}[${this._exprToWGSL(node.flushStore.offsetExpr)}] = ${accVar};`);
+    const flushIdx = this._exprToWGSL(node.flushStore.offsetExpr);
+    const flushTarget = this._packedBufAccess(node.flushStore.buffer.name, flushIdx);
+    this._emit(`${flushTarget} = ${accVar};`);
   }
 
   _exprToWGSL(node) {
@@ -452,8 +589,8 @@ export class WebGPUCodegen {
       case 'IntImmNode': return String(node.value);
       case 'FloatImmNode': return this._emitFloatLiteral(node.value);
       case 'VariableNode': return this._resolveVariable(node.name);
-      case 'BufferLoadNode': return `${node.buffer.name}[${this._flatIndex(node.buffer, node.indices)}]`;
-      case 'LIRFlatLoadNode': return `${node.buffer.name}[${this._exprToWGSL(node.offsetExpr)}]`;
+      case 'BufferLoadNode': return this._packedBufAccess(node.buffer.name, this._flatIndex(node.buffer, node.indices));
+      case 'LIRFlatLoadNode': return this._packedBufAccess(node.buffer.name, this._exprToWGSL(node.offsetExpr));
       case 'MathOpNode': {
         const a = this._exprToWGSL(node.a);
         if (!node.b) return `(${node.op}${a})`;
@@ -496,6 +633,15 @@ export class WebGPUCodegen {
     }
     const fn = wgslMathFunc(node.externName);
     return `${fn}(${joined})`;
+  }
+
+  _packedBufAccess(bufName, indexExpr) {
+    if (this._packedMode && this._packedOffsets && this._packedOffsets.has(bufName)) {
+      const info = this._packedOffsets.get(bufName);
+      if (info.offset === 0) return `${info.storage}[${indexExpr}]`;
+      return `${info.storage}[${info.offset}u + u32(${indexExpr})]`;
+    }
+    return `${bufName}[${indexExpr}]`;
   }
 
   _flatIndex(buffer, indices) {

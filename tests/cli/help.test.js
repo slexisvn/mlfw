@@ -10,7 +10,7 @@ describe('Tensor Lang CLI help', () => {
   it('provides topic help', () => {
     expect(getHelp('tensor')).toContain('mean(x, axis=0)');
     expect(getHelp('model')).toContain('forward x');
-    expect(getHelp('compile')).toContain('trace(compiled)');
+    expect(getHelp('compile')).toContain('snippet=true');
   });
 
   it('lists and prints examples without executing them', () => {

@@ -24,7 +24,7 @@ export async function runCli(args, {
   if (!command || command === 'repl') {
     if (operand || extra.length) return fail(stderr, 'repl does not accept arguments');
     if (!stdinIsTTY) {
-      return executeSource(await readStdin(), { stdout, stderr, filename: '<stdin>', stripExit: true });
+      return await executeSource(await readStdin(), { stdout, stderr, filename: '<stdin>', stripExit: true });
     }
     await repl();
     return 0;
@@ -48,14 +48,14 @@ export async function runCli(args, {
       stdout(`${file}: OK`);
       return 0;
     }
-    return executeSource(source, { stdout, stderr, filename: file });
+    return await executeSource(source, { stdout, stderr, filename: file });
   } catch (error) {
     stderr(source === undefined ? `${error.name || 'Error'}: ${error.message}` : formatDiagnostic(error, source, file));
     return 1;
   }
 }
 
-export function executeSource(source, {
+export async function executeSource(source, {
   stdout = console.log,
   stderr = console.error,
   filename = null,
@@ -63,7 +63,7 @@ export function executeSource(source, {
 } = {}) {
   if (stripExit) source = source.replace(/(?:^|\n)\s*(?:exit|quit)\s*;?\s*$/u, '');
   try {
-    const result = new TensorLangRuntime({ output: stdout }).execute(source);
+    const result = await new TensorLangRuntime({ output: stdout }).execute(source);
     const text = formatValue(result);
     if (text) stdout(text);
     return 0;

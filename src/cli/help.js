@@ -127,28 +127,30 @@ Break and continue:
     print(i)`,
 
   compile: `Compile and execute a neural network:
-  model = Sequential(Linear(2, 4), ReLU(), Linear(4, 1))
+  m = Sequential(Linear(2, 4), ReLU(), Linear(4, 1))
   x = randn([8, 2])
 
-  compiled = compile(model, input=x)
+  compiled = compile(m, input=x)
   y = compiled(x)                        # execute compiled model
-  trace(compiled)
-  graph(compiled)
 
 Lazy compile (no input needed):
-  compiled = compile(model)
+  compiled = compile(m)
   y = compiled(x)                        # first call compiles + executes
 
 Options (off by default):
-  compile(model, input=x, target=gpu)
-  compile(model, input=x, fusion=true)
-  compile(model, input=x, scheduling=true, autotune=true)
-  compile(model, input=x, quantization=true)
-  compile(model, input=x, layout=true, rematerialization=true)
-  compile(model, input=x, inplaceReuse=true)
-  compile(model, input=x, partition=true)
+  compile(m, input=x, target=gpu)
+  compile(m, input=x, fusion=true)
+  compile(m, input=x, scheduling=true, autotune=true)
+  compile(m, input=x, quantization=true)
+  compile(m, input=x, layout=true, rematerialization=true)
+  compile(m, input=x, inplaceReuse=true)
+  compile(m, input=x, partition=true)
 
-Targets: cpu (default), gpu, wasm`,
+Debug & inspect:
+  compile(m, input=x, debug=true)
+  compile(m, input=x, snippet=true)
+
+Targets: cpu (default), gpu, wasm, webgpu`,
 };
 
 const EXAMPLES = {

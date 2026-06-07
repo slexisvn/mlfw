@@ -26,6 +26,8 @@ export class WasmCodegen {
     this._primFunc = func;
     this._wasmAcc = null;
     this._waccCounter = 0;
+    this._hasParallel = false;
+    this._parallelExtent = 0;
 
     const isLIR = func.type === 'LIRFunc';
 
@@ -46,6 +48,8 @@ export class WasmCodegen {
       this._scanMathImports(func.body);
     }
 
+    this._scanParallel(func.body);
+
     const paramNames = [];
     for (const [, buf] of func.bufferMap) {
       paramNames.push(buf.name);
@@ -58,7 +62,8 @@ export class WasmCodegen {
     this._indent++;
 
     const memPages = Math.max(1, Math.ceil(this._totalMemBytes / 65536));
-    this._emit(`(memory (export "memory") ${memPages} 256)`);
+    const maxPages = Math.max(256, memPages);
+    this._emit(`(memory (export "memory") ${memPages} ${maxPages})`);
 
     for (const [name, sig] of this._imports) {
       this._emit(`(import "math" "${name}" (func $math_${name} ${sig}))`);
@@ -73,6 +78,14 @@ export class WasmCodegen {
       paramDecls.push('(param i32)');
       this._ensureLocal(sp.name, 'i32');
       shapeParamEntries.push(sp.name);
+    }
+    if (this._hasParallel) {
+      paramDecls.push('(param i32)');
+      paramDecls.push('(param i32)');
+      this._ensureLocal('_par_start', 'i32');
+      this._ensureLocal('_par_end', 'i32');
+      paramNames.push('_par_start');
+      paramNames.push('_par_end');
     }
     this._emit('(func (export "' + func.name + '") ' + paramDecls.join(' '));
     this._indent++;
@@ -92,6 +105,13 @@ export class WasmCodegen {
       this._emit('(local.get ' + (bufCount + i) + ')');
       this._emit('local.set $' + shapeParamEntries[i]);
     }
+    if (this._hasParallel) {
+      const parIdx = bufCount + shapeParamEntries.length;
+      this._emit('(local.get ' + parIdx + ')');
+      this._emit('local.set $_par_start');
+      this._emit('(local.get ' + (parIdx + 1) + ')');
+      this._emit('local.set $_par_end');
+    }
 
     this._visitNode(func.body);
 
@@ -107,6 +127,7 @@ export class WasmCodegen {
       bufferOffsets: new Map(this._bufferOffsets),
       imports: this._imports,
       params: paramNames,
+      parallel: this._hasParallel ? { extent: this._parallelExtent, outputIndices: this._findOutputIndices(func) } : null,
     };
   }
 
@@ -150,9 +171,77 @@ export class WasmCodegen {
     }
   }
 
+  _findOutputIndices(func) {
+    const storeNames = new Set();
+    const stack = [func.body];
+    while (stack.length > 0) {
+      const node = stack.pop();
+      if (!node) continue;
+      if ((node.type === 'BufferStoreNode' || node.type === 'LIRFlatStoreNode') && node.buffer) {
+        storeNames.add(node.buffer.name);
+      }
+      if (node.type === 'LIRAccumulatorNode' && node.flushStore && node.flushStore.buffer) {
+        storeNames.add(node.flushStore.buffer.name);
+      }
+      if (node.body) stack.push(node.body);
+      if (node.stmts) for (const s of node.stmts) stack.push(s);
+      if (node.thenBody) stack.push(node.thenBody);
+      if (node.elseBody) stack.push(node.elseBody);
+      if (node.loopBody) stack.push(node.loopBody);
+    }
+    const indices = [];
+    let idx = 0;
+    for (const [, buf] of func.bufferMap) {
+      if (storeNames.has(buf.name)) indices.push(idx);
+      idx++;
+    }
+    return indices;
+  }
+
+  _scanParallel(root) {
+    const stack = [root];
+    while (stack.length > 0) {
+      const node = stack.pop();
+      if (!node) continue;
+      if (node.type === 'ForNode' && node.kind === ForKind.PARALLEL) {
+        this._hasParallel = true;
+        this._parallelExtent = node.extent && node.extent.type === 'IntImmNode' ? node.extent.value : 0;
+        return;
+      }
+      if (node.body) stack.push(node.body);
+      if (node.stmts) for (const s of node.stmts) stack.push(s);
+      if (node.thenBody) stack.push(node.thenBody);
+      if (node.elseBody) stack.push(node.elseBody);
+    }
+  }
+
   _visitFor(node) {
     const varName = node.loopVar.name;
     const extent = this._constExtent(node.extent);
+
+    if (node.kind === ForKind.PARALLEL) {
+      this._emit('(local.get $_par_start)');
+      this._emit('local.set $' + varName);
+      this._emit('(block $break_' + varName);
+      this._indent++;
+      this._emit('(loop $loop_' + varName);
+      this._indent++;
+      this._emit('(local.get $' + varName + ')');
+      this._emit('(local.get $_par_end)');
+      this._emit('i32.ge_s');
+      this._emit('br_if $break_' + varName);
+      this._visitNode(node.body);
+      this._emit('(local.get $' + varName + ')');
+      this._emit('(i32.const 1)');
+      this._emit('i32.add');
+      this._emit('local.set $' + varName);
+      this._emit('br $loop_' + varName);
+      this._indent--;
+      this._emit(')');
+      this._indent--;
+      this._emit(')');
+      return;
+    }
 
     if ((node.kind === ForKind.UNROLLED || node.kind === ForKind.VECTORIZED) && extent !== null && extent <= 32) {
       for (let i = 0; i < extent; i++) {

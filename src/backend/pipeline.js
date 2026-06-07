@@ -4,6 +4,12 @@ import { GPUCodegen } from './gpu/codegen.js';
 import { WasmCodegen } from './wasm/codegen.js';
 import { WebGPUCodegen } from './webgpu/codegen.js';
 import { createCPULibrarySelector, createGPULibrarySelector } from './library_selector.js';
+import { buildSnippet as cpuSnippet } from './cpu/snippet.js';
+import { buildSnippet as wasmSnippet } from './wasm/snippet.js';
+import { buildSnippet as webgpuSnippet } from './webgpu/snippet.js';
+import { buildSnippet as gpuSnippet } from './gpu/snippet.js';
+
+const SNIPPET_BUILDERS = { js: cpuSnippet, wasm: wasmSnippet, webgpu: webgpuSnippet, cuda: gpuSnippet };
 
 export class CompiledKernel {
   constructor(name, source, target, metadata = {}) {
@@ -11,6 +17,12 @@ export class CompiledKernel {
     this.source = source;
     this.target = target;
     this.metadata = metadata;
+  }
+
+  snippet() {
+    const builder = SNIPPET_BUILDERS[this.metadata.kind];
+    if (!builder) throw new Error(`No snippet for kind: ${this.metadata.kind}`);
+    return builder(this);
   }
 }
 
@@ -48,14 +60,18 @@ export class BackendPipeline {
   _compileWasm(primFunc) {
     const codegen = new WasmCodegen(this.target);
     const result = codegen.generate(primFunc);
-    return new CompiledKernel(primFunc.name, result.wat, this.target, {
+    const meta = {
       kind: 'wasm',
       memoryPages: result.memoryPages,
       bufferOffsets: result.bufferOffsets,
       imports: result.imports,
       params: result.params,
       bufferMap: primFunc.bufferMap,
-    });
+    };
+    if (result.parallel) {
+      meta.parallel = result.parallel;
+    }
+    return new CompiledKernel(primFunc.name, result.wat, this.target, meta);
   }
 
   _compileWebGPU(primFunc) {

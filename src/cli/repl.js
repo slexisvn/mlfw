@@ -106,7 +106,7 @@ export async function startRepl({ term = terminalKit.terminal } = {}) {
     if (depth > 0) continue;
 
     try {
-      const value = runtime.execute(buffer);
+      const value = await runtime.execute(buffer);
       const text = formatValue(value);
       if (text) write(text);
     } catch (error) {

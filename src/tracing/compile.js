@@ -7,7 +7,6 @@ import { CPUTarget } from '../backend/target.js';
 import { tensorToContiguous, wrapResult } from '../dispatcher/jit_dispatch.js';
 import { typedArrayCtor } from '../tensor/types/dtype.js';
 import { computeNumel } from '../tensor/utils/shape_utils.js';
-import { extractWebGPUSnippet } from '../backend/webgpu/snippet.js';
 
 let _tracingRegistered = false;
 
@@ -31,33 +30,51 @@ export function _traceCore(fn, exampleInputs, opts) {
   const numUserInputs = exampleInputs.length;
   const symbolicInputs = tracer._initGraph();
 
-  tracer.activate();
-  try {
-    const TRACING_KEYS = DispatchKeySet.fromKey(DispatchKey.TRACING);
-    const result = withIncludedKeys(TRACING_KEYS, () => fn(...symbolicInputs));
-
+  function _finalize(result) {
     if (Array.isArray(result)) {
       tracer.markOutputs(result);
     } else {
       tracer.markOutput(result);
     }
-  } finally {
     tracer.deactivate();
+
+    const graph = tracer.getGraphModule();
+    const func = graph.functions().next().value;
+
+    return {
+      graph,
+      capturedParams: [...tracer.capturedParams],
+      numUserInputs,
+      outputTypes: func.outputTypes,
+    };
   }
 
-  const graph = tracer.getGraphModule();
-  const func = graph.functions().next().value;
+  tracer.activate();
+  const TRACING_KEYS = DispatchKeySet.fromKey(DispatchKey.TRACING);
+  const result = withIncludedKeys(TRACING_KEYS, () => fn(...symbolicInputs));
 
-  return {
-    graph,
-    capturedParams: [...tracer.capturedParams],
-    numUserInputs,
-    outputTypes: func.outputTypes,
-  };
+  // Support async forward functions (e.g. Tensor Lang custom models)
+  if (result && typeof result.then === 'function') {
+    return result.then(
+      resolved => _finalize(resolved),
+      error => { tracer.deactivate(); throw error; },
+    );
+  }
+
+  try {
+    return _finalize(result);
+  } catch (error) {
+    tracer.deactivate();
+    throw error;
+  }
 }
 
 export function trace(fn, exampleInputs, opts) {
-  return _traceCore(fn, exampleInputs, opts).graph;
+  const result = _traceCore(fn, exampleInputs, opts);
+  if (result && typeof result.then === 'function') {
+    return result.then(r => r.graph);
+  }
+  return result.graph;
 }
 
 function _prepareExecution(compiled, inputs) {
@@ -138,12 +155,7 @@ export function compile(model, exampleInputs, opts) {
     return key;
   }
 
-  function _compile(inputs) {
-    const traced = _traceCore(
-      (...args) => model.forward(...args),
-      inputs,
-      { name: model.constructor.name || 'compiled' }
-    );
+  function _finalize(traced) {
     const result = new Compiler(compilerOpts).compile(traced.graph);
     return {
       result,
@@ -154,18 +166,40 @@ export function compile(model, exampleInputs, opts) {
     };
   }
 
+  function _compile(inputs) {
+    const traced = _traceCore(
+      (...args) => model.forward(...args),
+      inputs,
+      { name: model.constructor.name || 'compiled' }
+    );
+    if (traced && typeof traced.then === 'function') {
+      return traced.then(_finalize);
+    }
+    return _finalize(traced);
+  }
+
   function compiledForward(...inputs) {
     const key = _getShapeKey(inputs);
     if (!_compiled || _shapeKey !== key) {
-      _compiled = _compile(inputs);
+      const result = _compile(inputs);
+      if (result && typeof result.then === 'function') {
+        return result.then(c => { _compiled = c; _shapeKey = key; return executeCompiled(_compiled, inputs); });
+      }
+      _compiled = result;
       _shapeKey = key;
     }
     return executeCompiled(_compiled, inputs);
   }
 
+  let _ready = null;
   if (exampleInputs) {
-    _compiled = _compile(exampleInputs);
-    _shapeKey = _getShapeKey(exampleInputs);
+    const result = _compile(exampleInputs);
+    if (result && typeof result.then === 'function') {
+      _ready = result.then(c => { _compiled = c; _shapeKey = _getShapeKey(exampleInputs); });
+    } else {
+      _compiled = result;
+      _shapeKey = _getShapeKey(exampleInputs);
+    }
   }
 
   compiledForward.original = model;
@@ -190,10 +224,14 @@ export function compile(model, exampleInputs, opts) {
     return _compiled.result.listKernels();
   };
 
-  compiledForward.toWebGPU = (...inputs) => {
+  compiledForward.snippet = () => {
     if (!_compiled) return null;
-    return extractWebGPUSnippet(_compiled, inputs);
+    const kernels = _compiled.result.listKernels();
+    return kernels.length > 0 ? _compiled.result.getSnippet(kernels[0]) : null;
   };
+
+  compiledForward.result = () => _compiled ? _compiled.result : null;
+  compiledForward._ready = _ready;
 
   return compiledForward;
 }

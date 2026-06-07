@@ -48,11 +48,21 @@ export function withExcludedKeys(keys, fn) {
 
 export function withIncludedKeys(keys, fn) {
   guardStack.push(null, keys);
+  let result;
   try {
-    return fn();
-  } finally {
+    result = fn();
+  } catch (error) {
     guardStack.pop();
+    throw error;
   }
+  if (result && typeof result.then === 'function') {
+    return result.then(
+      value => { guardStack.pop(); return value; },
+      error => { guardStack.pop(); throw error; },
+    );
+  }
+  guardStack.pop();
+  return result;
 }
 
 export function withGuard(excludeKeys, includeKeys, fn) {

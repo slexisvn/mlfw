@@ -389,9 +389,32 @@ export class ElementwiseWasmRule extends ScheduleRule {
     const loops = schedule.getLoops(blockName);
     if (loops.length === 0) return;
 
+    const numCores = target.numCores || 1;
+    const vectorWidth = target.vectorWidth || 4;
+
+    if (numCores > 1 && loops.length >= 1) {
+      const outerExtent = loops[0].extent;
+      const outerSize = outerExtent && outerExtent.type === 'IntImmNode' ? outerExtent.value : 0;
+      if (outerSize >= numCores * 4) {
+        schedule.parallelize(loops[0]);
+        if (loops.length > 1) {
+          const innermost = loops[loops.length - 1];
+          const extent = innermost.extent;
+          if (extent.type === 'IntImmNode' && extent.value >= vectorWidth) {
+            if (extent.value % vectorWidth === 0) {
+              const [, vi] = schedule.split(innermost, vectorWidth);
+              schedule.vectorize(vi);
+            } else {
+              schedule.vectorize(innermost);
+            }
+          }
+        }
+        return;
+      }
+    }
+
     const innermost = loops[loops.length - 1];
     const extent = innermost.extent;
-    const vectorWidth = target.vectorWidth || 4;
 
     if (extent.type === 'IntImmNode' && extent.value >= vectorWidth * 2) {
       const [outer, inner] = schedule.split(innermost, vectorWidth);
@@ -401,6 +424,41 @@ export class ElementwiseWasmRule extends ScheduleRule {
 
     if (extent.type === 'IntImmNode' && extent.value >= vectorWidth) {
       schedule.vectorize(innermost);
+    }
+  }
+}
+
+export class ReductionWasmRule extends ScheduleRule {
+  constructor() {
+    super('reduction_wasm');
+  }
+
+  matches(primFunc, blockName, target) {
+    if (target.kind !== TargetKind.WASM) return false;
+    if (target.numCores <= 1) return false;
+    const info = classifyBlock(primFunc, blockName);
+    if (!info) return false;
+    return info.hasReduction && info.loopCount >= 2;
+  }
+
+  apply(schedule, blockName, target) {
+    const loops = schedule.getLoops(blockName);
+    if (loops.length < 2) return;
+
+    const spatialLoops = [];
+    for (const loop of loops) {
+      const info = classifyBlock(schedule.func, blockName);
+      if (!info || !isReductionLoop(loop, info)) {
+        spatialLoops.push(loop);
+      }
+    }
+
+    if (spatialLoops.length > 0) {
+      const outerExtent = spatialLoops[0].extent;
+      const outerSize = outerExtent && outerExtent.type === 'IntImmNode' ? outerExtent.value : 0;
+      if (outerSize >= (target.numCores || 1) * 4) {
+        schedule.parallelize(spatialLoops[0]);
+      }
     }
   }
 }
@@ -455,6 +513,7 @@ export class SchedulePolicy {
       new MatmulTiledGPURule(),
       new ReductionCPURule(),
       new ReductionGPURule(),
+      new ReductionWasmRule(),
       new ElementwiseCPURule(),
       new ElementwiseGPURule(),
       new ElementwiseWasmRule(),
