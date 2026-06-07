@@ -88,13 +88,15 @@ export function installBuiltins(runtime, define) {
   define('dtype', value => value.dtype);
   define('print', value => { runtime.output(formatValue(value)); return value; });
   define('trace', value => {
-    if (!(value instanceof CompiledProgramView)) throw new Error('trace() expects a compiled program');
-    const text = formatTrace(value.events);
+    const view = value?._isCompiled ? value._compiledView : value instanceof CompiledProgramView ? value : null;
+    if (!view?.events) throw new Error('trace() expects a compiled program');
+    const text = formatTrace(view.events);
     runtime.output(text);
     return text;
   });
   define('graph', value => {
-    const graph = value instanceof CompiledProgramView ? value.graph : value;
+    const graph = value?._isCompiled ? value._compiledView?.graph :
+                  value instanceof CompiledProgramView ? value.graph : value;
     const text = printModule(graph);
     runtime.output(text);
     return text;

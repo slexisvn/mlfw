@@ -481,7 +481,7 @@ export class Compiler {
         const compiled = backend.compile(pf);
         runtimeMod.addCompiledKernel(compiled);
         if (pf.shapeParamMap && pf.shapeParamMap.size > 0) {
-          runtimeMod.setShapeParamMap(pf.name, pf.shapeParamMap);
+          runtimeMod.setShapeParamMap(pf.name, pf.shapeParamMap, pf.bufferMap);
         }
         trace.codegenStats(pf.name, {
           durationMs: performance.now() - ft0,

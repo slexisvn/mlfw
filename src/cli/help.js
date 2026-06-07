@@ -24,6 +24,7 @@ Neural network:
 
 Compiler:
   compiled = compile(model, input=x)
+  y = compiled(x)
   trace(compiled)
 
 More:
@@ -125,13 +126,18 @@ Break and continue:
     if i == 5: continue
     print(i)`,
 
-  compile: `Compile a neural network:
+  compile: `Compile and execute a neural network:
   model = Sequential(Linear(2, 4), ReLU(), Linear(4, 1))
   x = randn([8, 2])
 
   compiled = compile(model, input=x)
+  y = compiled(x)                        # execute compiled model
   trace(compiled)
   graph(compiled)
+
+Lazy compile (no input needed):
+  compiled = compile(model)
+  y = compiled(x)                        # first call compiles + executes
 
 Options (off by default):
   compile(model, input=x, target=gpu)
@@ -174,6 +180,7 @@ model(x)`,
   compile: `model = Sequential(Linear(2, 4), ReLU(), Linear(4, 1))
 x = randn([8, 2])
 compiled = compile(model, input=x)
+y = compiled(x)
 trace(compiled)`,
 };
 

@@ -54,8 +54,9 @@ describe('Tensor Lang', () => {
       x = randn([5, 4])
       compile(model, input=x)
     `);
-    expect(result.events.length).toBeGreaterThan(0);
-    expect(result.result.listKernels().length).toBeGreaterThan(0);
+    expect(result._isCompiled).toBe(true);
+    expect(result._compiledView.events.length).toBeGreaterThan(0);
+    expect(result._compiledView.result.listKernels().length).toBeGreaterThan(0);
   });
 
   it('compiles tensor operators inside custom forward', () => {
@@ -68,7 +69,7 @@ describe('Tensor Lang', () => {
       x = randn([2, 4])
       compile(net, input=x)
     `);
-    expect(result.result.listKernels().length).toBeGreaterThan(0);
+    expect(result._compiledView.result.listKernels().length).toBeGreaterThan(0);
   });
 
   it('compiles scalar tensor operators inside custom forward', () => {
@@ -81,7 +82,49 @@ describe('Tensor Lang', () => {
       x = randn([2, 4])
       compile(net, input=x)
     `);
-    expect(result.result.listKernels().length).toBeGreaterThan(0);
+    expect(result._compiledView.result.listKernels().length).toBeGreaterThan(0);
+  });
+
+  it('executes compiled model and returns tensor', () => {
+    const runtime = new TensorLangRuntime({ output: () => {} });
+    const result = runtime.execute(`
+      model = Sequential(Linear(4, 2))
+      x = randn([3, 4])
+      compiled = compile(model, input=x)
+      compiled(x)
+    `);
+    expect(result.shape).toEqual([3, 2]);
+    expect(result.dtype).toBe('f32');
+  });
+
+  it('supports lazy compile without input', () => {
+    const runtime = new TensorLangRuntime({ output: () => {} });
+    const result = runtime.execute(`
+      model = Sequential(Linear(4, 2))
+      compiled = compile(model)
+      x = randn([3, 4])
+      compiled(x)
+    `);
+    expect(result.shape).toEqual([3, 2]);
+  });
+
+  it('compiled output matches eager forward', () => {
+    const runtime = new TensorLangRuntime({ output: () => {} });
+    runtime.execute(`
+      model = Sequential(Linear(3, 2))
+      x = tensor([[1, 2, 3]])
+      eager = model(x)
+      compiled = compile(model, input=x)
+      comp = compiled(x)
+    `);
+    const eager = runtime.getVariable('eager');
+    const comp = runtime.getVariable('comp');
+    expect(comp.shape).toEqual(eager.shape);
+    const eagerData = eager.data;
+    const compData = comp.data;
+    for (let i = 0; i < eagerData.length; i++) {
+      expect(compData[i]).toBeCloseTo(eagerData[i], 4);
+    }
   });
 
   it('indexes and slices tensors', () => {

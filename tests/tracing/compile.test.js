@@ -3,6 +3,56 @@ import {
   tensor, Linear, Sequential, ReLU,
 } from '../../src/index.js';
 import { compile } from '../../src/tracing/compile.js';
+import { Tensor } from '../../src/tensor/core/tensor.js';
+
+describe('compile returns executable tensors', () => {
+  it('returns a Tensor with correct shape and dtype', () => {
+    const model = new Sequential(new Linear(4, 2));
+    const x = tensor([[1, 2, 3, 4]]);
+    const compiled = compile(model, [x]);
+
+    const out = compiled(x);
+    expect(out).toBeInstanceOf(Tensor);
+    expect(out.shape).toEqual([1, 2]);
+    expect(out.dtype).toBe('f32');
+  });
+
+  it('numerical output matches eager forward pass', () => {
+    const model = new Sequential(new Linear(3, 2));
+    const x = tensor([[1, 2, 3]]);
+
+    const eager = model.forward(x);
+    const compiled = compile(model, [x]);
+    const compiled_out = compiled(x);
+
+    expect(compiled_out.shape).toEqual(eager.shape);
+    const eagerData = eager.data;
+    const compiledData = compiled_out.data;
+    for (let i = 0; i < eagerData.length; i++) {
+      expect(compiledData[i]).toBeCloseTo(eagerData[i], 4);
+    }
+  });
+
+  it('multi-layer model produces correct shape', () => {
+    const model = new Sequential(
+      new Linear(4, 3),
+      new ReLU(),
+      new Linear(3, 2),
+    );
+    const x = tensor([[1, 2, 3, 4]]);
+
+    const compiled = compile(model, [x]);
+    const out = compiled(x);
+
+    expect(out).toBeInstanceOf(Tensor);
+    expect(out.shape).toEqual([1, 2]);
+    expect(out.dtype).toBe('f32');
+    expect(out.data.length).toBe(2);
+    for (let i = 0; i < out.data.length; i++) {
+      expect(Number.isFinite(out.data[i])).toBe(true);
+    }
+  });
+});
 
 describe('compile shape-based recompilation cache', () => {
   it('same shape input reuses cached compilation', () => {
@@ -13,7 +63,9 @@ describe('compile shape-based recompilation cache', () => {
     const r1 = compiled(x1);
     const x2 = tensor([[5, 6, 7, 8]]);
     const r2 = compiled(x2);
-    expect(r1.result).toBe(r2.result);
+    expect(r1).toBeInstanceOf(Tensor);
+    expect(r2).toBeInstanceOf(Tensor);
+    expect(r1.shape).toEqual(r2.shape);
   });
 
   it('different shape triggers recompilation', () => {
@@ -24,7 +76,8 @@ describe('compile shape-based recompilation cache', () => {
 
     const x2 = tensor([[1, 2, 3, 4], [5, 6, 7, 8]]);
     const r2 = compiled(x2);
-    expect(r2.result).not.toBe(r1.result);
+    expect(r1.shape).toEqual([1, 2]);
+    expect(r2.shape).toEqual([2, 2]);
   });
 });
 
@@ -71,7 +124,8 @@ describe('compile lazy (no exampleInputs)', () => {
 
     const x = tensor([[1, 2, 3, 4]]);
     const r = compiled(x);
-    expect(r.result).toBeDefined();
+    expect(r).toBeInstanceOf(Tensor);
+    expect(r.shape).toEqual([1, 2]);
     expect(compiled.kernels().length).toBeGreaterThan(0);
   });
 });

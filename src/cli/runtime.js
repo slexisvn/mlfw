@@ -2,7 +2,7 @@ import * as fw from '../index.js';
 import { Module } from '../nn/module.js';
 import { Tensor } from '../tensor/core/tensor.js';
 import { SymbolicTensor } from '../tracing/symbolic_tensor.js';
-import { trace } from '../tracing/compile.js';
+import { executeCompiled, _traceCore } from '../tracing/compile.js';
 import { Compiler } from '../compiler/pipeline/compiler.js';
 import { TraceLevel } from '../compiler/pipeline/trace.js';
 import { parse } from './parser.js';
@@ -323,16 +323,17 @@ export class TensorLangRuntime {
       throw new Error('compile() currently expects a model. Example: compile(model, input=x)');
     }
     const named = takeNamed(args);
-    let inputs = named.input ?? args[0];
-    if (!Array.isArray(inputs)) inputs = [inputs];
-    if (!inputs.length || inputs.some(x => !(x instanceof Tensor))) {
-      throw new Error('compile() needs tensor input, for example compile(model, input=x)');
+    const rawInput = named.input ?? args[0];
+    let inputs = rawInput != null ? (Array.isArray(rawInput) ? rawInput : [rawInput]) : null;
+    if (inputs && inputs.some(x => !(x instanceof Tensor))) {
+      throw new Error('compile() input must be a tensor, for example compile(model, input=x)');
     }
+
     const targetName = named.target ?? 'cpu';
     const target = targetName === 'gpu' ? fw.GPUTarget() : targetName === 'wasm' ? fw.WasmTarget() : fw.CPUTarget();
-    const events = [];
-    const graph = trace((...values) => model.forward(...values), inputs, { name: model._langName || model.constructor.name });
-    const compiler = new Compiler({
+    const runtime = this;
+
+    const compilerOpts = {
       target,
       verify: named.verify ?? true,
       fusion: {
@@ -360,16 +361,67 @@ export class TensorLangRuntime {
         enabled: named.partition ?? false,
         targets: [],
       },
-      trace: {
-        level: TraceLevel.DEBUG,
-        sink: event => events.push(event),
-        irSnapshot: { afterGraphPasses: true, afterLowering: true, afterScheduling: true },
-      },
-    });
-    const result = compiler.compile(graph);
-    const compiled = new CompiledProgramView({ model, inputs, graph, result, events, target: targetName });
-    this.output(formatTrace(events));
-    return compiled;
+    };
+
+    let _compiled = null;
+    let _shapeKey = null;
+    let _view = null;
+
+    const modelName = model._langName || model.constructor.name;
+
+    function _getShapeKey(tensorInputs) {
+      let key = '';
+      for (const inp of tensorInputs) key += inp.shape.join(',') + ':' + inp.dtype + '|';
+      return key;
+    }
+
+    function _doCompile(tensorInputs) {
+      const events = [];
+      const traced = _traceCore(
+        (...values) => model.forward(...values),
+        tensorInputs,
+        { name: modelName },
+      );
+      const compiler = new Compiler({
+        ...compilerOpts,
+        trace: {
+          level: TraceLevel.DEBUG,
+          sink: event => events.push(event),
+          irSnapshot: { afterGraphPasses: true, afterLowering: true, afterScheduling: true },
+        },
+      });
+      const result = compiler.compile(traced.graph);
+      _view = new CompiledProgramView({ model, inputs: tensorInputs, graph: traced.graph, result, events, target: targetName });
+      runtime.output(formatTrace(events));
+      return {
+        result,
+        graph: traced.graph,
+        capturedParams: traced.capturedParams,
+        numUserInputs: traced.numUserInputs,
+        outputTypes: traced.outputTypes,
+      };
+    }
+
+    // Eager compile if inputs provided
+    if (inputs) {
+      _compiled = _doCompile(inputs);
+      _shapeKey = _getShapeKey(inputs);
+    }
+
+    // Callable: compiled(x) → Tensor
+    const execFn = (...callInputs) => {
+      const key = _getShapeKey(callInputs);
+      if (!_compiled || _shapeKey !== key) {
+        _compiled = _doCompile(callInputs);
+        _shapeKey = key;
+      }
+      return executeCompiled(_compiled, callInputs);
+    };
+
+    execFn._isCompiled = true;
+    execFn._langName = 'compiled';
+    Object.defineProperty(execFn, '_compiledView', { get: () => _view });
+    return execFn;
   }
 }
 

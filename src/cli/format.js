@@ -14,6 +14,11 @@ export function formatValue(value) {
   }
   if (value instanceof Module) return value.toString();
   if (value instanceof CompiledProgramView) return value.toString();
+  if (typeof value === 'function' && value._isCompiled) {
+    const view = value._compiledView;
+    if (view) return view.toString();
+    return '<compiled model (lazy)>';
+  }
   if (typeof value === 'function') {
     const name = value._langName || value.name || 'anonymous';
     return `<fn ${name}>`;

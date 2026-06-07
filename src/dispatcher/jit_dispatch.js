@@ -114,7 +114,7 @@ function _inferOutputShape(opName, tensorArgs, scalars) {
   return bcast || [...tensorArgs[0].shape];
 }
 
-function _tensorToContiguous(t) {
+export function tensorToContiguous(t) {
   if (t.isContiguous) return t.data;
   const shape = t.shape;
   const strides = t.strides;
@@ -138,7 +138,7 @@ function _tensorToContiguous(t) {
   return dst;
 }
 
-function _wrapResult(data, shape, dtype, device) {
+export function wrapResult(data, shape, dtype, device) {
   const strides = computeStrides(shape);
   const storage = Storage.fromData(data, device);
   const impl = new TensorImpl(storage, 0, shape, strides, dtype, device);
@@ -158,7 +158,7 @@ function _wrapOpForJIT(opName, dispatchKey) {
     const target = getTarget();
     const entry = jitCompile(opName, tensors, scalars, target);
 
-    const runtimeArgs = tensors.map(t => _tensorToContiguous(t));
+    const runtimeArgs = tensors.map(t => tensorToContiguous(t));
 
     const outShape = _inferOutputShape(opName, tensors, scalars);
     const outDtype = resultDtype(tensors[0].dtype, tensors.length > 1 ? tensors[1].dtype : tensors[0].dtype);
@@ -169,7 +169,7 @@ function _wrapOpForJIT(opName, dispatchKey) {
 
     entry.runtime.run(entry.funcName, ...runtimeArgs);
 
-    return _wrapResult(outData, outShape, outDtype, tensors[0].device);
+    return wrapResult(outData, outShape, outDtype, tensors[0].device);
   };
 }
 

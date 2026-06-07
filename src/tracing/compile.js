@@ -4,10 +4,9 @@ import { DispatchKey, DispatchKeySet } from '../dispatcher/dispatch_key.js';
 import { withIncludedKeys } from '../dispatcher/guard.js';
 import { Compiler } from '../compiler/pipeline/compiler.js';
 import { CPUTarget } from '../backend/target.js';
-import { Tensor } from '../tensor/core/tensor.js';
-import { TensorImpl } from '../tensor/core/tensor_impl.js';
-import { Storage } from '../tensor/core/storage.js';
-import { computeStrides, computeNumel } from '../tensor/utils/shape_utils.js';
+import { tensorToContiguous, wrapResult } from '../dispatcher/jit_dispatch.js';
+import { typedArrayCtor } from '../tensor/types/dtype.js';
+import { computeNumel } from '../tensor/utils/shape_utils.js';
 
 let _tracingRegistered = false;
 
@@ -18,7 +17,7 @@ function _ensureTracing() {
   }
 }
 
-export function trace(fn, exampleInputs, opts) {
+export function _traceCore(fn, exampleInputs, opts) {
   _ensureTracing();
 
   const name = opts?.name || fn.name || 'traced';
@@ -28,6 +27,7 @@ export function trace(fn, exampleInputs, opts) {
     tracer.createInput(input.shape, input.dtype);
   }
 
+  const numUserInputs = exampleInputs.length;
   const symbolicInputs = tracer._initGraph();
 
   tracer.activate();
@@ -44,7 +44,68 @@ export function trace(fn, exampleInputs, opts) {
     tracer.deactivate();
   }
 
-  return tracer.getGraphModule();
+  const graph = tracer.getGraphModule();
+  const func = graph.functions().next().value;
+
+  return {
+    graph,
+    capturedParams: [...tracer.capturedParams],
+    numUserInputs,
+    outputTypes: func.outputTypes,
+  };
+}
+
+export function trace(fn, exampleInputs, opts) {
+  return _traceCore(fn, exampleInputs, opts).graph;
+}
+
+export function executeCompiled(compiled, inputs) {
+  const kernels = compiled.result.listKernels();
+  if (kernels.length === 0) throw new Error('No kernels compiled');
+  const funcName = kernels[0];
+
+  const device = inputs.length > 0 ? inputs[0].device : 'cpu';
+
+  const inputArrays = new Array(inputs.length);
+  for (let i = 0; i < inputs.length; i++) {
+    inputArrays[i] = tensorToContiguous(inputs[i]);
+  }
+
+  const params = compiled.capturedParams;
+  const paramArrays = new Array(params.length);
+  for (let i = 0; i < params.length; i++) {
+    paramArrays[i] = tensorToContiguous(params[i]);
+  }
+
+  const outputTypes = compiled.outputTypes;
+  const outputArrays = new Array(outputTypes.length);
+  const outputShapes = new Array(outputTypes.length);
+  for (let i = 0; i < outputTypes.length; i++) {
+    const shape = outputTypes[i].shape;
+    const dtype = outputTypes[i].dtype;
+    const numel = computeNumel(shape);
+    const Ctor = typedArrayCtor(dtype);
+    outputArrays[i] = new Ctor(Math.max(numel, 1));
+    outputShapes[i] = shape;
+  }
+
+  const allArgs = new Array(inputArrays.length + paramArrays.length + outputArrays.length);
+  let idx = 0;
+  for (let i = 0; i < inputArrays.length; i++) allArgs[idx++] = inputArrays[i];
+  for (let i = 0; i < paramArrays.length; i++) allArgs[idx++] = paramArrays[i];
+  for (let i = 0; i < outputArrays.length; i++) allArgs[idx++] = outputArrays[i];
+
+  compiled.result.run(funcName, ...allArgs);
+
+  if (outputTypes.length === 1) {
+    return wrapResult(outputArrays[0], outputShapes[0], outputTypes[0].dtype, device);
+  }
+
+  const results = new Array(outputTypes.length);
+  for (let i = 0; i < outputTypes.length; i++) {
+    results[i] = wrapResult(outputArrays[i], outputShapes[i], outputTypes[i].dtype, device);
+  }
+  return results;
 }
 
 export function compile(model, exampleInputs, opts) {
@@ -64,12 +125,19 @@ export function compile(model, exampleInputs, opts) {
   }
 
   function _compile(inputs) {
-    const graph = trace(
+    const traced = _traceCore(
       (...args) => model.forward(...args),
       inputs,
       { name: model.constructor.name || 'compiled' }
     );
-    return { result: new Compiler(compilerOpts).compile(graph), graph };
+    const result = new Compiler(compilerOpts).compile(traced.graph);
+    return {
+      result,
+      graph: traced.graph,
+      capturedParams: traced.capturedParams,
+      numUserInputs: traced.numUserInputs,
+      outputTypes: traced.outputTypes,
+    };
   }
 
   function compiledForward(...inputs) {
@@ -78,7 +146,7 @@ export function compile(model, exampleInputs, opts) {
       _compiled = _compile(inputs);
       _shapeKey = key;
     }
-    return _compiled;
+    return executeCompiled(_compiled, inputs);
   }
 
   if (exampleInputs) {
