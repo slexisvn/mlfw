@@ -127,6 +127,14 @@ export class CompilationResult {
     return this.module.run(funcName, ...args);
   }
 
+  async runAsync(funcName, ...args) {
+    return this.module.runAsync(funcName, ...args);
+  }
+
+  isAsync(funcName) {
+    return this.module.isAsync(funcName);
+  }
+
   getSource(funcName) {
     return this.module.getKernelSource(funcName);
   }

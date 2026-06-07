@@ -131,7 +131,7 @@ export class ElementwiseGPURule extends ScheduleRule {
   }
 
   matches(primFunc, blockName, target) {
-    if (target.kind !== TargetKind.GPU) return false;
+    if (!target.isGPU()) return false;
     const info = classifyBlock(primFunc, blockName);
     if (!info) return false;
     return !info.hasReduction && info.loopCount >= 1;
@@ -210,7 +210,7 @@ export class ReductionGPURule extends ScheduleRule {
   }
 
   matches(primFunc, blockName, target) {
-    if (target.kind !== TargetKind.GPU) return false;
+    if (!target.isGPU()) return false;
     const info = classifyBlock(primFunc, blockName);
     if (!info) return false;
     return info.hasReduction;
@@ -310,7 +310,7 @@ export class MatmulTiledGPURule extends ScheduleRule {
   }
 
   matches(primFunc, blockName, target) {
-    if (target.kind !== TargetKind.GPU) return false;
+    if (!target.isGPU()) return false;
     const info = classifyBlock(primFunc, blockName);
     if (!info) return false;
     if (!info.hasReduction || !blockName.includes('matmul')) return false;

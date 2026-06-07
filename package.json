@@ -7,8 +7,7 @@
   },
   "scripts": {
     "start": "node src/cli/index.js",
-    "test": "vitest run --exclude tests/stress/**",
-    "test:stress": "vitest run tests/stress",
+    "test": "vitest run --exclude '**/node_modules/**' --exclude '**/stress/**' --exclude '**/webgpu-gpu.test.*'",
     "test:all": "vitest run",
     "test:coverage": "vitest run --coverage",
     "postinstall": "patch-package"
@@ -20,6 +19,7 @@
   },
   "dependencies": {
     "cli-highlight": "^2.1.11",
-    "terminal-kit": "^3.1.2"
+    "terminal-kit": "^3.1.2",
+    "webgpu": "^0.4.0"
   }
 }

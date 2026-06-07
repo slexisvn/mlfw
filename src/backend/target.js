@@ -1,6 +1,7 @@
 export const TargetKind = Object.freeze({
   CPU: 'cpu',
   GPU: 'gpu',
+  WEBGPU: 'webgpu',
   WASM: 'wasm',
   ACCELERATOR: 'accelerator'
 });
@@ -37,7 +38,11 @@ export class TargetFeatures {
   }
 
   isGPU() {
-    return this.kind === TargetKind.GPU;
+    return this.kind === TargetKind.GPU || this.kind === TargetKind.WEBGPU;
+  }
+
+  isWebGPU() {
+    return this.kind === TargetKind.WEBGPU;
   }
 
   isCPU() {
@@ -49,7 +54,7 @@ export class TargetFeatures {
   }
 
   supportsThreadBinding() {
-    return this.isGPU();
+    return this.isGPU() || this.isWebGPU();
   }
 
   supportsVectorization() {
@@ -119,5 +124,25 @@ export const WasmTarget = (overrides = {}) => new TargetFeatures({
   computeTFLOPs: 0.1,
   supportsInt8: true,
   simd: true,
+  ...overrides
+});
+
+export const WebGPUTarget = (overrides = {}) => new TargetFeatures({
+  kind: TargetKind.WEBGPU,
+  name: 'webgpu_generic',
+  vectorWidth: 1,
+  numCores: 32,
+  maxThreadsPerBlock: 256,
+  maxBlockDimX: 256,
+  maxBlockDimY: 256,
+  maxBlockDimZ: 64,
+  maxGridDimX: 65535,
+  maxGridDimY: 65535,
+  maxGridDimZ: 65535,
+  sharedMemoryBytes: 16384,
+  warpSize: 32,
+  memoryBandwidthGBs: 400,
+  computeTFLOPs: 8,
+  supportsFloat16: true,
   ...overrides
 });

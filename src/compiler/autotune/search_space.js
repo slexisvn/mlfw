@@ -200,7 +200,7 @@ export function getSketchesForBlock(primFunc, blockName, target, blockMap) {
     if (info.isMatmul) sketches.push(createMatmulCPUSketch());
     else if (info.hasReduction) sketches.push(createReductionCPUSketch());
     else sketches.push(createElementwiseCPUSketch());
-  } else if (target.kind === TargetKind.GPU) {
+  } else if (target.isGPU()) {
     if (info.isMatmul) sketches.push(createMatmulGPUSketch());
     else sketches.push(createElementwiseGPUSketch());
   }

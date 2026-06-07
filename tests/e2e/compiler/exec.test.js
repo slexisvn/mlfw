@@ -36,46 +36,46 @@ for (const target of TARGETS) {
   describe(`compile+exec [${target.name}]`, () => {
 
     describe('single Linear', () => {
-      it('forward [1,4] -> [1,2]', () => {
+      it('forward [1,4] -> [1,2]', async () => {
         const model = new Sequential(new Linear(4, 2));
         const x = tensor([[1, 2, 3, 4]]);
         const compiled = compileFor(model, [x], target);
-        const out = compiled(x);
+        const out = await compiled(x);
 
         expect(out).toBeInstanceOf(Tensor);
         expect(out.shape).toEqual([1, 2]);
         expectFinite(out);
       });
 
-      it('batch [3,4] -> [3,2]', () => {
+      it('batch [3,4] -> [3,2]', async () => {
         const model = new Sequential(new Linear(4, 2));
         const x = tensor([[1, 2, 3, 4], [5, 6, 7, 8], [0.1, 0.2, 0.3, 0.4]]);
         const compiled = compileFor(model, [x], target);
-        const out = compiled(x);
+        const out = await compiled(x);
 
         expect(out.shape).toEqual([3, 2]);
         expectFinite(out);
       });
 
-      it('different inputs produce different outputs', () => {
+      it('different inputs produce different outputs', async () => {
         const model = new Sequential(new Linear(4, 2));
         const x1 = tensor([[1, 0, 0, 0]]);
         const x2 = tensor([[0, 0, 0, 1]]);
         const compiled = compileFor(model, [x1], target);
 
-        const o1 = compiled(x1);
-        const o2 = compiled(x2);
+        const o1 = await compiled(x1);
+        const o2 = await compiled(x2);
         const diff = Math.abs(o1.data[0] - o2.data[0]) + Math.abs(o1.data[1] - o2.data[1]);
         expect(diff).toBeGreaterThan(0);
       });
     });
 
     describe('Linear + activation', () => {
-      it('Linear + ReLU', () => {
+      it('Linear + ReLU', async () => {
         const model = new Sequential(new Linear(4, 4), new ReLU());
         const x = tensor([[1, -1, 2, -2]]);
         const compiled = compileFor(model, [x], target);
-        const out = compiled(x);
+        const out = await compiled(x);
 
         expect(out.shape).toEqual([1, 4]);
         expectFinite(out);
@@ -84,11 +84,11 @@ for (const target of TARGETS) {
         }
       });
 
-      it('Linear + Sigmoid', () => {
+      it('Linear + Sigmoid', async () => {
         const model = new Sequential(new Linear(3, 3), new Sigmoid());
         const x = tensor([[10, -10, 0]]);
         const compiled = compileFor(model, [x], target);
-        const out = compiled(x);
+        const out = await compiled(x);
 
         expect(out.shape).toEqual([1, 3]);
         expectFinite(out);
@@ -98,11 +98,11 @@ for (const target of TARGETS) {
         }
       });
 
-      it('Linear + Tanh', () => {
+      it('Linear + Tanh', async () => {
         const model = new Sequential(new Linear(3, 3), new Tanh());
         const x = tensor([[5, -5, 0]]);
         const compiled = compileFor(model, [x], target);
-        const out = compiled(x);
+        const out = await compiled(x);
 
         expect(out.shape).toEqual([1, 3]);
         expectFinite(out);
@@ -114,7 +114,7 @@ for (const target of TARGETS) {
     });
 
     describe('deep models', () => {
-      it('3-layer MLP', () => {
+      it('3-layer MLP', async () => {
         const model = new Sequential(
           new Linear(8, 16),
           new ReLU(),
@@ -124,13 +124,13 @@ for (const target of TARGETS) {
         );
         const x = tensor([[1, 2, 3, 4, 5, 6, 7, 8]]);
         const compiled = compileFor(model, [x], target);
-        const out = compiled(x);
+        const out = await compiled(x);
 
         expect(out.shape).toEqual([1, 4]);
         expectFinite(out);
       });
 
-      it('4-layer with mixed activations', () => {
+      it('4-layer with mixed activations', async () => {
         const model = new Sequential(
           new Linear(4, 8),
           new ReLU(),
@@ -142,13 +142,13 @@ for (const target of TARGETS) {
         );
         const x = tensor([[1, 2, 3, 4]]);
         const compiled = compileFor(model, [x], target);
-        const out = compiled(x);
+        const out = await compiled(x);
 
         expect(out.shape).toEqual([1, 2]);
         expectFinite(out);
       });
 
-      it('wide layer (64 hidden)', () => {
+      it('wide layer (64 hidden)', async () => {
         const model = new Sequential(
           new Linear(4, 64),
           new ReLU(),
@@ -156,7 +156,7 @@ for (const target of TARGETS) {
         );
         const x = tensor([[0.5, -0.5, 1.0, -1.0]]);
         const compiled = compileFor(model, [x], target);
-        const out = compiled(x);
+        const out = await compiled(x);
 
         expect(out.shape).toEqual([1, 2]);
         expectFinite(out);
@@ -164,18 +164,18 @@ for (const target of TARGETS) {
     });
 
     describe('batch sizes', () => {
-      it('single sample [1,4]', () => {
+      it('single sample [1,4]', async () => {
         const model = new Sequential(new Linear(4, 2));
         const x = tensor([[1, 2, 3, 4]]);
         const compiled = compileFor(model, [x], target);
-        expect(compiled(x).shape).toEqual([1, 2]);
+        expect((await compiled(x)).shape).toEqual([1, 2]);
       });
 
-      it('recompiles for different batch size', () => {
+      it('recompiles for different batch size', async () => {
         const model = new Sequential(new Linear(4, 2));
         const x1 = tensor([[1, 2, 3, 4]]);
         const compiled = compileFor(model, [x1], target);
-        const o1 = compiled(x1);
+        const o1 = await compiled(x1);
         expect(o1.shape).toEqual([1, 2]);
 
         const x4 = tensor([
@@ -184,28 +184,28 @@ for (const target of TARGETS) {
           [9, 10, 11, 12],
           [13, 14, 15, 16],
         ]);
-        const o4 = compiled(x4);
+        const o4 = await compiled(x4);
         expect(o4.shape).toEqual([4, 2]);
         expectFinite(o4);
       });
     });
 
     describe('numerical stability', () => {
-      it('zero input', () => {
+      it('zero input', async () => {
         const model = new Sequential(new Linear(4, 2));
         const x = tensor([[0, 0, 0, 0]]);
         const compiled = compileFor(model, [x], target);
-        const out = compiled(x);
+        const out = await compiled(x);
 
         expect(out.shape).toEqual([1, 2]);
         expectFinite(out);
       });
 
-      it('large values', () => {
+      it('large values', async () => {
         const model = new Sequential(new Linear(4, 2), new Tanh());
         const x = tensor([[100, -100, 50, -50]]);
         const compiled = compileFor(model, [x], target);
-        const out = compiled(x);
+        const out = await compiled(x);
 
         expect(out.shape).toEqual([1, 2]);
         expectFinite(out);
@@ -215,24 +215,24 @@ for (const target of TARGETS) {
         }
       });
 
-      it('small values', () => {
+      it('small values', async () => {
         const model = new Sequential(new Linear(4, 2));
         const x = tensor([[1e-7, -1e-7, 1e-7, -1e-7]]);
         const compiled = compileFor(model, [x], target);
-        const out = compiled(x);
+        const out = await compiled(x);
 
         expect(out.shape).toEqual([1, 2]);
         expectFinite(out);
       });
 
-      it('repeated execution is deterministic', () => {
+      it('repeated execution is deterministic', async () => {
         const model = new Sequential(new Linear(4, 2));
         const x = tensor([[1, 2, 3, 4]]);
         const compiled = compileFor(model, [x], target);
 
-        const r1 = compiled(x);
-        const r2 = compiled(x);
-        const r3 = compiled(x);
+        const r1 = await compiled(x);
+        const r2 = await compiled(x);
+        const r3 = await compiled(x);
 
         expectClose(r1, r2);
         expectClose(r2, r3);
@@ -241,24 +241,24 @@ for (const target of TARGETS) {
 
     if (target.name === 'cpu') {
       describe('cpu-eager vs compiled agreement', () => {
-        it('single Linear matches eager', () => {
+        it('single Linear matches eager', async () => {
           const model = new Sequential(new Linear(4, 2));
           const x = tensor([[1, 2, 3, 4]]);
 
           const eager = model.forward(x);
           const compiled = compileFor(model, [x], target);
-          const comp = compiled(x);
+          const comp = await compiled(x);
 
           expectClose(eager, comp, 3);
         });
 
-        it('Linear+ReLU matches eager', () => {
+        it('Linear+ReLU matches eager', async () => {
           const model = new Sequential(new Linear(3, 3), new ReLU());
           const x = tensor([[1, 2, 3]]);
 
           const eager = model.forward(x);
           const compiled = compileFor(model, [x], target);
-          const comp = compiled(x);
+          const comp = await compiled(x);
 
           expectClose(eager, comp, 3);
         });
@@ -266,13 +266,13 @@ for (const target of TARGETS) {
     }
 
     describe('lazy compile', () => {
-      it('compiles on first call', () => {
+      it('compiles on first call', async () => {
         const model = new Sequential(new Linear(4, 2));
         const compiled = compile(model, undefined, { target: target.factory() });
         expect(compiled.kernels()).toEqual([]);
 
         const x = tensor([[1, 2, 3, 4]]);
-        const out = compiled(x);
+        const out = await compiled(x);
 
         expect(out).toBeInstanceOf(Tensor);
         expect(out.shape).toEqual([1, 2]);

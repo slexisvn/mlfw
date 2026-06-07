@@ -50,4 +50,4 @@ export * as nn from './nn/index.js';
 export * as init from './nn/init.js';
 
 export { trace, compile } from './tracing/compile.js';
-export { CPUTarget, GPUTarget, WasmTarget } from './backend/target.js';
+export { CPUTarget, GPUTarget, WasmTarget, WebGPUTarget } from './backend/target.js';

@@ -7,6 +7,7 @@ import { CPUTarget } from '../backend/target.js';
 import { tensorToContiguous, wrapResult } from '../dispatcher/jit_dispatch.js';
 import { typedArrayCtor } from '../tensor/types/dtype.js';
 import { computeNumel } from '../tensor/utils/shape_utils.js';
+import { extractWebGPUSnippet } from '../backend/webgpu/snippet.js';
 
 let _tracingRegistered = false;
 
@@ -59,7 +60,7 @@ export function trace(fn, exampleInputs, opts) {
   return _traceCore(fn, exampleInputs, opts).graph;
 }
 
-export function executeCompiled(compiled, inputs) {
+function _prepareExecution(compiled, inputs) {
   const kernels = compiled.result.listKernels();
   if (kernels.length === 0) throw new Error('No kernels compiled');
   const funcName = kernels[0];
@@ -95,17 +96,30 @@ export function executeCompiled(compiled, inputs) {
   for (let i = 0; i < paramArrays.length; i++) allArgs[idx++] = paramArrays[i];
   for (let i = 0; i < outputArrays.length; i++) allArgs[idx++] = outputArrays[i];
 
-  compiled.result.run(funcName, ...allArgs);
+  return { funcName, device, outputTypes, outputArrays, outputShapes, allArgs };
+}
 
+function _wrapOutputs(device, outputTypes, outputArrays, outputShapes) {
   if (outputTypes.length === 1) {
     return wrapResult(outputArrays[0], outputShapes[0], outputTypes[0].dtype, device);
   }
-
   const results = new Array(outputTypes.length);
   for (let i = 0; i < outputTypes.length; i++) {
     results[i] = wrapResult(outputArrays[i], outputShapes[i], outputTypes[i].dtype, device);
   }
   return results;
+}
+
+export function executeCompiled(compiled, inputs) {
+  const { funcName, device, outputTypes, outputArrays, outputShapes, allArgs } = _prepareExecution(compiled, inputs);
+
+  if (compiled.result.isAsync(funcName)) {
+    return compiled.result.runAsync(funcName, ...allArgs)
+      .then(() => _wrapOutputs(device, outputTypes, outputArrays, outputShapes));
+  }
+
+  compiled.result.run(funcName, ...allArgs);
+  return _wrapOutputs(device, outputTypes, outputArrays, outputShapes);
 }
 
 export function compile(model, exampleInputs, opts) {
@@ -174,6 +188,11 @@ export function compile(model, exampleInputs, opts) {
   compiledForward.kernels = () => {
     if (!_compiled) return [];
     return _compiled.result.listKernels();
+  };
+
+  compiledForward.toWebGPU = (...inputs) => {
+    if (!_compiled) return null;
+    return extractWebGPUSnippet(_compiled, inputs);
   };
 
   return compiledForward;

@@ -106,6 +106,7 @@ export function installBuiltins(runtime, define) {
   define('cpu', 'cpu');
   define('gpu', 'gpu');
   define('wasm', 'wasm');
+  define('webgpu', 'webgpu');
   for (const dtype of ['f16', 'f32', 'f64', 'i32', 'i64', 'bool']) define(dtype, dtype);
 }
 

@@ -91,6 +91,36 @@ export function isJSMathFunc(name) {
   return JS_MATH_FUNCS.has(name);
 }
 
+const WGSL_TYPE_TABLE = {
+  'f16':  { wgsl: 'f16',  bytes: 2 },
+  'f32':  { wgsl: 'f32',  bytes: 4 },
+  'f64':  { wgsl: 'f32',  bytes: 4 },
+  'i8':   { wgsl: 'i32',  bytes: 4 },
+  'i16':  { wgsl: 'i32',  bytes: 4 },
+  'i32':  { wgsl: 'i32',  bytes: 4 },
+  'i64':  { wgsl: 'i32',  bytes: 4 },
+  'ui8':  { wgsl: 'u32',  bytes: 4 },
+  'bool': { wgsl: 'u32',  bytes: 4 },
+  'index':{ wgsl: 'u32',  bytes: 4 },
+};
+
+const DEFAULT_WGSL_ENTRY = WGSL_TYPE_TABLE['f32'];
+
+export function wgslType(dtype) { return (WGSL_TYPE_TABLE[dtype] || DEFAULT_WGSL_ENTRY).wgsl; }
+export function wgslBytes(dtype) { return (WGSL_TYPE_TABLE[dtype] || DEFAULT_WGSL_ENTRY).bytes; }
+
+const WGSL_MATH_FUNCS = {
+  'exp': 'exp', 'log': 'log', 'sqrt': 'sqrt', 'tanh': 'tanh',
+  'abs': 'abs', 'sin': 'sin', 'cos': 'cos', 'ceil': 'ceil',
+  'floor': 'floor', 'max': 'max', 'min': 'min', 'pow': 'pow',
+  'round': 'round', 'sign': 'sign', 'rsqrt': 'inverseSqrt',
+  'fabs': 'abs',
+};
+
+export function wgslMathFunc(name) {
+  return WGSL_MATH_FUNCS[name] || name;
+}
+
 const LIBRARY_FUNC_TABLE = {
   'dot': {
     'blas':   { 'f32': 'sgemm',  'f64': 'dgemm'  },

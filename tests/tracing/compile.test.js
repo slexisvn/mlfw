@@ -6,24 +6,24 @@ import { compile } from '../../src/tracing/compile.js';
 import { Tensor } from '../../src/tensor/core/tensor.js';
 
 describe('compile returns executable tensors', () => {
-  it('returns a Tensor with correct shape and dtype', () => {
+  it('returns a Tensor with correct shape and dtype', async () => {
     const model = new Sequential(new Linear(4, 2));
     const x = tensor([[1, 2, 3, 4]]);
     const compiled = compile(model, [x]);
 
-    const out = compiled(x);
+    const out = await compiled(x);
     expect(out).toBeInstanceOf(Tensor);
     expect(out.shape).toEqual([1, 2]);
     expect(out.dtype).toBe('f32');
   });
 
-  it('numerical output matches eager forward pass', () => {
+  it('numerical output matches eager forward pass', async () => {
     const model = new Sequential(new Linear(3, 2));
     const x = tensor([[1, 2, 3]]);
 
     const eager = model.forward(x);
     const compiled = compile(model, [x]);
-    const compiled_out = compiled(x);
+    const compiled_out = await compiled(x);
 
     expect(compiled_out.shape).toEqual(eager.shape);
     const eagerData = eager.data;
@@ -33,7 +33,7 @@ describe('compile returns executable tensors', () => {
     }
   });
 
-  it('multi-layer model produces correct shape', () => {
+  it('multi-layer model produces correct shape', async () => {
     const model = new Sequential(
       new Linear(4, 3),
       new ReLU(),
@@ -42,7 +42,7 @@ describe('compile returns executable tensors', () => {
     const x = tensor([[1, 2, 3, 4]]);
 
     const compiled = compile(model, [x]);
-    const out = compiled(x);
+    const out = await compiled(x);
 
     expect(out).toBeInstanceOf(Tensor);
     expect(out.shape).toEqual([1, 2]);
@@ -55,27 +55,27 @@ describe('compile returns executable tensors', () => {
 });
 
 describe('compile shape-based recompilation cache', () => {
-  it('same shape input reuses cached compilation', () => {
+  it('same shape input reuses cached compilation', async () => {
     const model = new Sequential(new Linear(4, 2));
     const x1 = tensor([[1, 2, 3, 4]]);
     const compiled = compile(model, [x1]);
 
-    const r1 = compiled(x1);
+    const r1 = await compiled(x1);
     const x2 = tensor([[5, 6, 7, 8]]);
-    const r2 = compiled(x2);
+    const r2 = await compiled(x2);
     expect(r1).toBeInstanceOf(Tensor);
     expect(r2).toBeInstanceOf(Tensor);
     expect(r1.shape).toEqual(r2.shape);
   });
 
-  it('different shape triggers recompilation', () => {
+  it('different shape triggers recompilation', async () => {
     const model = new Sequential(new Linear(4, 2));
     const x1 = tensor([[1, 2, 3, 4]]);
     const compiled = compile(model, [x1]);
-    const r1 = compiled(x1);
+    const r1 = await compiled(x1);
 
     const x2 = tensor([[1, 2, 3, 4], [5, 6, 7, 8]]);
-    const r2 = compiled(x2);
+    const r2 = await compiled(x2);
     expect(r1.shape).toEqual([1, 2]);
     expect(r2.shape).toEqual([2, 2]);
   });
@@ -117,13 +117,13 @@ describe('compile accessor methods', () => {
 });
 
 describe('compile lazy (no exampleInputs)', () => {
-  it('compiles on first call when no example inputs given', () => {
+  it('compiles on first call when no example inputs given', async () => {
     const model = new Sequential(new Linear(4, 2));
     const compiled = compile(model);
     expect(compiled.kernels()).toEqual([]);
 
     const x = tensor([[1, 2, 3, 4]]);
-    const r = compiled(x);
+    const r = await compiled(x);
     expect(r).toBeInstanceOf(Tensor);
     expect(r.shape).toEqual([1, 2]);
     expect(compiled.kernels().length).toBeGreaterThan(0);

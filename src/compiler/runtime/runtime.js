@@ -1,4 +1,9 @@
 import { encodeWat } from '../../backend/wasm/wat_encoder.js';
+let _webgpuMod = null;
+async function getWebGPURuntime() {
+  if (!_webgpuMod) _webgpuMod = await import('./webgpu_runtime.js');
+  return _webgpuMod;
+}
 
 const TYPED_ARRAY_CTORS = {
   'f16':  Float32Array,
@@ -224,6 +229,11 @@ export class RuntimeModule {
     } else if (compiledKernel.metadata.kind === 'wasm') {
       const inst = instantiateWasm(compiledKernel);
       this._wasmInstances.set(compiledKernel.name, inst);
+    } else if (compiledKernel.metadata.kind === 'webgpu') {
+      if (!this._webgpuKernels) this._webgpuKernels = new Map();
+      if (!this._webgpuInstances) this._webgpuInstances = new Map();
+      this._webgpuKernels.set(compiledKernel.name, compiledKernel);
+      this._webgpuInstances.set(compiledKernel.name, getWebGPURuntime().then(m => m.instantiateWebGPU(compiledKernel)));
     }
   }
 
@@ -254,6 +264,10 @@ export class RuntimeModule {
       shapeValues = RuntimeModule._extractShapeParams(shapeParamMap, tensorShapes, args);
     }
 
+    if (this._webgpuKernels && this._webgpuKernels.has(name)) {
+      throw new Error('WebGPU kernel requires async execution — use runAsync()');
+    }
+
     const wasmInst = this._wasmInstances.get(name);
     if (wasmInst) {
       runWasmKernel(wasmInst, name, tensorArgs, shapeValues);
@@ -267,6 +281,38 @@ export class RuntimeModule {
     }
 
     throw new Error('Kernel \'' + name + '\' not found or not executable');
+  }
+
+  async runAsync(name, ...args) {
+    if (!this._webgpuInstances || !this._webgpuInstances.has(name)) {
+      this.run(name, ...args);
+      return;
+    }
+
+    const tensorArgs = [];
+    const tensorShapes = new Map();
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] instanceof RuntimeTensor) {
+        tensorArgs.push(args[i].data);
+        tensorShapes.set(i, args[i].shape);
+      } else {
+        tensorArgs.push(args[i]);
+      }
+    }
+
+    const shapeParamMap = this._shapeParamMaps && this._shapeParamMaps.get(name);
+    let shapeValues = null;
+    if (shapeParamMap && shapeParamMap.size > 0) {
+      shapeValues = RuntimeModule._extractShapeParams(shapeParamMap, tensorShapes, args);
+    }
+
+    const instance = await this._webgpuInstances.get(name);
+    const { runWebGPUKernel } = await getWebGPURuntime();
+    await runWebGPUKernel(instance, tensorArgs, shapeValues);
+  }
+
+  isAsync(name) {
+    return !!(this._webgpuKernels && this._webgpuKernels.has(name));
   }
 
   static _extractShapeParams(shapeParamMap, tensorShapes, args) {

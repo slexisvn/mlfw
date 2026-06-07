@@ -2,6 +2,7 @@ import { TargetKind } from './target.js';
 import { CPUCodegen } from './cpu/codegen.js';
 import { GPUCodegen } from './gpu/codegen.js';
 import { WasmCodegen } from './wasm/codegen.js';
+import { WebGPUCodegen } from './webgpu/codegen.js';
 import { createCPULibrarySelector, createGPULibrarySelector } from './library_selector.js';
 
 export class CompiledKernel {
@@ -26,6 +27,7 @@ export class BackendPipeline {
   compile(primFunc) {
     if (this.target.isWasm()) return this._compileWasm(primFunc);
     if (this.target.isCPU()) return this._compileCPU(primFunc);
+    if (this.target.isWebGPU()) return this._compileWebGPU(primFunc);
     if (this.target.isGPU()) return this._compileGPU(primFunc);
     throw new Error(`Unsupported target kind: ${this.target.kind}`);
   }
@@ -53,6 +55,19 @@ export class BackendPipeline {
       imports: result.imports,
       params: result.params,
       bufferMap: primFunc.bufferMap,
+    });
+  }
+
+  _compileWebGPU(primFunc) {
+    const codegen = new WebGPUCodegen(this.target);
+    const kernel = codegen.generate(primFunc);
+    return new CompiledKernel(primFunc.name, kernel.source, this.target, {
+      kind: 'webgpu',
+      workgroupSize: kernel.workgroupSize,
+      dispatchSize: kernel.dispatchSize,
+      sharedMemBytes: kernel.sharedMemBytes,
+      params: kernel.params,
+      bindings: kernel.bindings
     });
   }
 
