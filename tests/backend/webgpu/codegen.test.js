@@ -184,6 +184,11 @@ describe('WebGPUCodegen._emitExternCall', () => {
     const b = new VariableNode('b', 'f32');
     expect(externCall('fmod', [a, b])).toBe('(a % b)');
   });
+
+  it('throws on unknown extern function', () => {
+    const x = new VariableNode('x', 'f32');
+    expect(() => externCall('fake_func', [x])).toThrow('WebGPU codegen: unsupported extern function "fake_func"');
+  });
 });
 
 describe('WebGPUCodegen._flatIndex', () => {
@@ -724,5 +729,190 @@ describe('WebGPUCodegen.generate — full kernel', () => {
     const opens = (kernel.source.match(/\{/g) || []).length;
     const closes = (kernel.source.match(/\}/g) || []).length;
     expect(opens).toBe(closes);
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────
+// _isBoolExpr — detection of boolean-producing expressions
+// ────────────────────────────────────────────────────────────────────
+
+describe('WebGPUCodegen._isBoolExpr', () => {
+  function isBoolExpr(node) {
+    const cg = makeCodegen();
+    return cg._isBoolExpr(node);
+  }
+
+  it('detects CompareNode as bool', () => {
+    expect(isBoolExpr(new CompareNode('gt', new FloatImmNode(1), new FloatImmNode(2)))).toBe(true);
+  });
+
+  it('detects logical ops (&&, ||, !) as bool', () => {
+    const a = new CompareNode('gt', new FloatImmNode(1), new FloatImmNode(0));
+    const b = new CompareNode('lt', new FloatImmNode(1), new FloatImmNode(2));
+    expect(isBoolExpr(new MathOpNode('&&', a, b))).toBe(true);
+    expect(isBoolExpr(new MathOpNode('||', a, b))).toBe(true);
+    expect(isBoolExpr(new MathOpNode('!', a))).toBe(true);
+  });
+
+  it('detects comparison MathOpNode (<, >, <=, >=, ==, !=) as bool', () => {
+    const a = new IntImmNode(1);
+    const b = new IntImmNode(2);
+    expect(isBoolExpr(new MathOpNode('<', a, b))).toBe(true);
+    expect(isBoolExpr(new MathOpNode('>', a, b))).toBe(true);
+    expect(isBoolExpr(new MathOpNode('<=', a, b))).toBe(true);
+    expect(isBoolExpr(new MathOpNode('>=', a, b))).toBe(true);
+    expect(isBoolExpr(new MathOpNode('==', a, b))).toBe(true);
+    expect(isBoolExpr(new MathOpNode('!=', a, b))).toBe(true);
+  });
+
+  it('does not detect arithmetic MathOpNode as bool', () => {
+    expect(isBoolExpr(new MathOpNode('+', new IntImmNode(1), new IntImmNode(2)))).toBe(false);
+    expect(isBoolExpr(new MathOpNode('*', new FloatImmNode(1), new FloatImmNode(2)))).toBe(false);
+  });
+
+  it('returns false for non-bool nodes', () => {
+    expect(isBoolExpr(new IntImmNode(1))).toBe(false);
+    expect(isBoolExpr(new FloatImmNode(1.0))).toBe(false);
+    expect(isBoolExpr(new VariableNode('x'))).toBe(false);
+    expect(isBoolExpr(null)).toBe(false);
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────
+// _boolExpr / _numericExpr — bool↔numeric boundary conversion
+// ────────────────────────────────────────────────────────────────────
+
+describe('WebGPUCodegen._boolExpr and _numericExpr', () => {
+  function boolExpr(node) {
+    const cg = makeCodegen();
+    cg._defaultDtype = 'f32';
+    return cg._boolExpr(node);
+  }
+
+  function numericExpr(node, dtype) {
+    const cg = makeCodegen();
+    cg._defaultDtype = 'f32';
+    return cg._numericExpr(node, dtype);
+  }
+
+  it('_boolExpr returns CompareNode as-is (no != 0)', () => {
+    const cmp = new CompareNode('lt', new IntImmNode(1), new IntImmNode(10));
+    const result = boolExpr(cmp);
+    expect(result).not.toContain('!= 0');
+    expect(result).toContain('<');
+  });
+
+  it('_boolExpr returns MathOpNode(<) as-is (no != 0)', () => {
+    const cmp = new MathOpNode('<', new IntImmNode(1), new IntImmNode(10));
+    const result = boolExpr(cmp);
+    expect(result).not.toContain('!= 0');
+    expect(result).toContain('<');
+  });
+
+  it('_boolExpr adds != 0 for non-bool expressions', () => {
+    const result = boolExpr(new IntImmNode(1));
+    expect(result).toContain('!= 0');
+  });
+
+  it('_numericExpr wraps CompareNode in select for f32', () => {
+    const cmp = new CompareNode('gt', new FloatImmNode(1), new FloatImmNode(2));
+    const result = numericExpr(cmp, 'f32');
+    expect(result).toContain('select(0.0, 1.0,');
+  });
+
+  it('_numericExpr wraps CompareNode in select for u32', () => {
+    const cmp = new CompareNode('eq', new IntImmNode(1), new IntImmNode(1));
+    const result = numericExpr(cmp, 'u32');
+    expect(result).toContain('select(');
+    expect(result).toMatch(/select\((0\.0|u32\(0\)), (1\.0|u32\(1\)),/);
+  });
+
+  it('_numericExpr wraps MathOpNode(<) in select for i32', () => {
+    const cmp = new MathOpNode('<', new IntImmNode(1), new IntImmNode(10));
+    const result = numericExpr(cmp, 'i32');
+    expect(result).toContain('select(i32(0), i32(1),');
+  });
+
+  it('_numericExpr passes through non-bool nodes unchanged', () => {
+    const add = new MathOpNode('+', new IntImmNode(1), new IntImmNode(2));
+    const result = numericExpr(add, 'f32');
+    expect(result).not.toContain('select');
+    expect(result).toContain('+');
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────
+// _analyzeSharing — shared memory budget enforcement
+// ────────────────────────────────────────────────────────────────────
+
+describe('WebGPUCodegen._analyzeSharing — shared memory budget', () => {
+  it('does not promote buffers exceeding sharedMemoryBytes limit', () => {
+    const inBuf = buf('x', [256], 'f32');
+    const outBuf = buf('y', [256], 'f32');
+    const tempBuf = buf('tmp', [8192], 'f32');
+
+    const load = new BufferLoadNode(inBuf, [idx('tid')]);
+    const tempStore = new BufferStoreNode(tempBuf, [idx('tid')], load);
+    const tempLoad = new BufferLoadNode(tempBuf, [idx('tid')]);
+    const store = new BufferStoreNode(outBuf, [idx('tid')], tempLoad);
+    const body = new SeqNode([tempStore, store]);
+    const alloc = new AllocateNode(tempBuf, 'local', body);
+    const inner = threadFor(idx('tid'), 128, 'threadIdx.x', alloc);
+    const outer = threadFor(idx('bid'), 4, 'blockIdx.x', inner);
+
+    const bufferMap = new Map([['p0', inBuf], ['p1', outBuf]]);
+    const cg = makeCodegen({ sharedMemoryBytes: 1024 });
+    cg._primFunc = makePrimFunc('smem_test', ['p0', 'p1'], outer, bufferMap);
+    cg._threadBindings = new Map();
+    cg._sharedBuffers = [];
+    cg._promotedBuffers = new Set();
+    cg._promotedBufferDecls = [];
+    cg._storeBuffers = new Set(['y']);
+    cg._scanBindings(outer);
+    cg._analyzeSharing(cg._primFunc);
+    expect(cg._promotedBuffers.has('tmp')).toBe(false);
+  });
+
+  it('promotes buffers that fit within sharedMemoryBytes limit', () => {
+    const inBuf = buf('x', [256], 'f32');
+    const outBuf = buf('y', [256], 'f32');
+    const smallTmp = buf('stmp', [64], 'f32');
+
+    const load = new BufferLoadNode(inBuf, [idx('tid')]);
+    const tempStore = new BufferStoreNode(smallTmp, [idx('tid')], load);
+    const tempLoad = new BufferLoadNode(smallTmp, [idx('tid')]);
+    const store = new BufferStoreNode(outBuf, [idx('tid')], tempLoad);
+    const body = new SeqNode([tempStore, store]);
+    const alloc = new AllocateNode(smallTmp, 'local', body);
+    const inner = threadFor(idx('tid'), 128, 'threadIdx.x', alloc);
+    const outer = threadFor(idx('bid'), 4, 'blockIdx.x', inner);
+
+    const bufferMap = new Map([['p0', inBuf], ['p1', outBuf]]);
+    const cg = makeCodegen({ sharedMemoryBytes: 16384 });
+    cg._primFunc = makePrimFunc('smem_ok', ['p0', 'p1'], outer, bufferMap);
+    cg._threadBindings = new Map();
+    cg._sharedBuffers = [];
+    cg._promotedBuffers = new Set();
+    cg._promotedBufferDecls = [];
+    cg._storeBuffers = new Set(['y']);
+    cg._scanBindings(outer);
+    cg._analyzeSharing(cg._primFunc);
+    expect(cg._promotedBuffers.has('stmp')).toBe(true);
+  });
+
+  it('if-stmt condition with MathOpNode(<) does not produce != 0', () => {
+    const cg = makeCodegen();
+    cg._lines = [];
+    cg._indent = 0;
+    cg._defaultDtype = 'f32';
+    const cond = new MathOpNode('<', new VariableNode('i', 'index'), new IntImmNode(100));
+    const body = new BufferStoreNode(buf('y', [100], 'f32'), [idx('i')], new FloatImmNode(1));
+    const ifNode = new IfThenElseNode(cond, body, null);
+    ifNode.thenBody = body;
+    ifNode.elseBody = null;
+    cg._visitIfStmt(ifNode);
+    const wgsl = cg._lines.join('\n');
+    expect(wgsl).toContain('< 100');
+    expect(wgsl).not.toMatch(/< 100\).*!= 0/);
   });
 });

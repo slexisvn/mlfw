@@ -137,9 +137,9 @@ export class CPUCodegen {
 
     const extent = this._exprToJS(node.extent);
 
-    if (node.kind === ForKind.UNROLLED || node.kind === ForKind.VECTORIZED) {
+    if (node.kind === ForKind.UNROLLED) {
       const constExtent = node.extent.type === 'IntImmNode' ? node.extent.value : null;
-      if (constExtent && constExtent <= 32) {
+      if (constExtent && constExtent <= 32 && !this._isZeroFillBody(node.body)) {
         for (let i = 0; i < constExtent; i++) {
           this._emit('{ const ' + varName + ' = ' + i + ';');
           this._indent++;
@@ -419,7 +419,10 @@ export class CPUCodegen {
             if (isJSMathFunc(node.externName)) vals.push(`Math.${node.externName}(${joined})`);
             else if (node.externName === 'rsqrt') vals.push(`(1.0 / Math.sqrt(${joined}))`);
             else if (node.externName === 'fmod') vals.push(`((${args[0]} % ${args[1]} + ${args[1]}) % ${args[1]})`);
-            else vals.push(`${node.externName}(${joined})`);
+            else if (node.externName === 'exp2') vals.push(`Math.pow(2, ${joined})`);
+            else if (node.externName === 'erf') vals.push(`((x_erf => { const t = 1.0 / (1.0 + 0.3275911 * Math.abs(x_erf)); const p = t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429)))); return (x_erf >= 0 ? 1 : -1) * (1.0 - p * Math.exp(-x_erf * x_erf)); })(${joined}))`);
+            else if (node.externName === 'log10') vals.push(`(Math.log(${joined}) * ${1 / Math.LN10})`);
+            else throw new Error(`CPU codegen: unsupported extern function "${node.externName}"`);
           }
           continue;
 
@@ -541,6 +544,23 @@ export class CPUCodegen {
         const val = cur.value;
         const isZero = (val.type === 'FloatImmNode' && val.value === 0) || (val.type === 'IntImmNode' && val.value === 0);
         return isZero;
+      }
+      return false;
+    }
+    return false;
+  }
+
+  _isZeroFillBody(body) {
+    let cur = body;
+    while (cur) {
+      if (cur.type === 'ForNode') {
+        cur = cur.body;
+        continue;
+      }
+      if (cur.type === 'BlockNode') { cur = cur.body; continue; }
+      if (cur.type === 'BufferStoreNode' || cur.type === 'LIRFlatStoreNode') {
+        const val = cur.value;
+        return (val.type === 'FloatImmNode' && val.value === 0) || (val.type === 'IntImmNode' && val.value === 0);
       }
       return false;
     }

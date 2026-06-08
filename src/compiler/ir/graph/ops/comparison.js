@@ -2,6 +2,23 @@ import { OpDef, OpTrait } from '../op_registry.js';
 import { TensorType, ScalarType } from '../types.js';
 import { inferCompare } from './helpers.js';
 
+function inferUnaryBool(operandTypes) {
+  if (operandTypes.length !== 1) return null;
+  const inp = operandTypes[0];
+  if (!(inp instanceof TensorType) || inp.dtype !== ScalarType.BOOL) return null;
+  return [new TensorType(inp.shape, ScalarType.BOOL)];
+}
+
+function inferBinaryBool(operandTypes) {
+  if (operandTypes.length !== 2) return null;
+  const [lhs, rhs] = operandTypes;
+  if (!(lhs instanceof TensorType) || lhs.dtype !== ScalarType.BOOL) return null;
+  if (!(rhs instanceof TensorType) || rhs.dtype !== ScalarType.BOOL) return null;
+  const shape = TensorType.broadcastShape(lhs.shape, rhs.shape);
+  if (!shape) return null;
+  return [new TensorType(shape, ScalarType.BOOL)];
+}
+
 const VALID_DIRECTIONS = new Set(['eq', 'ne', 'lt', 'le', 'gt', 'ge']);
 
 export function register(registry) {
@@ -53,6 +70,24 @@ export function register(registry) {
       return [new TensorType(x.shape, x.dtype)];
     }
   }));
+
+  registry.register(new OpDef({
+    name: 'logical_not',
+    numOperands: 1,
+    numResults: 1,
+    traits: [OpTrait.ELEMENTWISE],
+    inferResultTypes: inferUnaryBool,
+  }));
+
+  for (const name of ['logical_and', 'logical_or']) {
+    registry.register(new OpDef({
+      name,
+      numOperands: 2,
+      numResults: 1,
+      traits: [OpTrait.ELEMENTWISE],
+      inferResultTypes: inferBinaryBool,
+    }));
+  }
 
   registry.register(new OpDef({
     name: 'clamp',

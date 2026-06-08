@@ -99,6 +99,32 @@ describe('Tensor Lang completion', () => {
     expect(tokenHook('print', false, [], term)).toBe('builtin');
   });
 
+  it('hints param name matching typed prefix inside function calls', () => {
+    const runtime = new TensorLangRuntime({ output: () => {} });
+    expect(completeInput('compile(mod', runtime)).toBe('compile(model');
+    expect(completeInput('compile(m, in', runtime)).toBe('compile(m, input');
+    expect(completeInput('compile(m, tar', runtime)).toBe('compile(m, target=cpu');
+    expect(completeInput('compile(m, de', runtime)).toBe('compile(m, debug');
+    expect(completeInput('Linear(64, out', runtime)).toBe('Linear(64, outFeatures');
+    expect(completeInput('Linear(64, bi', runtime)).toBe('Linear(64, bias=true');
+  });
+
+  it('does not hint when typing values or no prefix', () => {
+    const runtime = new TensorLangRuntime({ output: () => {} });
+    expect(completeInput('compile(', runtime)).toBe('compile(');
+    expect(completeInput('compile(m, ', runtime)).toBe('compile(m, ');
+    expect(completeInput('compile(m, input=2', runtime)).toBe('compile(m, input=2');
+    expect(completeInput('compile(m, x', runtime)).toBe('compile(m, x');
+  });
+
+  it('hints param names for user-defined functions', async () => {
+    const runtime = new TensorLangRuntime({ output: () => {} });
+    await runtime.execute('fn apply(weights, data, scale): return weights');
+    expect(completeInput('apply(wei', runtime)).toBe('apply(weights');
+    expect(completeInput('apply(w, da', runtime)).toBe('apply(w, data');
+    expect(completeInput('apply(w, d, sc', runtime)).toBe('apply(w, d, scale');
+  });
+
   it('restores terminal state before exiting', () => {
     const calls = [];
     const term = {

@@ -187,6 +187,11 @@ describe('CPUCodegen._exprToJS', () => {
     expect(exprToJS(node)).toBe('((a % b + b) % b)');
   });
 
+  it('throws on unknown extern function', () => {
+    const node = new CallExternNode('fake_func', [new VariableNode('x', 'f32')], 'f32');
+    expect(() => exprToJS(node)).toThrow('CPU codegen: unsupported extern function "fake_func"');
+  });
+
   it('renders BufferLoadNode', () => {
     const b = buf('buf_1', [4], 'f32');
     const node = new BufferLoadNode(b, [new VariableNode('i', 'index')]);
@@ -1040,5 +1045,97 @@ describe('regression — _isRedundantZeroFill works for non-local buffers', () =
     const cg = makeCodegen();
     const src = cg.generate(pf);
     expect(src).not.toMatch(/zbuf/);
+  });
+});
+
+describe('CPUCodegen._isZeroFillBody', () => {
+  function isZeroFillBody(body) {
+    const cg = makeCodegen();
+    return cg._isZeroFillBody(body);
+  }
+
+  it('detects direct zero-store body', () => {
+    const b = buf('tmp', [4], 'f32');
+    const store = new BufferStoreNode(b, [idx('i')], new FloatImmNode(0));
+    expect(isZeroFillBody(store)).toBe(true);
+  });
+
+  it('detects zero-store through BlockNode', () => {
+    const b = buf('tmp', [4], 'f32');
+    const store = new BufferStoreNode(b, [idx('i')], new FloatImmNode(0));
+    const block = new BlockNode('blk', [], [], [{ buffer: b }], store);
+    expect(isZeroFillBody(block)).toBe(true);
+  });
+
+  it('detects zero-store through nested ForNode', () => {
+    const b = buf('tmp', [4, 8], 'f32');
+    const store = new BufferStoreNode(b, [idx('i'), idx('j')], new IntImmNode(0));
+    const block = new BlockNode('blk', [], [], [{ buffer: b }], store);
+    const innerFor = new ForNode(idx('j'), new IntImmNode(0), new IntImmNode(8), ForKind.SERIAL, block);
+    expect(isZeroFillBody(innerFor)).toBe(true);
+  });
+
+  it('rejects non-zero store', () => {
+    const b = buf('tmp', [4], 'f32');
+    const store = new BufferStoreNode(b, [idx('i')], new FloatImmNode(1));
+    expect(isZeroFillBody(store)).toBe(false);
+  });
+
+  it('rejects variable store', () => {
+    const b = buf('tmp', [4], 'f32');
+    const load = new BufferLoadNode(buf('src', [4], 'f32'), [idx('i')]);
+    const store = new BufferStoreNode(b, [idx('i')], load);
+    expect(isZeroFillBody(store)).toBe(false);
+  });
+});
+
+describe('CPUCodegen — VECTORIZED loops emitted as regular loops (no unroll)', () => {
+  it('VECTORIZED loop emits for-loop instead of unrolling', () => {
+    const inBuf = buf('x', [8], 'f32');
+    const outBuf = buf('y', [8], 'f32');
+    const load = new BufferLoadNode(inBuf, [idx('i')]);
+    const store = new BufferStoreNode(outBuf, [idx('i')], load);
+    const block = new BlockNode('cp', [], [{ buffer: inBuf }], [{ buffer: outBuf }], store);
+    const forNode = new ForNode(idx('i'), new IntImmNode(0), new IntImmNode(8), ForKind.VECTORIZED, block);
+
+    const bufferMap = new Map([['p0', inBuf], ['p1', outBuf]]);
+    const pf = makePrimFunc('vec_loop', ['p0', 'p1'], forNode, bufferMap);
+
+    const cg = makeCodegen();
+    const src = cg.generate(pf);
+    expect(src).toMatch(/for\s*\(/);
+    expect(src).not.toMatch(/const i = 0/);
+  });
+
+  it('UNROLLED loop still unrolls normally', () => {
+    const inBuf = buf('x', [4], 'f32');
+    const outBuf = buf('y', [4], 'f32');
+    const load = new BufferLoadNode(inBuf, [idx('i')]);
+    const store = new BufferStoreNode(outBuf, [idx('i')], load);
+    const block = new BlockNode('cp', [], [{ buffer: inBuf }], [{ buffer: outBuf }], store);
+    const forNode = new ForNode(idx('i'), new IntImmNode(0), new IntImmNode(4), ForKind.UNROLLED, block);
+
+    const bufferMap = new Map([['p0', inBuf], ['p1', outBuf]]);
+    const pf = makePrimFunc('unroll_ok', ['p0', 'p1'], forNode, bufferMap);
+
+    const cg = makeCodegen();
+    const src = cg.generate(pf);
+    expect(src).not.toMatch(/for\s*\(/);
+    expect(src).toMatch(/const i = 0/);
+    expect(src).toMatch(/const i = 3/);
+  });
+
+  it('UNROLLED zero-fill is not unrolled into scalar stores', () => {
+    const b = buf('tmp', [8], 'f32');
+    const store = new BufferStoreNode(b, [idx('i')], new FloatImmNode(0));
+    const block = new BlockNode('blk', [], [], [{ buffer: b }], store);
+    const forNode = new ForNode(idx('i'), new IntImmNode(0), new IntImmNode(8), ForKind.UNROLLED, block);
+
+    const bufferMap = new Map([['p0', b]]);
+    const pf = makePrimFunc('zero_nounroll', ['p0'], forNode, bufferMap);
+
+    const cg = makeCodegen();
+    const src = cg.generate(pf);
+    expect(src).not.toMatch(/const i = 0/);
   });
 });

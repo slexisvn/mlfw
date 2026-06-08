@@ -147,6 +147,13 @@ export class EpilogueFusionPass extends FunctionPass {
 
       const { chain, tags, lastOp, extras } = analysis;
 
+      let extrasConsumed = 0;
+      for (const tag of tags) {
+        if (tag === 'bias' || tag === 'residual_add' || tag === 'scale') extrasConsumed++;
+        else if (tag === 'clamp') extrasConsumed += 2;
+      }
+      if (extrasConsumed !== extras.length) continue;
+
       const allInputs = [dotOp.getOperand(0), dotOp.getOperand(1), ...extras];
       const outputType = lastOp.getResult(0).type;
 

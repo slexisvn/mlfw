@@ -5,6 +5,13 @@ import {
 import { registerLoweringRule, lowerPointwise } from '../lowering_registry.js';
 
 const BINARY_ARITH = new Set(['+', '-', '*', '/']);
+const BINARY_LOGICAL = new Set(['&&', '||']);
+const UNARY_PREFIX = new Set(['!']);
+
+const SYNTHETIC_UNARY = {
+  'square': (args) => new MathOpNode('*', args[0], args[0]),
+  'reciprocal': (args) => new MathOpNode('/', new FloatImmNode(1), args[0]),
+};
 
 const ELEMENTWISE_OPS = {
   'add': '+', 'sub': '-', 'mul': '*', 'div': '/',
@@ -13,7 +20,10 @@ const ELEMENTWISE_OPS = {
   'ceil': 'ceil', 'floor': 'floor', 'neg': '-',
   'maximum': 'max', 'minimum': 'min',
   'sin': 'sin', 'cos': 'cos', 'round': 'round', 'sign': 'sign',
-  'pow': 'pow', 'rem': 'fmod'
+  'pow': 'pow', 'rem': 'fmod',
+  'erf': 'erf', 'log2': 'log2', 'log10': 'log10', 'exp2': 'exp2',
+  'square': 'square', 'reciprocal': 'reciprocal',
+  'logical_not': '!', 'logical_and': '&&', 'logical_or': '||'
 };
 
 export { ELEMENTWISE_OPS };
@@ -21,8 +31,15 @@ export { ELEMENTWISE_OPS };
 export function buildElementwiseExpr(opName, loadArgs, dtype) {
   const jsOp = ELEMENTWISE_OPS[opName];
   if (!jsOp) return null;
+  if (SYNTHETIC_UNARY[opName]) return SYNTHETIC_UNARY[opName](loadArgs);
   if (loadArgs.length === 2 && BINARY_ARITH.has(jsOp)) {
     return new MathOpNode(jsOp, loadArgs[0], loadArgs[1]);
+  }
+  if (loadArgs.length === 2 && BINARY_LOGICAL.has(jsOp)) {
+    return new MathOpNode(jsOp, loadArgs[0], loadArgs[1]);
+  }
+  if (loadArgs.length === 1 && UNARY_PREFIX.has(jsOp)) {
+    return new MathOpNode(jsOp, loadArgs[0]);
   }
   if (loadArgs.length === 1 && jsOp === '-') {
     return new MathOpNode('-', loadArgs[0]);

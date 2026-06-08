@@ -616,6 +616,75 @@ describe('WasmCodegen._visitFor — unrolling', () => {
     const result = cg.generate(pf);
     expect(result.wat).toMatch(/\(loop\s/);
   });
+
+  it('does not unroll VECTORIZED zero-fill loops', () => {
+    const b = buf('z', [8], 'f32');
+    const store = new BufferStoreNode(b, [idx('i')], new FloatImmNode(0));
+    const block = new BlockNode('blk', [], [], [{ buffer: b }], store);
+    const forNode = new ForNode(idx('i'), new IntImmNode(0), new IntImmNode(8), ForKind.VECTORIZED, block);
+
+    const bufferMap = new Map([['p0', b]]);
+    const pf = makePrimFunc('vec_zero', ['p0'], forNode, bufferMap);
+
+    const cg = makeCodegen();
+    const result = cg.generate(pf);
+    expect(result.wat).toMatch(/\(loop\s/);
+  });
+
+  it('does not unroll UNROLLED zero-fill loops', () => {
+    const b = buf('z', [4], 'f32');
+    const store = new BufferStoreNode(b, [idx('i')], new IntImmNode(0));
+    const block = new BlockNode('blk', [], [], [{ buffer: b }], store);
+    const forNode = new ForNode(idx('i'), new IntImmNode(0), new IntImmNode(4), ForKind.UNROLLED, block);
+
+    const bufferMap = new Map([['p0', b]]);
+    const pf = makePrimFunc('unroll_zero', ['p0'], forNode, bufferMap);
+
+    const cg = makeCodegen();
+    const result = cg.generate(pf);
+    expect(result.wat).toMatch(/\(loop\s/);
+  });
+});
+
+describe('WasmCodegen._isZeroFillBody', () => {
+  function isZeroFillBody(body) {
+    const cg = makeCodegen();
+    return cg._isZeroFillBody(body);
+  }
+
+  it('detects direct float zero-store', () => {
+    const b = buf('tmp', [4], 'f32');
+    const store = new BufferStoreNode(b, [idx('i')], new FloatImmNode(0));
+    expect(isZeroFillBody(store)).toBe(true);
+  });
+
+  it('detects direct int zero-store', () => {
+    const b = buf('tmp', [4], 'i32');
+    const store = new BufferStoreNode(b, [idx('i')], new IntImmNode(0));
+    expect(isZeroFillBody(store)).toBe(true);
+  });
+
+  it('detects zero-store nested in ForNode', () => {
+    const b = buf('tmp', [4, 8], 'f32');
+    const store = new BufferStoreNode(b, [idx('i'), idx('j')], new FloatImmNode(0));
+    const block = new BlockNode('blk', [], [], [{ buffer: b }], store);
+    const innerFor = new ForNode(idx('j'), new IntImmNode(0), new IntImmNode(8), ForKind.SERIAL, block);
+    expect(isZeroFillBody(innerFor)).toBe(true);
+  });
+
+  it('rejects non-zero store', () => {
+    const b = buf('tmp', [4], 'f32');
+    const store = new BufferStoreNode(b, [idx('i')], new FloatImmNode(3.14));
+    expect(isZeroFillBody(store)).toBe(false);
+  });
+
+  it('rejects load-store body', () => {
+    const src = buf('src', [4], 'f32');
+    const dst = buf('dst', [4], 'f32');
+    const load = new BufferLoadNode(src, [idx('i')]);
+    const store = new BufferStoreNode(dst, [idx('i')], load);
+    expect(isZeroFillBody(store)).toBe(false);
+  });
 });
 
 // ────────────────────────────────────────────────────────────────────
@@ -1114,5 +1183,113 @@ describe('WasmCodegen._emitExpr — comparison in MathOpNode', () => {
   it('emits i32.ge_s for int >=', () => {
     const node = new MathOpNode('>=', new IntImmNode(5), new IntImmNode(3));
     expect(emitExpr(node)).toContain('i32.ge_s');
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────
+// boolean type handling — LetStmtNode local type + IfThenElseNode condition
+// ────────────────────────────────────────────────────────────────────
+
+describe('WasmCodegen — boolean type system', () => {
+  it('_fixLetStmtLocals declares i32 for CompareNode value', () => {
+    const cg = makeCodegen();
+    cg._locals = new Map();
+    cg._locals.set('cse0', 'f32');
+    const letVar = new VariableNode('cse0', 'f32');
+    const compare = new CompareNode('gt', new FloatImmNode(1), new FloatImmNode(2));
+    const letStmt = new LetStmtNode(letVar, compare, null);
+    cg._fixLetStmtLocals(letStmt);
+    expect(cg._locals.get('cse0')).toBe('i32');
+  });
+
+  it('_fixLetStmtLocals declares f32 for float MathOpNode value', () => {
+    const cg = makeCodegen();
+    cg._locals = new Map();
+    const letVar = new VariableNode('tmp', 'f32');
+    const add = new MathOpNode('+', new FloatImmNode(1), new FloatImmNode(2));
+    const letStmt = new LetStmtNode(letVar, add, null);
+    cg._fixLetStmtLocals(letStmt);
+    expect(cg._locals.get('tmp')).toBe('f32');
+  });
+
+  it('_fixLetStmtLocals declares i32 for logical AND value', () => {
+    const cg = makeCodegen();
+    cg._locals = new Map();
+    const letVar = new VariableNode('cse1');
+    const cmpA = new CompareNode('gt', new FloatImmNode(1), new FloatImmNode(0));
+    const cmpB = new CompareNode('lt', new FloatImmNode(1), new FloatImmNode(2));
+    const andOp = new MathOpNode('&&', cmpA, cmpB);
+    const letStmt = new LetStmtNode(letVar, andOp, null);
+    cg._fixLetStmtLocals(letStmt);
+    expect(cg._locals.get('cse1')).toBe('i32');
+  });
+
+  it('_wasmExprDtype returns i32 for CompareNode', () => {
+    const cg = makeCodegen();
+    cg._locals = new Map();
+    const node = new CompareNode('gt', new FloatImmNode(1), new FloatImmNode(2));
+    expect(cg._wasmExprDtype(node)).toBe('i32');
+  });
+
+  it('_wasmExprDtype returns i32 for boolean MathOpNode (&&, ||, !)', () => {
+    const cg = makeCodegen();
+    cg._locals = new Map();
+    const a = new CompareNode('gt', new FloatImmNode(1), new FloatImmNode(0));
+    const b = new CompareNode('lt', new FloatImmNode(1), new FloatImmNode(2));
+    expect(cg._wasmExprDtype(new MathOpNode('&&', a, b))).toBe('i32');
+    expect(cg._wasmExprDtype(new MathOpNode('||', a, b))).toBe('i32');
+    expect(cg._wasmExprDtype(new MathOpNode('!', a))).toBe('i32');
+  });
+
+  it('_wasmExprDtype returns i32 for comparison MathOpNode (<, >, <=, >=)', () => {
+    const cg = makeCodegen();
+    cg._locals = new Map();
+    expect(cg._wasmExprDtype(new MathOpNode('<', new FloatImmNode(1), new FloatImmNode(2)))).toBe('i32');
+    expect(cg._wasmExprDtype(new MathOpNode('>', new IntImmNode(5), new IntImmNode(3)))).toBe('i32');
+    expect(cg._wasmExprDtype(new MathOpNode('<=', new IntImmNode(1), new IntImmNode(2)))).toBe('i32');
+    expect(cg._wasmExprDtype(new MathOpNode('>=', new IntImmNode(5), new IntImmNode(3)))).toBe('i32');
+  });
+
+  it('_wasmExprDtype returns local type for VariableNode', () => {
+    const cg = makeCodegen();
+    cg._locals = new Map();
+    cg._locals.set('cse0', 'i32');
+    cg._locals.set('tmp', 'f32');
+    expect(cg._wasmExprDtype(new VariableNode('cse0'))).toBe('i32');
+    expect(cg._wasmExprDtype(new VariableNode('tmp'))).toBe('f32');
+  });
+
+  it('IfThenElseNode skips f32.ne for i32 condition (bool op)', () => {
+    const cg = makeCodegen();
+    cg._lines = [];
+    cg._indent = 0;
+    cg._locals = new Map();
+    cg._locals.set('cond', 'i32');
+    cg._bufferOffsets = new Map();
+    cg._wasmAcc = null;
+    const cond = new MathOpNode('||',
+      new CompareNode('gt', new FloatImmNode(1), new FloatImmNode(0)),
+      new CompareNode('lt', new FloatImmNode(1), new FloatImmNode(2))
+    );
+    const ite = new IfThenElseNode(cond, new FloatImmNode(1), new FloatImmNode(0));
+    cg._emitExpr(ite);
+    const wat = cg._lines.map(l => l.trim()).join('\n');
+    expect(wat).not.toContain('f32.ne');
+    expect(wat).toContain('i32.or');
+    expect(wat).toContain('(if (result f32)');
+  });
+
+  it('IfThenElseNode adds f32.ne for float condition', () => {
+    const cg = makeCodegen();
+    cg._lines = [];
+    cg._indent = 0;
+    cg._locals = new Map();
+    cg._bufferOffsets = new Map();
+    cg._wasmAcc = null;
+    const cond = new FloatImmNode(1.0);
+    const ite = new IfThenElseNode(cond, new FloatImmNode(1), new FloatImmNode(0));
+    cg._emitExpr(ite);
+    const wat = cg._lines.map(l => l.trim()).join('\n');
+    expect(wat).toContain('f32.ne');
   });
 });

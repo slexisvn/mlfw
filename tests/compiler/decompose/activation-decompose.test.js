@@ -197,6 +197,157 @@ describe('silu decomposition', () => {
   });
 });
 
+describe('elu decomposition', () => {
+  it('decomposes to compare + select + exp primitives', () => {
+    const t = new TensorType([2, 4], ScalarType.F32);
+    const func = buildFunction('f', [t], [t], (b, args) => {
+      b.returnOp([b.elu(args[0]).getResult(0)]);
+    });
+    run(func);
+    const ops = new Set();
+    for (const op of func.ops()) ops.add(op.opName);
+    expect(ops.has('elu')).toBe(false);
+    expect(ops.has('compare')).toBe(true);
+    expect(ops.has('select')).toBe(true);
+    expect(ops.has('exp')).toBe(true);
+  });
+
+  it('preserves custom alpha attribute through decomposition', () => {
+    const t = new TensorType([4], ScalarType.F32);
+    const func = buildFunction('f', [t], [t], (b, args) => {
+      b.returnOp([b.elu(args[0], 2.0).getResult(0)]);
+    });
+    run(func);
+    const consts = func.findOps(op => op.opName === 'constant');
+    const vals = consts.map(c => c.getAttr('value'));
+    expect(vals).toContain(2.0);
+  });
+});
+
+describe('leaky_relu decomposition', () => {
+  it('decomposes to compare + select + mul primitives', () => {
+    const t = new TensorType([4, 8], ScalarType.F32);
+    const func = buildFunction('f', [t], [t], (b, args) => {
+      b.returnOp([b.leakyRelu(args[0]).getResult(0)]);
+    });
+    run(func);
+    const ops = new Set();
+    for (const op of func.ops()) ops.add(op.opName);
+    expect(ops.has('leaky_relu')).toBe(false);
+    expect(ops.has('compare')).toBe(true);
+    expect(ops.has('select')).toBe(true);
+  });
+
+  it('uses the specified negative slope, not hardcoded', () => {
+    const t = new TensorType([4], ScalarType.F32);
+    const func = buildFunction('f', [t], [t], (b, args) => {
+      b.returnOp([b.leakyRelu(args[0], 0.2).getResult(0)]);
+    });
+    run(func);
+    const consts = func.findOps(op => op.opName === 'constant');
+    const vals = consts.map(c => c.getAttr('value'));
+    expect(vals).toContain(0.2);
+  });
+});
+
+describe('celu decomposition', () => {
+  it('decomposes to maximum + minimum + exp primitives', () => {
+    const t = new TensorType([4], ScalarType.F32);
+    const func = buildFunction('f', [t], [t], (b, args) => {
+      b.returnOp([b.celu(args[0]).getResult(0)]);
+    });
+    run(func);
+    const ops = new Set();
+    for (const op of func.ops()) ops.add(op.opName);
+    expect(ops.has('celu')).toBe(false);
+    expect(ops.has('maximum')).toBe(true);
+    expect(ops.has('minimum')).toBe(true);
+    expect(ops.has('exp')).toBe(true);
+  });
+});
+
+describe('selu decomposition', () => {
+  it('decomposes to compare + select + exp + mul with fixed lambda/alpha', () => {
+    const t = new TensorType([4], ScalarType.F32);
+    const func = buildFunction('f', [t], [t], (b, args) => {
+      b.returnOp([b.selu(args[0]).getResult(0)]);
+    });
+    run(func);
+    const ops = new Set();
+    for (const op of func.ops()) ops.add(op.opName);
+    expect(ops.has('selu')).toBe(false);
+    expect(ops.has('compare')).toBe(true);
+    expect(ops.has('select')).toBe(true);
+    const consts = func.findOps(op => op.opName === 'constant');
+    const vals = consts.map(c => c.getAttr('value'));
+    expect(vals.some(v => Math.abs(v - 1.0507009873554805) < 1e-6)).toBe(true);
+    expect(vals.some(v => Math.abs(v - 1.6732632423543772) < 1e-6)).toBe(true);
+  });
+});
+
+describe('mish decomposition', () => {
+  it('decomposes to tanh + log + exp + mul', () => {
+    const t = new TensorType([4], ScalarType.F32);
+    const func = buildFunction('f', [t], [t], (b, args) => {
+      b.returnOp([b.mish(args[0]).getResult(0)]);
+    });
+    run(func);
+    const ops = new Set();
+    for (const op of func.ops()) ops.add(op.opName);
+    expect(ops.has('mish')).toBe(false);
+    expect(ops.has('tanh')).toBe(true);
+    expect(ops.has('log')).toBe(true);
+    expect(ops.has('exp')).toBe(true);
+    expect(ops.has('mul')).toBe(true);
+  });
+});
+
+describe('hardswish decomposition', () => {
+  it('decomposes to minimum + maximum + mul + div', () => {
+    const t = new TensorType([4], ScalarType.F32);
+    const func = buildFunction('f', [t], [t], (b, args) => {
+      b.returnOp([b.hardswish(args[0]).getResult(0)]);
+    });
+    run(func);
+    const ops = new Set();
+    for (const op of func.ops()) ops.add(op.opName);
+    expect(ops.has('hardswish')).toBe(false);
+    expect(ops.has('minimum')).toBe(true);
+    expect(ops.has('maximum')).toBe(true);
+    expect(ops.has('mul')).toBe(true);
+  });
+});
+
+describe('hardsigmoid decomposition', () => {
+  it('decomposes to minimum + maximum + div + add', () => {
+    const t = new TensorType([4], ScalarType.F32);
+    const func = buildFunction('f', [t], [t], (b, args) => {
+      b.returnOp([b.hardsigmoid(args[0]).getResult(0)]);
+    });
+    run(func);
+    const ops = new Set();
+    for (const op of func.ops()) ops.add(op.opName);
+    expect(ops.has('hardsigmoid')).toBe(false);
+    expect(ops.has('minimum')).toBe(true);
+    expect(ops.has('maximum')).toBe(true);
+  });
+
+  it('all intermediate values preserve input dtype', () => {
+    for (const dtype of [ScalarType.F32, ScalarType.F64]) {
+      const t = new TensorType([4], dtype);
+      const func = buildFunction('f', [t], [t], (b, args) => {
+        b.returnOp([b.hardsigmoid(args[0]).getResult(0)]);
+      });
+      run(func);
+      for (const val of allValues(func)) {
+        if (val.type instanceof TensorType) {
+          expect(val.type.dtype).toBe(dtype);
+        }
+      }
+    }
+  });
+});
+
 describe('chained activations', () => {
   it('decomposing sigmoid→gelu chain wires sigmoid output into gelu input', () => {
     const t = new TensorType([4, 8], ScalarType.F32);

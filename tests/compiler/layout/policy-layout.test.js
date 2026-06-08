@@ -165,3 +165,92 @@ describe('LayoutPolicy.estimateConversionCost', () => {
     expect(policy.estimateConversionCost(from, to, t)).toBe(1024);
   });
 });
+
+describe('LayoutPolicy.estimateBenefit', () => {
+  function ops(func) {
+    const list = [];
+    for (const op of func.ops()) {
+      if (op.opName !== 'return') list.push(op);
+    }
+    return list;
+  }
+
+  it('dot/conv/matmul consumers get high benefit (numEl * 4 * useCount)', () => {
+    const lhs = new TensorType([16, 32], ScalarType.F32);
+    const rhs = new TensorType([32, 16], ScalarType.F32);
+    const out = new TensorType([16, 16], ScalarType.F32);
+    const func = buildFunction('f', [lhs, rhs], [out], (b, args) => {
+      b.returnOp([b.matmul(args[0], args[1]).getResult(0)]);
+    });
+
+    const policy = new LayoutPolicy(CPUTarget());
+    const dotOp = ops(func)[0];
+    const benefit = policy.estimateBenefit(dotOp, rhs, 1);
+    expect(benefit).toBe(16 * 32 * 4 * 1);
+  });
+
+  it('reduce consumers get medium benefit (numEl * 2 * useCount)', () => {
+    const t = new TensorType([4, 8], ScalarType.F32);
+    const s = new TensorType([], ScalarType.F32);
+    const outT = new TensorType([4], ScalarType.F32);
+    const func = buildFunction('f', [t, s], [outT], (b, args) => {
+      b.returnOp([b.reduce(args[0], args[1], [1], 'sum').getResult(0)]);
+    });
+
+    const policy = new LayoutPolicy(CPUTarget());
+    const reduceOp = ops(func)[0];
+    const benefit = policy.estimateBenefit(reduceOp, t, 1);
+    expect(benefit).toBe(32 * 2 * 1);
+  });
+
+  it('elementwise consumers get low benefit', () => {
+    const t = new TensorType([256], ScalarType.F32);
+    const func = buildFunction('f', [t, t], [t], (b, args) => {
+      b.returnOp([b.add(args[0], args[1]).getResult(0)]);
+    });
+
+    const policy = new LayoutPolicy(CPUTarget());
+    const addOp = ops(func)[0];
+    const benefit = policy.estimateBenefit(addOp, t, 1);
+    expect(benefit).toBe(Math.floor(256 * 0.5));
+  });
+
+  it('small tensor (fits in cache) gets zero benefit for elementwise', () => {
+    const t = new TensorType([8], ScalarType.F32);
+    const func = buildFunction('f', [t, t], [t], (b, args) => {
+      b.returnOp([b.add(args[0], args[1]).getResult(0)]);
+    });
+
+    const policy = new LayoutPolicy(CPUTarget());
+    const addOp = ops(func)[0];
+    expect(policy.estimateBenefit(addOp, t, 1)).toBe(0);
+  });
+
+  it('small tensor still gets benefit for dot (compute-intensive)', () => {
+    const lhs = new TensorType([4, 4], ScalarType.F32);
+    const rhs = new TensorType([4, 4], ScalarType.F32);
+    const out = new TensorType([4, 4], ScalarType.F32);
+    const func = buildFunction('f', [lhs, rhs], [out], (b, args) => {
+      b.returnOp([b.matmul(args[0], args[1]).getResult(0)]);
+    });
+
+    const policy = new LayoutPolicy(CPUTarget());
+    const dotOp = ops(func)[0];
+    expect(policy.estimateBenefit(dotOp, rhs, 1)).toBeGreaterThan(0);
+  });
+
+  it('useCount multiplies benefit', () => {
+    const lhs = new TensorType([16, 32], ScalarType.F32);
+    const rhs = new TensorType([32, 16], ScalarType.F32);
+    const out = new TensorType([16, 16], ScalarType.F32);
+    const func = buildFunction('f', [lhs, rhs], [out], (b, args) => {
+      b.returnOp([b.matmul(args[0], args[1]).getResult(0)]);
+    });
+
+    const policy = new LayoutPolicy(CPUTarget());
+    const dotOp = ops(func)[0];
+    const b1 = policy.estimateBenefit(dotOp, rhs, 1);
+    const b3 = policy.estimateBenefit(dotOp, rhs, 3);
+    expect(b3).toBe(b1 * 3);
+  });
+});

@@ -93,6 +93,16 @@ export class IRBuilder {
   floor(x) { return this._inferAndBuild('floor', [x]); }
   ceil(x) { return this._inferAndBuild('ceil', [x]); }
   sign(x) { return this._inferAndBuild('sign', [x]); }
+  erf(x) { return this._inferAndBuild('erf', [x]); }
+  log2(x) { return this._inferAndBuild('log2', [x]); }
+  log10(x) { return this._inferAndBuild('log10', [x]); }
+  exp2(x) { return this._inferAndBuild('exp2', [x]); }
+  square(x) { return this._inferAndBuild('square', [x]); }
+  reciprocal(x) { return this._inferAndBuild('reciprocal', [x]); }
+
+  logicalNot(x) { return this._inferAndBuild('logical_not', [x]); }
+  logicalAnd(lhs, rhs) { return this._inferAndBuild('logical_and', [lhs, rhs]); }
+  logicalOr(lhs, rhs) { return this._inferAndBuild('logical_or', [lhs, rhs]); }
 
   compare(lhs, rhs, direction) {
     return this._inferAndBuild('compare', [lhs, rhs], { direction });
@@ -287,6 +297,23 @@ export class IRBuilder {
     return this._inferAndBuild('silu', [x]);
   }
 
+  elu(x, alpha = 1.0) {
+    return this._inferAndBuild('elu', [x], { alpha });
+  }
+
+  leakyRelu(x, negativeSlope = 0.01) {
+    return this._inferAndBuild('leaky_relu', [x], { negative_slope: negativeSlope });
+  }
+
+  celu(x, alpha = 1.0) {
+    return this._inferAndBuild('celu', [x], { alpha });
+  }
+
+  selu(x) { return this._inferAndBuild('selu', [x]); }
+  mish(x) { return this._inferAndBuild('mish', [x]); }
+  hardswish(x) { return this._inferAndBuild('hardswish', [x]); }
+  hardsigmoid(x) { return this._inferAndBuild('hardsigmoid', [x]); }
+
   layernorm(input, gamma, beta, axis = -1, eps = 1e-5) {
     const dim = axis < 0 ? input.type.rank + axis : axis;
     return this._inferAndBuild('layer_norm', [input, gamma, beta], { axis: dim, epsilon: eps });
@@ -316,6 +343,29 @@ export class IRBuilder {
 
   embedding(weight, indices) {
     return this._inferAndBuild('embedding', [weight, indices]);
+  }
+
+  gather(operand, indices, opts) {
+    return this._inferAndBuild('gather', [operand, indices], {
+      offset_dims: opts.offsetDims,
+      collapsed_slice_dims: opts.collapsedSliceDims,
+      start_index_map: opts.startIndexMap,
+      index_vector_dim: opts.indexVectorDim,
+      slice_sizes: opts.sliceSizes,
+    });
+  }
+
+  scatter(operand, indices, updates, opts) {
+    return this._inferAndBuild('scatter', [operand, indices, updates], {
+      update_window_dims: opts.updateWindowDims,
+      inserted_window_dims: opts.insertedWindowDims,
+      scatter_dims_to_operand_dims: opts.scatterDimsToOperandDims,
+      index_vector_dim: opts.indexVectorDim,
+    });
+  }
+
+  scatterAdd(operand, indices, updates, opts) {
+    return this.scatter(operand, indices, updates, opts);
   }
 
   argmax(input, axis, keepDims = false) {

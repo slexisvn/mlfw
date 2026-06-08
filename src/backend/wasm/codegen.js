@@ -94,6 +94,8 @@ export class WasmCodegen {
       this._prescanLocals(func.body);
     }
 
+    this._fixLetStmtLocals(func.body);
+
     const localDecls = [];
     for (const [name, type] of this._locals) {
       localDecls.push('(local $' + name + ' ' + type + ')');
@@ -152,11 +154,14 @@ export class WasmCodegen {
         case 'AllocateNode':
           node = node.body;
           continue;
-        case 'LetStmtNode':
-          this._emitExpr(node.value);
+        case 'LetStmtNode': {
+          const varDtype = inferDtype(node.value) || node.variable.dtype || this._defaultDtype;
+          this._locals.set(node.variable.name, wasmType(varDtype));
+          this._emitCoerced(node.value, isDtypeFloat(varDtype));
           this._emit(`local.set $${node.variable.name}`);
           node = node.body;
           continue;
+        }
         case 'ForNode': this._visitFor(node); return;
         case 'BlockNode': this._visitBlock(node); return;
         case 'IfThenElseNode': this._visitIf(node); return;
@@ -243,7 +248,7 @@ export class WasmCodegen {
       return;
     }
 
-    if ((node.kind === ForKind.UNROLLED || node.kind === ForKind.VECTORIZED) && extent !== null && extent <= 32) {
+    if ((node.kind === ForKind.UNROLLED || node.kind === ForKind.VECTORIZED) && extent !== null && extent <= 32 && !this._isZeroFillBody(node.body)) {
       for (let i = 0; i < extent; i++) {
         this._emit('(i32.const ' + i + ')');
         this._emit('local.set $' + varName);
@@ -551,8 +556,7 @@ export class WasmCodegen {
         const resultIsFloat = isDtypeFloat(resultDtype);
         const resultType = resultIsFloat ? 'f32' : 'i32';
         this._emitExpr(node.condition);
-        const condDtype = node.condition._dtype || inferDtype(node.condition);
-        if (isDtypeFloat(condDtype)) {
+        if (isDtypeFloat(this._wasmExprDtype(node.condition))) {
           this._emit('(f32.const 0)');
           this._emit('f32.ne');
         }
@@ -602,7 +606,23 @@ export class WasmCodegen {
           this._emitExpr(node.a);
           this._emit('i32.sub');
         }
+      } else if (node.op === '!') {
+        this._emitExpr(node.a);
+        this._emit('i32.eqz');
       }
+      return;
+    }
+
+    if (node.op === '&&') {
+      this._emitExpr(node.a);
+      this._emitExpr(node.b);
+      this._emit('i32.and');
+      return;
+    }
+    if (node.op === '||') {
+      this._emitExpr(node.a);
+      this._emitExpr(node.b);
+      this._emit('i32.or');
       return;
     }
 
@@ -673,6 +693,20 @@ export class WasmCodegen {
 
   _constExtent(node) {
     return node.type === 'IntImmNode' ? node.value : null;
+  }
+
+  _isZeroFillBody(body) {
+    let cur = body;
+    while (cur) {
+      if (cur.type === 'ForNode') { cur = cur.body; continue; }
+      if (cur.type === 'BlockNode') { cur = cur.body; continue; }
+      if (cur.type === 'BufferStoreNode' || cur.type === 'LIRFlatStoreNode') {
+        const val = cur.value;
+        return (val.type === 'FloatImmNode' && val.value === 0) || (val.type === 'IntImmNode' && val.value === 0);
+      }
+      return false;
+    }
+    return false;
   }
 
   _layoutBuffers(primFunc) {
@@ -774,7 +808,8 @@ export class WasmCodegen {
         }
       }
       if (n.type === 'LetStmtNode' && n.variable) {
-        this._ensureLocal(n.variable.name, wasmType(n.variable.dtype || this._defaultDtype));
+        const letDtype = inferDtype(n.value) || n.variable.dtype || this._defaultDtype;
+        this._ensureLocal(n.variable.name, wasmType(letDtype));
       }
       if (n.body) stack.push(n.body);
       if (n.stmts) for (const s of n.stmts) stack.push(s);
@@ -783,6 +818,37 @@ export class WasmCodegen {
       if (n.initBody) stack.push(n.initBody);
     }
     this._waccCounter = 0;
+  }
+
+  _wasmExprDtype(node) {
+    if (!node) return 'i32';
+    if (node.type === 'CompareNode') return 'i32';
+    if (node.type === 'MathOpNode') {
+      if (node.op === '!' || node.op === '&&' || node.op === '||') return 'i32';
+      if (node.op === '<' || node.op === '>' || node.op === '<=' || node.op === '>=') return 'i32';
+    }
+    if (node.type === 'VariableNode') {
+      const localType = this._locals.get(node.name);
+      if (localType) return localType === 'f32' ? 'f32' : 'i32';
+    }
+    return inferDtype(node);
+  }
+
+  _fixLetStmtLocals(node) {
+    const stack = [node];
+    while (stack.length > 0) {
+      const n = stack.pop();
+      if (!n) continue;
+      if (n.type === 'LetStmtNode' && n.variable && n.value) {
+        const valDtype = inferDtype(n.value);
+        if (valDtype) this._locals.set(n.variable.name, wasmType(valDtype));
+      }
+      if (n.body) stack.push(n.body);
+      if (n.stmts) for (const s of n.stmts) stack.push(s);
+      if (n.thenBody) stack.push(n.thenBody);
+      if (n.elseBody) stack.push(n.elseBody);
+      if (n.initBody) stack.push(n.initBody);
+    }
   }
 
   _accPatternDtype(forNode) {

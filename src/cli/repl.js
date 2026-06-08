@@ -3,6 +3,7 @@ import { formatValue } from './format.js';
 import { TensorLangRuntime } from './runtime.js';
 import { BANNER, handleReplCommand } from './help.js';
 import { formatDiagnostic } from './diagnostics.js';
+import { parseCallContext } from './call_context.js';
 
 const KEYWORDS = new Set([
   'model', 'forward', 'return', 'true', 'false', 'null',
@@ -127,7 +128,15 @@ export function shutdownTerminal(term) {
 }
 
 export function completeInput(input, runtime, buffer = '') {
-  // Dot completion: obj.prop
+  const ctx = parseCallContext(input);
+  if (ctx) {
+    const sig = runtime.signatureRegistry.lookup(ctx.functionName);
+    if (sig) {
+      const hint = formatParamHint(input, sig);
+      if (hint !== input) return hint;
+    }
+  }
+
   const dotMatch = input.match(/([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)?$/);
   if (dotMatch) {
     const obj = runtime.getVariable(dotMatch[1]);
@@ -200,6 +209,18 @@ export function tokenHook(token, _isEnd, _previous, term) {
   if (/^(?:\*\*=?|==|!=|<=|>=|[+\-*\/@][=]?|[=<>])$/.test(token)) return term.brightBlack;
   if (/^[A-Z]/.test(token)) return term.cyan;
   return term;
+}
+
+function formatParamHint(input, sig) {
+  const afterSep = input.match(/.*[,(]\s*(.*)$/s);
+  if (!afterSep) return input;
+  const typed = afterSep[1];
+  if (!typed || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(typed)) return input;
+  for (const p of sig.params) {
+    const label = p.defaultValue != null ? `${p.name}=${p.defaultValue}` : p.name;
+    if (label.startsWith(typed) && label !== typed) return input + label.slice(typed.length);
+  }
+  return input;
 }
 
 function bracketDelta(line) {

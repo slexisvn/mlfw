@@ -38,6 +38,11 @@ export class LayoutTransformPass extends FunctionPass {
       let transformResult = insertedTransforms.get(key);
 
       if (!transformResult) {
+        const convCost = this._policy.estimateConversionCost(from, to, value.type);
+        const useCount = value.uses ? [...value.uses()].length : 1;
+        const benefit = this._policy.estimateBenefit(consumer, value.type, useCount);
+        if (convCost > benefit) continue;
+
         const srcOrder = from instanceof Layout ? from.order : Array.from({ length: value.type.rank }, (_, k) => k);
         const dstOrder = to instanceof Layout ? to.order : Array.from({ length: value.type.rank }, (_, k) => k);
 

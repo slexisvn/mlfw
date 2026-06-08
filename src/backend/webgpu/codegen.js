@@ -1,6 +1,10 @@
 import { ForKind } from '../../compiler/ir/tensor/nodes.js';
-import { wgslType, wgslBytes, wgslMathFunc } from '../dtype_map.js';
+import { wgslType, wgslBytes, wgslMathFunc, hasWgslMathFunc } from '../dtype_map.js';
 import { inferDtype } from '../../compiler/ir/lir/nodes.js';
+
+const BOOL_OPS = new Set(['!', '&&', '||']);
+const CMP_OPS = new Set(['<', '>', '<=', '>=', '==', '!=']);
+const COMPARE_DIRS = new Set(['eq', 'ne', 'lt', 'le', 'gt', 'ge']);
 
 const WGSL_THREAD_TAG_MAP = {
   'threadIdx.x': 'local_invocation_id.x',
@@ -311,8 +315,13 @@ export class WebGPUCodegen {
 
     this._needsBarriers = true;
 
+    const smemLimit = this.target.sharedMemoryBytes || 16384;
+    let smemUsed = this._sharedBuffers.reduce((sum, b) => sum + Math.max(b.sizeInBytes(), 0), 0);
+
     const storageNames = new Set();
     for (const [, buf] of func.bufferMap) storageNames.add(buf.name);
+
+    const candidates = [];
 
     const stack = [func.body];
     while (stack.length > 0) {
@@ -322,10 +331,7 @@ export class WebGPUCodegen {
         if (!storageNames.has(node.buffer.name)) {
           const numel = node.buffer.numel();
           const size = numel > 0 ? numel : this._estimateBufferSize(node.buffer);
-          if (size > 0) {
-            this._promotedBuffers.add(node.buffer.name);
-            this._promotedBufferDecls.push({ name: node.buffer.name, dtype: node.buffer.dtype, size });
-          }
+          if (size > 0) candidates.push({ name: node.buffer.name, dtype: node.buffer.dtype, size });
         }
         stack.push(node.body);
         continue;
@@ -342,12 +348,18 @@ export class WebGPUCodegen {
     this._scanAllocateNodes(func.body, allocatedNames);
     for (const [name, buf] of refBuffers) {
       if (storageNames.has(name) || allocatedNames.has(name)) continue;
-      if (this._promotedBuffers.has(name)) continue;
+      if (candidates.some(c => c.name === name)) continue;
       const numel = buf.numel();
       const size = numel > 0 ? numel : this._estimateBufferSize(buf);
-      if (size > 0) {
-        this._promotedBuffers.add(name);
-        this._promotedBufferDecls.push({ name, dtype: buf.dtype, size });
+      if (size > 0) candidates.push({ name, dtype: buf.dtype, size });
+    }
+
+    for (const c of candidates) {
+      const bytes = c.size * (wgslBytes(c.dtype) || 4);
+      if (smemUsed + bytes <= smemLimit) {
+        this._promotedBuffers.add(c.name);
+        this._promotedBufferDecls.push(c);
+        smemUsed += bytes;
       }
     }
   }
@@ -517,7 +529,7 @@ export class WebGPUCodegen {
   }
 
   _visitIfStmt(node) {
-    this._emit(`if (${this._exprToWGSL(node.condition)}) {`);
+    this._emit(`if (${this._boolExpr(node.condition)}) {`);
     this._indent++;
     this._visitNode(node.thenBody);
     this._indent--;
@@ -531,8 +543,10 @@ export class WebGPUCodegen {
   }
 
   _visitLetStmtNode(node) {
-    const dtype = wgslType(this._defaultDtype);
-    this._emit(`var ${node.variable.name}: ${dtype} = ${this._exprToWGSL(node.value)};`);
+    const varDtype = node.variable.dtype || this._defaultDtype;
+    const dtype = wgslType(varDtype);
+    const val = this._numericExpr(node.value, varDtype);
+    this._emit(`var ${node.variable.name}: ${dtype} = ${val};`);
     this._visitNode(node.body);
   }
 
@@ -549,18 +563,20 @@ export class WebGPUCodegen {
   _visitBufferStoreNode(node) {
     const idx = this._flatIndex(node.buffer, node.indices);
     const target = this._packedBufAccess(node.buffer.name, idx);
-    this._emit(`${target} = ${this._exprToWGSL(node.value)};`);
+    const val = this._numericExpr(node.value, node.buffer.dtype);
+    this._emit(`${target} = ${val};`);
   }
 
   _visitLIRFlatStore(node) {
     const idx = this._exprToWGSL(node.offsetExpr);
     const target = this._packedBufAccess(node.buffer.name, idx);
-    this._emit(`${target} = ${this._exprToWGSL(node.value)};`);
+    const val = this._numericExpr(node.value, node.buffer.dtype);
+    this._emit(`${target} = ${val};`);
   }
 
   _visitLIRBindings(node) {
     for (const bind of node.bindings) {
-      this._emit(`let ${bind.name}: i32 = ${this._exprToWGSL(bind.expr)};`);
+      this._emit(`let ${bind.name}: i32 = ${this._numericExpr(bind.expr, 'i32')};`);
     }
     this._visitNode(node.body);
   }
@@ -583,6 +599,27 @@ export class WebGPUCodegen {
     this._emit(`${flushTarget} = ${accVar};`);
   }
 
+  _isBoolExpr(node) {
+    if (!node) return false;
+    if (node.type === 'CompareNode') return true;
+    if (node.type === 'MathOpNode' && (BOOL_OPS.has(node.op) || CMP_OPS.has(node.op))) return true;
+    return false;
+  }
+
+  _numericExpr(node, dtype) {
+    if (this._isBoolExpr(node)) {
+      const wt = dtype ? wgslType(dtype) : 'i32';
+      if (wt === 'f32') return `select(0.0, 1.0, ${this._exprToWGSL(node)})`;
+      return `select(${wt}(0), ${wt}(1), ${this._exprToWGSL(node)})`;
+    }
+    return this._exprToWGSL(node);
+  }
+
+  _boolExpr(node) {
+    if (this._isBoolExpr(node)) return this._exprToWGSL(node);
+    return `(${this._exprToWGSL(node)} != 0)`;
+  }
+
   _exprToWGSL(node) {
     if (!node) return '0';
     switch (node.type) {
@@ -592,15 +629,20 @@ export class WebGPUCodegen {
       case 'BufferLoadNode': return this._packedBufAccess(node.buffer.name, this._flatIndex(node.buffer, node.indices));
       case 'LIRFlatLoadNode': return this._packedBufAccess(node.buffer.name, this._exprToWGSL(node.offsetExpr));
       case 'MathOpNode': {
-        const a = this._exprToWGSL(node.a);
-        if (!node.b) return `(${node.op}${a})`;
-        const b = this._exprToWGSL(node.b);
+        if (!node.b) {
+          if (node.op === '!') return `(!${this._boolExpr(node.a)})`;
+          return `(${node.op}${this._numericExpr(node.a)})`;
+        }
+        if (node.op === '&&') return `(${this._boolExpr(node.a)} && ${this._boolExpr(node.b)})`;
+        if (node.op === '||') return `(${this._boolExpr(node.a)} || ${this._boolExpr(node.b)})`;
+        const a = this._numericExpr(node.a);
+        const b = this._numericExpr(node.b);
         if (node.op === '//') return `(${a} / ${b})`;
         if (node.op === '%') return `(${a} % ${b})`;
         return `(${a} ${node.op} ${b})`;
       }
-      case 'CompareNode': return `(${this._exprToWGSL(node.a)} ${node.toC()} ${this._exprToWGSL(node.b)})`;
-      case 'IfThenElseNode': return `select(${this._exprToWGSL(node.elseBody)}, ${this._exprToWGSL(node.thenBody)}, ${this._exprToWGSL(node.condition)})`;
+      case 'CompareNode': return `(${this._numericExpr(node.a)} ${node.toC()} ${this._numericExpr(node.b)})`;
+      case 'IfThenElseNode': return `select(${this._exprToWGSL(node.elseBody)}, ${this._exprToWGSL(node.thenBody)}, ${this._boolExpr(node.condition)})`;
       case 'CastNode': return `${wgslType(node.toDtype)}(${this._exprToWGSL(node.expr)})`;
       case 'CallExternNode': return this._emitExternCall(node);
       default: return '0';
@@ -631,7 +673,16 @@ export class WebGPUCodegen {
     if (node.externName === 'fmod') {
       return `(${args[0]} % ${args[1]})`;
     }
+    if (node.externName === 'erf') {
+      return `((select(-1.0, 1.0, ${args[0]} >= 0.0)) * (1.0 - (1.0 / (1.0 + 0.3275911 * abs(${args[0]}))) * (0.254829592 + (1.0 / (1.0 + 0.3275911 * abs(${args[0]}))) * (-0.284496736 + (1.0 / (1.0 + 0.3275911 * abs(${args[0]}))) * (1.421413741 + (1.0 / (1.0 + 0.3275911 * abs(${args[0]}))) * (-1.453152027 + (1.0 / (1.0 + 0.3275911 * abs(${args[0]}))) * 1.061405429)))) * exp(-${args[0]} * ${args[0]})))`;
+    }
+    if (node.externName === 'log10') {
+      return `(log(${args[0]}) * ${1 / Math.LN10})`;
+    }
     const fn = wgslMathFunc(node.externName);
+    if (fn === node.externName && !hasWgslMathFunc(node.externName)) {
+      throw new Error(`WebGPU codegen: unsupported extern function "${node.externName}"`);
+    }
     return `${fn}(${joined})`;
   }
 

@@ -34,6 +34,18 @@ export class LayoutPolicy {
     return numEl * 2;
   }
 
+  estimateBenefit(consumer, tensorType, useCount) {
+    if (!(tensorType instanceof TensorType)) return 0;
+    const numEl = tensorType.numel();
+    if (numEl < 0) return 0;
+    const opName = consumer.opName;
+    if (opName === 'dot' || opName === 'conv' || opName === 'matmul') return numEl * 4 * useCount;
+    if (opName === 'reduce') return numEl * 2 * useCount;
+    const cacheLineBytes = this.target.cacheLineBytes || 64;
+    if (numEl * 4 <= cacheLineBytes * 4) return 0;
+    return Math.floor(numEl * 0.5);
+  }
+
   _initDefaultRules() {
     this._rules.set('conv', (op, tgt) => {
       const inp = op.getOperand(0).type;

@@ -111,6 +111,47 @@ export function register(registry) {
     }
   }));
 
+  for (const name of ['selu', 'mish', 'hardswish', 'hardsigmoid']) {
+    registry.register(new OpDef({
+      name,
+      numOperands: 1,
+      numResults: 1,
+      traits: [OpTrait.ELEMENTWISE, OpTrait.SAME_OPERAND_AND_RESULT_TYPE],
+      inferResultTypes: inferSameAsInputFloat,
+      verify: verifyUnaryFloat
+    }));
+  }
+
+  registry.register(new OpDef({
+    name: 'elu',
+    numOperands: 1,
+    numResults: 1,
+    attrs: [{ name: 'alpha', type: 'number' }],
+    traits: [OpTrait.ELEMENTWISE, OpTrait.SAME_OPERAND_AND_RESULT_TYPE],
+    inferResultTypes: inferSameAsInputFloat,
+    verify: verifyUnaryFloat
+  }));
+
+  registry.register(new OpDef({
+    name: 'leaky_relu',
+    numOperands: 1,
+    numResults: 1,
+    attrs: [{ name: 'negative_slope', type: 'number' }],
+    traits: [OpTrait.ELEMENTWISE, OpTrait.SAME_OPERAND_AND_RESULT_TYPE],
+    inferResultTypes: inferSameAsInputFloat,
+    verify: verifyUnaryFloat
+  }));
+
+  registry.register(new OpDef({
+    name: 'celu',
+    numOperands: 1,
+    numResults: 1,
+    attrs: [{ name: 'alpha', type: 'number' }],
+    traits: [OpTrait.ELEMENTWISE, OpTrait.SAME_OPERAND_AND_RESULT_TYPE],
+    inferResultTypes: inferSameAsInputFloat,
+    verify: verifyUnaryFloat
+  }));
+
   registry.register(new OpDef({
     name: 'embedding',
     numOperands: 2,

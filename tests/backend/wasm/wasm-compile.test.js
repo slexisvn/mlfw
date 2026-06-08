@@ -1475,3 +1475,59 @@ describe('WASM kernel quality — compound graph end-to-end', () => {
     expect(out[1]).toBeCloseTo(Math.exp(1), 4);
   });
 });
+
+// ────────────────────────────────────────────────────────────────────
+// boolean ops — compare→logicalAnd→logicalOr→select pipeline
+// ────────────────────────────────────────────────────────────────────
+
+describe('WASM boolean ops — compile and run', () => {
+  const F32 = ScalarType.F32;
+  const tt = (shape) => new TensorType(shape, F32);
+
+  it('compare + logicalAnd + logicalOr + select compiles valid WASM', () => {
+    const func = buildFunction('w_bool_ops', [tt([16]), tt([16])], [tt([16])], (b, args) => {
+      const gt = b.compare(args[0], args[1], 'gt').getResult(0);
+      const lt = b.compare(args[0], args[1], 'lt').getResult(0);
+      const anded = b.logicalAnd(gt, lt).getResult(0);
+      const ored = b.logicalOr(gt, anded).getResult(0);
+      b.returnOp([b.select(ored, args[0], args[1]).getResult(0)]);
+    });
+    const result = compile(func);
+    expect(result.succeeded).toBe(true);
+    const s = src(result, 'w_bool_ops');
+    expect(s).toContain('(module');
+    expect(s).toContain('i32.and');
+    expect(s).toContain('i32.or');
+  });
+
+  it('boolean select produces correct numerical results', () => {
+    const func = buildFunction('w_bool_num', [tt([4]), tt([4])], [tt([4])], (b, args) => {
+      const gt = b.compare(args[0], args[1], 'gt').getResult(0);
+      b.returnOp([b.select(gt, args[0], args[1]).getResult(0)]);
+    });
+    const result = compile(func);
+    expect(result.succeeded).toBe(true);
+    const a = new Float32Array([5, 1, 3, 2]);
+    const bv = new Float32Array([2, 4, 3, 1]);
+    const out = new Float32Array(4);
+    result.run('w_bool_num', a, bv, out);
+    expect(out[0]).toBe(5);
+    expect(out[1]).toBe(4);
+    expect(out[2]).toBe(3);
+    expect(out[3]).toBe(2);
+  });
+
+  it('CSE-hoisted compare does not cause type mismatch', () => {
+    const func = buildFunction('w_bool_cse', [tt([8]), tt([8])], [tt([8])], (b, args) => {
+      const gt = b.compare(args[0], args[1], 'gt').getResult(0);
+      const lt = b.compare(args[0], args[1], 'lt').getResult(0);
+      const and1 = b.logicalAnd(gt, lt).getResult(0);
+      const or1 = b.logicalOr(gt, and1).getResult(0);
+      b.returnOp([b.select(or1, args[0], args[1]).getResult(0)]);
+    });
+    const result = compile(func);
+    expect(result.succeeded).toBe(true);
+    const s = src(result, 'w_bool_cse');
+    expect(s).not.toContain('f32.ne');
+  });
+});

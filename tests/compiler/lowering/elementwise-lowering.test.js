@@ -242,6 +242,83 @@ describe('chained elementwise lowering', () => {
   });
 });
 
+describe('new primitive unary lowering', () => {
+  const ops = [
+    ['erf', 'erf', CallExternNode],
+    ['log2', 'log2', CallExternNode],
+    ['log10', 'log10', CallExternNode],
+    ['exp2', 'exp2', CallExternNode],
+  ];
+
+  for (const [opName, externName, nodeType] of ops) {
+    it(`${opName} lowers to CallExternNode("${externName}")`, () => {
+      const t = new TensorType([4], ScalarType.F32);
+      const pf = lower('f', [t], [t], (b, args) => {
+        b.returnOp([b[opName](args[0]).getResult(0)]);
+      });
+      const stores = collectNodes(pf.body, n => n instanceof BufferStoreNode);
+      expect(stores[0].value).toBeInstanceOf(nodeType);
+      expect(stores[0].value.externName).toBe(externName);
+    });
+  }
+
+  it('square lowers to MathOpNode(*) with same operand on both sides', () => {
+    const t = new TensorType([4], ScalarType.F32);
+    const pf = lower('f', [t], [t], (b, args) => {
+      b.returnOp([b.square(args[0]).getResult(0)]);
+    });
+    const stores = collectNodes(pf.body, n => n instanceof BufferStoreNode);
+    expect(stores[0].value).toBeInstanceOf(MathOpNode);
+    expect(stores[0].value.op).toBe('*');
+    expect(stores[0].value.a).toBeInstanceOf(BufferLoadNode);
+    expect(stores[0].value.b).toBeInstanceOf(BufferLoadNode);
+  });
+
+  it('reciprocal lowers to MathOpNode(/) with 1 as numerator', () => {
+    const t = new TensorType([4], ScalarType.F32);
+    const pf = lower('f', [t], [t], (b, args) => {
+      b.returnOp([b.reciprocal(args[0]).getResult(0)]);
+    });
+    const stores = collectNodes(pf.body, n => n instanceof BufferStoreNode);
+    expect(stores[0].value).toBeInstanceOf(MathOpNode);
+    expect(stores[0].value.op).toBe('/');
+    expect(stores[0].value.a).toBeInstanceOf(FloatImmNode);
+    expect(stores[0].value.a.value).toBe(1);
+  });
+});
+
+describe('boolean ops lowering', () => {
+  it('logical_not lowers to MathOpNode(!)', () => {
+    const boolT = new TensorType([4], ScalarType.BOOL);
+    const pf = lower('f', [boolT], [boolT], (b, args) => {
+      b.returnOp([b.logicalNot(args[0]).getResult(0)]);
+    });
+    const stores = collectNodes(pf.body, n => n instanceof BufferStoreNode);
+    expect(stores[0].value).toBeInstanceOf(MathOpNode);
+    expect(stores[0].value.op).toBe('!');
+  });
+
+  it('logical_and lowers to MathOpNode(&&)', () => {
+    const boolT = new TensorType([4], ScalarType.BOOL);
+    const pf = lower('f', [boolT, boolT], [boolT], (b, args) => {
+      b.returnOp([b.logicalAnd(args[0], args[1]).getResult(0)]);
+    });
+    const stores = collectNodes(pf.body, n => n instanceof BufferStoreNode);
+    expect(stores[0].value).toBeInstanceOf(MathOpNode);
+    expect(stores[0].value.op).toBe('&&');
+  });
+
+  it('logical_or lowers to MathOpNode(||)', () => {
+    const boolT = new TensorType([4], ScalarType.BOOL);
+    const pf = lower('f', [boolT, boolT], [boolT], (b, args) => {
+      b.returnOp([b.logicalOr(args[0], args[1]).getResult(0)]);
+    });
+    const stores = collectNodes(pf.body, n => n instanceof BufferStoreNode);
+    expect(stores[0].value).toBeInstanceOf(MathOpNode);
+    expect(stores[0].value.op).toBe('||');
+  });
+});
+
 describe('loop extents match tensor shape', () => {
   it('3D tensor produces 3-deep loop nest with correct extents', () => {
     const t = new TensorType([2, 3, 4], ScalarType.F32);

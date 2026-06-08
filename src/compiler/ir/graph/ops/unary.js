@@ -6,7 +6,7 @@ import {
 } from './helpers.js';
 
 export function register(registry) {
-  for (const name of ['abs', 'floor', 'ceil', 'round', 'sign']) {
+  for (const name of ['abs', 'floor', 'ceil', 'round', 'sign', 'square', 'reciprocal']) {
     registry.register(new OpDef({
       name,
       numOperands: 1,
@@ -28,7 +28,7 @@ export function register(registry) {
     verify: verifyUnaryFloat
   }));
 
-  for (const name of ['log', 'sqrt', 'rsqrt', 'tanh', 'sin', 'cos']) {
+  for (const name of ['log', 'sqrt', 'rsqrt', 'tanh', 'sin', 'cos', 'erf', 'log2', 'log10', 'exp2']) {
     registry.register(new OpDef({
       name,
       numOperands: 1,

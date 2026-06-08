@@ -6,7 +6,8 @@ import { compile as tracingCompile } from '../tracing/compile.js';
 import { TraceLevel } from '../compiler/pipeline/trace.js';
 import { parse } from './parser.js';
 import { CompiledProgramView, formatTrace } from './format.js';
-import { installBuiltins, takeNamed } from './builtins.js';
+import { installBuiltins, installSignatures, takeNamed } from './builtins.js';
+import { SignatureRegistry } from './signature_registry.js';
 
 class Environment {
   constructor(parent = null) {
@@ -30,7 +31,9 @@ export class TensorLangRuntime {
   constructor({ output = console.log } = {}) {
     this.output = output;
     this.global = new Environment();
+    this.signatureRegistry = new SignatureRegistry();
     this._installBuiltins();
+    installSignatures(this.signatureRegistry);
   }
 
   async execute(source) {
@@ -240,6 +243,7 @@ export class TensorLangRuntime {
     };
     func._langName = node.name;
     declarationEnv.define(node.name, func);
+    this.signatureRegistry.register(node.name, node.params.map(name => ({ name })));
     return func;
   }
 
@@ -278,6 +282,7 @@ export class TensorLangRuntime {
     };
     factory._langName = node.name;
     declarationEnv.define(node.name, factory);
+    this.signatureRegistry.register(node.name, node.params.map(name => ({ name })));
     return factory;
   }
 

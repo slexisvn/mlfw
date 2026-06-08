@@ -105,6 +105,7 @@ export class DominatorFusionPass extends FunctionPass {
           const group = new FusionGroup(nextId++);
           group.addOp(op);
           group.addOp(pdomOp);
+          if (!this._checkGroupReductions(group)) continue;
           opToGroup.set(op, group);
           opToGroup.set(pdomOp, group);
           groupList.push(group);
@@ -128,7 +129,7 @@ export class DominatorFusionPass extends FunctionPass {
       result.push(group);
     }
 
-    return result;
+    return result.filter(group => this._checkGroupReductions(group));
   }
 
   _canFusePatterns(producer, consumer) {
@@ -198,6 +199,15 @@ export class DominatorFusionPass extends FunctionPass {
         }
       }
     }
+  }
+
+  _checkGroupReductions(group) {
+    let count = 0;
+    for (const op of group.ops) {
+      const def = registry.get(op.opName);
+      if (def && def.isReduction) count++;
+    }
+    return count <= this.maxReductions;
   }
 
   _checkReductionLimit(group, newOp) {

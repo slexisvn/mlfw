@@ -50,4 +50,5 @@ export * as nn from './nn/index.js';
 export * as init from './nn/init.js';
 
 export { trace, compile } from './tracing/compile.js';
+export { compileWithBackward } from './tracing/compile_backward.js';
 export { CPUTarget, GPUTarget, WasmTarget, WebGPUTarget } from './backend/target.js';

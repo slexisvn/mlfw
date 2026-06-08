@@ -260,13 +260,6 @@ export class MatmulTiledCPURule extends ScheduleRule {
     if (target.kind !== TargetKind.CPU) return false;
     const info = classifyBlock(primFunc, blockName);
     if (!info) return false;
-    return info.hasReduction && blockName.includes('matmul');
-  }
-
-  matches(primFunc, blockName, target) {
-    if (target.kind !== TargetKind.CPU) return false;
-    const info = classifyBlock(primFunc, blockName);
-    if (!info) return false;
     if (!info.hasReduction || !blockName.includes('matmul')) return false;
     if (info.loopCount < 3) return false;
     const cacheBytes = target.l1CacheBytes || 32768;
@@ -285,22 +278,20 @@ export class MatmulTiledCPURule extends ScheduleRule {
     const cacheBytes = target.l1CacheBytes || 32768;
     const tileDim = Math.max(8, Math.min(64, Math.floor(Math.sqrt(cacheBytes / 4))));
 
-    const mLoop = loops[0];
-    const nLoop = loops[1];
-
-    const mExtent = mLoop.extent.type === 'IntImmNode' ? mLoop.extent.value : null;
-    const nExtent = nLoop.extent.type === 'IntImmNode' ? nLoop.extent.value : null;
-
-    if (mExtent && mExtent >= tileDim) {
-      const [mo] = schedule.split(mLoop, tileDim);
-      schedule.parallelize(mo);
+    const tileIndices = [];
+    const tileSizes = [];
+    for (let i = 0; i < Math.min(2, loops.length); i++) {
+      const ext = loops[i].extent.type === 'IntImmNode' ? loops[i].extent.value : null;
+      if (ext && ext >= tileDim) {
+        tileIndices.push(i);
+        tileSizes.push(tileDim);
+      }
     }
 
-    const updatedLoops = schedule.getLoops(blockName);
-    const currentN = updatedLoops.find(l => l.loopVar.name === nLoop.loopVar.name);
-    if (currentN && nExtent && nExtent >= tileDim) {
-      schedule.split(currentN, tileDim);
-    }
+    if (tileIndices.length === 0) return;
+
+    const { outerLoops } = schedule.tile(blockName, tileIndices, tileSizes);
+    if (outerLoops.length > 0) schedule.parallelize(outerLoops[0]);
   }
 }
 
@@ -316,7 +307,8 @@ export class MatmulTiledGPURule extends ScheduleRule {
     if (!info.hasReduction || !blockName.includes('matmul')) return false;
     if (info.loopCount < 3) return false;
     const smemBytes = target.sharedMemoryBytes || 49152;
-    const tileDim = Math.max(16, Math.min(128, Math.floor(Math.sqrt(smemBytes / 4))));
+    const bytesPerTile = 4 * 2;
+    const tileDim = Math.max(16, Math.min(128, Math.floor(Math.sqrt(smemBytes / bytesPerTile))));
     const maxExtent = info.loops.reduce((m, l) => {
       const e = l.extent && l.extent.type === 'IntImmNode' ? l.extent.value : 0;
       return e > m ? e : m;
@@ -333,7 +325,8 @@ export class MatmulTiledGPURule extends ScheduleRule {
 
     const smemBytes = target.sharedMemoryBytes || 49152;
     const tcScale = target.supportsTensorCore ? 2 : 1;
-    const blockTileDim = Math.max(16, Math.min(128, Math.floor(Math.sqrt(smemBytes / 4)) * tcScale));
+    const bytesPerTile = 4 * 2;
+    const blockTileDim = Math.max(16, Math.min(128, Math.floor(Math.sqrt(smemBytes / bytesPerTile)) * tcScale));
     const blockTileM = blockTileDim;
     const blockTileN = blockTileDim;
     const warp = target.warpSize || 32;

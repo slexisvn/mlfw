@@ -253,6 +253,124 @@ registerDecomposition('one_hot', (op, b) => {
   op.erase();
 });
 
+function bcast(b, scalar, dtype, shape) {
+  return b.broadcast(b.scalarConstant(scalar, dtype).getResult(0), shape, []).getResult(0);
+}
+
+registerDecomposition('elu', (op, b) => {
+  const x = op.getOperand(0);
+  const alpha = op.getAttr('alpha') ?? 1.0;
+  const dtype = x.type.dtype;
+  const shape = x.type.shape;
+  const zero = bcast(b, 0, dtype, shape);
+  const mask = b.compare(x, zero, 'gt').getResult(0);
+  const one = bcast(b, 1, dtype, shape);
+  const expX = b.exp(x).getResult(0);
+  const expMinusOne = b.sub(expX, one).getResult(0);
+  const alphaVal = bcast(b, alpha, dtype, shape);
+  const negBranch = b.mul(alphaVal, expMinusOne).getResult(0);
+  const result = b.select(mask, x, negBranch);
+  op.replaceAllResultsWith([result.getResult(0)]);
+  op.erase();
+});
+
+registerDecomposition('leaky_relu', (op, b) => {
+  const x = op.getOperand(0);
+  const slope = op.getAttr('negative_slope') ?? 0.01;
+  const dtype = x.type.dtype;
+  const shape = x.type.shape;
+  const zero = bcast(b, 0, dtype, shape);
+  const mask = b.compare(x, zero, 'gt').getResult(0);
+  const slopeVal = bcast(b, slope, dtype, shape);
+  const negBranch = b.mul(slopeVal, x).getResult(0);
+  const result = b.select(mask, x, negBranch);
+  op.replaceAllResultsWith([result.getResult(0)]);
+  op.erase();
+});
+
+registerDecomposition('celu', (op, b) => {
+  const x = op.getOperand(0);
+  const alpha = op.getAttr('alpha') ?? 1.0;
+  const dtype = x.type.dtype;
+  const shape = x.type.shape;
+  const zero = bcast(b, 0, dtype, shape);
+  const positivePart = b.maximum(x, zero).getResult(0);
+  const alphaVal = bcast(b, alpha, dtype, shape);
+  const xOverAlpha = b.div(x, alphaVal).getResult(0);
+  const expTerm = b.exp(xOverAlpha).getResult(0);
+  const one = bcast(b, 1, dtype, shape);
+  const expMinusOne = b.sub(expTerm, one).getResult(0);
+  const scaled = b.mul(alphaVal, expMinusOne).getResult(0);
+  const negativePart = b.minimum(zero, scaled).getResult(0);
+  const result = b.add(positivePart, negativePart);
+  op.replaceAllResultsWith([result.getResult(0)]);
+  op.erase();
+});
+
+registerDecomposition('selu', (op, b) => {
+  const x = op.getOperand(0);
+  const dtype = x.type.dtype;
+  const shape = x.type.shape;
+  const lambda = 1.0507009873554805;
+  const alphaConst = 1.6732632423543772;
+  const zero = bcast(b, 0, dtype, shape);
+  const mask = b.compare(x, zero, 'gt').getResult(0);
+  const one = bcast(b, 1, dtype, shape);
+  const expX = b.exp(x).getResult(0);
+  const expMinusOne = b.sub(expX, one).getResult(0);
+  const alphaVal = bcast(b, alphaConst, dtype, shape);
+  const negBranch = b.mul(alphaVal, expMinusOne).getResult(0);
+  const inner = b.select(mask, x, negBranch).getResult(0);
+  const lambdaVal = bcast(b, lambda, dtype, shape);
+  const result = b.mul(lambdaVal, inner);
+  op.replaceAllResultsWith([result.getResult(0)]);
+  op.erase();
+});
+
+registerDecomposition('mish', (op, b) => {
+  const x = op.getOperand(0);
+  const dtype = x.type.dtype;
+  const shape = x.type.shape;
+  const one = bcast(b, 1, dtype, shape);
+  const expX = b.exp(x).getResult(0);
+  const onePlusExp = b.add(one, expX).getResult(0);
+  const softplus = b.log(onePlusExp).getResult(0);
+  const tanhSoftplus = b.tanh(softplus).getResult(0);
+  const result = b.mul(x, tanhSoftplus);
+  op.replaceAllResultsWith([result.getResult(0)]);
+  op.erase();
+});
+
+registerDecomposition('hardswish', (op, b) => {
+  const x = op.getOperand(0);
+  const dtype = x.type.dtype;
+  const shape = x.type.shape;
+  const three = bcast(b, 3, dtype, shape);
+  const zero = bcast(b, 0, dtype, shape);
+  const six = bcast(b, 6, dtype, shape);
+  const xPlus3 = b.add(x, three).getResult(0);
+  const clamped = b.minimum(b.maximum(xPlus3, zero).getResult(0), six).getResult(0);
+  const scaled = b.div(clamped, six).getResult(0);
+  const result = b.mul(x, scaled);
+  op.replaceAllResultsWith([result.getResult(0)]);
+  op.erase();
+});
+
+registerDecomposition('hardsigmoid', (op, b) => {
+  const x = op.getOperand(0);
+  const dtype = x.type.dtype;
+  const shape = x.type.shape;
+  const six = bcast(b, 6, dtype, shape);
+  const half = bcast(b, 0.5, dtype, shape);
+  const zero = bcast(b, 0, dtype, shape);
+  const one = bcast(b, 1, dtype, shape);
+  const xOverSix = b.div(x, six).getResult(0);
+  const shifted = b.add(xOverSix, half).getResult(0);
+  const result = b.minimum(b.maximum(shifted, zero).getResult(0), one);
+  op.replaceAllResultsWith([result.getResult(0)]);
+  op.erase();
+});
+
 registerDecomposition('embedding', (op, b) => {
   const weight = op.getOperand(0);
   const indices = op.getOperand(1);

@@ -7,6 +7,7 @@ import { CPUTarget } from '../backend/target.js';
 import { tensorToContiguous, wrapResult } from '../dispatcher/jit_dispatch.js';
 import { typedArrayCtor } from '../tensor/types/dtype.js';
 import { computeNumel } from '../tensor/utils/shape_utils.js';
+import { compileWithBackward } from './compile_backward.js';
 
 let _tracingRegistered = false;
 
@@ -140,6 +141,10 @@ export function executeCompiled(compiled, inputs) {
 }
 
 export function compile(model, exampleInputs, opts) {
+  if (opts?.backward) {
+    return _compileWithBackward(model, exampleInputs, opts);
+  }
+
   const target = opts?.target ?? CPUTarget();
   const compilerOpts = { target, verify: false, ...opts };
 

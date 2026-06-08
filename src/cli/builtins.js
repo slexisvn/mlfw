@@ -146,3 +146,86 @@ function promoteScalarArgs(args) {
     if (typeof args[i] === 'number' || typeof args[i] === 'boolean') args[i] = fw.tensor(args[i], options);
   }
 }
+
+const FACTORY_SIGNATURES = {
+  tensor: [{ name: 'data' }, { name: 'opts', isOptional: true }],
+  zeros: [{ name: 'shape' }, { name: 'opts', isOptional: true }],
+  ones: [{ name: 'shape' }, { name: 'opts', isOptional: true }],
+  empty: [{ name: 'shape' }, { name: 'opts', isOptional: true }],
+  full: [{ name: 'shape' }, { name: 'value' }, { name: 'opts', isOptional: true }],
+  randn: [{ name: 'shape' }, { name: 'opts', isOptional: true }],
+  arange: [{ name: 'start' }, { name: 'end', isOptional: true }, { name: 'step', isOptional: true }, { name: 'opts', isOptional: true }],
+  eye: [{ name: 'n' }, { name: 'm', isOptional: true }, { name: 'opts', isOptional: true }],
+  linspace: [{ name: 'start' }, { name: 'end' }, { name: 'steps' }, { name: 'opts', isOptional: true }],
+  zerosLike: [{ name: 'tensor' }],
+  onesLike: [{ name: 'tensor' }],
+  emptyLike: [{ name: 'tensor' }],
+  fullLike: [{ name: 'tensor' }, { name: 'value' }],
+  randnLike: [{ name: 'tensor' }],
+};
+
+const MODULE_SIGNATURES = {
+  Linear: [{ name: 'inFeatures' }, { name: 'outFeatures' }, { name: 'bias', defaultValue: 'true', isOptional: true }],
+  Conv1d: [{ name: 'inChannels' }, { name: 'outChannels' }, { name: 'kernelSize' }, { name: 'stride', defaultValue: '1', isOptional: true }, { name: 'padding', defaultValue: '0', isOptional: true }],
+  Conv2d: [{ name: 'inChannels' }, { name: 'outChannels' }, { name: 'kernelSize' }, { name: 'stride', defaultValue: '1', isOptional: true }, { name: 'padding', defaultValue: '0', isOptional: true }],
+  LayerNorm: [{ name: 'normalizedShape' }, { name: 'eps', defaultValue: '1e-5', isOptional: true }],
+  BatchNorm1d: [{ name: 'numFeatures' }, { name: 'eps', defaultValue: '1e-5', isOptional: true }, { name: 'momentum', defaultValue: '0.1', isOptional: true }],
+  BatchNorm2d: [{ name: 'numFeatures' }, { name: 'eps', defaultValue: '1e-5', isOptional: true }, { name: 'momentum', defaultValue: '0.1', isOptional: true }],
+  Dropout: [{ name: 'p', defaultValue: '0.5', isOptional: true }],
+  Embedding: [{ name: 'numEmbeddings' }, { name: 'embeddingDim' }, { name: 'paddingIdx', isOptional: true }],
+  MaxPool2d: [{ name: 'kernelSize' }, { name: 'stride', isOptional: true }, { name: 'padding', defaultValue: '0', isOptional: true }],
+  AvgPool2d: [{ name: 'kernelSize' }, { name: 'stride', isOptional: true }, { name: 'padding', defaultValue: '0', isOptional: true }],
+  AdaptiveAvgPool2d: [{ name: 'outputSize' }],
+  LeakyReLU: [{ name: 'negativeSlope', defaultValue: '0.01', isOptional: true }],
+  ELU: [{ name: 'alpha', defaultValue: '1.0', isOptional: true }],
+  Softmax: [{ name: 'dim', defaultValue: '-1', isOptional: true }],
+  LogSoftmax: [{ name: 'dim', defaultValue: '-1', isOptional: true }],
+  Flatten: [{ name: 'startDim', defaultValue: '1', isOptional: true }, { name: 'endDim', defaultValue: '-1', isOptional: true }],
+};
+
+const BUILTIN_SIGNATURES = {
+  reshape: [{ name: 'tensor' }, { name: 'shape' }],
+  transpose: [{ name: 'tensor' }, { name: 'dim0' }, { name: 'dim1' }],
+  permute: [{ name: 'tensor' }, { name: 'dims' }],
+  expand: [{ name: 'tensor' }, { name: 'shape' }],
+  slice: [{ name: 'tensor' }, { name: 'dim' }, { name: 'start' }, { name: 'end' }, { name: 'step', defaultValue: '1', isOptional: true }],
+  unsqueeze: [{ name: 'tensor' }, { name: 'dim' }],
+  squeeze: [{ name: 'tensor' }, { name: 'dim' }],
+  narrow: [{ name: 'tensor' }, { name: 'dim' }, { name: 'start' }, { name: 'length' }],
+  select: [{ name: 'tensor' }, { name: 'dim' }, { name: 'index' }],
+  contiguous: [{ name: 'tensor' }],
+  detach: [{ name: 'tensor' }],
+  requires_grad: [{ name: 'tensor' }, { name: 'flag', defaultValue: 'true', isOptional: true }],
+  grad: [{ name: 'tensor' }],
+  backward: [{ name: 'tensor' }, { name: 'gradient', isOptional: true }],
+  range: [{ name: 'start' }, { name: 'stop', isOptional: true }, { name: 'step', isOptional: true }],
+  len: [{ name: 'value' }],
+  shape: [{ name: 'tensor' }],
+  dtype: [{ name: 'tensor' }],
+  print: [{ name: 'value' }],
+  trace: [{ name: 'compiled' }],
+  graph: [{ name: 'compiled' }],
+  compile: [
+    { name: 'model' }, { name: 'input', isOptional: true }, { name: 'target', defaultValue: 'cpu', isOptional: true },
+    { name: 'fusion', isOptional: true }, { name: 'scheduling', isOptional: true }, { name: 'autotune', isOptional: true },
+    { name: 'quantization', isOptional: true }, { name: 'layout', isOptional: true }, { name: 'rematerialization', isOptional: true },
+    { name: 'inplaceReuse', isOptional: true }, { name: 'partition', isOptional: true },
+    { name: 'debug', isOptional: true }, { name: 'snippet', isOptional: true }, { name: 'verify', defaultValue: 'true', isOptional: true },
+    { name: 'epilogue', isOptional: true }, { name: 'fusionStrategy', defaultValue: 'xla', isOptional: true },
+    { name: 'numTrials', defaultValue: '64', isOptional: true }, { name: 'timeBudgetMs', defaultValue: '30000', isOptional: true },
+  ],
+  Sequential: [{ name: '...modules' }],
+  sum: [{ name: 'input' }, { name: 'axis', isOptional: true }, { name: 'keep', isOptional: true }],
+  mean: [{ name: 'input' }, { name: 'axis', isOptional: true }, { name: 'keep', isOptional: true }],
+  max: [{ name: 'input' }, { name: 'axis', isOptional: true }, { name: 'keep', isOptional: true }],
+  min: [{ name: 'input' }, { name: 'axis', isOptional: true }, { name: 'keep', isOptional: true }],
+  argmax: [{ name: 'input' }, { name: 'axis', isOptional: true }, { name: 'keep', isOptional: true }],
+  argmin: [{ name: 'input' }, { name: 'axis', isOptional: true }, { name: 'keep', isOptional: true }],
+  prod: [{ name: 'input' }, { name: 'axis', isOptional: true }, { name: 'keep', isOptional: true }],
+};
+
+export function installSignatures(registry) {
+  for (const [name, params] of Object.entries(FACTORY_SIGNATURES)) registry.register(name, params);
+  for (const [name, params] of Object.entries(MODULE_SIGNATURES)) registry.register(name, params);
+  for (const [name, params] of Object.entries(BUILTIN_SIGNATURES)) registry.register(name, params);
+}

@@ -272,3 +272,69 @@ describe('WebGPU compilation — balanced braces', () => {
     }
   });
 });
+
+// ────────────────────────────────────────────────────────────────────
+// boolean ops — WGSL bool type handling
+// ────────────────────────────────────────────────────────────────────
+
+describe('WebGPU compilation — boolean ops WGSL validity', () => {
+  const F32 = ScalarType.F32;
+  const tt = (shape) => new TensorType(shape, F32);
+
+  it('compare + logicalAnd + logicalOr + select compiles clean WGSL', () => {
+    const func = buildFunction('wgpu_bool', [tt([64]), tt([64])], [tt([64])], (b, args) => {
+      const gt = b.compare(args[0], args[1], 'gt').getResult(0);
+      const lt = b.compare(args[0], args[1], 'lt').getResult(0);
+      const anded = b.logicalAnd(gt, lt).getResult(0);
+      const ored = b.logicalOr(gt, anded).getResult(0);
+      b.returnOp([b.select(ored, args[0], args[1]).getResult(0)]);
+    });
+    const result = compile(func);
+    expect(result.succeeded).toBe(true);
+    const src = getSource(result, 'wgpu_bool');
+    expect(src).toContain('select(');
+    expect(src).not.toMatch(/bool\s*!=\s*0/);
+    expect(src).toContain('@compute');
+  });
+
+  it('compare stored to buffer uses select() not raw bool assignment', () => {
+    const func = buildFunction('wgpu_cmp_store', [tt([32]), tt([32])], [tt([32])], (b, args) => {
+      const gt = b.compare(args[0], args[1], 'gt').getResult(0);
+      b.returnOp([b.select(gt, args[0], args[1]).getResult(0)]);
+    });
+    const result = compile(func);
+    expect(result.succeeded).toBe(true);
+    const src = getSource(result, 'wgpu_cmp_store');
+    expect(src).toContain('select(');
+  });
+
+  it('pad+conv bounds check does not produce bool != 0', () => {
+    const func = buildFunction('wgpu_pad_conv', [
+      tt([1, 1, 8, 8]), tt([4, 1, 3, 3])
+    ], [tt([1, 4, 8, 8])], (b, args) => {
+      const padVal = b.scalarConstant(0, F32).getResult(0);
+      const padded = b.pad(args[0], padVal, [0, 0, 1, 1], [0, 0, 1, 1]).getResult(0);
+      b.returnOp([b.conv(padded, args[1], [1, 1], [[0, 0], [0, 0]]).getResult(0)]);
+    });
+    const result = compile(func);
+    expect(result.succeeded).toBe(true);
+    for (const k of result.listKernels()) {
+      const src = getSource(result, k);
+      expect(src).not.toMatch(/bool\s*!=\s*0/);
+    }
+  });
+
+  it('conditional clamp with compare+select produces valid WGSL', () => {
+    const func = buildFunction('wgpu_cond', [tt([32]), tt([32])], [tt([32])], (b, args) => {
+      const gt = b.compare(args[0], args[1], 'gt').getResult(0);
+      const eq = b.compare(args[0], args[1], 'eq').getResult(0);
+      const ored = b.logicalOr(gt, eq).getResult(0);
+      const selected = b.select(ored, args[0], args[1]).getResult(0);
+      const zero = b.constant(0, tt([32])).getResult(0);
+      const one = b.constant(1, tt([32])).getResult(0);
+      b.returnOp([b.clamp(zero, selected, one).getResult(0)]);
+    });
+    const result = compile(func);
+    expect(result.succeeded).toBe(true);
+  });
+});

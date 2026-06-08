@@ -155,3 +155,42 @@ describe('LayoutTransformPass', () => {
     }
   });
 });
+
+describe('LayoutTransformPass — cost-benefit profitability', () => {
+  it('inserts transform for large dot RHS (benefit > cost)', () => {
+    const lhs = new TensorType([64, 128], ScalarType.F32);
+    const rhs = new TensorType([128, 64], ScalarType.F32);
+    const out = new TensorType([64, 64], ScalarType.F32);
+    const func = buildFunction('f', [lhs, rhs], [out], (b, args) => {
+      b.returnOp([b.matmul(args[0], args[1]).getResult(0)]);
+    });
+
+    expect(run(func, CPUTarget())).toBe(PassResult.CHANGED);
+    expect(findOps(func, 'layout_transform').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('inserts transform for conv on GPU (compute-intensive)', () => {
+    const inp = new TensorType([1, 3, 64, 64], ScalarType.F32);
+    const ker = new TensorType([32, 3, 3, 3], ScalarType.F32);
+    const out = new TensorType([1, 32, 62, 62], ScalarType.F32);
+    const func = buildFunction('f', [inp, ker], [out], (b, args) => {
+      b.returnOp([b.conv(args[0], args[1], [1, 1], [0, 0, 0, 0]).getResult(0)]);
+    });
+
+    expect(run(func, GPUTarget())).toBe(PassResult.CHANGED);
+    expect(findOps(func, 'layout_transform').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('dot transform count does not exceed needed conversions', () => {
+    const lhs = new TensorType([32, 64], ScalarType.F32);
+    const rhs = new TensorType([64, 32], ScalarType.F32);
+    const out = new TensorType([32, 32], ScalarType.F32);
+    const func = buildFunction('f', [lhs, rhs], [out], (b, args) => {
+      b.returnOp([b.matmul(args[0], args[1]).getResult(0)]);
+    });
+
+    run(func, CPUTarget());
+    const transforms = findOps(func, 'layout_transform');
+    expect(transforms.length).toBeLessThanOrEqual(2);
+  });
+});

@@ -73,7 +73,8 @@ const C_MATH_BASES = {
   'exp': 'exp', 'log': 'log', 'sqrt': 'sqrt', 'tanh': 'tanh',
   'abs': 'fabs', 'sin': 'sin', 'cos': 'cos', 'ceil': 'ceil',
   'floor': 'floor', 'max': 'fmax', 'min': 'fmin', 'pow': 'pow',
-  'round': 'round', 'fmod': 'fmod'
+  'round': 'round', 'fmod': 'fmod',
+  'erf': 'erf', 'log2': 'log2', 'log10': 'log10', 'exp2': 'exp2'
 };
 
 export function cMathFunc(name, dtype) {
@@ -84,7 +85,8 @@ export function cMathFunc(name, dtype) {
 
 const JS_MATH_FUNCS = new Set([
   'exp', 'log', 'sqrt', 'tanh', 'abs', 'ceil', 'floor',
-  'sin', 'cos', 'max', 'min', 'pow', 'round', 'sign'
+  'sin', 'cos', 'max', 'min', 'pow', 'round', 'sign',
+  'log2', 'log10'
 ]);
 
 export function isJSMathFunc(name) {
@@ -114,11 +116,15 @@ const WGSL_MATH_FUNCS = {
   'abs': 'abs', 'sin': 'sin', 'cos': 'cos', 'ceil': 'ceil',
   'floor': 'floor', 'max': 'max', 'min': 'min', 'pow': 'pow',
   'round': 'round', 'sign': 'sign', 'rsqrt': 'inverseSqrt',
-  'fabs': 'abs',
+  'fabs': 'abs', 'log2': 'log2', 'exp2': 'exp2',
 };
 
 export function wgslMathFunc(name) {
   return WGSL_MATH_FUNCS[name] || name;
+}
+
+export function hasWgslMathFunc(name) {
+  return name in WGSL_MATH_FUNCS;
 }
 
 const LIBRARY_FUNC_TABLE = {

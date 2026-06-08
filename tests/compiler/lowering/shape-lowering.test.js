@@ -360,3 +360,47 @@ describe('iota lowering', () => {
     expect(cast.fromDtype).toBe('index');
   });
 });
+
+describe('scatter lowering', () => {
+  it('scatter produces copy + update with add semantics', () => {
+    const operandT = new TensorType([5, 3], ScalarType.F32);
+    const indicesT = new TensorType([2, 1], ScalarType.I32);
+    const updatesT = new TensorType([2, 3], ScalarType.F32);
+    const outT = new TensorType([5, 3], ScalarType.F32);
+    const pf = lower('f', [operandT, indicesT, updatesT], [outT], (b, args) => {
+      b.returnOp([b.scatter(args[0], args[1], args[2], {
+        updateWindowDims: [1],
+        insertedWindowDims: [0],
+        scatterDimsToOperandDims: [0],
+        indexVectorDim: 1,
+      }).getResult(0)]);
+    });
+
+    expect(pf.body).toBeInstanceOf(SeqNode);
+    const stores = collectNodes(pf.body, n => n instanceof BufferStoreNode);
+    expect(stores.length).toBe(2);
+    const addStore = stores.find(s => s.value instanceof MathOpNode && s.value.op === '+');
+    expect(addStore).toBeDefined();
+    expect(addStore.value.a).toBeInstanceOf(BufferLoadNode);
+    expect(addStore.value.b).toBeInstanceOf(BufferLoadNode);
+  });
+
+  it('scatterAdd is an alias for scatter', () => {
+    const operandT = new TensorType([4], ScalarType.F32);
+    const indicesT = new TensorType([2, 1], ScalarType.I32);
+    const updatesT = new TensorType([2], ScalarType.F32);
+    const outT = new TensorType([4], ScalarType.F32);
+    const pf = lower('f', [operandT, indicesT, updatesT], [outT], (b, args) => {
+      b.returnOp([b.scatterAdd(args[0], args[1], args[2], {
+        updateWindowDims: [],
+        insertedWindowDims: [0],
+        scatterDimsToOperandDims: [0],
+        indexVectorDim: 1,
+      }).getResult(0)]);
+    });
+
+    const stores = collectNodes(pf.body, n => n instanceof BufferStoreNode);
+    const addStore = stores.find(s => s.value instanceof MathOpNode && s.value.op === '+');
+    expect(addStore).toBeDefined();
+  });
+});
