@@ -104,10 +104,6 @@ function checkKernelSanity(src) {
   expect((src.match(/\(/g) || []).length).toBe((src.match(/\)/g) || []).length);
 }
 
-// ────────────────────────────────────────────────────────────────────
-// Deep MLP with various activations
-// ────────────────────────────────────────────────────────────────────
-
 describe('Deep MLP kernel quality', () => {
   it('6-layer MLP with relu: compiles, no undeclared vars, no JS artifacts', () => {
     const func = buildFunction('mlp_relu6', [t([32, 64])], [t([32, 16])], (b, args) => {
@@ -201,10 +197,6 @@ describe('Deep MLP kernel quality', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Multi-head attention pattern
-// ────────────────────────────────────────────────────────────────────
-
 describe('Multi-head attention kernel quality', () => {
   it('QKV projection + scaled dot attention compiles correctly', () => {
     const func = buildFunction('mha', [t([4, 64]), t([64, 64]), t([64, 64]), t([64, 64])], [t([4, 64])], (b, args) => {
@@ -250,10 +242,6 @@ describe('Multi-head attention kernel quality', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// ResNet-style residual block
-// ────────────────────────────────────────────────────────────────────
-
 describe('ResNet-style residual kernel quality', () => {
   it('matmul chain with skip connection compiles correctly', () => {
     const func = buildFunction('resblock', [t([16, 32]), t([32, 32]), t([32, 32])], [t([16, 32])], (b, args) => {
@@ -293,10 +281,6 @@ describe('ResNet-style residual kernel quality', () => {
     }
   });
 });
-
-// ────────────────────────────────────────────────────────────────────
-// Transformer FFN patterns (layer norm + feedforward)
-// ────────────────────────────────────────────────────────────────────
 
 describe('Transformer FFN kernel quality', () => {
   it('layer norm + 2-layer FFN with relu compiles', () => {
@@ -356,10 +340,6 @@ describe('Transformer FFN kernel quality', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Softmax + cross-entropy / reduction chains
-// ────────────────────────────────────────────────────────────────────
-
 describe('Reduction chain kernel quality', () => {
   it('softmax + log + sum reduction compiles', () => {
     const func = buildFunction('xent', [t([16, 32])], [t([16])], (b, args) => {
@@ -417,10 +397,6 @@ describe('Reduction chain kernel quality', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Multi-output model (encoder-decoder)
-// ────────────────────────────────────────────────────────────────────
-
 describe('Multi-output kernel quality', () => {
   it('encoder-decoder with 2 outputs compiles', () => {
     const func = buildFunction('enc_dec', [t([8, 32]), t([32, 16]), t([16, 32]), t([16, 4])],
@@ -459,10 +435,6 @@ describe('Multi-output kernel quality', () => {
     }
   });
 });
-
-// ────────────────────────────────────────────────────────────────────
-// Deep elementwise chains (activation stress)
-// ────────────────────────────────────────────────────────────────────
 
 describe('Deep elementwise chain kernel quality', () => {
   it('10-deep unary chain with various activations', () => {
@@ -550,10 +522,6 @@ describe('Deep elementwise chain kernel quality', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Shape manipulation + compute
-// ────────────────────────────────────────────────────────────────────
-
 describe('Shape manipulation kernel quality', () => {
   it('reshape -> matmul -> transpose -> reduce compiles', () => {
     const func = buildFunction('shape_ops', [t([4, 8, 2]), t([16, 16])], [t([4])], (b, args) => {
@@ -606,10 +574,6 @@ describe('Shape manipulation kernel quality', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Large matmul configurations
-// ────────────────────────────────────────────────────────────────────
-
 describe('Large matmul kernel quality', () => {
   it('256x256 matmul compiles with valid tiling', () => {
     const func = buildFunction('mm256', [t([256, 256]), t([256, 256])], [t([256, 256])], (b, args) => {
@@ -648,10 +612,6 @@ describe('Large matmul kernel quality', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Dtype correctness in deep models
-// ────────────────────────────────────────────────────────────────────
-
 describe('Dtype correctness in deep models', () => {
   it('f64 MLP uses double* params and unsuffixed math', () => {
     const func = buildFunction('mlp_f64', [t([8, 16], F64), t([16, 8], F64)], [t([8, 8], F64)], (b, args) => {
@@ -682,10 +642,6 @@ describe('Dtype correctness in deep models', () => {
     expect(src).not.toMatch(/double\*/);
   });
 });
-
-// ────────────────────────────────────────────────────────────────────
-// Broadcasting in deep models
-// ────────────────────────────────────────────────────────────────────
 
 describe('Broadcasting kernel quality', () => {
   it('matmul + broadcast bias add + relu compiles', () => {
@@ -722,10 +678,6 @@ describe('Broadcasting kernel quality', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Embedding + pooling pattern
-// ────────────────────────────────────────────────────────────────────
-
 describe('Pooling kernel quality', () => {
   it('matmul + reduce (mean pooling) compiles', () => {
     const func = buildFunction('mm_pool',
@@ -746,10 +698,6 @@ describe('Pooling kernel quality', () => {
     }
   });
 });
-
-// ────────────────────────────────────────────────────────────────────
-// Matmul + sigmoid (epilogue fusion regression)
-// ────────────────────────────────────────────────────────────────────
 
 describe('Matmul + sigmoid (epilogue regression)', () => {
   it('matmul + sigmoid compiles without crash', () => {
@@ -813,10 +761,6 @@ describe('Matmul + sigmoid (epilogue regression)', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Epilogue fusion quality (what DOES fuse vs what falls through)
-// ────────────────────────────────────────────────────────────────────
-
 describe('Epilogue fusion quality', () => {
   it('matmul + relu fuses into single kernel', () => {
     const func = buildFunction('mm_relu', [t([16, 32]), t([32, 16])], [t([16, 16])], (b, args) => {
@@ -870,10 +814,6 @@ describe('Epilogue fusion quality', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Conv patterns
-// ────────────────────────────────────────────────────────────────────
-
 describe('Conv kernel quality', () => {
   it('2D conv compiles with valid CUDA', () => {
     const func = buildFunction('conv2d',
@@ -926,10 +866,6 @@ describe('Conv kernel quality', () => {
     }
   });
 });
-
-// ────────────────────────────────────────────────────────────────────
-// Model-level compilation (Sequential API)
-// ────────────────────────────────────────────────────────────────────
 
 describe('Model-level GPU compilation quality', () => {
   it('Sequential MLP with ReLU: valid CUDA, shared memory', () => {
@@ -1035,10 +971,6 @@ describe('Model-level GPU compilation quality', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Numerical edge cases in kernel generation
-// ────────────────────────────────────────────────────────────────────
-
 describe('Numerical edge case kernel quality', () => {
   it('1-element tensors compile without issues', () => {
     const func = buildFunction('scalar_mm', [t([1, 1]), t([1, 1])], [t([1, 1])], (b, args) => {
@@ -1096,10 +1028,6 @@ describe('Numerical edge case kernel quality', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Compound activations (decomposed into multiple ops)
-// ────────────────────────────────────────────────────────────────────
-
 describe('Compound activation kernel quality', () => {
   it('softmax compiles to valid CUDA kernels', () => {
     const func = buildFunction('sm', [t([8, 32])], [t([8, 32])], (b, args) => {
@@ -1156,10 +1084,6 @@ describe('Compound activation kernel quality', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Comparison & select patterns
-// ────────────────────────────────────────────────────────────────────
-
 describe('Comparison & select kernel quality', () => {
   it('maximum (element-wise max) compiles', () => {
     const func = buildFunction('ew_max', [t([256]), t([256])], [t([256])], (b, args) => {
@@ -1200,10 +1124,6 @@ describe('Comparison & select kernel quality', () => {
     }
   });
 });
-
-// ────────────────────────────────────────────────────────────────────
-// High-dimensional tensors
-// ────────────────────────────────────────────────────────────────────
 
 describe('High-dimensional tensor kernel quality', () => {
   it('4D elementwise add compiles', () => {
@@ -1246,10 +1166,6 @@ describe('High-dimensional tensor kernel quality', () => {
     }
   });
 });
-
-// ────────────────────────────────────────────────────────────────────
-// End-to-end model patterns
-// ────────────────────────────────────────────────────────────────────
 
 describe('End-to-end model pattern kernel quality', () => {
   it('autoencoder (encode + decode) compiles', () => {

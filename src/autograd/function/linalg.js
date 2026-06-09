@@ -1,6 +1,19 @@
 import { AutogradNode } from '../node.js';
 import * as ops from '../../tensor/ops/ops.js';
-import { transpose, unsqueeze, squeeze } from '../../tensor/view/view_ops.js';
+import { transpose, unsqueeze, squeeze, reshape } from '../../tensor/view/view_ops.js';
+
+function _sumToShape(tensor, targetShape) {
+  let t = tensor;
+  while (t.ndim > targetShape.length) {
+    t = ops.sum(t, 0, false);
+  }
+  for (let i = 0; i < targetShape.length; i++) {
+    if (targetShape[i] === 1 && t.shape[i] !== 1) {
+      t = ops.sum(t, i, true);
+    }
+  }
+  return t;
+}
 
 export class MatmulBackward extends AutogradNode {
   constructor() { super(2); }
@@ -13,8 +26,8 @@ export class MatmulBackward extends AutogradNode {
     const aRank = a.ndim;
     const bRank = b.ndim;
 
-    if (aRank === 2 && bRank === 2) {
-      return [ops.matmul(g, transpose(b, 0, 1)), ops.matmul(transpose(a, 0, 1), g)];
+    if (aRank === 1 && bRank === 1) {
+      return [ops.mul(g, b), ops.mul(g, a)];
     }
 
     if (aRank === 2 && bRank === 1) {
@@ -23,18 +36,13 @@ export class MatmulBackward extends AutogradNode {
       return [ops.matmul(gUnsq, bUnsq), squeeze(ops.matmul(transpose(a, 0, 1), gUnsq), 1)];
     }
 
-    if (aRank === 1 && bRank === 1) {
-      return [ops.mul(g, b), ops.mul(g, a)];
-    }
+    let gradA = ops.matmul(g, transpose(b, bRank - 2, bRank - 1));
+    let gradB = ops.matmul(transpose(a, aRank - 2, aRank - 1), g);
 
-    if (aRank >= 3 && bRank >= 3) {
-      return [
-        ops.matmul(g, transpose(b, bRank - 2, bRank - 1)),
-        ops.matmul(transpose(a, aRank - 2, aRank - 1), g),
-      ];
-    }
+    gradA = _sumToShape(gradA, a.shape);
+    gradB = _sumToShape(gradB, b.shape);
 
-    throw new Error(`MatmulBackward: unsupported ranks ${aRank}, ${bRank}`);
+    return [gradA, gradB];
   }
 }
 

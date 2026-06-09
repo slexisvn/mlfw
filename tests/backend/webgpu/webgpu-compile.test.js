@@ -273,9 +273,6 @@ describe('WebGPU compilation — balanced braces', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// boolean ops — WGSL bool type handling
-// ────────────────────────────────────────────────────────────────────
 
 describe('WebGPU compilation — boolean ops WGSL validity', () => {
   const F32 = ScalarType.F32;

@@ -6,7 +6,10 @@ describe('Tensor Lang completion', () => {
   it('completes builtins and preserves the expression prefix', () => {
     const runtime = new TensorLangRuntime({ output: () => {} });
     expect(completeInput('rel', runtime)).toBe('relu');
-    expect(completeInput('x = rand', runtime)).toBe('x = randn');
+    const randResult = completeInput('x = rand', runtime);
+    expect(Array.isArray(randResult)).toBe(true);
+    expect(randResult).toContain('randn');
+    expect(randResult).toContain('randperm');
     expect(completeInput('mod', runtime)).toBe('model');
     expect(completeInput('ret', runtime)).toBe('return');
   });
@@ -57,16 +60,13 @@ describe('Tensor Lang completion', () => {
   fc2 = Linear(h, 1)
   forward x:
 `;
-    // fc1, fc2 not yet executed, but extractable from buffer
     const result = completeInput('fc', runtime, buffer);
     expect(Array.isArray(result)).toBe(true);
     expect(result).toContain('fc1');
     expect(result).toContain('fc2');
 
-    // model name from buffer
     expect(completeInput('ML', runtime, buffer)).toBe('MLP');
 
-    // forward param from buffer
     expect(completeInput('x = f', runtime, buffer)).toContain('fc1');
   });
 

@@ -732,9 +732,6 @@ describe('WebGPUCodegen.generate — full kernel', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// _isBoolExpr — detection of boolean-producing expressions
-// ────────────────────────────────────────────────────────────────────
 
 describe('WebGPUCodegen._isBoolExpr', () => {
   function isBoolExpr(node) {
@@ -778,9 +775,6 @@ describe('WebGPUCodegen._isBoolExpr', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// _boolExpr / _numericExpr — bool↔numeric boundary conversion
-// ────────────────────────────────────────────────────────────────────
 
 describe('WebGPUCodegen._boolExpr and _numericExpr', () => {
   function boolExpr(node) {
@@ -841,9 +835,6 @@ describe('WebGPUCodegen._boolExpr and _numericExpr', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// _analyzeSharing — shared memory budget enforcement
-// ────────────────────────────────────────────────────────────────────
 
 describe('WebGPUCodegen._analyzeSharing — shared memory budget', () => {
   it('does not promote buffers exceeding sharedMemoryBytes limit', () => {

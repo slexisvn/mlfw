@@ -149,6 +149,52 @@ describe('Tensor Lang', () => {
     expect(conv.bias).toBeNull();
   });
 
+  it('accesses model properties via dot notation in tensor lang', async () => {
+    const runtime = new TensorLangRuntime({ output: () => {} });
+
+    await runtime.execute('layer = Linear(4, 2)');
+    const weight = await runtime.execute('layer.weight');
+    expect(weight.shape).toEqual([2, 4]);
+    expect(weight.isParameter).toBe(true);
+
+    const bias = await runtime.execute('layer.bias');
+    expect(bias.shape).toEqual([2]);
+    expect(bias.isParameter).toBe(true);
+
+    await runtime.execute('layer2 = Linear(4, 2, bias=false)');
+    const noBias = await runtime.execute('layer2.bias');
+    expect(noBias).toBeNull();
+
+    const layer = await runtime.execute('layer');
+    const params = [...layer.parameters()];
+    expect(params).toHaveLength(2);
+  });
+
+  it('accesses custom model sub-module properties', async () => {
+    const runtime = new TensorLangRuntime({ output: () => {} });
+    await runtime.execute(`model MLP(h):
+  fc1 = Linear(2, h)
+  fc2 = Linear(h, 1)
+  forward x:
+    return fc2(relu(fc1(x)))`);
+    await runtime.execute('net = MLP(4)');
+
+    const fc1 = await runtime.execute('net.fc1');
+    expect(fc1).toBeDefined();
+    expect(fc1.weight.shape).toEqual([4, 2]);
+
+    const fc1Weight = await runtime.execute('net.fc1.weight');
+    expect(fc1Weight.shape).toEqual([4, 2]);
+    expect(fc1Weight.isParameter).toBe(true);
+
+    const fc1Bias = await runtime.execute('net.fc1.bias');
+    expect(fc1Bias.shape).toEqual([4]);
+
+    const net = await runtime.execute('net');
+    const allParams = [...net.parameters()];
+    expect(allParams).toHaveLength(4); // fc1.weight, fc1.bias, fc2.weight, fc2.bias
+  });
+
   it('reports runtime errors at the source expression', async () => {
     const runtime = new TensorLangRuntime({ output: () => {} });
     await expect(runtime.execute('x = tensor([1])\nmissing(x)'))

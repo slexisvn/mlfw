@@ -6,7 +6,7 @@ import { CompiledProgramView, formatTrace, formatValue } from './format.js';
 import { printModule } from '../compiler/ir/graph/printer.js';
 
 const FACTORIES = [
-  'tensor', 'zeros', 'ones', 'empty', 'full', 'randn', 'arange', 'eye', 'linspace',
+  'tensor', 'zeros', 'ones', 'empty', 'full', 'randn', 'arange', 'eye', 'linspace', 'randperm',
   'zerosLike', 'onesLike', 'emptyLike', 'fullLike', 'randnLike',
 ];
 

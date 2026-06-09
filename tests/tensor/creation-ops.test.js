@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  zeros, ones, full, randn, arange, eye, linspace,
+  zeros, ones, full, randn, arange, eye, linspace, randperm,
 } from '../../src/tensor/factory/creation_ops.js';
 
 describe('zeros', () => {
@@ -113,5 +113,38 @@ describe('randn', () => {
     let sum = 0;
     for (let i = 0; i < t.data.length; i++) sum += t.data[i];
     expect(Math.abs(sum / t.data.length)).toBeLessThan(0.2);
+  });
+});
+
+describe('randperm', () => {
+  it('returns tensor of shape [n] with dtype I32', () => {
+    const t = randperm(10);
+    expect(t.shape).toEqual([10]);
+    expect(t.dtype).toBe('i32');
+  });
+
+  it('contains all indices 0..n-1 exactly once', () => {
+    const t = randperm(100);
+    const sorted = [...t.data].sort((a, b) => a - b);
+    const expected = Array.from({ length: 100 }, (_, i) => i);
+    expect(sorted).toEqual(expected);
+  });
+
+  it('produces different permutations on separate calls', () => {
+    const a = [...randperm(50).data];
+    const b = [...randperm(50).data];
+    const same = a.every((v, i) => v === b[i]);
+    expect(same).toBe(false);
+  });
+
+  it('handles n=0', () => {
+    const t = randperm(0);
+    expect(t.shape).toEqual([0]);
+    expect(t.numel).toBe(0);
+  });
+
+  it('handles n=1', () => {
+    const t = randperm(1);
+    expect([...t.data]).toEqual([0]);
   });
 });

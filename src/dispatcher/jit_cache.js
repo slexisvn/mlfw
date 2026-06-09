@@ -61,9 +61,11 @@ const _BUILDER_ALIASES = {
   embedding: (b, args) => b.embedding(args[0], args[1]),
 };
 
+let _nextFuncId = 0;
+
 function _buildGraphFunc(opName, tensorArgs, scalarArgs) {
   const inputTypes = tensorArgs.map(t => new TensorType(t.shape, t.dtype));
-  const funcName = opName + '_jit';
+  const funcName = opName + '_jit_' + (_nextFuncId++);
 
   const func = buildFunction(funcName, inputTypes, [], (builder, irArgs) => {
     let result;

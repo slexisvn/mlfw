@@ -51,9 +51,6 @@ function extractUsedVars(s) {
   return declared;
 }
 
-// ────────────────────────────────────────────────────────────────────
-// JS syntax: no CUDA artifacts
-// ────────────────────────────────────────────────────────────────────
 
 describe('CPU kernel quality — JS syntax, no CUDA artifacts', () => {
   it('elementwise add: uses function, not __global__', () => {
@@ -94,9 +91,6 @@ describe('CPU kernel quality — JS syntax, no CUDA artifacts', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Math function mapping
-// ────────────────────────────────────────────────────────────────────
 
 describe('CPU kernel quality — Math.* function mapping', () => {
   const mathOps = [
@@ -124,9 +118,6 @@ describe('CPU kernel quality — Math.* function mapping', () => {
   }
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Elementwise fusion: single store for chains
-// ────────────────────────────────────────────────────────────────────
 
 describe('CPU kernel quality — elementwise fusion', () => {
   it('add+mul fuses into single inline expression per element', () => {
@@ -171,9 +162,6 @@ describe('CPU kernel quality — elementwise fusion', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Scheduling: vectorization / unrolling
-// ────────────────────────────────────────────────────────────────────
 
 describe('CPU kernel quality — scheduling and vectorization', () => {
   it('scheduled 1024 add: outer for loop with unrolled inner', () => {
@@ -207,9 +195,6 @@ describe('CPU kernel quality — scheduling and vectorization', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Reduction structure
-// ────────────────────────────────────────────────────────────────────
 
 describe('CPU kernel quality — reduction structure', () => {
   it('sum reduction: initializes to 0', () => {
@@ -268,9 +253,6 @@ describe('CPU kernel quality — reduction structure', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Matmul structure
-// ────────────────────────────────────────────────────────────────────
 
 describe('CPU kernel quality — matmul structure', () => {
   it('matmul: 3 nested for loops (M, N, K)', () => {
@@ -324,9 +306,6 @@ describe('CPU kernel quality — matmul structure', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Epilogue fusion quality
-// ────────────────────────────────────────────────────────────────────
 
 describe('CPU kernel quality — epilogue fusion', () => {
   it('matmul + neg: produces negation, not identity', () => {
@@ -385,9 +364,6 @@ describe('CPU kernel quality — epilogue fusion', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// 2D/3D stride correctness
-// ────────────────────────────────────────────────────────────────────
 
 describe('CPU kernel quality — multi-dim stride correctness', () => {
   it('2D [32,64]: stride = * 64', () => {
@@ -410,9 +386,6 @@ describe('CPU kernel quality — multi-dim stride correctness', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Balanced syntax
-// ────────────────────────────────────────────────────────────────────
 
 describe('CPU kernel quality — balanced syntax', () => {
   function checkBalanced(s) {
@@ -462,9 +435,6 @@ describe('CPU kernel quality — balanced syntax', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Numerical correctness: actually run the compiled kernels
-// ────────────────────────────────────────────────────────────────────
 
 describe('CPU kernel quality — numerical correctness (run)', () => {
   it('add: [1,2,3] + [4,5,6] = [5,7,9]', () => {
@@ -561,9 +531,6 @@ describe('CPU kernel quality — numerical correctness (run)', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Numerical correctness: reduction
-// ────────────────────────────────────────────────────────────────────
 
 describe('CPU kernel quality — reduction numerical correctness', () => {
   it('sum reduce [2,3]: row sums', () => {
@@ -612,9 +579,6 @@ describe('CPU kernel quality — reduction numerical correctness', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Numerical correctness: matmul
-// ────────────────────────────────────────────────────────────────────
 
 describe('CPU kernel quality — matmul numerical correctness', () => {
   it('identity matmul: I @ v = v', () => {
@@ -693,9 +657,6 @@ describe('CPU kernel quality — matmul numerical correctness', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Numerical correctness: 2D elementwise
-// ────────────────────────────────────────────────────────────────────
 
 describe('CPU kernel quality — 2D elementwise numerical correctness', () => {
   it('[2,3] add: element-wise correct', () => {
@@ -724,9 +685,6 @@ describe('CPU kernel quality — 2D elementwise numerical correctness', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Edge cases
-// ────────────────────────────────────────────────────────────────────
 
 describe('CPU kernel quality — edge cases', () => {
   it('1-element tensor compiles and runs', () => {
@@ -773,9 +731,6 @@ describe('CPU kernel quality — edge cases', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Single kernel per function
-// ────────────────────────────────────────────────────────────────────
 
 describe('CPU kernel quality — single kernel output', () => {
   it('elementwise add: 1 kernel', () => {
@@ -808,9 +763,6 @@ describe('CPU kernel quality — single kernel output', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Matmul size variants: structure + correctness
-// ────────────────────────────────────────────────────────────────────
 
 describe('CPU kernel quality — matmul size variants', () => {
   const configs = [
@@ -839,9 +791,6 @@ describe('CPU kernel quality — matmul size variants', () => {
   }
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Reduce + elementwise chain
-// ────────────────────────────────────────────────────────────────────
 
 describe('CPU kernel quality — reduce + elementwise chain', () => {
   it('sum + neg: correct negated sum', () => {
@@ -861,9 +810,6 @@ describe('CPU kernel quality — reduce + elementwise chain', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// No CUDA function names in CPU code
-// ────────────────────────────────────────────────────────────────────
 
 describe('CPU kernel quality — no CUDA function names', () => {
   const cudaFuncs = /\b(expf|logf|sqrtf|tanhf|fabsf|sinf|cosf|floorf|ceilf|fmaxf|fminf|powf|rsqrtf)\b/;
@@ -898,9 +844,6 @@ describe('CPU kernel quality — no CUDA function names', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Dtype handling
-// ────────────────────────────────────────────────────────────────────
 
 describe('CPU kernel quality — dtype handling', () => {
   it('f64 add: uses Float64Array temp, correct values', () => {
@@ -934,9 +877,6 @@ describe('CPU kernel quality — dtype handling', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// No redundant stores (noop stores)
-// ────────────────────────────────────────────────────────────────────
 
 describe('CPU kernel quality — no redundant stores', () => {
   it('neg: no noop store (buf[i] = buf[i])', () => {
@@ -965,9 +905,6 @@ describe('CPU kernel quality — no redundant stores', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Long fusion chains
-// ────────────────────────────────────────────────────────────────────
 
 describe('CPU kernel quality — long fusion chains', () => {
   it('5-op chain (add+mul+neg+exp+sqrt): single kernel, single store per element', () => {
@@ -1019,9 +956,6 @@ describe('CPU kernel quality — long fusion chains', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Full reduction (no spatial dims)
-// ────────────────────────────────────────────────────────────────────
 
 describe('CPU kernel quality — full reduction (scalar output)', () => {
   it('sum all [16]: produces single scalar', () => {
@@ -1053,9 +987,6 @@ describe('CPU kernel quality — full reduction (scalar output)', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// ReLU standalone
-// ────────────────────────────────────────────────────────────────────
 
 describe('CPU kernel quality — relu', () => {
   it('relu: uses Math.max(0, x) pattern', () => {
@@ -1096,9 +1027,6 @@ describe('CPU kernel quality — relu', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Numerical: tanh, abs, log
-// ────────────────────────────────────────────────────────────────────
 
 describe('CPU kernel quality — more math numerical correctness', () => {
   it('tanh: tanh([0, 1, -1]) correct', () => {
@@ -1142,9 +1070,6 @@ describe('CPU kernel quality — more math numerical correctness', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// 3D numerical correctness
-// ────────────────────────────────────────────────────────────────────
 
 describe('CPU kernel quality — 3D numerical correctness', () => {
   it('[2,2,3] add: correct element-wise', () => {
@@ -1174,9 +1099,6 @@ describe('CPU kernel quality — 3D numerical correctness', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Reduction: prod
-// ────────────────────────────────────────────────────────────────────
 
 describe('CPU kernel quality — prod reduction', () => {
   it('prod reduce [2,3]: row products', () => {
@@ -1195,9 +1117,6 @@ describe('CPU kernel quality — prod reduction', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Non-divisible scheduling guards
-// ────────────────────────────────────────────────────────────────────
 
 describe('CPU kernel quality — non-divisible scheduling', () => {
   it('size 13 (not divisible by 8): still produces correct results', () => {
@@ -1240,9 +1159,6 @@ describe('CPU kernel quality — non-divisible scheduling', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Matmul with epilogue chains: numerical
-// ────────────────────────────────────────────────────────────────────
 
 describe('CPU kernel quality — matmul epilogue numerical', () => {
   it('matmul + exp: correct exp(A@B)', () => {
@@ -1304,9 +1220,6 @@ describe('CPU kernel quality — matmul epilogue numerical', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Reduction: 3D reduce axis
-// ────────────────────────────────────────────────────────────────────
 
 describe('CPU kernel quality — 3D reduction', () => {
   it('[2,3,4] sum axis 2: correct', () => {
@@ -1340,9 +1253,6 @@ describe('CPU kernel quality — 3D reduction', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// CPU vs GPU: same function, different targets
-// ────────────────────────────────────────────────────────────────────
 
 describe('CPU kernel quality — CPU vs GPU target difference', () => {
   it('same graph, CPU uses function not __global__', () => {
@@ -1358,9 +1268,6 @@ describe('CPU kernel quality — CPU vs GPU target difference', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Accumulator patterns
-// ────────────────────────────────────────────────────────────────────
 
 describe('CPU kernel quality — accumulator patterns', () => {
   it('sum reduction: declares accumulator with let, not const', () => {
@@ -1397,9 +1304,6 @@ describe('CPU kernel quality — accumulator patterns', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Large matmul: tiling structure
-// ────────────────────────────────────────────────────────────────────
 
 describe('CPU kernel quality — large matmul tiling', () => {
   it('32x64 @ 64x32: more loops than small matmul (tiling)', () => {
@@ -1429,9 +1333,6 @@ describe('CPU kernel quality — large matmul tiling', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Mixed operations: end-to-end compound graphs
-// ────────────────────────────────────────────────────────────────────
 
 describe('CPU kernel quality — compound graph numerical', () => {
   it('matmul + bias + exp: correct exp(A@B + bias)', () => {

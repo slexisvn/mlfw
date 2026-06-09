@@ -101,6 +101,21 @@ export function eye(n, m, opts) {
   return t;
 }
 
+export function randperm(n, opts) {
+  const dtype = opts?.dtype ?? ScalarType.I32;
+  const device = opts?.device ?? CPU_DEVICE;
+  const t = _makeTensor([n], dtype, device, opts?.requiresGrad ?? false);
+  const data = t.data;
+  for (let i = 0; i < n; i++) data[i] = i;
+  for (let i = n - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = data[i];
+    data[i] = data[j];
+    data[j] = tmp;
+  }
+  return t;
+}
+
 export function linspace(start, end, steps, opts) {
   const { dtype, device, requiresGrad } = _defaultOpts(opts);
   const t = _makeTensor([steps], dtype, device, requiresGrad);

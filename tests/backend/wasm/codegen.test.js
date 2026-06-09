@@ -27,9 +27,6 @@ function makePrimFunc(name, params, body, bufferMap, shapeParams = []) {
   return new PrimFunc(name, params, body, bufferMap, shapeParams);
 }
 
-// ────────────────────────────────────────────────────────────────────
-// _emitExpr — expression emission
-// ────────────────────────────────────────────────────────────────────
 
 describe('WasmCodegen._emitExpr', () => {
   function emitExpr(node) {
@@ -68,9 +65,6 @@ describe('WasmCodegen._emitExpr', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// _emitExpr — MathOpNode
-// ────────────────────────────────────────────────────────────────────
 
 describe('WasmCodegen._emitExpr — MathOpNode', () => {
   function emitExpr(node) {
@@ -151,9 +145,6 @@ describe('WasmCodegen._emitExpr — MathOpNode', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// _emitExpr — CompareNode
-// ────────────────────────────────────────────────────────────────────
 
 describe('WasmCodegen._emitExpr — CompareNode', () => {
   function emitExpr(node) {
@@ -193,9 +184,6 @@ describe('WasmCodegen._emitExpr — CompareNode', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// _emitExpr — CastNode
-// ────────────────────────────────────────────────────────────────────
 
 describe('WasmCodegen._emitExpr — CastNode', () => {
   function emitExpr(node) {
@@ -220,9 +208,6 @@ describe('WasmCodegen._emitExpr — CastNode', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// _emitExpr — CallExternNode
-// ────────────────────────────────────────────────────────────────────
 
 describe('WasmCodegen._emitExpr — CallExternNode', () => {
   function emitExpr(node) {
@@ -299,9 +284,6 @@ describe('WasmCodegen._emitExpr — CallExternNode', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// _emitExpr — BufferLoadNode
-// ────────────────────────────────────────────────────────────────────
 
 describe('WasmCodegen._emitExpr — BufferLoadNode', () => {
   function emitExpr(node, offsets) {
@@ -344,9 +326,6 @@ describe('WasmCodegen._emitExpr — BufferLoadNode', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// _emitAddr — address computation
-// ────────────────────────────────────────────────────────────────────
 
 describe('WasmCodegen._emitAddr', () => {
   function emitAddr(buffer, indices, offsets) {
@@ -387,9 +366,6 @@ describe('WasmCodegen._emitAddr', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// _layoutBuffers — buffer memory layout
-// ────────────────────────────────────────────────────────────────────
 
 describe('WasmCodegen._layoutBuffers', () => {
   it('assigns sequential offsets to buffers', () => {
@@ -428,9 +404,6 @@ describe('WasmCodegen._layoutBuffers', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// _scanMathImports — import detection
-// ────────────────────────────────────────────────────────────────────
 
 describe('WasmCodegen._scanMathImports', () => {
   it('detects exp as import', () => {
@@ -498,9 +471,6 @@ describe('WasmCodegen._scanMathImports', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// _inferDtype — type inference
-// ────────────────────────────────────────────────────────────────────
 
 describe('WasmCodegen._inferDtype', () => {
   function inferDtype(node) {
@@ -550,9 +520,6 @@ describe('WasmCodegen._inferDtype', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// _constExtent
-// ────────────────────────────────────────────────────────────────────
 
 describe('WasmCodegen._constExtent', () => {
   it('returns value for IntImmNode', () => {
@@ -566,9 +533,6 @@ describe('WasmCodegen._constExtent', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// _visitFor — unrolling
-// ────────────────────────────────────────────────────────────────────
 
 describe('WasmCodegen._visitFor — unrolling', () => {
   it('unrolls UNROLLED loops with small extent', () => {
@@ -688,9 +652,6 @@ describe('WasmCodegen._isZeroFillBody', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// _emitForLoop — loop structure
-// ────────────────────────────────────────────────────────────────────
 
 describe('WasmCodegen._emitForLoop', () => {
   it('generates block+loop+br_if+br structure', () => {
@@ -713,9 +674,6 @@ describe('WasmCodegen._emitForLoop', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// _detectWasmAcc — accumulator pattern detection
-// ────────────────────────────────────────────────────────────────────
 
 describe('WasmCodegen._detectWasmAcc', () => {
   function detectAcc(forNode) {
@@ -770,9 +728,6 @@ describe('WasmCodegen._detectWasmAcc', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// generate — full WAT output
-// ────────────────────────────────────────────────────────────────────
 
 describe('WasmCodegen.generate — full function', () => {
   it('generates valid WAT module with exports', () => {
@@ -856,9 +811,6 @@ describe('WasmCodegen.generate — full function', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// generate — IfThenElseNode
-// ────────────────────────────────────────────────────────────────────
 
 describe('WasmCodegen.generate — IfThenElseNode', () => {
   it('generates wasm if/then/else for conditional store', () => {
@@ -881,9 +833,6 @@ describe('WasmCodegen.generate — IfThenElseNode', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// generate — LetStmtNode
-// ────────────────────────────────────────────────────────────────────
 
 describe('WasmCodegen.generate — LetStmtNode', () => {
   it('generates local.set for let binding', () => {
@@ -905,9 +854,6 @@ describe('WasmCodegen.generate — LetStmtNode', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// generate — AllocateNode
-// ────────────────────────────────────────────────────────────────────
 
 describe('WasmCodegen.generate — AllocateNode', () => {
   it('allocates temp buffer in memory layout', () => {
@@ -936,9 +882,6 @@ describe('WasmCodegen.generate — AllocateNode', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// generate — SeqNode
-// ────────────────────────────────────────────────────────────────────
 
 describe('WasmCodegen.generate — SeqNode', () => {
   it('emits both children of SeqNode', () => {
@@ -958,9 +901,6 @@ describe('WasmCodegen.generate — SeqNode', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// generate — result metadata
-// ────────────────────────────────────────────────────────────────────
 
 describe('WasmCodegen.generate — result metadata', () => {
   it('returns correct name', () => {
@@ -1032,9 +972,6 @@ describe('WasmCodegen.generate — result metadata', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// generate — balanced parens in output
-// ────────────────────────────────────────────────────────────────────
 
 describe('WasmCodegen.generate — balanced WAT', () => {
   function checkBalanced(wat) {
@@ -1087,9 +1024,6 @@ describe('WasmCodegen.generate — balanced WAT', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// _emitFlatIndex — multi-dim index flattening
-// ────────────────────────────────────────────────────────────────────
 
 describe('WasmCodegen._emitFlatIndex', () => {
   function emitFlatIndex(buffer, indices) {
@@ -1122,9 +1056,6 @@ describe('WasmCodegen._emitFlatIndex', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// _prescanLocals — local variable declaration
-// ────────────────────────────────────────────────────────────────────
 
 describe('WasmCodegen._prescanLocals', () => {
   it('registers loop variables as i32 locals', () => {
@@ -1150,9 +1081,6 @@ describe('WasmCodegen._prescanLocals', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// _emitMathOp — comparison operators
-// ────────────────────────────────────────────────────────────────────
 
 describe('WasmCodegen._emitExpr — comparison in MathOpNode', () => {
   function emitExpr(node) {
@@ -1187,9 +1115,6 @@ describe('WasmCodegen._emitExpr — comparison in MathOpNode', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// boolean type handling — LetStmtNode local type + IfThenElseNode condition
-// ────────────────────────────────────────────────────────────────────
 
 describe('WasmCodegen — boolean type system', () => {
   it('_fixLetStmtLocals declares i32 for CompareNode value', () => {

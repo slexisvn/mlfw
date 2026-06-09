@@ -10,7 +10,7 @@ installOps(Tensor);
 export { Tensor } from './tensor/core/tensor.js';
 
 export {
-  zeros, ones, empty, full, randn, arange, eye, linspace,
+  zeros, ones, empty, full, randn, arange, eye, linspace, randperm,
 } from './tensor/factory/creation_ops.js';
 
 export {
@@ -44,10 +44,29 @@ export {
   Embedding,
   Sequential, ModuleList, ModuleDict,
   Flatten,
+  MultiheadAttention,
+  TransformerEncoderLayer, TransformerDecoderLayer,
+  TransformerEncoder, TransformerDecoder,
+  Transformer,
+  PositionalEncoding,
 } from './nn/index.js';
 
 export * as nn from './nn/index.js';
 export * as init from './nn/init.js';
+
+export {
+  Dataset, TensorDataset, MapDataset,
+  Sampler, SequentialSampler, RandomSampler, BatchSampler,
+  DataLoader, defaultCollate,
+} from './data/index.js';
+export * as data from './data/index.js';
+
+export {
+  Optimizer, SGD, Adam, AdamW,
+  LRScheduler, StepLR, CosineAnnealingLR, ReduceLROnPlateau,
+  clipGradNorm_, clipGradValue_,
+} from './optim/index.js';
+export * as optim from './optim/index.js';
 
 export { trace, compile } from './tracing/compile.js';
 export { compileWithBackward } from './tracing/compile_backward.js';

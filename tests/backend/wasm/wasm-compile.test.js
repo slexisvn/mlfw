@@ -24,9 +24,6 @@ function countBlocks(s) {
   return (s.match(/\(block\s/g) || []).length;
 }
 
-// ────────────────────────────────────────────────────────────────────
-// WAT module structure
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — WAT module structure', () => {
   it('elementwise add: produces valid (module) with (func)', () => {
@@ -65,9 +62,6 @@ describe('WASM kernel quality — WAT module structure', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// No JS or CUDA artifacts
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — no JS/CUDA artifacts', () => {
   it('add: no JS function/Math/let/const', () => {
@@ -108,9 +102,6 @@ describe('WASM kernel quality — no JS/CUDA artifacts', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Native WASM ops: f32.sqrt, f32.abs, f32.floor, f32.ceil, f32.neg, f32.min, f32.max
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — native WASM instructions', () => {
   const nativeOps = [
@@ -134,9 +125,6 @@ describe('WASM kernel quality — native WASM instructions', () => {
   }
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Imported math functions: exp, log, tanh, sin, cos
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — imported math functions', () => {
   const importedOps = [
@@ -160,9 +148,6 @@ describe('WASM kernel quality — imported math functions', () => {
   }
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Arithmetic ops: f32.add, f32.sub, f32.mul, f32.div
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — arithmetic instructions', () => {
   it('add: uses f32.add', () => {
@@ -190,9 +175,6 @@ describe('WASM kernel quality — arithmetic instructions', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Elementwise fusion: chained ops produce single kernel
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — elementwise fusion', () => {
   it('add+mul: single kernel', () => {
@@ -226,9 +208,6 @@ describe('WASM kernel quality — elementwise fusion', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Scheduling: vectorization (unrolling with vectorWidth=4)
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — scheduling and vectorization', () => {
   it('scheduled 16-element add: has block/loop structure', () => {
@@ -260,9 +239,6 @@ describe('WASM kernel quality — scheduling and vectorization', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Reduction structure
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — reduction structure', () => {
   it('sum reduction: has f32.add for accumulation', () => {
@@ -299,9 +275,6 @@ describe('WASM kernel quality — reduction structure', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Matmul structure
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — matmul structure', () => {
   it('matmul: has 3+ nested loops', () => {
@@ -340,9 +313,6 @@ describe('WASM kernel quality — matmul structure', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Memory layout
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — memory layout', () => {
   it('allocates memory pages', () => {
@@ -373,9 +343,6 @@ describe('WASM kernel quality — memory layout', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Balanced parens
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — balanced parentheses', () => {
   function checkBalanced(s) {
@@ -420,9 +387,6 @@ describe('WASM kernel quality — balanced parentheses', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Single kernel per function
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — single kernel output', () => {
   it('elementwise add: 1 kernel', () => {
@@ -454,9 +418,6 @@ describe('WASM kernel quality — single kernel output', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Numerical correctness: elementwise
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — elementwise numerical correctness', () => {
   it('add: [1,2,3,4] + [10,20,30,40] = [11,22,33,44]', () => {
@@ -577,9 +538,6 @@ describe('WASM kernel quality — elementwise numerical correctness', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Numerical correctness: fused chains
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — fused chain numerical correctness', () => {
   it('add+mul: (a+b)*c correct', () => {
@@ -625,9 +583,6 @@ describe('WASM kernel quality — fused chain numerical correctness', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Numerical correctness: reduction
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — reduction numerical correctness', () => {
   it('sum reduce [2,3]: row sums', () => {
@@ -690,9 +645,6 @@ describe('WASM kernel quality — reduction numerical correctness', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Numerical correctness: matmul
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — matmul numerical correctness', () => {
   it('identity matmul: I @ v = v', () => {
@@ -771,9 +723,6 @@ describe('WASM kernel quality — matmul numerical correctness', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Numerical correctness: 2D/3D elementwise
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — multi-dim numerical correctness', () => {
   it('[2,3] add: correct', () => {
@@ -803,9 +752,6 @@ describe('WASM kernel quality — multi-dim numerical correctness', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Edge cases
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — edge cases', () => {
   it('1-element tensor: compiles and runs', () => {
@@ -851,9 +797,6 @@ describe('WASM kernel quality — edge cases', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Multi-dim stride correctness
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — stride correctness', () => {
   it('2D [4,8] add: uses i32.const 8 for stride', () => {
@@ -876,9 +819,6 @@ describe('WASM kernel quality — stride correctness', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Reduce + elementwise chain
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — reduce + elementwise chain', () => {
   it('sum + neg: correct negated sum', () => {
@@ -898,9 +838,6 @@ describe('WASM kernel quality — reduce + elementwise chain', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// 3D reduction
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — 3D reduction', () => {
   it('[2,3,4] sum axis 2: correct', () => {
@@ -918,9 +855,6 @@ describe('WASM kernel quality — 3D reduction', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Matmul + chained ops: numerical
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — matmul + ops numerical', () => {
   it('matmul + exp: correct exp(A@B)', () => {
@@ -965,9 +899,6 @@ describe('WASM kernel quality — matmul + ops numerical', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// ReLU
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — relu', () => {
   it('relu: uses f32.max (native)', () => {
@@ -992,9 +923,6 @@ describe('WASM kernel quality — relu', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Long chain
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — long fusion chain', () => {
   it('5-op chain (add+mul+neg+exp+sqrt): single kernel, numerically correct', () => {
@@ -1018,9 +946,6 @@ describe('WASM kernel quality — long fusion chain', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Prod reduction
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — prod reduction', () => {
   it('prod reduce [2,3]: row products', () => {
@@ -1050,9 +975,6 @@ describe('WASM kernel quality — prod reduction', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// WAT control flow: block/loop/br_if patterns
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — control flow patterns', () => {
   it('for loop: has matching block+loop with br_if and br', () => {
@@ -1089,9 +1011,6 @@ describe('WASM kernel quality — control flow patterns', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Accumulator optimization (_wacc pattern)
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — accumulator optimization', () => {
   it('sum reduction: uses _wacc local for accumulation', () => {
@@ -1119,9 +1038,6 @@ describe('WASM kernel quality — accumulator optimization', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Non-divisible vectorization correctness
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — non-divisible vectorization', () => {
   it('size 5 (not divisible by 4): correct results', () => {
@@ -1164,9 +1080,6 @@ describe('WASM kernel quality — non-divisible vectorization', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Floor/ceil numerical
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — floor/ceil numerical', () => {
   it('floor: floor([1.7, -0.3, 2.0]) = [1, -1, 2]', () => {
@@ -1198,9 +1111,6 @@ describe('WASM kernel quality — floor/ceil numerical', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Matmul + tanh / sqrt(abs) numerical
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — matmul + unary chain numerical', () => {
   it('matmul + tanh: correct tanh(A@B)', () => {
@@ -1243,9 +1153,6 @@ describe('WASM kernel quality — matmul + unary chain numerical', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Load/store patterns
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — load/store patterns', () => {
   it('add: has load and store', () => {
@@ -1278,9 +1185,6 @@ describe('WASM kernel quality — load/store patterns', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// ReLU + add fusion
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — relu + add fusion', () => {
   it('relu(add(a,b)): single kernel, numerically correct', () => {
@@ -1310,9 +1214,6 @@ describe('WASM kernel quality — relu + add fusion', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Large matmul
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — large matmul', () => {
   it('16x32 @ 32x16: numerically correct (all-ones = K)', () => {
@@ -1342,9 +1243,6 @@ describe('WASM kernel quality — large matmul', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// 3D reduction axis 1
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — 3D reduction axis 1', () => {
   it('[2,3,4] sum axis 1: correct', () => {
@@ -1362,9 +1260,6 @@ describe('WASM kernel quality — 3D reduction axis 1', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Full max reduction (scalar output)
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — full max reduction', () => {
   it('max all [8]: produces single max', () => {
@@ -1382,9 +1277,6 @@ describe('WASM kernel quality — full max reduction', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// sin / cos numerical
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — sin/cos numerical', () => {
   it('sin: sin([0, π/2]) ≈ [0, 1]', () => {
@@ -1414,9 +1306,6 @@ describe('WASM kernel quality — sin/cos numerical', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// WASM vs CPU: same graph, different codegen
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — WASM vs CPU target difference', () => {
   it('same graph: WASM uses (module), CPU uses function', () => {
@@ -1432,9 +1321,6 @@ describe('WASM kernel quality — WASM vs CPU target difference', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Compound graph: end-to-end
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — compound graph end-to-end', () => {
   it('matmul + bias + exp: correct exp(A@B + bias)', () => {
@@ -1476,9 +1362,6 @@ describe('WASM kernel quality — compound graph end-to-end', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// boolean ops — compare→logicalAnd→logicalOr→select pipeline
-// ────────────────────────────────────────────────────────────────────
 
 describe('WASM boolean ops — compile and run', () => {
   const F32 = ScalarType.F32;

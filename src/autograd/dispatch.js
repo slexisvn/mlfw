@@ -5,10 +5,29 @@ import { GradMode } from './grad_mode.js';
 import { getGradFn, hasGradFn } from './registry.js';
 import { GradAccumulator } from './accumulator.js';
 import { AutogradMeta } from '../tensor/core/autograd_meta.js';
+import { TensorImpl } from '../tensor/core/tensor_impl.js';
+import { Tensor } from '../tensor/core/tensor.js';
 import { setAutogradEngine } from '../tensor/core/tensor.js';
 import { backward } from './engine.js';
+import { _initViewAutograd } from '../tensor/view/view_ops.js';
+import { ReshapeBackward, TransposeBackward, PermuteBackward } from './function/view.js';
 
 setAutogradEngine({ backward });
+_initViewAutograd(GradMode, ReshapeBackward, TransposeBackward, PermuteBackward, GradAccumulator);
+
+function _snapshotTensor(t) {
+  const impl = t._impl;
+  const clonedStorage = impl.storage.clone();
+  const newImpl = new TensorImpl(
+    clonedStorage,
+    impl.storageOffset,
+    impl.sizes(),
+    impl.strides(),
+    impl.dtype,
+    impl.device
+  );
+  return new Tensor(newImpl);
+}
 
 function _anyRequiresGrad(args) {
   for (let i = 0; i < args.length; i++) {
@@ -53,7 +72,7 @@ function autogradFallback(keySet, stack) {
 
   const tensorArgs = _extractTensors(args);
   for (let i = 0; i < tensorArgs.length; i++) {
-    gradFn.saveTensor(tensorArgs[i]);
+    gradFn.saveTensor(_snapshotTensor(tensorArgs[i]));
     gradFn.saveInputMetadata(i, [...tensorArgs[i].shape], tensorArgs[i].dtype);
   }
 
@@ -118,7 +137,7 @@ export function wrapWithAutograd(opName, handle) {
 
     const tensorArgs = _extractTensors(args);
     for (let i = 0; i < tensorArgs.length; i++) {
-      gradFn.saveTensor(tensorArgs[i]);
+      gradFn.saveTensor(_snapshotTensor(tensorArgs[i]));
       gradFn.saveInputMetadata(i, [...tensorArgs[i].shape], tensorArgs[i].dtype);
     }
 

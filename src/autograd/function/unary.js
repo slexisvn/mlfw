@@ -55,8 +55,13 @@ export class ReluBackward extends AutogradNode {
   constructor() { super(1); }
   apply(gradOutputs) {
     const [input] = this.savedTensors();
-    const zero = zeros(input.shape, { dtype: input.dtype, device: input.device });
-    const mask = ops.gt(input.detach(), zero);
+    const x = input.detach();
+    const mask = zeros(x.shape, { dtype: x.dtype, device: x.device });
+    const maskData = mask._impl.storage.data;
+    const xData = x._impl.storage.data;
+    for (let i = 0; i < maskData.length; i++) {
+      maskData[i] = xData[i] > 0 ? 1 : 0;
+    }
     return [ops.mul(gradOutputs[0], mask)];
   }
 }

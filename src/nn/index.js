@@ -13,6 +13,7 @@ import * as _pooling from './functional/pooling.js';
 import * as _dropout from './functional/dropout.js';
 import * as _loss from './functional/loss.js';
 import * as _embedding from './functional/embedding.js';
+import * as _attention from './functional/attention.js';
 
 export const F = {
   ..._activation,
@@ -23,6 +24,7 @@ export const F = {
   ..._dropout,
   ..._loss,
   ..._embedding,
+  ..._attention,
 };
 
 export { Linear } from './modules/linear.js';
@@ -35,3 +37,10 @@ export { CrossEntropyLoss, MSELoss, NLLLoss, BCELoss } from './modules/loss.js';
 export { Embedding } from './modules/embedding.js';
 export { Sequential, ModuleList, ModuleDict } from './modules/container.js';
 export { Flatten } from './modules/flatten.js';
+export {
+  MultiheadAttention,
+  TransformerEncoderLayer, TransformerDecoderLayer,
+  TransformerEncoder, TransformerDecoder,
+  Transformer,
+} from './modules/transformer.js';
+export { PositionalEncoding } from './modules/positional.js';

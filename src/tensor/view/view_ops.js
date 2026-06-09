@@ -11,6 +11,48 @@ import {
   computeNarrow,
   computeSelect,
 } from './view_utils.js';
+import { AutogradMeta } from '../core/autograd_meta.js';
+
+let _GradMode = null;
+let _ReshapeBackward = null;
+let _TransposeBackward = null;
+let _PermuteBackward = null;
+let _GradAccumulator = null;
+
+export function _initViewAutograd(GradMode, ReshapeBackward, TransposeBackward, PermuteBackward, GradAccumulator) {
+  _GradMode = GradMode;
+  _ReshapeBackward = ReshapeBackward;
+  _TransposeBackward = TransposeBackward;
+  _PermuteBackward = PermuteBackward;
+  _GradAccumulator = GradAccumulator;
+}
+
+function _wrapWithAutograd(srcTensor, resultTensor, BackwardClass, ...ctorArgs) {
+  if (!_GradMode || !_GradMode.isEnabled()) return;
+  const srcMeta = srcTensor._impl.autogradMeta;
+  if (!srcMeta || !srcMeta.requiresGrad) return;
+
+  const node = new BackwardClass(...ctorArgs);
+  node.saveInputMetadata(0, [...srcTensor.shape], srcTensor.dtype);
+
+  const srcFn = srcMeta.gradFn;
+  if (srcFn) {
+    node.setNextEdge(0, srcFn, srcMeta.outputNr || 0);
+  } else {
+    let acc = srcMeta.getGradAccumulator();
+    if (!acc && _GradAccumulator) {
+      acc = new _GradAccumulator(srcTensor);
+      srcMeta.setGradAccumulator(acc);
+    }
+    if (acc) node.setNextEdge(0, acc, 0);
+  }
+
+  const meta = new AutogradMeta();
+  meta.setGradFn(node, 0);
+  meta.requiresGrad = true;
+  resultTensor._impl.setAutogradMeta(meta);
+  resultTensor._impl._updateKeySet();
+}
 
 function _makeView(src, newSizes, newStrides, offsetDelta) {
   const impl = new TensorImpl(
@@ -21,6 +63,10 @@ function _makeView(src, newSizes, newStrides, offsetDelta) {
     src._impl.dtype,
     src._impl.device
   );
+  const srcMeta = src._impl.autogradMeta;
+  if (srcMeta) {
+    impl.setAutogradMeta(srcMeta);
+  }
   return new Tensor(impl);
 }
 
@@ -28,22 +74,29 @@ export function reshape(tensor, newShape) {
   const result = inferReshape(tensor.shape, tensor.strides, newShape);
   if (!result) throw new Error(`Cannot reshape tensor of shape [${tensor.shape}] to [${newShape}]`);
 
+  let out;
   if (!result.needsCopy) {
-    return _makeView(tensor, result.sizes, result.strides, 0);
+    out = _makeView(tensor, result.sizes, result.strides, 0);
+  } else {
+    const contiguous = tensor.isContiguous ? tensor : _copyContiguous(tensor);
+    out = _makeView(contiguous, result.sizes, result.strides, 0);
   }
-
-  const contiguous = tensor.isContiguous ? tensor : _copyContiguous(tensor);
-  return _makeView(contiguous, result.sizes, result.strides, 0);
+  if (_ReshapeBackward) _wrapWithAutograd(tensor, out, _ReshapeBackward);
+  return out;
 }
 
 export function transpose(tensor, dim0, dim1) {
   const { sizes, strides } = computeTranspose(tensor.shape, tensor.strides, dim0, dim1);
-  return _makeView(tensor, sizes, strides, 0);
+  const out = _makeView(tensor, sizes, strides, 0);
+  if (_TransposeBackward) _wrapWithAutograd(tensor, out, _TransposeBackward, dim0, dim1);
+  return out;
 }
 
 export function permute(tensor, dims) {
   const { sizes, strides } = computePermute(tensor.shape, tensor.strides, dims);
-  return _makeView(tensor, sizes, strides, 0);
+  const out = _makeView(tensor, sizes, strides, 0);
+  if (_PermuteBackward) _wrapWithAutograd(tensor, out, _PermuteBackward, dims);
+  return out;
 }
 
 export function expand(tensor, targetShape) {
@@ -123,6 +176,10 @@ function _copyContiguous(tensor) {
     tensor._impl.dtype,
     tensor._impl.device
   );
+  const srcMeta = tensor._impl.autogradMeta;
+  if (srcMeta) {
+    impl.setAutogradMeta(srcMeta);
+  }
   return new Tensor(impl);
 }
 

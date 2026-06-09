@@ -99,9 +99,6 @@ function hasNoopStore(src) {
   return false;
 }
 
-// ────────────────────────────────────────────────────────────────────
-// Elementwise: fusion quality
-// ────────────────────────────────────────────────────────────────────
 
 describe('GPU kernel quality — elementwise fusion', () => {
   it('add+mul fuses into single inline expression, no temp buffer', () => {
@@ -178,9 +175,6 @@ describe('GPU kernel quality — elementwise fusion', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Elementwise: no temp buffers, no redundant stores
-// ────────────────────────────────────────────────────────────────────
 
 describe('GPU kernel quality — no waste in elementwise', () => {
   it('single unary op has exactly 1 store, 0 local arrays', () => {
@@ -232,9 +226,6 @@ describe('GPU kernel quality — no waste in elementwise', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Thread binding: scheduling effectiveness
-// ────────────────────────────────────────────────────────────────────
 
 describe('GPU kernel quality — thread parallelism', () => {
   it('1024 elements: blockIdx.x + threadIdx.x, block size 256', () => {
@@ -306,9 +297,6 @@ describe('GPU kernel quality — thread parallelism', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Variable declaration: no undeclared vars in elementwise
-// ────────────────────────────────────────────────────────────────────
 
 describe('GPU kernel quality — all variables declared (elementwise)', () => {
   it('add 1D: no undeclared vars', () => {
@@ -358,9 +346,6 @@ describe('GPU kernel quality — all variables declared (elementwise)', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Variable declaration: reduction kernels
-// ────────────────────────────────────────────────────────────────────
 
 describe('GPU kernel quality — all variables declared (reduction)', () => {
   it('sum reduce axis 1: no undeclared vars', () => {
@@ -397,9 +382,6 @@ describe('GPU kernel quality — all variables declared (reduction)', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Variable declaration: matmul kernels
-// ────────────────────────────────────────────────────────────────────
 
 describe('GPU kernel quality — all variables declared (matmul)', () => {
   it('matmul 16x32 @ 32x16: no undeclared vars', () => {
@@ -423,9 +405,6 @@ describe('GPU kernel quality — all variables declared (matmul)', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Variable declaration: epilogue-fused kernels
-// ────────────────────────────────────────────────────────────────────
 
 describe('GPU kernel quality — all variables declared (epilogue)', () => {
   it('matmul + bias add: no undeclared vars', () => {
@@ -466,9 +445,6 @@ describe('GPU kernel quality — all variables declared (epilogue)', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// No-op stores: matmul+neg should negate, not copy
-// ────────────────────────────────────────────────────────────────────
 
 describe('GPU kernel quality — no redundant stores', () => {
   it('matmul + neg epilogue must negate, not produce x=x', () => {
@@ -506,9 +482,6 @@ describe('GPU kernel quality — no redundant stores', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Source sanity: no JS artifacts, balanced braces
-// ────────────────────────────────────────────────────────────────────
 
 describe('GPU kernel quality — source sanity', () => {
   it('no JavaScript in CUDA source', () => {
@@ -547,9 +520,6 @@ describe('GPU kernel quality — source sanity', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Dtype correctness in generated code
-// ────────────────────────────────────────────────────────────────────
 
 describe('GPU kernel quality — dtype correctness', () => {
   it('f32: float* params, expf suffix', () => {
@@ -584,9 +554,6 @@ describe('GPU kernel quality — dtype correctness', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Matmul kernel structure
-// ────────────────────────────────────────────────────────────────────
 
 describe('GPU kernel quality — matmul structure', () => {
   it('matmul initializes output to 0 before accumulation', () => {
@@ -629,9 +596,6 @@ describe('GPU kernel quality — matmul structure', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Reduction kernel structure
-// ────────────────────────────────────────────────────────────────────
 
 describe('GPU kernel quality — reduction structure', () => {
   it('sum reduction initializes to 0', () => {
@@ -681,9 +645,6 @@ describe('GPU kernel quality — reduction structure', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// GPU vs CPU codegen comparison
-// ────────────────────────────────────────────────────────────────────
 
 describe('GPU kernel quality — GPU vs CPU codegen differences', () => {
   it('GPU: __global__, float*; CPU: function, no __global__', () => {
@@ -717,9 +678,6 @@ describe('GPU kernel quality — GPU vs CPU codegen differences', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Edge cases
-// ────────────────────────────────────────────────────────────────────
 
 describe('GPU kernel quality — edge cases', () => {
   it('1-element tensor: compiles without div-by-zero', () => {
@@ -748,9 +706,6 @@ describe('GPU kernel quality — edge cases', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Epilogue fusion quality: matmul + unary ops
-// ────────────────────────────────────────────────────────────────────
 
 describe('GPU kernel quality — epilogue fusion unary ops', () => {
   it('matmul + exp: epilogue contains expf, not identity', () => {
@@ -824,9 +779,6 @@ describe('GPU kernel quality — epilogue fusion unary ops', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Epilogue fusion quality: matmul + binary ops + activation
-// ────────────────────────────────────────────────────────────────────
 
 describe('GPU kernel quality — epilogue multi-op chains', () => {
   it('matmul + bias + relu: epilogue has fmaxf and add', () => {
@@ -879,9 +831,6 @@ describe('GPU kernel quality — epilogue multi-op chains', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Epilogue: single kernel for matmul+epilogue
-// ────────────────────────────────────────────────────────────────────
 
 describe('GPU kernel quality — epilogue produces single kernel', () => {
   it('matmul + neg compiles to 1 kernel', () => {
@@ -909,9 +858,6 @@ describe('GPU kernel quality — epilogue produces single kernel', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Large reduction: blockIdx split
-// ────────────────────────────────────────────────────────────────────
 
 describe('GPU kernel quality — large reduction (blockIdx split)', () => {
   it('spatial > 256: uses blockIdx.x + threadIdx.x', () => {
@@ -953,9 +899,6 @@ describe('GPU kernel quality — large reduction (blockIdx split)', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// 3D tensor: correct stride computation
-// ────────────────────────────────────────────────────────────────────
 
 describe('GPU kernel quality — 3D tensor stride correctness', () => {
   it('3D add: row-major strides in buffer access', () => {
@@ -992,9 +935,6 @@ describe('GPU kernel quality — 3D tensor stride correctness', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Matmul structure: contraction loop
-// ────────────────────────────────────────────────────────────────────
 
 describe('GPU kernel quality — matmul contraction loop', () => {
   it('contraction dim becomes serial for loop', () => {
@@ -1021,9 +961,6 @@ describe('GPU kernel quality — matmul contraction loop', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Large matmul: blockIdx splitting
-// ────────────────────────────────────────────────────────────────────
 
 describe('GPU kernel quality — large matmul tiling', () => {
   it('128x128 matmul: uses blockIdx for tiling', () => {
@@ -1056,9 +993,6 @@ describe('GPU kernel quality — large matmul tiling', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Reduce + elementwise chain
-// ────────────────────────────────────────────────────────────────────
 
 describe('GPU kernel quality — reduce + elementwise chain', () => {
   it('sum + neg: negation applied to reduced result', () => {
@@ -1089,9 +1023,6 @@ describe('GPU kernel quality — reduce + elementwise chain', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Balanced braces/parens across all kernel types
-// ────────────────────────────────────────────────────────────────────
 
 describe('GPU kernel quality — balanced syntax across kernel types', () => {
   function checkBalanced(src) {
@@ -1139,9 +1070,6 @@ describe('GPU kernel quality — balanced syntax across kernel types', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// No JS artifacts across all kernel types
-// ────────────────────────────────────────────────────────────────────
 
 describe('GPU kernel quality — no JS artifacts across kernel types', () => {
   function checkNoJS(src) {
@@ -1194,9 +1122,6 @@ describe('GPU kernel quality — no JS artifacts across kernel types', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Kernel metadata correctness
-// ────────────────────────────────────────────────────────────────────
 
 describe('GPU kernel quality — kernel metadata', () => {
   it('1024-element add: gridDim*blockDim >= 1024', () => {
@@ -1241,9 +1166,6 @@ describe('GPU kernel quality — kernel metadata', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Elementwise long chains
-// ────────────────────────────────────────────────────────────────────
 
 describe('GPU kernel quality — long elementwise chains', () => {
   it('add+sub+mul+neg: 4 ops fused into 1 store', () => {
@@ -1283,9 +1205,6 @@ describe('GPU kernel quality — long elementwise chains', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Reduction: different combine ops
-// ────────────────────────────────────────────────────────────────────
 
 describe('GPU kernel quality — reduction combine ops', () => {
   it('max reduction: no undeclared vars, uses fmaxf', () => {
@@ -1315,9 +1234,6 @@ describe('GPU kernel quality — reduction combine ops', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Multiple math ops: correct CUDA function names
-// ────────────────────────────────────────────────────────────────────
 
 describe('GPU kernel quality — math function mapping', () => {
   const ops = [
@@ -1340,9 +1256,6 @@ describe('GPU kernel quality — math function mapping', () => {
   }
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Non-divisible split: guard conditions
-// ────────────────────────────────────────────────────────────────────
 
 describe('GPU kernel quality — non-divisible split guards', () => {
   it('300 elements (not divisible by 256): has bounds guard or valid code', () => {
@@ -1369,9 +1282,6 @@ describe('GPU kernel quality — non-divisible split guards', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// 2D elementwise: correct index decomposition
-// ────────────────────────────────────────────────────────────────────
 
 describe('GPU kernel quality — 2D index decomposition', () => {
   it('32x64 add: decomposes fused index with / and %', () => {
@@ -1398,9 +1308,6 @@ describe('GPU kernel quality — 2D index decomposition', () => {
   });
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Matmul sizes: various configurations
-// ────────────────────────────────────────────────────────────────────
 
 describe('GPU kernel quality — matmul size variants', () => {
   const configs = [
@@ -1426,9 +1333,6 @@ describe('GPU kernel quality — matmul size variants', () => {
   }
 });
 
-// ────────────────────────────────────────────────────────────────────
-// Scheduled kernel: __shared__ promotion + __syncthreads (TVM/XLA fix)
-// ────────────────────────────────────────────────────────────────────
 
 function compileGPU(model, inputs, opts) {
   return modelCompile(model, inputs, { target: GPUTarget(), ...opts });
