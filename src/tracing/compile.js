@@ -18,14 +18,34 @@ function _ensureTracing() {
   }
 }
 
+function _normalizeDynamicShapes(dynamicShapes, exampleInputs) {
+  if (!dynamicShapes) return new Array(exampleInputs.length).fill(null);
+
+  const result = new Array(exampleInputs.length);
+  for (let i = 0; i < exampleInputs.length; i++) {
+    const spec = dynamicShapes[i];
+    if (spec === true) {
+      const all = new Set();
+      for (let d = 0; d < exampleInputs[i].shape.length; d++) all.add(d);
+      result[i] = all;
+    } else if (spec instanceof Set) {
+      result[i] = spec;
+    } else {
+      result[i] = null;
+    }
+  }
+  return result;
+}
+
 export function _traceCore(fn, exampleInputs, opts) {
   _ensureTracing();
 
   const name = opts?.name || fn.name || 'traced';
   const tracer = new Tracer(name);
+  const dynamicShapes = _normalizeDynamicShapes(opts?.dynamicShapes, exampleInputs);
 
-  for (const input of exampleInputs) {
-    tracer.createInput(input.shape, input.dtype);
+  for (let i = 0; i < exampleInputs.length; i++) {
+    tracer.createInput(exampleInputs[i].shape, exampleInputs[i].dtype, dynamicShapes[i]);
   }
 
   const numUserInputs = exampleInputs.length;
@@ -47,6 +67,8 @@ export function _traceCore(fn, exampleInputs, opts) {
       capturedParams: [...tracer.capturedParams],
       numUserInputs,
       outputTypes: func.outputTypes,
+      shapeEnv: tracer.shapeEnv,
+      outputSymShapes: tracer.outputSymShapes,
     };
   }
 
@@ -54,7 +76,6 @@ export function _traceCore(fn, exampleInputs, opts) {
   const TRACING_KEYS = DispatchKeySet.fromKey(DispatchKey.TRACING);
   const result = withIncludedKeys(TRACING_KEYS, () => fn(...symbolicInputs));
 
-  // Support async forward functions (e.g. Tensor Lang custom models)
   if (result && typeof result.then === 'function') {
     return result.then(
       resolved => _finalize(resolved),
@@ -78,7 +99,7 @@ export function trace(fn, exampleInputs, opts) {
   return result.graph;
 }
 
-function _prepareExecution(compiled, inputs) {
+function _prepareExecution(compiled, inputs, shapeEnv) {
   const kernels = compiled.result.listKernels();
   if (kernels.length === 0) throw new Error('No kernels compiled');
   const funcName = kernels[0];
@@ -97,10 +118,14 @@ function _prepareExecution(compiled, inputs) {
   }
 
   const outputTypes = compiled.outputTypes;
+  const outputSymShapes = compiled.outputSymShapes;
   const outputArrays = new Array(outputTypes.length);
   const outputShapes = new Array(outputTypes.length);
+
   for (let i = 0; i < outputTypes.length; i++) {
-    const shape = outputTypes[i].shape;
+    const shape = outputSymShapes && shapeEnv
+      ? shapeEnv.resolveSymbolicShape(outputSymShapes[i])
+      : outputTypes[i].shape;
     const dtype = outputTypes[i].dtype;
     const numel = computeNumel(shape);
     const Ctor = typedArrayCtor(dtype);
@@ -128,8 +153,9 @@ function _wrapOutputs(device, outputTypes, outputArrays, outputShapes) {
   return results;
 }
 
-export function executeCompiled(compiled, inputs) {
-  const { funcName, device, outputTypes, outputArrays, outputShapes, allArgs } = _prepareExecution(compiled, inputs);
+export function executeCompiled(compiled, inputs, shapeEnv) {
+  const { funcName, device, outputTypes, outputArrays, outputShapes, allArgs } =
+    _prepareExecution(compiled, inputs, shapeEnv);
 
   if (compiled.result.isAsync(funcName)) {
     return compiled.result.runAsync(funcName, ...allArgs)
@@ -147,18 +173,9 @@ export function compile(model, exampleInputs, opts) {
 
   const target = opts?.target ?? CPUTarget();
   const compilerOpts = { target, verify: false, ...opts };
+  const dynamicShapes = opts?.dynamic_shapes || null;
 
-  let _compiled = null;
-  let _shapeKey = null;
-
-  function _getShapeKey(inputs) {
-    let key = '';
-    for (let i = 0; i < inputs.length; i++) {
-      const inp = inputs[i];
-      key += inp.shape.join(',') + ':' + inp.dtype + '|';
-    }
-    return key;
-  }
+  const _cacheEntries = [];
 
   function _finalize(traced) {
     const result = new Compiler(compilerOpts).compile(traced.graph);
@@ -168,6 +185,8 @@ export function compile(model, exampleInputs, opts) {
       capturedParams: traced.capturedParams,
       numUserInputs: traced.numUserInputs,
       outputTypes: traced.outputTypes,
+      shapeEnv: traced.shapeEnv,
+      outputSymShapes: traced.outputSymShapes,
     };
   }
 
@@ -175,7 +194,7 @@ export function compile(model, exampleInputs, opts) {
     const traced = _traceCore(
       (...args) => model.forward(...args),
       inputs,
-      { name: model.constructor.name || 'compiled' }
+      { name: model.constructor.name || 'compiled', dynamicShapes }
     );
     if (traced && typeof traced.then === 'function') {
       return traced.then(_finalize);
@@ -183,27 +202,41 @@ export function compile(model, exampleInputs, opts) {
     return _finalize(traced);
   }
 
+  function _findCachedEntry(inputs) {
+    for (let i = 0; i < _cacheEntries.length; i++) {
+      const entry = _cacheEntries[i];
+      entry.shapeEnv.bindInputShapes(inputs);
+      const { passed } = entry.shapeEnv.evaluateGuards();
+      if (passed) return entry;
+    }
+    return null;
+  }
+
   function compiledForward(...inputs) {
-    const key = _getShapeKey(inputs);
-    if (!_compiled || _shapeKey !== key) {
+    let entry = _findCachedEntry(inputs);
+    if (!entry) {
       const result = _compile(inputs);
       if (result && typeof result.then === 'function') {
-        return result.then(c => { _compiled = c; _shapeKey = key; return executeCompiled(_compiled, inputs); });
+        return result.then(c => {
+          _cacheEntries.push(c);
+          c.shapeEnv.bindInputShapes(inputs);
+          return executeCompiled(c, inputs, c.shapeEnv);
+        });
       }
-      _compiled = result;
-      _shapeKey = key;
+      entry = result;
+      _cacheEntries.push(entry);
+      entry.shapeEnv.bindInputShapes(inputs);
     }
-    return executeCompiled(_compiled, inputs);
+    return executeCompiled(entry, inputs, entry.shapeEnv);
   }
 
   let _ready = null;
   if (exampleInputs) {
     const result = _compile(exampleInputs);
     if (result && typeof result.then === 'function') {
-      _ready = result.then(c => { _compiled = c; _shapeKey = _getShapeKey(exampleInputs); });
+      _ready = result.then(c => { _cacheEntries.push(c); });
     } else {
-      _compiled = result;
-      _shapeKey = _getShapeKey(exampleInputs);
+      _cacheEntries.push(result);
     }
   }
 
@@ -214,28 +247,30 @@ export function compile(model, exampleInputs, opts) {
     return trace(
       (...a) => model.forward(...a),
       args,
-      { name: model.constructor.name || 'compiled' }
+      { name: model.constructor.name || 'compiled', dynamicShapes }
     );
   };
 
   compiledForward.source = () => {
-    if (!_compiled) return null;
-    const kernels = _compiled.result.listKernels();
-    return kernels.length > 0 ? _compiled.result.getSource(kernels[0]) : null;
+    if (_cacheEntries.length === 0) return null;
+    const compiled = _cacheEntries[0];
+    const kernels = compiled.result.listKernels();
+    return kernels.length > 0 ? compiled.result.getSource(kernels[0]) : null;
   };
 
   compiledForward.kernels = () => {
-    if (!_compiled) return [];
-    return _compiled.result.listKernels();
+    if (_cacheEntries.length === 0) return [];
+    return _cacheEntries[0].result.listKernels();
   };
 
   compiledForward.snippet = () => {
-    if (!_compiled) return null;
-    const kernels = _compiled.result.listKernels();
-    return kernels.length > 0 ? _compiled.result.getSnippet(kernels[0]) : null;
+    if (_cacheEntries.length === 0) return null;
+    const compiled = _cacheEntries[0];
+    const kernels = compiled.result.listKernels();
+    return kernels.length > 0 ? compiled.result.getSnippet(kernels[0]) : null;
   };
 
-  compiledForward.result = () => _compiled ? _compiled.result : null;
+  compiledForward.result = () => _cacheEntries.length > 0 ? _cacheEntries[0].result : null;
   compiledForward._ready = _ready;
 
   return compiledForward;

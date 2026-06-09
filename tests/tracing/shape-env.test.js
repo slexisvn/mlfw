@@ -2,90 +2,118 @@ import { describe, it, expect } from 'vitest';
 import { ShapeEnv } from '../../src/tracing/shape_env.js';
 import { DYNAMIC } from '../../src/compiler/ir/graph/types.js';
 
-describe('ShapeEnv.createSymbolicSize', () => {
-  it('concrete positive hint returns the hint unchanged', () => {
+describe('ShapeEnv.allocate', () => {
+  it('returns incrementing symbol names', () => {
     const env = new ShapeEnv();
-    expect(env.createSymbolicSize(42)).toBe(42);
-    expect(env.createSymbolicSize(0)).toBe(0);
+    expect(env.allocate(0, 0, 4)).toBe('s0');
+    expect(env.allocate(0, 1, 8)).toBe('s1');
+    expect(env.allocate(1, 0, 16)).toBe('s2');
   });
 
-  it('undefined hint returns DYNAMIC', () => {
+  it('stores source mapping in symbols', () => {
     const env = new ShapeEnv();
-    expect(env.createSymbolicSize(undefined)).toBe(DYNAMIC);
-  });
-
-  it('null hint returns DYNAMIC', () => {
-    const env = new ShapeEnv();
-    expect(env.createSymbolicSize(null)).toBe(DYNAMIC);
-  });
-
-  it('negative hint returns DYNAMIC', () => {
-    const env = new ShapeEnv();
-    expect(env.createSymbolicSize(-1)).toBe(DYNAMIC);
-    expect(env.createSymbolicSize(-999)).toBe(DYNAMIC);
-  });
-
-  it('multiple DYNAMIC calls increment symbol ids', () => {
-    const env = new ShapeEnv();
-    env.createSymbolicSize(undefined);
-    env.createSymbolicSize(null);
-    env.createSymbolicSize(-1);
-    expect(env.symbols.size).toBe(3);
-    expect(env.symbols.has('s0')).toBe(true);
-    expect(env.symbols.has('s1')).toBe(true);
-    expect(env.symbols.has('s2')).toBe(true);
+    env.allocate(2, 3, 64);
+    const info = env.symbols.get('s0');
+    expect(info).toEqual({ hint: 64, inputIdx: 2, dimIdx: 3 });
   });
 });
 
-describe('ShapeEnv.bindConcrete + resolveShape', () => {
-  it('resolves bound symbols to concrete values', () => {
+describe('ShapeEnv.produceShapeSpec', () => {
+  it('marks dynamic dims with DYNAMIC in irShape and symbol in symShape', () => {
     const env = new ShapeEnv();
-    env.createSymbolicSize(undefined);
-    env.bindConcrete('s0', 16);
-    expect(env.resolveShape(['s0', 32])).toEqual([16, 32]);
+    const { irShape, symShape } = env.produceShapeSpec(0, [4, 8, 16], new Set([0, 2]));
+    expect(irShape).toEqual([DYNAMIC, 8, DYNAMIC]);
+    expect(symShape[0]).toBe('s0');
+    expect(symShape[1]).toBe(8);
+    expect(symShape[2]).toBe('s2');
   });
 
-  it('unbound symbols stay as DYNAMIC', () => {
+  it('all static dims produce concrete values and equality guards', () => {
     const env = new ShapeEnv();
-    env.createSymbolicSize(undefined);
-    expect(env.resolveShape(['s0'])).toEqual([DYNAMIC]);
-  });
-
-  it('concrete dims pass through unchanged', () => {
-    const env = new ShapeEnv();
-    expect(env.resolveShape([1, 3, 224, 224])).toEqual([1, 3, 224, 224]);
-  });
-
-  it('rebinding a symbol overwrites the previous value', () => {
-    const env = new ShapeEnv();
-    env.createSymbolicSize(undefined);
-    env.bindConcrete('s0', 8);
-    env.bindConcrete('s0', 64);
-    expect(env.resolveShape(['s0'])).toEqual([64]);
+    const { irShape, symShape } = env.produceShapeSpec(0, [3, 5], null);
+    expect(irShape).toEqual([3, 5]);
+    expect(symShape).toEqual([3, 5]);
+    expect(env.guards.length).toBe(2);
+    expect(env.guards[0]).toEqual({ lhs: 's0', op: 'eq', rhs: 3 });
+    expect(env.guards[1]).toEqual({ lhs: 's1', op: 'eq', rhs: 5 });
   });
 });
 
-describe('ShapeEnv guards accumulation', () => {
-  it('guardEquals pushes eq constraint', () => {
+describe('ShapeEnv.guardRelation', () => {
+  it('accumulates guards in order', () => {
     const env = new ShapeEnv();
-    env.guardEquals('s0', 32);
-    expect(env.guards).toEqual([{ type: 'eq', sym: 's0', value: 32 }]);
-  });
-
-  it('guardGreater pushes gt constraint', () => {
-    const env = new ShapeEnv();
-    env.guardGreater('s0', 0);
-    expect(env.guards).toEqual([{ type: 'gt', sym: 's0', value: 0 }]);
-  });
-
-  it('mixed guards accumulate in order', () => {
-    const env = new ShapeEnv();
-    env.guardEquals('s0', 16);
-    env.guardGreater('s1', 0);
-    env.guard({ type: 'custom', sym: 's2', value: 'even' });
+    env.guardRelation('s0', 'gt', 0);
+    env.guardRelation('s1', 'eq', 32);
+    env.guardRelation('s0', 'le', 1024);
     expect(env.guards.length).toBe(3);
-    expect(env.guards[0].type).toBe('eq');
-    expect(env.guards[1].type).toBe('gt');
-    expect(env.guards[2].type).toBe('custom');
+    expect(env.guards[0]).toEqual({ lhs: 's0', op: 'gt', rhs: 0 });
+    expect(env.guards[1]).toEqual({ lhs: 's1', op: 'eq', rhs: 32 });
+    expect(env.guards[2]).toEqual({ lhs: 's0', op: 'le', rhs: 1024 });
+  });
+});
+
+describe('ShapeEnv.guardDivisible', () => {
+  it('stores divisibility guard', () => {
+    const env = new ShapeEnv();
+    env.guardDivisible('s0', 4);
+    expect(env.guards[0]).toEqual({ type: 'divisible', sym: 's0', divisor: 4 });
+  });
+});
+
+describe('ShapeEnv.bindInputShapes + evaluateGuards', () => {
+  it('passes when concrete shapes satisfy all guards', () => {
+    const env = new ShapeEnv();
+    env.produceShapeSpec(0, [1, 8], new Set([0]));
+    env.guardRelation('s0', 'gt', 0);
+
+    env.bindInputShapes([{ shape: [4, 8] }]);
+    const { passed } = env.evaluateGuards();
+    expect(passed).toBe(true);
+  });
+
+  it('fails when static dim changes', () => {
+    const env = new ShapeEnv();
+    env.produceShapeSpec(0, [1, 8], null);
+
+    env.bindInputShapes([{ shape: [1, 16] }]);
+    const { passed, failedGuard } = env.evaluateGuards();
+    expect(passed).toBe(false);
+    expect(failedGuard.op).toBe('eq');
+  });
+
+  it('fails when guard is violated', () => {
+    const env = new ShapeEnv();
+    env.produceShapeSpec(0, [4, 8], new Set([0]));
+    env.guardRelation('s0', 'gt', 0);
+
+    env.bindInputShapes([{ shape: [0, 8] }]);
+    const { passed } = env.evaluateGuards();
+    expect(passed).toBe(false);
+  });
+
+  it('evaluates divisibility guards', () => {
+    const env = new ShapeEnv();
+    env.produceShapeSpec(0, [16], new Set([0]));
+    env.guardDivisible('s0', 4);
+
+    env.bindInputShapes([{ shape: [12] }]);
+    expect(env.evaluateGuards().passed).toBe(true);
+
+    env.bindInputShapes([{ shape: [13] }]);
+    expect(env.evaluateGuards().passed).toBe(false);
+  });
+});
+
+describe('ShapeEnv.resolveSymbolicShape', () => {
+  it('resolves symbol names to bound values', () => {
+    const env = new ShapeEnv();
+    env.produceShapeSpec(0, [4, 8], new Set([0]));
+    env.bindInputShapes([{ shape: [16, 8] }]);
+    expect(env.resolveSymbolicShape(['s0', 8])).toEqual([16, 8]);
+  });
+
+  it('passes through concrete values unchanged', () => {
+    const env = new ShapeEnv();
+    expect(env.resolveSymbolicShape([3, 5, 7])).toEqual([3, 5, 7]);
   });
 });

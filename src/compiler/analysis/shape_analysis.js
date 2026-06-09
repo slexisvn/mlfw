@@ -17,22 +17,33 @@ export class ShapeAnalysis {
   static get depKey() { return 'shape'; }
   static get dependencies() { return []; }
 
-  static compute(func) {
+  static compute(func, shapeEnv) {
     const shapes = new Map();
     let nextDynId = 0;
 
-    const resolveShape = (shape) => {
+    const symNameMap = new Map();
+    if (shapeEnv && shapeEnv.symbols.size > 0) {
+      for (const [symName, info] of shapeEnv.symbols) {
+        const key = `${info.inputIdx}:${info.dimIdx}`;
+        symNameMap.set(key, symName);
+      }
+    }
+
+    const resolveShape = (shape, argIdx) => {
       if (!shape) return null;
-      return shape.map(d => {
-        if (d === DYNAMIC) {
-          return SymInt.var(`d${nextDynId++}`);
+      return shape.map((d, dimIdx) => {
+        if (d !== DYNAMIC) return d;
+        if (argIdx !== undefined) {
+          const mapped = symNameMap.get(`${argIdx}:${dimIdx}`);
+          if (mapped) return SymInt.var(mapped);
         }
-        return d;
+        return SymInt.var(`d${nextDynId++}`);
       });
     };
 
-    for (const arg of func.args) {
-      shapes.set(arg, resolveShape(arg.type.shape));
+    const args = func.args;
+    for (let i = 0; i < args.length; i++) {
+      shapes.set(args[i], resolveShape(args[i].type.shape, i));
     }
 
     for (const op of func.ops()) {

@@ -389,6 +389,13 @@ export class ElementwiseWasmRule extends ScheduleRule {
       const outerExtent = loops[0].extent;
       const outerSize = outerExtent && outerExtent.type === 'IntImmNode' ? outerExtent.value : 0;
       if (outerSize >= numCores * 4) {
+        if (loops.length === 1 && target.supportsSimd && target.supportsSimd()
+            && outerSize >= vectorWidth * 2 && outerSize % vectorWidth === 0) {
+          const [outer, inner] = schedule.split(loops[0], vectorWidth);
+          schedule.parallelize(outer);
+          schedule.vectorize(inner);
+          return;
+        }
         schedule.parallelize(loops[0]);
         if (loops.length > 1) {
           const innermost = loops[loops.length - 1];
@@ -428,7 +435,9 @@ export class ReductionWasmRule extends ScheduleRule {
 
   matches(primFunc, blockName, target) {
     if (target.kind !== TargetKind.WASM) return false;
-    if (target.numCores <= 1) return false;
+    const hasParallel = target.numCores > 1;
+    const hasSimd = target.supportsSimd && target.supportsSimd();
+    if (!hasParallel && !hasSimd) return false;
     const info = classifyBlock(primFunc, blockName);
     if (!info) return false;
     return info.hasReduction && info.loopCount >= 2;
@@ -438,11 +447,14 @@ export class ReductionWasmRule extends ScheduleRule {
     const loops = schedule.getLoops(blockName);
     if (loops.length < 2) return;
 
+    const info = classifyBlock(schedule.func, blockName);
     const spatialLoops = [];
+    const reductionLoops = [];
     for (const loop of loops) {
-      const info = classifyBlock(schedule.func, blockName);
       if (!info || !isReductionLoop(loop, info)) {
         spatialLoops.push(loop);
+      } else {
+        reductionLoops.push(loop);
       }
     }
 
@@ -451,6 +463,14 @@ export class ReductionWasmRule extends ScheduleRule {
       const outerSize = outerExtent && outerExtent.type === 'IntImmNode' ? outerExtent.value : 0;
       if (outerSize >= (target.numCores || 1) * 4) {
         schedule.parallelize(spatialLoops[0]);
+      }
+    }
+
+    if (target.supportsSimd && target.supportsSimd() && reductionLoops.length > 0) {
+      const redLoop = reductionLoops[reductionLoops.length - 1];
+      const redExtent = redLoop.extent && redLoop.extent.type === 'IntImmNode' ? redLoop.extent.value : 0;
+      if (redExtent >= target.vectorWidth * 2) {
+        schedule.vectorize(redLoop);
       }
     }
   }

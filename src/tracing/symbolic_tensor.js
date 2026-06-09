@@ -8,13 +8,14 @@ import { computeStrides } from '../tensor/utils/shape_utils.js';
 const TRACING_KEY = DispatchKeySet.fromKey(DispatchKey.TRACING);
 
 export class SymbolicTensor extends Tensor {
-  constructor(irValue, shape, dtype, tracer) {
+  constructor(irValue, shape, dtype, tracer, symbolicShape) {
     const strides = computeStrides(shape);
     const storage = Storage.allocate(0, dtype, META_DEVICE);
     const impl = new TensorImpl(storage, 0, shape, strides, dtype, META_DEVICE);
     super(impl);
     this._irValue = irValue;
     this._tracer = tracer;
+    this._symbolicShape = symbolicShape;
   }
 
   get irValue() {
@@ -23,6 +24,10 @@ export class SymbolicTensor extends Tensor {
 
   get tracer() {
     return this._tracer;
+  }
+
+  get symbolicShape() {
+    return this._symbolicShape;
   }
 
   get dispatchKeySet() {

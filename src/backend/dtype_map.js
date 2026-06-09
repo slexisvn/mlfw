@@ -26,10 +26,42 @@ const WASM_TYPE_TABLE = {
 
 const DEFAULT_WASM_ENTRY = WASM_TYPE_TABLE['f32'];
 
+const WASM_SIMD_TABLE = {
+  'f32': {
+    laneType: 'f32x4', lanes: 4, laneBytes: 4,
+    vecLoad: 'v128.load', vecStore: 'v128.store',
+    splat: 'f32x4.splat', extractLane: 'f32x4.extract_lane', replaceLane: 'f32x4.replace_lane',
+    add: 'f32x4.add', sub: 'f32x4.sub', mul: 'f32x4.mul', div: 'f32x4.div',
+    neg: 'f32x4.neg', abs: 'f32x4.abs', sqrt: 'f32x4.sqrt',
+    min: 'f32x4.min', max: 'f32x4.max', ceil: 'f32x4.ceil', floor: 'f32x4.floor',
+    eq: 'f32x4.eq', ne: 'f32x4.ne', lt: 'f32x4.lt', le: 'f32x4.le', gt: 'f32x4.gt', ge: 'f32x4.ge',
+    bitselect: 'v128.bitselect',
+  },
+  'i32': {
+    laneType: 'i32x4', lanes: 4, laneBytes: 4,
+    vecLoad: 'v128.load', vecStore: 'v128.store',
+    splat: 'i32x4.splat', extractLane: 'i32x4.extract_lane', replaceLane: 'i32x4.replace_lane',
+    add: 'i32x4.add', sub: 'i32x4.sub', mul: 'i32x4.mul', div: null,
+    neg: null, abs: 'i32x4.abs', sqrt: null,
+    min: 'i32x4.min_s', max: 'i32x4.max_s', ceil: null, floor: null,
+    eq: 'i32x4.eq', ne: 'i32x4.ne', lt: 'i32x4.lt_s', le: 'i32x4.le_s', gt: 'i32x4.gt_s', ge: 'i32x4.ge_s',
+    bitselect: 'v128.bitselect',
+  },
+};
+
 export function wasmType(dtype) { return (WASM_TYPE_TABLE[dtype] || DEFAULT_WASM_ENTRY).wasm; }
 export function wasmLoad(dtype) { return (WASM_TYPE_TABLE[dtype] || DEFAULT_WASM_ENTRY).load; }
 export function wasmStore(dtype) { return (WASM_TYPE_TABLE[dtype] || DEFAULT_WASM_ENTRY).store; }
 export function wasmBytes(dtype) { return (WASM_TYPE_TABLE[dtype] || DEFAULT_WASM_ENTRY).bytes; }
+
+export function wasmSimdEntry(dtype) { return WASM_SIMD_TABLE[dtype] || null; }
+export function wasmVecOp(dtype, op) { const e = WASM_SIMD_TABLE[dtype]; return e ? (e[op] || null) : null; }
+export function wasmVecLoad(dtype) { const e = WASM_SIMD_TABLE[dtype]; return e ? e.vecLoad : null; }
+export function wasmVecStore(dtype) { const e = WASM_SIMD_TABLE[dtype]; return e ? e.vecStore : null; }
+export function wasmVecSplat(dtype) { const e = WASM_SIMD_TABLE[dtype]; return e ? e.splat : null; }
+export function wasmVecExtractLane(dtype) { const e = WASM_SIMD_TABLE[dtype]; return e ? e.extractLane : null; }
+export function wasmVecReplaceLane(dtype) { const e = WASM_SIMD_TABLE[dtype]; return e ? e.replaceLane : null; }
+export function wasmVecLanes(dtype) { const e = WASM_SIMD_TABLE[dtype]; return e ? e.lanes : 0; }
 
 const DEFAULT_ENTRY = DTYPE_TABLE['f32'];
 

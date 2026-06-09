@@ -480,6 +480,33 @@ class WatEncoder {
       'f64.load': [0x2b, 3, 0], 'f64.store': [0x39, 3, 0],
     };
 
+    const simdOpcodes = {
+      'v128.load': { prefix: 0xfd, sub: 0, memarg: [4, 0] },
+      'v128.store': { prefix: 0xfd, sub: 11, memarg: [4, 0] },
+      'v128.bitselect': { prefix: 0xfd, sub: 0x52 }, 'v128.and': { prefix: 0xfd, sub: 0x4e }, 'v128.or': { prefix: 0xfd, sub: 0x50 }, 'v128.not': { prefix: 0xfd, sub: 0x4d },
+      'f32x4.splat': { prefix: 0xfd, sub: 0x13 }, 'i32x4.splat': { prefix: 0xfd, sub: 0x11 },
+      'f32x4.add': { prefix: 0xfd, sub: 0xe4 }, 'f32x4.sub': { prefix: 0xfd, sub: 0xe5 },
+      'f32x4.mul': { prefix: 0xfd, sub: 0xe6 }, 'f32x4.div': { prefix: 0xfd, sub: 0xe7 },
+      'f32x4.neg': { prefix: 0xfd, sub: 0xe1 }, 'f32x4.abs': { prefix: 0xfd, sub: 0xe0 },
+      'f32x4.sqrt': { prefix: 0xfd, sub: 0xe3 },
+      'f32x4.ceil': { prefix: 0xfd, sub: 0x67 }, 'f32x4.floor': { prefix: 0xfd, sub: 0x68 },
+      'f32x4.min': { prefix: 0xfd, sub: 0xe8 }, 'f32x4.max': { prefix: 0xfd, sub: 0xe9 },
+      'f32x4.eq': { prefix: 0xfd, sub: 0x41 }, 'f32x4.ne': { prefix: 0xfd, sub: 0x42 },
+      'f32x4.lt': { prefix: 0xfd, sub: 0x43 }, 'f32x4.gt': { prefix: 0xfd, sub: 0x44 },
+      'f32x4.le': { prefix: 0xfd, sub: 0x45 }, 'f32x4.ge': { prefix: 0xfd, sub: 0x46 },
+      'f32x4.extract_lane': { prefix: 0xfd, sub: 0x1f, lane: true },
+      'f32x4.replace_lane': { prefix: 0xfd, sub: 0x20, lane: true },
+      'i32x4.add': { prefix: 0xfd, sub: 0xae }, 'i32x4.sub': { prefix: 0xfd, sub: 0xb1 },
+      'i32x4.mul': { prefix: 0xfd, sub: 0xb5 },
+      'i32x4.abs': { prefix: 0xfd, sub: 0xa0 },
+      'i32x4.min_s': { prefix: 0xfd, sub: 0xb6 }, 'i32x4.max_s': { prefix: 0xfd, sub: 0xb8 },
+      'i32x4.eq': { prefix: 0xfd, sub: 0x37 }, 'i32x4.ne': { prefix: 0xfd, sub: 0x38 },
+      'i32x4.lt_s': { prefix: 0xfd, sub: 0x39 }, 'i32x4.gt_s': { prefix: 0xfd, sub: 0x3a },
+      'i32x4.le_s': { prefix: 0xfd, sub: 0x3b }, 'i32x4.ge_s': { prefix: 0xfd, sub: 0x3c },
+      'i32x4.extract_lane': { prefix: 0xfd, sub: 0x1b, lane: true },
+      'i32x4.replace_lane': { prefix: 0xfd, sub: 0x1c, lane: true },
+    };
+
     const op = opcodes[instr];
     if (op !== undefined) {
       if (Array.isArray(op)) {
@@ -488,6 +515,22 @@ class WatEncoder {
         this._writeU32(body, op[2]);
       } else {
         body.push(op);
+      }
+      return;
+    }
+
+    const baseName = instr.endsWith('.extract_lane') || instr.endsWith('.replace_lane') ? instr : instr;
+    const simd = simdOpcodes[baseName];
+    if (simd) {
+      body.push(simd.prefix);
+      this._writeU32(body, simd.sub);
+      if (simd.memarg) {
+        this._writeU32(body, simd.memarg[0]);
+        this._writeU32(body, simd.memarg[1]);
+      }
+      if (simd.lane && fullNode) {
+        const laneVal = parseInt(this._findNumArg(fullNode));
+        body.push(laneVal);
       }
     }
   }
@@ -512,6 +555,7 @@ class WatEncoder {
       case 'i64': return 0x7e;
       case 'f32': return 0x7d;
       case 'f64': return 0x7c;
+      case 'v128': return 0x7b;
       default: return 0x7f;
     }
   }

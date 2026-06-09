@@ -589,7 +589,7 @@ describe('WasmCodegen._visitFor — unrolling', () => {
     expect(wat).toContain('(i32.const 2)');
   });
 
-  it('unrolls VECTORIZED loops with small extent', () => {
+  it('VECTORIZED loops emit SIMD v128 instructions', () => {
     const b = buf('x', [4], 'f32');
     const store = new BufferStoreNode(b, [idx('i')], new FloatImmNode(1));
     const block = new BlockNode('blk', [], [], [{ buffer: b }], store);
@@ -600,7 +600,8 @@ describe('WasmCodegen._visitFor — unrolling', () => {
 
     const cg = makeCodegen();
     const result = cg.generate(pf);
-    expect(result.wat).not.toMatch(/\(loop\s/);
+    expect(result.wat).toContain('v128.store');
+    expect(result.wat).toContain('f32x4.splat');
   });
 
   it('does not unroll large-extent loops', () => {

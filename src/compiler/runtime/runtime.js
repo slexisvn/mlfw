@@ -138,8 +138,10 @@ const MATH_IMPORTS = {
 };
 
 function instantiateWasm(kernel) {
-  const binary = encodeWat(kernel.source);
-  const mod = new WebAssembly.Module(binary);
+  let binary;
+  try { binary = encodeWat(kernel.source); } catch(e) { throw new Error('encodeWat: ' + e.message + '\n' + kernel.source); }
+  let mod;
+  try { mod = new WebAssembly.Module(binary); } catch(e) { throw new Error('WASM: ' + e.message + '\n' + kernel.source); }
   const mathImports = {};
   if (kernel.metadata.imports) {
     for (const [name] of kernel.metadata.imports) {

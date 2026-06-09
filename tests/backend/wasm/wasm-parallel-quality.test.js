@@ -19,19 +19,19 @@ function tt(shape) { return new TensorType(shape, F32); }
 function analyzeWat(s) {
   const loops = (s.match(/\(loop\s/g) || []).length;
   const blocks = (s.match(/\(block\s/g) || []).length;
-  const stores = (s.match(/f32\.store/g) || []).length;
-  const loads = (s.match(/f32\.load/g) || []).length;
+  const stores = (s.match(/(?:f32\.store|v128\.store)/g) || []).length;
+  const loads = (s.match(/(?:f32\.load|v128\.load)/g) || []).length;
   const parStart = (s.match(/\$_par_start/g) || []).length;
   const parEnd = (s.match(/\$_par_end/g) || []).length;
   const opens = (s.match(/\(/g) || []).length;
   const closes = (s.match(/\)/g) || []).length;
   const lines = s.split('\n').length;
-  const wasmOps = (s.match(/\b(i32|f32)\.\w+/g) || []).length;
+  const wasmOps = (s.match(/\b(i32|f32|v128|f32x4|i32x4)\.\w+/g) || []).length;
   return { loops, blocks, stores, loads, parStart, parEnd, opens, closes, lines, wasmOps };
 }
 
 describe('parallel WASM kernel quality — codegen structure', () => {
-  it('1D add: parallel loop has no redundant nesting', () => {
+  it('1D add: parallel outer + vectorized inner (split)', () => {
     const t = tt([512]);
     const func = buildFunction('q_add1d', [t, t], [t], (b, args) => {
       b.returnOp([b.add(args[0], args[1]).getResult(0)]);
@@ -41,9 +41,7 @@ describe('parallel WASM kernel quality — codegen structure', () => {
     expect(info.opens).toBe(info.closes);
     expect(info.parStart).toBeGreaterThan(0);
     expect(info.parEnd).toBeGreaterThan(0);
-    expect(info.loops).toBe(1);
-    expect(info.stores).toBe(1);
-    expect(info.loads).toBe(2);
+    expect(s).toMatch(/v128\.load|v128\.store|f32x4\.\w+/);
   });
 
   it('2D add: outer parallel + inner serial/vectorized', () => {
@@ -91,7 +89,7 @@ describe('parallel WASM kernel quality — codegen structure', () => {
     const s = wat(compile(func), 'q_bounds');
     expect(s).toMatch(/\$_par_start/);
     expect(s).toMatch(/\$_par_end/);
-    expect(s).not.toMatch(/\(i32\.const 0\)\s*\n\s*local\.set \$i0/);
+    expect(s).not.toMatch(/\(i32\.const 0\)\s*\n\s*local\.set \$i0\b[^_]/);
   });
 
   it('sequential WAT does not emit par params', () => {
@@ -133,7 +131,7 @@ describe('parallel WASM kernel quality — scheduling decisions', () => {
     const s = wat(r, 'q_nonpow2');
     expect(s).toMatch(/\$_par_start/);
     const kernel = r.module.kernels.get('q_nonpow2');
-    expect(kernel.metadata.parallel.extent).toBe(100);
+    expect(kernel.metadata.parallel.extent).toBe(25);
   });
 
   it('1D reduction: no parallel (single spatial dim reduced away)', () => {
@@ -147,7 +145,8 @@ describe('parallel WASM kernel quality — scheduling decisions', () => {
     expect(s).not.toMatch(/\$_par_start/);
   });
 
-  it('parallel metadata extent matches loop extent', () => {
+  it('parallel metadata extent matches outer loop extent after split', () => {
+    const vectorWidth = 4;
     for (const size of [64, 128, 200, 512, 1024]) {
       const t = tt([size]);
       const func = buildFunction('q_ext_' + size, [t, t], [t], (b, args) => {
@@ -156,7 +155,8 @@ describe('parallel WASM kernel quality — scheduling decisions', () => {
       const r = compile(func);
       const kernel = r.module.kernels.get('q_ext_' + size);
       expect(kernel.metadata.parallel).toBeTruthy();
-      expect(kernel.metadata.parallel.extent).toBe(size);
+      const expectedExtent = size >= vectorWidth * 2 ? Math.floor(size / vectorWidth) : size;
+      expect(kernel.metadata.parallel.extent).toBe(expectedExtent);
     }
   });
 
@@ -168,6 +168,19 @@ describe('parallel WASM kernel quality — scheduling decisions', () => {
     const r = compile(func);
     const kernel = r.module.kernels.get('q_ext2d');
     expect(kernel.metadata.parallel.extent).toBe(64);
+  });
+
+  it('1D parallel+SIMD: split produces both parallel and SIMD ops', () => {
+    const t = tt([256]);
+    const func = buildFunction('q_parsim', [t, t], [t], (b, args) => {
+      b.returnOp([b.add(args[0], args[1]).getResult(0)]);
+    });
+    const s = wat(compile(func), 'q_parsim');
+    expect(s).toMatch(/\$_par_start/);
+    expect(s).toMatch(/\$_par_end/);
+    expect(s).toMatch(/v128\.load/);
+    expect(s).toMatch(/f32x4\.add/);
+    expect(s).toMatch(/v128\.store/);
   });
 });
 

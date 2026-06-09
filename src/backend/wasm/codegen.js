@@ -1,5 +1,5 @@
 import { ForKind } from '../../compiler/ir/tensor/nodes.js';
-import { wasmType, wasmLoad, wasmStore, wasmBytes, isDtypeFloat, isDtypeInt } from '../dtype_map.js';
+import { wasmType, wasmLoad, wasmStore, wasmBytes, isDtypeFloat, isDtypeInt, wasmSimdEntry, wasmVecOp, wasmVecLoad, wasmVecStore, wasmVecSplat, wasmVecExtractLane, wasmVecReplaceLane, wasmVecLanes } from '../dtype_map.js';
 import { inferDtype } from '../../compiler/ir/lir/nodes.js';
 
 export class WasmCodegen {
@@ -13,6 +13,8 @@ export class WasmCodegen {
     this._bufferOffsets = new Map();
     this._totalMemBytes = 0;
     this._defaultDtype = 'f32';
+    this._vectorMode = null;
+    this._vecTmpCounter = 0;
   }
 
   generate(func) {
@@ -28,6 +30,8 @@ export class WasmCodegen {
     this._waccCounter = 0;
     this._hasParallel = false;
     this._parallelExtent = 0;
+    this._vectorMode = null;
+    this._vecTmpCounter = 0;
 
     const isLIR = func.type === 'LIRFunc';
 
@@ -92,6 +96,12 @@ export class WasmCodegen {
 
     if (!isLIR) {
       this._prescanLocals(func.body);
+      this._vecTmpCounter = 0;
+    }
+
+    if (this.target.supportsSimd()) {
+      this._prescanVecLocalsAll(func.body);
+      this._vecTmpCounter = 0;
     }
 
     this._fixLetStmtLocals(func.body);
@@ -165,8 +175,12 @@ export class WasmCodegen {
         case 'ForNode': this._visitFor(node); return;
         case 'BlockNode': this._visitBlock(node); return;
         case 'IfThenElseNode': this._visitIf(node); return;
-        case 'BufferStoreNode': this._visitStore(node); return;
-        case 'LIRFlatStoreNode': this._visitLIRFlatStore(node); return;
+        case 'BufferStoreNode':
+          if (this._vectorMode) { this._emitVecStore(node); return; }
+          this._visitStore(node); return;
+        case 'LIRFlatStoreNode':
+          if (this._vectorMode) { this._emitVecFlatStore(node); return; }
+          this._visitLIRFlatStore(node); return;
         case 'LIRBindingsNode': this._visitLIRBindings(node); return;
         case 'LIRAccumulatorNode': this._visitLIRAccumulator(node); return;
         case 'WhileNode': this._visitWhile(node); return;
@@ -248,6 +262,11 @@ export class WasmCodegen {
       return;
     }
 
+    if (node.kind === ForKind.VECTORIZED && this.target.supportsSimd() && extent !== null) {
+      this._visitVectorizedFor(node);
+      return;
+    }
+
     if ((node.kind === ForKind.UNROLLED || node.kind === ForKind.VECTORIZED) && extent !== null && extent <= 32 && !this._isZeroFillBody(node.body)) {
       for (let i = 0; i < extent; i++) {
         this._emit('(i32.const ' + i + ')');
@@ -300,6 +319,16 @@ export class WasmCodegen {
     const dtype = node.dtype;
     this._ensureLocal(accLocal, wasmType(dtype));
 
+    const extent = this._constExtent(node.extent);
+    const simdEntry = extent !== null && node.loopKind === ForKind.VECTORIZED
+      && this.target.supportsSimd() ? wasmSimdEntry(dtype) : null;
+    const lanes = simdEntry ? this.target.vectorWidth : 0;
+
+    if (simdEntry && extent >= lanes) {
+      this._visitVecAccumulator(node, simdEntry, lanes, extent);
+      return;
+    }
+
     this._emitExpr(node.initLoad);
     this._emit('local.set $' + accLocal);
 
@@ -343,12 +372,126 @@ export class WasmCodegen {
     this._wasmAcc = prevAcc;
   }
 
+  _visitVecAccumulator(node, simdEntry, lanes, extent) {
+    const accLocal = node.localName;
+    const dtype = node.dtype;
+    const varName = node.loopVar.name;
+    const isFloat = isDtypeFloat(dtype);
+    const scalarAdd = isFloat ? 'f32.add' : 'i32.add';
+    const vecAdd = wasmVecOp(dtype, 'add');
+    const mainExtent = Math.floor(extent / lanes) * lanes;
+    const tailStart = mainExtent;
+
+    const vaccLocal = accLocal + '_vec';
+    this._ensureLocal(vaccLocal, 'v128');
+
+    this._emitExpr(node.initLoad);
+    this._emit('local.set $' + accLocal);
+
+    this._emit(isFloat ? '(f32.const 0)' : '(i32.const 0)');
+    this._emit(simdEntry.splat);
+    this._emit('local.set $' + vaccLocal);
+
+    const prevAcc = this._wasmAcc;
+    this._wasmAcc = {
+      local: accLocal,
+      bufName: node.flushStore.buffer.name,
+    };
+
+    this._vectorMode = { dtype, lanes, loopVar: varName, simd: simdEntry };
+    this._emit('(i32.const 0)');
+    this._emit('local.set $' + varName);
+    this._emit('(block $vbreak_' + varName);
+    this._indent++;
+    this._emit('(loop $vloop_' + varName);
+    this._indent++;
+    this._emit('(local.get $' + varName + ')');
+    this._emit('(i32.const ' + mainExtent + ')');
+    this._emit('i32.ge_s');
+    this._emit('br_if $vbreak_' + varName);
+
+    this._emit('(local.get $' + vaccLocal + ')');
+    this._emitVecExpr(node.body);
+    this._emit(vecAdd);
+    this._emit('local.set $' + vaccLocal);
+
+    this._emit('(local.get $' + varName + ')');
+    this._emit('(i32.const ' + lanes + ')');
+    this._emit('i32.add');
+    this._emit('local.set $' + varName);
+    this._emit('br $vloop_' + varName);
+    this._indent--;
+    this._emit(')');
+    this._indent--;
+    this._emit(')');
+    this._vectorMode = null;
+
+    this._emit('(local.get $' + accLocal + ')');
+    for (let l = 0; l < lanes; l++) {
+      this._emit('(local.get $' + vaccLocal + ')');
+      this._emit(simdEntry.extractLane + ' ' + l);
+      this._emit(scalarAdd);
+    }
+    this._emit('local.set $' + accLocal);
+
+    if (tailStart < extent) {
+      this._emit('(i32.const ' + tailStart + ')');
+      this._emit('local.set $' + varName);
+      this._emit('(block $tbreak_' + varName);
+      this._indent++;
+      this._emit('(loop $tloop_' + varName);
+      this._indent++;
+      this._emit('(local.get $' + varName + ')');
+      this._emit('(i32.const ' + extent + ')');
+      this._emit('i32.ge_s');
+      this._emit('br_if $tbreak_' + varName);
+
+      this._emit('(local.get $' + accLocal + ')');
+      this._emitCoerced(node.body, isFloat);
+      this._emit(scalarAdd);
+      this._emit('local.set $' + accLocal);
+
+      this._emit('(local.get $' + varName + ')');
+      this._emit('(i32.const 1)');
+      this._emit('i32.add');
+      this._emit('local.set $' + varName);
+      this._emit('br $tloop_' + varName);
+      this._indent--;
+      this._emit(')');
+      this._indent--;
+      this._emit(')');
+    }
+
+    this._emitFlatAddr(node.flushStore.buffer, node.flushStore.offsetExpr);
+    this._emit('(local.get $' + accLocal + ')');
+    this._emit(wasmStore(node.flushStore.dtype));
+
+    this._wasmAcc = prevAcc;
+  }
+
   _emitFlatAddr(buffer, offsetExpr) {
     const baseOffset = this._bufferOffsets.get(buffer.name) || 0;
     const bytes = wasmBytes(buffer.dtype || 'f32');
 
     if (!offsetExpr || (offsetExpr.type === 'IntImmNode' && offsetExpr.value === 0)) {
       this._emit(`(i32.const ${baseOffset})`);
+      return;
+    }
+
+    const vm = this._vectorMode;
+    if (vm && vm.addrLocal) {
+      if (!vm._addrEmitted) {
+        this._emitExpr(offsetExpr);
+        this._emit(`(i32.const ${bytes})`);
+        this._emit('i32.mul');
+        this._emit('local.set $' + vm.addrLocal);
+        vm._addrEmitted = true;
+      }
+      this._emit('(local.get $' + vm.addrLocal + ')');
+      if (baseOffset > 0) {
+        this._emit(`(i32.const ${baseOffset})`);
+        this._emit('i32.add');
+      }
       return;
     }
 
@@ -450,6 +593,23 @@ export class WasmCodegen {
 
     if (indices.length === 0) {
       this._emit(`(i32.const ${baseOffset})`);
+      return;
+    }
+
+    const vm = this._vectorMode;
+    if (vm && vm.addrLocal && indices.length > 0) {
+      if (!vm._addrEmitted) {
+        this._emitFlatIndex(buffer, indices);
+        this._emit(`(i32.const ${bytes})`);
+        this._emit('i32.mul');
+        this._emit('local.set $' + vm.addrLocal);
+        vm._addrEmitted = true;
+      }
+      this._emit('(local.get $' + vm.addrLocal + ')');
+      if (baseOffset > 0) {
+        this._emit(`(i32.const ${baseOffset})`);
+        this._emit('i32.add');
+      }
       return;
     }
 
@@ -709,6 +869,414 @@ export class WasmCodegen {
     return false;
   }
 
+  _visitVectorizedFor(node) {
+    const varName = node.loopVar.name;
+    const extent = this._constExtent(node.extent);
+    const dtype = this._inferBodyDtype(node.body) || this._defaultDtype;
+    const lanes = this.target.vectorWidth;
+    const simdEntry = wasmSimdEntry(dtype);
+
+    if (!simdEntry || extent < lanes) {
+      this._emitForLoop(varName, node.extent, node.body);
+      return;
+    }
+
+    const mainExtent = Math.floor(extent / lanes) * lanes;
+    const tailExtent = extent - mainExtent;
+    const bytes = wasmBytes(dtype);
+    const bufAccessCount = this._countBufAccesses(node.body);
+    const useAddrCSE = bufAccessCount >= 2;
+    const addrLocal = useAddrCSE ? '_vaddr_' + varName : null;
+
+    if (mainExtent > 0) {
+      this._vectorMode = { dtype, lanes, loopVar: varName, simd: simdEntry, addrLocal };
+      if (mainExtent === lanes) {
+        this._emit('(i32.const 0)');
+        this._emit('local.set $' + varName);
+        this._emitVecAddrReset();
+        this._visitNode(node.body);
+      } else {
+        this._emit('(i32.const 0)');
+        this._emit('local.set $' + varName);
+        this._emit('(block $vbreak_' + varName);
+        this._indent++;
+        this._emit('(loop $vloop_' + varName);
+        this._indent++;
+        this._emit('(local.get $' + varName + ')');
+        this._emit('(i32.const ' + mainExtent + ')');
+        this._emit('i32.ge_s');
+        this._emit('br_if $vbreak_' + varName);
+        this._emitVecAddrReset();
+        this._visitNode(node.body);
+        this._emit('(local.get $' + varName + ')');
+        this._emit('(i32.const ' + lanes + ')');
+        this._emit('i32.add');
+        this._emit('local.set $' + varName);
+        this._emit('br $vloop_' + varName);
+        this._indent--;
+        this._emit(')');
+        this._indent--;
+        this._emit(')');
+      }
+      this._vectorMode = null;
+    }
+
+    if (tailExtent > 0) {
+      for (let i = mainExtent; i < extent; i++) {
+        this._emit('(i32.const ' + i + ')');
+        this._emit('local.set $' + varName);
+        this._visitNode(node.body);
+      }
+    }
+  }
+
+  _emitVecAddrReset() {
+    if (this._vectorMode && this._vectorMode.addrLocal) {
+      this._vectorMode._addrEmitted = false;
+    }
+  }
+
+  _countBufAccesses(root) {
+    let count = 0;
+    const stack = [root];
+    while (stack.length > 0) {
+      const n = stack.pop();
+      if (!n || typeof n !== 'object') continue;
+      if (n.type === 'BufferLoadNode' || n.type === 'BufferStoreNode' ||
+          n.type === 'LIRFlatLoadNode' || n.type === 'LIRFlatStoreNode') {
+        count++;
+      }
+      if (n.body) stack.push(n.body);
+      if (n.value && typeof n.value === 'object') stack.push(n.value);
+      if (n.a) stack.push(n.a);
+      if (n.b) stack.push(n.b);
+      if (n.stmts) for (const s of n.stmts) stack.push(s);
+      if (n.args) for (const a of n.args) stack.push(a);
+      if (n.indices) for (const idx of n.indices) stack.push(idx);
+      if (n.thenBody) stack.push(n.thenBody);
+      if (n.elseBody) stack.push(n.elseBody);
+      if (n.expr) stack.push(n.expr);
+      if (n.condition) stack.push(n.condition);
+      if (n.offsetExpr) stack.push(n.offsetExpr);
+    }
+    return count;
+  }
+
+  _inferBodyDtype(body) {
+    const stack = [body];
+    while (stack.length > 0) {
+      const n = stack.pop();
+      if (!n) continue;
+      if (n.type === 'BufferStoreNode' && n.buffer) return n.buffer.dtype;
+      if (n.type === 'LIRFlatStoreNode') return n.dtype || this._defaultDtype;
+      if (n.type === 'BufferLoadNode' && n.buffer) return n.buffer.dtype;
+      if (n.type === 'LIRFlatLoadNode') return n.dtype || this._defaultDtype;
+      if (n.body) stack.push(n.body);
+      if (n.stmts) for (const s of n.stmts) stack.push(s);
+      if (n.value && typeof n.value === 'object') stack.push(n.value);
+    }
+    return null;
+  }
+
+  _emitVecStore(node) {
+    const vm = this._vectorMode;
+    this._emitAddr(node.buffer, node.indices);
+    this._emitVecExpr(node.value);
+    this._emit(vm.simd.vecStore);
+  }
+
+  _emitVecFlatStore(node) {
+    const vm = this._vectorMode;
+    this._emitFlatAddr(node.buffer, node.offsetExpr);
+    this._emitVecExpr(node.value);
+    this._emit(vm.simd.vecStore);
+  }
+
+  _emitVecExpr(node) {
+    if (!node) { this._emit('(i32.const 0)'); return; }
+    const vm = this._vectorMode;
+    const dtype = vm.dtype;
+
+    switch (node.type) {
+      case 'BufferLoadNode':
+        this._emitAddr(node.buffer, node.indices);
+        this._emit(vm.simd.vecLoad);
+        break;
+      case 'LIRFlatLoadNode':
+        this._emitFlatAddr(node.buffer, node.offsetExpr);
+        this._emit(vm.simd.vecLoad);
+        break;
+      case 'FloatImmNode':
+        this._emit('(f32.const ' + node.value + ')');
+        this._emit(vm.simd.splat);
+        break;
+      case 'IntImmNode':
+        if (isDtypeFloat(dtype)) {
+          this._emit('(f32.const ' + node.value + ')');
+          this._emit(vm.simd.splat);
+        } else {
+          this._emit('(i32.const ' + node.value + ')');
+          this._emit(vm.simd.splat);
+        }
+        break;
+      case 'VariableNode':
+        if (node.name === vm.loopVar) {
+          this._emit('(local.get $' + node.name + ')');
+        } else {
+          const localType = this._locals.get(node.name);
+          if (localType === 'f32') {
+            this._emit('(local.get $' + node.name + ')');
+            this._emit(vm.simd.splat);
+          } else {
+            this._emit('(local.get $' + node.name + ')');
+            if (isDtypeFloat(dtype)) this._emit('f32.convert_i32_s');
+            this._emit(vm.simd.splat);
+          }
+        }
+        break;
+      case 'MathOpNode':
+        this._emitVecMathOp(node);
+        break;
+      case 'CompareNode':
+        this._emitVecCompare(node);
+        break;
+      case 'CallExternNode':
+        this._emitVecCallExtern(node);
+        break;
+      case 'CastNode':
+        this._emitVecExpr(node.expr);
+        break;
+      case 'IfThenElseNode':
+        this._emitVecSelect(node);
+        break;
+      default:
+        this._emitExpr(node);
+        break;
+    }
+  }
+
+  _emitVecMathOp(node) {
+    const vm = this._vectorMode;
+    const dtype = vm.dtype;
+
+    if (!node.b) {
+      if (node.op === '-') {
+        const negOp = wasmVecOp(dtype, 'neg');
+        if (negOp) {
+          this._emitVecExpr(node.a);
+          this._emit(negOp);
+        } else {
+          this._emit('(i32.const 0)');
+          this._emit(vm.simd.splat);
+          this._emitVecExpr(node.a);
+          this._emit(wasmVecOp(dtype, 'sub'));
+        }
+      } else if (node.op === '!') {
+        this._emitVecExpr(node.a);
+        this._emit('v128.not');
+      }
+      return;
+    }
+
+    if (node.op === '&&') {
+      this._emitVecExpr(node.a);
+      this._emitVecExpr(node.b);
+      this._emit('v128.and');
+      return;
+    }
+    if (node.op === '||') {
+      this._emitVecExpr(node.a);
+      this._emitVecExpr(node.b);
+      this._emit('v128.or');
+      return;
+    }
+
+    const OP_MAP = { '+': 'add', '-': 'sub', '*': 'mul', '/': 'div' };
+    const opName = OP_MAP[node.op];
+    if (opName) {
+      const vecInstr = wasmVecOp(dtype, opName);
+      if (vecInstr) {
+        this._emitVecExpr(node.a);
+        this._emitVecExpr(node.b);
+        this._emit(vecInstr);
+        return;
+      }
+    }
+
+    const CMP_MAP = { '<': 'lt', '>': 'gt', '<=': 'le', '>=': 'ge' };
+    const cmpName = CMP_MAP[node.op];
+    if (cmpName) {
+      const vecInstr = wasmVecOp(dtype, cmpName);
+      if (vecInstr) {
+        this._emitVecExpr(node.a);
+        this._emitVecExpr(node.b);
+        this._emit(vecInstr);
+        return;
+      }
+    }
+
+    this._emitExpr(node);
+    this._emit(vm.simd.splat);
+  }
+
+  _emitVecCompare(node) {
+    const vm = this._vectorMode;
+    const dtype = vm.dtype;
+    const vecInstr = wasmVecOp(dtype, node.direction);
+    if (vecInstr) {
+      this._emitVecExpr(node.a);
+      this._emitVecExpr(node.b);
+      this._emit(vecInstr);
+    } else {
+      this._emitExpr(node);
+      this._emit(vm.simd.splat);
+    }
+  }
+
+  _emitVecCallExtern(node) {
+    const vm = this._vectorMode;
+    const dtype = vm.dtype;
+    const vecInstr = wasmVecOp(dtype, node.externName);
+
+    if (vecInstr) {
+      if (node.externName === 'min' || node.externName === 'max') {
+        this._emitVecExpr(node.args[0]);
+        this._emitVecExpr(node.args[1]);
+      } else {
+        this._emitVecExpr(node.args[0]);
+      }
+      this._emit(vecInstr);
+      return;
+    }
+
+    if (node.externName === 'rsqrt') {
+      const sqrtOp = wasmVecOp(dtype, 'sqrt');
+      if (sqrtOp) {
+        this._emit('(f32.const 1)');
+        this._emit(vm.simd.splat);
+        this._emitVecExpr(node.args[0]);
+        this._emit(sqrtOp);
+        this._emit(wasmVecOp(dtype, 'div'));
+        return;
+      }
+    }
+
+    this._emitScalarizeFallback(node);
+  }
+
+  _emitVecSelect(node) {
+    const vm = this._vectorMode;
+    this._emitVecExpr(node.thenBody);
+    this._emitVecExpr(node.elseBody);
+    this._emitVecExpr(node.condition);
+    this._emit(vm.simd.bitselect);
+  }
+
+  _emitScalarizeFallback(node) {
+    const vm = this._vectorMode;
+    const lanes = vm.lanes;
+    const extractLane = vm.simd.extractLane;
+    const replaceLane = vm.simd.replaceLane;
+    const splat = vm.simd.splat;
+
+    const tmpName = '_vtmp_' + (this._vecTmpCounter++);
+    this._ensureLocal(tmpName, 'v128');
+
+    const laneResults = [];
+    for (let l = 0; l < lanes; l++) {
+      const ln = '_vl_' + tmpName + '_' + l;
+      this._ensureLocal(ln, wasmType(vm.dtype));
+      laneResults.push(ln);
+    }
+
+    this._emitVecExpr(node.args[0]);
+    this._emit('local.set $' + tmpName);
+
+    for (let l = 0; l < lanes; l++) {
+      this._emit('(local.get $' + tmpName + ')');
+      this._emit(extractLane + ' ' + l);
+      if (node.args.length > 1) {
+        const arg2Tmp = '_vtmp2_' + tmpName;
+        if (l === 0) {
+          this._ensureLocal(arg2Tmp, 'v128');
+          const prevVM = this._vectorMode;
+          this._vectorMode = vm;
+          this._emitVecExpr(node.args[1]);
+          this._vectorMode = prevVM;
+          this._emit('local.set $' + arg2Tmp);
+        }
+        this._emit('(local.get $' + arg2Tmp + ')');
+        this._emit(extractLane + ' ' + l);
+      }
+      if (this._imports.has(node.externName)) {
+        this._emit('call $math_' + node.externName);
+      }
+      this._emit('local.set $' + laneResults[l]);
+    }
+
+    this._emit('(local.get $' + laneResults[lanes - 1] + ')');
+    this._emit(splat);
+    for (let l = lanes - 2; l >= 0; l--) {
+      this._emit('(local.get $' + laneResults[l] + ')');
+      this._emit(replaceLane + ' ' + l);
+    }
+  }
+
+  _prescanVecLocalsAll(root) {
+    const stack = [root];
+    while (stack.length > 0) {
+      const n = stack.pop();
+      if (!n) continue;
+      if (n.type === 'ForNode' && n.kind === ForKind.VECTORIZED) {
+        this._prescanVecLocals(n.body);
+        if (this._countBufAccesses(n.body) >= 2) {
+          this._ensureLocal('_vaddr_' + n.loopVar.name, 'i32');
+        }
+      }
+      if (n.type === 'LIRAccumulatorNode' && n.loopKind === ForKind.VECTORIZED) {
+        this._ensureLocal(n.localName + '_vec', 'v128');
+        this._prescanVecLocals(n.body);
+      }
+      if (n.body) stack.push(n.body);
+      if (n.stmts) for (const s of n.stmts) stack.push(s);
+      if (n.thenBody) stack.push(n.thenBody);
+      if (n.elseBody) stack.push(n.elseBody);
+      if (n.initBody) stack.push(n.initBody);
+      if (n.loopBody) stack.push(n.loopBody);
+    }
+  }
+
+  _prescanVecLocals(body) {
+    const stack = [body];
+    while (stack.length > 0) {
+      const n = stack.pop();
+      if (!n) continue;
+      if (n.type === 'CallExternNode' && n.externName) {
+        const vecInstr = wasmVecOp(this._defaultDtype, n.externName);
+        if (!vecInstr && n.externName !== 'rsqrt') {
+          const tmpName = '_vtmp_' + (this._vecTmpCounter);
+          this._ensureLocal(tmpName, 'v128');
+          const lanes = this.target.vectorWidth;
+          for (let l = 0; l < lanes; l++) {
+            this._ensureLocal('_vl_' + tmpName + '_' + l, wasmType(this._defaultDtype));
+          }
+          if (n.args.length > 1) {
+            this._ensureLocal('_vtmp2_' + tmpName, 'v128');
+          }
+          this._vecTmpCounter++;
+        }
+      }
+      if (n.body) stack.push(n.body);
+      if (n.stmts) for (const s of n.stmts) stack.push(s);
+      if (n.value && typeof n.value === 'object' && n.value.type) stack.push(n.value);
+      if (n.a && typeof n.a === 'object') stack.push(n.a);
+      if (n.b && typeof n.b === 'object') stack.push(n.b);
+      if (n.args) for (const a of n.args) if (typeof a === 'object') stack.push(a);
+      if (n.thenBody) stack.push(n.thenBody);
+      if (n.elseBody) stack.push(n.elseBody);
+    }
+  }
+
   _layoutBuffers(primFunc) {
     let offset = 0;
     const align = 16;
@@ -800,6 +1368,9 @@ export class WasmCodegen {
         const accDtype = this._accPatternDtype(n);
         if (accDtype) {
           this._ensureLocal('_wacc_' + (++this._waccCounter), wasmType(accDtype));
+        }
+        if (n.kind === ForKind.VECTORIZED && this.target.supportsSimd()) {
+          this._prescanVecLocals(n.body);
         }
       }
       if (n.type === 'BlockNode') {

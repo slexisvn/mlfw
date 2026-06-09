@@ -114,11 +114,11 @@ describe('WASM kernel quality — no JS/CUDA artifacts', () => {
 
 describe('WASM kernel quality — native WASM instructions', () => {
   const nativeOps = [
-    { name: 'sqrt', wasmInstr: 'f32.sqrt', build: (b, x) => b.sqrt(x) },
-    { name: 'abs', wasmInstr: 'f32.abs', build: (b, x) => b.abs(x) },
-    { name: 'floor', wasmInstr: 'f32.floor', build: (b, x) => b.floor(x) },
-    { name: 'ceil', wasmInstr: 'f32.ceil', build: (b, x) => b.ceil(x) },
-    { name: 'neg', wasmInstr: 'f32.neg', build: (b, x) => b.neg(x) },
+    { name: 'sqrt', wasmInstr: 'sqrt', build: (b, x) => b.sqrt(x) },
+    { name: 'abs', wasmInstr: 'abs', build: (b, x) => b.abs(x) },
+    { name: 'floor', wasmInstr: 'floor', build: (b, x) => b.floor(x) },
+    { name: 'ceil', wasmInstr: 'ceil', build: (b, x) => b.ceil(x) },
+    { name: 'neg', wasmInstr: 'neg', build: (b, x) => b.neg(x) },
   ];
 
   for (const { name, wasmInstr, build } of nativeOps) {
@@ -128,7 +128,7 @@ describe('WASM kernel quality — native WASM instructions', () => {
         b.returnOp([build(b, args[0]).getResult(0)]);
       });
       const s = src(compile(func), `w_native_${name}`);
-      expect(s).toContain(wasmInstr);
+      expect(s).toMatch(new RegExp(`f32\\.${wasmInstr}|f32x4\\.${wasmInstr}`));
       expect(s).not.toMatch(new RegExp(`call \\$math_${name}`));
     });
   }
@@ -170,7 +170,7 @@ describe('WASM kernel quality — arithmetic instructions', () => {
     const func = buildFunction('w_arith_add', [t, t], [t], (b, args) => {
       b.returnOp([b.add(args[0], args[1]).getResult(0)]);
     });
-    expect(src(compile(func), 'w_arith_add')).toContain('f32.add');
+    expect(src(compile(func), 'w_arith_add')).toMatch(/f32\.add|f32x4\.add/);
   });
 
   it('sub: uses f32.sub', () => {
@@ -178,7 +178,7 @@ describe('WASM kernel quality — arithmetic instructions', () => {
     const func = buildFunction('w_arith_sub', [t, t], [t], (b, args) => {
       b.returnOp([b.sub(args[0], args[1]).getResult(0)]);
     });
-    expect(src(compile(func), 'w_arith_sub')).toContain('f32.sub');
+    expect(src(compile(func), 'w_arith_sub')).toMatch(/f32\.sub|f32x4\.sub/);
   });
 
   it('mul: uses f32.mul', () => {
@@ -186,7 +186,7 @@ describe('WASM kernel quality — arithmetic instructions', () => {
     const func = buildFunction('w_arith_mul', [t, t], [t], (b, args) => {
       b.returnOp([b.mul(args[0], args[1]).getResult(0)]);
     });
-    expect(src(compile(func), 'w_arith_mul')).toContain('f32.mul');
+    expect(src(compile(func), 'w_arith_mul')).toMatch(/f32\.mul|f32x4\.mul/);
   });
 });
 
@@ -211,8 +211,8 @@ describe('WASM kernel quality — elementwise fusion', () => {
       b.returnOp([b.mul(sum.getResult(0), args[2]).getResult(0)]);
     });
     const s = src(compile(func), 'w_fuse_ops');
-    expect(s).toContain('f32.add');
-    expect(s).toContain('f32.mul');
+    expect(s).toMatch(/f32\.add|f32x4\.add/);
+    expect(s).toMatch(/f32\.mul|f32x4\.mul/);
   });
 
   it('exp(neg(x)): contains f32.neg and call $math_exp', () => {
@@ -221,7 +221,7 @@ describe('WASM kernel quality — elementwise fusion', () => {
       b.returnOp([b.exp(b.neg(args[0]).getResult(0)).getResult(0)]);
     });
     const s = src(compile(func), 'w_fuse_expneg');
-    expect(s).toContain('f32.neg');
+    expect(s).toMatch(/f32\.neg|f32x4\.neg/);
     expect(s).toMatch(/call \$math_exp/);
   });
 });
@@ -284,7 +284,7 @@ describe('WASM kernel quality — reduction structure', () => {
       b.returnOp([b.reduce(args[0], negInf.getResult(0), [1], 'max').getResult(0)]);
     });
     const s = src(compile(func), 'w_red_max');
-    expect(s).toContain('f32.max');
+    expect(s).toMatch(/f32\.max|f32x4\.max/);
   });
 
   it('reduction: has nested block/loop', () => {
@@ -323,8 +323,8 @@ describe('WASM kernel quality — matmul structure', () => {
       b.returnOp([b.matmul(args[0], args[1]).getResult(0)]);
     });
     const s = src(compile(func), 'w_mm_fma');
-    expect(s).toContain('f32.mul');
-    expect(s).toContain('f32.add');
+    expect(s).toMatch(/f32\.mul|f32x4\.mul/);
+    expect(s).toMatch(/f32\.add|f32x4\.add/);
   });
 
   it('matmul: uses f32.load and f32.store', () => {
@@ -976,7 +976,7 @@ describe('WASM kernel quality — relu', () => {
       b.returnOp([b.relu(args[0]).getResult(0)]);
     });
     const s = src(compile(func), 'w_relu_src');
-    expect(s).toContain('f32.max');
+    expect(s).toMatch(/f32\.max|f32x4\.max/);
   });
 
   it('relu: numerically correct [-3,-1,0,1,3]', () => {
@@ -1046,7 +1046,7 @@ describe('WASM kernel quality — prod reduction', () => {
       b.returnOp([b.reduce(args[0], one.getResult(0), [1], 'prod').getResult(0)]);
     });
     const s = src(compile(func), 'w_rprod_src');
-    expect(s).toContain('f32.mul');
+    expect(s).toMatch(/f32\.mul|f32x4\.mul/);
   });
 });
 
@@ -1248,24 +1248,24 @@ describe('WASM kernel quality — matmul + unary chain numerical', () => {
 // ────────────────────────────────────────────────────────────────────
 
 describe('WASM kernel quality — load/store patterns', () => {
-  it('add: has f32.load and f32.store', () => {
+  it('add: has load and store', () => {
     const t = new TensorType([8], ScalarType.F32);
     const func = buildFunction('w_ldst_add', [t, t], [t], (b, args) => {
       b.returnOp([b.add(args[0], args[1]).getResult(0)]);
     });
     const s = src(compile(func), 'w_ldst_add');
-    expect(s).toContain('f32.load');
-    expect(s).toContain('f32.store');
+    expect(s).toMatch(/f32\.load|v128\.load/);
+    expect(s).toMatch(/f32\.store|v128\.store/);
   });
 
-  it('neg: has f32.load and f32.store', () => {
+  it('neg: has load and store', () => {
     const t = new TensorType([8], ScalarType.F32);
     const func = buildFunction('w_ldst_neg', [t], [t], (b, args) => {
       b.returnOp([b.neg(args[0]).getResult(0)]);
     });
     const s = src(compile(func), 'w_ldst_neg');
-    expect(s).toContain('f32.load');
-    expect(s).toContain('f32.store');
+    expect(s).toMatch(/f32\.load|v128\.load/);
+    expect(s).toMatch(/f32\.store|v128\.store/);
   });
 
   it('byte addressing: multiplies index by 4 (sizeof f32)', () => {
@@ -1298,15 +1298,15 @@ describe('WASM kernel quality — relu + add fusion', () => {
     expect(Array.from(out)).toEqual([0, 0, 2, 0]);
   });
 
-  it('relu(add): WAT contains f32.add and f32.max', () => {
+  it('relu(add): WAT contains add and max', () => {
     const t = new TensorType([8], ScalarType.F32);
     const func = buildFunction('w_relu_add_src', [t, t], [t], (b, args) => {
       const sum = b.add(args[0], args[1]);
       b.returnOp([b.relu(sum.getResult(0)).getResult(0)]);
     });
     const s = src(compile(func), 'w_relu_add_src');
-    expect(s).toContain('f32.add');
-    expect(s).toContain('f32.max');
+    expect(s).toMatch(/f32\.add|f32x4\.add/);
+    expect(s).toMatch(/f32\.max|f32x4\.max/);
   });
 });
 
@@ -1427,7 +1427,7 @@ describe('WASM kernel quality — WASM vs CPU target difference', () => {
     const wasmSrc = src(compile(func), 'w_vs_cpu');
     expect(wasmSrc).toMatch(/^\(module/);
     expect(wasmSrc).not.toMatch(/^function\s/m);
-    expect(wasmSrc).toContain('f32.add');
+    expect(wasmSrc).toMatch(/f32\.add|f32x4\.add/);
     expect(wasmSrc).not.toMatch(/\bMath\./);
   });
 });
@@ -1496,8 +1496,8 @@ describe('WASM boolean ops — compile and run', () => {
     expect(result.succeeded).toBe(true);
     const s = src(result, 'w_bool_ops');
     expect(s).toContain('(module');
-    expect(s).toContain('i32.and');
-    expect(s).toContain('i32.or');
+    expect(s).toMatch(/i32\.and|v128\.and/);
+    expect(s).toMatch(/i32\.or|v128\.or/);
   });
 
   it('boolean select produces correct numerical results', () => {

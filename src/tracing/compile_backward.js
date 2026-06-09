@@ -15,36 +15,29 @@ export function compileWithBackward(model, exampleInputs, opts = {}) {
   const mode = opts.mode || 'separate';
   const rematPolicy = opts.rematPolicy || new RematPolicy(opts.remat || {});
   const compilerOpts = { target, verify: false, ...opts, backward: undefined, mode: undefined, rematPolicy: undefined, remat: undefined };
+  const dynamicShapes = opts.dynamic_shapes || null;
 
-  let _fwdCompiled = null;
-  let _bwdCompiled = null;
-  let _jointCompiled = null;
+  const _cacheEntries = [];
   let _savedValues = null;
-  let _meta = null;
-  let _shapeKey = null;
-
-  function _getShapeKey(inputs) {
-    let key = '';
-    for (let i = 0; i < inputs.length; i++) {
-      key += inputs[i].shape.join(',') + ':' + inputs[i].dtype + '|';
-    }
-    return key;
-  }
+  let _activeMeta = null;
 
   function _compile(inputs) {
     const traced = _traceCore(
       (...args) => model.forward(...args),
       inputs,
-      { name: model.constructor.name || 'compiled' }
+      { name: model.constructor.name || 'compiled', dynamicShapes }
     );
 
     const graph = traced.graph;
     const func = graph.functions().next().value;
 
-    if (mode === 'joint') {
-      return _compileJoint(func, traced, rematPolicy);
-    }
-    return _compileSeparate(func, traced, rematPolicy);
+    const compiled = mode === 'joint'
+      ? _compileJoint(func, traced, rematPolicy)
+      : _compileSeparate(func, traced, rematPolicy);
+
+    compiled.shapeEnv = traced.shapeEnv;
+    compiled.outputSymShapes = traced.outputSymShapes;
+    return compiled;
   }
 
   function _compileSeparate(forwardFunc, traced, policy) {
@@ -94,6 +87,13 @@ export function compileWithBackward(model, exampleInputs, opts = {}) {
     };
   }
 
+  function _resolveOutputShape(compiled, i) {
+    if (compiled.outputSymShapes && compiled.shapeEnv) {
+      return compiled.shapeEnv.resolveSymbolicShape(compiled.outputSymShapes[i]);
+    }
+    return compiled.outputTypes[i].shape;
+  }
+
   function _executeSeparateForward(compiled, inputs) {
     const kernels = compiled.fwdResult.listKernels();
     const funcName = kernels[0];
@@ -107,7 +107,7 @@ export function compileWithBackward(model, exampleInputs, opts = {}) {
     const outputArrays = new Array(outputTypes.length);
     const outputShapes = new Array(outputTypes.length);
     for (let i = 0; i < outputTypes.length; i++) {
-      const shape = outputTypes[i].shape;
+      const shape = _resolveOutputShape(compiled, i);
       const dtype = outputTypes[i].dtype;
       const numel = computeNumel(shape);
       const Ctor = typedArrayCtor(dtype);
@@ -134,7 +134,6 @@ export function compileWithBackward(model, exampleInputs, opts = {}) {
     const savedValues = compiled.savedValues;
     const savedArrays = new Array(savedValues.length);
     for (let i = 0; i < savedValues.length; i++) {
-      const idx = savedValues[i].id;
       savedArrays[i] = savedContext.savedBuffers[i] || new Float32Array(computeNumel(savedValues[i].type.shape));
     }
 
@@ -159,18 +158,30 @@ export function compileWithBackward(model, exampleInputs, opts = {}) {
     );
   }
 
+  function _findCachedEntry(inputs) {
+    for (let i = 0; i < _cacheEntries.length; i++) {
+      const entry = _cacheEntries[i];
+      entry.shapeEnv.bindInputShapes(inputs);
+      const { passed } = entry.shapeEnv.evaluateGuards();
+      if (passed) return entry;
+    }
+    return null;
+  }
+
   function compiledForward(...inputs) {
-    const key = _getShapeKey(inputs);
-    if (!_meta || _shapeKey !== key) {
-      _meta = _compile(inputs);
-      _shapeKey = key;
+    let meta = _findCachedEntry(inputs);
+    if (!meta) {
+      meta = _compile(inputs);
+      _cacheEntries.push(meta);
+      meta.shapeEnv.bindInputShapes(inputs);
+    }
+    _activeMeta = meta;
+
+    if (meta.mode === 'joint') {
+      return _executeJointForward(meta, inputs);
     }
 
-    if (_meta.mode === 'joint') {
-      return _executeJointForward(_meta, inputs);
-    }
-
-    const ctx = _executeSeparateForward(_meta, inputs);
+    const ctx = _executeSeparateForward(meta, inputs);
     _savedValues = ctx;
     return ctx.results;
   }
@@ -219,15 +230,15 @@ export function compileWithBackward(model, exampleInputs, opts = {}) {
   }
 
   compiledForward.backward = function (...gradOutputs) {
-    if (!_meta || !_savedValues) {
+    if (!_activeMeta || !_savedValues) {
       throw new Error('Must run forward before backward');
     }
 
-    if (_meta.mode === 'joint') {
-      return _executeJointBackward(_meta, gradOutputs, _savedValues);
+    if (_activeMeta.mode === 'joint') {
+      return _executeJointBackward(_activeMeta, gradOutputs, _savedValues);
     }
 
-    return _executeSeparateBackward(_meta, gradOutputs, _savedValues);
+    return _executeSeparateBackward(_activeMeta, gradOutputs, _savedValues);
   };
 
   function _executeJointBackward(compiled, gradOutputs, savedCtx) {
@@ -270,20 +281,22 @@ export function compileWithBackward(model, exampleInputs, opts = {}) {
   compiledForward.original = model;
 
   compiledForward.backwardGraph = () => {
-    if (!_meta) return null;
-    if (_meta.mode === 'joint') return _meta.jointFunc;
-    return _meta.backwardFunc;
+    if (_cacheEntries.length === 0) return null;
+    const meta = _cacheEntries[0];
+    if (meta.mode === 'joint') return meta.jointFunc;
+    return meta.backwardFunc;
   };
 
   compiledForward.forwardGraph = () => {
-    if (!_meta) return null;
-    if (_meta.mode === 'joint') return _meta.jointFunc;
-    return _meta.forwardFunc;
+    if (_cacheEntries.length === 0) return null;
+    const meta = _cacheEntries[0];
+    if (meta.mode === 'joint') return meta.jointFunc;
+    return meta.forwardFunc;
   };
 
   if (exampleInputs) {
-    _meta = _compile(exampleInputs);
-    _shapeKey = _getShapeKey(exampleInputs);
+    const compiled = _compile(exampleInputs);
+    _cacheEntries.push(compiled);
   }
 
   return compiledForward;

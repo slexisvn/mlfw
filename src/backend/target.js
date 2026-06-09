@@ -35,6 +35,7 @@ export class TargetFeatures {
     this.preferredBlockFactor = config.preferredBlockFactor || 0;
     this.supportsBlockedLayout = config.supportsBlockedLayout ?? false;
     this.supportsInt8 = config.supportsInt8 ?? false;
+    this.simd = config.simd ?? false;
   }
 
   isGPU() {
@@ -66,6 +67,10 @@ export class TargetFeatures {
       return this.maxThreadsPerBlock * this.maxGridDimX;
     }
     return this.numCores;
+  }
+
+  supportsSimd() {
+    return this.simd && this.vectorWidth > 1;
   }
 
   hasLibraryOp(opName) {

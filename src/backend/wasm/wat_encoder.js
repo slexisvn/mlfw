@@ -1,7 +1,7 @@
 const WASM_MAGIC = [0x00, 0x61, 0x73, 0x6d];
 const WASM_VERSION = [0x01, 0x00, 0x00, 0x00];
 const SEC_TYPE = 1, SEC_IMPORT = 2, SEC_FUNC = 3, SEC_MEMORY = 5, SEC_EXPORT = 7, SEC_CODE = 10;
-const T_I32 = 0x7f, T_F32 = 0x7d, T_FUNC = 0x60, T_VOID = 0x40;
+const T_I32 = 0x7f, T_F32 = 0x7d, T_V128 = 0x7b, T_FUNC = 0x60, T_VOID = 0x40;
 
 function uleb(v) { const r = []; do { let b = v & 0x7f; v >>>= 7; if (v) b |= 0x80; r.push(b); } while (v); return r; }
 function sleb(v) { const r = []; let more = true; while (more) { let b = v & 0x7f; v >>= 7; if ((v === 0 && !(b & 0x40)) || (v === -1 && (b & 0x40))) more = false; else b |= 0x80; r.push(b); } return r; }
@@ -24,6 +24,27 @@ const INSTR = new Map([
   ['f32.load', [0x2a, 0x02, 0x00]], ['f32.store', [0x38, 0x02, 0x00]],
   ['i32.load', [0x28, 0x02, 0x00]], ['i32.store', [0x36, 0x02, 0x00]],
   ['i32.load8_s', [0x2c, 0x00, 0x00]], ['i32.store8', [0x3a, 0x00, 0x00]],
+  ['v128.load', [0xfd, ...uleb(0), 0x04, 0x00]], ['v128.store', [0xfd, ...uleb(11), 0x04, 0x00]],
+  ['v128.bitselect', [0xfd, ...uleb(0x52)]], ['v128.and', [0xfd, ...uleb(0x4e)]], ['v128.or', [0xfd, ...uleb(0x50)]], ['v128.not', [0xfd, ...uleb(0x4d)]],
+  ['f32x4.splat', [0xfd, ...uleb(0x13)]], ['i32x4.splat', [0xfd, ...uleb(0x11)]],
+  ['f32x4.add', [0xfd, ...uleb(0xe4)]], ['f32x4.sub', [0xfd, ...uleb(0xe5)]],
+  ['f32x4.mul', [0xfd, ...uleb(0xe6)]], ['f32x4.div', [0xfd, ...uleb(0xe7)]],
+  ['f32x4.neg', [0xfd, ...uleb(0xe1)]], ['f32x4.abs', [0xfd, ...uleb(0xe0)]],
+  ['f32x4.sqrt', [0xfd, ...uleb(0xe3)]],
+  ['f32x4.ceil', [0xfd, ...uleb(0x67)]], ['f32x4.floor', [0xfd, ...uleb(0x68)]],
+  ['f32x4.min', [0xfd, ...uleb(0xe8)]], ['f32x4.max', [0xfd, ...uleb(0xe9)]],
+  ['f32x4.eq', [0xfd, ...uleb(0x41)]], ['f32x4.ne', [0xfd, ...uleb(0x42)]],
+  ['f32x4.lt', [0xfd, ...uleb(0x43)]], ['f32x4.gt', [0xfd, ...uleb(0x44)]],
+  ['f32x4.le', [0xfd, ...uleb(0x45)]], ['f32x4.ge', [0xfd, ...uleb(0x46)]],
+  ['f32x4.extract_lane', [0xfd, ...uleb(0x1f)]], ['f32x4.replace_lane', [0xfd, ...uleb(0x20)]],
+  ['i32x4.add', [0xfd, ...uleb(0xae)]], ['i32x4.sub', [0xfd, ...uleb(0xb1)]],
+  ['i32x4.mul', [0xfd, ...uleb(0xb5)]],
+  ['i32x4.abs', [0xfd, ...uleb(0xa0)]],
+  ['i32x4.min_s', [0xfd, ...uleb(0xb6)]], ['i32x4.max_s', [0xfd, ...uleb(0xb8)]],
+  ['i32x4.eq', [0xfd, ...uleb(0x37)]], ['i32x4.ne', [0xfd, ...uleb(0x38)]],
+  ['i32x4.lt_s', [0xfd, ...uleb(0x39)]], ['i32x4.gt_s', [0xfd, ...uleb(0x3a)]],
+  ['i32x4.le_s', [0xfd, ...uleb(0x3b)]], ['i32x4.ge_s', [0xfd, ...uleb(0x3c)]],
+  ['i32x4.extract_lane', [0xfd, ...uleb(0x1b)]], ['i32x4.replace_lane', [0xfd, ...uleb(0x1c)]],
 ]);
 
 function tokenize(wat) {
@@ -78,8 +99,8 @@ function parseModule(tokens) {
       while (peek() === '(') {
         p++;
         const inner = eat();
-        if (inner === 'param') { while (peek() !== ')') { const t = eat(); if (t === 'f32') params.push(T_F32); else if (t === 'i32') params.push(T_I32); } }
-        else if (inner === 'result') { while (peek() !== ')') { const t = eat(); if (t === 'f32') results.push(T_F32); else if (t === 'i32') results.push(T_I32); } }
+        if (inner === 'param') { while (peek() !== ')') { const t = eat(); if (t === 'f32') params.push(T_F32); else if (t === 'i32') params.push(T_I32); else if (t === 'v128') params.push(T_V128); } }
+        else if (inner === 'result') { while (peek() !== ')') { const t = eat(); if (t === 'f32') results.push(T_F32); else if (t === 'i32') results.push(T_I32); else if (t === 'v128') results.push(T_V128); } }
         expect(')');
       }
       expect(')'); expect(')');
@@ -90,7 +111,7 @@ function parseModule(tokens) {
         p++;
         const inner = eat();
         if (inner === 'export') { funcExportName = eat().replace(/"/g, ''); expect(')'); }
-        else if (inner === 'param') { while (peek() !== ')') { const t = eat(); if (t === 'i32') funcParams.push(T_I32); else if (t === 'f32') funcParams.push(T_F32); } expect(')'); }
+        else if (inner === 'param') { while (peek() !== ')') { const t = eat(); if (t === 'i32') funcParams.push(T_I32); else if (t === 'f32') funcParams.push(T_F32); else if (t === 'v128') funcParams.push(T_V128); } expect(')'); }
         else if (inner === 'result') { while (peek() !== ')') eat(); expect(')'); }
         else if (inner === 'local') {
           while (peek() !== ')') {
@@ -98,6 +119,7 @@ function parseModule(tokens) {
             if (t.startsWith('$')) { funcLocalNames.push(t.replace('$', '')); }
             else if (t === 'i32') funcLocals.push(T_I32);
             else if (t === 'f32') funcLocals.push(T_F32);
+            else if (t === 'v128') funcLocals.push(T_V128);
           }
           expect(')');
         } else { p = saved; break; }
@@ -174,7 +196,7 @@ function encodeBody(bodyTokens, localMap, importMap) {
           if (peek() === '(') {
             const saved = p;
             p++;
-            if (peek() === 'result') { eat(); const rt = eat(); blockType = rt === 'f32' ? T_F32 : T_I32; expect(')'); }
+            if (peek() === 'result') { eat(); const rt = eat(); blockType = rt === 'f32' ? T_F32 : rt === 'v128' ? T_V128 : T_I32; expect(')'); }
             else { p = saved; }
           }
           bytes.push(0x04, blockType);
@@ -219,6 +241,10 @@ function encodeBody(bodyTokens, localMap, importMap) {
       else if (t === 'local.set') {
         bytes.push(0x21);
         bytes.push(...uleb(localIdx(eatLabel())));
+      }
+      else if (t.endsWith('.extract_lane') || t.endsWith('.replace_lane')) {
+        bytes.push(...INSTR.get(t));
+        bytes.push(parseInt(eat(), 10));
       }
       else if (INSTR.has(t)) {
         bytes.push(...INSTR.get(t));
