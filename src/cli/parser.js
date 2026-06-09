@@ -35,6 +35,9 @@ class Parser {
     const start = this.current();
     if (this.atIdentifier('model') && this.peek(1).type === 'identifier') return this.parseModel();
     if (this.atIdentifier('forward')) return this.parseForward();
+    if (this.atIdentifier('train') && this.peek(1).value !== '=' && !COMPOUND_OPS[this.peek(1).value]) return this.parseTrain();
+    if (this.atIdentifier('validate') && this.peek(1).value !== '=' && !COMPOUND_OPS[this.peek(1).value]) return this.parseValidate();
+    if (this.atIdentifier('optimizer') && this.peek(1).value === ':') return this.parseOptimizer();
     if (this.atIdentifier('fn')) return this.parseFunctionDeclaration();
     if (this.atIdentifier('if')) return this.parseIf();
     if (this.atIdentifier('for')) return this.parseFor();
@@ -48,6 +51,10 @@ class Parser {
 
     if (this.at('identifier')) {
       const nextVal = this.peek(1).value;
+      if (nextVal === ',') {
+        const maybeDestructure = this.tryParseDestructureAssign();
+        if (maybeDestructure) return maybeDestructure;
+      }
       if (nextVal === '=') {
         const name = this.next().value;
         this.expectValue('=');
@@ -140,6 +147,49 @@ class Parser {
     }
     const body = this.parseBlock();
     return this.locate({ type: 'ForwardDeclaration', params, body }, start);
+  }
+
+  parseTrain() {
+    const start = this.expectIdentifier('train');
+    const params = [];
+    while (!this.atValue(':')) {
+      params.push(this.expect('identifier').value);
+      if (!this.matchValue(',')) break;
+      if (this.atValue(':')) break;
+    }
+    const body = this.parseBlock();
+    return this.locate({ type: 'TrainDeclaration', params, body }, start);
+  }
+
+  parseValidate() {
+    const start = this.expectIdentifier('validate');
+    const params = [];
+    while (!this.atValue(':')) {
+      params.push(this.expect('identifier').value);
+      if (!this.matchValue(',')) break;
+      if (this.atValue(':')) break;
+    }
+    const body = this.parseBlock();
+    return this.locate({ type: 'ValidateDeclaration', params, body }, start);
+  }
+
+  parseOptimizer() {
+    const start = this.expectIdentifier('optimizer');
+    const body = this.parseBlock();
+    return this.locate({ type: 'OptimizerDeclaration', body }, start);
+  }
+
+  tryParseDestructureAssign() {
+    const savedPos = this.pos;
+    const start = this.current();
+    const names = [this.next().value];
+    while (this.matchValue(',')) {
+      if (!this.at('identifier')) { this.pos = savedPos; return null; }
+      names.push(this.next().value);
+    }
+    if (!this.atValue('=')) { this.pos = savedPos; return null; }
+    this.next();
+    return this.locate({ type: 'DestructureAssign', names, value: this.parseExpression() }, start);
   }
 
   parseNameList() {

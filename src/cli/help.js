@@ -1,4 +1,4 @@
-export const BANNER = `MLFW Tensor Lang
+export const BANNER = `Tera — Tensor Algebra
 
 Try:
   x = tensor([[1, 2], [3, 4]])

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { CLI_USAGE, runCli } from '../../src/cli/commands.js';
 
-describe('Tensor Lang CLI commands', () => {
+describe('Tera CLI commands', () => {
   it('checks source without executing it', async () => {
     const stdout = vi.fn();
     const code = await runCli(['check', 'model.mlfw'], {

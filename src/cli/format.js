@@ -1,6 +1,17 @@
 import { Tensor } from '../tensor/core/tensor.js';
 import { Module } from '../nn/module.js';
 
+export function formatValueCompact(value) {
+  if (value instanceof Tensor) {
+    if (value.ndim === 0 && value.data) return String(value.item());
+    if (value.numel <= 64 && value.data) return JSON.stringify(value.toArray());
+    const device = String(value.device);
+    const deviceText = device === 'cpu' ? '' : `, device=${device}`;
+    return `Tensor(shape=[${value.shape.join(', ')}], dtype=${value.dtype}${deviceText})`;
+  }
+  return formatValue(value);
+}
+
 export function formatValue(value) {
   if (value instanceof Tensor) {
     const device = String(value.device);

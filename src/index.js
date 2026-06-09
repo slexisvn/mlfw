@@ -71,3 +71,13 @@ export * as optim from './optim/index.js';
 export { trace, compile } from './tracing/compile.js';
 export { compileWithBackward } from './tracing/compile_backward.js';
 export { CPUTarget, GPUTarget, WasmTarget, WebGPUTarget } from './backend/target.js';
+
+export {
+  LightningModule, Trainer, Callback,
+  ModelCheckpoint, EarlyStopping, ProgressCallback,
+  LearningRateMonitor, Timer, GradientAccumulationScheduler,
+  Logger, ConsoleLogger, CSVLogger,
+  Metric, MeanMetric, SumMetric, MetricCollection,
+  Accuracy, Precision, Recall, F1Score, ConfusionMatrix,
+} from './lightning/index.js';
+export * as lightning from './lightning/index.js';

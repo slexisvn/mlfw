@@ -1,0 +1,94 @@
+# Multi-label Classification — Movie genre tagging
+#
+# Loss: BCELoss (each label is independent binary)
+# Activation: sigmoid (output probabilities per label)
+# Optimizer: Adam
+# Architecture: 3-layer MLP
+# Labels: [action, comedy, drama, sci-fi]
+
+# --- Data ---
+# Features: [explosions, jokes, romance, aliens, budget]
+x = tensor([
+  [0.9, 0.1, 0.1, 0.8, 0.9],
+  [0.1, 0.9, 0.3, 0.0, 0.3],
+  [0.0, 0.1, 0.9, 0.0, 0.4],
+  [0.8, 0.0, 0.0, 0.9, 0.9],
+  [0.7, 0.7, 0.1, 0.1, 0.7],
+  [0.1, 0.8, 0.7, 0.0, 0.5],
+  [0.0, 0.0, 0.8, 0.1, 0.2],
+  [0.6, 0.1, 0.2, 0.7, 0.8],
+  [0.9, 0.6, 0.0, 0.0, 0.6],
+  [0.0, 0.7, 0.6, 0.0, 0.3],
+  [0.8, 0.0, 0.3, 0.8, 1.0],
+  [0.1, 0.9, 0.1, 0.0, 0.4]
+])
+
+# Multi-hot: [action, comedy, drama, sci-fi]
+y = tensor([
+  [1.0, 0.0, 0.0, 1.0],
+  [0.0, 1.0, 0.0, 0.0],
+  [0.0, 0.0, 1.0, 0.0],
+  [1.0, 0.0, 0.0, 1.0],
+  [1.0, 1.0, 0.0, 0.0],
+  [0.0, 1.0, 1.0, 0.0],
+  [0.0, 0.0, 1.0, 0.0],
+  [1.0, 0.0, 0.0, 1.0],
+  [1.0, 1.0, 0.0, 0.0],
+  [0.0, 1.0, 1.0, 0.0],
+  [1.0, 0.0, 0.0, 1.0],
+  [0.0, 1.0, 0.0, 0.0]
+])
+
+loader = DataLoader(TensorDataset(x, y), batch_size=12)
+
+# --- Model ---
+model GenreNet():
+  fc1 = Linear(5, 64)
+  fc2 = Linear(64, 4)
+  loss_fn = BCELoss()
+
+  forward x:
+    h = relu(fc1(x))
+    return sigmoid(fc2(h))
+
+  train batch:
+    x, y = batch
+    probs = GenreNet(x)
+    loss = loss_fn(probs, y)
+    log("loss", loss, prog_bar=true)
+    return loss
+
+  optimizer:
+    return Adam(GenreNet.parameters(), lr=0.01)
+
+# --- Train ---
+net = GenreNet()
+trainer = Trainer(max_epochs=800, logger=false, enable_checkpointing=false, enable_progress=false)
+trainer.fit(net, loader)
+
+# --- Inference (threshold = 0.5) ---
+probs = net(x)
+
+print("=== Multi-label: Movie Genres ===")
+print("Labels: [action, comedy, drama, sci-fi]")
+
+correct = 0
+total = 0
+i = 0
+while i < 12:
+  j = 0
+  while j < 4:
+    pred = 0
+    if probs[i, j] > 0.5:
+      pred = 1
+    if pred == y[i, j]:
+      correct = correct + 1
+    total = total + 1
+    j = j + 1
+  i = i + 1
+
+print("Sample predictions (probabilities):")
+print("  Movie 0:", probs[0], "-> true: [action, sci-fi]")
+print("  Movie 1:", probs[1], "-> true: [comedy]")
+print("  Movie 5:", probs[5], "-> true: [comedy, drama]")
+print("Label accuracy:", correct, "/", total)

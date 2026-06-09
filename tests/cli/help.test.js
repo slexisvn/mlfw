@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BANNER, getExample, getHelp, handleReplCommand, listExamples } from '../../src/cli/help.js';
 
-describe('Tensor Lang CLI help', () => {
+describe('Tera CLI help', () => {
   it('shows a useful first-run example', () => {
     expect(BANNER).toContain('x = tensor([[1, 2], [3, 4]])');
     expect(BANNER).toContain('Type help for examples');

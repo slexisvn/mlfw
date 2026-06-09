@@ -1,6 +1,6 @@
 import { GradAccumulator } from './accumulator.js';
 import { ones as _ones } from '../tensor/factory/creation_ops.js';
-import { add as _add } from '../tensor/ops/ops.js';
+import { add as _add, sum as _sum } from '../tensor/ops/ops.js';
 
 export function backward(rootTensor, gradOutput) {
   const rootGradFn = rootTensor.gradFn;
@@ -47,7 +47,19 @@ export function backward(rootTensor, gradOutput) {
     const grads = gradMap.get(node.id);
     if (!grads) continue;
 
-    const gradInputs = node.apply(grads);
+    const rawGradInputs = node.apply(grads);
+
+    // Reduce gradients to match input shapes (handle broadcasting)
+    let gradInputs = rawGradInputs;
+    if (rawGradInputs) {
+      gradInputs = rawGradInputs.map((g, i) => {
+        if (!g) return g;
+        const meta = node.inputMetadata(i);
+        if (!meta) return g;
+        return _reduceBroadcastGrad(g, meta.shape);
+      });
+    }
+
     node.releaseVariables();
 
     if (!gradInputs) continue;
@@ -71,6 +83,37 @@ export function backward(rootTensor, gradOutput) {
       }
     }
   }
+}
+
+/**
+ * Reduce gradient to match the input shape when broadcasting was used.
+ * e.g., grad shape [2,3] → input shape [2,1]: sum along axis 1, keepdim.
+ * e.g., grad shape [3,4] → input shape [4]: sum along axis 0.
+ */
+function _reduceBroadcastGrad(grad, inputShape) {
+  const gradShape = grad.shape;
+  if (gradShape.length === inputShape.length &&
+      gradShape.every((s, i) => s === inputShape[i])) {
+    return grad; // shapes match, no reduction needed
+  }
+
+  let result = grad;
+
+  // If input has fewer dimensions, sum leading dims
+  const dimDiff = gradShape.length - inputShape.length;
+  for (let i = 0; i < dimDiff; i++) {
+    result = _sum(result, 0, false);
+  }
+
+  // Now same rank — sum along dims where input was 1 (broadcast dims)
+  // Must go from last to first to keep indices stable
+  for (let i = inputShape.length - 1; i >= 0; i--) {
+    if (inputShape[i] === 1 && result.shape[i] !== 1) {
+      result = _sum(result, i, true);
+    }
+  }
+
+  return result;
 }
 
 function _countDeps(root, depCount, visited) {

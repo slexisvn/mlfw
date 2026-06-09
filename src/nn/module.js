@@ -163,13 +163,13 @@ export class Module {
 
   to(device) {
     for (const [name, p] of this._parameters) {
-      if (p !== null) {
+      if (p !== null && typeof p.to === 'function') {
         this._parameters.set(name, new Parameter(p.to(device), p.requiresGrad));
         this[name] = this._parameters.get(name);
       }
     }
     for (const [name, b] of this._buffers) {
-      if (b !== null) {
+      if (b !== null && typeof b.to === 'function') {
         this._buffers.set(name, b.to(device));
         this[name] = this._buffers.get(name);
       }

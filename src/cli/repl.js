@@ -1,6 +1,6 @@
 import terminalKit from 'terminal-kit';
 import { formatValue } from './format.js';
-import { TensorLangRuntime } from './runtime.js';
+import { TeraRuntime } from './runtime.js';
 import { BANNER, handleReplCommand } from './help.js';
 import { formatDiagnostic } from './diagnostics.js';
 import { parseCallContext } from './call_context.js';
@@ -27,7 +27,7 @@ const COMMANDS = ['help', 'help tensor', 'help model', 'help fn', 'help control'
 
 export async function startRepl({ term = terminalKit.terminal } = {}) {
   const write = text => term.noFormat(String(text) + '\n');
-  const runtime = new TensorLangRuntime({ output: write });
+  const runtime = new TeraRuntime({ output: write });
   const history = [];
   let buffer = '';
   let depth = 0;

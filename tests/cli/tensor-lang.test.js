@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { TensorLangRuntime } from '../../src/cli/runtime.js';
+import { TeraRuntime } from '../../src/cli/runtime.js';
 import { formatValue } from '../../src/cli/format.js';
 
-describe('Tensor Lang', () => {
+describe('Tera', () => {
   it('evaluates tensor expressions including matmul', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     const result = await runtime.execute(`
       x = tensor([[1, 2]])
       w = tensor([[3], [4]])
@@ -15,13 +15,13 @@ describe('Tensor Lang', () => {
   });
 
   it('promotes scalars in tensor operators and function calls', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     expect((await runtime.execute('tensor([1, 2]) * 2 + 1')).toArray()).toEqual([3, 5]);
     expect((await runtime.execute('mul(tensor([1, 2]), 3)')).toArray()).toEqual([3, 6]);
   });
 
   it('formats scalar and CPU tensors for the CLI', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     const scalar = await runtime.execute('tensor(2)');
     const vector = await runtime.execute('tensor([1, 2])');
 
@@ -30,7 +30,7 @@ describe('Tensor Lang', () => {
   });
 
   it('defines and runs a custom model', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     const result = await runtime.execute(`
       model MLP(input, hidden, output):
         fc1 = Linear(input, hidden)
@@ -48,7 +48,7 @@ describe('Tensor Lang', () => {
   });
 
   it('compiles a model and records trace events', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     const result = await runtime.execute(`
       model = Sequential(Linear(4, 3), ReLU(), Linear(3, 2))
       x = randn([5, 4])
@@ -60,7 +60,7 @@ describe('Tensor Lang', () => {
   });
 
   it('compiles tensor operators inside custom forward', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     const result = await runtime.execute(`
       model Residual:
         forward x:
@@ -73,7 +73,7 @@ describe('Tensor Lang', () => {
   });
 
   it('compiles scalar tensor operators inside custom forward', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     const result = await runtime.execute(`
       model Scale:
         forward x:
@@ -86,7 +86,7 @@ describe('Tensor Lang', () => {
   });
 
   it('executes compiled model and returns tensor', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     const result = await runtime.execute(`
       model = Sequential(Linear(4, 2))
       x = randn([3, 4])
@@ -98,7 +98,7 @@ describe('Tensor Lang', () => {
   });
 
   it('supports lazy compile without input', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     const result = await runtime.execute(`
       model = Sequential(Linear(4, 2))
       compiled = compile(model)
@@ -109,7 +109,7 @@ describe('Tensor Lang', () => {
   });
 
   it('compiled output matches eager forward', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     await runtime.execute(`
       model = Sequential(Linear(3, 2))
       x = tensor([[1, 2, 3]])
@@ -128,29 +128,29 @@ describe('Tensor Lang', () => {
   });
 
   it('indexes and slices tensors', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     expect((await runtime.execute('tensor([[1, 2, 3], [4, 5, 6]])[1]')).toArray()).toEqual([4, 5, 6]);
     expect((await runtime.execute('tensor([[1, 2, 3], [4, 5, 6]])[:, 1]')).toArray()).toEqual([2, 5]);
     expect((await runtime.execute('tensor([0, 1, 2, 3, 4])[1:5:2]')).toArray()).toEqual([1, 3]);
-    expect((await runtime.execute('tensor([1, 2, 3])[-1]')).item()).toBe(3);
+    expect(await runtime.execute('tensor([1, 2, 3])[-1]')).toBe(3);
   });
 
   it('exposes view and like-operation builtins', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     const result = await runtime.execute('transpose(reshape(onesLike(tensor([1, 2, 3, 4])), [2, 2]), 0, 1)');
     expect(result.shape).toEqual([2, 2]);
     expect(result.toArray()).toEqual([[1, 1], [1, 1]]);
   });
 
   it('passes named convolution options as an options object', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     const conv = await runtime.execute('Conv2d(3, 8, 3, padding=1, bias=false)');
     expect(conv.padding).toBe(1);
     expect(conv.bias).toBeNull();
   });
 
-  it('accesses model properties via dot notation in tensor lang', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+  it('accesses model properties via dot notation in Tera', async () => {
+    const runtime = new TeraRuntime({ output: () => {} });
 
     await runtime.execute('layer = Linear(4, 2)');
     const weight = await runtime.execute('layer.weight');
@@ -171,7 +171,7 @@ describe('Tensor Lang', () => {
   });
 
   it('accesses custom model sub-module properties', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     await runtime.execute(`model MLP(h):
   fc1 = Linear(2, h)
   fc2 = Linear(h, 1)
@@ -196,13 +196,13 @@ describe('Tensor Lang', () => {
   });
 
   it('reports runtime errors at the source expression', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     await expect(runtime.execute('x = tensor([1])\nmissing(x)'))
       .rejects.toThrow(/Unknown name 'missing' at 2:1/);
   });
 
   it('supports basic autograd builtins', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     const result = await runtime.execute(`
       x = tensor([2], grad=true)
       y = sum(x * x)
@@ -213,7 +213,7 @@ describe('Tensor Lang', () => {
   });
 
   it('evaluates scalar logical operators', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     expect(await runtime.execute('true and false')).toBe(false);
     expect(await runtime.execute('true and true')).toBe(true);
     expect(await runtime.execute('true or false')).toBe(true);
@@ -223,13 +223,13 @@ describe('Tensor Lang', () => {
   });
 
   it('short-circuits and/or for scalars', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     expect(await runtime.execute('false and undefined_var')).toBe(false);
     expect(await runtime.execute('true or undefined_var')).toBe(true);
   });
 
   it('applies logical operators element-wise on tensors', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     const andResult = await runtime.execute('tensor([1, 0, 1]) and tensor([1, 1, 0])');
     expect(andResult.toArray()).toEqual([1, 0, 0]);
     const orResult = await runtime.execute('tensor([1, 0, 0]) or tensor([0, 0, 1])');
@@ -239,7 +239,7 @@ describe('Tensor Lang', () => {
   });
 
   it('evaluates compound assignment on scalars', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     expect(await runtime.execute('x = 10\nx += 5')).toBe(15);
     expect(await runtime.execute('x = 10\nx -= 3')).toBe(7);
     expect(await runtime.execute('x = 10\nx *= 2')).toBe(20);
@@ -248,18 +248,18 @@ describe('Tensor Lang', () => {
   });
 
   it('evaluates compound assignment on tensors', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     const result = await runtime.execute('x = tensor([1, 2, 3])\nx += 1');
     expect(result.toArray()).toEqual([2, 3, 4]);
   });
 
   it('rejects compound assignment on undefined variable', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     await expect(runtime.execute('x += 1')).rejects.toThrow(/Unknown name 'x'/);
   });
 
   it('defines and calls user functions', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     expect(await runtime.execute(`
       fn add(a, b): return a + b
       add(3, 4)
@@ -267,7 +267,7 @@ describe('Tensor Lang', () => {
   });
 
   it('supports closures in user functions', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     expect(await runtime.execute(`
       scale = 10
       fn scaled(x): return x * scale
@@ -276,7 +276,7 @@ describe('Tensor Lang', () => {
   });
 
   it('supports recursion in user functions', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     expect(await runtime.execute(`
       fn sum_to(n):
         return n + sum_to(n - 1)
@@ -284,7 +284,7 @@ describe('Tensor Lang', () => {
   });
 
   it('applies user functions to tensors', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     const result = await runtime.execute(`
       fn double(x): return x * 2
       double(tensor([1, 2, 3]))
@@ -293,7 +293,7 @@ describe('Tensor Lang', () => {
   });
 
   it('returns last expression when no explicit return', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     expect(await runtime.execute(`
       fn square(x): x * x
       square(5)
@@ -301,7 +301,7 @@ describe('Tensor Lang', () => {
   });
 
   it('evaluates if/elif/else', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     expect(await runtime.execute('if true: 1')).toBe(1);
     expect(await runtime.execute(`if false: 1
 else: 2`)).toBe(2);
@@ -314,7 +314,7 @@ else: 3`)).toBe(3);
   });
 
   it('evaluates for...in loops', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     expect(await runtime.execute(`
       total = 0
       for i in [1, 2, 3]: total += i
@@ -323,7 +323,7 @@ else: 3`)).toBe(3);
   });
 
   it('evaluates for...in with range()', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     expect(await runtime.execute(`
       total = 0
       for i in range(5): total += i
@@ -332,7 +332,7 @@ else: 3`)).toBe(3);
   });
 
   it('evaluates while loops', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     expect(await runtime.execute(`
       x = 10
       while x > 0: x -= 1
@@ -341,7 +341,7 @@ else: 3`)).toBe(3);
   });
 
   it('supports break in loops', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     expect(await runtime.execute(`
       total = 0
       for i in range(100):
@@ -352,7 +352,7 @@ else: 3`)).toBe(3);
   });
 
   it('supports continue in loops', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     expect(await runtime.execute(`
       total = 0
       for i in range(6):
@@ -363,7 +363,7 @@ else: 3`)).toBe(3);
   });
 
   it('propagates return from inside loops', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     expect(await runtime.execute(`
       fn find_first(items):
         for x in items:
@@ -374,7 +374,7 @@ else: 3`)).toBe(3);
   });
 
   it('supports nested control flow', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     expect(await runtime.execute(`
       total = 0
       for i in range(3):
@@ -386,7 +386,7 @@ else: 3`)).toBe(3);
   });
 
   it('rejects invalid indexing forms', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     await expect(runtime.execute('tensor([1])[]')).rejects.toThrow(/Expected index expression/);
     await expect(runtime.execute('tensor([1, 2])[::0]')).rejects.toThrow(/Slice step must be a positive integer/);
   });

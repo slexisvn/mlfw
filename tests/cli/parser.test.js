@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parse } from '../../src/cli/parser.js';
 
-describe('Tensor Lang parser', () => {
+describe('Tera parser', () => {
   it('preserves source locations on AST nodes', () => {
     const program = parse('\nvalue = missing(1)');
     expect(program.body[0]).toMatchObject({ type: 'Assign', line: 2, column: 1 });

@@ -1,5 +1,7 @@
 import * as fw from '../index.js';
 import { Module } from '../nn/module.js';
+import { LightningModule } from '../lightning/core/module.js';
+import { Metric } from '../lightning/metrics/metric.js';
 import { Tensor } from '../tensor/core/tensor.js';
 import { SymbolicTensor } from '../tracing/symbolic_tensor.js';
 import { compile as tracingCompile } from '../tracing/compile.js';
@@ -27,7 +29,7 @@ class Environment {
   }
 }
 
-export class TensorLangRuntime {
+export class TeraRuntime {
   constructor({ output = console.log } = {}) {
     this.output = output;
     this.global = new Environment();
@@ -81,6 +83,10 @@ export class TensorLangRuntime {
       if (node.type === 'FunctionDeclaration') return this.defineFunction(node, env);
       if (node.type === 'ModelDeclaration') return this.defineModel(node, env);
       if (node.type === 'ForwardDeclaration') throw new Error('forward can only appear inside model');
+      if (node.type === 'TrainDeclaration') throw new Error('train can only appear inside model');
+      if (node.type === 'ValidateDeclaration') throw new Error('validate can only appear inside model');
+      if (node.type === 'OptimizerDeclaration') throw new Error('optimizer can only appear inside model');
+      if (node.type === 'DestructureAssign') return await this.evaluateDestructure(node, env);
       throw new Error(`Unsupported statement ${node.type}`);
     });
   }
@@ -135,6 +141,7 @@ export class TensorLangRuntime {
     if (Object.keys(named).length > 0) positional.push({ __named: true, ...named });
     let result;
     if (callable instanceof Module) result = callable.forward(...positional);
+    else if (callable && typeof callable.forward === 'function' && typeof callable !== 'function') result = callable.forward(...positional);
     else if (typeof callable !== 'function') throw new Error('Value is not callable');
     else result = callable(...positional);
     // Await if result is a Promise (e.g. WebGPU async execution)
@@ -247,20 +254,38 @@ export class TensorLangRuntime {
     return func;
   }
 
+  async evaluateDestructure(node, env) {
+    const value = await this.evaluateExpression(node.value, env);
+    if (!Array.isArray(value)) throw new Error('Destructuring requires an array value');
+    if (value.length < node.names.length) throw new Error(`Not enough values to unpack (expected ${node.names.length}, got ${value.length})`);
+    for (let i = 0; i < node.names.length; i++) {
+      env.define(node.names[i], value[i]);
+    }
+    return value;
+  }
+
   defineModel(node, declarationEnv) {
     const runtime = this;
     const forward = node.body.find(x => x.type === 'ForwardDeclaration');
     if (!forward) throw new Error(`Model ${node.name} needs a forward block`);
-    const fields = node.body.filter(x => x.type !== 'ForwardDeclaration');
+    const trainBlock = node.body.find(x => x.type === 'TrainDeclaration');
+    const validateBlock = node.body.find(x => x.type === 'ValidateDeclaration');
+    const optimizerBlock = node.body.find(x => x.type === 'OptimizerDeclaration');
+    const isLightning = !!(trainBlock || validateBlock || optimizerBlock);
+    const declTypes = new Set(['ForwardDeclaration', 'TrainDeclaration', 'ValidateDeclaration', 'OptimizerDeclaration']);
+    const fields = node.body.filter(x => !declTypes.has(x.type));
+    const modelName = node.name;
+    const BaseClass = isLightning ? LightningModule : Module;
 
     const factory = async (...args) => {
       const named = takeNamed(args);
       const modelEnv = new Environment(declarationEnv);
       node.params.forEach((name, i) => modelEnv.define(name, named[name] ?? args[i]));
-      class LangModel extends Module {
+
+      class LangModel extends BaseClass {
         constructor() {
           super();
-          this._langName = node.name;
+          this._langName = modelName;
         }
         async forward(...inputs) {
           const callEnv = new Environment(modelEnv);
@@ -273,6 +298,37 @@ export class TensorLangRuntime {
         }
         toString() { return `${this._langName}${super.toString().slice(this.constructor.name.length)}`; }
       }
+
+      if (trainBlock) {
+        LangModel.prototype.trainingStep = async function(batch, batchIdx) {
+          const callEnv = buildStepEnv(this, modelEnv, fields, modelName);
+          bindLog(callEnv, this);
+          if (trainBlock.params[0]) callEnv.define(trainBlock.params[0], batch);
+          if (trainBlock.params[1]) callEnv.define(trainBlock.params[1], batchIdx);
+          const result = await runtime.evaluateProgram({ type: 'Program', body: trainBlock.body }, callEnv);
+          return result && result.__return ? result.value : result;
+        };
+      }
+
+      if (validateBlock) {
+        LangModel.prototype.validationStep = async function(batch, batchIdx) {
+          const callEnv = buildStepEnv(this, modelEnv, fields, modelName);
+          bindLog(callEnv, this);
+          if (validateBlock.params[0]) callEnv.define(validateBlock.params[0], batch);
+          if (validateBlock.params[1]) callEnv.define(validateBlock.params[1], batchIdx);
+          const result = await runtime.evaluateProgram({ type: 'Program', body: validateBlock.body }, callEnv);
+          return result && result.__return ? result.value : result;
+        };
+      }
+
+      if (optimizerBlock) {
+        LangModel.prototype.configureOptimizers = async function() {
+          const callEnv = buildStepEnv(this, modelEnv, fields, modelName);
+          const result = await runtime.evaluateProgram({ type: 'Program', body: optimizerBlock.body }, callEnv);
+          return result && result.__return ? result.value : result;
+        };
+      }
+
       const instance = new LangModel();
       for (const field of fields) {
         const value = await runtime.evaluateStatement(field, modelEnv);
@@ -280,9 +336,9 @@ export class TensorLangRuntime {
       }
       return instance;
     };
-    factory._langName = node.name;
-    declarationEnv.define(node.name, factory);
-    this.signatureRegistry.register(node.name, node.params.map(name => ({ name })));
+    factory._langName = modelName;
+    declarationEnv.define(modelName, factory);
+    this.signatureRegistry.register(modelName, node.params.map(name => ({ name })));
     return factory;
   }
 
@@ -313,6 +369,8 @@ export class TensorLangRuntime {
           throw new Error(`Index ${index} is out of bounds for dimension ${dim} with size ${value.shape[dim]}`);
         }
         value = value.select(dim, index);
+        // Return plain number for scalar (0-dim) result, like Python
+        if (value.ndim === 0) return value.item();
       }
     }
     return value;
@@ -400,6 +458,35 @@ function promoteScalars(left, right) {
   if (!isTensorValue(right)) right = fw.tensor(right, options);
   return [left, right];
 }
+
+function buildStepEnv(instance, modelEnv, fields, modelName) {
+  const callEnv = new Environment(modelEnv);
+  callEnv.define(modelName, instance);
+  for (const field of fields) {
+    if (field.type === 'Assign') callEnv.define(field.name, instance[field.name]);
+  }
+  return callEnv;
+}
+
+function bindLog(callEnv, instance) {
+  callEnv.define('log', (name, value, ...rest) => {
+    const named = rest.length > 0 && rest[rest.length - 1] && rest[rest.length - 1].__named ? rest.pop() : {};
+    delete named.__named;
+    let v = value;
+    if (v && typeof v === 'object' && typeof v.compute === 'function' && !(v instanceof Tensor)) {
+      v = v.compute();
+    }
+    const opts = {};
+    if (named.on_step !== undefined) opts.onStep = named.on_step;
+    if (named.on_epoch !== undefined) opts.onEpoch = named.on_epoch;
+    if (named.prog_bar !== undefined) opts.progBar = named.prog_bar;
+    if (named.reduce_fx !== undefined) opts.reduceFx = named.reduce_fx;
+    instance.log(name, v, opts);
+  });
+}
+
+/** @deprecated Use TeraRuntime instead */
+export const TensorLangRuntime = TeraRuntime;
 
 export class LangRuntimeError extends Error {
   constructor(message, line, column, cause) {

@@ -2,8 +2,17 @@ import * as fw from '../index.js';
 import * as ops from '../tensor/ops/ops.js';
 import { Tensor } from '../tensor/core/tensor.js';
 import { SymbolicTensor } from '../tracing/symbolic_tensor.js';
-import { CompiledProgramView, formatTrace, formatValue } from './format.js';
+import { CompiledProgramView, formatTrace, formatValue, formatValueCompact } from './format.js';
 import { printModule } from '../compiler/ir/graph/printer.js';
+import { DataLoader, TensorDataset } from '../data/index.js';
+import { loadCsv, CsvFrame } from './csv_frame.js';
+import { SGD, Adam, AdamW, StepLR, CosineAnnealingLR, ReduceLROnPlateau } from '../optim/index.js';
+import {
+  Trainer, EarlyStopping, ModelCheckpoint, ProgressCallback,
+  LearningRateMonitor, Timer, GradientAccumulationScheduler,
+  ConsoleLogger, CSVLogger,
+  Accuracy, Precision, Recall, F1Score, ConfusionMatrix, MetricCollection,
+} from '../lightning/index.js';
 
 const FACTORIES = [
   'tensor', 'zeros', 'ones', 'empty', 'full', 'randn', 'arange', 'eye', 'linspace', 'randperm',
@@ -41,7 +50,10 @@ export function installBuiltins(runtime, define) {
   for (const name of REDUCTIONS) {
     define(name, (input, ...args) => {
       const named = takeNamed(args);
-      return fw[name](input, named.axis ?? args[0], named.keep ?? false);
+      const axis = named.axis ?? args[0];
+      const keep = named.keep ?? false;
+      if (axis === undefined || axis === null) return fw[name](input);
+      return fw[name](input, axis, keep);
     });
   }
   for (const name of MODULES) define(name, (...args) => constructWithNamed(fw[name], args));
@@ -81,12 +93,20 @@ export function installBuiltins(runtime, define) {
     if (Array.isArray(value)) return value.length;
     if (typeof value === 'string') return value.length;
     if (value instanceof Tensor || value instanceof SymbolicTensor) return value.shape[0];
+    if (value && typeof value.length === 'number') return value.length;
     throw new Error('len() expects an array, string, or tensor');
   });
 
   define('shape', value => value.shape);
   define('dtype', value => value.dtype);
-  define('print', value => { runtime.output(formatValue(value)); return value; });
+  define('print', (...args) => {
+    const named = args.length > 0 && args[args.length - 1]?.__named ? args.pop() : null;
+    const sep = named?.sep ?? ' ';
+    const compact = args.length > 1;
+    const text = args.map(v => compact ? formatValueCompact(v) : formatValue(v)).join(sep);
+    runtime.output(text);
+    return args.length === 1 ? args[0] : undefined;
+  });
   define('trace', value => {
     const view = value?._isCompiled ? value._compiledView : value instanceof CompiledProgramView ? value : null;
     if (!view?.events) throw new Error('trace() expects a compiled program');
@@ -108,6 +128,151 @@ export function installBuiltins(runtime, define) {
   define('wasm', 'wasm');
   define('webgpu', 'webgpu');
   for (const dtype of ['f16', 'f32', 'f64', 'i32', 'i64', 'bool']) define(dtype, dtype);
+
+  define('TensorDataset', (...args) => new TensorDataset(...args));
+  define('DataLoader', (...args) => {
+    const named = takeNamed(args);
+    delete named.__named;
+    return new DataLoader(args[0], snakeNamedToCamel(named));
+  });
+
+  define('SGD', (...args) => constructOptimizer(SGD, args));
+  define('Adam', (...args) => constructOptimizer(Adam, args));
+  define('AdamW', (...args) => constructOptimizer(AdamW, args));
+
+  define('StepLR', (...args) => constructScheduler(StepLR, args, ['optimizer', 'stepSize', 'gamma']));
+  define('CosineAnnealingLR', (...args) => constructScheduler(CosineAnnealingLR, args, ['optimizer', 'tMax', 'etaMin']));
+  define('ReduceLROnPlateau', (...args) => {
+    const named = takeNamed(args);
+    delete named.__named;
+    return new ReduceLROnPlateau(args[0], snakeNamedToCamel(named));
+  });
+
+  define('Trainer', (...args) => {
+    const named = takeNamed(args);
+    delete named.__named;
+    return new Trainer(snakeNamedToCamel(named));
+  });
+
+  define('EarlyStopping', (...args) => constructWithSnakeCase(EarlyStopping, args));
+  define('ModelCheckpoint', (...args) => constructWithSnakeCase(ModelCheckpoint, args));
+  define('ProgressCallback', (...args) => constructWithSnakeCase(ProgressCallback, args));
+  define('LearningRateMonitor', (...args) => constructWithSnakeCase(LearningRateMonitor, args));
+  define('Timer', (...args) => constructWithSnakeCase(Timer, args));
+  define('GradientAccumulationScheduler', (...args) => constructWithSnakeCase(GradientAccumulationScheduler, args));
+
+  define('ConsoleLogger', (...args) => constructWithSnakeCase(ConsoleLogger, args));
+  define('CSVLogger', (...args) => constructWithSnakeCase(CSVLogger, args));
+
+  define('Accuracy', (...args) => constructWithSnakeCase(Accuracy, args));
+  define('Precision', (...args) => constructWithSnakeCase(Precision, args));
+  define('Recall', (...args) => constructWithSnakeCase(Recall, args));
+  define('F1Score', (...args) => constructWithSnakeCase(F1Score, args));
+  define('ConfusionMatrix', (...args) => constructWithSnakeCase(ConfusionMatrix, args));
+  define('MetricCollection', (...args) => constructWithSnakeCase(MetricCollection, args));
+
+  define('optim_config', (...args) => {
+    const named = takeNamed(args);
+    delete named.__named;
+    const optimizer = args[0] ?? named.optimizer;
+    if (!optimizer) throw new Error('optim_config() requires an optimizer');
+    const result = { optimizer };
+    const sched = named.lr_scheduler ?? named.lrScheduler;
+    if (sched) result.lrScheduler = sched;
+    return result;
+  });
+
+  define('load_csv', (...args) => {
+    const named = takeNamed(args);
+    delete named.__named;
+    const path = args[0];
+    if (typeof path !== 'string') throw new Error('load_csv() requires a file path string');
+    const sep = named.separator ?? named.sep ?? ',';
+    const frame = loadCsv(path, sep);
+    bindFrameMethods(frame, fw.tensor);
+    return frame;
+  });
+
+  define('encode', (...args) => {
+    const data = args[0];
+    if (data instanceof CsvFrame) {
+      if (data.numCols !== 1) throw new Error('encode() on a CsvFrame requires exactly 1 column. Use data.select("col") first.');
+      const { encoded, classes } = data.encode(0);
+      return [fw.tensor(encoded, { shape: [encoded.length] }), classes];
+    }
+    if (Array.isArray(data)) {
+      const classMap = new Map();
+      const classes = [];
+      const encoded = new Float32Array(data.length);
+      for (let i = 0; i < data.length; i++) {
+        const key = String(data[i]);
+        let idx = classMap.get(key);
+        if (idx === undefined) {
+          idx = classes.length;
+          classMap.set(key, idx);
+          classes.push(data[i]);
+        }
+        encoded[i] = idx;
+      }
+      return [fw.tensor(encoded, { shape: [encoded.length] }), classes];
+    }
+    throw new Error('encode() expects a CsvFrame or array');
+  });
+
+  define('decode', (...args) => {
+    const indices = args[0];
+    const classes = args[1];
+    if (!Array.isArray(classes)) throw new Error('decode() expects (indices, classes) — classes must be an array');
+    if (indices instanceof Tensor) {
+      const data = indices.data;
+      const result = [];
+      for (let i = 0; i < data.length; i++) {
+        const idx = Math.round(data[i]);
+        result.push(idx >= 0 && idx < classes.length ? classes[idx] : `<unknown:${idx}>`);
+      }
+      return result;
+    }
+    if (typeof indices === 'number') {
+      const idx = Math.round(indices);
+      return idx >= 0 && idx < classes.length ? classes[idx] : `<unknown:${idx}>`;
+    }
+    throw new Error('decode() expects a tensor or number as first argument');
+  });
+
+  define('normalize', (...args) => {
+    const t = args[0];
+    if (!(t instanceof Tensor)) throw new Error('normalize() expects a tensor');
+    const named = takeNamed(args);
+    delete named.__named;
+    const axis = named.axis ?? 0;
+    const mu = fw.mean(t, axis, true);
+    const diff = fw.sub(t, mu);
+    const variance = fw.mean(fw.mul(diff, diff), axis, true);
+    const std = fw.sqrt(fw.add(variance, fw.tensor(1e-8)));
+    return fw.div(diff, std);
+  });
+
+  define('train_test_split', (...args) => {
+    const named = takeNamed(args);
+    delete named.__named;
+    const data = args[0];
+    const ratio = named.test_size ?? named.ratio ?? 0.2;
+    if (data instanceof CsvFrame) {
+      const shuffled = data.shuffle();
+      const splitIdx = Math.round(shuffled.numRows * (1 - ratio));
+      const train = shuffled.slice(0, splitIdx);
+      const test = shuffled.slice(splitIdx);
+      bindFrameMethods(train, fw.tensor);
+      bindFrameMethods(test, fw.tensor);
+      return [train, test];
+    }
+    if (data instanceof Tensor) {
+      const n = data.shape[0];
+      const splitIdx = Math.round(n * (1 - ratio));
+      return [data.slice(0, 0, splitIdx), data.slice(0, splitIdx, n)];
+    }
+    throw new Error('train_test_split() expects a CsvFrame or tensor');
+  });
 }
 
 export function takeNamed(args) {
@@ -147,6 +312,82 @@ function promoteScalarArgs(args) {
   }
 }
 
+function snakeToCamel(name) {
+  return name.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+}
+
+function snakeNamedToCamel(named) {
+  const result = {};
+  for (const key of Object.keys(named)) {
+    result[snakeToCamel(key)] = named[key];
+  }
+  return result;
+}
+
+function constructWithSnakeCase(Type, args) {
+  const named = takeNamed(args);
+  delete named.__named;
+  const opts = snakeNamedToCamel(named);
+  if (args.length > 0) return new Type(...args, opts);
+  if (Object.keys(opts).length > 0) return new Type(opts);
+  return new Type();
+}
+
+function constructOptimizer(Type, args) {
+  const named = takeNamed(args);
+  delete named.__named;
+  const params = args[0];
+  if (!params) throw new Error(`${Type.name}() requires params as first argument`);
+  return new Type(params, snakeNamedToCamel(named));
+}
+
+function bindFrameMethods(frame, tensorFn) {
+  frame.to_tensor = (...cols) => frame.toTensor(tensorFn, ...cols);
+  frame.to_array = () => frame.toArray();
+  frame.encode = (col) => {
+    const { encoded, classes } = CsvFrame.prototype.encode.call(frame, col);
+    return [tensorFn(encoded, { shape: [encoded.length] }), classes];
+  };
+  const origSelect = frame.select.bind(frame);
+  frame.select = (...names) => {
+    const sub = origSelect(...names);
+    bindFrameMethods(sub, tensorFn);
+    return sub;
+  };
+  const origDrop = frame.drop.bind(frame);
+  frame.drop = (...names) => {
+    const sub = origDrop(...names);
+    bindFrameMethods(sub, tensorFn);
+    return sub;
+  };
+  const origShuffle = frame.shuffle.bind(frame);
+  frame.shuffle = () => {
+    const sub = origShuffle();
+    bindFrameMethods(sub, tensorFn);
+    return sub;
+  };
+  const origSlice = frame.slice.bind(frame);
+  frame.slice = (start, end) => {
+    const sub = origSlice(start, end);
+    bindFrameMethods(sub, tensorFn);
+    return sub;
+  };
+}
+
+function constructScheduler(Type, args, posNames) {
+  const named = takeNamed(args);
+  delete named.__named;
+  const merged = snakeNamedToCamel(named);
+  const positional = [];
+  for (let i = 0; i < posNames.length; i++) {
+    const name = posNames[i];
+    if (i < args.length) positional.push(args[i]);
+    else if (merged[name] !== undefined) positional.push(merged[name]);
+    else break;
+  }
+  return new Type(...positional);
+}
+
 const FACTORY_SIGNATURES = {
   tensor: [{ name: 'data' }, { name: 'opts', isOptional: true }],
   zeros: [{ name: 'shape' }, { name: 'opts', isOptional: true }],
@@ -181,6 +422,38 @@ const MODULE_SIGNATURES = {
   Softmax: [{ name: 'dim', defaultValue: '-1', isOptional: true }],
   LogSoftmax: [{ name: 'dim', defaultValue: '-1', isOptional: true }],
   Flatten: [{ name: 'startDim', defaultValue: '1', isOptional: true }, { name: 'endDim', defaultValue: '-1', isOptional: true }],
+};
+
+const TRAINING_SIGNATURES = {
+  TensorDataset: [{ name: '...tensors' }],
+  DataLoader: [{ name: 'dataset' }, { name: 'batch_size', defaultValue: '1', isOptional: true }, { name: 'shuffle', defaultValue: 'false', isOptional: true }, { name: 'drop_last', defaultValue: 'false', isOptional: true }],
+  SGD: [{ name: 'params' }, { name: 'lr', defaultValue: '0.01', isOptional: true }, { name: 'momentum', defaultValue: '0', isOptional: true }, { name: 'weight_decay', defaultValue: '0', isOptional: true }],
+  Adam: [{ name: 'params' }, { name: 'lr', defaultValue: '0.001', isOptional: true }, { name: 'betas', isOptional: true }, { name: 'weight_decay', defaultValue: '0', isOptional: true }],
+  AdamW: [{ name: 'params' }, { name: 'lr', defaultValue: '0.001', isOptional: true }, { name: 'betas', isOptional: true }, { name: 'weight_decay', defaultValue: '0.01', isOptional: true }],
+  StepLR: [{ name: 'optimizer' }, { name: 'step_size' }, { name: 'gamma', defaultValue: '0.1', isOptional: true }],
+  CosineAnnealingLR: [{ name: 'optimizer' }, { name: 't_max' }, { name: 'eta_min', defaultValue: '0', isOptional: true }],
+  ReduceLROnPlateau: [{ name: 'optimizer' }, { name: 'mode', defaultValue: '"min"', isOptional: true }, { name: 'patience', defaultValue: '10', isOptional: true }, { name: 'factor', defaultValue: '0.1', isOptional: true }],
+  Trainer: [{ name: 'max_epochs', defaultValue: '10', isOptional: true }, { name: 'accelerator', defaultValue: '"auto"', isOptional: true }, { name: 'callbacks', isOptional: true }, { name: 'logger', defaultValue: 'true', isOptional: true }],
+  EarlyStopping: [{ name: 'monitor' }, { name: 'patience', defaultValue: '3', isOptional: true }, { name: 'mode', defaultValue: '"min"', isOptional: true }],
+  ModelCheckpoint: [{ name: 'monitor', isOptional: true }, { name: 'save_top_k', defaultValue: '1', isOptional: true }, { name: 'mode', defaultValue: '"min"', isOptional: true }],
+  ProgressCallback: [],
+  LearningRateMonitor: [],
+  Timer: [],
+  GradientAccumulationScheduler: [{ name: 'scheduling' }],
+  ConsoleLogger: [],
+  CSVLogger: [{ name: 'save_dir', isOptional: true }, { name: 'name', isOptional: true }],
+  Accuracy: [{ name: 'task', defaultValue: '"binary"', isOptional: true }, { name: 'num_classes', isOptional: true }, { name: 'top_k', defaultValue: '1', isOptional: true }],
+  Precision: [{ name: 'task', defaultValue: '"binary"', isOptional: true }, { name: 'num_classes', isOptional: true }, { name: 'average', defaultValue: '"macro"', isOptional: true }],
+  Recall: [{ name: 'task', defaultValue: '"binary"', isOptional: true }, { name: 'num_classes', isOptional: true }, { name: 'average', defaultValue: '"macro"', isOptional: true }],
+  F1Score: [{ name: 'task', defaultValue: '"binary"', isOptional: true }, { name: 'num_classes', isOptional: true }, { name: 'average', defaultValue: '"macro"', isOptional: true }],
+  ConfusionMatrix: [{ name: 'num_classes' }],
+  MetricCollection: [{ name: '...metrics' }],
+  optim_config: [{ name: 'optimizer' }, { name: 'lr_scheduler', isOptional: true }],
+  load_csv: [{ name: 'path' }, { name: 'separator', defaultValue: '","', isOptional: true }],
+  encode: [{ name: 'data' }],
+  decode: [{ name: 'indices' }, { name: 'classes' }],
+  normalize: [{ name: 'tensor' }, { name: 'axis', defaultValue: '0', isOptional: true }],
+  train_test_split: [{ name: 'data' }, { name: 'test_size', defaultValue: '0.2', isOptional: true }],
 };
 
 const BUILTIN_SIGNATURES = {
@@ -228,4 +501,5 @@ export function installSignatures(registry) {
   for (const [name, params] of Object.entries(FACTORY_SIGNATURES)) registry.register(name, params);
   for (const [name, params] of Object.entries(MODULE_SIGNATURES)) registry.register(name, params);
   for (const [name, params] of Object.entries(BUILTIN_SIGNATURES)) registry.register(name, params);
+  for (const [name, params] of Object.entries(TRAINING_SIGNATURES)) registry.register(name, params);
 }

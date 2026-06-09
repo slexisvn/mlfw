@@ -1,6 +1,6 @@
 import * as ops from '../../tensor/ops/ops.js';
 import { full } from '../../tensor/factory/creation_ops.js';
-import { log_softmax } from './activation.js';
+import { tensor as fromArray } from '../../tensor/factory/from_ops.js';
 
 export function mse_loss(input, target, reduction = 'mean') {
   const diff = ops.sub(input, target);
@@ -8,28 +8,52 @@ export function mse_loss(input, target, reduction = 'mean') {
   return _reduce(sq, reduction);
 }
 
+function _logSoftmaxAutograd(input, dim) {
+  const maxVal = _dimMax(input, dim);
+  const shifted = ops.sub(input, maxVal);
+  const expShifted = ops.exp(shifted);
+  const sumExp = _dimSum(expShifted, dim);
+  const logSumExp = ops.log(sumExp);
+  return ops.sub(shifted, logSumExp);
+}
+
+function _dimMax(input, dim) {
+  const actualDim = dim < 0 ? input.ndim + dim : dim;
+  const maxT = ops.max(input, actualDim, true);
+  return maxT;
+}
+
+function _dimSum(input, dim) {
+  const actualDim = dim < 0 ? input.ndim + dim : dim;
+  return ops.sum(input, actualDim, true);
+}
+
+function _buildOneHot(batchSize, numClasses, target, dtype, device) {
+  const targetData = target._impl.storage.data;
+  const targetOffset = target._impl.storageOffset;
+  const oneHotData = new Float32Array(batchSize * numClasses);
+  for (let i = 0; i < batchSize; i++) {
+    oneHotData[i * numClasses + (targetData[targetOffset + i] | 0)] = 1;
+  }
+  return fromArray(oneHotData, { shape: [batchSize, numClasses], dtype, device });
+}
+
 export function nll_loss(input, target, reduction = 'mean') {
   const batchSize = input.shape[0];
-  const data = input._impl.storage.data;
-  const targetData = target._impl.storage.data;
-  const inputOffset = input._impl.storageOffset;
-  const targetOffset = target._impl.storageOffset;
   const numClasses = input.shape[1];
-
-  let total = 0;
-  for (let i = 0; i < batchSize; i++) {
-    const cls = targetData[targetOffset + i] | 0;
-    total -= data[inputOffset + i * numClasses + cls];
+  const oneHot = _buildOneHot(batchSize, numClasses, target, input.dtype, input.device);
+  const gathered = ops.mul(input, oneHot);
+  const totalNeg = ops.neg(ops.sum(gathered));
+  if (reduction === 'mean') {
+    const n = full(totalNeg.shape, batchSize, { dtype: input.dtype, device: input.device });
+    return ops.div(totalNeg, n);
   }
-
-  const { scalar } = require('../../tensor/factory/from_ops.js');
-  if (reduction === 'mean') return scalar(total / batchSize, { dtype: input.dtype, device: input.device });
-  if (reduction === 'sum') return scalar(total, { dtype: input.dtype, device: input.device });
-  throw new Error('nll_loss only supports mean/sum reduction with this implementation');
+  if (reduction === 'sum') return totalNeg;
+  throw new Error(`nll_loss: unknown reduction '${reduction}'`);
 }
 
 export function cross_entropy(input, target, reduction = 'mean') {
-  const logProbs = log_softmax(input, -1);
+  const logProbs = _logSoftmaxAutograd(input, -1);
   return nll_loss(logProbs, target, reduction);
 }
 

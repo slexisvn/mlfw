@@ -3,7 +3,7 @@ import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
 import { CPUTarget } from '../../../src/backend/target.js';
-import { TensorLangRuntime } from '../../../src/cli/runtime.js';
+import { TeraRuntime } from '../../../src/cli/runtime.js';
 
 function compile(func, opts = {}) {
   return compileGraph(func, CPUTarget(), opts);
@@ -319,9 +319,9 @@ describe('Transformer — IR builder', () => {
   });
 });
 
-describe('Transformer — tensor lang compile', () => {
-  it('compiles a transformer-style model defined in tensor lang', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+describe('Transformer — Tera compile', () => {
+  it('compiles a transformer-style model defined in Tera', async () => {
+    const runtime = new TeraRuntime({ output: () => {} });
     const result = await runtime.execute(`
       model TransformerBlock(d):
         wq = Linear(d, d)
@@ -352,7 +352,7 @@ describe('Transformer — tensor lang compile', () => {
   });
 
   it('compiles stacked transformer blocks via custom model chaining', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     const result = await runtime.execute(`
       model FFN(d):
         fc1 = Linear(d, d * 2)

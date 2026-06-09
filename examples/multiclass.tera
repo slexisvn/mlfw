@@ -1,0 +1,63 @@
+# Multi-class Classification — Iris (3 species)
+#
+# Loss: CrossEntropyLoss
+# Optimizer: Adam
+# Metric: Accuracy
+# Architecture: 3-layer MLP
+# Data: iris.csv (150 samples, 4 features, 3 classes)
+
+# --- Data ---
+data = load_csv("examples/iris.csv")
+print(data)
+
+x = normalize(data.drop("species").to_tensor())
+y, classes = data.select("species").encode("species")
+print("Classes:", classes)
+
+loader = DataLoader(TensorDataset(x, y), batch_size=60)
+
+# --- Model ---
+model IrisNet():
+  fc1 = Linear(4, 64)
+  fc2 = Linear(64, 3)
+  loss_fn = CrossEntropyLoss()
+  acc = Accuracy(task="multiclass", num_classes=3)
+
+  forward x:
+    h = relu(fc1(x))
+    return fc2(h)
+
+  train batch:
+    x, y = batch
+    logits = IrisNet(x)
+    loss = loss_fn(logits, y)
+    acc(logits, y)
+    log("loss", loss, prog_bar=true)
+    log("acc", acc, prog_bar=true)
+    return loss
+
+  optimizer:
+    return Adam(IrisNet.parameters(), lr=0.01)
+
+# --- Train ---
+net = IrisNet()
+print(net)
+
+trainer = Trainer(max_epochs=500, logger=false, enable_checkpointing=false, enable_progress=false)
+trainer.fit(net, loader)
+
+# --- Inference ---
+logits = net(x)
+preds = argmax(logits, axis=1)
+
+print("=== Iris Classification ===")
+print("Predictions:", decode(preds, classes))
+print("Actual:     ", decode(y, classes))
+
+correct = 0
+i = 0
+while i < len(x):
+  if preds[i] == y[i]:
+    correct = correct + 1
+  i = i + 1
+print("Accuracy:", correct, "/", len(x))

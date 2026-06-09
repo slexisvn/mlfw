@@ -59,6 +59,14 @@ const _BUILDER_ALIASES = {
   conv2d: (b, args, s) => b.conv(args[0], args[1], s?.strides ?? [1,1], s?.padding ?? [[0,0],[0,0]], { dilation: s?.dilation ?? [1,1], groups: s?.groups ?? 1 }),
   pool2d: (b, args, s) => b.pool2d(args[0], s?.pool_type ?? 'max', s?.kernel_size ?? [2,2], s?.strides ?? [2,2], s?.padding ?? [[0,0],[0,0]]),
   embedding: (b, args) => b.embedding(args[0], args[1]),
+  argmax: (b, args, s) => b.argmax(args[0], s?.dim ?? 0, s?.keepdim ?? false),
+  argmin: (b, args, s) => b.argmin(args[0], s?.dim ?? 0, s?.keepdim ?? false),
+  eq: (b, args) => b.compare(args[0], args[1], 'eq'),
+  ne: (b, args) => b.compare(args[0], args[1], 'ne'),
+  lt: (b, args) => b.compare(args[0], args[1], 'lt'),
+  le: (b, args) => b.compare(args[0], args[1], 'le'),
+  gt: (b, args) => b.compare(args[0], args[1], 'gt'),
+  ge: (b, args) => b.compare(args[0], args[1], 'ge'),
 };
 
 let _nextFuncId = 0;

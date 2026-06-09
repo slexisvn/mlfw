@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { completeInput, shutdownTerminal, tokenHook } from '../../src/cli/repl.js';
-import { TensorLangRuntime } from '../../src/cli/runtime.js';
+import { TeraRuntime } from '../../src/cli/runtime.js';
 
-describe('Tensor Lang completion', () => {
+describe('Tera completion', () => {
   it('completes builtins and preserves the expression prefix', () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     expect(completeInput('rel', runtime)).toBe('relu');
     const randResult = completeInput('x = rand', runtime);
     expect(Array.isArray(randResult)).toBe(true);
@@ -15,13 +15,13 @@ describe('Tensor Lang completion', () => {
   });
 
   it('includes names created during the session', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     await runtime.execute('weights = randn([2, 2])');
     expect(completeInput('wei', runtime)).toBe('weights');
   });
 
   it('completes user-defined functions and model names', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     await runtime.execute('fn my_normalize(x): return x / sum(x)');
     expect(completeInput('my_n', runtime)).toBe('my_normalize');
 
@@ -32,7 +32,7 @@ describe('Tensor Lang completion', () => {
   });
 
   it('completes properties of custom model instances', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     await runtime.execute(`model MLP(h):
   fc1 = Linear(2, h)
   fc2 = Linear(h, 1)
@@ -48,13 +48,13 @@ describe('Tensor Lang completion', () => {
   });
 
   it('completes properties of builtin modules', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     await runtime.execute('layer = Linear(4, 2)');
     expect(completeInput('layer.w', runtime)).toBe('layer.weight');
   });
 
   it('suggests names from the current buffer before execution', () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     const buffer = `model MLP(h):
   fc1 = Linear(2, h)
   fc2 = Linear(h, 1)
@@ -71,7 +71,7 @@ describe('Tensor Lang completion', () => {
   });
 
   it('returns alternatives for ambiguous input', () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     const result = completeInput('help ', runtime);
     expect(result).toBe('help ');
 
@@ -100,7 +100,7 @@ describe('Tensor Lang completion', () => {
   });
 
   it('hints param name matching typed prefix inside function calls', () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     expect(completeInput('compile(mod', runtime)).toBe('compile(model');
     expect(completeInput('compile(m, in', runtime)).toBe('compile(m, input');
     expect(completeInput('compile(m, tar', runtime)).toBe('compile(m, target=cpu');
@@ -110,7 +110,7 @@ describe('Tensor Lang completion', () => {
   });
 
   it('does not hint when typing values or no prefix', () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     expect(completeInput('compile(', runtime)).toBe('compile(');
     expect(completeInput('compile(m, ', runtime)).toBe('compile(m, ');
     expect(completeInput('compile(m, input=2', runtime)).toBe('compile(m, input=2');
@@ -118,7 +118,7 @@ describe('Tensor Lang completion', () => {
   });
 
   it('hints param names for user-defined functions', async () => {
-    const runtime = new TensorLangRuntime({ output: () => {} });
+    const runtime = new TeraRuntime({ output: () => {} });
     await runtime.execute('fn apply(weights, data, scale): return weights');
     expect(completeInput('apply(wei', runtime)).toBe('apply(weights');
     expect(completeInput('apply(w, da', runtime)).toBe('apply(w, data');

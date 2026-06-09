@@ -1,6 +1,6 @@
-# Tensor Lang Grammar
+# Tera Grammar
 
-Tensor Lang is a Python-inspired scripting language for tensor computation and neural network definition. It features indentation-based blocks, first-class tensor operations, and a built-in neural network module system.
+Tera (Tensor Algebra) is a Python-inspired scripting language for tensor computation and neural network definition. It features indentation-based blocks, first-class tensor operations, and a built-in neural network module system.
 
 ## Lexical Structure
 
@@ -24,7 +24,8 @@ Identifier  →  [A-Za-z_][A-Za-z0-9_]*
 **Keywords** (recognized contextually as identifiers):
 
 ```
-model  forward  fn  if  elif  else  for  in  while
+model  forward  train  validate  optimizer
+fn  if  elif  else  for  in  while
 break  continue  return  not  and  or  true  false  null
 ```
 
@@ -50,7 +51,7 @@ String  →  '"' <chars> '"'
 
 ### Indentation
 
-Tensor Lang uses Python-style indentation for blocks:
+Tera uses Python-style indentation for blocks:
 
 - After `:` followed by a newline, increased indentation opens a block (`INDENT` token)
 - Decreased indentation closes a block (`DEDENT` token)
@@ -69,6 +70,7 @@ Program  →  Statement*
 ```ebnf
 Statement  →  Assignment
            |  CompoundAssign
+           |  DestructureAssign
            |  IfStmt
            |  ForStmt
            |  WhileStmt
@@ -79,10 +81,11 @@ Statement  →  Assignment
            |  'return' Expression?
            |  ExpressionStmt
 
-Assignment      →  IDENTIFIER '=' Expression
-CompoundAssign  →  IDENTIFIER CompoundOp Expression
-CompoundOp      →  '+=' | '-=' | '*=' | '/=' | '**=' | '@='
-ExpressionStmt  →  Expression
+Assignment         →  IDENTIFIER '=' Expression
+CompoundAssign     →  IDENTIFIER CompoundOp Expression
+CompoundOp         →  '+=' | '-=' | '*=' | '/=' | '**=' | '@='
+DestructureAssign  →  IDENTIFIER ',' IDENTIFIER (',' IDENTIFIER)* '=' Expression
+ExpressionStmt     →  Expression
 ```
 
 ### Control Flow
@@ -115,20 +118,26 @@ Functions capture their declaring scope (closures). The return value is the last
 ### Models
 
 ```ebnf
-ModelDecl    →  'model' IDENTIFIER ParamList ':' ModelBody
-ModelBody    →  NEWLINE INDENT (Assignment | ForwardDecl)+ DEDENT
-ForwardDecl  →  'forward' ForwardParams? ':' Block
-ForwardParams → IDENTIFIER (',' IDENTIFIER)*
+ModelDecl      →  'model' IDENTIFIER ParamList ':' ModelBody
+ModelBody      →  NEWLINE INDENT (Assignment | ForwardDecl | TrainDecl | ValidateDecl | OptimizerDecl)+ DEDENT
+ForwardDecl    →  'forward' ForwardParams? ':' Block
+TrainDecl      →  'train' ForwardParams? ':' Block
+ValidateDecl   →  'validate' ForwardParams? ':' Block
+OptimizerDecl  →  'optimizer' ':' Block
+ForwardParams  →  IDENTIFIER (',' IDENTIFIER)*
 ```
 
 A model must contain exactly one `forward` block. Assignments in the model body define submodule fields.
 
-Note: unlike `fn`, `forward` does **not** use parentheses around its parameters. Parameters are listed directly, separated by commas:
+Note: unlike `fn`, `forward`, `train`, `validate` do **not** use parentheses around their parameters. Parameters are listed directly, separated by commas:
 
 ```python
 forward x:           # single parameter
 forward x, y, z:     # multiple parameters
 forward:             # no parameters
+train batch:         # training step receives batch
+validate batch:      # validation step receives batch
+optimizer:           # no parameters, configures optimizers
 ```
 
 ### Expressions
@@ -325,6 +334,144 @@ print(value)                   compile(model, ...)
 trace(compiled)                graph(compiled)
 Sequential(...modules)
 ```
+
+## Training Syntax
+
+Models with `train`, `validate`, and/or `optimizer` blocks automatically extend `LightningModule` and support the Trainer API. Models without these blocks extend the base `Module` as before.
+
+### Destructuring Assignment
+
+```python
+x, y = batch           # unpack array into named variables
+a, b, c = [1, 2, 3]    # works with any array
+```
+
+### Training Blocks
+
+Inside `train` and `validate` blocks, the **model name** acts as a self-reference to the current instance. Calling `ModelName(x)` invokes forward, and `ModelName.parameters()` returns the model's parameters. No `self` or `this` keyword needed.
+
+```python
+model Classifier(num_classes):
+  features = Sequential(Linear(784, 128), ReLU())
+  head = Linear(128, num_classes)
+  loss_fn = CrossEntropyLoss()
+  acc = Accuracy(task="multiclass", num_classes=num_classes)
+
+  forward x:
+    return head(features(x))
+
+  train batch:
+    x, y = batch
+    logits = Classifier(x)          # calls forward
+    loss = loss_fn(logits, y)
+    acc(logits, y)
+    log("train_loss", loss, prog_bar=true)
+    log("train_acc", acc)           # metrics auto-compute
+    return loss
+
+  validate batch:
+    x, y = batch
+    logits = Classifier(x)
+    loss = loss_fn(logits, y)
+    log("val_loss", loss)
+
+  optimizer:
+    opt = Adam(Classifier.parameters(), lr=0.001)
+    sched = CosineAnnealingLR(opt, t_max=10)
+    return optim_config(opt, lr_scheduler=sched)
+```
+
+### log() Function
+
+Available inside `train` and `validate` blocks. Logs metrics to the training framework.
+
+```python
+log(name, value, on_step=null, on_epoch=null, prog_bar=false, reduce_fx="mean")
+```
+
+When `value` is a Metric instance (e.g. `Accuracy`), `.compute()` is called automatically.
+
+### Optimizers
+
+| Function | Signature |
+|----------|-----------|
+| `SGD` | `SGD(params, lr=0.01, momentum=0, weight_decay=0)` |
+| `Adam` | `Adam(params, lr=0.001, betas=[0.9, 0.999], weight_decay=0)` |
+| `AdamW` | `AdamW(params, lr=0.001, betas=[0.9, 0.999], weight_decay=0.01)` |
+
+### LR Schedulers
+
+| Function | Signature |
+|----------|-----------|
+| `StepLR` | `StepLR(optimizer, step_size, gamma=0.1)` |
+| `CosineAnnealingLR` | `CosineAnnealingLR(optimizer, t_max, eta_min=0)` |
+| `ReduceLROnPlateau` | `ReduceLROnPlateau(optimizer, mode="min", patience=10, factor=0.1)` |
+
+### Trainer
+
+```python
+trainer = Trainer(
+  max_epochs=20,
+  accelerator="cpu",
+  logger=true,
+  enable_checkpointing=true,
+  enable_progress=true,
+  callbacks=[...],
+  fast_dev_run=false,
+  gradient_clip_val=null,
+  log_every_n_steps=50
+)
+trainer.fit(model, train_loader, val_loader)
+trainer.validate(model, val_loader)
+trainer.test(model, test_loader)
+trainer.predict(model, data_loader)
+```
+
+### Data Loading
+
+```python
+dataset = TensorDataset(x_tensor, y_tensor)
+loader = DataLoader(dataset, batch_size=32, shuffle=true, drop_last=false)
+```
+
+### Callbacks
+
+| Function | Signature |
+|----------|-----------|
+| `EarlyStopping` | `EarlyStopping(monitor, patience=3, mode="min")` |
+| `ModelCheckpoint` | `ModelCheckpoint(monitor, save_top_k=1, mode="min")` |
+| `ProgressCallback` | `ProgressCallback()` |
+| `LearningRateMonitor` | `LearningRateMonitor()` |
+| `Timer` | `Timer()` |
+| `GradientAccumulationScheduler` | `GradientAccumulationScheduler(scheduling)` |
+
+### Loggers
+
+```python
+ConsoleLogger()
+CSVLogger(save_dir="logs", name="experiment")
+```
+
+### Metrics
+
+| Function | Signature |
+|----------|-----------|
+| `Accuracy` | `Accuracy(task="binary", num_classes=null, top_k=1)` |
+| `Precision` | `Precision(task="binary", num_classes=null, average="macro")` |
+| `Recall` | `Recall(task="binary", num_classes=null, average="macro")` |
+| `F1Score` | `F1Score(task="binary", num_classes=null, average="macro")` |
+| `ConfusionMatrix` | `ConfusionMatrix(num_classes)` |
+| `MetricCollection` | `MetricCollection(...metrics)` |
+
+### optim_config Helper
+
+Returns optimizer configuration for use in `optimizer` blocks:
+
+```python
+optim_config(optimizer, lr_scheduler=scheduler)
+```
+
+All training builtins accept `snake_case` named arguments which are automatically converted to `camelCase` for the underlying JavaScript constructors.
 
 ## Neural Network Modules
 
@@ -660,6 +807,56 @@ model TextClassifier(vocab, d, num_classes):
     h = ln1(x + attn)
     h = ln2(h + ff2(gelu(ff1(h))))
     return head(mean(h, axis=0, keep=true))
+```
+
+### Training with Trainer API
+
+Full training pipeline using the Trainer:
+
+```python
+model Classifier(num_classes):
+  fc1 = Linear(784, 256)
+  fc2 = Linear(256, num_classes)
+  loss_fn = CrossEntropyLoss()
+  acc = Accuracy(task="multiclass", num_classes=num_classes)
+
+  forward x:
+    return fc2(relu(fc1(x)))
+
+  train batch:
+    x, y = batch
+    logits = Classifier(x)
+    loss = loss_fn(logits, y)
+    acc(logits, y)
+    log("train_loss", loss, prog_bar=true)
+    log("train_acc", acc)
+    return loss
+
+  validate batch:
+    x, y = batch
+    logits = Classifier(x)
+    loss = loss_fn(logits, y)
+    log("val_loss", loss)
+
+  optimizer:
+    opt = Adam(Classifier.parameters(), lr=0.001)
+    sched = CosineAnnealingLR(opt, t_max=20)
+    return optim_config(opt, lr_scheduler=sched)
+
+x_train = randn([200, 784])
+y_train = randn([200])
+train_loader = DataLoader(TensorDataset(x_train, y_train), batch_size=32, shuffle=true)
+
+net = Classifier(10)
+trainer = Trainer(
+  max_epochs=20,
+  callbacks=[
+    EarlyStopping(monitor="val_loss", patience=3),
+    ModelCheckpoint(monitor="val_loss"),
+    LearningRateMonitor()
+  ]
+)
+trainer.fit(net, train_loader)
 ```
 
 ### Autograd and Training Loop

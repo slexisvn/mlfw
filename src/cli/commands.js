@@ -1,16 +1,16 @@
 import fs from 'node:fs';
 import { parse } from './parser.js';
-import { TensorLangRuntime } from './runtime.js';
+import { TeraRuntime } from './runtime.js';
 import { formatValue } from './format.js';
 import { formatDiagnostic } from './diagnostics.js';
 import { startRepl } from './repl.js';
 
 export const CLI_USAGE = `Usage:
-  mlfw                 Start the Tensor Lang REPL
-  mlfw repl            Start the Tensor Lang REPL
-  mlfw run <file>      Execute a Tensor Lang file
-  mlfw check <file>    Parse a Tensor Lang file without executing it
-  mlfw <file>          Execute a Tensor Lang file`;
+  mlfw                 Start the Tera REPL
+  mlfw repl            Start the Tera REPL
+  mlfw run <file>      Execute a Tera file (.tera)
+  mlfw check <file>    Parse a Tera file without executing
+  mlfw <file>          Execute a Tera file`;
 
 export async function runCli(args, {
   stdout = console.log,
@@ -63,7 +63,7 @@ export async function executeSource(source, {
 } = {}) {
   if (stripExit) source = source.replace(/(?:^|\n)\s*(?:exit|quit)\s*;?\s*$/u, '');
   try {
-    const result = await new TensorLangRuntime({ output: stdout }).execute(source);
+    const result = await new TeraRuntime({ output: stdout }).execute(source);
     const text = formatValue(result);
     if (text) stdout(text);
     return 0;
