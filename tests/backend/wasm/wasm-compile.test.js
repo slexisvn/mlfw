@@ -1581,4 +1581,49 @@ describe('WASM codegen — layer_norm affine values', () => {
       for (let i = 0; i < D; i++) expect(out[r * D + i]).toBeCloseTo(expected[i], 3);
     }
   });
+
+  it('layer_norm with affine matches reference even without scheduling', () => {
+    const D = 16;
+    const x = new TensorType([4, D], ScalarType.F32);
+    const w = new TensorType([D], ScalarType.F32);
+    const bb = new TensorType([D], ScalarType.F32);
+    const o = new TensorType([4, D], ScalarType.F32);
+    const func = buildFunction('w_ln_affine_ns', [x, w, bb], [o], (b, a) => {
+      b.returnOp([b.layernorm(a[0], a[1], a[2], -1, 1e-5).getResult(0)]);
+    });
+    const result = compileNoSchedule(func);
+    expect(result.succeeded).toBe(true);
+    const xd = new Float32Array(4 * D);
+    for (let i = 0; i < 4 * D; i++) xd[i] = (i % 7) * 0.3 - 1;
+    const wd = new Float32Array(D); for (let i = 0; i < D; i++) wd[i] = 1 + i * 0.05;
+    const bd = new Float32Array(D); for (let i = 0; i < D; i++) bd[i] = i * 0.01;
+    const out = new Float32Array(4 * D);
+    result.run('w_ln_affine_ns', xd, wd, bd, out);
+    const ref = (row) => {
+      const m = row.reduce((s, v) => s + v, 0) / D;
+      const v = row.reduce((s, val) => s + (val - m) ** 2, 0) / D;
+      return row.map((val, i) => ((val - m) / Math.sqrt(v + 1e-5)) * wd[i] + bd[i]);
+    };
+    for (let r = 0; r < 4; r++) {
+      const expected = ref(Array.from(xd.slice(r * D, r * D + D)));
+      for (let i = 0; i < D; i++) expect(out[r * D + i]).toBeCloseTo(expected[i], 3);
+    }
+  });
+});
+
+describe('WASM codegen — rsqrt extern', () => {
+  it('rsqrt computes 1/sqrt(x), not sqrt(x)', () => {
+    const x = new TensorType([4], ScalarType.F32);
+    const o = new TensorType([4], ScalarType.F32);
+    const func = buildFunction('w_rsqrt', [x], [o], (b, a) => {
+      b.returnOp([b._inferAndBuild('rsqrt', [a[0]]).getResult(0)]);
+    });
+    const result = compileNoSchedule(func);
+    expect(result.succeeded).toBe(true);
+    const xd = new Float32Array([1, 4, 16, 0.25]);
+    const out = new Float32Array(4);
+    result.run('w_rsqrt', xd, out);
+    const expected = [1, 0.5, 0.25, 2];
+    for (let i = 0; i < 4; i++) expect(out[i]).toBeCloseTo(expected[i], 4);
+  });
 });

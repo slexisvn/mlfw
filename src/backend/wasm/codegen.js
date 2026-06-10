@@ -903,6 +903,14 @@ export class WasmCodegen {
       ? (this._numPrefix(node.dtype) === 'i32' ? 'f32' : this._numPrefix(node.dtype))
       : 'f32';
 
+    if (node.externName === 'rsqrt') {
+      this._emit('(' + prefix + '.const 1)');
+      for (const arg of node.args) this._emitCoercedTo(arg, prefix);
+      this._emit(prefix + '.sqrt');
+      this._emit(prefix + '.div');
+      return;
+    }
+
     for (const arg of node.args) this._emitCoercedTo(arg, prefix);
 
     switch (node.externName) {
@@ -912,11 +920,6 @@ export class WasmCodegen {
       case 'floor': this._emit(prefix + '.floor'); break;
       case 'min': this._emit(prefix + '.min'); break;
       case 'max': this._emit(prefix + '.max'); break;
-      case 'rsqrt':
-        this._emit(prefix + '.sqrt');
-        this._emit('(' + prefix + '.const 1)');
-        this._emit(prefix + '.div');
-        break;
       default:
         if (this._imports.has(node.externName)) {
           this._emit(`call $math_${node.externName}`);

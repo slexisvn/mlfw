@@ -69,9 +69,6 @@ const BOTH2 = [
   { name: 'matmul_i32', dtype: 'i32', lo: -10, hi: 10, shapes: [[5, 6], [6, 4]], fwd: (x, y) => matmul(x, y) },
   { name: 'add_f64', dtype: 'f64', shapes: [[6, 8], [6, 8]], fwd: (x, y) => add(x, y) },
   { name: 'matmul_f64', dtype: 'f64', shapes: [[5, 6], [6, 4]], fwd: (x, y) => matmul(x, y) },
-];
-
-const CPU_ONLY = [
   { name: 'layernorm_affine', shapes: [[4, 16], [16], [16]], fwd: (x, w, b) => layer_norm(x, [16], w, b, 1e-5) },
 ];
 
@@ -79,8 +76,5 @@ describe('differential nn: eager vs compiled (conv/pool/norm/dtype)', () => {
   for (const prog of [...BOTH, ...BOTH2]) {
     it(`${prog.name} on cpu matches eager`, () => checkDiff(prog, CPUTarget));
     it(`${prog.name} on wasm matches eager`, () => checkDiff(prog, WasmTarget));
-  }
-  for (const prog of CPU_ONLY) {
-    it(`${prog.name} on cpu matches eager`, () => checkDiff(prog, CPUTarget));
   }
 });
