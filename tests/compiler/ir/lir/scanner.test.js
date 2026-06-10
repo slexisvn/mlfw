@@ -145,6 +145,28 @@ describe('scanMetadata — memoryLayout', () => {
     expect(meta.memoryLayout.totalBytes).toBeGreaterThanOrEqual(32);
   });
 
+  it('allocates zero bytes for an empty (numel=0) buffer, not 65536', () => {
+    const empty = buf('e', [0]);
+    const b = buf('b', [4]);
+    const loop = simpleLoop(empty, b);
+    const pf = makePrimFunc('test', ['p0', 'p1'], loop, new Map([['p0', empty], ['p1', b]]));
+    const meta = scanMetadata(pf, WasmTarget());
+    const offE = meta.memoryLayout.bufferOffsets.get('e');
+    const offB = meta.memoryLayout.bufferOffsets.get('b');
+    expect(offB - offE).toBeLessThan(65536);
+  });
+
+  it('allocates 65536 for a dynamic (numel=-1) buffer', () => {
+    const dyn = buf('d', [-1]);
+    const b = buf('b', [4]);
+    const loop = simpleLoop(dyn, b);
+    const pf = makePrimFunc('test', ['p0', 'p1'], loop, new Map([['p0', dyn], ['p1', b]]));
+    const meta = scanMetadata(pf, WasmTarget());
+    const offD = meta.memoryLayout.bufferOffsets.get('d');
+    const offB = meta.memoryLayout.bufferOffsets.get('b');
+    expect(offB - offD).toBeGreaterThanOrEqual(65536);
+  });
+
   it('includes temp buffers found in tree', () => {
     const a = buf('a', [4]);
     const tmp = buf('tmp', [4]);

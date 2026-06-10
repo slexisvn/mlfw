@@ -1,0 +1,5994 @@
+{
+  "version": 1,
+  "keywords": [
+    "and",
+    "break",
+    "continue",
+    "elif",
+    "else",
+    "false",
+    "fn",
+    "for",
+    "forward",
+    "if",
+    "in",
+    "model",
+    "not",
+    "null",
+    "optimizer",
+    "or",
+    "return",
+    "train",
+    "true",
+    "validate",
+    "while"
+  ],
+  "keywordGroups": {
+    "declaration": [
+      "fn",
+      "forward",
+      "model",
+      "optimizer",
+      "train",
+      "validate"
+    ],
+    "control": [
+      "break",
+      "continue",
+      "elif",
+      "else",
+      "for",
+      "if",
+      "in",
+      "return",
+      "while"
+    ],
+    "operator": [
+      "and",
+      "not",
+      "or"
+    ],
+    "constant": [
+      "false",
+      "null",
+      "true"
+    ],
+    "other": []
+  },
+  "operators": {
+    "threeChar": [
+      "**="
+    ],
+    "twoChar": [
+      "**",
+      "==",
+      "!=",
+      "<=",
+      ">=",
+      "+=",
+      "-=",
+      "*=",
+      "/=",
+      "@="
+    ],
+    "oneChar": [
+      "(",
+      ")",
+      "[",
+      "]",
+      ",",
+      ".",
+      "=",
+      ":",
+      "+",
+      "-",
+      "*",
+      "/",
+      "@",
+      "<",
+      ">"
+    ]
+  },
+  "pseudoTypes": {
+    "Tensor": [
+      {
+        "name": "shape",
+        "description": "Return the shape (size-per-dimension array) of the tensor.",
+        "signature": {
+          "params": [],
+          "display": "shape()"
+        }
+      },
+      {
+        "name": "dtype",
+        "description": "Return the dtype string of the tensor.",
+        "signature": {
+          "params": [],
+          "display": "dtype()"
+        }
+      },
+      {
+        "name": "reshape",
+        "description": "Return a view with the given shape; total element count must match.",
+        "signature": {
+          "params": [
+            {
+              "name": "shape",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "reshape(shape)"
+        }
+      },
+      {
+        "name": "transpose",
+        "description": "Swap two dimensions.",
+        "signature": {
+          "params": [
+            {
+              "name": "dim0",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            },
+            {
+              "name": "dim1",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "transpose(dim0, dim1)"
+        }
+      },
+      {
+        "name": "permute",
+        "description": "Reorder all dimensions per the permutation list.",
+        "signature": {
+          "params": [
+            {
+              "name": "dims",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "permute(dims)"
+        }
+      },
+      {
+        "name": "expand",
+        "description": "Broadcast to a larger shape without copying memory.",
+        "signature": {
+          "params": [
+            {
+              "name": "shape",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "expand(shape)"
+        }
+      },
+      {
+        "name": "slice",
+        "description": "View a contiguous slice along the given dimension.",
+        "signature": {
+          "params": [
+            {
+              "name": "dim",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            },
+            {
+              "name": "start",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            },
+            {
+              "name": "end",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            },
+            {
+              "name": "step",
+              "optional": true,
+              "rest": false,
+              "defaultValue": "1"
+            }
+          ],
+          "display": "slice(dim, start, end, step=1)"
+        }
+      },
+      {
+        "name": "unsqueeze",
+        "description": "Insert a size-1 dimension at the given position.",
+        "signature": {
+          "params": [
+            {
+              "name": "dim",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "unsqueeze(dim)"
+        }
+      },
+      {
+        "name": "squeeze",
+        "description": "Remove a size-1 dimension at the given position.",
+        "signature": {
+          "params": [
+            {
+              "name": "dim",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "squeeze(dim)"
+        }
+      },
+      {
+        "name": "narrow",
+        "description": "Take `length` elements starting at `start` along `dim`.",
+        "signature": {
+          "params": [
+            {
+              "name": "dim",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            },
+            {
+              "name": "start",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            },
+            {
+              "name": "length",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "narrow(dim, start, length)"
+        }
+      },
+      {
+        "name": "select",
+        "description": "Select a single index along `dim`, removing that dimension.",
+        "signature": {
+          "params": [
+            {
+              "name": "dim",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            },
+            {
+              "name": "index",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "select(dim, index)"
+        }
+      },
+      {
+        "name": "contiguous",
+        "description": "Return a row-major contiguous copy of the tensor.",
+        "signature": {
+          "params": [],
+          "display": "contiguous()"
+        }
+      },
+      {
+        "name": "detach",
+        "description": "Return a copy detached from the autograd graph.",
+        "signature": {
+          "params": [],
+          "display": "detach()"
+        }
+      },
+      {
+        "name": "backward",
+        "description": "Propagate gradients backward from this tensor.",
+        "signature": {
+          "params": [
+            {
+              "name": "gradient",
+              "optional": true,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "backward(gradient?)"
+        }
+      },
+      {
+        "name": "requires_grad",
+        "description": "Enable or disable gradient tracking on this tensor.",
+        "signature": {
+          "params": [
+            {
+              "name": "flag",
+              "optional": true,
+              "rest": false,
+              "defaultValue": "true"
+            }
+          ],
+          "display": "requires_grad(flag=true)"
+        }
+      },
+      {
+        "name": "grad",
+        "description": "Read the accumulated gradient of this leaf tensor.",
+        "signature": {
+          "params": [],
+          "display": "grad()"
+        }
+      }
+    ],
+    "CsvFrame": [
+      {
+        "name": "select",
+        "description": "Return a new frame containing only the named columns.",
+        "signature": {
+          "params": [
+            {
+              "name": "columns",
+              "optional": true,
+              "rest": true,
+              "defaultValue": null
+            }
+          ],
+          "display": "select(...columns)"
+        }
+      },
+      {
+        "name": "shuffle",
+        "description": "Return a new frame with rows randomly permuted.",
+        "signature": {
+          "params": [],
+          "display": "shuffle()"
+        }
+      },
+      {
+        "name": "slice",
+        "description": "Return a new frame with rows in range `[start, end)`.",
+        "signature": {
+          "params": [
+            {
+              "name": "start",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            },
+            {
+              "name": "end",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "slice(start, end)"
+        }
+      },
+      {
+        "name": "encode",
+        "description": "Encode a categorical column to integer ids.",
+        "signature": {
+          "params": [
+            {
+              "name": "column",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "encode(column)"
+        }
+      }
+    ],
+    "Model": [
+      {
+        "name": "parameters",
+        "description": "Return the model's learnable parameter tensors.",
+        "signature": {
+          "params": [],
+          "display": "parameters()"
+        }
+      },
+      {
+        "name": "forward",
+        "description": "Run the model's forward block. Calling the model directly is equivalent.",
+        "signature": {
+          "params": [
+            {
+              "name": "*args",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "forward(*args)"
+        }
+      },
+      {
+        "name": "train",
+        "description": "Set training mode.",
+        "signature": {
+          "params": [],
+          "display": "train()"
+        }
+      },
+      {
+        "name": "eval",
+        "description": "Set evaluation mode.",
+        "signature": {
+          "params": [],
+          "display": "eval()"
+        }
+      },
+      {
+        "name": "state_dict",
+        "description": "Return a serializable dict of parameter tensors.",
+        "signature": {
+          "params": [],
+          "display": "state_dict()"
+        }
+      },
+      {
+        "name": "load_state_dict",
+        "description": "Load parameter tensors from a previously saved dict.",
+        "signature": {
+          "params": [
+            {
+              "name": "state",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "load_state_dict(state)"
+        }
+      }
+    ]
+  },
+  "builtins": [
+    {
+      "name": "abs",
+      "kind": "function",
+      "description": "Element-wise absolute value.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "x",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "abs(x)"
+      },
+      "methods": []
+    },
+    {
+      "name": "Accuracy",
+      "kind": "metric",
+      "description": "Classification accuracy metric. Configure with `task` (`binary`/`multiclass`/`multilabel`).",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "task",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "\"binary\""
+          },
+          {
+            "name": "num_classes",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "top_k",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "1"
+          }
+        ],
+        "display": "Accuracy(task=\"binary\", num_classes?, top_k=1)"
+      },
+      "methods": [
+        {
+          "name": "update",
+          "description": "Update internal state with a new batch of predictions and ground-truth labels.",
+          "signature": {
+            "params": [
+              {
+                "name": "preds",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "target",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "update(preds, target)"
+          }
+        },
+        {
+          "name": "compute",
+          "description": "Compute the current metric value across all accumulated updates.",
+          "signature": {
+            "params": [],
+            "display": "compute()"
+          }
+        },
+        {
+          "name": "reset",
+          "description": "Clear accumulated state so the next epoch starts fresh.",
+          "signature": {
+            "params": [],
+            "display": "reset()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Adam",
+      "kind": "optimizer",
+      "description": "Adaptive moment estimation optimizer. Standard default for deep learning.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "params",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "lr",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0.001"
+          },
+          {
+            "name": "betas",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "[0.9, 0.999]"
+          },
+          {
+            "name": "weight_decay",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0"
+          }
+        ],
+        "display": "Adam(params, lr=0.001, betas=[0.9, 0.999], weight_decay=0)"
+      },
+      "methods": [
+        {
+          "name": "step",
+          "description": "Apply one optimizer update step using the current gradients.",
+          "signature": {
+            "params": [],
+            "display": "step()"
+          }
+        },
+        {
+          "name": "zero_grad",
+          "description": "Zero out gradients of all tracked parameters before the next backward pass.",
+          "signature": {
+            "params": [],
+            "display": "zero_grad()"
+          }
+        },
+        {
+          "name": "param_groups",
+          "description": "Return the list of parameter groups (each with its own learning rate, weight decay, etc.).",
+          "signature": {
+            "params": [],
+            "display": "param_groups()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "AdamW",
+      "kind": "optimizer",
+      "description": "Adam variant with decoupled weight decay — preferred for transformer-style models.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "params",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "lr",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0.001"
+          },
+          {
+            "name": "betas",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "[0.9, 0.999]"
+          },
+          {
+            "name": "weight_decay",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0.01"
+          }
+        ],
+        "display": "AdamW(params, lr=0.001, betas=[0.9, 0.999], weight_decay=0.01)"
+      },
+      "methods": [
+        {
+          "name": "step",
+          "description": "Apply one optimizer update step using the current gradients.",
+          "signature": {
+            "params": [],
+            "display": "step()"
+          }
+        },
+        {
+          "name": "zero_grad",
+          "description": "Zero out gradients of all tracked parameters before the next backward pass.",
+          "signature": {
+            "params": [],
+            "display": "zero_grad()"
+          }
+        },
+        {
+          "name": "param_groups",
+          "description": "Return the list of parameter groups (each with its own learning rate, weight decay, etc.).",
+          "signature": {
+            "params": [],
+            "display": "param_groups()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "AdaptiveAvgPool2d",
+      "kind": "module",
+      "description": "2-D adaptive average pooling to a target output spatial shape, independent of input size.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "output_size",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "AdaptiveAvgPool2d(output_size)"
+      },
+      "methods": [
+        {
+          "name": "forward",
+          "description": "Run the module's forward pass. Calling the module directly (`module(x)`) is equivalent to `module.forward(x)`.",
+          "signature": {
+            "params": [
+              {
+                "name": "x",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "forward(x)"
+          }
+        },
+        {
+          "name": "parameters",
+          "description": "Return an array of the module's learnable parameter tensors.",
+          "signature": {
+            "params": [],
+            "display": "parameters()"
+          }
+        },
+        {
+          "name": "train",
+          "description": "Set the module to training mode (enables Dropout, updates BatchNorm running stats).",
+          "signature": {
+            "params": [],
+            "display": "train()"
+          }
+        },
+        {
+          "name": "eval",
+          "description": "Set the module to evaluation mode (disables Dropout, freezes BatchNorm stats).",
+          "signature": {
+            "params": [],
+            "display": "eval()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "add",
+      "kind": "function",
+      "description": "Element-wise addition. Broadcasts shapes; scalars are auto-promoted.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "a",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "b",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "add(a, b)"
+      },
+      "methods": []
+    },
+    {
+      "name": "arange",
+      "kind": "factory",
+      "description": "Half-open integer range tensor `[start, end)` with optional `step`.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "start",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "end",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "step",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "opts",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "arange(start, end?, step?, opts?)"
+      },
+      "methods": []
+    },
+    {
+      "name": "argmax",
+      "kind": "reduction",
+      "description": "Index of the maximum along `axis`.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "input",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "axis",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "keep",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "argmax(input, axis?, keep?)"
+      },
+      "methods": []
+    },
+    {
+      "name": "argmin",
+      "kind": "reduction",
+      "description": "Index of the minimum along `axis`.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "input",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "axis",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "keep",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "argmin(input, axis?, keep?)"
+      },
+      "methods": []
+    },
+    {
+      "name": "AvgPool2d",
+      "kind": "module",
+      "description": "2-D average pooling. Downsamples spatial dimensions averaging per window.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "kernel",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "stride",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "padding",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0"
+          }
+        ],
+        "display": "AvgPool2d(kernel, stride?, padding=0)"
+      },
+      "methods": [
+        {
+          "name": "forward",
+          "description": "Run the module's forward pass. Calling the module directly (`module(x)`) is equivalent to `module.forward(x)`.",
+          "signature": {
+            "params": [
+              {
+                "name": "x",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "forward(x)"
+          }
+        },
+        {
+          "name": "parameters",
+          "description": "Return an array of the module's learnable parameter tensors.",
+          "signature": {
+            "params": [],
+            "display": "parameters()"
+          }
+        },
+        {
+          "name": "train",
+          "description": "Set the module to training mode (enables Dropout, updates BatchNorm running stats).",
+          "signature": {
+            "params": [],
+            "display": "train()"
+          }
+        },
+        {
+          "name": "eval",
+          "description": "Set the module to evaluation mode (disables Dropout, freezes BatchNorm stats).",
+          "signature": {
+            "params": [],
+            "display": "eval()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "backward",
+      "kind": "autograd",
+      "description": "Propagate gradients backward from the given tensor.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "gradient",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "backward(tensor, gradient?)"
+      },
+      "methods": []
+    },
+    {
+      "name": "BatchNorm1d",
+      "kind": "module",
+      "description": "Batch normalization for 2-D `(N, C)` or 3-D `(N, C, L)` inputs.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "features",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "eps",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "1e-5"
+          },
+          {
+            "name": "momentum",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0.1"
+          }
+        ],
+        "display": "BatchNorm1d(features, eps=1e-5, momentum=0.1)"
+      },
+      "methods": [
+        {
+          "name": "forward",
+          "description": "Run the module's forward pass. Calling the module directly (`module(x)`) is equivalent to `module.forward(x)`.",
+          "signature": {
+            "params": [
+              {
+                "name": "x",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "forward(x)"
+          }
+        },
+        {
+          "name": "parameters",
+          "description": "Return an array of the module's learnable parameter tensors.",
+          "signature": {
+            "params": [],
+            "display": "parameters()"
+          }
+        },
+        {
+          "name": "train",
+          "description": "Set the module to training mode (enables Dropout, updates BatchNorm running stats).",
+          "signature": {
+            "params": [],
+            "display": "train()"
+          }
+        },
+        {
+          "name": "eval",
+          "description": "Set the module to evaluation mode (disables Dropout, freezes BatchNorm stats).",
+          "signature": {
+            "params": [],
+            "display": "eval()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "BatchNorm2d",
+      "kind": "module",
+      "description": "Batch normalization for 4-D `(N, C, H, W)` image-like inputs.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "features",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "eps",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "1e-5"
+          },
+          {
+            "name": "momentum",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0.1"
+          }
+        ],
+        "display": "BatchNorm2d(features, eps=1e-5, momentum=0.1)"
+      },
+      "methods": [
+        {
+          "name": "forward",
+          "description": "Run the module's forward pass. Calling the module directly (`module(x)`) is equivalent to `module.forward(x)`.",
+          "signature": {
+            "params": [
+              {
+                "name": "x",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "forward(x)"
+          }
+        },
+        {
+          "name": "parameters",
+          "description": "Return an array of the module's learnable parameter tensors.",
+          "signature": {
+            "params": [],
+            "display": "parameters()"
+          }
+        },
+        {
+          "name": "train",
+          "description": "Set the module to training mode (enables Dropout, updates BatchNorm running stats).",
+          "signature": {
+            "params": [],
+            "display": "train()"
+          }
+        },
+        {
+          "name": "eval",
+          "description": "Set the module to evaluation mode (disables Dropout, freezes BatchNorm stats).",
+          "signature": {
+            "params": [],
+            "display": "eval()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "BCELoss",
+      "kind": "module",
+      "description": "Binary cross-entropy loss for sigmoid-activated outputs.",
+      "returns": null,
+      "signature": {
+        "params": [],
+        "display": "BCELoss()"
+      },
+      "methods": [
+        {
+          "name": "forward",
+          "description": "Run the module's forward pass. Calling the module directly (`module(x)`) is equivalent to `module.forward(x)`.",
+          "signature": {
+            "params": [
+              {
+                "name": "x",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "forward(x)"
+          }
+        },
+        {
+          "name": "parameters",
+          "description": "Return an array of the module's learnable parameter tensors.",
+          "signature": {
+            "params": [],
+            "display": "parameters()"
+          }
+        },
+        {
+          "name": "train",
+          "description": "Set the module to training mode (enables Dropout, updates BatchNorm running stats).",
+          "signature": {
+            "params": [],
+            "display": "train()"
+          }
+        },
+        {
+          "name": "eval",
+          "description": "Set the module to evaluation mode (disables Dropout, freezes BatchNorm stats).",
+          "signature": {
+            "params": [],
+            "display": "eval()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "bool",
+      "kind": "dtype",
+      "description": "Boolean dtype.\n\n---\n\n# Kind templates\n\nThese `## @kind/<kind>` entries define methods auto-injected into every builtin\nof the matching kind. A builtin's own `###` methods take precedence; templates\nadd the rest.",
+      "returns": null,
+      "signature": null,
+      "methods": []
+    },
+    {
+      "name": "cat",
+      "kind": "function",
+      "description": "Concatenate tensors along an existing dimension.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "tensors",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "axis",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0"
+          }
+        ],
+        "display": "cat(tensors, axis=0)"
+      },
+      "methods": []
+    },
+    {
+      "name": "ceil",
+      "kind": "function",
+      "description": "Element-wise ceiling (round toward `+∞`).",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "x",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "ceil(x)"
+      },
+      "methods": []
+    },
+    {
+      "name": "clone",
+      "kind": "function",
+      "description": "Return a deep copy of the tensor (separate storage).",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "clone(tensor)"
+      },
+      "methods": []
+    },
+    {
+      "name": "compile",
+      "kind": "utility",
+      "description": "Compile a model or function to a backend (`cpu`/`gpu`/`wasm`/`webgpu`). `input` provides an example for shape inference and tuning.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "model",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "input",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "target",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "cpu"
+          },
+          {
+            "name": "fusion",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "scheduling",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "debug",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "compile(model, input?, target=cpu, fusion?, scheduling?, debug?)"
+      },
+      "methods": []
+    },
+    {
+      "name": "ConfusionMatrix",
+      "kind": "metric",
+      "description": "Cumulative confusion matrix over `num_classes`.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "num_classes",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "ConfusionMatrix(num_classes)"
+      },
+      "methods": [
+        {
+          "name": "update",
+          "description": "Update internal state with a new batch of predictions and ground-truth labels.",
+          "signature": {
+            "params": [
+              {
+                "name": "preds",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "target",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "update(preds, target)"
+          }
+        },
+        {
+          "name": "compute",
+          "description": "Compute the current metric value across all accumulated updates.",
+          "signature": {
+            "params": [],
+            "display": "compute()"
+          }
+        },
+        {
+          "name": "reset",
+          "description": "Clear accumulated state so the next epoch starts fresh.",
+          "signature": {
+            "params": [],
+            "display": "reset()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "ConsoleLogger",
+      "kind": "logger",
+      "description": "Send log records to stdout.",
+      "returns": null,
+      "signature": {
+        "params": [],
+        "display": "ConsoleLogger()"
+      },
+      "methods": [
+        {
+          "name": "log",
+          "description": "Record a scalar metric value.",
+          "signature": {
+            "params": [
+              {
+                "name": "name",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "value",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "step",
+                "optional": true,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "log(name, value, step?)"
+          }
+        },
+        {
+          "name": "flush",
+          "description": "Flush buffered records to the underlying sink.",
+          "signature": {
+            "params": [],
+            "display": "flush()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "contiguous",
+      "kind": "shape",
+      "description": "Return a tensor with row-major contiguous memory layout. Materializes views.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "contiguous(tensor)"
+      },
+      "methods": []
+    },
+    {
+      "name": "Conv1d",
+      "kind": "module",
+      "description": "1-D convolution over an input with `in` channels, producing `out` channels.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "in",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "out",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "kernel",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "stride",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "1"
+          },
+          {
+            "name": "padding",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0"
+          }
+        ],
+        "display": "Conv1d(in, out, kernel, stride=1, padding=0)"
+      },
+      "methods": [
+        {
+          "name": "forward",
+          "description": "Run the module's forward pass. Calling the module directly (`module(x)`) is equivalent to `module.forward(x)`.",
+          "signature": {
+            "params": [
+              {
+                "name": "x",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "forward(x)"
+          }
+        },
+        {
+          "name": "parameters",
+          "description": "Return an array of the module's learnable parameter tensors.",
+          "signature": {
+            "params": [],
+            "display": "parameters()"
+          }
+        },
+        {
+          "name": "train",
+          "description": "Set the module to training mode (enables Dropout, updates BatchNorm running stats).",
+          "signature": {
+            "params": [],
+            "display": "train()"
+          }
+        },
+        {
+          "name": "eval",
+          "description": "Set the module to evaluation mode (disables Dropout, freezes BatchNorm stats).",
+          "signature": {
+            "params": [],
+            "display": "eval()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Conv2d",
+      "kind": "module",
+      "description": "2-D convolution. Use `padding` to preserve spatial dimensions.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "in",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "out",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "kernel",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "stride",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "1"
+          },
+          {
+            "name": "padding",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0"
+          }
+        ],
+        "display": "Conv2d(in, out, kernel, stride=1, padding=0)"
+      },
+      "methods": [
+        {
+          "name": "forward",
+          "description": "Run the module's forward pass. Calling the module directly (`module(x)`) is equivalent to `module.forward(x)`.",
+          "signature": {
+            "params": [
+              {
+                "name": "x",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "forward(x)"
+          }
+        },
+        {
+          "name": "parameters",
+          "description": "Return an array of the module's learnable parameter tensors.",
+          "signature": {
+            "params": [],
+            "display": "parameters()"
+          }
+        },
+        {
+          "name": "train",
+          "description": "Set the module to training mode (enables Dropout, updates BatchNorm running stats).",
+          "signature": {
+            "params": [],
+            "display": "train()"
+          }
+        },
+        {
+          "name": "eval",
+          "description": "Set the module to evaluation mode (disables Dropout, freezes BatchNorm stats).",
+          "signature": {
+            "params": [],
+            "display": "eval()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "cos",
+      "kind": "function",
+      "description": "Element-wise cosine.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "x",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "cos(x)"
+      },
+      "methods": []
+    },
+    {
+      "name": "CosineAnnealingLR",
+      "kind": "scheduler",
+      "description": "Cosine schedule decaying the learning rate to `eta_min` over `t_max` epochs.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "optimizer",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "t_max",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "eta_min",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0"
+          }
+        ],
+        "display": "CosineAnnealingLR(optimizer, t_max, eta_min=0)"
+      },
+      "methods": [
+        {
+          "name": "step",
+          "description": "Advance the scheduler by one step. Some schedulers (`ReduceLROnPlateau`) require a monitored metric.",
+          "signature": {
+            "params": [
+              {
+                "name": "metric",
+                "optional": true,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "step(metric?)"
+          }
+        },
+        {
+          "name": "get_last_lr",
+          "description": "Return the most recently computed learning rate(s).",
+          "signature": {
+            "params": [],
+            "display": "get_last_lr()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "cpu",
+      "kind": "device",
+      "description": "CPU execution backend.",
+      "returns": null,
+      "signature": null,
+      "methods": []
+    },
+    {
+      "name": "CrossEntropyLoss",
+      "kind": "module",
+      "description": "Combined LogSoftmax + NLL loss — standard for multiclass classification.",
+      "returns": null,
+      "signature": {
+        "params": [],
+        "display": "CrossEntropyLoss()"
+      },
+      "methods": [
+        {
+          "name": "forward",
+          "description": "Run the module's forward pass. Calling the module directly (`module(x)`) is equivalent to `module.forward(x)`.",
+          "signature": {
+            "params": [
+              {
+                "name": "x",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "forward(x)"
+          }
+        },
+        {
+          "name": "parameters",
+          "description": "Return an array of the module's learnable parameter tensors.",
+          "signature": {
+            "params": [],
+            "display": "parameters()"
+          }
+        },
+        {
+          "name": "train",
+          "description": "Set the module to training mode (enables Dropout, updates BatchNorm running stats).",
+          "signature": {
+            "params": [],
+            "display": "train()"
+          }
+        },
+        {
+          "name": "eval",
+          "description": "Set the module to evaluation mode (disables Dropout, freezes BatchNorm stats).",
+          "signature": {
+            "params": [],
+            "display": "eval()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "CSVLogger",
+      "kind": "logger",
+      "description": "Append log records to a CSV file under `save_dir/name`.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "save_dir",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "\"logs\""
+          },
+          {
+            "name": "name",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "\"experiment\""
+          }
+        ],
+        "display": "CSVLogger(save_dir=\"logs\", name=\"experiment\")"
+      },
+      "methods": [
+        {
+          "name": "log",
+          "description": "Record a scalar metric value.",
+          "signature": {
+            "params": [
+              {
+                "name": "name",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "value",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "step",
+                "optional": true,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "log(name, value, step?)"
+          }
+        },
+        {
+          "name": "flush",
+          "description": "Flush buffered records to the underlying sink.",
+          "signature": {
+            "params": [],
+            "display": "flush()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "DataLoader",
+      "kind": "data",
+      "description": "Iterate over a dataset in mini-batches with optional shuffling and `drop_last`.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "dataset",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "batch_size",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "32"
+          },
+          {
+            "name": "shuffle",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "true"
+          },
+          {
+            "name": "drop_last",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "false"
+          }
+        ],
+        "display": "DataLoader(dataset, batch_size=32, shuffle=true, drop_last=false)"
+      },
+      "methods": [
+        {
+          "name": "len",
+          "description": "Number of batches per epoch.",
+          "signature": {
+            "params": [],
+            "display": "len()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "decode",
+      "kind": "data",
+      "description": "Map integer ids back to original class labels using the `classes` array from `encode`.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "indices",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "classes",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "decode(indices, classes)"
+      },
+      "methods": []
+    },
+    {
+      "name": "detach",
+      "kind": "autograd",
+      "description": "Detach a tensor from the autograd graph; the result shares storage but has no gradient.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "detach(tensor)"
+      },
+      "methods": []
+    },
+    {
+      "name": "div",
+      "kind": "function",
+      "description": "Element-wise division.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "a",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "b",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "div(a, b)"
+      },
+      "methods": []
+    },
+    {
+      "name": "dot",
+      "kind": "function",
+      "description": "Inner (dot) product of two 1-D tensors.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "a",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "b",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "dot(a, b)"
+      },
+      "methods": []
+    },
+    {
+      "name": "Dropout",
+      "kind": "module",
+      "description": "Randomly zero elements with probability `p` during training. Inactive at eval time.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "p",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0.5"
+          }
+        ],
+        "display": "Dropout(p=0.5)"
+      },
+      "methods": [
+        {
+          "name": "forward",
+          "description": "Run the module's forward pass. Calling the module directly (`module(x)`) is equivalent to `module.forward(x)`.",
+          "signature": {
+            "params": [
+              {
+                "name": "x",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "forward(x)"
+          }
+        },
+        {
+          "name": "parameters",
+          "description": "Return an array of the module's learnable parameter tensors.",
+          "signature": {
+            "params": [],
+            "display": "parameters()"
+          }
+        },
+        {
+          "name": "train",
+          "description": "Set the module to training mode (enables Dropout, updates BatchNorm running stats).",
+          "signature": {
+            "params": [],
+            "display": "train()"
+          }
+        },
+        {
+          "name": "eval",
+          "description": "Set the module to evaluation mode (disables Dropout, freezes BatchNorm stats).",
+          "signature": {
+            "params": [],
+            "display": "eval()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "dtype",
+      "kind": "utility",
+      "description": "Return the dtype string of a tensor.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "dtype(tensor)"
+      },
+      "methods": []
+    },
+    {
+      "name": "EarlyStopping",
+      "kind": "callback",
+      "description": "Stop training when a monitored metric stops improving for `patience` evaluations.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "monitor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "patience",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "3"
+          },
+          {
+            "name": "mode",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "\"min\""
+          }
+        ],
+        "display": "EarlyStopping(monitor, patience=3, mode=\"min\")"
+      },
+      "methods": [
+        {
+          "name": "on_train_start",
+          "description": "Hook fired at the start of training.",
+          "signature": {
+            "params": [
+              {
+                "name": "trainer",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "model",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "on_train_start(trainer, model)"
+          }
+        },
+        {
+          "name": "on_train_end",
+          "description": "Hook fired at the end of training.",
+          "signature": {
+            "params": [
+              {
+                "name": "trainer",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "model",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "on_train_end(trainer, model)"
+          }
+        },
+        {
+          "name": "on_epoch_start",
+          "description": "Hook fired at the start of each epoch.",
+          "signature": {
+            "params": [
+              {
+                "name": "trainer",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "model",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "on_epoch_start(trainer, model)"
+          }
+        },
+        {
+          "name": "on_epoch_end",
+          "description": "Hook fired at the end of each epoch.",
+          "signature": {
+            "params": [
+              {
+                "name": "trainer",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "model",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "on_epoch_end(trainer, model)"
+          }
+        }
+      ]
+    },
+    {
+      "name": "ELU",
+      "kind": "module",
+      "description": "Exponential Linear Unit activation. Smooth alternative to ReLU for negative values.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "alpha",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "1.0"
+          }
+        ],
+        "display": "ELU(alpha=1.0)"
+      },
+      "methods": [
+        {
+          "name": "forward",
+          "description": "Run the module's forward pass. Calling the module directly (`module(x)`) is equivalent to `module.forward(x)`.",
+          "signature": {
+            "params": [
+              {
+                "name": "x",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "forward(x)"
+          }
+        },
+        {
+          "name": "parameters",
+          "description": "Return an array of the module's learnable parameter tensors.",
+          "signature": {
+            "params": [],
+            "display": "parameters()"
+          }
+        },
+        {
+          "name": "train",
+          "description": "Set the module to training mode (enables Dropout, updates BatchNorm running stats).",
+          "signature": {
+            "params": [],
+            "display": "train()"
+          }
+        },
+        {
+          "name": "eval",
+          "description": "Set the module to evaluation mode (disables Dropout, freezes BatchNorm stats).",
+          "signature": {
+            "params": [],
+            "display": "eval()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Embedding",
+      "kind": "module",
+      "description": "Lookup table mapping integer ids to dense vectors of size `dim`.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "num",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "dim",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "padding_idx",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "Embedding(num, dim, padding_idx?)"
+      },
+      "methods": [
+        {
+          "name": "forward",
+          "description": "Run the module's forward pass. Calling the module directly (`module(x)`) is equivalent to `module.forward(x)`.",
+          "signature": {
+            "params": [
+              {
+                "name": "x",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "forward(x)"
+          }
+        },
+        {
+          "name": "parameters",
+          "description": "Return an array of the module's learnable parameter tensors.",
+          "signature": {
+            "params": [],
+            "display": "parameters()"
+          }
+        },
+        {
+          "name": "train",
+          "description": "Set the module to training mode (enables Dropout, updates BatchNorm running stats).",
+          "signature": {
+            "params": [],
+            "display": "train()"
+          }
+        },
+        {
+          "name": "eval",
+          "description": "Set the module to evaluation mode (disables Dropout, freezes BatchNorm stats).",
+          "signature": {
+            "params": [],
+            "display": "eval()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "empty",
+      "kind": "factory",
+      "description": "Allocate a tensor of the given shape without initializing its contents.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "shape",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "opts",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "empty(shape, opts?)"
+      },
+      "methods": []
+    },
+    {
+      "name": "emptyLike",
+      "kind": "factory",
+      "description": "Uninitialized tensor with the same shape, dtype, and device as the input.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "emptyLike(tensor)"
+      },
+      "methods": []
+    },
+    {
+      "name": "encode",
+      "kind": "data",
+      "description": "Encode categorical values to integer ids. Returns `[encoded_tensor, classes_array]`.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "data",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "encode(data)"
+      },
+      "methods": []
+    },
+    {
+      "name": "eq",
+      "kind": "function",
+      "description": "Element-wise equality comparison. Returns a boolean tensor.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "a",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "b",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "eq(a, b)"
+      },
+      "methods": []
+    },
+    {
+      "name": "exp",
+      "kind": "function",
+      "description": "Element-wise natural exponential `e^x`.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "x",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "exp(x)"
+      },
+      "methods": []
+    },
+    {
+      "name": "expand",
+      "kind": "shape",
+      "description": "Broadcast a tensor to a larger shape without copying memory.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "shape",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "expand(tensor, shape)"
+      },
+      "methods": []
+    },
+    {
+      "name": "eye",
+      "kind": "factory",
+      "description": "Identity matrix of size `n × m` (or `n × n` if `m` omitted).",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "n",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "m",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "opts",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "eye(n, m?, opts?)"
+      },
+      "methods": []
+    },
+    {
+      "name": "f16",
+      "kind": "dtype",
+      "description": "Half-precision floating-point dtype (16-bit).",
+      "returns": null,
+      "signature": null,
+      "methods": []
+    },
+    {
+      "name": "F1Score",
+      "kind": "metric",
+      "description": "Harmonic mean of precision and recall.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "task",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "\"binary\""
+          },
+          {
+            "name": "num_classes",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "average",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "\"macro\""
+          }
+        ],
+        "display": "F1Score(task=\"binary\", num_classes?, average=\"macro\")"
+      },
+      "methods": [
+        {
+          "name": "update",
+          "description": "Update internal state with a new batch of predictions and ground-truth labels.",
+          "signature": {
+            "params": [
+              {
+                "name": "preds",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "target",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "update(preds, target)"
+          }
+        },
+        {
+          "name": "compute",
+          "description": "Compute the current metric value across all accumulated updates.",
+          "signature": {
+            "params": [],
+            "display": "compute()"
+          }
+        },
+        {
+          "name": "reset",
+          "description": "Clear accumulated state so the next epoch starts fresh.",
+          "signature": {
+            "params": [],
+            "display": "reset()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "f32",
+      "kind": "dtype",
+      "description": "Single-precision floating-point dtype (32-bit). Default for most models.",
+      "returns": null,
+      "signature": null,
+      "methods": []
+    },
+    {
+      "name": "f64",
+      "kind": "dtype",
+      "description": "Double-precision floating-point dtype (64-bit).",
+      "returns": null,
+      "signature": null,
+      "methods": []
+    },
+    {
+      "name": "Flatten",
+      "kind": "module",
+      "description": "Flatten a contiguous range of dimensions into one. Typical use: between conv blocks and a Linear head.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "start_dim",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "1"
+          },
+          {
+            "name": "end_dim",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "-1"
+          }
+        ],
+        "display": "Flatten(start_dim=1, end_dim=-1)"
+      },
+      "methods": [
+        {
+          "name": "forward",
+          "description": "Run the module's forward pass. Calling the module directly (`module(x)`) is equivalent to `module.forward(x)`.",
+          "signature": {
+            "params": [
+              {
+                "name": "x",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "forward(x)"
+          }
+        },
+        {
+          "name": "parameters",
+          "description": "Return an array of the module's learnable parameter tensors.",
+          "signature": {
+            "params": [],
+            "display": "parameters()"
+          }
+        },
+        {
+          "name": "train",
+          "description": "Set the module to training mode (enables Dropout, updates BatchNorm running stats).",
+          "signature": {
+            "params": [],
+            "display": "train()"
+          }
+        },
+        {
+          "name": "eval",
+          "description": "Set the module to evaluation mode (disables Dropout, freezes BatchNorm stats).",
+          "signature": {
+            "params": [],
+            "display": "eval()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "floor",
+      "kind": "function",
+      "description": "Element-wise floor (round toward `-∞`).",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "x",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "floor(x)"
+      },
+      "methods": []
+    },
+    {
+      "name": "full",
+      "kind": "factory",
+      "description": "Create a tensor of the given shape filled with the provided scalar `value`.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "shape",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "value",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "opts",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "full(shape, value, opts?)"
+      },
+      "methods": []
+    },
+    {
+      "name": "fullLike",
+      "kind": "factory",
+      "description": "Constant-filled tensor matching the shape, dtype, and device of the input.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "value",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "fullLike(tensor, value)"
+      },
+      "methods": []
+    },
+    {
+      "name": "ge",
+      "kind": "function",
+      "description": "Element-wise greater-than-or-equal comparison.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "a",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "b",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "ge(a, b)"
+      },
+      "methods": []
+    },
+    {
+      "name": "gelu",
+      "kind": "function",
+      "description": "Gaussian Error Linear Unit activation.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "x",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "gelu(x)"
+      },
+      "methods": []
+    },
+    {
+      "name": "GELU",
+      "kind": "module",
+      "description": "Gaussian Error Linear Unit activation module — commonly used in Transformers.",
+      "returns": null,
+      "signature": {
+        "params": [],
+        "display": "GELU()"
+      },
+      "methods": [
+        {
+          "name": "forward",
+          "description": "Run the module's forward pass. Calling the module directly (`module(x)`) is equivalent to `module.forward(x)`.",
+          "signature": {
+            "params": [
+              {
+                "name": "x",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "forward(x)"
+          }
+        },
+        {
+          "name": "parameters",
+          "description": "Return an array of the module's learnable parameter tensors.",
+          "signature": {
+            "params": [],
+            "display": "parameters()"
+          }
+        },
+        {
+          "name": "train",
+          "description": "Set the module to training mode (enables Dropout, updates BatchNorm running stats).",
+          "signature": {
+            "params": [],
+            "display": "train()"
+          }
+        },
+        {
+          "name": "eval",
+          "description": "Set the module to evaluation mode (disables Dropout, freezes BatchNorm stats).",
+          "signature": {
+            "params": [],
+            "display": "eval()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "gpu",
+      "kind": "device",
+      "description": "Native GPU execution backend (CUDA-like).",
+      "returns": null,
+      "signature": null,
+      "methods": []
+    },
+    {
+      "name": "grad",
+      "kind": "autograd",
+      "description": "Read the accumulated gradient of a leaf tensor.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "grad(tensor)"
+      },
+      "methods": []
+    },
+    {
+      "name": "GradientAccumulationScheduler",
+      "kind": "callback",
+      "description": "Accumulate gradients across multiple steps before updating, on a per-epoch schedule.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "scheduling",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "GradientAccumulationScheduler(scheduling)"
+      },
+      "methods": [
+        {
+          "name": "on_train_start",
+          "description": "Hook fired at the start of training.",
+          "signature": {
+            "params": [
+              {
+                "name": "trainer",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "model",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "on_train_start(trainer, model)"
+          }
+        },
+        {
+          "name": "on_train_end",
+          "description": "Hook fired at the end of training.",
+          "signature": {
+            "params": [
+              {
+                "name": "trainer",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "model",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "on_train_end(trainer, model)"
+          }
+        },
+        {
+          "name": "on_epoch_start",
+          "description": "Hook fired at the start of each epoch.",
+          "signature": {
+            "params": [
+              {
+                "name": "trainer",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "model",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "on_epoch_start(trainer, model)"
+          }
+        },
+        {
+          "name": "on_epoch_end",
+          "description": "Hook fired at the end of each epoch.",
+          "signature": {
+            "params": [
+              {
+                "name": "trainer",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "model",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "on_epoch_end(trainer, model)"
+          }
+        }
+      ]
+    },
+    {
+      "name": "graph",
+      "kind": "utility",
+      "description": "Print the IR graph of a compiled program or module.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "compiled",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "graph(compiled)"
+      },
+      "methods": []
+    },
+    {
+      "name": "gt",
+      "kind": "function",
+      "description": "Element-wise greater-than comparison.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "a",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "b",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "gt(a, b)"
+      },
+      "methods": []
+    },
+    {
+      "name": "i32",
+      "kind": "dtype",
+      "description": "32-bit signed integer dtype.",
+      "returns": null,
+      "signature": null,
+      "methods": []
+    },
+    {
+      "name": "i64",
+      "kind": "dtype",
+      "description": "64-bit signed integer dtype.",
+      "returns": null,
+      "signature": null,
+      "methods": []
+    },
+    {
+      "name": "LayerNorm",
+      "kind": "module",
+      "description": "Layer normalization over the given trailing shape. Stabilizes activations independent of batch.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "shape",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "eps",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "1e-5"
+          }
+        ],
+        "display": "LayerNorm(shape, eps=1e-5)"
+      },
+      "methods": [
+        {
+          "name": "forward",
+          "description": "Run the module's forward pass. Calling the module directly (`module(x)`) is equivalent to `module.forward(x)`.",
+          "signature": {
+            "params": [
+              {
+                "name": "x",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "forward(x)"
+          }
+        },
+        {
+          "name": "parameters",
+          "description": "Return an array of the module's learnable parameter tensors.",
+          "signature": {
+            "params": [],
+            "display": "parameters()"
+          }
+        },
+        {
+          "name": "train",
+          "description": "Set the module to training mode (enables Dropout, updates BatchNorm running stats).",
+          "signature": {
+            "params": [],
+            "display": "train()"
+          }
+        },
+        {
+          "name": "eval",
+          "description": "Set the module to evaluation mode (disables Dropout, freezes BatchNorm stats).",
+          "signature": {
+            "params": [],
+            "display": "eval()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "le",
+      "kind": "function",
+      "description": "Element-wise less-than-or-equal comparison.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "a",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "b",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "le(a, b)"
+      },
+      "methods": []
+    },
+    {
+      "name": "LeakyReLU",
+      "kind": "module",
+      "description": "Leaky ReLU activation; negative inputs are scaled by `negative_slope` instead of zeroed.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "negative_slope",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0.01"
+          }
+        ],
+        "display": "LeakyReLU(negative_slope=0.01)"
+      },
+      "methods": [
+        {
+          "name": "forward",
+          "description": "Run the module's forward pass. Calling the module directly (`module(x)`) is equivalent to `module.forward(x)`.",
+          "signature": {
+            "params": [
+              {
+                "name": "x",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "forward(x)"
+          }
+        },
+        {
+          "name": "parameters",
+          "description": "Return an array of the module's learnable parameter tensors.",
+          "signature": {
+            "params": [],
+            "display": "parameters()"
+          }
+        },
+        {
+          "name": "train",
+          "description": "Set the module to training mode (enables Dropout, updates BatchNorm running stats).",
+          "signature": {
+            "params": [],
+            "display": "train()"
+          }
+        },
+        {
+          "name": "eval",
+          "description": "Set the module to evaluation mode (disables Dropout, freezes BatchNorm stats).",
+          "signature": {
+            "params": [],
+            "display": "eval()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "LearningRateMonitor",
+      "kind": "callback",
+      "description": "Log the current learning rate at each step.",
+      "returns": null,
+      "signature": {
+        "params": [],
+        "display": "LearningRateMonitor()"
+      },
+      "methods": [
+        {
+          "name": "on_train_start",
+          "description": "Hook fired at the start of training.",
+          "signature": {
+            "params": [
+              {
+                "name": "trainer",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "model",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "on_train_start(trainer, model)"
+          }
+        },
+        {
+          "name": "on_train_end",
+          "description": "Hook fired at the end of training.",
+          "signature": {
+            "params": [
+              {
+                "name": "trainer",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "model",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "on_train_end(trainer, model)"
+          }
+        },
+        {
+          "name": "on_epoch_start",
+          "description": "Hook fired at the start of each epoch.",
+          "signature": {
+            "params": [
+              {
+                "name": "trainer",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "model",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "on_epoch_start(trainer, model)"
+          }
+        },
+        {
+          "name": "on_epoch_end",
+          "description": "Hook fired at the end of each epoch.",
+          "signature": {
+            "params": [
+              {
+                "name": "trainer",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "model",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "on_epoch_end(trainer, model)"
+          }
+        }
+      ]
+    },
+    {
+      "name": "len",
+      "kind": "utility",
+      "description": "Length of an array, string, or first dimension of a tensor.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "value",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "len(value)"
+      },
+      "methods": []
+    },
+    {
+      "name": "Linear",
+      "kind": "module",
+      "description": "Fully-connected layer `y = x @ Wᵀ + b`. Set `bias=false` to disable the bias term.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "in",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "out",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "bias",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "true"
+          }
+        ],
+        "display": "Linear(in, out, bias=true)"
+      },
+      "methods": [
+        {
+          "name": "forward",
+          "description": "Run the module's forward pass. Calling the module directly (`module(x)`) is equivalent to `module.forward(x)`.",
+          "signature": {
+            "params": [
+              {
+                "name": "x",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "forward(x)"
+          }
+        },
+        {
+          "name": "parameters",
+          "description": "Return an array of the module's learnable parameter tensors.",
+          "signature": {
+            "params": [],
+            "display": "parameters()"
+          }
+        },
+        {
+          "name": "train",
+          "description": "Set the module to training mode (enables Dropout, updates BatchNorm running stats).",
+          "signature": {
+            "params": [],
+            "display": "train()"
+          }
+        },
+        {
+          "name": "eval",
+          "description": "Set the module to evaluation mode (disables Dropout, freezes BatchNorm stats).",
+          "signature": {
+            "params": [],
+            "display": "eval()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "linspace",
+      "kind": "factory",
+      "description": "Evenly spaced values between `start` and `end`, inclusive, with `steps` points.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "start",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "end",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "steps",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "opts",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "linspace(start, end, steps, opts?)"
+      },
+      "methods": []
+    },
+    {
+      "name": "load_csv",
+      "kind": "data",
+      "description": "Load a CSV file into a `CsvFrame`.",
+      "returns": "CsvFrame",
+      "signature": {
+        "params": [
+          {
+            "name": "path",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "separator",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "\""
+          },
+          {
+            "name": "\"",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "load_csv(path, separator=\", \")"
+      },
+      "methods": [
+        {
+          "name": "select",
+          "description": "Return a new frame containing only the named columns.",
+          "signature": {
+            "params": [
+              {
+                "name": "columns",
+                "optional": true,
+                "rest": true,
+                "defaultValue": null
+              }
+            ],
+            "display": "select(...columns)"
+          }
+        },
+        {
+          "name": "shuffle",
+          "description": "Return a new frame with rows randomly permuted.",
+          "signature": {
+            "params": [],
+            "display": "shuffle()"
+          }
+        },
+        {
+          "name": "slice",
+          "description": "Return a new frame with rows in range `[start, end)`.",
+          "signature": {
+            "params": [
+              {
+                "name": "start",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "end",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "slice(start, end)"
+          }
+        },
+        {
+          "name": "encode",
+          "description": "Encode a categorical column to integer ids. Returns `[encoded_tensor, classes_array]`.",
+          "signature": {
+            "params": [
+              {
+                "name": "column",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "encode(column)"
+          }
+        }
+      ]
+    },
+    {
+      "name": "log",
+      "kind": "function",
+      "description": "Log a metric value from inside `train`/`validate`. Calls `.compute()` automatically on Metric instances.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "name",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "value",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "on_step",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "on_epoch",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "prog_bar",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "false"
+          },
+          {
+            "name": "reduce_fx",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "\"mean\""
+          }
+        ],
+        "display": "log(name, value, on_step?, on_epoch?, prog_bar=false, reduce_fx=\"mean\")"
+      },
+      "methods": []
+    },
+    {
+      "name": "log_softmax",
+      "kind": "function",
+      "description": "Logarithm of softmax, numerically stable.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "x",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "axis",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "-1"
+          }
+        ],
+        "display": "log_softmax(x, axis=-1)"
+      },
+      "methods": []
+    },
+    {
+      "name": "LogSoftmax",
+      "kind": "module",
+      "description": "LogSoftmax module — numerically stable log of softmax.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "dim",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "-1"
+          }
+        ],
+        "display": "LogSoftmax(dim=-1)"
+      },
+      "methods": [
+        {
+          "name": "forward",
+          "description": "Run the module's forward pass. Calling the module directly (`module(x)`) is equivalent to `module.forward(x)`.",
+          "signature": {
+            "params": [
+              {
+                "name": "x",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "forward(x)"
+          }
+        },
+        {
+          "name": "parameters",
+          "description": "Return an array of the module's learnable parameter tensors.",
+          "signature": {
+            "params": [],
+            "display": "parameters()"
+          }
+        },
+        {
+          "name": "train",
+          "description": "Set the module to training mode (enables Dropout, updates BatchNorm running stats).",
+          "signature": {
+            "params": [],
+            "display": "train()"
+          }
+        },
+        {
+          "name": "eval",
+          "description": "Set the module to evaluation mode (disables Dropout, freezes BatchNorm stats).",
+          "signature": {
+            "params": [],
+            "display": "eval()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "lt",
+      "kind": "function",
+      "description": "Element-wise less-than comparison.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "a",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "b",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "lt(a, b)"
+      },
+      "methods": []
+    },
+    {
+      "name": "matmul",
+      "kind": "function",
+      "description": "Matrix multiplication. Same as the `@` operator. Supports broadcasting on leading batch dimensions.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "a",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "b",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "matmul(a, b)"
+      },
+      "methods": []
+    },
+    {
+      "name": "max",
+      "kind": "reduction",
+      "description": "Maximum value across `axis` (or whole tensor).",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "input",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "axis",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "keep",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "max(input, axis?, keep?)"
+      },
+      "methods": []
+    },
+    {
+      "name": "maximum",
+      "kind": "function",
+      "description": "Element-wise maximum of two tensors.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "a",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "b",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "maximum(a, b)"
+      },
+      "methods": []
+    },
+    {
+      "name": "MaxPool2d",
+      "kind": "module",
+      "description": "2-D max pooling. Downsamples spatial dimensions taking the per-window max.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "kernel",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "stride",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "padding",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0"
+          }
+        ],
+        "display": "MaxPool2d(kernel, stride?, padding=0)"
+      },
+      "methods": [
+        {
+          "name": "forward",
+          "description": "Run the module's forward pass. Calling the module directly (`module(x)`) is equivalent to `module.forward(x)`.",
+          "signature": {
+            "params": [
+              {
+                "name": "x",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "forward(x)"
+          }
+        },
+        {
+          "name": "parameters",
+          "description": "Return an array of the module's learnable parameter tensors.",
+          "signature": {
+            "params": [],
+            "display": "parameters()"
+          }
+        },
+        {
+          "name": "train",
+          "description": "Set the module to training mode (enables Dropout, updates BatchNorm running stats).",
+          "signature": {
+            "params": [],
+            "display": "train()"
+          }
+        },
+        {
+          "name": "eval",
+          "description": "Set the module to evaluation mode (disables Dropout, freezes BatchNorm stats).",
+          "signature": {
+            "params": [],
+            "display": "eval()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "mean",
+      "kind": "reduction",
+      "description": "Arithmetic mean across `axis` (or all elements).",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "input",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "axis",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "keep",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "mean(input, axis?, keep?)"
+      },
+      "methods": []
+    },
+    {
+      "name": "MetricCollection",
+      "kind": "metric",
+      "description": "Group multiple metrics into one callable for convenience.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "metrics",
+            "optional": true,
+            "rest": true,
+            "defaultValue": null
+          }
+        ],
+        "display": "MetricCollection(...metrics)"
+      },
+      "methods": [
+        {
+          "name": "update",
+          "description": "Update internal state with a new batch of predictions and ground-truth labels.",
+          "signature": {
+            "params": [
+              {
+                "name": "preds",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "target",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "update(preds, target)"
+          }
+        },
+        {
+          "name": "compute",
+          "description": "Compute the current metric value across all accumulated updates.",
+          "signature": {
+            "params": [],
+            "display": "compute()"
+          }
+        },
+        {
+          "name": "reset",
+          "description": "Clear accumulated state so the next epoch starts fresh.",
+          "signature": {
+            "params": [],
+            "display": "reset()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "min",
+      "kind": "reduction",
+      "description": "Minimum value across `axis` (or whole tensor).",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "input",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "axis",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "keep",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "min(input, axis?, keep?)"
+      },
+      "methods": []
+    },
+    {
+      "name": "minimum",
+      "kind": "function",
+      "description": "Element-wise minimum of two tensors.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "a",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "b",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "minimum(a, b)"
+      },
+      "methods": []
+    },
+    {
+      "name": "ModelCheckpoint",
+      "kind": "callback",
+      "description": "Save the best model(s) according to a monitored metric.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "monitor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "save_top_k",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "1"
+          },
+          {
+            "name": "mode",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "\"min\""
+          }
+        ],
+        "display": "ModelCheckpoint(monitor, save_top_k=1, mode=\"min\")"
+      },
+      "methods": [
+        {
+          "name": "on_train_start",
+          "description": "Hook fired at the start of training.",
+          "signature": {
+            "params": [
+              {
+                "name": "trainer",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "model",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "on_train_start(trainer, model)"
+          }
+        },
+        {
+          "name": "on_train_end",
+          "description": "Hook fired at the end of training.",
+          "signature": {
+            "params": [
+              {
+                "name": "trainer",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "model",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "on_train_end(trainer, model)"
+          }
+        },
+        {
+          "name": "on_epoch_start",
+          "description": "Hook fired at the start of each epoch.",
+          "signature": {
+            "params": [
+              {
+                "name": "trainer",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "model",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "on_epoch_start(trainer, model)"
+          }
+        },
+        {
+          "name": "on_epoch_end",
+          "description": "Hook fired at the end of each epoch.",
+          "signature": {
+            "params": [
+              {
+                "name": "trainer",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "model",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "on_epoch_end(trainer, model)"
+          }
+        }
+      ]
+    },
+    {
+      "name": "MSELoss",
+      "kind": "module",
+      "description": "Mean squared error loss — standard for regression.",
+      "returns": null,
+      "signature": {
+        "params": [],
+        "display": "MSELoss()"
+      },
+      "methods": [
+        {
+          "name": "forward",
+          "description": "Run the module's forward pass. Calling the module directly (`module(x)`) is equivalent to `module.forward(x)`.",
+          "signature": {
+            "params": [
+              {
+                "name": "x",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "forward(x)"
+          }
+        },
+        {
+          "name": "parameters",
+          "description": "Return an array of the module's learnable parameter tensors.",
+          "signature": {
+            "params": [],
+            "display": "parameters()"
+          }
+        },
+        {
+          "name": "train",
+          "description": "Set the module to training mode (enables Dropout, updates BatchNorm running stats).",
+          "signature": {
+            "params": [],
+            "display": "train()"
+          }
+        },
+        {
+          "name": "eval",
+          "description": "Set the module to evaluation mode (disables Dropout, freezes BatchNorm stats).",
+          "signature": {
+            "params": [],
+            "display": "eval()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "mul",
+      "kind": "function",
+      "description": "Element-wise multiplication (Hadamard product).",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "a",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "b",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "mul(a, b)"
+      },
+      "methods": []
+    },
+    {
+      "name": "narrow",
+      "kind": "shape",
+      "description": "Take `length` elements starting at `start` along `dim`.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "dim",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "start",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "length",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "narrow(tensor, dim, start, length)"
+      },
+      "methods": []
+    },
+    {
+      "name": "ne",
+      "kind": "function",
+      "description": "Element-wise inequality comparison.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "a",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "b",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "ne(a, b)"
+      },
+      "methods": []
+    },
+    {
+      "name": "neg",
+      "kind": "function",
+      "description": "Element-wise unary negation.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "x",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "neg(x)"
+      },
+      "methods": []
+    },
+    {
+      "name": "NLLLoss",
+      "kind": "module",
+      "description": "Negative log-likelihood loss. Pair with LogSoftmax outputs.",
+      "returns": null,
+      "signature": {
+        "params": [],
+        "display": "NLLLoss()"
+      },
+      "methods": [
+        {
+          "name": "forward",
+          "description": "Run the module's forward pass. Calling the module directly (`module(x)`) is equivalent to `module.forward(x)`.",
+          "signature": {
+            "params": [
+              {
+                "name": "x",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "forward(x)"
+          }
+        },
+        {
+          "name": "parameters",
+          "description": "Return an array of the module's learnable parameter tensors.",
+          "signature": {
+            "params": [],
+            "display": "parameters()"
+          }
+        },
+        {
+          "name": "train",
+          "description": "Set the module to training mode (enables Dropout, updates BatchNorm running stats).",
+          "signature": {
+            "params": [],
+            "display": "train()"
+          }
+        },
+        {
+          "name": "eval",
+          "description": "Set the module to evaluation mode (disables Dropout, freezes BatchNorm stats).",
+          "signature": {
+            "params": [],
+            "display": "eval()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "normalize",
+      "kind": "data",
+      "description": "Standardize a tensor along `axis`: subtract mean and divide by standard deviation.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "axis",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0"
+          }
+        ],
+        "display": "normalize(tensor, axis=0)"
+      },
+      "methods": []
+    },
+    {
+      "name": "ones",
+      "kind": "factory",
+      "description": "Create a tensor of the given shape filled with `1`.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "shape",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "opts",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "ones(shape, opts?)"
+      },
+      "methods": []
+    },
+    {
+      "name": "onesLike",
+      "kind": "factory",
+      "description": "Tensor of ones with the same shape, dtype, and device as the input.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "onesLike(tensor)"
+      },
+      "methods": []
+    },
+    {
+      "name": "optim_config",
+      "kind": "utility",
+      "description": "Wrap an optimizer (and optionally an LR scheduler) for return from an `optimizer:` block.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "optimizer",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "lr_scheduler",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "optim_config(optimizer, lr_scheduler?)"
+      },
+      "methods": []
+    },
+    {
+      "name": "permute",
+      "kind": "shape",
+      "description": "Reorder all dimensions according to a permutation list.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "dims",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "permute(tensor, dims)"
+      },
+      "methods": []
+    },
+    {
+      "name": "pow",
+      "kind": "function",
+      "description": "Element-wise power. `pow(x, y) = x ** y`.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "x",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "y",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "pow(x, y)"
+      },
+      "methods": []
+    },
+    {
+      "name": "Precision",
+      "kind": "metric",
+      "description": "Precision metric — fraction of positive predictions that are correct.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "task",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "\"binary\""
+          },
+          {
+            "name": "num_classes",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "average",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "\"macro\""
+          }
+        ],
+        "display": "Precision(task=\"binary\", num_classes?, average=\"macro\")"
+      },
+      "methods": [
+        {
+          "name": "update",
+          "description": "Update internal state with a new batch of predictions and ground-truth labels.",
+          "signature": {
+            "params": [
+              {
+                "name": "preds",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "target",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "update(preds, target)"
+          }
+        },
+        {
+          "name": "compute",
+          "description": "Compute the current metric value across all accumulated updates.",
+          "signature": {
+            "params": [],
+            "display": "compute()"
+          }
+        },
+        {
+          "name": "reset",
+          "description": "Clear accumulated state so the next epoch starts fresh.",
+          "signature": {
+            "params": [],
+            "display": "reset()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "print",
+      "kind": "utility",
+      "description": "Print one or more values to the runtime output, separated by `sep`.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "values",
+            "optional": true,
+            "rest": true,
+            "defaultValue": null
+          },
+          {
+            "name": "sep",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "\" \""
+          }
+        ],
+        "display": "print(...values, sep=\" \")"
+      },
+      "methods": []
+    },
+    {
+      "name": "prod",
+      "kind": "reduction",
+      "description": "Product of elements across `axis`.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "input",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "axis",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "keep",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "prod(input, axis?, keep?)"
+      },
+      "methods": []
+    },
+    {
+      "name": "ProgressCallback",
+      "kind": "callback",
+      "description": "Lightweight progress bar callback for the Trainer.",
+      "returns": null,
+      "signature": {
+        "params": [],
+        "display": "ProgressCallback()"
+      },
+      "methods": [
+        {
+          "name": "on_train_start",
+          "description": "Hook fired at the start of training.",
+          "signature": {
+            "params": [
+              {
+                "name": "trainer",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "model",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "on_train_start(trainer, model)"
+          }
+        },
+        {
+          "name": "on_train_end",
+          "description": "Hook fired at the end of training.",
+          "signature": {
+            "params": [
+              {
+                "name": "trainer",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "model",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "on_train_end(trainer, model)"
+          }
+        },
+        {
+          "name": "on_epoch_start",
+          "description": "Hook fired at the start of each epoch.",
+          "signature": {
+            "params": [
+              {
+                "name": "trainer",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "model",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "on_epoch_start(trainer, model)"
+          }
+        },
+        {
+          "name": "on_epoch_end",
+          "description": "Hook fired at the end of each epoch.",
+          "signature": {
+            "params": [
+              {
+                "name": "trainer",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "model",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "on_epoch_end(trainer, model)"
+          }
+        }
+      ]
+    },
+    {
+      "name": "randn",
+      "kind": "factory",
+      "description": "Sample a tensor of the given shape from the standard normal distribution.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "shape",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "opts",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "randn(shape, opts?)"
+      },
+      "methods": []
+    },
+    {
+      "name": "randnLike",
+      "kind": "factory",
+      "description": "Standard-normal sample with the same shape, dtype, and device as the input.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "randnLike(tensor)"
+      },
+      "methods": []
+    },
+    {
+      "name": "randperm",
+      "kind": "factory",
+      "description": "Random permutation of integers `0..n-1`.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "n",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "opts",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "randperm(n, opts?)"
+      },
+      "methods": []
+    },
+    {
+      "name": "range",
+      "kind": "utility",
+      "description": "Python-style integer range: returns an array `[start..stop)` with optional `step`.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "start",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "stop",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "step",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "range(start, stop?, step?)"
+      },
+      "methods": []
+    },
+    {
+      "name": "Recall",
+      "kind": "metric",
+      "description": "Recall metric — fraction of actual positives that are predicted positive.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "task",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "\"binary\""
+          },
+          {
+            "name": "num_classes",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "average",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "\"macro\""
+          }
+        ],
+        "display": "Recall(task=\"binary\", num_classes?, average=\"macro\")"
+      },
+      "methods": [
+        {
+          "name": "update",
+          "description": "Update internal state with a new batch of predictions and ground-truth labels.",
+          "signature": {
+            "params": [
+              {
+                "name": "preds",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "target",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "update(preds, target)"
+          }
+        },
+        {
+          "name": "compute",
+          "description": "Compute the current metric value across all accumulated updates.",
+          "signature": {
+            "params": [],
+            "display": "compute()"
+          }
+        },
+        {
+          "name": "reset",
+          "description": "Clear accumulated state so the next epoch starts fresh.",
+          "signature": {
+            "params": [],
+            "display": "reset()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "ReduceLROnPlateau",
+      "kind": "scheduler",
+      "description": "Reduce learning rate when a monitored metric stops improving.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "optimizer",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "mode",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "\"min\""
+          },
+          {
+            "name": "patience",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "10"
+          },
+          {
+            "name": "factor",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0.1"
+          }
+        ],
+        "display": "ReduceLROnPlateau(optimizer, mode=\"min\", patience=10, factor=0.1)"
+      },
+      "methods": [
+        {
+          "name": "step",
+          "description": "Advance the scheduler by one step. Some schedulers (`ReduceLROnPlateau`) require a monitored metric.",
+          "signature": {
+            "params": [
+              {
+                "name": "metric",
+                "optional": true,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "step(metric?)"
+          }
+        },
+        {
+          "name": "get_last_lr",
+          "description": "Return the most recently computed learning rate(s).",
+          "signature": {
+            "params": [],
+            "display": "get_last_lr()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "relu",
+      "kind": "function",
+      "description": "Rectified linear unit: `max(0, x)`.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "x",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "relu(x)"
+      },
+      "methods": []
+    },
+    {
+      "name": "ReLU",
+      "kind": "module",
+      "description": "Rectified Linear Unit activation module: `max(0, x)`.",
+      "returns": null,
+      "signature": {
+        "params": [],
+        "display": "ReLU()"
+      },
+      "methods": [
+        {
+          "name": "forward",
+          "description": "Run the module's forward pass. Calling the module directly (`module(x)`) is equivalent to `module.forward(x)`.",
+          "signature": {
+            "params": [
+              {
+                "name": "x",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "forward(x)"
+          }
+        },
+        {
+          "name": "parameters",
+          "description": "Return an array of the module's learnable parameter tensors.",
+          "signature": {
+            "params": [],
+            "display": "parameters()"
+          }
+        },
+        {
+          "name": "train",
+          "description": "Set the module to training mode (enables Dropout, updates BatchNorm running stats).",
+          "signature": {
+            "params": [],
+            "display": "train()"
+          }
+        },
+        {
+          "name": "eval",
+          "description": "Set the module to evaluation mode (disables Dropout, freezes BatchNorm stats).",
+          "signature": {
+            "params": [],
+            "display": "eval()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "remainder",
+      "kind": "function",
+      "description": "Element-wise floored remainder (sign follows divisor).",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "a",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "b",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "remainder(a, b)"
+      },
+      "methods": []
+    },
+    {
+      "name": "requires_grad",
+      "kind": "autograd",
+      "description": "Set or query whether a tensor accumulates gradients.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "flag",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "true"
+          }
+        ],
+        "display": "requires_grad(tensor, flag=true)"
+      },
+      "methods": []
+    },
+    {
+      "name": "reshape",
+      "kind": "shape",
+      "description": "Change shape without copying data. Total element count must match.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "shape",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "reshape(tensor, shape)"
+      },
+      "methods": []
+    },
+    {
+      "name": "rsqrt",
+      "kind": "function",
+      "description": "Element-wise reciprocal square root `1/√x`.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "x",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "rsqrt(x)"
+      },
+      "methods": []
+    },
+    {
+      "name": "select",
+      "kind": "shape",
+      "description": "Pick a single index along `dim`, removing that dimension.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "dim",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "index",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "select(tensor, dim, index)"
+      },
+      "methods": []
+    },
+    {
+      "name": "Sequential",
+      "kind": "sequential",
+      "description": "Compose modules into a feed-forward pipeline. The output of each module is fed to the next.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "modules",
+            "optional": true,
+            "rest": true,
+            "defaultValue": null
+          }
+        ],
+        "display": "Sequential(...modules)"
+      },
+      "methods": [
+        {
+          "name": "forward",
+          "description": "Run inputs sequentially through each contained module.",
+          "signature": {
+            "params": [
+              {
+                "name": "x",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "forward(x)"
+          }
+        },
+        {
+          "name": "parameters",
+          "description": "Return parameters of all contained modules concatenated.",
+          "signature": {
+            "params": [],
+            "display": "parameters()"
+          }
+        },
+        {
+          "name": "train",
+          "description": "Switch all submodules to training mode.",
+          "signature": {
+            "params": [],
+            "display": "train()"
+          }
+        },
+        {
+          "name": "eval",
+          "description": "Switch all submodules to evaluation mode.",
+          "signature": {
+            "params": [],
+            "display": "eval()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "SGD",
+      "kind": "optimizer",
+      "description": "Stochastic gradient descent with optional `momentum` and `weight_decay`.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "params",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "lr",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0.01"
+          },
+          {
+            "name": "momentum",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0"
+          },
+          {
+            "name": "weight_decay",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0"
+          }
+        ],
+        "display": "SGD(params, lr=0.01, momentum=0, weight_decay=0)"
+      },
+      "methods": [
+        {
+          "name": "step",
+          "description": "Apply one optimizer update step using the current gradients.",
+          "signature": {
+            "params": [],
+            "display": "step()"
+          }
+        },
+        {
+          "name": "zero_grad",
+          "description": "Zero out gradients of all tracked parameters before the next backward pass.",
+          "signature": {
+            "params": [],
+            "display": "zero_grad()"
+          }
+        },
+        {
+          "name": "param_groups",
+          "description": "Return the list of parameter groups (each with its own learning rate, weight decay, etc.).",
+          "signature": {
+            "params": [],
+            "display": "param_groups()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "shape",
+      "kind": "utility",
+      "description": "Return the shape (size-per-dimension array) of a tensor.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "shape(tensor)"
+      },
+      "methods": []
+    },
+    {
+      "name": "sigmoid",
+      "kind": "function",
+      "description": "Element-wise logistic sigmoid `1/(1+e^-x)`.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "x",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "sigmoid(x)"
+      },
+      "methods": []
+    },
+    {
+      "name": "Sigmoid",
+      "kind": "module",
+      "description": "Logistic sigmoid activation module.",
+      "returns": null,
+      "signature": {
+        "params": [],
+        "display": "Sigmoid()"
+      },
+      "methods": [
+        {
+          "name": "forward",
+          "description": "Run the module's forward pass. Calling the module directly (`module(x)`) is equivalent to `module.forward(x)`.",
+          "signature": {
+            "params": [
+              {
+                "name": "x",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "forward(x)"
+          }
+        },
+        {
+          "name": "parameters",
+          "description": "Return an array of the module's learnable parameter tensors.",
+          "signature": {
+            "params": [],
+            "display": "parameters()"
+          }
+        },
+        {
+          "name": "train",
+          "description": "Set the module to training mode (enables Dropout, updates BatchNorm running stats).",
+          "signature": {
+            "params": [],
+            "display": "train()"
+          }
+        },
+        {
+          "name": "eval",
+          "description": "Set the module to evaluation mode (disables Dropout, freezes BatchNorm stats).",
+          "signature": {
+            "params": [],
+            "display": "eval()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "sign",
+      "kind": "function",
+      "description": "Element-wise sign: `-1`, `0`, or `+1`.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "x",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "sign(x)"
+      },
+      "methods": []
+    },
+    {
+      "name": "silu",
+      "kind": "function",
+      "description": "SiLU/Swish activation: `x * sigmoid(x)`.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "x",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "silu(x)"
+      },
+      "methods": []
+    },
+    {
+      "name": "SiLU",
+      "kind": "module",
+      "description": "SiLU/Swish activation module: `x * sigmoid(x)`.",
+      "returns": null,
+      "signature": {
+        "params": [],
+        "display": "SiLU()"
+      },
+      "methods": [
+        {
+          "name": "forward",
+          "description": "Run the module's forward pass. Calling the module directly (`module(x)`) is equivalent to `module.forward(x)`.",
+          "signature": {
+            "params": [
+              {
+                "name": "x",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "forward(x)"
+          }
+        },
+        {
+          "name": "parameters",
+          "description": "Return an array of the module's learnable parameter tensors.",
+          "signature": {
+            "params": [],
+            "display": "parameters()"
+          }
+        },
+        {
+          "name": "train",
+          "description": "Set the module to training mode (enables Dropout, updates BatchNorm running stats).",
+          "signature": {
+            "params": [],
+            "display": "train()"
+          }
+        },
+        {
+          "name": "eval",
+          "description": "Set the module to evaluation mode (disables Dropout, freezes BatchNorm stats).",
+          "signature": {
+            "params": [],
+            "display": "eval()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "sin",
+      "kind": "function",
+      "description": "Element-wise sine.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "x",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "sin(x)"
+      },
+      "methods": []
+    },
+    {
+      "name": "slice",
+      "kind": "shape",
+      "description": "View a contiguous slice along `dim` from `start` to `end` (exclusive) with optional `step`.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "dim",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "start",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "end",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "step",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "1"
+          }
+        ],
+        "display": "slice(tensor, dim, start, end, step=1)"
+      },
+      "methods": []
+    },
+    {
+      "name": "softmax",
+      "kind": "function",
+      "description": "Softmax along the specified dimension. Normalizes to a probability distribution.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "x",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "axis",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "-1"
+          }
+        ],
+        "display": "softmax(x, axis=-1)"
+      },
+      "methods": []
+    },
+    {
+      "name": "Softmax",
+      "kind": "module",
+      "description": "Softmax module over the specified dimension.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "dim",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "-1"
+          }
+        ],
+        "display": "Softmax(dim=-1)"
+      },
+      "methods": [
+        {
+          "name": "forward",
+          "description": "Run the module's forward pass. Calling the module directly (`module(x)`) is equivalent to `module.forward(x)`.",
+          "signature": {
+            "params": [
+              {
+                "name": "x",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "forward(x)"
+          }
+        },
+        {
+          "name": "parameters",
+          "description": "Return an array of the module's learnable parameter tensors.",
+          "signature": {
+            "params": [],
+            "display": "parameters()"
+          }
+        },
+        {
+          "name": "train",
+          "description": "Set the module to training mode (enables Dropout, updates BatchNorm running stats).",
+          "signature": {
+            "params": [],
+            "display": "train()"
+          }
+        },
+        {
+          "name": "eval",
+          "description": "Set the module to evaluation mode (disables Dropout, freezes BatchNorm stats).",
+          "signature": {
+            "params": [],
+            "display": "eval()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "sqrt",
+      "kind": "function",
+      "description": "Element-wise square root.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "x",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "sqrt(x)"
+      },
+      "methods": []
+    },
+    {
+      "name": "squeeze",
+      "kind": "shape",
+      "description": "Remove a size-1 dimension at `dim`.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "dim",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "squeeze(tensor, dim)"
+      },
+      "methods": []
+    },
+    {
+      "name": "stack",
+      "kind": "function",
+      "description": "Stack tensors along a new dimension.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "tensors",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "axis",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0"
+          }
+        ],
+        "display": "stack(tensors, axis=0)"
+      },
+      "methods": []
+    },
+    {
+      "name": "StepLR",
+      "kind": "scheduler",
+      "description": "Decay the learning rate by `gamma` every `step_size` epochs.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "optimizer",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "step_size",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "gamma",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0.1"
+          }
+        ],
+        "display": "StepLR(optimizer, step_size, gamma=0.1)"
+      },
+      "methods": [
+        {
+          "name": "step",
+          "description": "Advance the scheduler by one step. Some schedulers (`ReduceLROnPlateau`) require a monitored metric.",
+          "signature": {
+            "params": [
+              {
+                "name": "metric",
+                "optional": true,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "step(metric?)"
+          }
+        },
+        {
+          "name": "get_last_lr",
+          "description": "Return the most recently computed learning rate(s).",
+          "signature": {
+            "params": [],
+            "display": "get_last_lr()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "sub",
+      "kind": "function",
+      "description": "Element-wise subtraction.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "a",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "b",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "sub(a, b)"
+      },
+      "methods": []
+    },
+    {
+      "name": "sum",
+      "kind": "reduction",
+      "description": "Reduce-sum across `axis` (or all elements when `axis` is omitted). `keep=true` preserves the reduced dimension.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "input",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "axis",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "keep",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "sum(input, axis?, keep?)"
+      },
+      "methods": []
+    },
+    {
+      "name": "tanh",
+      "kind": "function",
+      "description": "Element-wise hyperbolic tangent.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "x",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "tanh(x)"
+      },
+      "methods": []
+    },
+    {
+      "name": "Tanh",
+      "kind": "module",
+      "description": "Hyperbolic tangent activation module.",
+      "returns": null,
+      "signature": {
+        "params": [],
+        "display": "Tanh()"
+      },
+      "methods": [
+        {
+          "name": "forward",
+          "description": "Run the module's forward pass. Calling the module directly (`module(x)`) is equivalent to `module.forward(x)`.",
+          "signature": {
+            "params": [
+              {
+                "name": "x",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "forward(x)"
+          }
+        },
+        {
+          "name": "parameters",
+          "description": "Return an array of the module's learnable parameter tensors.",
+          "signature": {
+            "params": [],
+            "display": "parameters()"
+          }
+        },
+        {
+          "name": "train",
+          "description": "Set the module to training mode (enables Dropout, updates BatchNorm running stats).",
+          "signature": {
+            "params": [],
+            "display": "train()"
+          }
+        },
+        {
+          "name": "eval",
+          "description": "Set the module to evaluation mode (disables Dropout, freezes BatchNorm stats).",
+          "signature": {
+            "params": [],
+            "display": "eval()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "tensor",
+      "kind": "factory",
+      "description": "Construct a tensor from a literal value, array, or nested array. Accepts `dtype`, `device`, `grad` options.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "data",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "opts",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "tensor(data, opts?)"
+      },
+      "methods": []
+    },
+    {
+      "name": "TensorDataset",
+      "kind": "data",
+      "description": "In-memory dataset zipping one or more tensors along their first dimension.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "tensors",
+            "optional": true,
+            "rest": true,
+            "defaultValue": null
+          }
+        ],
+        "display": "TensorDataset(...tensors)"
+      },
+      "methods": []
+    },
+    {
+      "name": "Timer",
+      "kind": "callback",
+      "description": "Measure and log wall-clock time per epoch and total.",
+      "returns": null,
+      "signature": {
+        "params": [],
+        "display": "Timer()"
+      },
+      "methods": [
+        {
+          "name": "on_train_start",
+          "description": "Hook fired at the start of training.",
+          "signature": {
+            "params": [
+              {
+                "name": "trainer",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "model",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "on_train_start(trainer, model)"
+          }
+        },
+        {
+          "name": "on_train_end",
+          "description": "Hook fired at the end of training.",
+          "signature": {
+            "params": [
+              {
+                "name": "trainer",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "model",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "on_train_end(trainer, model)"
+          }
+        },
+        {
+          "name": "on_epoch_start",
+          "description": "Hook fired at the start of each epoch.",
+          "signature": {
+            "params": [
+              {
+                "name": "trainer",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "model",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "on_epoch_start(trainer, model)"
+          }
+        },
+        {
+          "name": "on_epoch_end",
+          "description": "Hook fired at the end of each epoch.",
+          "signature": {
+            "params": [
+              {
+                "name": "trainer",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "model",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "on_epoch_end(trainer, model)"
+          }
+        }
+      ]
+    },
+    {
+      "name": "trace",
+      "kind": "utility",
+      "description": "Print the runtime execution trace of a compiled program.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "compiled",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "trace(compiled)"
+      },
+      "methods": []
+    },
+    {
+      "name": "train_test_split",
+      "kind": "data",
+      "description": "Split a `CsvFrame` or tensor into train/test partitions.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "data",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "test_size",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0.2"
+          }
+        ],
+        "display": "train_test_split(data, test_size=0.2)"
+      },
+      "methods": []
+    },
+    {
+      "name": "Trainer",
+      "kind": "trainer",
+      "description": "Drives the training loop: epochs, validation, callbacks, logging, checkpointing.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "max_epochs",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "20"
+          },
+          {
+            "name": "accelerator",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "\"cpu\""
+          },
+          {
+            "name": "logger",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "true"
+          },
+          {
+            "name": "enable_checkpointing",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "true"
+          },
+          {
+            "name": "enable_progress",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "true"
+          },
+          {
+            "name": "callbacks",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "fast_dev_run",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "false"
+          },
+          {
+            "name": "gradient_clip_val",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "log_every_n_steps",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "50"
+          }
+        ],
+        "display": "Trainer(max_epochs=20, accelerator=\"cpu\", logger=true, enable_checkpointing=true, enable_progress=true, callbacks?, fast_dev_run=false, gradient_clip_val?, log_every_n_steps=50)"
+      },
+      "methods": [
+        {
+          "name": "fit",
+          "description": "Run the training loop. Iterates `max_epochs` over `train_loader`, optionally validating on `val_loader` each epoch.",
+          "signature": {
+            "params": [
+              {
+                "name": "model",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "train_loader",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "val_loader",
+                "optional": true,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "fit(model, train_loader, val_loader?)"
+          }
+        },
+        {
+          "name": "validate",
+          "description": "Run validation only (no gradient updates). Returns logged metrics.",
+          "signature": {
+            "params": [
+              {
+                "name": "model",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "loader",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "validate(model, loader)"
+          }
+        },
+        {
+          "name": "test",
+          "description": "Run the model in eval mode over `loader`. Returns logged metrics.",
+          "signature": {
+            "params": [
+              {
+                "name": "model",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "loader",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "test(model, loader)"
+          }
+        },
+        {
+          "name": "predict",
+          "description": "Run the model in eval mode and collect outputs into an array.",
+          "signature": {
+            "params": [
+              {
+                "name": "model",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "loader",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "predict(model, loader)"
+          }
+        }
+      ]
+    },
+    {
+      "name": "transpose",
+      "kind": "shape",
+      "description": "Swap two dimensions of the tensor.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "dim0",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "dim1",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "transpose(tensor, dim0, dim1)"
+      },
+      "methods": []
+    },
+    {
+      "name": "unsqueeze",
+      "kind": "shape",
+      "description": "Insert a size-1 dimension at `dim`.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "dim",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "unsqueeze(tensor, dim)"
+      },
+      "methods": []
+    },
+    {
+      "name": "wasm",
+      "kind": "device",
+      "description": "WebAssembly execution backend.",
+      "returns": null,
+      "signature": null,
+      "methods": []
+    },
+    {
+      "name": "webgpu",
+      "kind": "device",
+      "description": "WebGPU execution backend (browser-friendly).",
+      "returns": null,
+      "signature": null,
+      "methods": []
+    },
+    {
+      "name": "where",
+      "kind": "function",
+      "description": "Element-wise conditional selection: pick from `a` where `condition` is true, else from `b`.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "condition",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "a",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "b",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "where(condition, a, b)"
+      },
+      "methods": []
+    },
+    {
+      "name": "zeros",
+      "kind": "factory",
+      "description": "Create a tensor of the given shape filled with `0`.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "shape",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "opts",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "zeros(shape, opts?)"
+      },
+      "methods": []
+    },
+    {
+      "name": "zerosLike",
+      "kind": "factory",
+      "description": "Zero tensor with the same shape, dtype, and device as the input.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "zerosLike(tensor)"
+      },
+      "methods": []
+    }
+  ]
+}

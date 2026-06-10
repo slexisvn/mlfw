@@ -7,8 +7,9 @@
   },
   "scripts": {
     "start": "node src/cli/index.js",
-    "test": "vitest run --exclude '**/node_modules/**' --exclude '**/stress/**' --exclude '**/webgpu-gpu.test.*'",
+    "test": "vitest run --exclude '**/node_modules/**' --exclude '**/stress/**' --exclude '**/webgpu-gpu.test.*' --exclude '**/vscode-ext/**'",
     "test:all": "vitest run",
+    "build:vscode": "node vscode-ext/scripts/generate.js",
     "test:coverage": "vitest run --coverage",
     "postinstall": "patch-package"
   },

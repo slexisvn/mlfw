@@ -106,8 +106,16 @@ export class RuntimeMemoryManager {
     const poolKey = dtype + ':' + scope;
     let pool = this._pools.get(poolKey);
     if (pool && pool.length > 0) {
-      const buf = pool.pop();
-      if (buf.length >= count) {
+      let fitIdx = -1;
+      for (let i = 0; i < pool.length; i++) {
+        if (pool[i].length >= count && (fitIdx === -1 || pool[i].length < pool[fitIdx].length)) {
+          fitIdx = i;
+        }
+      }
+      if (fitIdx !== -1) {
+        const buf = pool[fitIdx];
+        pool[fitIdx] = pool[pool.length - 1];
+        pool.pop();
         this._allocated += sizeBytes;
         if (this._allocated > this._peak) this._peak = this._allocated;
         return buf;
@@ -166,8 +174,8 @@ function runWasmKernel(wasmInstance, name, tensorArgs, shapeValues, parStart, pa
 
   for (let i = 0; i < nBufs; i++) {
     const data = tensorArgs[i];
-    if (data instanceof Float32Array) {
-      new Float32Array(memory.buffer, offsets[i], data.length).set(data);
+    if (ArrayBuffer.isView(data)) {
+      new data.constructor(memory.buffer, offsets[i], data.length).set(data);
     }
   }
 
@@ -182,8 +190,8 @@ function runWasmKernel(wasmInstance, name, tensorArgs, shapeValues, parStart, pa
 
   for (let i = 0; i < nBufs; i++) {
     const data = tensorArgs[i];
-    if (data instanceof Float32Array) {
-      data.set(new Float32Array(memory.buffer, offsets[i], data.length));
+    if (ArrayBuffer.isView(data)) {
+      data.set(new data.constructor(memory.buffer, offsets[i], data.length));
     }
   }
 }
@@ -277,7 +285,8 @@ export class RuntimeModule {
     const shapeParamMap = this._shapeParamMaps && this._shapeParamMaps.get(name);
     let shapeValues = null;
     if (shapeParamMap && shapeParamMap.size > 0) {
-      shapeValues = RuntimeModule._extractShapeParams(shapeParamMap, tensorShapes, args);
+      const bufferMap = this._bufferMaps && this._bufferMaps.get(name);
+      shapeValues = RuntimeModule._extractShapeParams(shapeParamMap, tensorShapes, args, bufferMap);
     }
 
     if (this._webgpuKernels && this._webgpuKernels.has(name)) {
@@ -319,7 +328,8 @@ export class RuntimeModule {
     const shapeParamMap = this._shapeParamMaps && this._shapeParamMaps.get(name);
     let shapeValues = null;
     if (shapeParamMap && shapeParamMap.size > 0) {
-      shapeValues = RuntimeModule._extractShapeParams(shapeParamMap, tensorShapes, args);
+      const bufferMap = this._bufferMaps && this._bufferMaps.get(name);
+      shapeValues = RuntimeModule._extractShapeParams(shapeParamMap, tensorShapes, args, bufferMap);
     }
 
     if (this._wasmParallel && this._wasmParallel.has(name)) {
@@ -347,19 +357,36 @@ export class RuntimeModule {
       || !!(this._wasmParallel && this._wasmParallel.has(name));
   }
 
-  static _extractShapeParams(shapeParamMap, tensorShapes, args) {
+  static _extractShapeParams(shapeParamMap, tensorShapes, args, bufferMap) {
+    const bufferIndex = new Map();
+    if (bufferMap) {
+      let i = 0;
+      for (const name of bufferMap.keys()) {
+        bufferIndex.set(name, i);
+        i++;
+      }
+    }
     const seen = new Map();
     const result = [];
     for (const [key, varNode] of shapeParamMap) {
       if (seen.has(varNode.name)) continue;
       seen.set(varNode.name, true);
       const sepIdx = key.lastIndexOf(':');
+      const bufferName = key.substring(0, sepIdx);
       const dimIdx = parseInt(key.substring(sepIdx + 1), 10);
       let resolved = null;
-      for (const [, shape] of tensorShapes) {
-        if (dimIdx < shape.length && shape[dimIdx] > 0) {
+      if (bufferIndex.has(bufferName)) {
+        const shape = tensorShapes.get(bufferIndex.get(bufferName));
+        if (shape && dimIdx < shape.length && shape[dimIdx] > 0) {
           resolved = shape[dimIdx];
-          break;
+        }
+      }
+      if (resolved === null) {
+        for (const [, shape] of tensorShapes) {
+          if (dimIdx < shape.length && shape[dimIdx] > 0) {
+            resolved = shape[dimIdx];
+            break;
+          }
         }
       }
       result.push(resolved !== null ? resolved : 1);

@@ -223,6 +223,7 @@ function detectAccumulator(forNode) {
   const storeKey = indicesKey(store.indices);
   const loadKey = indicesKey(loadSide.indices);
   if (storeKey !== loadKey) return null;
+  if (storeKey.includes('?')) return null;
 
   const loopVarName = forNode.loopVar.name;
   if (storeKey.includes('$' + loopVarName)) return null;

@@ -14,6 +14,15 @@ export class AutogradNode {
     this._nextEdges = [];
     this._savedTensors = [];
     this._inputMetadata = [];
+    this._opArgs = null;
+  }
+
+  setOpArgs(args) {
+    this._opArgs = args;
+  }
+
+  opArgs() {
+    return this._opArgs;
   }
 
   get id() {

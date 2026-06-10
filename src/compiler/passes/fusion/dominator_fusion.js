@@ -273,9 +273,23 @@ export class DominatorFusionPass extends FunctionPass {
       [bodyRegion]
     );
 
-    const firstOp = sorted[0];
-    if (!firstOp.parentBlock) return;
-    firstOp.parentBlock.insertBefore(fusionOp, firstOp);
+    const block = sorted[0].parentBlock;
+    if (!block) return;
+
+    let insertAfter = null;
+    for (const val of inputValues) {
+      const producer = val.definingOp;
+      if (!producer || group.hasOp(producer)) continue;
+      if (!insertAfter || !this._comesBefore(producer, insertAfter)) {
+        insertAfter = producer;
+      }
+    }
+
+    if (insertAfter && insertAfter.parentBlock === block) {
+      block.insertAfter(fusionOp, insertAfter);
+    } else {
+      block.insertBefore(fusionOp, sorted[0]);
+    }
 
     for (let i = 0; i < outputValues.length; i++) {
       outputValues[i].replaceAllUsesWith(fusionOp.getResult(i));
@@ -285,6 +299,17 @@ export class DominatorFusionPass extends FunctionPass {
       op.dropAllOperands();
       if (op.parentBlock) op.parentBlock.removeOp(op);
     }
+  }
+
+  _comesBefore(opA, opB) {
+    if (!opA.parentBlock || opA.parentBlock !== opB.parentBlock) return false;
+    let cur = opA.parentBlock.firstOp;
+    while (cur) {
+      if (cur === opA) return true;
+      if (cur === opB) return false;
+      cur = cur._next;
+    }
+    return false;
   }
 
   _topoSort(group) {

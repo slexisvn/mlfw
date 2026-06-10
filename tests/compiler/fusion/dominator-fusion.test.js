@@ -20,6 +20,18 @@ function findOps(func, opName) {
   return result;
 }
 
+function assertNoUseBeforeDef(func) {
+  const defined = new Set(func.entryBlock.arguments);
+  for (const op of func.entryBlock.ops()) {
+    for (let i = 0; i < op.numOperands; i++) {
+      const operand = op.getOperand(i);
+      if (operand.isBlockArgument()) continue;
+      expect(defined.has(operand)).toBe(true);
+    }
+    for (let i = 0; i < op.numResults; i++) defined.add(op.getResult(i));
+  }
+}
+
 function countReductionsInGroup(fusionOp) {
   const body = fusionOp.regions[0].entryBlock;
   let count = 0;
@@ -137,6 +149,21 @@ describe('DominatorFusionPass — no NaN/Inf in compiled output', () => {
     for (const k of result.listKernels()) {
       expect(hasComputedNanInf(result.getSource(k))).toBe(false);
     }
+  });
+});
+
+describe('DominatorFusionPass — insertion point dominates group inputs', () => {
+  it('does not insert fused op before a late-defined external input', () => {
+    const t = new TensorType([8, 8], F32);
+    const func = buildFunction('f', [t, t], [t], (b, args) => {
+      const early = b.exp(args[0]);
+      const external = b.matmul(args[0], args[1]);
+      const combined = b.add(early.getResult(0), external.getResult(0));
+      b.returnOp([b.neg(combined.getResult(0)).getResult(0)]);
+    });
+
+    expect(run(func)).toBe(PassResult.CHANGED);
+    assertNoUseBeforeDef(func);
   });
 });
 

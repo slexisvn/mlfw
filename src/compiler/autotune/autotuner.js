@@ -282,7 +282,7 @@ export class Autotuner {
     let best = candidates[0];
 
     if (this.benchmarkRunner && candidates.length > 0) {
-      const measured = this._refineByCostModel(primFunc, blockName, candidates);
+      const measured = this._refineByCostModel(primFunc, blockName, candidates, blockMap);
       if (measured.length > 0) {
         best = measured[0];
       }
@@ -342,9 +342,9 @@ export class Autotuner {
     }
   }
 
-  _refineByCostModel(primFunc, blockName, candidates) {
+  _refineByCostModel(primFunc, blockName, candidates, blockMap) {
     const topK = candidates.slice(0, this.config.topKForBenchmark);
-    const sketches = getSketchesForBlock(primFunc, blockName, this.target);
+    const sketches = getSketchesForBlock(primFunc, blockName, this.target, blockMap);
     const sketchByName = new Map();
     for (const s of sketches) sketchByName.set(s.name, s);
 

@@ -141,15 +141,11 @@ export class BufferAssignment {
       if (!activeByScope.has(scope)) activeByScope.set(scope, []);
       const active = activeByScope.get(scope);
 
-      const expired = [];
       for (let i = active.length - 1; i >= 0; i--) {
         if (active[i].interval.lastUse < interval.firstUse) {
           pool.release(active[i].block);
-          expired.push(i);
+          active.splice(i, 1);
         }
-      }
-      for (let i = expired.length - 1; i >= 0; i--) {
-        active.splice(expired[i], 1);
       }
 
       const block = pool.allocate(size, buf);

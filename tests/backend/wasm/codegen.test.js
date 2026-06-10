@@ -534,6 +534,29 @@ describe('WasmCodegen._constExtent', () => {
 });
 
 
+describe('WasmCodegen._visitBlock — reduction init guard', () => {
+  it('guards BlockNode.initBody with a first-iteration check inside a serial loop', () => {
+    const acc = buf('acc', [1], 'f32');
+    const initStore = new BufferStoreNode(acc, [new IntImmNode(0)], new FloatImmNode(0));
+    const bodyStore = new BufferStoreNode(
+      acc, [new IntImmNode(0)],
+      new MathOpNode('+', new BufferLoadNode(acc, [new IntImmNode(0)]), new FloatImmNode(1))
+    );
+    const block = new BlockNode('blk', [], [{ buffer: acc }], [{ buffer: acc }], bodyStore, initStore);
+    const forNode = new ForNode(idx('i'), new IntImmNode(0), new IntImmNode(8), ForKind.SERIAL, block);
+
+    const bufferMap = new Map([['p0', acc]]);
+    const pf = makePrimFunc('reduce_init', ['p0'], forNode, bufferMap);
+
+    const cg = makeCodegen();
+    const wat = cg.generate(pf).wat;
+    const guardIdx = wat.indexOf('i32.eqz');
+    const ifIdx = wat.indexOf('(if', guardIdx);
+    expect(guardIdx).toBeGreaterThanOrEqual(0);
+    expect(ifIdx).toBeGreaterThan(guardIdx);
+  });
+});
+
 describe('WasmCodegen._visitFor — unrolling', () => {
   it('unrolls UNROLLED loops with small extent', () => {
     const b = buf('x', [3], 'f32');

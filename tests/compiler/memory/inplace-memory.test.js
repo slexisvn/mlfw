@@ -148,6 +148,32 @@ describe('InplaceAnalysis', () => {
     expect(found).toBeUndefined();
   });
 
+  it('does not alias one src to two dsts (WAW hazard)', () => {
+    const paramBuf = new Buffer('param', [8], 'f32', 'global');
+    const srcBuf = new Buffer('src', [8], 'f32', 'global');
+    const dst1 = new Buffer('dst1', [8], 'f32', 'global');
+    const dst2 = new Buffer('dst2', [8], 'f32', 'global');
+    const outBuf = new Buffer('out', [8], 'f32', 'global');
+
+    const block0 = new BlockNode('b0', [makeBind('i')], [{ buffer: paramBuf }], [{ buffer: srcBuf }],
+      new BufferStoreNode(srcBuf, [], new BufferLoadNode(paramBuf, [])));
+    const body1 = new SeqNode([
+      new BufferStoreNode(dst1, [], new BufferLoadNode(srcBuf, [])),
+      new BufferStoreNode(dst2, [], new BufferLoadNode(srcBuf, [])),
+    ]);
+    const block1 = new BlockNode('b1', [makeBind('i')], [{ buffer: srcBuf }], [{ buffer: dst1 }, { buffer: dst2 }], body1);
+    const body2 = new BufferStoreNode(outBuf, [], new MathOpNode('+', new BufferLoadNode(dst1, []), new BufferLoadNode(dst2, [])));
+    const block2 = new BlockNode('b2', [makeBind('i')], [{ buffer: dst1 }, { buffer: dst2 }], [{ buffer: outBuf }], body2);
+    const seq = new SeqNode([block0, block1, block2]);
+    const pf = makePrimFunc(seq, [paramBuf, outBuf]);
+
+    const liveness = BufferLiveness.analyze(pf);
+    const candidates = InplaceAnalysis.analyze(pf, liveness);
+
+    const usingSrc = candidates.filter(c => c.srcBuffer === srcBuf);
+    expect(usingSrc.length).toBe(1);
+  });
+
   it('returns empty array when no candidates exist', () => {
     const paramBuf = new Buffer('param', [8], 'f32', 'global');
     const outBuf = new Buffer('out', [8], 'f32', 'global');

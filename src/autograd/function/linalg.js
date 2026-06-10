@@ -36,6 +36,12 @@ export class MatmulBackward extends AutogradNode {
       return [ops.matmul(gUnsq, bUnsq), squeeze(ops.matmul(transpose(a, 0, 1), gUnsq), 1)];
     }
 
+    if (aRank === 1 && bRank === 2) {
+      const gradA = ops.matmul(g, transpose(b, 0, 1));
+      const gradB = ops.matmul(unsqueeze(a, 1), unsqueeze(g, 0));
+      return [gradA, gradB];
+    }
+
     let gradA = ops.matmul(g, transpose(b, bRank - 2, bRank - 1));
     let gradB = ops.matmul(transpose(a, aRank - 2, aRank - 1), g);
 

@@ -293,6 +293,47 @@ export class GraphPartitioner {
 
     const topoOps = this._topologicalSort(ops);
     const opToPartition = new Map();
+    const partitionPreds = new Map();
+
+    const isUpstreamOf = (ancestor, node) => {
+      if (ancestor === node) return true;
+      const stack = [node];
+      const seen = new Set();
+      while (stack.length > 0) {
+        const cur = stack.pop();
+        if (cur === ancestor) return true;
+        if (seen.has(cur)) continue;
+        seen.add(cur);
+        const preds = partitionPreds.get(cur);
+        if (preds) {
+          for (const p of preds) stack.push(p);
+        }
+      }
+      return false;
+    };
+
+    const operandPartitions = (op) => {
+      const set = new Set();
+      for (let i = 0; i < op.numOperands; i++) {
+        const producer = op.getOperand(i).definingOp;
+        if (!producer) continue;
+        const part = opToPartition.get(producer);
+        if (part) set.add(part);
+      }
+      return set;
+    };
+
+    const recordEdges = (op, ownPartition) => {
+      for (const part of operandPartitions(op)) {
+        if (part === ownPartition) continue;
+        let preds = partitionPreds.get(ownPartition);
+        if (!preds) {
+          preds = new Set();
+          partitionPreds.set(ownPartition, preds);
+        }
+        preds.add(part);
+      }
+    };
 
     for (const op of topoOps) {
       const target = opToTarget.get(op);
@@ -306,12 +347,20 @@ export class GraphPartitioner {
         if (!producerPartition) continue;
 
         if (producerPartition.target === target || producerPartition.target.name === target.name) {
-          if (this._fitsMemoryLimit(producerPartition, op, target)) {
-            producerPartition.addOp(op);
-            opToPartition.set(op, producerPartition);
-            merged = true;
-            break;
+          if (!this._fitsMemoryLimit(producerPartition, op, target)) continue;
+
+          let createsCycle = false;
+          for (const part of operandPartitions(op)) {
+            if (part === producerPartition) continue;
+            if (isUpstreamOf(producerPartition, part)) { createsCycle = true; break; }
           }
+          if (createsCycle) continue;
+
+          producerPartition.addOp(op);
+          opToPartition.set(op, producerPartition);
+          recordEdges(op, producerPartition);
+          merged = true;
+          break;
         }
       }
 
@@ -319,6 +368,7 @@ export class GraphPartitioner {
         const partition = new Partition(nextId++, target);
         partition.addOp(op);
         opToPartition.set(op, partition);
+        recordEdges(op, partition);
         if (!targetPartitions.has(target.name)) {
           targetPartitions.set(target.name, []);
         }
@@ -377,6 +427,21 @@ export class GraphPartitioner {
         merged.add(i);
       } else {
         result.push(p);
+      }
+    }
+
+    const covered = new Set();
+    for (const part of result) {
+      for (const op of part.ops) covered.add(op);
+    }
+    for (const part of partitions) {
+      let missing = false;
+      for (const op of part.ops) {
+        if (!covered.has(op)) { missing = true; break; }
+      }
+      if (missing) {
+        result.push(part);
+        for (const op of part.ops) covered.add(op);
       }
     }
 

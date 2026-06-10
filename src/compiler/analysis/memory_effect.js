@@ -85,15 +85,19 @@ export class MemoryEffectAnalysis {
             addValueEffect(eff.value, op, eff);
           }
         } else {
-          for (let i = 0; i < op.numOperands; i++) {
-            const eff = new MemoryEffect(SideEffectKind.READ, op.getOperand(i));
-            effects.push(eff);
-            addValueEffect(op.getOperand(i), op, eff);
+          if (effectKind & SideEffectKind.READ) {
+            for (let i = 0; i < op.numOperands; i++) {
+              const eff = new MemoryEffect(SideEffectKind.READ, op.getOperand(i));
+              effects.push(eff);
+              addValueEffect(op.getOperand(i), op, eff);
+            }
           }
-          for (let i = 0; i < op.numResults; i++) {
-            const eff = new MemoryEffect(SideEffectKind.WRITE, op.getResult(i));
-            effects.push(eff);
-            addValueEffect(op.getResult(i), op, eff);
+          if (effectKind & SideEffectKind.WRITE) {
+            for (let i = 0; i < op.numResults; i++) {
+              const eff = new MemoryEffect(SideEffectKind.WRITE, op.getResult(i));
+              effects.push(eff);
+              addValueEffect(op.getResult(i), op, eff);
+            }
           }
         }
       }

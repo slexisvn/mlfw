@@ -198,6 +198,20 @@ describe('BufferAssignment', () => {
     expect(assignment.pools.has('shared')).toBe(true);
   });
 
+  it('releases correct active entries when multiple expire at once (descending splice)', () => {
+    const size = [16];
+    const spec = [[0, 3, 9], [1, 5, 7], [2, 1, 1], [3, 4, 8], [4, 5, 5], [5, 2, 4], [6, 0, 1], [7, 0, 2]];
+    const intervals = spec.map(([k, f, l]) =>
+      new BufferInterval(new Buffer('b' + k, size, 'f32', 'global'), f, l, 'global'));
+
+    const assignment = new BufferAssignment();
+    assignment.assign(intervals);
+
+    const bufSize = 16 * 4;
+    const aligned = Math.ceil(bufSize / 64) * 64;
+    expect(assignment.peakMemory()).toBe(aligned * 4);
+  });
+
   it('many non-overlapping intervals reuse memory efficiently', () => {
     const bufs = [];
     const intervals = [];

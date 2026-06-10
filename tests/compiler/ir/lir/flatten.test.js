@@ -104,6 +104,33 @@ describe('flattenIndex', () => {
     const result = flattenIndex(b, [new IntImmNode(1), new IntImmNode(2), new IntImmNode(3)], null);
     expect(evalExpr(result)).toBe(23);
   });
+
+  it('adds buffer.offset for a 2D subview: idx=(2,1) shape=(3,4) offset=5 -> 14', () => {
+    const b = new Buffer('sub', [3, 4], 'f32', 'global', null, 5);
+    const result = flattenIndex(b, [new IntImmNode(2), new IntImmNode(1)], null);
+    expect(evalExpr(result)).toBe(14);
+  });
+
+  it('adds buffer.offset for a 1D subview: idx=i offset=8', () => {
+    const b = new Buffer('sub', [8], 'f32', 'global', null, 8);
+    const result = flattenIndex(b, [idx('i')], null);
+    const str = exprToString(result);
+    expect(str).toContain('i');
+    expect(str).toContain('8');
+  });
+
+  it('returns buffer.offset for scalar subview with offset', () => {
+    const b = new Buffer('s', [], 'f32', 'global', null, 7);
+    const result = flattenIndex(b, [], null);
+    expect(result.type).toBe('IntImmNode');
+    expect(result.value).toBe(7);
+  });
+
+  it('does not add an offset term when offset is zero', () => {
+    const b = buf('m', [3, 4]);
+    const result = flattenIndex(b, [idx('i')], null);
+    expect(result.type).toBe('VariableNode');
+  });
 });
 
 describe('computeDynamicStride', () => {

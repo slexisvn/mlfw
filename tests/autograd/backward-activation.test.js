@@ -6,17 +6,12 @@ function gradValues(t) {
 }
 
 function geluRef(x) {
-  return 0.5 * x * (1 + Math.tanh(0.7978845608028654 * (x + 0.044715 * x * x * x)));
+  return x / (1 + Math.exp(-1.702 * x));
 }
 
 function geluGradRef(x) {
-  const c = 0.7978845608028654;
-  const ic = 0.044715;
-  const inner = c * (x + ic * x * x * x);
-  const th = Math.tanh(inner);
-  const sech2 = 1 - th * th;
-  const dInner = c * (1 + 3 * ic * x * x);
-  return 0.5 * (1 + th + x * sech2 * dInner);
+  const s = 1 / (1 + Math.exp(-1.702 * x));
+  return s * (1 + 1.702 * x * (1 - s));
 }
 
 function sigmoidRef(x) {

@@ -9,6 +9,7 @@ const _SCALAR_ARG_SPEC = {
   mean: ['dim', 'keepdim'],
   max: ['dim', 'keepdim'],
   min: ['dim', 'keepdim'],
+  prod: ['dim', 'keepdim'],
   transpose: ['dim0', 'dim1'],
   softmax: ['dim'],
   log_softmax: ['dim'],
@@ -37,8 +38,8 @@ function _tracingKernel(opName) {
         tensorArgs.push(arg);
       } else if (arg && arg._impl) {
         tensorArgs.push(tracer.captureConstant(arg));
-      } else if (arg !== undefined && arg !== null && spec) {
-        if (scalarIdx < spec.length) {
+      } else if (spec) {
+        if (arg !== undefined && arg !== null && scalarIdx < spec.length) {
           scalarArgs[spec[scalarIdx]] = arg;
         }
         scalarIdx++;

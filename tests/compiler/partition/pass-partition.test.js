@@ -155,6 +155,68 @@ describe('GraphPartitionPass', () => {
   });
 });
 
+describe('GraphPartitionPass topo sort and insertion ordering', () => {
+  it('_topoSort throws when the op set contains a cycle', () => {
+    const pass = new PartitionMaterializationPass();
+
+    const a = { numOperands: 1, numResults: 1, getOperand() { return { definingOp: b }; }, getResult() { return {}; } };
+    const b = { numOperands: 1, numResults: 1, getOperand() { return { definingOp: a }; }, getResult() { return {}; } };
+
+    expect(() => pass._topoSort([a, b])).toThrow(/cycle/i);
+  });
+
+  it('_topoSort returns all ops for an acyclic set', () => {
+    const pass = new PartitionMaterializationPass();
+    const r1 = {};
+    const p = { numOperands: 0, numResults: 1, getOperand() { return null; }, getResult() { return r1; } };
+    const c = { numOperands: 1, numResults: 0, getOperand() { return { definingOp: p }; }, getResult() { return {}; } };
+
+    const sorted = pass._topoSort([c, p]);
+    expect(sorted.length).toBe(2);
+    expect(sorted.indexOf(p)).toBeLessThan(sorted.indexOf(c));
+  });
+
+  it('copy_to_device is inserted after the transferred value definingOp', () => {
+    const cpu = CPUTarget();
+    const gpu = GPUTarget();
+    const t = new TensorType([256, 256], ScalarType.F32);
+    const tSmall = new TensorType([4], ScalarType.F32);
+    const func = buildFunction('f', [t, tSmall], [t], (b, args) => {
+      const cpuNeg = b.neg(args[1]);
+      cpuNeg.setAttr('device', 'cpu');
+      const bc = b.broadcast(cpuNeg.getResult(0), [256, 256], [1]);
+      const gpuAdd = b.add(args[0], bc.getResult(0));
+      b.returnOp([gpuAdd.getResult(0)]);
+    });
+
+    const pass = new GraphPartitionPass({
+      targets: [cpu, gpu],
+      opTargetOverrides: new Map([['neg', cpu]])
+    });
+    const result = pass.run(func);
+
+    if (result === PassResult.CHANGED) {
+      const order = [];
+      for (const op of func.entryBlock.ops()) order.push(op);
+
+      const copies = findOps(func, 'copy_to_device');
+      expect(copies.length).toBeGreaterThan(0);
+      for (const copy of copies) {
+        const val = copy.getOperand(0);
+        const defOp = val.definingOp;
+        if (defOp && order.includes(defOp)) {
+          expect(order.indexOf(copy)).toBeGreaterThan(order.indexOf(defOp));
+        }
+        for (const use of copy.getResult(0).uses()) {
+          if (order.includes(use.user)) {
+            expect(order.indexOf(use.user)).toBeGreaterThan(order.indexOf(copy));
+          }
+        }
+      }
+    }
+  });
+});
+
 describe('PartitionMaterializationPass', () => {
   it('returns UNCHANGED when only 1 partition exists', () => {
     const t = new TensorType([4], ScalarType.F32);

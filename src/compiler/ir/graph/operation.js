@@ -119,15 +119,19 @@ export class Operation {
     return null;
   }
 
-  clone() {
-    const clonedRegions = this.regions.map(r => cloneRegion(r));
+  clone(valueMap = new Map()) {
+    const mappedOperands = this.operands.map(v => valueMap.get(v) || v);
+    const clonedRegions = this.regions.map(r => cloneRegion(r, valueMap));
     const op = new Operation(
       this.opName,
-      [...this.operands],
+      mappedOperands,
       this.results.map(r => r.type),
       new Map(this.attributes),
       clonedRegions
     );
+    for (let i = 0; i < this.results.length; i++) {
+      valueMap.set(this.results[i], op.results[i]);
+    }
     return op;
   }
 
@@ -206,14 +210,16 @@ function attrValueEquals(a, b) {
   return false;
 }
 
-export function cloneRegion(region) {
-  const { Block, Region: R } = { Block: region.blocks[0]?.constructor, Region: region.constructor };
+export function cloneRegion(region, valueMap = new Map()) {
   const newRegion = new Region();
   for (const block of region.blocks) {
     const argTypes = block.arguments.map(a => a.type);
     const newBlock = new block.constructor(argTypes);
+    for (let i = 0; i < block.arguments.length; i++) {
+      valueMap.set(block.arguments[i], newBlock.arguments[i]);
+    }
     for (const op of block) {
-      newBlock.pushOp(op.clone());
+      newBlock.pushOp(op.clone(valueMap));
     }
     newRegion.addBlock(newBlock);
   }

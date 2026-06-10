@@ -286,6 +286,58 @@ describe('Compiled backward numerical correctness', () => {
     }
   });
 
+  it('embedding backward: scatter-add gradients into weight rows', () => {
+    const V = 5;
+    const D = 3;
+    const N = 4;
+    const weightT = new TensorType([V, D], ScalarType.F32);
+    const idxT = new TensorType([N], ScalarType.I32);
+    const outT = new TensorType([N, D], ScalarType.F32);
+
+    const func = buildFunction('emb_fwd', [weightT, idxT], [outT], (b, args) => {
+      b.returnOp([b.embedding(args[0], args[1]).getResult(0)]);
+    });
+
+    const bwd = buildAndCompileBackward(func);
+
+    const typedFor = (type, fill) => {
+      const n = Math.max(numel(type.shape), 1);
+      const arr = type.dtype === ScalarType.I32 ? new Int32Array(n) : new Float32Array(n);
+      if (fill) fill(arr);
+      return arr;
+    };
+
+    const indicesData = [2, 0, 2, 4];
+    const gradOutData = new Float32Array(N * D);
+    for (let i = 0; i < N * D; i++) gradOutData[i] = i + 1;
+
+    const inputs = bwd.inputTypes.map((type, i) => {
+      if (type.shape.length === idxT.shape.length && type.dtype === ScalarType.I32) {
+        return typedFor(type, a => a.set(indicesData));
+      }
+      if (type.shape.length === outT.shape.length &&
+          type.shape[0] === outT.shape[0] && type.shape[1] === outT.shape[1]) {
+        return typedFor(type, a => a.set(gradOutData));
+      }
+      return typedFor(type);
+    });
+
+    const outputs = bwd.run(...inputs);
+    const gradWeight = outputs.find(buf => buf.length === V * D);
+    if (!gradWeight) throw new Error('no V*D buffer in outputs');
+
+    const expected = new Float32Array(V * D);
+    for (let n = 0; n < N; n++) {
+      const v = indicesData[n];
+      for (let d = 0; d < D; d++) {
+        expected[v * D + d] += gradOutData[n * D + d];
+      }
+    }
+    for (let i = 0; i < V * D; i++) {
+      expect(gradWeight[i]).toBeCloseTo(expected[i], 4);
+    }
+  });
+
   it('reshape backward: grad reshaped back', () => {
     const func = buildFunction('reshape_fwd', [t([2, 3])], [t([6])], (b, args) => {
       b.returnOp([b.reshape(args[0], [6]).getResult(0)]);

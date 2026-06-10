@@ -64,9 +64,17 @@ export class GraphPartitionPass extends FunctionPass {
       copyOp.setAttr('partition_id', edge.dst.id);
       copyOp.setAttr('partition_target', dstDevice);
 
-      const insertPoint = this._findInsertionPoint(block, edge.dst);
-      if (insertPoint) {
-        block.insertBefore(copyOp, insertPoint);
+      const order = this._buildOrderIndex(block);
+      const firstUse = this._findInsertionPoint(block, edge.dst, value);
+      const defOp = value.definingOp;
+
+      if (firstUse && defOp && order.has(defOp) && order.has(firstUse) &&
+          order.get(defOp) >= order.get(firstUse)) {
+        block.insertAfter(copyOp, defOp);
+      } else if (firstUse) {
+        block.insertBefore(copyOp, firstUse);
+      } else if (defOp && order.has(defOp)) {
+        block.insertAfter(copyOp, defOp);
       } else {
         const returnOp = func.getReturnOp();
         if (returnOp) {
@@ -87,11 +95,24 @@ export class GraphPartitionPass extends FunctionPass {
     }
   }
 
-  _findInsertionPoint(block, dstPartition) {
+  _findInsertionPoint(block, dstPartition, value) {
+    for (const op of block.ops()) {
+      if (!dstPartition.hasOp(op)) continue;
+      for (let i = 0; i < op.numOperands; i++) {
+        if (op.getOperand(i) === value) return op;
+      }
+    }
     for (const op of block.ops()) {
       if (dstPartition.hasOp(op)) return op;
     }
     return null;
+  }
+
+  _buildOrderIndex(block) {
+    const order = new Map();
+    let idx = 0;
+    for (const op of block.ops()) order.set(op, idx++);
+    return order;
   }
 }
 
@@ -265,6 +286,10 @@ export class PartitionMaterializationPass extends FunctionPass {
         inDegree.set(consumer, deg);
         if (deg === 0) queue.push(consumer);
       }
+    }
+
+    if (sorted.length < ops.length) {
+      throw new Error('GraphPartitionPass: cycle detected in partition ops during topological sort');
     }
 
     return sorted;

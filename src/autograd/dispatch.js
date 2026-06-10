@@ -136,6 +136,7 @@ export function wrapWithAutograd(opName, handle) {
     }
 
     const tensorArgs = _extractTensors(args);
+    gradFn.setOpArgs(args);
     for (let i = 0; i < tensorArgs.length; i++) {
       gradFn.saveTensor(_snapshotTensor(tensorArgs[i]));
       gradFn.saveInputMetadata(i, [...tensorArgs[i].shape], tensorArgs[i].dtype);

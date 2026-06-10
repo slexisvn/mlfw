@@ -43,8 +43,11 @@ export class ScheduleTrace {
         throw new Error(`Unknown schedule primitive: ${step.primitive}`);
       }
       schedule._replaying = true;
-      method.call(schedule, ...step.args);
-      schedule._replaying = false;
+      try {
+        method.call(schedule, ...step.args);
+      } finally {
+        schedule._replaying = false;
+      }
     }
   }
 

@@ -58,6 +58,34 @@ describe('LayoutPolicy conv rule', () => {
   });
 });
 
+describe('LayoutPolicy conv rule rank guard', () => {
+  function fakeConv(inputRank) {
+    return {
+      opName: 'conv',
+      getOperand(i) {
+        return { type: { rank: inputRank } };
+      }
+    };
+  }
+
+  it('GPU conv with non-rank-4 input returns null (no invalid NHWC permutation)', () => {
+    const policy = new LayoutPolicy(GPUTarget());
+    expect(policy.getPreference(fakeConv(3))).toBeNull();
+    expect(policy.getPreference(fakeConv(5))).toBeNull();
+  });
+
+  it('CPU conv with non-rank-4 input returns null', () => {
+    const policy = new LayoutPolicy(CPUTarget());
+    expect(policy.getPreference(fakeConv(3))).toBeNull();
+  });
+
+  it('GPU conv with rank-4 still yields valid NHWC permutation', () => {
+    const policy = new LayoutPolicy(GPUTarget());
+    const pref = policy.getPreference(fakeConv(4));
+    expect(pref.inputs[0].equals(new Layout([0, 2, 3, 1]))).toBe(true);
+  });
+});
+
 describe('LayoutPolicy dot rule', () => {
   it('CPU dot: LHS row-major, RHS column-major for rank-2', () => {
     const lhs = new TensorType([4, 8], ScalarType.F32);

@@ -1,3 +1,5 @@
+import { computeWorkloadKey } from './workload_key.js';
+
 export class TuningRecord {
   constructor(workloadKey, sketchName, params, score, traceData, version) {
     this.workloadKey = workloadKey;
@@ -16,9 +18,8 @@ export class TuningDatabase {
     this._records = new Map();
   }
 
-  computeWorkloadKey(blockName, shape, dtype, targetName) {
-    const shapeStr = Array.isArray(shape) ? shape.join('x') : String(shape);
-    return `${blockName}|${shapeStr}|${dtype}|${targetName}`;
+  computeWorkloadKey(primFunc, blockName, target, blockMap = null) {
+    return computeWorkloadKey(primFunc, blockName, target, blockMap);
   }
 
   store(workloadKey, record) {

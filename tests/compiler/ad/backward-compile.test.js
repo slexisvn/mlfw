@@ -87,6 +87,33 @@ describe('BackwardGraphBuilder', () => {
     expect(mulOps.length).toBeGreaterThanOrEqual(1);
   });
 
+  it('rematerializes unsaved intermediate operands instead of referencing forward values', () => {
+    const func = buildFunction('remat_fwd', [t([4])], [t([4])], (b, args) => {
+      const a = b.abs(args[0]).getResult(0);
+      const result = b.log(a).getResult(0);
+      b.returnOp([result]);
+    });
+
+    const builder = new BackwardGraphBuilder();
+    const { backwardFunc } = builder.build(func);
+
+    const bwdArgIds = new Set(backwardFunc.args.map(v => v.id));
+    const bwdResultIds = new Set();
+    for (const op of backwardFunc.opsArray()) {
+      for (let r = 0; r < op.numResults; r++) bwdResultIds.add(op.getResult(r).id);
+    }
+
+    for (const op of backwardFunc.opsArray()) {
+      for (let o = 0; o < op.numOperands; o++) {
+        const v = op.getOperand(o);
+        expect(bwdArgIds.has(v.id) || bwdResultIds.has(v.id)).toBe(true);
+      }
+    }
+
+    const absOps = backwardFunc.opsArray().filter(op => op.opName === 'abs');
+    expect(absOps.length).toBe(1);
+  });
+
   it('generates backward for matmul', () => {
     const func = buildFunction('matmul_fwd', [t([2, 3]), t([3, 4])], [t([2, 4])], (b, args) => {
       const result = b.matmul(args[0], args[1]).getResult(0);

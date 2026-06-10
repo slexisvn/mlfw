@@ -52,6 +52,20 @@ describe('compile returns executable tensors', () => {
       expect(Number.isFinite(out.data[i])).toBe(true);
     }
   });
+
+  it('compiled keepdim reduction preserves the reduced axis and matches eager', async () => {
+    const x = tensor([[1, 2, 3, 4], [5, 6, 7, 8]]);
+    for (const reduce of [(t) => t.sum(1, true), (t) => t.mean(1, true), (t) => t.max(1, true)]) {
+      const eager = reduce(x);
+      const compiled = compile({ forward: (t) => reduce(t) }, [x]);
+      const out = await compiled(x);
+      expect(out.shape).toEqual(eager.shape);
+      expect(out.shape).toEqual([2, 1]);
+      const e = eager.contiguous().data;
+      const c = out.contiguous().data;
+      for (let i = 0; i < e.length; i++) expect(c[i]).toBeCloseTo(e[i], 4);
+    }
+  });
 });
 
 describe('compile shape-based recompilation cache', () => {

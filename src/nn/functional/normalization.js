@@ -3,7 +3,7 @@ import { full } from '../../tensor/factory/creation_ops.js';
 import { SymbolicTensor } from '../../tracing/symbolic_tensor.js';
 
 export function layer_norm(input, normalizedShape, weight, bias, eps = 1e-5) {
-  if (input instanceof SymbolicTensor || input.isSymbolic) {
+  if ((input instanceof SymbolicTensor || input.isSymbolic) && weight && bias) {
     const axis = input.ndim - normalizedShape.length;
     return ops.layer_norm(input, weight, bias, axis, eps);
   }

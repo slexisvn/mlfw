@@ -53,6 +53,8 @@ export class BufferLiveness {
       paramBuffers.add(buf);
     }
 
+    const touchLog = [];
+
     const touch = (buffer) => {
       if (!buffer) return;
       let interval = intervals.get(buffer);
@@ -63,6 +65,7 @@ export class BufferLiveness {
         if (stmtIdx < interval.firstUse) interval.firstUse = stmtIdx;
         if (stmtIdx > interval.lastUse) interval.lastUse = stmtIdx;
       }
+      touchLog.push(buffer);
     };
 
     const touchExpr = (node) => {
@@ -87,18 +90,28 @@ export class BufferLiveness {
       }
     };
 
-    const stack = [primFunc.body];
-    while (stack.length > 0) {
-      const node = stack.pop();
-      if (!node) continue;
+    const extendRegion = (logStart, endIdx) => {
+      for (let i = logStart; i < touchLog.length; i++) {
+        const interval = intervals.get(touchLog[i]);
+        if (interval && endIdx > interval.lastUse) interval.lastUse = endIdx;
+      }
+    };
+
+    const walk = (node) => {
+      if (!node) return;
 
       switch (node.type) {
         case 'SeqNode':
-          for (let i = node.stmts.length - 1; i >= 0; i--) stack.push(node.stmts[i]);
+          for (const s of node.stmts) walk(s);
           break;
-        case 'ForNode':
-          stack.push(node.body);
+        case 'ForNode': {
+          const bodyStart = stmtIdx;
+          const logStart = touchLog.length;
+          walk(node.body);
+          const bodyEnd = stmtIdx > bodyStart ? stmtIdx - 1 : bodyStart;
+          extendRegion(logStart, bodyEnd);
           break;
+        }
         case 'BlockNode':
           stmtOrder.push({ idx: stmtIdx, node });
           for (const r of node.reads) touch(r.buffer);
@@ -109,20 +122,27 @@ export class BufferLiveness {
           break;
         case 'AllocateNode':
           touch(node.buffer);
-          stack.push(node.body);
+          walk(node.body);
           break;
-        case 'IfThenElseNode':
-          if (node.elseBody) stack.push(node.elseBody);
-          stack.push(node.thenBody);
+        case 'IfThenElseNode': {
+          const branchStart = stmtIdx;
+          const logStart = touchLog.length;
+          walk(node.thenBody);
+          if (node.elseBody) walk(node.elseBody);
+          const branchEnd = stmtIdx > branchStart ? stmtIdx - 1 : branchStart;
+          extendRegion(logStart, branchEnd);
           break;
+        }
         case 'LetStmtNode':
-          stack.push(node.body);
+          walk(node.body);
           break;
         default:
           touchBody(node);
           break;
       }
-    }
+    };
+
+    walk(primFunc.body);
 
     return new BufferLivenessResult(intervals, stmtOrder, paramBuffers);
   }

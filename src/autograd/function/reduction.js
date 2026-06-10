@@ -1,7 +1,28 @@
 import { AutogradNode } from '../node.js';
 import * as ops from '../../tensor/ops/ops.js';
 import { ones, full, zeros } from '../../tensor/factory/creation_ops.js';
-import { expand, unsqueeze, reshape } from '../../tensor/view/view_ops.js';
+import { expand, unsqueeze, reshape, contiguous } from '../../tensor/view/view_ops.js';
+
+function _normalizeDims(dim, rank) {
+  if (dim === undefined || dim === null) {
+    const all = [];
+    for (let i = 0; i < rank; i++) all.push(i);
+    return all;
+  }
+  const list = Array.isArray(dim) ? dim : [dim];
+  return list.map((d) => (d < 0 ? d + rank : d)).sort((a, b) => a - b);
+}
+
+function _unreduce(grad, inputShape, dims, keepdim) {
+  let g = grad;
+  if (!keepdim) {
+    for (const d of dims) {
+      g = unsqueeze(g, d);
+    }
+  }
+  const z = zeros(inputShape, { dtype: g.dtype, device: g.device });
+  return ops.add(z, g);
+}
 
 export class SumBackward extends AutogradNode {
   constructor() { super(1); }
@@ -10,7 +31,11 @@ export class SumBackward extends AutogradNode {
     const g = gradOutputs[0];
     const meta = this.inputMetadata(0);
     const inputShape = meta.shape;
-    return [_expandToShape(g, inputShape)];
+    const args = this.opArgs();
+    const dim = args ? args[1] : undefined;
+    const keepdim = args ? args[2] : false;
+    const dims = _normalizeDims(dim, inputShape.length);
+    return [_unreduce(g, inputShape, dims, keepdim)];
   }
 }
 
@@ -21,24 +46,16 @@ export class MeanBackward extends AutogradNode {
     const g = gradOutputs[0];
     const meta = this.inputMetadata(0);
     const inputShape = meta.shape;
-    let numel = 1;
-    for (let i = 0; i < inputShape.length; i++) numel *= inputShape[i];
+    const args = this.opArgs();
+    const dim = args ? args[1] : undefined;
+    const keepdim = args ? args[2] : false;
+    const dims = _normalizeDims(dim, inputShape.length);
 
-    const expanded = _expandToShape(g, inputShape);
-    const n = full(inputShape, numel, { dtype: g.dtype, device: g.device });
+    let count = 1;
+    for (const d of dims) count *= inputShape[d];
+
+    const expanded = _unreduce(g, inputShape, dims, keepdim);
+    const n = full(inputShape, count, { dtype: g.dtype, device: g.device });
     return [ops.div(expanded, n)];
   }
-}
-
-function _expandToShape(grad, targetShape) {
-  if (grad.ndim === 0) {
-    return full(targetShape, grad.item(), { dtype: grad.dtype, device: grad.device });
-  }
-
-  let g = grad;
-  while (g.ndim < targetShape.length) {
-    g = unsqueeze(g, 0);
-  }
-
-  return expand(g, targetShape);
 }

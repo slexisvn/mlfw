@@ -131,7 +131,7 @@ export function register() {
     let inBoundsExpr = null;
     for (let s = 0; s < spatialDims; s++) {
       const key = spatialLayoutKeys[s];
-      const kKey = key.toLowerCase() === 'h' ? 'H' : 'W';
+      const kKey = key.toUpperCase();
       const inSpatialIdx = mathOp('+',
         mathOp('*', soBinds[s].iterVar, new IntImmNode(strides[s])),
         mathOp('+',
@@ -160,7 +160,7 @@ export function register() {
 
     const kerSpatialSizes = new Array(spatialDims);
     for (let s = 0; s < spatialDims; s++) {
-      const kKey = spatialLayoutKeys[s].toLowerCase() === 'h' ? 'H' : 'W';
+      const kKey = spatialLayoutKeys[s].toUpperCase();
       kerSpatialSizes[s] = kerBuf.shape[kLayout[kKey]];
     }
 

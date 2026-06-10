@@ -3,8 +3,15 @@ import { IRBuilder } from '../../ir/graph/builder.js';
 import { registry } from '../../ir/graph/ops.js';
 import { OpTrait } from '../../ir/graph/op_registry.js';
 import { TraceLevel } from '../../pipeline/trace.js';
+import { isIntType } from '../../ir/graph/types.js';
 
 const CONSTANT_OPS = new Set(['constant', 'scalar_constant']);
+
+function isFoldResultRepresentable(value, dtype) {
+  if (!isIntType(dtype)) return true;
+  if (typeof value !== 'number') return true;
+  return Number.isInteger(value) && Number.isSafeInteger(value);
+}
 
 function resolveConstantValue(value, visited) {
   const op = value.definingOp;
@@ -71,6 +78,7 @@ export class ConstantFoldPass extends FunctionPass {
       try {
         const resultVal = def.fold(constValues, op.attributes, constOps);
         if (resultVal === undefined) continue;
+        if (!isFoldResultRepresentable(resultVal, op.getResult(0).type.dtype)) continue;
 
         builder.block = op.parentBlock;
         builder.setInsertionPoint(op);

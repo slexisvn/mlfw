@@ -96,4 +96,44 @@ describe('pool2d', () => {
     expect(out[2]).toBe(8);
     expect(out[3]).toBe(9);
   });
+
+  it('avg pool with padding divides by per-output in-bounds count when count_include_pad=false', () => {
+    const inp = new TensorType([1, 1, 3, 3], ScalarType.F32);
+    const out = new TensorType([1, 1, 2, 2], ScalarType.F32);
+    const func = buildFunction('avgp_pad_excl', [inp], [out], (b, args) => {
+      const p = b._inferAndBuild('pool2d', [args[0]], {
+        pool_type: 'avg', kernel_size: [2, 2], strides: [2, 2],
+        padding: [[0, 1], [0, 1]], count_include_pad: false
+      });
+      b.returnOp([p.getResult(0)]);
+    });
+    const r = compile(func);
+    const input = new Float32Array([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    const output = new Float32Array(4);
+    r.run('avgp_pad_excl', input, output);
+    expect(output[0]).toBeCloseTo(3, 5);
+    expect(output[1]).toBeCloseTo(4.5, 5);
+    expect(output[2]).toBeCloseTo(7.5, 5);
+    expect(output[3]).toBeCloseTo(9, 5);
+  });
+
+  it('avg pool with padding divides by full kernel size when count_include_pad=true', () => {
+    const inp = new TensorType([1, 1, 3, 3], ScalarType.F32);
+    const out = new TensorType([1, 1, 2, 2], ScalarType.F32);
+    const func = buildFunction('avgp_pad_incl', [inp], [out], (b, args) => {
+      const p = b._inferAndBuild('pool2d', [args[0]], {
+        pool_type: 'avg', kernel_size: [2, 2], strides: [2, 2],
+        padding: [[0, 1], [0, 1]], count_include_pad: true
+      });
+      b.returnOp([p.getResult(0)]);
+    });
+    const r = compile(func);
+    const input = new Float32Array([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    const output = new Float32Array(4);
+    r.run('avgp_pad_incl', input, output);
+    expect(output[0]).toBeCloseTo(3, 5);
+    expect(output[1]).toBeCloseTo(9 / 4, 5);
+    expect(output[2]).toBeCloseTo(15 / 4, 5);
+    expect(output[3]).toBeCloseTo(9 / 4, 5);
+  });
 });

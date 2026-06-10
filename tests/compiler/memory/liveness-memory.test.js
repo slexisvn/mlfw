@@ -189,6 +189,42 @@ describe('BufferLiveness.analyze', () => {
     expect(result.stmtOrder.length).toBe(1);
   });
 
+  it('buffer touched early in a multi-statement loop body stays live to loop end', () => {
+    const early = new Buffer('early', [4], 'f32', 'global');
+    const mid = new Buffer('mid', [4], 'f32', 'global');
+    const tail = new Buffer('tail', [4], 'f32', 'global');
+    const inBuf = new Buffer('in', [4], 'f32', 'global');
+    const innerA = makeSimpleBlock('ia', [{ buffer: inBuf }], [{ buffer: early }]);
+    const innerB = makeSimpleBlock('ib', [{ buffer: inBuf }], [{ buffer: mid }]);
+    const innerC = makeSimpleBlock('ic', [{ buffer: inBuf }], [{ buffer: tail }]);
+    const body = new SeqNode([innerA, innerB, innerC]);
+    const loop = new ForNode(makeVar('i'), new IntImmNode(0), new IntImmNode(4), ForKind.SERIAL, body);
+    const pf = makePrimFunc(loop, [inBuf]);
+
+    const result = BufferLiveness.analyze(pf);
+    const earlyInterval = result.intervals.get(early);
+    expect(earlyInterval.firstUse).toBe(0);
+    expect(earlyInterval.lastUse).toBe(2);
+  });
+
+  it('liveness extends to the join across If branches', () => {
+    const a = new Buffer('a', [4], 'f32', 'global');
+    const t1 = new Buffer('t1', [4], 'f32', 'global');
+    const t2 = new Buffer('t2', [4], 'f32', 'global');
+    const out = new Buffer('out', [4], 'f32', 'global');
+    const pre = makeSimpleBlock('pre', [{ buffer: a }], [{ buffer: t1 }]);
+    const thenBlock = makeSimpleBlock('then', [{ buffer: t1 }], [{ buffer: t2 }]);
+    const elseBlock = makeSimpleBlock('else', [{ buffer: a }], [{ buffer: out }]);
+    const ite = new IfThenElseNode(new IntImmNode(1), thenBlock, elseBlock);
+    const seq = new SeqNode([pre, ite]);
+    const pf = makePrimFunc(seq, [a, out]);
+
+    const result = BufferLiveness.analyze(pf);
+    const t1Interval = result.intervals.get(t1);
+    expect(t1Interval.firstUse).toBe(0);
+    expect(t1Interval.lastUse).toBe(2);
+  });
+
   it('blocks inside IfThenElseNode are analyzed', () => {
     const bufA = new Buffer('a', [4], 'f32', 'global');
     const bufB = new Buffer('b', [4], 'f32', 'global');

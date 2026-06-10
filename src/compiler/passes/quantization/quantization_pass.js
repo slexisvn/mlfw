@@ -1,6 +1,6 @@
 import { FunctionPass, PassResult } from '../pass.js';
 import { Operation } from '../../ir/graph/operation.js';
-import { TensorType, ScalarType, isFloatType } from '../../ir/graph/types.js';
+import { TensorType, ScalarType, isFloatType, scalarBytes } from '../../ir/graph/types.js';
 import { registry } from '../../ir/graph/ops.js';
 import { OpTrait } from '../../ir/graph/op_registry.js';
 import { UseDefAnalysis } from '../../analysis/use_def.js';
@@ -99,17 +99,18 @@ export class QuantizationPass extends FunctionPass {
   }
 
   _getQuantParams(value, cfg) {
+    const numBits = scalarBytes(cfg.targetDtype) * 8;
     if (cfg.calibration && cfg.calibration.hasData(value)) {
       return cfg.calibration.getQuantParams(value, cfg.scheme, cfg.targetDtype);
     }
     const defOp = value.definingOp;
     if (defOp && defOp.opName === 'constant') {
       const val = defOp.getAttr('value');
-      if (typeof val === 'number') return QuantizationParams.fromRange(-Math.abs(val) || -1, Math.abs(val) || 1, cfg.scheme, cfg.targetDtype);
-      if (val && typeof val.length === 'number') return QuantizationParams.fromConstantArray(val, cfg.scheme, cfg.targetDtype);
+      if (typeof val === 'number') return QuantizationParams.fromRange(-Math.abs(val) || -1, Math.abs(val) || 1, cfg.scheme, cfg.targetDtype, numBits);
+      if (val && typeof val.length === 'number') return QuantizationParams.fromConstantArray(val, cfg.scheme, cfg.targetDtype, numBits);
     }
     if (value.type instanceof TensorType && isFloatType(value.type.dtype)) {
-      return QuantizationParams.defaultForActivation(cfg.scheme, cfg.targetDtype);
+      return QuantizationParams.defaultForActivation(cfg.scheme, cfg.targetDtype, numBits);
     }
     return null;
   }

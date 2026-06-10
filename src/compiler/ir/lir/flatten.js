@@ -1,10 +1,16 @@
 import { MathOpNode, IntImmNode, VariableNode } from '../tensor/nodes.js';
 
 export function flattenIndex(buffer, indices, shapeParamMap) {
-  if (indices.length === 0) return new IntImmNode(0);
-  if (indices.length === 1) return indices[0];
+  const baseOffset = typeof buffer.offset === 'number' ? buffer.offset : 0;
+
+  if (indices.length === 0) return new IntImmNode(baseOffset);
+  if (indices.length === 1) {
+    if (baseOffset === 0) return indices[0];
+    return new MathOpNode('+', indices[0], new IntImmNode(baseOffset));
+  }
 
   const terms = [];
+  if (baseOffset !== 0) terms.push(new IntImmNode(baseOffset));
   for (let i = 0; i < indices.length; i++) {
     const idx = indices[i];
     if (idx.type === 'IntImmNode' && idx.value === 0) continue;

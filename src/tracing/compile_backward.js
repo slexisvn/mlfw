@@ -3,6 +3,7 @@ import { Compiler } from '../compiler/pipeline/compiler.js';
 import { CPUTarget } from '../backend/target.js';
 import { GraphModule } from '../compiler/ir/graph/module.js';
 import { BackwardGraphBuilder } from '../compiler/ad/backward_builder.js';
+import { IRBuilder } from '../compiler/ir/graph/builder.js';
 import { JointGraphBuilder } from '../compiler/ad/joint_builder.js';
 import { RematPolicy } from '../compiler/ad/remat_policy.js';
 import '../compiler/ad/index.js';
@@ -44,6 +45,36 @@ export function compileWithBackward(model, exampleInputs, opts = {}) {
     const bwdBuilder = new BackwardGraphBuilder({ rematPolicy: policy });
     const { backwardFunc, savedValues, gradInputIndices } = bwdBuilder.build(forwardFunc);
 
+    const realReturnOp = forwardFunc.getReturnOp();
+    const realOutputs = [...realReturnOp.operands];
+    const numRealOutputs = realOutputs.length;
+
+    const argIndexById = new Map(forwardFunc.args.map((a, i) => [a.id, i]));
+    const outputIndexById = new Map(realOutputs.map((o, i) => [o.id, i]));
+
+    const extraSaved = [];
+    const extraIndexById = new Map();
+    for (const sv of savedValues) {
+      if (argIndexById.has(sv.id) || outputIndexById.has(sv.id) || extraIndexById.has(sv.id)) continue;
+      extraIndexById.set(sv.id, numRealOutputs + extraSaved.length);
+      extraSaved.push(sv);
+    }
+
+    if (extraSaved.length > 0) {
+      realReturnOp.erase();
+      new IRBuilder(forwardFunc).returnOp([...realOutputs, ...extraSaved]);
+      forwardFunc.outputTypes = Object.freeze([
+        ...realOutputs.map(v => v.type),
+        ...extraSaved.map(v => v.type),
+      ]);
+    }
+
+    const savedSources = savedValues.map(sv => {
+      if (argIndexById.has(sv.id)) return { kind: 'arg', index: argIndexById.get(sv.id) };
+      if (outputIndexById.has(sv.id)) return { kind: 'output', index: outputIndexById.get(sv.id) };
+      return { kind: 'output', index: extraIndexById.get(sv.id) };
+    });
+
     const fwdModule = new GraphModule('forward');
     fwdModule.addFunction(forwardFunc);
     const fwdResult = new Compiler(compilerOpts).compile(fwdModule);
@@ -59,6 +90,8 @@ export function compileWithBackward(model, exampleInputs, opts = {}) {
       forwardFunc,
       backwardFunc,
       savedValues,
+      savedSources,
+      numRealOutputs,
       gradInputIndices,
       capturedParams: traced.capturedParams,
       numUserInputs: traced.numUserInputs,
@@ -103,12 +136,13 @@ export function compileWithBackward(model, exampleInputs, opts = {}) {
     const params = compiled.capturedParams;
     const paramArrays = params.map(t => tensorToContiguous(t));
 
-    const outputTypes = compiled.outputTypes;
-    const outputArrays = new Array(outputTypes.length);
-    const outputShapes = new Array(outputTypes.length);
-    for (let i = 0; i < outputTypes.length; i++) {
-      const shape = _resolveOutputShape(compiled, i);
-      const dtype = outputTypes[i].dtype;
+    const allOutputTypes = compiled.forwardFunc.outputTypes;
+    const numRealOutputs = compiled.numRealOutputs;
+    const outputArrays = new Array(allOutputTypes.length);
+    const outputShapes = new Array(allOutputTypes.length);
+    for (let i = 0; i < allOutputTypes.length; i++) {
+      const shape = i < numRealOutputs ? _resolveOutputShape(compiled, i) : allOutputTypes[i].shape;
+      const dtype = allOutputTypes[i].dtype;
       const numel = computeNumel(shape);
       const Ctor = typedArrayCtor(dtype);
       outputArrays[i] = new Ctor(Math.max(numel, 1));
@@ -118,11 +152,11 @@ export function compileWithBackward(model, exampleInputs, opts = {}) {
     const allArgs = [...inputArrays, ...paramArrays, ...outputArrays];
     compiled.fwdResult.run(funcName, ...allArgs);
 
-    const results = outputTypes.length === 1
-      ? wrapResult(outputArrays[0], outputShapes[0], outputTypes[0].dtype, device)
-      : outputArrays.map((arr, i) => wrapResult(arr, outputShapes[i], outputTypes[i].dtype, device));
+    const results = numRealOutputs === 1
+      ? wrapResult(outputArrays[0], outputShapes[0], allOutputTypes[0].dtype, device)
+      : Array.from({ length: numRealOutputs }, (_, i) => wrapResult(outputArrays[i], outputShapes[i], allOutputTypes[i].dtype, device));
 
-    return { results, savedBuffers: [...inputArrays, ...paramArrays, ...outputArrays], device };
+    return { results, inputArrays, paramArrays, outputArrays, device };
   }
 
   function _executeSeparateBackward(compiled, gradOutputs, savedContext) {
@@ -132,9 +166,12 @@ export function compileWithBackward(model, exampleInputs, opts = {}) {
     const gradArrays = gradOutputs.map(t => tensorToContiguous(t));
 
     const savedValues = compiled.savedValues;
+    const savedSources = compiled.savedSources;
+    const argBuffers = [...savedContext.inputArrays, ...savedContext.paramArrays];
     const savedArrays = new Array(savedValues.length);
     for (let i = 0; i < savedValues.length; i++) {
-      savedArrays[i] = savedContext.savedBuffers[i] || new Float32Array(computeNumel(savedValues[i].type.shape));
+      const src = savedSources[i];
+      savedArrays[i] = src.kind === 'arg' ? argBuffers[src.index] : savedContext.outputArrays[src.index];
     }
 
     const bwdFunc = compiled.backwardFunc;

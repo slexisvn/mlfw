@@ -127,7 +127,7 @@ function computeMemoryLayout(primFunc, meta, target) {
     offset = Math.ceil(offset / align) * align;
     meta.memoryLayout.bufferOffsets.set(buf.name, offset);
     const numel = buf.numel();
-    offset += numel > 0 ? numel * wasmBytes(buf.dtype) : 65536;
+    offset += numel < 0 ? 65536 : numel * wasmBytes(buf.dtype);
   }
 
   for (const [name, buf] of meta.usedBuffers) {
@@ -135,7 +135,7 @@ function computeMemoryLayout(primFunc, meta, target) {
     offset = Math.ceil(offset / align) * align;
     meta.memoryLayout.bufferOffsets.set(name, offset);
     const numel = buf.numel();
-    offset += numel > 0 ? numel * wasmBytes(buf.dtype) : 65536;
+    offset += numel < 0 ? 65536 : numel * wasmBytes(buf.dtype);
   }
 
   meta.memoryLayout.totalBytes = offset;

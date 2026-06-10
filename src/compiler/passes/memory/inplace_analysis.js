@@ -28,6 +28,8 @@ export class InplaceAnalysis {
       }
     }
 
+    const alreadyAliased = new Set();
+
     for (const block of blocks) {
       const currentIdx = blockIdx.get(block);
       if (currentIdx === undefined) continue;
@@ -39,6 +41,7 @@ export class InplaceAnalysis {
         for (const readEntry of block.reads) {
           const srcBuf = readEntry.buffer;
           if (srcBuf === dstBuf) continue;
+          if (alreadyAliased.has(srcBuf)) continue;
           if (livenessResult.isParam(srcBuf)) continue;
 
           if (!shapesMatch(srcBuf, dstBuf)) continue;
@@ -56,6 +59,8 @@ export class InplaceAnalysis {
                 srcBuf, dstBuf,
                 `${srcBuf.name} last used at ${srcInterval.lastUse}, ${dstBuf.name} first used at ${dstInterval.firstUse}`
               ));
+              alreadyAliased.add(srcBuf);
+              break;
             }
           }
         }

@@ -1,12 +1,13 @@
 const WASM_MAGIC = [0x00, 0x61, 0x73, 0x6d];
 const WASM_VERSION = [0x01, 0x00, 0x00, 0x00];
 const SEC_TYPE = 1, SEC_IMPORT = 2, SEC_FUNC = 3, SEC_MEMORY = 5, SEC_EXPORT = 7, SEC_CODE = 10;
-const T_I32 = 0x7f, T_F32 = 0x7d, T_V128 = 0x7b, T_FUNC = 0x60, T_VOID = 0x40;
+const T_I32 = 0x7f, T_F64 = 0x7c, T_F32 = 0x7d, T_V128 = 0x7b, T_FUNC = 0x60, T_VOID = 0x40;
 
 function uleb(v) { const r = []; do { let b = v & 0x7f; v >>>= 7; if (v) b |= 0x80; r.push(b); } while (v); return r; }
 function sleb(v) { const r = []; let more = true; while (more) { let b = v & 0x7f; v >>= 7; if ((v === 0 && !(b & 0x40)) || (v === -1 && (b & 0x40))) more = false; else b |= 0x80; r.push(b); } return r; }
 function encStr(s) { const e = new TextEncoder().encode(s); return [...uleb(e.length), ...e]; }
 function encF32(v) { const b = new ArrayBuffer(4); new Float32Array(b)[0] = v; return [...new Uint8Array(b)]; }
+function encF64(v) { const b = new ArrayBuffer(8); new Float64Array(b)[0] = v; return [...new Uint8Array(b)]; }
 function section(id, data) { return [id, ...uleb(data.length), ...data]; }
 function vec(items) { const f = []; for (const i of items) f.push(...i); return [...uleb(items.length), ...f]; }
 
@@ -20,8 +21,14 @@ const INSTR = new Map([
   ['f32.neg', [0x8c]], ['f32.abs', [0x8b]], ['f32.ceil', [0x8d]], ['f32.floor', [0x8e]], ['f32.sqrt', [0x91]], ['f32.min', [0x96]], ['f32.max', [0x97]],
   ['f32.eq', [0x5b]], ['f32.ne', [0x5c]], ['f32.lt', [0x5d]], ['f32.gt', [0x5e]], ['f32.le', [0x5f]], ['f32.ge', [0x60]],
   ['f32.convert_i32_s', [0xb2]],
+  ['f64.add', [0xa0]], ['f64.sub', [0xa1]], ['f64.mul', [0xa2]], ['f64.div', [0xa3]],
+  ['f64.min', [0xa4]], ['f64.max', [0xa5]],
+  ['f64.neg', [0x9a]], ['f64.abs', [0x99]], ['f64.ceil', [0x9b]], ['f64.floor', [0x9c]], ['f64.sqrt', [0x9f]],
+  ['f64.eq', [0x61]], ['f64.ne', [0x62]], ['f64.lt', [0x63]], ['f64.gt', [0x64]], ['f64.le', [0x65]], ['f64.ge', [0x66]],
+  ['f64.convert_i32_s', [0xb7]], ['f64.promote_f32', [0xbb]], ['f32.demote_f64', [0xb6]], ['i32.trunc_f64_s', [0xaa]],
   ['select', [0x1b]],
   ['f32.load', [0x2a, 0x02, 0x00]], ['f32.store', [0x38, 0x02, 0x00]],
+  ['f64.load', [0x2b, 0x03, 0x00]], ['f64.store', [0x39, 0x03, 0x00]],
   ['i32.load', [0x28, 0x02, 0x00]], ['i32.store', [0x36, 0x02, 0x00]],
   ['i32.load8_s', [0x2c, 0x00, 0x00]], ['i32.store8', [0x3a, 0x00, 0x00]],
   ['v128.load', [0xfd, ...uleb(0), 0x04, 0x00]], ['v128.store', [0xfd, ...uleb(11), 0x04, 0x00]],
@@ -99,8 +106,8 @@ function parseModule(tokens) {
       while (peek() === '(') {
         p++;
         const inner = eat();
-        if (inner === 'param') { while (peek() !== ')') { const t = eat(); if (t === 'f32') params.push(T_F32); else if (t === 'i32') params.push(T_I32); else if (t === 'v128') params.push(T_V128); } }
-        else if (inner === 'result') { while (peek() !== ')') { const t = eat(); if (t === 'f32') results.push(T_F32); else if (t === 'i32') results.push(T_I32); else if (t === 'v128') results.push(T_V128); } }
+        if (inner === 'param') { while (peek() !== ')') { const t = eat(); if (t === 'f32') params.push(T_F32); else if (t === 'f64') params.push(T_F64); else if (t === 'i32') params.push(T_I32); else if (t === 'v128') params.push(T_V128); } }
+        else if (inner === 'result') { while (peek() !== ')') { const t = eat(); if (t === 'f32') results.push(T_F32); else if (t === 'f64') results.push(T_F64); else if (t === 'i32') results.push(T_I32); else if (t === 'v128') results.push(T_V128); } }
         expect(')');
       }
       expect(')'); expect(')');
@@ -111,7 +118,7 @@ function parseModule(tokens) {
         p++;
         const inner = eat();
         if (inner === 'export') { funcExportName = eat().replace(/"/g, ''); expect(')'); }
-        else if (inner === 'param') { while (peek() !== ')') { const t = eat(); if (t === 'i32') funcParams.push(T_I32); else if (t === 'f32') funcParams.push(T_F32); else if (t === 'v128') funcParams.push(T_V128); } expect(')'); }
+        else if (inner === 'param') { while (peek() !== ')') { const t = eat(); if (t === 'i32') funcParams.push(T_I32); else if (t === 'f32') funcParams.push(T_F32); else if (t === 'f64') funcParams.push(T_F64); else if (t === 'v128') funcParams.push(T_V128); } expect(')'); }
         else if (inner === 'result') { while (peek() !== ')') eat(); expect(')'); }
         else if (inner === 'local') {
           while (peek() !== ')') {
@@ -119,6 +126,7 @@ function parseModule(tokens) {
             if (t.startsWith('$')) { funcLocalNames.push(t.replace('$', '')); }
             else if (t === 'i32') funcLocals.push(T_I32);
             else if (t === 'f32') funcLocals.push(T_F32);
+            else if (t === 'f64') funcLocals.push(T_F64);
             else if (t === 'v128') funcLocals.push(T_V128);
           }
           expect(')');
@@ -171,6 +179,7 @@ function encodeBody(bodyTokens, localMap, importMap) {
         const kw = eat();
         if (kw === 'i32.const') { bytes.push(0x41); bytes.push(...sleb(parseInt(eat()))); expect(')'); }
         else if (kw === 'f32.const') { bytes.push(0x43); bytes.push(...encF32(parseFloat(eat()))); expect(')'); }
+        else if (kw === 'f64.const') { bytes.push(0x44); bytes.push(...encF64(parseFloat(eat()))); expect(')'); }
         else if (kw === 'local.get') { bytes.push(0x20); bytes.push(...uleb(localIdx(eat()))); expect(')'); }
         else if (kw === 'local.set') { bytes.push(0x21); bytes.push(...uleb(localIdx(eat()))); expect(')'); }
         else if (kw === 'block') {
@@ -196,7 +205,7 @@ function encodeBody(bodyTokens, localMap, importMap) {
           if (peek() === '(') {
             const saved = p;
             p++;
-            if (peek() === 'result') { eat(); const rt = eat(); blockType = rt === 'f32' ? T_F32 : rt === 'v128' ? T_V128 : T_I32; expect(')'); }
+            if (peek() === 'result') { eat(); const rt = eat(); blockType = rt === 'f32' ? T_F32 : rt === 'f64' ? T_F64 : rt === 'v128' ? T_V128 : T_I32; expect(')'); }
             else { p = saved; }
           }
           bytes.push(0x04, blockType);

@@ -1,8 +1,4 @@
-const DTYPE_BYTES = {
-  'f16': 2, 'f32': 4, 'f64': 8,
-  'i8': 1, 'i16': 2, 'i32': 4, 'i64': 8,
-  'bool': 1, 'index': 4
-};
+import { dtypeBytes } from '../../../backend/dtype_map.js';
 
 export class Buffer {
   constructor(name, shape, dtype, scope, strides = null, offset = 0, alignment = 64) {
@@ -47,7 +43,7 @@ export class Buffer {
   sizeInBytes() {
     const n = this.numel();
     if (n < 0) return -1;
-    return n * (DTYPE_BYTES[this.dtype] || 4);
+    return n * dtypeBytes(this.dtype);
   }
 }
 

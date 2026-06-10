@@ -87,14 +87,12 @@ export class BackwardGraphBuilder {
 
       const operandValues = new Array(op.numOperands);
       for (let o = 0; o < op.numOperands; o++) {
-        const fwdVal = op.getOperand(o);
-        operandValues[o] = valueMap.get(fwdVal.id) || fwdVal;
+        operandValues[o] = this._materialize(op.getOperand(o), valueMap, builder);
       }
 
       const resultValues = new Array(op.numResults);
       for (let r = 0; r < op.numResults; r++) {
-        const fwdRes = op.getResult(r);
-        resultValues[r] = valueMap.get(fwdRes.id) || fwdRes;
+        resultValues[r] = this._materialize(op.getResult(r), valueMap, builder);
       }
 
       const ctx = {
@@ -138,6 +136,32 @@ export class BackwardGraphBuilder {
       savedValues,
       gradInputIndices: this._getGradInputIndices(forwardInputs, needsGrad),
     };
+  }
+
+  _materialize(fwdVal, valueMap, builder, active) {
+    const mapped = valueMap.get(fwdVal.id);
+    if (mapped !== undefined) return mapped;
+
+    const defOp = fwdVal.definingOp;
+    if (!defOp) return fwdVal;
+
+    const seen = active || new Set();
+    if (seen.has(fwdVal.id)) return fwdVal;
+    seen.add(fwdVal.id);
+
+    const operands = new Array(defOp.numOperands);
+    for (let o = 0; o < defOp.numOperands; o++) {
+      operands[o] = this._materialize(defOp.getOperand(o), valueMap, builder, seen);
+    }
+
+    const resultTypes = defOp.results.map(r => r.type);
+    const cloned = builder._buildOp(defOp.opName, operands, resultTypes, new Map(defOp.attributes), null);
+
+    for (let r = 0; r < defOp.numResults; r++) {
+      valueMap.set(defOp.getResult(r).id, cloned.getResult(r));
+    }
+
+    return valueMap.get(fwdVal.id);
   }
 
   _computeGradReachability(func, topoOrder) {

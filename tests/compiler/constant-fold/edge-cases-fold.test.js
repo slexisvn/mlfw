@@ -149,3 +149,59 @@ describe('visited set prevents re-traversal', () => {
     expect(retVal(func).definingOp.getAttr('value')).toBe(30);
   });
 });
+
+describe('integer dtype fold representability guard', () => {
+  it('aborts fold when integer result exceeds safe integer range', () => {
+    const t = new TensorType([], ScalarType.I64);
+    const func = buildFunction('f', [], [t], (b) => {
+      const a = b.scalarConstant(10000000000, ScalarType.I64);
+      const c = b.scalarConstant(10000000000, ScalarType.I64);
+      b.returnOp([b.mul(a.getResult(0), c.getResult(0)).getResult(0)]);
+    });
+
+    run(func);
+
+    expect(retVal(func).definingOp.opName).toBe('mul');
+  });
+
+  it('aborts fold when integer division yields a non-integer result', () => {
+    const t = new TensorType([], ScalarType.I32);
+    const func = buildFunction('f', [], [t], (b) => {
+      const a = b.scalarConstant(7, ScalarType.I32);
+      const c = b.scalarConstant(2, ScalarType.I32);
+      b.returnOp([b.div(a.getResult(0), c.getResult(0)).getResult(0)]);
+    });
+
+    run(func);
+
+    expect(retVal(func).definingOp.opName).toBe('div');
+  });
+
+  it('still folds integer results within safe range', () => {
+    const t = new TensorType([], ScalarType.I32);
+    const func = buildFunction('f', [], [t], (b) => {
+      const a = b.scalarConstant(8, ScalarType.I32);
+      const c = b.scalarConstant(2, ScalarType.I32);
+      b.returnOp([b.mul(a.getResult(0), c.getResult(0)).getResult(0)]);
+    });
+
+    run(func);
+
+    expect(retVal(func).definingOp.opName).toBe('constant');
+    expect(retVal(func).definingOp.getAttr('value')).toBe(16);
+  });
+
+  it('does not block folds for float dtypes producing non-finite values', () => {
+    const t = new TensorType([], ScalarType.F32);
+    const func = buildFunction('f', [], [t], (b) => {
+      const a = b.scalarConstant(1, ScalarType.F32);
+      const c = b.scalarConstant(0, ScalarType.F32);
+      b.returnOp([b.div(a.getResult(0), c.getResult(0)).getResult(0)]);
+    });
+
+    run(func);
+
+    expect(retVal(func).definingOp.opName).toBe('constant');
+    expect(retVal(func).definingOp.getAttr('value')).toBe(Infinity);
+  });
+});

@@ -6,6 +6,20 @@ import { registry } from '../compiler/ir/graph/ops.js';
 import { SymbolicTensor } from './symbolic_tensor.js';
 import { ShapeEnv } from './shape_env.js';
 
+function _traceReduce(b, args, a, reduceType, initVal) {
+  const rank = args[0].type.rank;
+  const dims = a?.dim;
+  const dimensions = dims !== undefined && dims !== null
+    ? (Array.isArray(dims) ? dims : [dims]).map(d => d < 0 ? rank + d : d)
+    : Array.from({ length: rank }, (_, i) => i);
+  const initConst = b.scalarConstant(initVal, args[0].type.dtype);
+  const reduced = b.reduce(args[0], initConst.getResult(0), dimensions, reduceType);
+  if (!a?.keepdim) return reduced;
+  const dimSet = new Set(dimensions);
+  const newShape = args[0].type.shape.map((d, i) => dimSet.has(i) ? 1 : d);
+  return b.reshape(reduced.getResult(0), newShape);
+}
+
 const _BUILDER_METHOD_MAP = {
   matmul: (b, args) => b.matmul(args[0], args[1]),
   softmax: (b, args, a) => b.softmax(args[0], a?.dim ?? -1),
@@ -21,22 +35,11 @@ const _BUILDER_METHOD_MAP = {
   pool2d: (b, args, a) => b.pool2d(args[0], a?.pool_type ?? 'max', a?.kernel_size ?? [2,2], a?.strides ?? [2,2], a?.padding ?? [[0,0],[0,0]]),
   maximum: (b, args) => b.maximum(args[0], args[1]),
   minimum: (b, args) => b.minimum(args[0], args[1]),
-  sum: (b, args, a) => {
-    const dims = a?.dim;
-    const dimensions = dims !== undefined && dims !== null
-      ? (Array.isArray(dims) ? dims : [dims])
-      : Array.from({ length: args[0].type.rank }, (_, i) => i);
-    const initConst = b.scalarConstant(0, args[0].type.dtype);
-    return b.reduce(args[0], initConst.getResult(0), dimensions, 'sum');
-  },
-  mean: (b, args, a) => {
-    const dims = a?.dim;
-    const dimensions = dims !== undefined && dims !== null
-      ? (Array.isArray(dims) ? dims : [dims])
-      : Array.from({ length: args[0].type.rank }, (_, i) => i);
-    const initConst = b.scalarConstant(0, args[0].type.dtype);
-    return b.reduce(args[0], initConst.getResult(0), dimensions, 'mean');
-  },
+  sum: (b, args, a) => _traceReduce(b, args, a, 'sum', 0),
+  mean: (b, args, a) => _traceReduce(b, args, a, 'mean', 0),
+  max: (b, args, a) => _traceReduce(b, args, a, 'max', -Infinity),
+  min: (b, args, a) => _traceReduce(b, args, a, 'min', Infinity),
+  prod: (b, args, a) => _traceReduce(b, args, a, 'prod', 1),
   eq: (b, args) => b.compare(args[0], args[1], 'eq'),
   ne: (b, args) => b.compare(args[0], args[1], 'ne'),
   lt: (b, args) => b.compare(args[0], args[1], 'lt'),
@@ -52,6 +55,9 @@ const _BUILDER_METHOD_MAP = {
     perm[d1] = d0;
     return b.transpose(args[0], perm);
   },
+  permute: (b, args, a) => b.transpose(args[0], a.dims),
+  reshape: (b, args, a) => b.reshape(args[0], a.new_shape),
+  slice: (b, args, a) => b.slice(args[0], a.starts, a.limits, a.strides),
 };
 
 let _activeTracer = null;

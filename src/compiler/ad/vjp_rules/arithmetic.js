@@ -11,6 +11,20 @@ registerVJPRule('sub', (ctx) => {
   return [grad, negGrad];
 });
 
+function _minMaxVJP(ctx, cmp) {
+  const grad = ctx.gradOutputs[0];
+  const [a, b] = ctx.operands;
+  const zero = ctx.builder.scalarConstant(0, a.type.dtype).getResult(0);
+  const zeroBr = ctx.builder.broadcast(zero, a.type.shape, []).getResult(0);
+  const mask = ctx.builder.compare(a, b, cmp).getResult(0);
+  const gradA = ctx.builder.select(mask, grad, zeroBr).getResult(0);
+  const gradB = ctx.builder.select(mask, zeroBr, grad).getResult(0);
+  return [gradA, gradB];
+}
+
+registerVJPRule('maximum', (ctx) => _minMaxVJP(ctx, 'ge'));
+registerVJPRule('minimum', (ctx) => _minMaxVJP(ctx, 'le'));
+
 registerVJPRule('mul', (ctx) => {
   const grad = ctx.gradOutputs[0];
   const [lhs, rhs] = ctx.operands;

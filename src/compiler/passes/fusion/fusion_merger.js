@@ -69,7 +69,7 @@ export class FusionMergerPass extends FunctionPass {
           const consumer = use.user;
           if (consumer === producer) continue;
 
-          const key = producer.id * 1000000 + consumer.id;
+          const key = `${producer.id}|${consumer.id}`;
           let entry = seen.get(key);
           if (!entry) {
             entry = { producer, consumer, sharedResults: new Map() };

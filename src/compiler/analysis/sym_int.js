@@ -1,3 +1,7 @@
+const SYM_INT_METHOD_NAMES = {
+  ceildiv: 'ceilDiv'
+};
+
 export class SymInt {
   constructor(type, name = null, args = []) {
     this.type = type;
@@ -43,6 +47,7 @@ export class SymInt {
   }
 
   static div(a, b) {
+    if (b === 0) throw new Error('SymInt.div: division by zero');
     if (typeof a === 'number' && typeof b === 'number') return Math.floor(a / b);
     if (a === 0) return 0;
     if (b === 1) return a;
@@ -51,6 +56,7 @@ export class SymInt {
   }
 
   static mod(a, b) {
+    if (b === 0) throw new Error('SymInt.mod: modulo by zero');
     if (typeof a === 'number' && typeof b === 'number') return ((a % b) + b) % b;
     if (a === 0) return 0;
     if (b === 1) return 0;
@@ -102,7 +108,7 @@ export class SymInt {
       return expr.name === varName ? value : expr;
     }
     const newArgs = expr.args.map(a => SymInt.substitute(a, varName, value));
-    const op = SymInt[expr.type];
+    const op = SymInt[SYM_INT_METHOD_NAMES[expr.type] || expr.type];
     if (op && newArgs.length === 2) return op(newArgs[0], newArgs[1]);
     if (op && newArgs.length === 1) return op(newArgs[0]);
     return new SymInt(expr.type, expr.name, newArgs);

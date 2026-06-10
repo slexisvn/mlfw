@@ -194,5 +194,20 @@ registerVJPRule('hardsigmoid', (ctx) => {
 registerVJPRule('embedding', (ctx) => {
   const grad = ctx.gradOutputs[0];
   const [weight, indices] = ctx.operands;
-  return [null, null];
+  const weightShape = weight.type.shape;
+  const weightDtype = weight.type.dtype;
+  const idxRank = indices.type.rank;
+  const idxShape = indices.type.shape;
+
+  const zeroScalar = ctx.builder.scalarConstant(0, weightDtype).getResult(0);
+  const zeroWeight = ctx.builder.broadcast(zeroScalar, weightShape, []).getResult(0);
+
+  const gradWeight = ctx.builder.scatter(zeroWeight, indices, grad, {
+    updateWindowDims: [idxRank],
+    insertedWindowDims: [0],
+    scatterDimsToOperandDims: [0],
+    indexVectorDim: idxRank,
+  }).getResult(0);
+
+  return [gradWeight, null];
 });

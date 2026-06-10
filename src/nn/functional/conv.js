@@ -1,5 +1,5 @@
 import * as ops from '../../tensor/ops/ops.js';
-import { reshape } from '../../tensor/view/view_ops.js';
+import { reshape, unsqueeze, squeeze } from '../../tensor/view/view_ops.js';
 
 export function conv2d(input, weight, bias, stride = [1, 1], padding = [[0, 0], [0, 0]], dilation = [1, 1], groups = 1) {
   const s = Array.isArray(stride) ? stride : [stride, stride];
@@ -15,7 +15,6 @@ export function conv2d(input, weight, bias, stride = [1, 1], padding = [[0, 0], 
 }
 
 export function conv1d(input, weight, bias, stride = 1, padding = 0, dilation = 1, groups = 1) {
-  const { unsqueeze, squeeze } = require('../../tensor/view/view_ops.js');
   const input4d = unsqueeze(input, 2);
   const weight4d = unsqueeze(weight, 2);
   const s = [1, Array.isArray(stride) ? stride[0] : stride];
@@ -24,7 +23,7 @@ export function conv1d(input, weight, bias, stride = 1, padding = 0, dilation = 
   const out4d = conv2d(input4d, weight4d, null, s, p, d, groups);
   const out = squeeze(out4d, 2);
   if (bias) {
-    const biasView = reshape(bias, [1, 1, bias.shape[0]]);
+    const biasView = reshape(bias, [1, bias.shape[0], 1]);
     return ops.add(out, biasView);
   }
   return out;

@@ -46,7 +46,8 @@ function collectBlockOps(node, ops) {
       collectBlockOps(node.value, ops);
       return;
     case 'BufferLoadNode':
-      ops.push('load');
+      ops.push(`load:${node.buffer.name}`);
+      if (node.indices) for (const idx of node.indices) collectBlockOps(idx, ops);
       return;
     case 'MathOpNode':
       ops.push(`math:${node.op}`);

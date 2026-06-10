@@ -300,9 +300,23 @@ export class MultiOutputFusionPass extends FunctionPass {
       [mergedRegion]
     );
 
-    const insertRef = left;
-    if (!insertRef.parentBlock) return;
-    insertRef.parentBlock.insertBefore(mergedFusionOp, insertRef);
+    const block = left.parentBlock;
+    if (!block) return;
+
+    let insertAfter = null;
+    for (const val of mergedOperands) {
+      const producer = val.definingOp;
+      if (!producer || producer === left || producer === right) continue;
+      if (!insertAfter || !this._comesBefore(producer, insertAfter)) {
+        insertAfter = producer;
+      }
+    }
+
+    if (insertAfter && insertAfter.parentBlock === block) {
+      block.insertAfter(mergedFusionOp, insertAfter);
+    } else {
+      block.insertBefore(mergedFusionOp, left);
+    }
 
     for (let i = 0; i < left.numResults; i++) {
       left.getResult(i).replaceAllUsesWith(mergedFusionOp.getResult(i));
@@ -316,6 +330,17 @@ export class MultiOutputFusionPass extends FunctionPass {
     if (left.parentBlock) left.parentBlock.removeOp(left);
     right.dropAllOperands();
     if (right.parentBlock) right.parentBlock.removeOp(right);
+  }
+
+  _comesBefore(opA, opB) {
+    if (!opA.parentBlock || opA.parentBlock !== opB.parentBlock) return false;
+    let cur = opA.parentBlock.firstOp;
+    while (cur) {
+      if (cur === opA) return true;
+      if (cur === opB) return false;
+      cur = cur._next;
+    }
+    return false;
   }
 
   _hasProducerConsumerEdge(producer, consumer) {
@@ -332,5 +357,5 @@ export class MultiOutputFusionPass extends FunctionPass {
 function pairKey(a, b) {
   const lo = Math.min(a.id, b.id);
   const hi = Math.max(a.id, b.id);
-  return lo * 1000000 + hi;
+  return `${lo}|${hi}`;
 }

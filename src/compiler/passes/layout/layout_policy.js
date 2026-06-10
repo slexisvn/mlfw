@@ -55,8 +55,8 @@ export class LayoutPolicy {
         return new LayoutPreference([tgt.preferredConvLayout, null], [tgt.preferredConvLayout]);
       }
 
-      if (tgt.isGPU()) {
-        const nhwc = new Layout([0, 2, 3, 1].slice(0, rank));
+      if (tgt.isGPU() && rank === 4) {
+        const nhwc = new Layout([0, 2, 3, 1]);
         return new LayoutPreference([nhwc, null], [nhwc]);
       }
 

@@ -84,6 +84,7 @@ function _inferOutputShape(opName, tensorArgs, scalars) {
     const aShape = tensorArgs[0].shape;
     const bShape = tensorArgs[1].shape;
     if (aShape.length === 1 && bShape.length === 1) return [];
+    if (aShape.length === 1 && bShape.length === 2) return [bShape[1]];
     if (aShape.length === 2 && bShape.length === 2) return [aShape[0], bShape[1]];
     if (aShape.length === 2 && bShape.length === 1) return [aShape[0]];
     if (aShape.length >= 3) return [...aShape.slice(0, -2), aShape[aShape.length - 2], bShape[bShape.length - 1]];
@@ -98,6 +99,34 @@ function _inferOutputShape(opName, tensorArgs, scalars) {
     const d1 = scalars.dim1 ?? 1;
     const tmp = shape[d0]; shape[d0] = shape[d1]; shape[d1] = tmp;
     return shape;
+  }
+
+  if (opName === 'conv2d') {
+    const inp = tensorArgs[0].shape;
+    const w = tensorArgs[1].shape;
+    const strides = scalars.strides || [1, 1];
+    const padding = scalars.padding || [[0, 0], [0, 0]];
+    const dilation = scalars.dilation || [1, 1];
+    const spatial = [];
+    for (let i = 0; i < 2; i++) {
+      const padTotal = padding[i][0] + padding[i][1];
+      const effK = (w[i + 2] - 1) * dilation[i] + 1;
+      spatial.push(Math.floor((inp[i + 2] + padTotal - effK) / strides[i]) + 1);
+    }
+    return [inp[0], w[0], ...spatial];
+  }
+
+  if (opName === 'pool2d') {
+    const inp = tensorArgs[0].shape;
+    const ks = scalars.kernel_size || [2, 2];
+    const strides = scalars.strides || ks;
+    const padding = scalars.padding || [[0, 0], [0, 0]];
+    const spatial = [];
+    for (let i = 0; i < 2; i++) {
+      const padTotal = padding[i][0] + padding[i][1];
+      spatial.push(Math.floor((inp[i + 2] + padTotal - ks[i]) / strides[i]) + 1);
+    }
+    return [inp[0], inp[1], ...spatial];
   }
 
   if (opName === 'softmax' || opName === 'log_softmax') return [...tensorArgs[0].shape];

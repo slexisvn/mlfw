@@ -564,6 +564,26 @@ describe('GPUCodegen.generate — LetStmtNode', () => {
     const kernel = makeCodegen().generate(pf);
     expect(kernel.source).toMatch(/float tmp = /);
   });
+
+  it('uses the let variable dtype, not the kernel default dtype', () => {
+    const inBuf = buf('x', [4], 'f32');
+    const outBuf = buf('y', [4], 'f32');
+
+    const load = new BufferLoadNode(inBuf, [idx('i')]);
+    const cast = new CastNode(load, 'f32', 'i32');
+    const intVar = new VariableNode('q', 'i32');
+    const back = new CastNode(intVar, 'i32', 'f32');
+    const store = new BufferStoreNode(outBuf, [idx('i')], back);
+    const letStmt = new LetStmtNode(intVar, cast, store);
+    const forNode = new ForNode(idx('i'), new IntImmNode(0), new IntImmNode(4), ForKind.SERIAL, letStmt);
+
+    const bufferMap = new Map([['p0', inBuf], ['p1', outBuf]]);
+    const pf = makePrimFunc('let_int_kernel', ['p0', 'p1'], forNode, bufferMap);
+
+    const kernel = makeCodegen().generate(pf);
+    expect(kernel.source).toMatch(/int q = /);
+    expect(kernel.source).not.toMatch(/float q = /);
+  });
 });
 
 describe('GPUCodegen.generate — WhileNode', () => {

@@ -37,10 +37,10 @@ export class BenchmarkRunner {
     let buffers = this._bufferCache.get(cacheKey);
     if (!buffers) {
       buffers = sizes.map(n => new Float32Array(n));
-      for (const buf of buffers) {
-        for (let i = 0; i < buf.length; i++) buf[i] = Math.random() * 2 - 1;
-      }
       this._bufferCache.set(cacheKey, buffers);
+    }
+    for (const buf of buffers) {
+      for (let i = 0; i < buf.length; i++) buf[i] = Math.random() * 2 - 1;
     }
     return { buffers, totalBytes };
   }
@@ -76,8 +76,7 @@ export class BenchmarkRunner {
     let totalElapsed = 0;
     const maxIterations = this.repeat * 3;
 
-    for (let i = 0; i < this.repeat || totalElapsed < this.minRepeatMs; i++) {
-      if (i >= maxIterations) break;
+    for (let i = 0; i < maxIterations && (i < this.repeat || totalElapsed < this.minRepeatMs); i++) {
       const start = performance.now();
       fn(...buffers);
       const elapsed = performance.now() - start;

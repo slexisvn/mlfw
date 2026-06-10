@@ -36,6 +36,29 @@ function resolveOtherOperand(op, chainSet) {
   return op0Def;
 }
 
+function comesBefore(opA, opB) {
+  if (!opA.parentBlock || opA.parentBlock !== opB.parentBlock) return false;
+  let cur = opA.parentBlock.firstOp;
+  while (cur) {
+    if (cur === opA) return true;
+    if (cur === opB) return false;
+    cur = cur._next;
+  }
+  return false;
+}
+
+function hasEscapingUse(removedSet, lastOp) {
+  for (const op of removedSet) {
+    if (op === lastOp) continue;
+    for (let j = 0; j < op.numResults; j++) {
+      for (const use of op.getResult(j).uses()) {
+        if (!removedSet.has(use.user)) return true;
+      }
+    }
+  }
+  return false;
+}
+
 function classifyTag(op, chainSet) {
   const fn = EPILOGUE_TAG_TABLE.get(op.opName);
   if (fn) return fn(op, chainSet);
@@ -170,8 +193,28 @@ export class EpilogueFusionPass extends FunctionPass {
         attrs
       );
 
-      if (!dotOp.parentBlock) continue;
-      dotOp.parentBlock.insertBefore(fusedOp, dotOp);
+      const block = dotOp.parentBlock;
+      if (!block) continue;
+
+      const removedSet = new Set(chain);
+      removedSet.add(dotOp);
+
+      if (hasEscapingUse(removedSet, lastOp)) continue;
+
+      let insertAfter = null;
+      for (const val of allInputs) {
+        const producer = val.definingOp;
+        if (!producer || removedSet.has(producer)) continue;
+        if (!insertAfter || !comesBefore(producer, insertAfter)) {
+          insertAfter = producer;
+        }
+      }
+
+      if (insertAfter && insertAfter.parentBlock === block) {
+        block.insertAfter(fusedOp, insertAfter);
+      } else {
+        block.insertBefore(fusedOp, dotOp);
+      }
       lastOp.getResult(0).replaceAllUsesWith(fusedOp.getResult(0));
 
       for (let i = chain.length - 1; i >= 0; i--) {

@@ -132,6 +132,7 @@ export class DequantizeFoldIntoDot extends Pattern {
     const rhsZP = rhsDequant.getAttr('zero_point');
     if (typeof lhsScale !== 'number' || typeof rhsScale !== 'number') return false;
     if (typeof lhsZP !== 'number' || typeof rhsZP !== 'number') return false;
+    if (lhsZP !== 0 || rhsZP !== 0) return false;
 
     const outputScale = lhsScale * rhsScale;
     const lhsC = op.getAttr('lhs_contracting');

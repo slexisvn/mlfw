@@ -305,6 +305,67 @@ describe('GraphPartitioner merge small partitions', () => {
   });
 });
 
+describe('GraphPartitioner cycle avoidance and op coverage', () => {
+  it('does not merge an op into a producer partition when it would create a back-edge', () => {
+    const cpu = CPUTarget();
+    const gpu = GPUTarget();
+    const t = new TensorType([8], ScalarType.F32);
+    const func = buildFunction('f', [t, t], [t], (b, args) => {
+      const a = b.add(args[0], args[1]);
+      const n = b.neg(a.getResult(0));
+      const c = b.add(a.getResult(0), n.getResult(0));
+      b.returnOp([c.getResult(0)]);
+    });
+
+    const overrides = new Map([['neg', cpu]]);
+    const config = new PartitionerConfig({ targets: [gpu, cpu], opTargetOverrides: overrides });
+    const result = new GraphPartitioner(config).partition(func);
+
+    const seen = new Set();
+    const onStack = new Set();
+    const hasCycle = (p) => {
+      if (onStack.has(p)) return true;
+      if (seen.has(p)) return false;
+      seen.add(p);
+      onStack.add(p);
+      for (const op of p.ops) {
+        for (let i = 0; i < op.numOperands; i++) {
+          const prod = op.getOperand(i).definingOp;
+          if (!prod) continue;
+          const sp = result.getPartition(prod);
+          if (sp && sp !== p && hasCycle(sp)) return true;
+        }
+      }
+      onStack.delete(p);
+      return false;
+    };
+
+    for (const p of result.partitions) {
+      expect(hasCycle(p)).toBe(false);
+    }
+  });
+
+  it('every partitionable op lands in exactly one emitted partition', () => {
+    const cpu = CPUTarget();
+    const gpu = GPUTarget();
+    const t = new TensorType([8], ScalarType.F32);
+    const func = buildFunction('f', [t, t], [t], (b, args) => {
+      const a = b.add(args[0], args[1]);
+      const n = b.neg(a.getResult(0));
+      const e = b.exp(n.getResult(0));
+      b.returnOp([e.getResult(0)]);
+    });
+
+    const config = new PartitionerConfig({ targets: [cpu, gpu], minPartitionSize: 10 });
+    const result = new GraphPartitioner(config).partition(func);
+
+    for (const op of ops(func)) {
+      const partsWithOp = result.partitions.filter(p => p.hasOp(op));
+      expect(partsWithOp.length).toBe(1);
+    }
+  });
+});
+
 describe('PartitionResult queries', () => {
   it('getPartitionsForTarget filters correctly', () => {
     const cpu = CPUTarget();

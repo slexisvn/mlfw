@@ -252,7 +252,8 @@ export class GPUCodegen {
   }
 
   _visitLetStmtNode(node) {
-    this._emit(`${cType(this._defaultDtype)} ${node.variable.name} = ${this._exprToC(node.value)};`);
+    const dtype = node.variable.dtype || this._defaultDtype;
+    this._emit(`${cType(dtype)} ${node.variable.name} = ${this._exprToC(node.value)};`);
     this._visitNode(node.body);
   }
 

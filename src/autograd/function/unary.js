@@ -76,19 +76,11 @@ export class GeluBackward extends AutogradNode {
     const d = x.dtype;
     const dev = x.device;
 
-    const coeff = full(s, 0.7978845608028654, { dtype: d, device: dev });
-    const ic = full(s, 0.044715, { dtype: d, device: dev });
-    const half = full(s, 0.5, { dtype: d, device: dev });
+    const c = full(s, 1.702, { dtype: d, device: dev });
     const one = ones(s, { dtype: d, device: dev });
-    const three = full(s, 3, { dtype: d, device: dev });
-
-    const x3 = ops.mul(ops.mul(x, x), x);
-    const inner = ops.mul(coeff, ops.add(x, ops.mul(ic, x3)));
-    const th = ops.tanh(inner);
-
-    const sechSq = ops.sub(one, ops.mul(th, th));
-    const dInner = ops.mul(coeff, ops.add(one, ops.mul(ops.mul(ic, three), ops.mul(x, x))));
-    const grad = ops.mul(half, ops.add(ops.add(one, th), ops.mul(x, ops.mul(sechSq, dInner))));
+    const cx = ops.mul(c, x);
+    const sig = ops.sigmoid(cx);
+    const grad = ops.mul(sig, ops.add(one, ops.mul(cx, ops.sub(one, sig))));
     return [ops.mul(g, grad)];
   }
 }

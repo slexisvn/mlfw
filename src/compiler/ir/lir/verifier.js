@@ -64,15 +64,21 @@ function verifyStmt(node, ctx) {
     case 'LIRBindingsNode':
       verifyBindings(node, ctx);
       break;
-    case 'LetStmtNode':
+    case 'LetStmtNode': {
       verifyExpr(node.value, ctx);
+      const had = ctx.boundVars.has(node.variable.name);
       ctx.boundVars.add(node.variable.name);
       verifyStmt(node.body, ctx);
+      if (!had) ctx.boundVars.delete(node.variable.name);
       break;
-    case 'AllocateNode':
+    }
+    case 'AllocateNode': {
+      const had = node.buffer ? ctx.bufferNames.has(node.buffer.name) : true;
       if (node.buffer) ctx.bufferNames.add(node.buffer.name);
       verifyStmt(node.body, ctx);
+      if (node.buffer && !had) ctx.bufferNames.delete(node.buffer.name);
       break;
+    }
     case 'IfThenElseNode':
       verifyExpr(node.condition, ctx);
       verifyStmt(node.thenBody, ctx);
@@ -93,15 +99,20 @@ function verifyStmt(node, ctx) {
 }
 
 function verifyForNode(node, ctx) {
+  if (!node.extent) {
+    ctx.errors.push(new LIRVerificationError('ForNode missing extent', [...ctx.path]));
+  } else {
+    verifyExpr(node.extent, ctx);
+  }
+  let had = true;
   if (!node.loopVar) {
     ctx.errors.push(new LIRVerificationError('ForNode missing loopVar', [...ctx.path]));
   } else {
+    had = ctx.boundVars.has(node.loopVar.name);
     ctx.boundVars.add(node.loopVar.name);
   }
-  if (!node.extent) {
-    ctx.errors.push(new LIRVerificationError('ForNode missing extent', [...ctx.path]));
-  }
   verifyStmt(node.body, ctx);
+  if (node.loopVar && !had) ctx.boundVars.delete(node.loopVar.name);
 }
 
 function verifyFlatStore(node, ctx) {
@@ -119,19 +130,24 @@ function verifyAccumulator(node, ctx) {
   if (!node.dtype) {
     ctx.errors.push(new LIRVerificationError('LIRAccumulatorNode missing dtype', [...ctx.path]));
   }
-  ctx.boundVars.add(node.localName);
+  const had = node.localName ? ctx.boundVars.has(node.localName) : true;
+  if (node.localName) ctx.boundVars.add(node.localName);
   verifyExpr(node.initLoad, ctx);
   verifyExpr(node.body, ctx);
   verifyStmt(node.flushStore, ctx);
   if (node.initBody) verifyStmt(node.initBody, ctx);
+  if (node.localName && !had) ctx.boundVars.delete(node.localName);
 }
 
 function verifyBindings(node, ctx) {
+  const added = [];
   for (const bind of node.bindings) {
     verifyExpr(bind.expr, ctx);
+    if (!ctx.boundVars.has(bind.name)) added.push(bind.name);
     ctx.boundVars.add(bind.name);
   }
   verifyStmt(node.body, ctx);
+  for (const name of added) ctx.boundVars.delete(name);
 }
 
 function verifyExpr(node, ctx) {
@@ -166,6 +182,10 @@ function verifyExpr(node, ctx) {
       if (node.elseBody) verifyExpr(node.elseBody, ctx);
       break;
     case 'VariableNode':
+      if (node.name !== undefined && !ctx.boundVars.has(node.name)) {
+        ctx.errors.push(new LIRVerificationError(`unbound variable '${node.name}'`, [...ctx.path]));
+      }
+      break;
     case 'IntImmNode':
     case 'FloatImmNode':
       break;

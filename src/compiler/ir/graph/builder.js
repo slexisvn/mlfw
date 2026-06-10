@@ -356,12 +356,15 @@ export class IRBuilder {
   }
 
   scatter(operand, indices, updates, opts) {
+    const scalarType = new TensorType([], operand.type.dtype);
+    const combinerRegion = new Region();
+    combinerRegion.addBlock(new Block([scalarType, scalarType]));
     return this._inferAndBuild('scatter', [operand, indices, updates], {
       update_window_dims: opts.updateWindowDims,
       inserted_window_dims: opts.insertedWindowDims,
       scatter_dims_to_operand_dims: opts.scatterDimsToOperandDims,
       index_vector_dim: opts.indexVectorDim,
-    });
+    }, [combinerRegion]);
   }
 
   scatterAdd(operand, indices, updates, opts) {

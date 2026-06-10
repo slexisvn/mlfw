@@ -56,6 +56,7 @@ export function verifyFunction(func, errors = []) {
   for (const arg of func.entryBlock.arguments) {
     definedValues.add(arg);
   }
+  collectDefinedValues(func.body, definedValues);
 
   for (const block of func.body) {
     verifyBlock(block, func, definedValues, errors);
@@ -94,12 +95,19 @@ export function verifyFunction(func, errors = []) {
   return errors;
 }
 
+function collectDefinedValues(blockList, definedValues) {
+  for (const block of blockList) {
+    for (const arg of block.arguments) definedValues.add(arg);
+    for (const op of block) {
+      for (let i = 0; i < op.numResults; i++) definedValues.add(op.getResult(i));
+      for (const region of op.regions) collectDefinedValues(region, definedValues);
+    }
+  }
+}
+
 function verifyBlock(block, func, definedValues, errors) {
   for (const op of block) {
     verifyOperation(op, func, definedValues, errors);
-    for (let i = 0; i < op.numResults; i++) {
-      definedValues.add(op.getResult(i));
-    }
   }
 
   if (block.size > 0) {
@@ -128,6 +136,9 @@ function verifyOperation(op, func, definedValues, errors) {
     if (!(operand instanceof Value)) {
       errors.push(new VerificationError(`Operand ${i} is not a Value`, op, func));
       continue;
+    }
+    if (!definedValues.has(operand)) {
+      errors.push(new VerificationError(`Operand ${i} used before definition`, op, func));
     }
   }
 

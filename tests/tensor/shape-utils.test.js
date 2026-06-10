@@ -11,6 +11,7 @@ import {
   flatIndex,
   expandShape,
 } from '../../src/tensor/utils/shape_utils.js';
+import { metaMatmul } from '../../src/tensor/native/meta/meta_ops.js';
 
 describe('computeStrides', () => {
   it('computes row-major strides for 3D', () => {
@@ -279,5 +280,30 @@ describe('computeStrides edge cases', () => {
 
   it('4D strides', () => {
     expect(computeStrides([2, 3, 4, 5])).toEqual([60, 20, 5, 1]);
+  });
+});
+
+describe('inferReshape non-contiguous', () => {
+  it('requires a copy when reshaping a transposed (non-mergeable) layout', () => {
+    const r = inferReshape([3, 2], [1, 3], [6]);
+    expect(r.needsCopy).toBe(true);
+  });
+
+  it('avoids a copy for a genuinely mergeable contiguous block', () => {
+    const r = inferReshape([2, 2], [2, 1], [4]);
+    expect(r.needsCopy).toBe(false);
+    expect(r.strides).toEqual([1]);
+  });
+});
+
+describe('metaMatmul shape inference', () => {
+  const fake = (shape) => ({ shape, dtype: 'f32' });
+
+  it('infers vector @ matrix (1D @ 2D) as the matrix column dim', () => {
+    expect(metaMatmul(null, fake([3]), fake([3, 2])).shape).toEqual([2]);
+  });
+
+  it('infers matrix @ vector (2D @ 1D)', () => {
+    expect(metaMatmul(null, fake([2, 3]), fake([3])).shape).toEqual([2]);
   });
 });

@@ -82,6 +82,35 @@ describe('QuantizationPass exclusion logic', () => {
   });
 });
 
+describe('QuantizationPass target dtype bit width', () => {
+  function dotScale(targetDtype) {
+    const lhs = new TensorType([4, 8], ScalarType.F32);
+    const rhs = new TensorType([8, 6], ScalarType.F32);
+    const out = new TensorType([4, 6], ScalarType.F32);
+    const func = buildFunction('f', [lhs, rhs], [out], (b, args) => {
+      b.returnOp([b.matmul(args[0], args[1]).getResult(0)]);
+    });
+    run(func, { targetDtype });
+    const qDot = findOps(func, 'quantized_dot')[0];
+    return qDot.getAttr('lhs_scale');
+  }
+
+  it('i8 activation scale uses 8-bit symmetric bound (6/127)', () => {
+    expect(dotScale(ScalarType.I8)).toBeCloseTo(6 / 127, 12);
+  });
+
+  it('i16 activation scale uses 16-bit symmetric bound (6/32767), not clobbered to 8-bit', () => {
+    const scale = dotScale(ScalarType.I16);
+    expect(scale).toBeCloseTo(6 / 32767, 12);
+    expect(scale).toBeLessThan(6 / 127);
+  });
+
+  it('i32 activation scale uses 32-bit symmetric bound', () => {
+    const bound = (1 << 31) - 1;
+    expect(dotScale(ScalarType.I32)).toBeCloseTo(6 / bound, 18);
+  });
+});
+
 describe('QuantizationPass native dot variant', () => {
   it('replaces dot with quantized_dot and erases original', () => {
     const lhs = new TensorType([4, 8], ScalarType.F32);

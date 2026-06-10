@@ -43,7 +43,6 @@ export class HistogramCollector {
 
     const range = this.rangeMax - this.rangeMin;
     if (range <= 0) return;
-    const scale = this.numBins / range;
 
     for (let i = 0; i < data.length; i++) {
       const v = data[i];
@@ -51,7 +50,11 @@ export class HistogramCollector {
         this._expandAndRebucket(data);
         return;
       }
-      const idx = Math.min(this.numBins - 1, Math.floor((v - this.rangeMin) * scale));
+    }
+
+    const scale = this.numBins / range;
+    for (let i = 0; i < data.length; i++) {
+      const idx = Math.min(this.numBins - 1, Math.floor((data[i] - this.rangeMin) * scale));
       this.bins[idx]++;
     }
     this.totalCount += data.length;

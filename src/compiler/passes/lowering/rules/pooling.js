@@ -1,9 +1,25 @@
 import {
   IntImmNode, FloatImmNode, MathOpNode, CompareNode,
   ForNode, ForKind, BufferStoreNode, BufferLoadNode,
-  BlockNode, SeqNode, IfThenElseNode, CallExternNode
+  BlockNode, SeqNode, IfThenElseNode, CallExternNode, CastNode
 } from '../../../ir/tensor/nodes.js';
-import { registerLoweringRule, buildSpatialNest, bufRefs } from '../lowering_registry.js';
+import { registerLoweringRule, buildSpatialNest, bufRefs, parseLayout } from '../lowering_registry.js';
+
+function spatialCount(ov, stride, kernel, pad, inExtent) {
+  const start = new MathOpNode('-', new MathOpNode('*', ov, new IntImmNode(stride)), new IntImmNode(pad));
+  const end = new MathOpNode('+', start, new IntImmNode(kernel));
+  const lo = new CallExternNode('max', [start, new IntImmNode(0)], 'index');
+  const hi = new CallExternNode('min', [end, new IntImmNode(inExtent)], 'index');
+  const raw = new MathOpNode('-', hi, lo);
+  return new CallExternNode('max', [raw, new IntImmNode(0)], 'index');
+}
+
+function avgPoolDivisorExpr(ohv, owv, sH, sW, kH, kW, padH, padW, inH, inW, outDtype) {
+  const hCount = spatialCount(ohv, sH, kH, padH, inH);
+  const wCount = spatialCount(owv, sW, kW, padW, inW);
+  const countI = new MathOpNode('*', hCount, wCount);
+  return new CastNode(countI, 'index', outDtype);
+}
 
 export function register() {
   registerLoweringRule('pool2d', (ctx, op, inputs, outputs) => {
@@ -14,13 +30,18 @@ export function register() {
     const strides = op.getAttr('strides');
     const padding = op.getAttr('padding');
     const countIncludePad = op.getAttr('count_include_pad') || false;
+    const layout = parseLayout(op.getAttr('layout') || 'NCHW');
+    const nAx = layout['N'];
+    const cAx = layout['C'];
+    const hAx = layout['H'];
+    const wAx = layout['W'];
 
-    const batch = inBuf.shape[0];
-    const channels = inBuf.shape[1];
-    const inH = inBuf.shape[2];
-    const inW = inBuf.shape[3];
-    const outH = outBuf.shape[2];
-    const outW = outBuf.shape[3];
+    const batch = inBuf.shape[nAx];
+    const channels = inBuf.shape[cAx];
+    const inH = inBuf.shape[hAx];
+    const inW = inBuf.shape[wAx];
+    const outH = outBuf.shape[hAx];
+    const outW = outBuf.shape[wAx];
     const kH = kernelSize[0];
     const kW = kernelSize[1];
     const sH = strides[0];
@@ -60,8 +81,10 @@ export function register() {
     const ltW = new CompareNode('lt', iwExpr, new IntImmNode(inW));
     const inBounds = new MathOpNode('*', new MathOpNode('*', geH, ltH), new MathOpNode('*', geW, ltW));
 
-    const outIdx = [nv, cv, ohv, owv];
-    const inIdx = [nv, cv, ihExpr, iwExpr];
+    const outIdx = new Array(4);
+    outIdx[nAx] = nv; outIdx[cAx] = cv; outIdx[hAx] = ohv; outIdx[wAx] = owv;
+    const inIdx = new Array(4);
+    inIdx[nAx] = nv; inIdx[cAx] = cv; inIdx[hAx] = ihExpr; inIdx[wAx] = iwExpr;
     const loadIn = new BufferLoadNode(inBuf, inIdx);
     const loadOut = new BufferLoadNode(outBuf, outIdx);
 
@@ -88,9 +111,16 @@ export function register() {
     const parts = [initBody, accBody];
 
     if (!isMax) {
-      const divVal = countIncludePad ? kH * kW : kH * kW;
       const divNest = buildSpatialNest(ctx, 'pd', [0, 1, 2, 3], outBuf.shape, outBuf);
-      const divExpr = new MathOpNode('*', new BufferLoadNode(outBuf, divNest.indices), new FloatImmNode(1.0 / divVal));
+      const dOh = divNest.indices[hAx];
+      const dOw = divNest.indices[wAx];
+      const divisor = countIncludePad
+        ? new FloatImmNode(kH * kW)
+        : avgPoolDivisorExpr(dOh, dOw, sH, sW, kH, kW, padH, padW, inH, inW, outBuf.dtype);
+      const loaded = new BufferLoadNode(outBuf, divNest.indices);
+      const divExpr = countIncludePad
+        ? new MathOpNode('*', loaded, new FloatImmNode(1.0 / (kH * kW)))
+        : new MathOpNode('/', loaded, divisor);
       const divStore = new BufferStoreNode(outBuf, divNest.indices, divExpr);
       const divBlock = new BlockNode(ctx.blockName('pool_div'), divNest.ivs, [{ buffer: outBuf }], [{ buffer: outBuf }], divStore);
       parts.push(divNest.wrap(divBlock));

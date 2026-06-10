@@ -118,8 +118,6 @@ export class ElementwiseCPURule extends ScheduleRule {
       if (extent.value % target.vectorWidth === 0) {
         const [_, vi] = schedule.split(innermost, target.vectorWidth);
         schedule.vectorize(vi);
-      } else {
-        schedule.vectorize(innermost);
       }
     }
   }
@@ -404,8 +402,6 @@ export class ElementwiseWasmRule extends ScheduleRule {
             if (extent.value % vectorWidth === 0) {
               const [, vi] = schedule.split(innermost, vectorWidth);
               schedule.vectorize(vi);
-            } else {
-              schedule.vectorize(innermost);
             }
           }
         }

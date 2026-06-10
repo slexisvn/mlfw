@@ -1,5 +1,7 @@
 import { Tensor } from '../core/tensor.js';
 import { TensorImpl } from '../core/tensor_impl.js';
+import { Storage } from '../core/storage.js';
+import { dtypeSize } from '../types/dtype.js';
 import { inferReshape, computeStrides } from '../utils/shape_utils.js';
 import {
   computeTranspose,
@@ -54,6 +56,22 @@ function _wrapWithAutograd(srcTensor, resultTensor, BackwardClass, ...ctorArgs) 
   resultTensor._impl._updateKeySet();
 }
 
+function _traceView(tensor, opName, attrs) {
+  return tensor.tracer.recordOp(opName, [tensor], attrs);
+}
+
+function _resolveShape(newShape, srcShape) {
+  const total = srcShape.reduce((a, b) => a * b, 1);
+  let known = 1, inferIdx = -1;
+  const out = newShape.slice();
+  for (let i = 0; i < out.length; i++) {
+    if (out[i] === -1) inferIdx = i;
+    else known *= out[i];
+  }
+  if (inferIdx >= 0) out[inferIdx] = known === 0 ? 0 : total / known;
+  return out;
+}
+
 function _makeView(src, newSizes, newStrides, offsetDelta) {
   const impl = new TensorImpl(
     src._impl.storage,
@@ -71,6 +89,9 @@ function _makeView(src, newSizes, newStrides, offsetDelta) {
 }
 
 export function reshape(tensor, newShape) {
+  if (tensor.isSymbolic && tensor.tracer) {
+    return _traceView(tensor, 'reshape', { new_shape: _resolveShape(newShape, tensor.shape) });
+  }
   const result = inferReshape(tensor.shape, tensor.strides, newShape);
   if (!result) throw new Error(`Cannot reshape tensor of shape [${tensor.shape}] to [${newShape}]`);
 
@@ -86,6 +107,12 @@ export function reshape(tensor, newShape) {
 }
 
 export function transpose(tensor, dim0, dim1) {
+  if (tensor.isSymbolic && tensor.tracer) {
+    const rank = tensor.shape.length;
+    const d0 = dim0 < 0 ? rank + dim0 : dim0;
+    const d1 = dim1 < 0 ? rank + dim1 : dim1;
+    return _traceView(tensor, 'transpose', { dim0: d0, dim1: d1 });
+  }
   const { sizes, strides } = computeTranspose(tensor.shape, tensor.strides, dim0, dim1);
   const out = _makeView(tensor, sizes, strides, 0);
   if (_TransposeBackward) _wrapWithAutograd(tensor, out, _TransposeBackward, dim0, dim1);
@@ -93,6 +120,11 @@ export function transpose(tensor, dim0, dim1) {
 }
 
 export function permute(tensor, dims) {
+  if (tensor.isSymbolic && tensor.tracer) {
+    const rank = tensor.shape.length;
+    const resolved = dims.map(d => d < 0 ? rank + d : d);
+    return _traceView(tensor, 'permute', { dims: resolved });
+  }
   const { sizes, strides } = computePermute(tensor.shape, tensor.strides, dims);
   const out = _makeView(tensor, sizes, strides, 0);
   if (_PermuteBackward) _wrapWithAutograd(tensor, out, _PermuteBackward, dims);
@@ -100,11 +132,42 @@ export function permute(tensor, dims) {
 }
 
 export function expand(tensor, targetShape) {
+  if (tensor.isSymbolic && tensor.tracer) {
+    const inRank = tensor.shape.length;
+    const offset = targetShape.length - inRank;
+    const resultShape = targetShape.map((d, i) => d === -1 ? tensor.shape[i - offset] : d);
+    const broadcastDimensions = Array.from({ length: inRank }, (_, i) => i + offset);
+    return _traceView(tensor, 'broadcast_in_dim', { result_shape: resultShape, broadcast_dimensions: broadcastDimensions });
+  }
   const { sizes, strides } = computeExpand(tensor.shape, tensor.strides, targetShape);
   return _makeView(tensor, sizes, strides, 0);
 }
 
+function _sliceAttrs(shape, dim, start, end, step) {
+  const rank = shape.length;
+  const d = dim < 0 ? rank + dim : dim;
+  const dimSize = shape[d];
+  let s = start ?? 0;
+  let e = end ?? dimSize;
+  const st = step ?? 1;
+  if (s < 0) s += dimSize;
+  if (e < 0) e += dimSize;
+  s = Math.max(0, Math.min(s, dimSize));
+  e = Math.max(0, Math.min(e, dimSize));
+  const starts = new Array(rank).fill(0);
+  const limits = shape.slice();
+  const strides = new Array(rank).fill(1);
+  starts[d] = s;
+  limits[d] = e;
+  strides[d] = st;
+  return { starts, limits, strides, d };
+}
+
 export function slice(tensor, dim, start, end, step) {
+  if (tensor.isSymbolic && tensor.tracer) {
+    const { starts, limits, strides } = _sliceAttrs(tensor.shape, dim, start, end, step);
+    return _traceView(tensor, 'slice', { starts, limits, strides });
+  }
   const { sizes, strides, offsetDelta } = computeSlice(
     tensor.shape, tensor.strides, dim, start, end, step
   );
@@ -112,16 +175,31 @@ export function slice(tensor, dim, start, end, step) {
 }
 
 export function unsqueeze(tensor, dim) {
+  if (tensor.isSymbolic && tensor.tracer) {
+    const rank = tensor.shape.length;
+    const d = dim < 0 ? rank + 1 + dim : dim;
+    const newShape = tensor.shape.slice();
+    newShape.splice(d, 0, 1);
+    return _traceView(tensor, 'reshape', { new_shape: newShape });
+  }
   const { sizes, strides } = computeUnsqueeze(tensor.shape, tensor.strides, dim);
   return _makeView(tensor, sizes, strides, 0);
 }
 
 export function squeeze(tensor, dim) {
+  if (tensor.isSymbolic && tensor.tracer) {
+    const { sizes } = computeSqueeze(tensor.shape, tensor.strides, dim);
+    return _traceView(tensor, 'reshape', { new_shape: sizes });
+  }
   const { sizes, strides } = computeSqueeze(tensor.shape, tensor.strides, dim);
   return _makeView(tensor, sizes, strides, 0);
 }
 
 export function narrow(tensor, dim, start, length) {
+  if (tensor.isSymbolic && tensor.tracer) {
+    const { starts, limits, strides } = _sliceAttrs(tensor.shape, dim, start, start + length, 1);
+    return _traceView(tensor, 'slice', { starts, limits, strides });
+  }
   const { sizes, strides, offsetDelta } = computeNarrow(
     tensor.shape, tensor.strides, dim, start, length
   );
@@ -129,6 +207,15 @@ export function narrow(tensor, dim, start, length) {
 }
 
 export function select(tensor, dim, index) {
+  if (tensor.isSymbolic && tensor.tracer) {
+    const rank = tensor.shape.length;
+    const d = dim < 0 ? rank + dim : dim;
+    const idx = index < 0 ? tensor.shape[d] + index : index;
+    const { starts, limits, strides } = _sliceAttrs(tensor.shape, d, idx, idx + 1, 1);
+    const sliced = _traceView(tensor, 'slice', { starts, limits, strides });
+    const newShape = tensor.shape.filter((_, i) => i !== d);
+    return sliced.tracer.recordOp('reshape', [sliced], { new_shape: newShape });
+  }
   const { sizes, strides, offsetDelta } = computeSelect(
     tensor.shape, tensor.strides, dim, index
   );
@@ -149,7 +236,8 @@ function _copyContiguous(tensor) {
 
   const dstStrides = computeStrides(sizes);
 
-  const newStorage = tensor._impl.storage.clone();
+  const dtype = tensor._impl.dtype;
+  const newStorage = Storage.allocate(n * dtypeSize(dtype), dtype, tensor._impl.device);
   const dstData = newStorage.data;
 
   const ndim = sizes.length;

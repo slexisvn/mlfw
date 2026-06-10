@@ -166,3 +166,42 @@ describe('conv + relu + pool pipeline', () => {
     expect(result[0]).toBeCloseTo(9);
   });
 });
+
+describe('conv 3D — distinct D/H/W kernel sizes', () => {
+  it('NCDHW conv with kernel D=2 H=1 W=1 reduces only the depth axis', () => {
+    const inShape = [1, 1, 2, 2, 2];
+    const kShape = [1, 1, 2, 1, 1];
+    const outShape = [1, 1, 1, 2, 2];
+    const x = new TensorType(inShape, ScalarType.F32);
+    const k = new TensorType(kShape, ScalarType.F32);
+    const out = new TensorType(outShape, ScalarType.F32);
+
+    const func = buildFunction('conv3d', [x, k], [out], (b, args) => {
+      const conv = b._inferAndBuild('conv', [args[0], args[1]], {
+        strides: [1, 1, 1],
+        padding: [[0, 0], [0, 0], [0, 0]],
+        dilation: [1, 1, 1],
+        groups: 1,
+        input_layout: 'NCDHW',
+        kernel_layout: 'OIDHW'
+      }).getResult(0);
+      b.returnOp([conv]);
+    });
+
+    const r = compile(func);
+    const inp = new Float32Array([
+      1, 2,
+      3, 4,
+      10, 20,
+      30, 40
+    ]);
+    const ker = new Float32Array([1, 1]);
+    const result = new Float32Array(4);
+    r.run('conv3d', inp, ker, result);
+
+    expect(result[0]).toBeCloseTo(11);
+    expect(result[1]).toBeCloseTo(22);
+    expect(result[2]).toBeCloseTo(33);
+    expect(result[3]).toBeCloseTo(44);
+  });
+});

@@ -28,6 +28,12 @@ describe('reshape', () => {
     const t = tensor([[1, 2], [3, 4]]).reshape([-1]);
     expect(t.toArray()).toEqual([1, 2, 3, 4]);
   });
+
+  it('reshapes non-contiguous (transposed) tensor via copy', () => {
+    const tt = tensor([[1, 2, 3], [4, 5, 6]]).transpose(0, 1);
+    expect(tt.reshape([6]).toArray()).toEqual([1, 4, 2, 5, 3, 6]);
+    expect(tt.reshape([2, 3]).toArray()).toEqual([[1, 4, 2], [5, 3, 6]]);
+  });
 });
 
 describe('transpose', () => {
@@ -159,6 +165,15 @@ describe('contiguous', () => {
     const c = t.contiguous();
     expect(c.isContiguous).toBe(true);
     expect(c.toArray()).toEqual([[1, 4], [2, 5], [3, 6]]);
+  });
+
+  it('contiguous of a sliced (offset) view has exactly numel elements in .data', () => {
+    const t = tensor([[10, 11, 12, 13, 14, 15], [20, 21, 22, 23, 24, 25]]).slice(1, 1, 5, 1);
+    expect(t.shape).toEqual([2, 4]);
+    const c = t.contiguous();
+    expect(c.data.length).toBe(t.numel);
+    expect(Array.from(c.data)).toEqual([11, 12, 13, 14, 21, 22, 23, 24]);
+    expect(c.toArray()).toEqual([[11, 12, 13, 14], [21, 22, 23, 24]]);
   });
 });
 

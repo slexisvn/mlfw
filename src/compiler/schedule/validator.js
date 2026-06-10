@@ -31,6 +31,7 @@ export class ScheduleValidator {
         for (const s of node.stmts) ScheduleValidator._visitNode(s, ctx);
         break;
       case 'IfThenElseNode':
+        ScheduleValidator._visitExpr(node.condition, ctx);
         ScheduleValidator._visitNode(node.thenBody, ctx);
         if (node.elseBody) ScheduleValidator._visitNode(node.elseBody, ctx);
         break;
@@ -120,8 +121,16 @@ export class ScheduleValidator {
   static _validateBufferAccess(node, ctx) {
     if (!node.buffer) {
       ctx.errors.push('BufferStore with null buffer');
-      return;
+    } else {
+      ScheduleValidator._checkRank(node, ctx);
     }
+    if (node.indices) {
+      for (const idx of node.indices) ScheduleValidator._visitExpr(idx, ctx);
+    }
+    if (node.value) ScheduleValidator._visitExpr(node.value, ctx);
+  }
+
+  static _checkRank(node, ctx) {
     if (node.indices && node.buffer.shape) {
       if (node.indices.length !== node.buffer.shape.length) {
         ctx.errors.push(
@@ -129,6 +138,41 @@ export class ScheduleValidator {
           `${node.indices.length} indices for rank-${node.buffer.shape.length} buffer`
         );
       }
+    }
+  }
+
+  static _visitExpr(node, ctx) {
+    if (!node || typeof node !== 'object') return;
+    switch (node.type) {
+      case 'BufferLoadNode':
+        if (!node.buffer) {
+          ctx.errors.push('BufferLoad with null buffer');
+        } else {
+          ScheduleValidator._checkRank(node, ctx);
+        }
+        if (node.indices) {
+          for (const idx of node.indices) ScheduleValidator._visitExpr(idx, ctx);
+        }
+        break;
+      case 'BufferStoreNode':
+        ScheduleValidator._validateBufferAccess(node, ctx);
+        break;
+      case 'MathOpNode':
+      case 'CompareNode':
+        ScheduleValidator._visitExpr(node.a, ctx);
+        ScheduleValidator._visitExpr(node.b, ctx);
+        break;
+      case 'CastNode':
+        ScheduleValidator._visitExpr(node.expr, ctx);
+        break;
+      case 'CallExternNode':
+        for (const a of node.args) ScheduleValidator._visitExpr(a, ctx);
+        break;
+      case 'IfThenElseNode':
+        ScheduleValidator._visitExpr(node.condition, ctx);
+        ScheduleValidator._visitNode(node.thenBody, ctx);
+        if (node.elseBody) ScheduleValidator._visitNode(node.elseBody, ctx);
+        break;
     }
   }
 }

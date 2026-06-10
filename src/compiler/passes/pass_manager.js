@@ -56,6 +56,14 @@ export class PassManager {
         if (result === PassResult.CHANGED) {
           anyChanged = true;
           this.analysisManager.invalidateAll();
+        } else if (result === PassResult.FAILED) {
+          this.analysisManager.invalidateAll();
+          const err = new CompilationError('graphPasses', module.name || '<module>', `pass '${pass.name}' failed`, pass.name);
+          errors.push(err);
+          if (!resilient) {
+            pass.trace = null;
+            return { changed: anyChanged, results, errors, failedFunctions: failedFunctions.size > 0 ? failedFunctions : null };
+          }
         }
       } else if (pass instanceof FunctionPass) {
         let passChanged = false;
@@ -75,6 +83,10 @@ export class PassManager {
                 anyChanged = true;
                 this.analysisManager.invalidate(func, pass.preservedAnalyses);
                 func.bumpVersion();
+              } else if (result === PassResult.FAILED) {
+                this.analysisManager.invalidate(func);
+                errors.push(new CompilationError('graphPasses', func.name, `pass '${pass.name}' failed`, pass.name));
+                failedFunctions.add(func.name);
               }
             } catch (e) {
               errors.push(new CompilationError('graphPasses', func.name, e.message, pass.name));
@@ -88,6 +100,13 @@ export class PassManager {
               anyChanged = true;
               this.analysisManager.invalidate(func, pass.preservedAnalyses);
               func.bumpVersion();
+            } else if (result === PassResult.FAILED) {
+              this.analysisManager.invalidate(func);
+              const err = new CompilationError('graphPasses', func.name, `pass '${pass.name}' failed`, pass.name);
+              errors.push(err);
+              failedFunctions.add(func.name);
+              pass.trace = null;
+              return { changed: anyChanged, results, errors, failedFunctions };
             }
           }
         }

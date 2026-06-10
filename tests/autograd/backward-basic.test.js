@@ -98,6 +98,34 @@ describe('mean backward', () => {
   });
 });
 
+describe('sum backward over axis', () => {
+  it('expands gradient back along a single reduced axis (keepdim=false)', () => {
+    const a = tensor([[1, 2, 3], [4, 5, 6]], { requiresGrad: true });
+    sum(sum(a, 1, false)).backward();
+    approx(gradValues(a), [1, 1, 1, 1, 1, 1]);
+  });
+
+  it('handles keepdim=true', () => {
+    const a = tensor([[1, 2, 3], [4, 5, 6]], { requiresGrad: true });
+    sum(sum(a, 1, true)).backward();
+    approx(gradValues(a), [1, 1, 1, 1, 1, 1]);
+  });
+});
+
+describe('mean backward over axis', () => {
+  it('divides only by the reduced-axis size, not total numel', () => {
+    const a = tensor([[1, 2, 3], [4, 5, 6]], { requiresGrad: true });
+    sum(mean(a, 1, false)).backward();
+    approx(gradValues(a), [1 / 3, 1 / 3, 1 / 3, 1 / 3, 1 / 3, 1 / 3]);
+  });
+
+  it('supports negative axis', () => {
+    const a = tensor([[1, 2, 3], [4, 5, 6]], { requiresGrad: true });
+    sum(mean(a, -1, false)).backward();
+    approx(gradValues(a), [1 / 3, 1 / 3, 1 / 3, 1 / 3, 1 / 3, 1 / 3]);
+  });
+});
+
 describe('gradient accumulation', () => {
   it('sums gradients when a variable is used multiple times', () => {
     const a = tensor([2], { requiresGrad: true });

@@ -229,6 +229,7 @@ export class Schedule {
 
     this._replaceNode(loop, outerLoop);
     this._srefTree.replaceLoop(loop, outerLoop, innerLoop);
+    this.state.invalidate();
 
     if (!this._replaying) {
       this.trace.record('split', [loop.loopVar.name, factor]);
@@ -280,6 +281,13 @@ export class Schedule {
 
     this._replaceNode(topmostLoop, newOrder[0]);
 
+    for (const loop of newOrder) {
+      if (loop === newOrder[0]) continue;
+      loop._parent = null;
+      loop._parentKey = null;
+      loop._parentIdx = -1;
+    }
+
     for (let i = 0; i < newOrder.length; i++) {
       const child = i < newOrder.length - 1 ? newOrder[i + 1] : innermostBody;
       newOrder[i].body = child;
@@ -329,6 +337,7 @@ export class Schedule {
 
     this._replaceNode(outer, fusedLoop);
     this._srefTree.replaceNode(outer, fusedLoop);
+    this.state.invalidate();
 
     if (!this._replaying) {
       this.trace.record('fuseLoops', [outerName, innerName]);

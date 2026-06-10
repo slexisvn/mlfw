@@ -44,6 +44,13 @@ describe('dispatch scalar arg spec parsing', () => {
     expect(reduce.getAttr('dimensions')).toEqual([0, 1]);
     expect(reduce.getAttr('reduce_type')).toBe('mean');
   });
+
+  it('sum with null dim and keepdim does not misalign keepdim into dim slot', () => {
+    const x = tensor([[1, 2, 3], [4, 5, 6]]);
+    const func = getFunc(trace((t) => t.sum(null, true), [x]));
+    const reduce = getOp(func, 'reduce');
+    expect(reduce.getAttr('dimensions')).toEqual([0, 1]);
+  });
 });
 
 describe('recordOp fallback chain', () => {

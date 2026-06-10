@@ -1,0 +1,95 @@
+{
+  "name": "tera-language",
+  "displayName": "Tera Language",
+  "description": "Syntax highlighting, diagnostics and IntelliSense for Tera (.tera) — tensor algebra & neural network DSL.",
+  "version": "0.6.0",
+  "icon": "icons/icon.png",
+  "publisher": "mlfw",
+  "engines": {
+    "vscode": "^1.94.0"
+  },
+  "type": "module",
+  "categories": [
+    "Programming Languages"
+  ],
+  "main": "./client/extension.js",
+  "activationEvents": [
+    "onLanguage:tera"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "tera",
+        "aliases": [
+          "Tera",
+          "tera"
+        ],
+        "extensions": [
+          ".tera"
+        ],
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icons/file-icon.png",
+          "dark": "./icons/file-icon.png"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "tera",
+        "scopeName": "source.tera",
+        "path": "./syntaxes/tera.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "tera",
+        "path": "./snippets/tera.json"
+      }
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "Tera",
+      "properties": {
+        "tera.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Trace LSP communication between VSCode and the Tera language server."
+        }
+      }
+    },
+    "configurationDefaults": {
+      "[tera]": {
+        "editor.quickSuggestions": {
+          "other": "on",
+          "comments": "off",
+          "strings": "off"
+        },
+        "editor.suggestOnTriggerCharacters": true,
+        "editor.wordBasedSuggestions": "off",
+        "editor.tabSize": 2,
+        "editor.insertSpaces": true
+      }
+    }
+  },
+  "scripts": {
+    "generate": "node scripts/generate.js",
+    "build:icon": "node scripts/build_icon.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1",
+    "vscode-languageserver": "^9.0.1",
+    "vscode-languageserver-textdocument": "^1.0.11"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "@types/vscode": "^1.85.0",
+    "vitest": "^4.1.8"
+  }
+}

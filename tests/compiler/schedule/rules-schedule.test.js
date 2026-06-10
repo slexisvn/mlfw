@@ -3,6 +3,8 @@ import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
 import { CPUTarget } from '../../../src/backend/target.js';
+import { ElementwiseCPURule } from '../../../src/compiler/schedule/rules.js';
+import { ForNode, IntImmNode, VariableNode, ForKind } from '../../../src/compiler/ir/tensor/nodes.js';
 
 const F32 = ScalarType.F32;
 
@@ -132,5 +134,52 @@ describe('ElementwiseCPURule — VECTORIZED loops not unrolled in CPU codegen', 
     const defStores = countStores(src(compileDefault(funcDef)));
 
     expect(schedStores).toBeLessThanOrEqual(defStores * 1.15);
+  });
+});
+
+class FakeSchedule {
+  constructor(loops) {
+    this._loops = loops;
+    this.func = {};
+    this.calls = [];
+  }
+  getLoops() { return this._loops; }
+  parallelize(loop) { this.calls.push(['parallelize', loop.loopVar.name]); }
+  vectorize(loop) { this.calls.push(['vectorize', loop.loopVar.name]); }
+  split(loop, factor) {
+    this.calls.push(['split', loop.loopVar.name, factor]);
+    const o = new ForNode(new VariableNode(loop.loopVar.name + '_o', 'int32'),
+      new IntImmNode(0), new IntImmNode(1), ForKind.SERIAL, loop.body);
+    const i = new ForNode(new VariableNode(loop.loopVar.name + '_i', 'int32'),
+      new IntImmNode(0), new IntImmNode(factor), ForKind.SERIAL, loop.body);
+    return [o, i];
+  }
+}
+
+function serialLoop(name, extent) {
+  return new ForNode(new VariableNode(name, 'int32'), new IntImmNode(0),
+    new IntImmNode(extent), ForKind.SERIAL, null);
+}
+
+describe('ElementwiseCPURule.apply — vectorize only when divisible', () => {
+  const target = { vectorWidth: 4 };
+
+  it('does not vectorize the full innermost loop when extent is not divisible', () => {
+    const loops = [serialLoop('i', 8), serialLoop('j', 6)];
+    const sch = new FakeSchedule(loops);
+    new ElementwiseCPURule().apply(sch, 'b', target);
+
+    expect(sch.calls).toContainEqual(['parallelize', 'i']);
+    expect(sch.calls.some(c => c[0] === 'vectorize' && c[1] === 'j')).toBe(false);
+    expect(sch.calls.some(c => c[0] === 'split' && c[1] === 'j')).toBe(false);
+  });
+
+  it('splits then vectorizes the inner tile when extent is divisible', () => {
+    const loops = [serialLoop('i', 8), serialLoop('j', 8)];
+    const sch = new FakeSchedule(loops);
+    new ElementwiseCPURule().apply(sch, 'b', target);
+
+    expect(sch.calls).toContainEqual(['split', 'j', 4]);
+    expect(sch.calls).toContainEqual(['vectorize', 'j_i']);
   });
 });

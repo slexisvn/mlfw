@@ -65,9 +65,11 @@ export function register(registry) {
     traits: [OpTrait.ELEMENTWISE],
     inferResultTypes(operandTypes) {
       if (operandTypes.length !== 3) return null;
-      const x = operandTypes[1];
-      if (!(x instanceof TensorType)) return null;
-      return [new TensorType(x.shape, x.dtype)];
+      const [cond, x, y] = operandTypes;
+      if (!(cond instanceof TensorType) || !(x instanceof TensorType) || !(y instanceof TensorType)) return null;
+      const shape = TensorType.broadcastShape(cond.shape, x.shape, y.shape);
+      if (!shape) return null;
+      return [new TensorType(shape, x.dtype)];
     }
   }));
 

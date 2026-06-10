@@ -86,6 +86,7 @@ export function metaMatmul(keySet, self, other) {
   if (aRank === 1 && bRank === 1) return _metaTensor([], self.dtype);
   if (aRank === 2 && bRank === 2) return _metaTensor([aShape[0], bShape[1]], self.dtype);
   if (aRank === 2 && bRank === 1) return _metaTensor([aShape[0]], self.dtype);
+  if (aRank === 1 && bRank === 2) return _metaTensor([bShape[1]], self.dtype);
   if (aRank >= 3 && bRank >= 3) {
     const batch = aShape.slice(0, aRank - 2);
     return _metaTensor([...batch, aShape[aRank - 2], bShape[bRank - 1]], self.dtype);

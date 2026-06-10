@@ -1414,3 +1414,171 @@ describe('WASM boolean ops — compile and run', () => {
     expect(s).not.toContain('f32.ne');
   });
 });
+
+
+function runTyped(result, name, specs) {
+  const inst = result.module._wasmInstances.get(name);
+  const { exports, memory, bufferOffsets } = inst;
+  const offsets = [...bufferOffsets.values()];
+  for (let i = 0; i < specs.length; i++) {
+    new specs[i].ctor(memory.buffer, offsets[i], specs[i].data.length).set(specs[i].data);
+  }
+  exports[name](...offsets.slice(0, specs.length));
+  const last = specs[specs.length - 1];
+  return Array.from(new last.ctor(memory.buffer, offsets[specs.length - 1], last.data.length));
+}
+
+describe('WASM codegen — i32 numerical correctness', () => {
+  it('i32 add produces correct nonzero ints', () => {
+    const t = new TensorType([2, 2], ScalarType.I32);
+    const func = buildFunction('w_i32_add', [t, t], [t], (b, a) => {
+      b.returnOp([b.add(a[0], a[1]).getResult(0)]);
+    });
+    const out = runTyped(compile(func), 'w_i32_add', [
+      { ctor: Int32Array, data: new Int32Array([1, 2, 3, 4]) },
+      { ctor: Int32Array, data: new Int32Array([10, 20, 30, 40]) },
+      { ctor: Int32Array, data: new Int32Array(4) },
+    ]);
+    expect(out).toEqual([11, 22, 33, 44]);
+  });
+
+  it('i32 mul, sum(axis) and matmul are correct', () => {
+    const t = new TensorType([4], ScalarType.I32);
+    const fm = buildFunction('w_i32_mul', [t, t], [t], (b, a) => {
+      b.returnOp([b.mul(a[0], a[1]).getResult(0)]);
+    });
+    expect(runTyped(compile(fm), 'w_i32_mul', [
+      { ctor: Int32Array, data: new Int32Array([2, 3, 4, 5]) },
+      { ctor: Int32Array, data: new Int32Array([3, 4, 5, 6]) },
+      { ctor: Int32Array, data: new Int32Array(4) },
+    ])).toEqual([6, 12, 20, 30]);
+
+    const ti = new TensorType([2, 3], ScalarType.I32);
+    const to = new TensorType([2], ScalarType.I32);
+    const fs = buildFunction('w_i32_sum', [ti], [to], (b, a) => {
+      const z = b.scalarConstant(0, ScalarType.I32);
+      b.returnOp([b.reduce(a[0], z.getResult(0), [1], 'sum').getResult(0)]);
+    });
+    expect(runTyped(compile(fs), 'w_i32_sum', [
+      { ctor: Int32Array, data: new Int32Array([1, 2, 3, 4, 5, 6]) },
+      { ctor: Int32Array, data: new Int32Array(2) },
+    ])).toEqual([6, 15]);
+
+    const l = new TensorType([2, 2], ScalarType.I32);
+    const fmm = buildFunction('w_i32_mm', [l, l], [l], (b, a) => {
+      b.returnOp([b.matmul(a[0], a[1]).getResult(0)]);
+    });
+    expect(runTyped(compile(fmm), 'w_i32_mm', [
+      { ctor: Int32Array, data: new Int32Array([1, 2, 3, 4]) },
+      { ctor: Int32Array, data: new Int32Array([1, 2, 3, 4]) },
+      { ctor: Int32Array, data: new Int32Array(4) },
+    ])).toEqual([7, 10, 15, 22]);
+  });
+});
+
+describe('WASM codegen — f64 produces valid modules and correct values', () => {
+  it('f64 add compiles and is correct', () => {
+    const t = new TensorType([4], ScalarType.F64);
+    const func = buildFunction('w_f64_add', [t, t], [t], (b, a) => {
+      b.returnOp([b.add(a[0], a[1]).getResult(0)]);
+    });
+    const result = compile(func);
+    expect(result.succeeded).toBe(true);
+    expect(runTyped(result, 'w_f64_add', [
+      { ctor: Float64Array, data: new Float64Array([1, 2, 3, 4]) },
+      { ctor: Float64Array, data: new Float64Array([10, 20, 30, 40]) },
+      { ctor: Float64Array, data: new Float64Array(4) },
+    ])).toEqual([11, 22, 33, 44]);
+  });
+
+  it('f64 sum(axis) and matmul compile and are correct', () => {
+    const ti = new TensorType([2, 3], ScalarType.F64);
+    const to = new TensorType([2], ScalarType.F64);
+    const fs = buildFunction('w_f64_sum', [ti], [to], (b, a) => {
+      const z = b.scalarConstant(0, ScalarType.F64);
+      b.returnOp([b.reduce(a[0], z.getResult(0), [1], 'sum').getResult(0)]);
+    });
+    const rs = compile(fs);
+    expect(rs.succeeded).toBe(true);
+    expect(runTyped(rs, 'w_f64_sum', [
+      { ctor: Float64Array, data: new Float64Array([1, 2, 3, 4, 5, 6]) },
+      { ctor: Float64Array, data: new Float64Array(2) },
+    ])).toEqual([6, 15]);
+
+    const l = new TensorType([2, 2], ScalarType.F64);
+    const fmm = buildFunction('w_f64_mm', [l, l], [l], (b, a) => {
+      b.returnOp([b.matmul(a[0], a[1]).getResult(0)]);
+    });
+    const rmm = compile(fmm);
+    expect(rmm.succeeded).toBe(true);
+    expect(runTyped(rmm, 'w_f64_mm', [
+      { ctor: Float64Array, data: new Float64Array([1, 2, 3, 4]) },
+      { ctor: Float64Array, data: new Float64Array([1, 2, 3, 4]) },
+      { ctor: Float64Array, data: new Float64Array(4) },
+    ])).toEqual([7, 10, 15, 22]);
+  });
+
+  it('f64 sqrt uses native f64 op and is correct', () => {
+    const t = new TensorType([4], ScalarType.F64);
+    const func = buildFunction('w_f64_sqrt', [t], [t], (b, a) => {
+      b.returnOp([b.sqrt(a[0]).getResult(0)]);
+    });
+    const result = compile(func);
+    expect(result.succeeded).toBe(true);
+    expect(src(result, 'w_f64_sqrt')).toMatch(/f64\.sqrt/);
+    expect(runTyped(result, 'w_f64_sqrt', [
+      { ctor: Float64Array, data: new Float64Array([4, 9, 16, 25]) },
+      { ctor: Float64Array, data: new Float64Array(4) },
+    ])).toEqual([2, 3, 4, 5]);
+  });
+});
+
+describe('WASM codegen — avg_pool2d integer divisor', () => {
+  it('avg_pool2d compiles (no f32.min on integer count) and is correct', () => {
+    const x = new TensorType([1, 2, 8, 8], ScalarType.F32);
+    const o = new TensorType([1, 2, 4, 4], ScalarType.F32);
+    const func = buildFunction('w_avgpool', [x], [o], (b, a) => {
+      b.returnOp([b.pool2d(a[0], 'avg', [2, 2], [2, 2], [[0, 0], [0, 0]]).getResult(0)]);
+    });
+    const result = compile(func);
+    expect(result.succeeded).toBe(true);
+    const xd = new Float32Array(1 * 2 * 8 * 8);
+    for (let i = 0; i < xd.length; i++) xd[i] = i + 1;
+    const out = new Float32Array(1 * 2 * 4 * 4);
+    result.run('w_avgpool', xd, out);
+    expect(out[0]).toBeCloseTo(5.5, 4);
+    expect(out[1]).toBeCloseTo(7.5, 4);
+    expect(out[2]).toBeCloseTo(9.5, 4);
+    expect(out[3]).toBeCloseTo(11.5, 4);
+  });
+});
+
+describe('WASM codegen — layer_norm affine values', () => {
+  it('layer_norm with weight+bias matches reference', () => {
+    const D = 16;
+    const x = new TensorType([2, D], ScalarType.F32);
+    const w = new TensorType([D], ScalarType.F32);
+    const bb = new TensorType([D], ScalarType.F32);
+    const o = new TensorType([2, D], ScalarType.F32);
+    const func = buildFunction('w_ln_affine', [x, w, bb], [o], (b, a) => {
+      b.returnOp([b.layernorm(a[0], a[1], a[2], -1, 1e-5).getResult(0)]);
+    });
+    const result = compile(func);
+    expect(result.succeeded).toBe(true);
+    const xd = new Float32Array(2 * D);
+    for (let i = 0; i < 2 * D; i++) xd[i] = (i % D) + 1;
+    const wd = new Float32Array(D).fill(2);
+    const bd = new Float32Array(D).fill(0.5);
+    const out = new Float32Array(2 * D);
+    result.run('w_ln_affine', xd, wd, bd, out);
+    const ref = (row) => {
+      const m = row.reduce((s, v) => s + v, 0) / D;
+      const v = row.reduce((s, val) => s + (val - m) ** 2, 0) / D;
+      return row.map((val, i) => ((val - m) / Math.sqrt(v + 1e-5)) * wd[i] + bd[i]);
+    };
+    for (let r = 0; r < 2; r++) {
+      const expected = ref(Array.from(xd.slice(r * D, r * D + D)));
+      for (let i = 0; i < D; i++) expect(out[r * D + i]).toBeCloseTo(expected[i], 3);
+    }
+  });
+});
