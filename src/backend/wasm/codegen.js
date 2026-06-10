@@ -897,6 +897,10 @@ export class WasmCodegen {
       this._emitIntMinMax(node);
       return;
     }
+    if (node.externName === 'abs' && !isDtypeFloat(node.dtype)) {
+      this._emitIntAbs(node);
+      return;
+    }
 
     const NATIVE = new Set(['sqrt', 'abs', 'ceil', 'floor', 'min', 'max', 'rsqrt']);
     const prefix = node.externName === 'abs' || NATIVE.has(node.externName)
@@ -929,6 +933,23 @@ export class WasmCodegen {
     }
   }
 
+  _emitIntAbs(node) {
+    const depth = this._intMinMaxEmitDepth || 0;
+    const t = '_iabs' + depth;
+    this._intMinMaxEmitDepth = depth + 1;
+    this._emitExpr(node.args[0]);
+    this._emit('local.set $' + t);
+    this._intMinMaxEmitDepth = depth;
+    this._emit('(i32.const 0)');
+    this._emit('(local.get $' + t + ')');
+    this._emit('i32.sub');
+    this._emit('(local.get $' + t + ')');
+    this._emit('(local.get $' + t + ')');
+    this._emit('(i32.const 0)');
+    this._emit('i32.lt_s');
+    this._emit('select');
+  }
+
   _emitIntMinMax(node) {
     const depth = this._intMinMaxEmitDepth || 0;
     const aLocal = '_immm_a' + depth;
@@ -954,6 +975,10 @@ export class WasmCodegen {
       if (n.type === 'CallExternNode' && (n.externName === 'min' || n.externName === 'max') && !isDtypeFloat(n.dtype)) {
         this._ensureLocal('_immm_a' + depth, 'i32');
         this._ensureLocal('_immm_b' + depth, 'i32');
+        if (depth + 1 > this._intMinMaxDepth) this._intMinMaxDepth = depth + 1;
+        childDepth = depth + 1;
+      } else if (n.type === 'CallExternNode' && n.externName === 'abs' && !isDtypeFloat(n.dtype)) {
+        this._ensureLocal('_iabs' + depth, 'i32');
         if (depth + 1 > this._intMinMaxDepth) this._intMinMaxDepth = depth + 1;
         childDepth = depth + 1;
       }

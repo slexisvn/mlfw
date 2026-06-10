@@ -8,6 +8,7 @@ import { PassManager } from '../compiler/passes/pass_manager.js';
 import { DecompositionPass } from '../compiler/passes/decompose/decomposition_pass.js';
 import { CanonicalizePass } from '../compiler/passes/canonicalize/canonicalize.js';
 import { DCEPass } from '../compiler/passes/simplify/dce.js';
+import { reduceInitValue } from '../backend/dtype_map.js';
 
 const _cache = new Map();
 const _runtimeModules = new Map();
@@ -113,13 +114,7 @@ function _callBuilder(builder, opName, irArgs, scalarArgs) {
 }
 
 function _reductionInit(opName, dtype) {
-  switch (opName) {
-    case 'sum': case 'mean': return 0;
-    case 'prod': return 1;
-    case 'max': return -Infinity;
-    case 'min': return Infinity;
-    default: return 0;
-  }
+  return reduceInitValue(opName, dtype);
 }
 
 export function jitCompile(opName, tensorArgs, scalarArgs, target) {

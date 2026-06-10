@@ -101,6 +101,20 @@ export function isDtypeInt(dtype) {
   return dtypeInfo(dtype).isInt;
 }
 
+const INT_RANGE = {
+  'i8': [-128, 127], 'i16': [-32768, 32767], 'i32': [-2147483648, 2147483647],
+  'i64': [Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER],
+  'ui8': [0, 255], 'index': [-2147483648, 2147483647],
+};
+
+export function reduceInitValue(reduceType, dtype) {
+  if (reduceType === 'sum' || reduceType === 'mean') return 0;
+  if (reduceType === 'prod') return 1;
+  if (reduceType === 'max') return isDtypeInt(dtype) ? (INT_RANGE[dtype] || INT_RANGE['i32'])[0] : -Infinity;
+  if (reduceType === 'min') return isDtypeInt(dtype) ? (INT_RANGE[dtype] || INT_RANGE['i32'])[1] : Infinity;
+  return 0;
+}
+
 const C_MATH_BASES = {
   'exp': 'exp', 'log': 'log', 'sqrt': 'sqrt', 'tanh': 'tanh',
   'abs': 'fabs', 'sin': 'sin', 'cos': 'cos', 'ceil': 'ceil',

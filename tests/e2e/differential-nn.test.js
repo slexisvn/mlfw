@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { tensor, add, mul, matmul, relu, sum } from '../../src/index.js';
+import { tensor, add, mul, matmul, relu, sum, max, min } from '../../src/index.js';
 import { layer_norm } from '../../src/nn/functional/normalization.js';
 import { conv2d } from '../../src/nn/functional/conv.js';
 import { max_pool2d, avg_pool2d } from '../../src/nn/functional/pooling.js';
@@ -66,6 +66,8 @@ const BOTH2 = [
   { name: 'add_i32', dtype: 'i32', lo: -50, hi: 50, shapes: [[6, 8], [6, 8]], fwd: (x, y) => add(x, y) },
   { name: 'mul_i32', dtype: 'i32', lo: -20, hi: 20, shapes: [[6, 8], [6, 8]], fwd: (x, y) => mul(x, y) },
   { name: 'sum_i32', dtype: 'i32', lo: -50, hi: 50, shapes: [[6, 8]], fwd: (x) => sum(x, 1) },
+  { name: 'max_i32_neg', dtype: 'i32', lo: -60, hi: -1, shapes: [[6, 8]], fwd: (x) => max(x, 1) },
+  { name: 'min_i32_pos', dtype: 'i32', lo: 1, hi: 60, shapes: [[6, 8]], fwd: (x) => min(x, 1) },
   { name: 'matmul_i32', dtype: 'i32', lo: -10, hi: 10, shapes: [[5, 6], [6, 4]], fwd: (x, y) => matmul(x, y) },
   { name: 'add_f64', dtype: 'f64', shapes: [[6, 8], [6, 8]], fwd: (x, y) => add(x, y) },
   { name: 'matmul_f64', dtype: 'f64', shapes: [[5, 6], [6, 4]], fwd: (x, y) => matmul(x, y) },

@@ -5,14 +5,15 @@ import { TensorType, DYNAMIC } from '../compiler/ir/graph/types.js';
 import { registry } from '../compiler/ir/graph/ops.js';
 import { SymbolicTensor } from './symbolic_tensor.js';
 import { ShapeEnv } from './shape_env.js';
+import { reduceInitValue } from '../backend/dtype_map.js';
 
-function _traceReduce(b, args, a, reduceType, initVal) {
+function _traceReduce(b, args, a, reduceType) {
   const rank = args[0].type.rank;
   const dims = a?.dim;
   const dimensions = dims !== undefined && dims !== null
     ? (Array.isArray(dims) ? dims : [dims]).map(d => d < 0 ? rank + d : d)
     : Array.from({ length: rank }, (_, i) => i);
-  const initConst = b.scalarConstant(initVal, args[0].type.dtype);
+  const initConst = b.scalarConstant(reduceInitValue(reduceType, args[0].type.dtype), args[0].type.dtype);
   const reduced = b.reduce(args[0], initConst.getResult(0), dimensions, reduceType);
   if (!a?.keepdim) return reduced;
   const dimSet = new Set(dimensions);
@@ -35,11 +36,11 @@ const _BUILDER_METHOD_MAP = {
   pool2d: (b, args, a) => b.pool2d(args[0], a?.pool_type ?? 'max', a?.kernel_size ?? [2,2], a?.strides ?? [2,2], a?.padding ?? [[0,0],[0,0]]),
   maximum: (b, args) => b.maximum(args[0], args[1]),
   minimum: (b, args) => b.minimum(args[0], args[1]),
-  sum: (b, args, a) => _traceReduce(b, args, a, 'sum', 0),
-  mean: (b, args, a) => _traceReduce(b, args, a, 'mean', 0),
-  max: (b, args, a) => _traceReduce(b, args, a, 'max', -Infinity),
-  min: (b, args, a) => _traceReduce(b, args, a, 'min', Infinity),
-  prod: (b, args, a) => _traceReduce(b, args, a, 'prod', 1),
+  sum: (b, args, a) => _traceReduce(b, args, a, 'sum'),
+  mean: (b, args, a) => _traceReduce(b, args, a, 'mean'),
+  max: (b, args, a) => _traceReduce(b, args, a, 'max'),
+  min: (b, args, a) => _traceReduce(b, args, a, 'min'),
+  prod: (b, args, a) => _traceReduce(b, args, a, 'prod'),
   eq: (b, args) => b.compare(args[0], args[1], 'eq'),
   ne: (b, args) => b.compare(args[0], args[1], 'ne'),
   lt: (b, args) => b.compare(args[0], args[1], 'lt'),
