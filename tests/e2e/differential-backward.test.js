@@ -273,6 +273,12 @@ const COMPOSITE_BWD = [
   { name: 'gather_d1', shape: [2, 3], fwd: (x) => M.gather(x, 1, M.tensor([[2, 0, 1], [1, 2, 0]], { dtype: 'i32' })) },
   { name: 'gather_dup', shape: [1, 4], fwd: (x) => M.gather(x, 1, M.tensor([[0, 0, 2, 1]], { dtype: 'i32' })) },
   { name: 'scatter_add_src', shape: [1, 3], fwd: (x) => M.scatter_add(M.tensor([[0, 0, 0, 0, 0]]), 1, M.tensor([[0, 2, 4]], { dtype: 'i32' }), x) },
+  { name: 'sort_mul_const', shape: [3, 4], fwd: (x) => M.mul(M.sort(x), M.tensor([[2, 2, 2, 2]])) },
+  { name: 'sort_add_const', shape: [3, 4], fwd: (x) => M.add(M.sort(x), M.tensor([[1, 1, 1, 1]])) },
+  { name: 'sort_dim0_mul', shape: [4, 3], fwd: (x) => M.mul(M.sort(x, 0), M.tensor([[2, 2, 2]])) },
+  { name: 'relu_mul_sort', shape: [3, 4], fwd: (x) => M.relu(M.mul(M.sort(x), M.tensor([[2, 2, 2, 2]]))) },
+  { name: 'topk_mul_const', shape: [3, 5], fwd: (x) => M.mul(M.topk(x, 3)[0], M.tensor([[2, 2, 2]])) },
+  { name: 'sort_plus_sort', shape: [3, 4], fwd: (x) => M.add(M.sort(x), M.sort(M.neg(x))) },
 ];
 
 function checkCompositeBackward(prog, makeTarget) {

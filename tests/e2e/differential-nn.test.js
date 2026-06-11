@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { tensor, add, sub, mul, div, matmul, relu, sum, mean, max, min, prod, argmax, argmin, softmax } from '../../src/index.js';
 import { layer_norm, group_norm } from '../../src/nn/functional/normalization.js';
-import { conv2d } from '../../src/nn/functional/conv.js';
+import { conv2d, conv1d } from '../../src/nn/functional/conv.js';
 import { max_pool2d, avg_pool2d } from '../../src/nn/functional/pooling.js';
 import { compile } from '../../src/tracing/compile.js';
 import { CPUTarget, WasmTarget } from '../../src/backend/target.js';
@@ -53,6 +53,10 @@ async function checkDiff(prog, makeTarget, tol = 2e-3) {
 }
 
 const BOTH = [
+  { name: 'conv2d_dilation2', shapes: [[1, 2, 8, 8], [3, 2, 3, 3]], fwd: (x, w) => conv2d(x, w, null, [1, 1], [[0, 0], [0, 0]], [2, 2]) },
+  { name: 'conv2d_groups2', shapes: [[1, 4, 6, 6], [4, 2, 3, 3]], fwd: (x, w) => conv2d(x, w, null, [1, 1], [[0, 0], [0, 0]], [1, 1], 2) },
+  { name: 'conv2d_dilation_groups', shapes: [[1, 4, 8, 8], [4, 2, 3, 3]], fwd: (x, w) => conv2d(x, w, null, [1, 1], [[1, 1], [1, 1]], [2, 2], 2) },
+  { name: 'conv1d_dilation', shapes: [[1, 2, 12], [3, 2, 3]], fwd: (x, w) => conv1d(x, w, null, 1, 0, 2) },
   { name: 'conv2d_k3', shapes: [[1, 2, 8, 8], [3, 2, 3, 3]], fwd: (x, w) => conv2d(x, w, null, [1, 1], [[0, 0], [0, 0]]) },
   { name: 'conv2d_pad', shapes: [[1, 2, 7, 7], [4, 2, 3, 3]], fwd: (x, w) => conv2d(x, w, null, [1, 1], [[1, 1], [1, 1]]) },
   { name: 'conv2d_stride', shapes: [[1, 1, 8, 8], [2, 1, 2, 2]], fwd: (x, w) => conv2d(x, w, null, [2, 2], [[0, 0], [0, 0]]) },
@@ -223,6 +227,47 @@ describe('index ops: eager vs compiled (one_hot/index_select)', () => {
 });
 
 describe('composition ops: independent correctness (not eager-vs-compiled)', () => {
+  it('dilated conv2d matches a hand-computed reference (independent oracle)', () => {
+    const x = tensor([[[[1, 2, 3, 4, 5, 6, 7], [8, 9, 10, 11, 12, 13, 14], [15, 16, 17, 18, 19, 20, 21],
+      [22, 23, 24, 25, 26, 27, 28], [29, 30, 31, 32, 33, 34, 35], [36, 37, 38, 39, 40, 41, 42], [43, 44, 45, 46, 47, 48, 49]]]]);
+    const w = tensor([[[[1, 0, -1], [2, 0, -2], [1, 0, -1]]]]);
+    const out = Array.from(conv2d(x, w, null, [1, 1], [[0, 0], [0, 0]], [2, 2]).contiguous().data);
+    const xf = Array.from(x.contiguous().data), wf = Array.from(w.contiguous().data);
+    const H = 7, W = 7, K = 3, d = 2, eff = (K - 1) * d + 1, O = H - eff + 1;
+    const ref = [];
+    for (let i = 0; i < O; i++) for (let j = 0; j < O; j++) {
+      let s = 0;
+      for (let ki = 0; ki < K; ki++) for (let kj = 0; kj < K; kj++) s += xf[(i + ki * d) * W + (j + kj * d)] * wf[ki * K + kj];
+      ref.push(s);
+    }
+    expect(out.length).toBe(ref.length);
+    for (let k = 0; k < ref.length; k++) expect(out[k]).toBeCloseTo(ref[k], 4);
+  });
+
+  it('grouped conv2d equals independent per-group convolutions (independent oracle)', () => {
+    const x = tensor([[[[1, 2], [3, 4]], [[5, 6], [7, 8]], [[-1, -2], [-3, -4]], [[2, 1], [0, 3]]]]);
+    const w = tensor([
+      [[[1, 0], [0, 1]], [[0, 1], [1, 0]]],
+      [[[2, 0], [0, 0]], [[1, 1], [1, 1]]],
+      [[[0, 1], [1, 0]], [[1, 0], [0, 1]]],
+      [[[1, 1], [1, 1]], [[2, 0], [0, 2]]]]);
+    const out = Array.from(conv2d(x, w, null, [1, 1], [[0, 0], [0, 0]], [1, 1], 2).contiguous().data);
+    const xf = Array.from(x.contiguous().data), wf = Array.from(w.contiguous().data);
+    const groupIn = 2;
+    const ref = [];
+    for (let oc = 0; oc < 4; oc++) {
+      const g = Math.floor(oc / 2);
+      let s = 0;
+      for (let ic = 0; ic < groupIn; ic++) {
+        const inCh = g * groupIn + ic;
+        for (let ki = 0; ki < 2; ki++) for (let kj = 0; kj < 2; kj++) s += xf[inCh * 4 + ki * 2 + kj] * wf[oc * 8 + ic * 4 + ki * 2 + kj];
+      }
+      ref.push(s);
+    }
+    expect(out.length).toBe(ref.length);
+    for (let k = 0; k < ref.length; k++) expect(out[k]).toBeCloseTo(ref[k], 4);
+  });
+
   it('group_norm normalizes each group to mean~0 var~1', () => {
     const x = tensor([[[[1, 2], [3, 4]], [[5, 6], [7, 8]], [[-2, -1], [0, 1]], [[10, 20], [30, 40]]]]);
     const w = tensor([1, 1, 1, 1]);

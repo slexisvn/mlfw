@@ -241,10 +241,31 @@
 ### Feature CŨ (đã xong ở trên)
 - [x] `topk` trả INDEX — xong (đợt 12).
 - [x] `gather`/`scatter` raw (advanced indexing) — xong (đợt 12, PyTorch dim-indexed trên builder.gather/scatterAdd).
-- [ ] grad qua split/flip/roll/cumsum/sort — chưa kiểm VJP (mới test forward). Cần fuzz backward cho nhóm này.
-- [ ] Quantized i8/u8 — cả quant path (observer→quantize→dequant) chưa fuzz lần nào.
-- [ ] bool/mask, index dtype (gather/scatter index).
-- [ ] conv/pool (đủ stride/pad/dilation/groups), layer_norm/batch_norm/group_norm/softmax/log_softmax, embedding, scatter/gather/index_select, comparison/select/where, cumsum/argmax/argmin, concat/split/stack/pad.
+- [x] grad qua split/flip/roll/cumsum/sort — QUÉT XONG. split/flip/roll/cumsum đã có backward test (COMPOSITE_BWD +
+  EAGER_PRIM_BWD). **sort/topk** chưa → quét ra BUG fusion-merger.
+  > **BUG fusion-merger re-merge fusion đã xóa** (2026-06-11): backward của `binary_op(sort(x), y)` (vd `mul(sort,c)`,
+  > shape multi-row) THROW "Fusion lowering: unmapped operand from 'unknown'". sort alone OK; sort+binary lỗi.
+  - Root: `FusionMergerPass.run` (`fusion_merger.js`) sau `_merge(producer,consumer)` xóa CẢ HAI op (dropAllOperands+
+    removeOp) nhưng chỉ `merged.add(producer)`, KHÔNG add consumer. Edge sau dùng consumer (đã xóa, numOperands=0) làm
+    producer → `pArgRemap` rỗng → block-arg của nó map về `undefined` → `remapOperands` giữ ref cũ = free var trong
+    thân fusion → lowering throw. (fusion OFF / strategy dominator: OK → khẳng định bug ở merger.)
+  - Fix 1 dòng: thêm `merged.add(consumer)`. Test: `differential-backward.test.js` COMPOSITE_BWD (+sort_mul_const,
+    sort_add_const, sort_dim0_mul, relu_mul_sort, topk_mul_const, sort_plus_sort vs numerical). Revert → 6 RED.
+- [x] **conv/pool/norm coverage** — QUÉT XONG. Quét ra BUG dilation+groups.
+  > **BUG conv2d/conv1d BỎ dilation + groups khi compile** (2026-06-11): `tracer.js:35 _BUILDER_METHOD_MAP.conv2d`
+  > gọi `b.conv(...,strides,padding)` THIẾU `{dilation,groups}` (dù `dispatch.js:20` đã trích `dilation,groups`).
+  > → compiled luôn dùng dilation=[1,1],groups=1: sai SHAPE (dilation) + sai VALUE (groups). conv op-def + lowering
+  > ĐÃ xử lý dilation/groups đúng — chỉ frontend tracer drop. (Eager ĐÚNG, là oracle.)
+  - Fix: truyền `{ dilation: a?.dilation, groups: a?.groups }` vào `b.conv`. Test: differential-nn BOTH (+conv2d_dilation2,
+    conv2d_groups2, conv2d_dilation_groups, conv1d_dilation) + oracle ĐỘC LẬP (dilated conv hand-ref + grouped per-group).
+    Revert → 6 RED. Pool (maxpool/avgpool/adaptive stride/pad), groupnorm/batchnorm-eval/layernorm-nd, softmax/
+    log_softmax, embedding(i32) — quét sạch (eager==cpu==wasm).
+- [x] **bool/mask, comparison/select/where, index dtype** — QUÉT XONG: where(bool-mask), where(from-compare),
+  eq/lt-int→where, comparison-int — eager==cpu==wasm sạch. gather/scatter/index_select/embedding với index **i32**:
+  sạch. GAP (chưa fix, niche): index **i64** (BigInt) throw "Cannot mix BigInt" — index ops compute qua JIT, BigInt
+  index trộn Number offset trong code sinh. i32-index là chuẩn ở đây (argmax/argsort/topk-idx đều trả i32) → để lại.
+- [x] **Quantized i8/u8 (quant path)** — quant là COMPILER PASS (ko phải user op). 51 test sẵn (params-quantization +
+  pass-quantization, có numerical/execute) PASS. Coverage ổn; random-graph quant-fuzzer là future-add.
 
 ### P2 — edge values & shape biên (2026-06-11, đợt P2)
 - [x] **NaN / Inf / -0** (item 1): quét unary/binary/reduce/matmul/softmax/where/clamp/min/max với NaN,±Inf,-0.

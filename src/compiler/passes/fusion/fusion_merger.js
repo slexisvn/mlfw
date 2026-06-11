@@ -42,6 +42,7 @@ export class FusionMergerPass extends FunctionPass {
 
       this._merge(producer, consumer, sharedResults);
       merged.add(producer);
+      merged.add(consumer);
       changed = true;
       mergeCount++;
     }
