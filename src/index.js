@@ -25,7 +25,7 @@ export {
   add, sub, mul, div, neg, pow, maximum, minimum,
   exp, log, sqrt, rsqrt, abs, sin, cos, tanh, sigmoid,
   relu, gelu, silu, sign, floor, ceil,
-  eq, ne, lt, le, gt, ge, where,
+  eq, ne, lt, le, gt, ge, where, clamp, pad, one_hot, index_select,
   sum, mean, max, min, argmax, argmin, prod,
   matmul, dot, cat, stack, clone,
   softmax, log_softmax,

@@ -19,6 +19,11 @@ const _SCALAR_ARG_SPEC = {
   batch_norm: ['axis', 'eps'],
   conv2d: ['strides', 'padding', 'dilation', 'groups'],
   pool2d: ['pool_type', 'kernel_size', 'strides', 'padding'],
+  pad: ['low', 'high'],
+  one_hot: ['depth'],
+  index_select: ['dim'],
+  cat: ['dim'],
+  stack: ['dim'],
 };
 
 function _tracingKernel(opName) {
@@ -33,13 +38,22 @@ function _tracingKernel(opName) {
     const spec = _SCALAR_ARG_SPEC[opName];
     let scalarIdx = 0;
 
-    for (const arg of args) {
+    const isTensor = (a) => (a instanceof SymbolicTensor) || (a && a._impl);
+    const pushTensor = (arg) => {
       if (arg instanceof SymbolicTensor) {
         tensorArgs.push(arg);
       } else if (arg && arg._impl && arg.isSymbolic) {
         tensorArgs.push(arg);
       } else if (arg && arg._impl) {
         tensorArgs.push(tracer.captureConstant(arg));
+      }
+    };
+
+    for (const arg of args) {
+      if (Array.isArray(arg) && arg.length > 0 && isTensor(arg[0])) {
+        for (const el of arg) pushTensor(el);
+      } else if (isTensor(arg)) {
+        pushTensor(arg);
       } else if (spec) {
         if (arg !== undefined && arg !== null && scalarIdx < spec.length) {
           scalarArgs[spec[scalarIdx]] = arg;

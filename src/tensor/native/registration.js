@@ -46,6 +46,10 @@ const _OP_DEFS = [
   'gt(Tensor self, Tensor other) -> Tensor',
   'ge(Tensor self, Tensor other) -> Tensor',
   'where(Tensor condition, Tensor self, Tensor other) -> Tensor',
+  'clamp(Tensor self, Tensor min, Tensor max) -> Tensor',
+  'pad(Tensor self, Tensor value, int[] low, int[] high) -> Tensor',
+  'one_hot(Tensor indices, int depth) -> Tensor',
+  'index_select(Tensor self, Tensor index, int dim) -> Tensor',
 
   'sum(Tensor self, int[] dim, bool keepdim) -> Tensor',
   'mean(Tensor self, int[] dim, bool keepdim) -> Tensor',

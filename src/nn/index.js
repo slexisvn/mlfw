@@ -30,7 +30,7 @@ export const F = {
 export { Linear } from './modules/linear.js';
 export { Conv1d, Conv2d } from './modules/conv.js';
 export { ReLU, GELU, SiLU, Sigmoid, Tanh, LeakyReLU, ELU, Softmax, LogSoftmax } from './modules/activation.js';
-export { LayerNorm, BatchNorm1d, BatchNorm2d } from './modules/normalization.js';
+export { LayerNorm, GroupNorm, BatchNorm1d, BatchNorm2d } from './modules/normalization.js';
 export { MaxPool2d, AvgPool2d, AdaptiveAvgPool2d } from './modules/pooling.js';
 export { Dropout } from './modules/dropout.js';
 export { CrossEntropyLoss, MSELoss, NLLLoss, BCELoss } from './modules/loss.js';

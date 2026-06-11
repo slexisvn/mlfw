@@ -104,6 +104,15 @@ class Dispatcher {
   }
 }
 
+function _unionArg(ks, arg) {
+  if (!arg) return ks;
+  if (arg.dispatchKeySet) return ks.union(arg.dispatchKeySet);
+  if (Array.isArray(arg)) {
+    for (let i = 0; i < arg.length; i++) ks = _unionArg(ks, arg[i]);
+  }
+  return ks;
+}
+
 export function computeKeySet(args, schema) {
   let ks = EMPTY_KEY_SET;
   if (schema) {
@@ -111,18 +120,12 @@ export function computeKeySet(args, schema) {
     for (let i = 0; i < indices.length; i++) {
       const idx = indices[i];
       if (idx < args.length) {
-        const arg = args[idx];
-        if (arg && arg.dispatchKeySet) {
-          ks = ks.union(arg.dispatchKeySet);
-        }
+        ks = _unionArg(ks, args[idx]);
       }
     }
   } else {
     for (let i = 0; i < args.length; i++) {
-      const arg = args[i];
-      if (arg && arg.dispatchKeySet) {
-        ks = ks.union(arg.dispatchKeySet);
-      }
+      ks = _unionArg(ks, args[i]);
     }
   }
   return ks;

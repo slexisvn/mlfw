@@ -1,7 +1,7 @@
-import { IRBuilder } from '../compiler/ir/graph/builder.js';
+import { IRBuilder, indexSelectGatherOpts } from '../compiler/ir/graph/builder.js';
 import { GraphModule } from '../compiler/ir/graph/module.js';
 import { GraphFunction } from '../compiler/ir/graph/function.js';
-import { TensorType, DYNAMIC } from '../compiler/ir/graph/types.js';
+import { TensorType, ScalarType, DYNAMIC } from '../compiler/ir/graph/types.js';
 import { registry } from '../compiler/ir/graph/ops.js';
 import { SymbolicTensor } from './symbolic_tensor.js';
 import { ShapeEnv } from './shape_env.js';
@@ -57,6 +57,25 @@ const _BUILDER_METHOD_MAP = {
     perm[d0] = d1;
     perm[d1] = d0;
     return b.transpose(args[0], perm);
+  },
+  clamp: (b, args) => b.clamp(args[1], args[0], args[2]),
+  pad: (b, args, a) => b.pad(args[0], args[1], a.low, a.high),
+  one_hot: (b, args, a) => b.oneHot(args[0], a.depth, { dtype: ScalarType.F32 }),
+  index_select: (b, args, a) => b.gather(args[0], args[1], indexSelectGatherOpts(args[0].type, a?.dim ?? 0, args[1].type.rank)),
+  cat: (b, args, a) => {
+    const rank = args[0].type.rank;
+    const dim = (a?.dim ?? 0) < 0 ? rank + (a?.dim ?? 0) : (a?.dim ?? 0);
+    return b.concat(args, dim);
+  },
+  stack: (b, args, a) => {
+    const rank = args[0].type.rank;
+    const dim = (a?.dim ?? 0) < 0 ? rank + 1 + (a?.dim ?? 0) : (a?.dim ?? 0);
+    const expanded = args.map(arg => {
+      const newShape = [...arg.type.shape];
+      newShape.splice(dim, 0, 1);
+      return b.reshape(arg, newShape).getResult(0);
+    });
+    return b.concat(expanded, dim);
   },
   permute: (b, args, a) => b.transpose(args[0], a.dims),
   reshape: (b, args, a) => b.reshape(args[0], a.new_shape),

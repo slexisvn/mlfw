@@ -1,5 +1,11 @@
 import { dispatcher, computeKeySet } from '../../dispatcher/dispatcher.js';
 import { getHandle } from './registry.js';
+import { scalar } from '../factory/from_ops.js';
+
+function _asTensor(value, ref) {
+  if (value && value._impl) return value;
+  return scalar(value, { dtype: ref.dtype });
+}
 
 function _dispatch(name, ...args) {
   const handle = getHandle(name);
@@ -41,6 +47,10 @@ export function le(self, other) { return _dispatch('le', self, other); }
 export function gt(self, other) { return _dispatch('gt', self, other); }
 export function ge(self, other) { return _dispatch('ge', self, other); }
 export function where(condition, self, other) { return _dispatch('where', condition, self, other); }
+export function clamp(self, min, max) { return _dispatch('clamp', self, _asTensor(min, self), _asTensor(max, self)); }
+export function pad(self, low, high, value = 0) { return _dispatch('pad', self, _asTensor(value, self), low, high); }
+export function one_hot(indices, depth) { return _dispatch('one_hot', indices, depth); }
+export function index_select(self, dim, index) { return _dispatch('index_select', self, index, dim); }
 
 export function sum(self, dim, keepdim) { return _dispatch('sum', self, dim, keepdim); }
 export function mean(self, dim, keepdim) { return _dispatch('mean', self, dim, keepdim); }

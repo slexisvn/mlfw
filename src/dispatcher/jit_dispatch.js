@@ -7,7 +7,7 @@ import { Tensor } from '../tensor/core/tensor.js';
 import { TensorImpl } from '../tensor/core/tensor_impl.js';
 import { Storage } from '../tensor/core/storage.js';
 import { computeStrides, computeNumel, broadcastShapes, matmulOutputShape } from '../tensor/utils/shape_utils.js';
-import { resultDtype, dtypeSize } from '../tensor/types/dtype.js';
+import { resultDtype, dtypeSize, typedArrayCtor } from '../tensor/types/dtype.js';
 
 const _TARGET_FOR_KEY = {
   [DispatchKey.CPU]: () => CPUTarget(),
@@ -30,6 +30,11 @@ const _SCALAR_ARG_SPEC = {
   batch_norm: ['axis', 'eps'],
   conv2d: ['strides', 'padding', 'dilation', 'groups'],
   pool2d: ['pool_type', 'kernel_size', 'strides', 'padding'],
+  pad: ['low', 'high'],
+  one_hot: ['depth'],
+  index_select: ['dim'],
+  cat: ['dim'],
+  stack: ['dim'],
 };
 
 function _extractTensorsAndScalars(opName, args) {
@@ -42,6 +47,10 @@ function _extractTensorsAndScalars(opName, args) {
     const a = args[i];
     if (a && a._impl) {
       tensors.push(a);
+    } else if (Array.isArray(a) && a.length > 0 && a[0] && a[0]._impl) {
+      for (const el of a) {
+        if (el && el._impl) tensors.push(el);
+      }
     } else if (a !== undefined && a !== null) {
       if (spec && scalarIdx < spec.length) {
         scalars[spec[scalarIdx]] = a;
@@ -122,6 +131,49 @@ function _inferOutputShape(opName, tensorArgs, scalars) {
     return [inp[0], inp[1], ...spatial];
   }
 
+  if (opName === 'clamp') {
+    let shape = tensorArgs[0].shape;
+    for (let i = 1; i < tensorArgs.length; i++) {
+      shape = broadcastShapes(shape, tensorArgs[i].shape) || shape;
+    }
+    return shape;
+  }
+
+  if (opName === 'pad') {
+    const inp = tensorArgs[0].shape;
+    const low = scalars.low || [];
+    const high = scalars.high || [];
+    return inp.map((d, i) => d + (low[i] || 0) + (high[i] || 0));
+  }
+
+  if (opName === 'one_hot') {
+    return [...tensorArgs[0].shape, scalars.depth];
+  }
+
+  if (opName === 'cat') {
+    const rank = tensorArgs[0].shape.length;
+    const dim = (scalars.dim ?? 0) < 0 ? rank + (scalars.dim ?? 0) : (scalars.dim ?? 0);
+    const shape = [...tensorArgs[0].shape];
+    shape[dim] = tensorArgs.reduce((acc, t) => acc + t.shape[dim], 0);
+    return shape;
+  }
+
+  if (opName === 'stack') {
+    const rank = tensorArgs[0].shape.length;
+    const dim = (scalars.dim ?? 0) < 0 ? rank + 1 + (scalars.dim ?? 0) : (scalars.dim ?? 0);
+    const shape = [...tensorArgs[0].shape];
+    shape.splice(dim, 0, tensorArgs.length);
+    return shape;
+  }
+
+  if (opName === 'index_select') {
+    const shape = [...tensorArgs[0].shape];
+    const rank = shape.length;
+    const dim = (scalars.dim ?? 0) < 0 ? rank + (scalars.dim ?? 0) : (scalars.dim ?? 0);
+    shape[dim] = tensorArgs[1].shape.reduce((a, b) => a * b, 1);
+    return shape;
+  }
+
   if (opName === 'softmax' || opName === 'log_softmax') return [...tensorArgs[0].shape];
   if (opName === 'layer_norm' || opName === 'batch_norm') return [...tensorArgs[0].shape];
   if (opName === 'embedding') {
@@ -183,9 +235,9 @@ function _wrapOpForJIT(opName, dispatchKey) {
     const runtimeArgs = tensors.map(t => tensorToContiguous(t));
 
     const outShape = _inferOutputShape(opName, tensors, scalars);
-    const outDtype = resultDtype(tensors[0].dtype, tensors.length > 1 ? tensors[1].dtype : tensors[0].dtype);
+    const outDtype = entry.outDtype || resultDtype(tensors[0].dtype, tensors.length > 1 ? tensors[1].dtype : tensors[0].dtype);
     const outNumel = computeNumel(outShape);
-    const Ctor = runtimeArgs.length > 0 ? runtimeArgs[0].constructor : Float32Array;
+    const Ctor = typedArrayCtor(outDtype);
     const outData = new Ctor(Math.max(outNumel, 1));
     runtimeArgs.push(outData);
 

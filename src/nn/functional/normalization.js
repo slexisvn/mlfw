@@ -33,6 +33,32 @@ export function layer_norm(input, normalizedShape, weight, bias, eps = 1e-5) {
   return normalized;
 }
 
+export function group_norm(input, numGroups, weight, bias, eps = 1e-5) {
+  const shape = input.shape;
+  const N = shape[0];
+  const C = shape[1];
+  const spatial = shape.slice(2);
+  const grouped = input.reshape([N, numGroups, C / numGroups, ...spatial]);
+  const dims = [];
+  for (let i = 2; i < grouped.ndim; i++) dims.push(i);
+
+  let meanVal = grouped;
+  for (let i = dims.length - 1; i >= 0; i--) meanVal = ops.mean(meanVal, dims[i], true);
+  const centered = ops.sub(grouped, meanVal);
+  const sq = ops.mul(centered, centered);
+  let variance = sq;
+  for (let i = dims.length - 1; i >= 0; i--) variance = ops.mean(variance, dims[i], true);
+
+  const epsT = full([], eps);
+  const invStd = ops.div(full([], 1), ops.sqrt(ops.add(variance, epsT)));
+  let normalized = ops.mul(centered, invStd).reshape(shape);
+
+  const affineShape = [1, C, ...spatial.map(() => 1)];
+  if (weight) normalized = ops.mul(normalized, weight.reshape(affineShape));
+  if (bias) normalized = ops.add(normalized, bias.reshape(affineShape));
+  return normalized;
+}
+
 export function batch_norm(input, runningMean, runningVar, weight, bias, training = true, eps = 1e-5) {
   return ops.batch_norm(input, weight, bias, runningMean, runningVar, 1, eps);
 }

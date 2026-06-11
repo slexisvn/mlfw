@@ -5,6 +5,23 @@ import { GraphFunction } from './function.js';
 import { GraphModule } from './module.js';
 import { registry } from './ops.js';
 
+export function indexSelectGatherOpts(operandType, dim, indicesRank) {
+  const rank = operandType.rank;
+  const d = dim < 0 ? rank + dim : dim;
+  const sliceSizes = operandType.shape.map((s, i) => i === d ? 1 : s);
+  const offsetDims = [];
+  for (let i = 0; i < rank; i++) {
+    if (i !== d) offsetDims.push(i < d ? i : i - 1 + indicesRank);
+  }
+  return {
+    offsetDims,
+    collapsedSliceDims: [d],
+    startIndexMap: [d],
+    indexVectorDim: indicesRank,
+    sliceSizes,
+  };
+}
+
 function bcastBatchDims(a, b) {
   const n = Math.max(a.length, b.length);
   const out = new Array(n);

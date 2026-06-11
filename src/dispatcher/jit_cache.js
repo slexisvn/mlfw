@@ -1,4 +1,4 @@
-import { buildFunction } from '../compiler/ir/graph/builder.js';
+import { buildFunction, indexSelectGatherOpts } from '../compiler/ir/graph/builder.js';
 import { GraphModule } from '../compiler/ir/graph/module.js';
 import { TensorType, ScalarType } from '../compiler/ir/graph/types.js';
 import { lowerGraphToPrimFunc } from '../compiler/passes/lowering/graph_to_tensor.js';
@@ -68,6 +68,25 @@ const _BUILDER_ALIASES = {
   le: (b, args) => b.compare(args[0], args[1], 'le'),
   gt: (b, args) => b.compare(args[0], args[1], 'gt'),
   ge: (b, args) => b.compare(args[0], args[1], 'ge'),
+  clamp: (b, args) => b.clamp(args[1], args[0], args[2]),
+  pad: (b, args, s) => b.pad(args[0], args[1], s.low, s.high),
+  one_hot: (b, args, s) => b.oneHot(args[0], s.depth, { dtype: ScalarType.F32 }),
+  index_select: (b, args, s) => b.gather(args[0], args[1], indexSelectGatherOpts(args[0].type, s.dim ?? 0, args[1].type.rank)),
+  cat: (b, args, s) => {
+    const rank = args[0].type.rank;
+    const dim = (s?.dim ?? 0) < 0 ? rank + (s?.dim ?? 0) : (s?.dim ?? 0);
+    return b.concat(args, dim);
+  },
+  stack: (b, args, s) => {
+    const rank = args[0].type.rank;
+    const dim = (s?.dim ?? 0) < 0 ? rank + 1 + (s?.dim ?? 0) : (s?.dim ?? 0);
+    const expanded = args.map(arg => {
+      const newShape = [...arg.type.shape];
+      newShape.splice(dim, 0, 1);
+      return b.reshape(arg, newShape).getResult(0);
+    });
+    return b.concat(expanded, dim);
+  },
 };
 
 let _nextFuncId = 0;
@@ -81,9 +100,10 @@ function _buildGraphFunc(opName, tensorArgs, scalarArgs) {
 
     if (_REDUCTION_OPS[opName]) {
       const dims = scalarArgs?.dim;
+      const rank = irArgs[0].type.rank;
       const dimensions = dims !== undefined && dims !== null
-        ? (Array.isArray(dims) ? dims : [dims])
-        : Array.from({ length: irArgs[0].type.rank }, (_, i) => i);
+        ? (Array.isArray(dims) ? dims : [dims]).map(d => d < 0 ? rank + d : d)
+        : Array.from({ length: rank }, (_, i) => i);
       const initVal = _reductionInit(opName, irArgs[0].type.dtype);
       const initConst = builder.scalarConstant(initVal, irArgs[0].type.dtype);
       result = builder.reduce(irArgs[0], initConst.getResult(0), dimensions, opName);
@@ -139,7 +159,9 @@ export function jitCompile(opName, tensorArgs, scalarArgs, target) {
   const rt = _getRuntime(target.name);
   rt.addCompiledKernel(compiled);
 
-  entry = { funcName: compiled.name, runtime: rt, numInputs: tensorArgs.length };
+  const retOp = func.getReturnOp();
+  const outDtype = retOp && retOp.operands.length > 0 ? retOp.operands[0].type.dtype : null;
+  entry = { funcName: compiled.name, runtime: rt, numInputs: tensorArgs.length, outDtype };
   _cache.set(key, entry);
   return entry;
 }

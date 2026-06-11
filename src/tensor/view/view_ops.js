@@ -303,6 +303,57 @@ function _copyContiguous(tensor) {
   return new Tensor(impl);
 }
 
+export function repeat(tensor, reps) {
+  const shape = tensor.shape;
+  const ndim = shape.length;
+  if (reps.length < ndim) throw new Error('repeat: reps length must be >= tensor rank');
+  const lead = reps.length - ndim;
+  const aligned = lead > 0 ? [...Array(lead).fill(1), ...shape] : shape.slice();
+  const interleaved = [];
+  const expanded = [];
+  const finalShape = [];
+  for (let i = 0; i < aligned.length; i++) {
+    interleaved.push(1, aligned[i]);
+    expanded.push(reps[i], aligned[i]);
+    finalShape.push(reps[i] * aligned[i]);
+  }
+  return reshape(expand(reshape(tensor, interleaved), expanded), finalShape);
+}
+
+export function tile(tensor, reps) {
+  const ndim = tensor.shape.length;
+  const r = reps.length < ndim ? [...Array(ndim - reps.length).fill(1), ...reps] : reps;
+  return repeat(tensor, r);
+}
+
+export function split(tensor, sizeOrSizes, dim = 0) {
+  const rank = tensor.shape.length;
+  const d = dim < 0 ? rank + dim : dim;
+  const n = tensor.shape[d];
+  let sizes;
+  if (Array.isArray(sizeOrSizes)) {
+    sizes = sizeOrSizes;
+  } else {
+    sizes = [];
+    for (let off = 0; off < n; off += sizeOrSizes) sizes.push(Math.min(sizeOrSizes, n - off));
+  }
+  const out = [];
+  let start = 0;
+  for (const s of sizes) {
+    out.push(narrow(tensor, d, start, s));
+    start += s;
+  }
+  return out;
+}
+
+export function chunk(tensor, chunks, dim = 0) {
+  const rank = tensor.shape.length;
+  const d = dim < 0 ? rank + dim : dim;
+  const n = tensor.shape[d];
+  const size = Math.ceil(n / chunks);
+  return split(tensor, size, d);
+}
+
 export function installViewOps(TensorClass) {
   const proto = TensorClass.prototype;
   proto.reshape = function(...args) {
@@ -323,6 +374,16 @@ export function installViewOps(TensorClass) {
   proto.squeeze = function(dim) { return squeeze(this, dim); };
   proto.narrow = function(dim, start, length) { return narrow(this, dim, start, length); };
   proto.select = function(dim, index) { return select(this, dim, index); };
+  proto.repeat = function(...reps) {
+    const r = reps.length === 1 && Array.isArray(reps[0]) ? reps[0] : reps;
+    return repeat(this, r);
+  };
+  proto.tile = function(...reps) {
+    const r = reps.length === 1 && Array.isArray(reps[0]) ? reps[0] : reps;
+    return tile(this, r);
+  };
+  proto.split = function(sizeOrSizes, dim = 0) { return split(this, sizeOrSizes, dim); };
+  proto.chunk = function(chunks, dim = 0) { return chunk(this, chunks, dim); };
   proto.contiguous = function() { return contiguous(this); };
   proto.t = function() {
     if (this.ndim !== 2) throw new Error('t() expects a 2D tensor');

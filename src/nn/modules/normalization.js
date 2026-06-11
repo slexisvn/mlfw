@@ -17,6 +17,21 @@ export class LayerNorm extends Module {
   }
 }
 
+export class GroupNorm extends Module {
+  constructor(numGroups, numChannels, eps = 1e-5, affine = true) {
+    super();
+    this.numGroups = numGroups;
+    this.numChannels = numChannels;
+    this.eps = eps;
+    this.weight = affine ? new Parameter(ones([numChannels])) : null;
+    this.bias = affine ? new Parameter(zeros([numChannels])) : null;
+  }
+
+  forward(input) {
+    return Fn.group_norm(input, this.numGroups, this.weight, this.bias, this.eps);
+  }
+}
+
 export class BatchNorm1d extends Module {
   constructor(numFeatures, eps = 1e-5, affine = true) {
     super();

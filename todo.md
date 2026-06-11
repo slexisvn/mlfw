@@ -79,9 +79,76 @@
 - GAP còn lại (chưa fix, op chưa wire cho compile — không phải value bug): `cat`, `stack` (No dispatch key),
   `pow` (Cannot infer result types — cả eager cũng ko compile). → P1 wiring.
 
-### P1 — dtype & op còn trống
-- [ ] f64 (mới test lẻ), f16/bf16 (lỗi rounding/denormal hay ẩn ở đây).
-- [ ] Wire cho compile: `cat`, `stack`, `pow` (hiện exploratory fuzz báo No-dispatch / can't-infer).
+### Bug đã fix đợt 4 (2026-06-11) — exploratory fuzz batch 2 (negative-dim, comparison, f64 chains)
+- **EAGER reduce dim ÂM sai toàn bộ** (sum/mean/max/min/prod với dim=-1,-2): `jit_cache._buildGraphFunc`
+  (đường eager) KHÔNG normalize dim âm — truyền thẳng `-1` vào `builder.reduce` trong khi `_inferOutputShape`
+  lại normalize → graph reduce nhầm trục → ra `[1,2,3,...]` degenerate. (compiled/tracer ĐÚNG → differential
+  eager-vs-compiled bắt được, eager là bên sai.) Fix: `.map(d => d < 0 ? rank + d : d)` trong jit_cache,
+  khớp với `_traceReduce`. Test: differential-nn (+mean_negdim, +sum_negdim2, +prod_negdim_f64,
+  +max_negdim_keepdim). Revert → 8 RED; apply → 54/54 GREEN. Full e2e+compiler+dispatcher+tensor 1617/1617.
+- Đã quét sạch (no fail): comparison/where/select, softmax/log_softmax f64 + dim giữa, matmul f64 2D/3D,
+  reduce all-dims, unary f64 (gelu/rsqrt/sqrt/log/exp), div f64, abs/neg i32, broadcast scalar/row.
+
+### Bug đã fix đợt 5 (2026-06-11) — P1 dtype coverage (1 batch lớn)
+> Exploratory fuzz integer dtypes (i8/i16/i64/ui8) + bool + f16 × {unary,binary,reduce,matmul} × {cpu,wasm}.
+- **WASM narrow-int load/store biến mất** (i16/ui8/bool ra 0/rác, i16 reduce compile-fail "stack fallthru"):
+  `wat_encoder.js` INSTR map THIẾU opcode memory narrow-int — codegen emit đúng `i32.load16_s`/`store16`/
+  `load8_u`/`load16_u` nhưng encoder drop token lạ → bytes rỗng. Fix: thêm 4 memarg entry
+  `[opcode, align=log2(bytes), offset]` vào `wat_encoder.js:33-34`. (ui8/i16 wrap-on-overflow đã đúng sẵn —
+  store8/store16 truncate khớp CPU mod-2^n.) [subagent]
+- **eager `where` cond bool ra giá trị wrap** (-2→254): output dtype + buffer ctor lấy từ `tensors[0]` (=cond
+  bool) thay vì kết quả. Fix: `jit_cache` gắn `entry.outDtype` từ return-op của graph; `jit_dispatch` dùng
+  `entry.outDtype` + cấp outData bằng `typedArrayCtor(outDtype)` (không phải `runtimeArgs[0].constructor`).
+- Test: `differential-nn.test.js` BOTH2 (+add/mul/sum/max/matmul cho i16 & ui8, +eq_bool) + 1 test standalone
+  eager where-bool. `mk()` generalize `Math.round` cho mọi non-float (qua `isDtypeFloat`). Revert → RED; apply
+  → 77/77. Full e2e+wasm+compiler+dispatcher+tensor **1960/1960**.
+- f16 quét sạch (lưu trữ as-f32, hoạt động). i64 BỎ QUA (cần BigInt host plumbing — niche).
+
+### P1 — dtype & op còn trống (cập nhật)
+- [x] Integer dtypes i8/i16/ui8 + bool trên compile cpu+wasm — đã fix (encoder narrow-int) + test.
+- [x] f64 (quét rộng, ổn). f16 (as-f32, ổn).
+- [ ] f16/bf16 ĐÚNG NGHĨA (half-precision thật) — hiện f16 chỉ là alias f32, chưa có rounding/denormal thật.
+- [ ] i64 (BigInt host marshalling) — niche, chưa làm.
+- [ ] Quant path (quantize→dequantize observer) fuzz — chưa đụng.
+
+### Feature đã wire đợt 6 (2026-06-11) — frontend ops (IR+lowering ĐÃ có sẵn, chỉ wire frontend) [subagent]
+> Phát hiện: IR ops + builder methods + lowering rules cho concat/split/gather/scatter/pad/clamp/pow/where/
+> one_hot ĐÃ tồn tại đầy đủ. "Làm feature" = wire frontend (ops.js export + registration schema + index.js +
+> dispatch _SCALAR_ARG_SPEC + tracer/jit_cache _BUILDER map). Template: `where` (wire tối thiểu, auto-path lo
+> phần còn lại vì builder có method cùng tên).
+- [x] `clamp(self,min,max)` — min/max nhận số hoặc tensor (`_asTensor` helper). Map → builder.clamp(min,self,max).
+- [x] `pad(self,low,high,value=0)`.
+- [x] `one_hot(indices,depth)` → f32.
+- [x] `index_select(self,dim,index)` — trên builder.gather, helper `indexSelectGatherOpts` (StableHLO gather attrs).
+- [x] `cat`/`stack` COMPILE — root: `computeKeySet` (dispatcher.js) không đệ quy vào array args → TRACING key
+  của symbolic tensor TRONG `Tensor[]` bị bỏ sót. Fix computeKeySet đệ quy + flatten tensor-list ở
+  jit_dispatch + tracing dispatch (guard để `int[]` như pad.low/high KHÔNG bị nhầm là tensor-list). stack =
+  reshape-insert-dim + concat.
+- Test: differential-nn.test.js (+clamp_scalar, +pad_2d trong BOTH2; +describe "index ops" cho one_hot/
+  index_select/cat/stack cpu+wasm). Sanity eager+cpu+wasm khớp. Full e2e+tensor+dispatcher+compiler+wasm+nn
+  **2088/2088**.
+- SKIP (lý do rõ): `gather`/`scatter` raw (opts XLA 5-attr + scatter cần combiner region — phức tạp, đã có
+  index_select thay); `split` (multi-output `numResults:-1`, cần multi-output plumbing ở JIT/tracing — ngoài
+  phạm vi wire frontend); `cumsum`/`flip`/`roll`/`repeat`/`topk`/`group_norm` (CHƯA có IR op — cần build mới).
+
+### Feature đợt 7 (2026-06-11) — composition/decomposition (KHÔNG cần IR op mới)
+> Nhận ra nhiều "feature thiếu" làm được bằng compose op có sẵn, không cần multi-output plumbing.
+- [x] `group_norm(input,numGroups,weight,bias,eps)` — decompose reshape→mean/var→normalize→reshape (như
+  layer_norm). `src/nn/functional/normalization.js` + class `GroupNorm` (`modules/normalization.js`, export
+  `nn/index.js`). Test: differential-nn (groupnorm, groupnorm_g1). eager==cpu==wasm.
+- [x] `repeat(reps)` / `tile(reps)` — method, compose reshape→expand→reshape (`view_ops.js`). PyTorch/numpy
+  semantics. Test: repeat_2d/repeat_1d/tile_promote.
+- [x] `split(sizeOrSizes,dim)` / `chunk(chunks,dim)` — method, compose qua `narrow` (mỗi mảnh 1 narrow, trả JS
+  array; compile() đã xử lý forward trả array). KHÔNG cần multi-output IR plumbing. Test: split_cat/chunk_cat
+  round-trip cpu+wasm.
+- Full e2e+tensor+nn+dispatcher+compiler+wasm **2102/2102**.
+
+### Feature còn lại (cần build IR op mới + lowering + 4 backend kernels — việc nặng)
+- [ ] `cumsum` (scan op — cần lowering scan + 4 backend), `topk`/`sort` (sorting kernel — khó nhất),
+  `flip`/`roll` (có thể compose qua index_select + reversed-index constant, nhưng cần verify capture constant
+  trong trace — medium).
+- [ ] `gather`/`scatter` raw export (advanced indexing) — opts XLA 5-attr + scatter combiner region.
+- [ ] split/chunk EAGER trả array of views — nếu cần grad qua split, kiểm VJP của narrow đã đúng chưa.
 - [ ] Quantized i8/u8 — cả quant path (observer→quantize→dequant) chưa fuzz lần nào.
 - [ ] bool/mask, index dtype (gather/scatter index).
 - [ ] conv/pool (đủ stride/pad/dilation/groups), layer_norm/batch_norm/group_norm/softmax/log_softmax, embedding, scatter/gather/index_select, comparison/select/where, cumsum/argmax/argmin, concat/split/stack/pad.
