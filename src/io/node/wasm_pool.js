@@ -139,27 +139,13 @@ export async function runWasmParallel(wasmInst, name, tensorArgs, shapeValues, p
     for (let i = 0; i < nBufs; i++) {
       const data = tensorArgs[i];
       if (!(data instanceof Float32Array)) continue;
-      const stride = strides[i];
-      if (stride > 0) {
-        const elemStart = parStart * stride;
-        const elemEnd = parEnd * stride;
-        const chunk = data.slice(elemStart, elemEnd);
-        bufferEntries.push({
-          offset: offsets[i] + elemStart * 4,
-          length: chunk.length,
-          data: chunk.buffer,
-          fullLength: data.length,
-          elemStart,
-        });
-      } else {
-        bufferEntries.push({
-          offset: offsets[i],
-          length: data.length,
-          data: data.buffer.slice(0),
-          fullLength: data.length,
-          elemStart: 0,
-        });
-      }
+      bufferEntries.push({
+        offset: offsets[i],
+        length: data.length,
+        data: data.buffer.slice(0),
+        fullLength: data.length,
+        elemStart: 0,
+      });
     }
 
     const callArgs = [...baseCallArgs, parStart, parEnd];
@@ -190,9 +176,10 @@ export async function runWasmParallel(wasmInst, name, tensorArgs, shapeValues, p
         const wIdx = r.workerIdx;
         const parStart = wIdx * chunkSize;
         const parEnd = Math.min(parStart + chunkSize, extent);
-        const workerBuf = new Float32Array(outBuf);
+        const workerFull = new Float32Array(outBuf);
         const elemStart = parStart * stride;
-        data.set(workerBuf, elemStart);
+        const elemEnd = parEnd * stride;
+        data.set(workerFull.subarray(elemStart, elemEnd), elemStart);
       }
     } else {
       const firstResult = results.find(r => r.workerIdx === 0);

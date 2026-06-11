@@ -308,3 +308,93 @@ describe('parallel WASM execution — large data parallel', () => {
     }
   });
 });
+
+// Regression tests for the scheduled-WASM correctness bugs. Before the fixes the worker
+// pool partitioned every buffer contiguously by extent (wrong for reductions where the
+// input is read strided, and for matmul where an operand is read in full), and the SIMD
+// codegen vector-loaded strided operands of a reduction/accumulator as if contiguous.
+describe('parallel WASM execution — scheduled reduction over non-last axis', () => {
+  // Reduce over axis 0 (sum down columns): the parallel loop iterates the spatial
+  // (column) axis while the input is read strided down rows. The pool used to hand each
+  // worker a contiguous row-slice instead of its columns; now reductions run sync.
+  function buildColSum(name, R, C) {
+    const tin = new TensorType([R, C], ScalarType.F32);
+    const tout = new TensorType([C], ScalarType.F32);
+    return buildFunction(name, [tin], [tout], (b, args) => {
+      const zero = b.scalarConstant(0, ScalarType.F32);
+      b.returnOp([b.reduce(args[0], zero.getResult(0), [0], 'sum').getResult(0)]);
+    });
+  }
+
+  it('sum over axis 0 [32,128] is correct (sync)', () => {
+    const R = 32, C = 128;
+    const a = new Float32Array(R * C);
+    for (let i = 0; i < R; i++) for (let j = 0; j < C; j++) a[i * C + j] = (j + 1) * 0.01;
+    const out = new Float32Array(C);
+    compilePar(buildColSum('wp_colsum_s', R, C)).run('wp_colsum_s', a, out);
+    for (let j = 0; j < C; j++) expect(out[j]).toBeCloseTo(R * (j + 1) * 0.01, 3);
+  });
+
+  it('sum over axis 0 [32,128] is correct (async/pool path)', async () => {
+    const R = 32, C = 128;
+    const a = new Float32Array(R * C);
+    for (let i = 0; i < R; i++) for (let j = 0; j < C; j++) a[i * C + j] = (j + 1) * 0.01;
+    const out = new Float32Array(C);
+    await compilePar(buildColSum('wp_colsum_a', R, C)).runAsync('wp_colsum_a', a, out);
+    for (let j = 0; j < C; j++) expect(out[j]).toBeCloseTo(R * (j + 1) * 0.01, 3);
+  });
+
+  it('max over axis 0 [16,64] is correct (vectorized reduction)', () => {
+    const R = 16, C = 64;
+    const a = new Float32Array(R * C);
+    // column j max occurs at row j % R with value j + 1; other rows smaller.
+    for (let i = 0; i < R; i++) for (let j = 0; j < C; j++) a[i * C + j] = (i === j % R) ? (j + 1) : -(j + 1);
+    const tin = new TensorType([R, C], ScalarType.F32);
+    const tout = new TensorType([C], ScalarType.F32);
+    const func = buildFunction('wp_colmax', [tin], [tout], (b, args) => {
+      const init = b.scalarConstant(-Infinity, ScalarType.F32);
+      b.returnOp([b.reduce(args[0], init.getResult(0), [0], 'max').getResult(0)]);
+    });
+    const out = new Float32Array(C);
+    compilePar(func).run('wp_colmax', a, out);
+    for (let j = 0; j < C; j++) expect(out[j]).toBeCloseTo(j + 1, 4);
+  });
+});
+
+describe('parallel WASM execution — scheduled matmul (vectorized contraction)', () => {
+  // matmul parallelizes over output rows and vectorizes the K contraction; operand B is
+  // read with a row stride (B[k, j]). The SIMD accumulator used to vector-load B as if
+  // contiguous; now it falls back to the scalar accumulator for strided operands.
+  function buildMatmul(name, Mn, K, P) {
+    const ta = new TensorType([Mn, K], ScalarType.F32);
+    const tb = new TensorType([K, P], ScalarType.F32);
+    const tc = new TensorType([Mn, P], ScalarType.F32);
+    return buildFunction(name, [ta, tb], [tc], (b, args) => {
+      b.returnOp([b.matmul(args[0], args[1]).getResult(0)]);
+    });
+  }
+
+  it('[64,8]@[8,16] matches hand-computed product (sync)', () => {
+    const Mn = 64, K = 8, P = 16;
+    const a = new Float32Array(Mn * K).fill(1);            // A[i,k] = 1
+    const b = new Float32Array(K * P);
+    for (let k = 0; k < K; k++) for (let j = 0; j < P; j++) b[k * P + j] = (j + 1) * 0.25;
+    const out = new Float32Array(Mn * P);
+    compilePar(buildMatmul('wp_mm_s', Mn, K, P)).run('wp_mm_s', a, b, out);
+    for (let i = 0; i < Mn; i++) for (let j = 0; j < P; j++) {
+      expect(out[i * P + j]).toBeCloseTo(K * (j + 1) * 0.25, 4); // sum_k 1 * (j+1)*0.25
+    }
+  });
+
+  it('[64,8]@[8,16] matches hand-computed product (async/pool path)', async () => {
+    const Mn = 64, K = 8, P = 16;
+    const a = new Float32Array(Mn * K).fill(1);
+    const b = new Float32Array(K * P);
+    for (let k = 0; k < K; k++) for (let j = 0; j < P; j++) b[k * P + j] = (j + 1) * 0.25;
+    const out = new Float32Array(Mn * P);
+    await compilePar(buildMatmul('wp_mm_a', Mn, K, P)).runAsync('wp_mm_a', a, b, out);
+    for (let i = 0; i < Mn; i++) for (let j = 0; j < P; j++) {
+      expect(out[i * P + j]).toBeCloseTo(K * (j + 1) * 0.25, 4);
+    }
+  });
+});

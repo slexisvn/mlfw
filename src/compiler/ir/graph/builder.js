@@ -488,11 +488,13 @@ export class IRBuilder {
   }
 
   argmax(input, axis, keepDims = false) {
-    return this._inferAndBuild('argmax', [input], { axis, keep_dims: keepDims });
+    const dim = axis < 0 ? input.type.rank + axis : axis;
+    return this._inferAndBuild('argmax', [input], { axis: dim, keep_dims: keepDims });
   }
 
   argmin(input, axis, keepDims = false) {
-    return this._inferAndBuild('argmin', [input], { axis, keep_dims: keepDims });
+    const dim = axis < 0 ? input.type.rank + axis : axis;
+    return this._inferAndBuild('argmin', [input], { axis: dim, keep_dims: keepDims });
   }
 
   pool2d(input, poolType, kernelSize, strides, padding, opts = {}) {

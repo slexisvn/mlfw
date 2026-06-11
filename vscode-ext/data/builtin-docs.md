@@ -415,6 +415,34 @@ Standardize a tensor along `axis`: subtract mean and divide by standard deviatio
 ## train_test_split(data, test_size=0.2)
 Split a `CsvFrame` or tensor into train/test partitions.
 
+## dataframe(columns) {data}
+Build a lazy `DataFrame` from named column arrays, one named argument per
+column: `dataframe(name=["a", "b"], age=[30, 40])`. Column types are inferred
+from the values. The frame records a query plan and is only executed when
+materialized with `collect`, `toArray`, `count`, `show`, or `chunks`.
+
+## col(column) {function}
+Reference a column by name in a `DataFrame` expression, returning a `Column`
+that can be transformed and compared. Use a dotted name (`"t.id"`) to qualify a
+table alias.
+
+## lit(value) {function}
+Wrap a constant value as a `Column` literal so it can be combined with other
+columns in expressions.
+
+## expr(sql) {function}
+Parse a scalar SQL string into a `Column`, e.g. `expr("price * 1.1")`. Bound
+against the frame's schema at build time.
+
+## avg(column) {function}
+Aggregate `Column` computing the mean of a column within a `groupBy(...).agg(...)`.
+
+## count(column) {function}
+Aggregate `Column` counting non-null values of a column within `agg(...)`.
+
+## countStar() {function}
+Aggregate `Column` counting all rows (`COUNT(*)`) within `agg(...)`.
+
 ## EarlyStopping(monitor, patience=3, mode="min")
 Stop training when a monitored metric stops improving for `patience` evaluations.
 
@@ -676,3 +704,140 @@ Return a serializable dict of parameter tensors.
 
 ### load_state_dict(state)
 Load parameter tensors from a previously saved dict.
+
+## $DataFrame
+
+### columns()
+Return the column names as an array of strings.
+
+### schema()
+Return the frame's schema (fields with names and data types).
+
+### explain()
+Return the logical query plan as a human-readable string.
+
+### select(...columns)
+Project a new frame from the given columns or `Column` expressions.
+
+### filter(condition)
+Keep only rows matching a boolean `Column` (or SQL string) condition.
+
+### where(condition)
+Alias for `filter`.
+
+### withColumn(name, column)
+Return a new frame with an added or replaced column computed from `column`.
+
+### drop(...columns)
+Return a new frame without the named columns.
+
+### groupBy(...columns)
+Group rows by the given columns, returning a `GroupedData` for aggregation.
+
+### orderBy(...specs)
+Sort rows. Each spec is a column name/`Column`, or `{ col, desc }` for ordering.
+
+### sort(...specs)
+Alias for `orderBy`.
+
+### limit(count, offset=0)
+Return at most `count` rows, skipping the first `offset` rows.
+
+### distinct()
+Return a frame with duplicate rows removed.
+
+### union(other)
+Concatenate the rows of another frame with matching column types.
+
+### unionAll(other)
+Concatenate rows of another frame, keeping duplicates.
+
+### join(other, on, how="INNER")
+Join with another frame on one or more key columns. `how` is one of
+`INNER`, `LEFT`, `RIGHT`, or `FULL`.
+
+### collect()
+Execute the plan and return all rows as an array of objects.
+
+### toArray()
+Alias for `collect`.
+
+### count()
+Execute the plan and return the number of rows.
+
+### show(n=20)
+Execute and print the first `n` rows as a formatted table; returns the text.
+
+### chunks()
+Execute and stream results as an async iterator of data chunks.
+
+## $GroupedData
+
+### agg(...columns)
+Apply aggregate `Column` expressions (e.g. `sum`, `avg`, `count`) over each
+group, returning a `DataFrame` of group keys and aggregates.
+
+## $Column
+
+### alias(name)
+Rename the column's output to `name`.
+
+### as(name)
+Alias for `alias`.
+
+### add(other)
+Arithmetic addition with another column or value.
+
+### sub(other)
+Arithmetic subtraction with another column or value.
+
+### mul(other)
+Arithmetic multiplication with another column or value.
+
+### div(other)
+Arithmetic division with another column or value.
+
+### eq(other)
+Equality comparison, producing a boolean column.
+
+### ne(other)
+Inequality comparison, producing a boolean column.
+
+### lt(other)
+Less-than comparison, producing a boolean column.
+
+### le(other)
+Less-than-or-equal comparison, producing a boolean column.
+
+### gt(other)
+Greater-than comparison, producing a boolean column.
+
+### ge(other)
+Greater-than-or-equal comparison, producing a boolean column.
+
+### and(other)
+Logical AND of two boolean columns.
+
+### or(other)
+Logical OR of two boolean columns.
+
+### not()
+Logical negation of a boolean column.
+
+### isNull()
+True where the column value is null.
+
+### isNotNull()
+True where the column value is not null.
+
+### like(pattern)
+SQL `LIKE` match against a string pattern.
+
+### between(low, high)
+True where the value lies in the inclusive range `[low, high]`.
+
+### isin(...values)
+True where the value is one of the given values.
+
+### cast(targetType)
+Cast the column to another data type.

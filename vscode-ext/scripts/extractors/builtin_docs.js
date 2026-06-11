@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from 'node:fs';
 
-const BUILTIN_HEADING = /^##\s+([A-Za-z_][A-Za-z0-9_]*)(?:\(([^)]*)\))?\s*$/;
+const BUILTIN_HEADING = /^##\s+([A-Za-z_][A-Za-z0-9_]*)(?:\(([^)]*)\))?(?:\s*\{([A-Za-z_][A-Za-z0-9_]*)\})?\s*$/;
 const METHOD_HEADING = /^###\s+([A-Za-z_][A-Za-z0-9_]*)(?:\(([^)]*)\))?\s*$/;
 const KIND_TEMPLATE_HEADING = /^##\s+@kind\/([A-Za-z_][A-Za-z0-9_]*)\s*$/;
 const PSEUDO_TYPE_HEADING = /^##\s+\$([A-Za-z_][A-Za-z0-9_]*)\s*$/;
@@ -34,6 +34,7 @@ export function extractBuiltinDocs(docPath) {
     if (current.kind === 'builtin') {
       builtins.set(current.name, {
         name: current.name,
+        kind: current.builtinKind ?? null,
         params: current.params,
         description: current.headerDesc ?? description,
         methods: current.methods,
@@ -66,6 +67,7 @@ export function extractBuiltinDocs(docPath) {
       current = {
         kind: 'builtin',
         name: builtinMatch[1],
+        builtinKind: builtinMatch[3] ?? null,
         params: builtinMatch[2] === undefined ? null : parseParams(builtinMatch[2]),
         methods: [],
         headerDesc: null,

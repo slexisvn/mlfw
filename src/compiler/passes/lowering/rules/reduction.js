@@ -85,6 +85,7 @@ export function register() {
       const inBuf = inputs[0];
       const outBuf = outputs[0];
       const axis = op.getAttr('axis');
+      const keepDims = op.getAttr('keep_dims') || false;
       const dimSet = new Set([axis]);
       const spatialDims = [];
       const reduceDim = axis;
@@ -92,12 +93,20 @@ export function register() {
         if (!dimSet.has(i)) spatialDims.push(i);
       }
 
+      const outIndicesFor = (nest) => {
+        if (!keepDims) return nest.indices;
+        const idx = new Array(inBuf.shape.length);
+        for (let i = 0; i < spatialDims.length; i++) idx[spatialDims[i]] = nest.indices[i];
+        idx[reduceDim] = new IntImmNode(0);
+        return idx;
+      };
+
       const bestValBuf = new Buffer('_argval_' + ctx.varCounter, spatialDims.map(d => inBuf.shape[d]), inBuf.dtype, 'global');
       ctx.varCounter++;
 
       const initNest = buildSpatialNest(ctx, 'ai', spatialDims, inBuf.shape, inBuf);
       const initValStore = new BufferStoreNode(bestValBuf, initNest.indices, new FloatImmNode(compareFn === 'gt' ? -Infinity : Infinity));
-      const initIdxStore = new BufferStoreNode(outBuf, initNest.indices, new IntImmNode(0));
+      const initIdxStore = new BufferStoreNode(outBuf, outIndicesFor(initNest), new IntImmNode(0));
       const initBlock = new BlockNode(ctx.blockName('arg_init'), initNest.ivs, [], [{ buffer: bestValBuf }, { buffer: outBuf }], new SeqNode([initValStore, initIdxStore]));
       const initBody = spatialDims.length > 0 ? initNest.wrap(initBlock) : initBlock;
 
@@ -112,9 +121,10 @@ export function register() {
       const loadBest = new BufferLoadNode(bestValBuf, accNest.indices);
       const isBetter = new CompareNode(compareFn, loadVal, loadBest);
       const newBest = new IfThenElseNode(isBetter, loadVal, loadBest);
-      const loadIdx = new BufferLoadNode(outBuf, accNest.indices);
+      const outAccIndices = outIndicesFor(accNest);
+      const loadIdx = new BufferLoadNode(outBuf, outAccIndices);
       const newIdx = new IfThenElseNode(isBetter, rBind[0].iterVar, loadIdx);
-      const storeIdx = new BufferStoreNode(outBuf, accNest.indices, newIdx);
+      const storeIdx = new BufferStoreNode(outBuf, outAccIndices, newIdx);
       const storeVal = new BufferStoreNode(bestValBuf, accNest.indices, newBest);
       const accBlock = new BlockNode(ctx.blockName('arg_acc'), concatIterVars(accNest.ivs, rBind),
         [{ buffer: inBuf }, { buffer: bestValBuf }], [{ buffer: bestValBuf }, { buffer: outBuf }],

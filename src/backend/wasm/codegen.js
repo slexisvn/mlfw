@@ -148,8 +148,54 @@ export class WasmCodegen {
       bufferOffsets: new Map(this._bufferOffsets),
       imports: this._imports,
       params: paramNames,
-      parallel: this._hasParallel ? { extent: this._parallelExtent, outputIndices: this._findOutputIndices(func) } : null,
+      parallel: this._hasParallel
+        ? { extent: this._parallelExtent, outputIndices: this._findOutputIndices(func), poolSafe: this._isParallelSafe(func) }
+        : null,
     };
+  }
+
+  _isParallelSafe(func) {
+    const parallels = [];
+    const findStack = [func.body];
+    while (findStack.length > 0) {
+      const node = findStack.pop();
+      if (!node) continue;
+      if (node.type === 'ForNode' && node.kind === ForKind.PARALLEL) parallels.push(node);
+      if (node.body) findStack.push(node.body);
+      if (node.stmts) for (const s of node.stmts) findStack.push(s);
+      if (node.thenBody) findStack.push(node.thenBody);
+      if (node.elseBody) findStack.push(node.elseBody);
+      if (node.loopBody) findStack.push(node.loopBody);
+    }
+    if (parallels.length !== 1) return false;
+    const parallelNode = parallels[0];
+
+    const topStmts = func.body && func.body.stmts ? func.body.stmts : [func.body];
+    if (!topStmts.includes(parallelNode)) return false;
+
+    const collectStores = (root, into) => {
+      const stack = [root];
+      while (stack.length > 0) {
+        const node = stack.pop();
+        if (!node) continue;
+        if (node.type === 'BufferStoreNode' || node.type === 'LIRFlatStoreNode') into.add(node);
+        if (node.type === 'LIRAccumulatorNode' && node.flushStore) into.add(node.flushStore);
+        if (node.body) stack.push(node.body);
+        if (node.stmts) for (const s of node.stmts) stack.push(s);
+        if (node.thenBody) stack.push(node.thenBody);
+        if (node.elseBody) stack.push(node.elseBody);
+        if (node.loopBody) stack.push(node.loopBody);
+      }
+    };
+
+    const allStores = new Set();
+    const innerStores = new Set();
+    collectStores(func.body, allStores);
+    collectStores(parallelNode.body, innerStores);
+    for (const st of allStores) {
+      if (!innerStores.has(st)) return false;
+    }
+    return true;
   }
 
   _ensureLocal(name, type) {
@@ -490,6 +536,56 @@ export class WasmCodegen {
     this._visitNode(node.body);
   }
 
+  _vecAccumOperandsUnitStride(node) {
+    const vecVar = node.loopVar && node.loopVar.name;
+    if (!vecVar) return false;
+    const usesVar = (expr) => {
+      const st = [expr];
+      while (st.length > 0) {
+        const m = st.pop();
+        if (!m || typeof m !== 'object') continue;
+        if (m.type === 'VariableNode' && m.name === vecVar) return true;
+        if (m.a) st.push(m.a);
+        if (m.b) st.push(m.b);
+        if (m.expr) st.push(m.expr);
+        if (m.args) for (const x of m.args) st.push(x);
+        if (m.indices) for (const x of m.indices) st.push(x);
+        if (m.offsetExpr) st.push(m.offsetExpr);
+      }
+      return false;
+    };
+    const stridedMul = (expr) => {
+      const st = [expr];
+      while (st.length > 0) {
+        const m = st.pop();
+        if (!m || typeof m !== 'object') continue;
+        if (m.type === 'MathOpNode' && m.op === '*' && (usesVar(m.a) || usesVar(m.b))) return true;
+        if (m.a) st.push(m.a);
+        if (m.b) st.push(m.b);
+        if (m.expr) st.push(m.expr);
+        if (m.args) for (const x of m.args) st.push(x);
+      }
+      return false;
+    };
+    const stack = [node.body];
+    while (stack.length > 0) {
+      const n = stack.pop();
+      if (!n || typeof n !== 'object') continue;
+      if (n.type === 'BufferLoadNode' && Array.isArray(n.indices)) {
+        for (let i = 0; i < n.indices.length - 1; i++) {
+          if (usesVar(n.indices[i])) return false;
+        }
+      }
+      if (n.type === 'LIRFlatLoadNode' && n.offsetExpr && stridedMul(n.offsetExpr)) return false;
+      if (n.a) stack.push(n.a);
+      if (n.b) stack.push(n.b);
+      if (n.expr) stack.push(n.expr);
+      if (n.args) for (const x of n.args) stack.push(x);
+      if (n.body) stack.push(n.body);
+    }
+    return true;
+  }
+
   _visitLIRAccumulator(node) {
     const accLocal = node.localName;
     const dtype = node.dtype;
@@ -500,7 +596,7 @@ export class WasmCodegen {
       && this.target.supportsSimd() ? wasmSimdEntry(dtype) : null;
     const lanes = simdEntry ? this.target.vectorWidth : 0;
 
-    if (simdEntry && extent >= lanes) {
+    if (simdEntry && extent >= lanes && this._vecAccumOperandsUnitStride(node)) {
       this._visitVecAccumulator(node, simdEntry, lanes, extent);
       return;
     }
@@ -1311,6 +1407,92 @@ export class WasmCodegen {
     return laneVars;
   }
 
+  _vecLoadsContiguous(root, laneVars) {
+    const usesLane = (expr) => {
+      const st = [expr];
+      while (st.length > 0) {
+        const m = st.pop();
+        if (!m || typeof m !== 'object') continue;
+        if (m.type === 'VariableNode' && laneVars.has(m.name)) return true;
+        if (m.a) st.push(m.a);
+        if (m.b) st.push(m.b);
+        if (m.expr) st.push(m.expr);
+        if (m.args) for (const x of m.args) st.push(x);
+        if (m.indices) for (const x of m.indices) st.push(x);
+        if (m.offsetExpr) st.push(m.offsetExpr);
+      }
+      return false;
+    };
+    const stridedMul = (expr) => {
+      const st = [expr];
+      while (st.length > 0) {
+        const m = st.pop();
+        if (!m || typeof m !== 'object') continue;
+        if (m.type === 'MathOpNode' && m.op === '*' && (usesLane(m.a) || usesLane(m.b))) return true;
+        if (m.a) st.push(m.a);
+        if (m.b) st.push(m.b);
+        if (m.expr) st.push(m.expr);
+        if (m.args) for (const x of m.args) st.push(x);
+      }
+      return false;
+    };
+    const stack = [root];
+    while (stack.length > 0) {
+      const n = stack.pop();
+      if (!n || typeof n !== 'object') continue;
+      if (n.type === 'BufferLoadNode' && Array.isArray(n.indices)) {
+        for (let i = 0; i < n.indices.length - 1; i++) {
+          if (usesLane(n.indices[i])) return false;
+        }
+      }
+      if (n.type === 'LIRFlatLoadNode' && n.offsetExpr && stridedMul(n.offsetExpr)) return false;
+      if (n.a) stack.push(n.a);
+      if (n.b) stack.push(n.b);
+      if (n.expr) stack.push(n.expr);
+      if (n.args) for (const x of n.args) stack.push(x);
+      if (n.value && typeof n.value === 'object') stack.push(n.value);
+      if (n.body) stack.push(n.body);
+      if (n.stmts) for (const s of n.stmts) stack.push(s);
+      if (n.thenBody) stack.push(n.thenBody);
+      if (n.elseBody) stack.push(n.elseBody);
+      if (n.loopBody) stack.push(n.loopBody);
+    }
+    return true;
+  }
+
+  _vecStoresLaneIndexed(root, laneVars) {
+    const stack = [root];
+    while (stack.length > 0) {
+      const node = stack.pop();
+      if (!node) continue;
+      let addr = null;
+      if (node.type === 'BufferStoreNode') addr = node.indices;
+      else if (node.type === 'LIRFlatStoreNode') addr = node.offsetExpr;
+      if (addr !== null && addr !== undefined) {
+        const names = [];
+        const st = Array.isArray(addr) ? [...addr] : [addr];
+        while (st.length > 0) {
+          const m = st.pop();
+          if (!m || typeof m !== 'object') continue;
+          if (m.type === 'VariableNode') names.push(m.name);
+          if (m.a) st.push(m.a);
+          if (m.b) st.push(m.b);
+          if (m.expr) st.push(m.expr);
+          if (m.args) for (const x of m.args) st.push(x);
+          if (m.indices) for (const x of m.indices) st.push(x);
+          if (m.offsetExpr) st.push(m.offsetExpr);
+        }
+        if (!names.some((nm) => laneVars.has(nm))) return false;
+      }
+      if (node.body) stack.push(node.body);
+      if (node.stmts) for (const s of node.stmts) stack.push(s);
+      if (node.thenBody) stack.push(node.thenBody);
+      if (node.elseBody) stack.push(node.elseBody);
+      if (node.loopBody) stack.push(node.loopBody);
+    }
+    return true;
+  }
+
   _visitVectorizedFor(node) {
     const varName = node.loopVar.name;
     const extent = this._constExtent(node.extent);
@@ -1323,6 +1505,12 @@ export class WasmCodegen {
       return;
     }
 
+    const laneVars = this._computeLaneVars(node);
+    if (!this._vecStoresLaneIndexed(node.body, laneVars) || !this._vecLoadsContiguous(node.body, laneVars)) {
+      this._emitForLoop(varName, node.extent, node.body);
+      return;
+    }
+
     const mainExtent = Math.floor(extent / lanes) * lanes;
     const tailExtent = extent - mainExtent;
     const bytes = wasmBytes(dtype);
@@ -1331,7 +1519,7 @@ export class WasmCodegen {
     const addrLocal = useAddrCSE ? '_vaddr_' + varName : null;
 
     if (mainExtent > 0) {
-      this._vectorMode = { dtype, lanes, loopVar: varName, simd: simdEntry, addrLocal, laneVars: this._computeLaneVars(node) };
+      this._vectorMode = { dtype, lanes, loopVar: varName, simd: simdEntry, addrLocal, laneVars };
       if (mainExtent === lanes) {
         this._emit('(i32.const 0)');
         this._emit('local.set $' + varName);

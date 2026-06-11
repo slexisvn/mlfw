@@ -280,3 +280,72 @@ body {
   border-radius: 4px;
   padding: 0 5px;
 }
+
+@media (max-width: 768px) {
+  .toolbar {
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 10px 14px;
+  }
+  .actions { gap: 6px; }
+  .actions button { padding: 6px 10px; font-size: 12px; }
+  .cells {
+    margin: 16px auto 70px;
+    padding: 0 12px;
+    gap: 12px;
+  }
+}
+
+@media (max-width: 560px) {
+  body { font-size: 13px; }
+  .toolbar { padding: 8px 12px; }
+  .brand .logo { font-size: 16px; }
+  .brand .sub { font-size: 12px; }
+  .actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .actions button {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 7px 8px;
+    font-size: 12px;
+  }
+  .kernel {
+    flex-basis: 100%;
+    margin-left: 0;
+    text-align: center;
+  }
+  .cells {
+    margin: 12px auto 64px;
+    padding: 0 8px;
+    gap: 10px;
+  }
+  .cell {
+    grid-template-columns: 38px 1fr;
+    border-radius: 8px;
+  }
+  .gutter {
+    padding: 10px 0;
+    gap: 6px;
+  }
+  .gutter .run { width: 26px; height: 26px; font-size: 12px; }
+  .gutter .count { font-size: 10px; }
+  .editor, .highlight {
+    font-size: 12.5px;
+    padding: 10px 10px;
+  }
+  .output { padding: 9px 10px; font-size: 12px; }
+  .cell-tools { padding: 0 8px 7px; }
+  .autocomplete {
+    max-width: calc(100vw - 32px);
+    font-size: 12px;
+  }
+  .hover-doc { max-width: calc(100vw - 24px); }
+  .hint { font-size: 11px; padding: 6px; }
+}
+
+@media (hover: none) {
+  .gutter .run { width: 32px; height: 32px; }
+  .cell-tools button { padding: 4px 9px; }
+}

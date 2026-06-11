@@ -126,7 +126,7 @@
       "patterns": [
         {
           "name": "support.function.tera",
-          "match": "\\b(?:abs|add|cat|ceil|clone|cos|div|dot|eq|exp|floor|ge|gelu|gt|le|log|log_softmax|lt|matmul|maximum|minimum|mul|ne|neg|pow|relu|remainder|rsqrt|sigmoid|sign|silu|sin|softmax|sqrt|stack|sub|tanh|where)\\b"
+          "match": "\\b(?:abs|add|cat|ceil|clone|cos|div|dot|eq|exp|floor|ge|gelu|gt|le|log|log_softmax|lt|matmul|maximum|minimum|mul|ne|neg|pow|relu|remainder|rsqrt|sigmoid|sign|silu|sin|softmax|sqrt|stack|sub|tanh|where|name|col|lit|expr|avg|count|countStar)\\b"
         },
         {
           "name": "support.class.metric.tera",
@@ -178,7 +178,7 @@
         },
         {
           "name": "support.function.data.tera",
-          "match": "\\b(?:DataLoader|decode|encode|load_csv|normalize|TensorDataset|train_test_split)\\b"
+          "match": "\\b(?:DataLoader|decode|encode|load_csv|normalize|TensorDataset|train_test_split|dataframe)\\b"
         },
         {
           "name": "support.class.callback.tera",

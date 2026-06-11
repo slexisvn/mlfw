@@ -463,6 +463,610 @@
           "display": "load_state_dict(state)"
         }
       }
+    ],
+    "DataFrame": [
+      {
+        "name": "columns",
+        "description": "Return the column names as an array of strings.",
+        "signature": {
+          "params": [],
+          "display": "columns()"
+        }
+      },
+      {
+        "name": "schema",
+        "description": "Return the frame's schema (fields with names and data types).",
+        "signature": {
+          "params": [],
+          "display": "schema()"
+        }
+      },
+      {
+        "name": "explain",
+        "description": "Return the logical query plan as a human-readable string.",
+        "signature": {
+          "params": [],
+          "display": "explain()"
+        }
+      },
+      {
+        "name": "select",
+        "description": "Project a new frame from the given columns or `Column` expressions.",
+        "signature": {
+          "params": [
+            {
+              "name": "columns",
+              "optional": true,
+              "rest": true,
+              "defaultValue": null
+            }
+          ],
+          "display": "select(...columns)"
+        }
+      },
+      {
+        "name": "filter",
+        "description": "Keep only rows matching a boolean `Column` (or SQL string) condition.",
+        "signature": {
+          "params": [
+            {
+              "name": "condition",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "filter(condition)"
+        }
+      },
+      {
+        "name": "where",
+        "description": "Alias for `filter`.",
+        "signature": {
+          "params": [
+            {
+              "name": "condition",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "where(condition)"
+        }
+      },
+      {
+        "name": "withColumn",
+        "description": "Return a new frame with an added or replaced column computed from `column`.",
+        "signature": {
+          "params": [
+            {
+              "name": "name",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            },
+            {
+              "name": "column",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "withColumn(name, column)"
+        }
+      },
+      {
+        "name": "drop",
+        "description": "Return a new frame without the named columns.",
+        "signature": {
+          "params": [
+            {
+              "name": "columns",
+              "optional": true,
+              "rest": true,
+              "defaultValue": null
+            }
+          ],
+          "display": "drop(...columns)"
+        }
+      },
+      {
+        "name": "groupBy",
+        "description": "Group rows by the given columns, returning a `GroupedData` for aggregation.",
+        "signature": {
+          "params": [
+            {
+              "name": "columns",
+              "optional": true,
+              "rest": true,
+              "defaultValue": null
+            }
+          ],
+          "display": "groupBy(...columns)"
+        }
+      },
+      {
+        "name": "orderBy",
+        "description": "Sort rows. Each spec is a column name/`Column`, or `{ col, desc }` for ordering.",
+        "signature": {
+          "params": [
+            {
+              "name": "specs",
+              "optional": true,
+              "rest": true,
+              "defaultValue": null
+            }
+          ],
+          "display": "orderBy(...specs)"
+        }
+      },
+      {
+        "name": "sort",
+        "description": "Alias for `orderBy`.",
+        "signature": {
+          "params": [
+            {
+              "name": "specs",
+              "optional": true,
+              "rest": true,
+              "defaultValue": null
+            }
+          ],
+          "display": "sort(...specs)"
+        }
+      },
+      {
+        "name": "limit",
+        "description": "Return at most `count` rows, skipping the first `offset` rows.",
+        "signature": {
+          "params": [
+            {
+              "name": "count",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            },
+            {
+              "name": "offset",
+              "optional": true,
+              "rest": false,
+              "defaultValue": "0"
+            }
+          ],
+          "display": "limit(count, offset=0)"
+        }
+      },
+      {
+        "name": "distinct",
+        "description": "Return a frame with duplicate rows removed.",
+        "signature": {
+          "params": [],
+          "display": "distinct()"
+        }
+      },
+      {
+        "name": "union",
+        "description": "Concatenate the rows of another frame with matching column types.",
+        "signature": {
+          "params": [
+            {
+              "name": "other",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "union(other)"
+        }
+      },
+      {
+        "name": "unionAll",
+        "description": "Concatenate rows of another frame, keeping duplicates.",
+        "signature": {
+          "params": [
+            {
+              "name": "other",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "unionAll(other)"
+        }
+      },
+      {
+        "name": "join",
+        "description": "Join with another frame on one or more key columns. `how` is one of\n`INNER`, `LEFT`, `RIGHT`, or `FULL`.",
+        "signature": {
+          "params": [
+            {
+              "name": "other",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            },
+            {
+              "name": "on",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            },
+            {
+              "name": "how",
+              "optional": true,
+              "rest": false,
+              "defaultValue": "\"INNER\""
+            }
+          ],
+          "display": "join(other, on, how=\"INNER\")"
+        }
+      },
+      {
+        "name": "collect",
+        "description": "Execute the plan and return all rows as an array of objects.",
+        "signature": {
+          "params": [],
+          "display": "collect()"
+        }
+      },
+      {
+        "name": "toArray",
+        "description": "Alias for `collect`.",
+        "signature": {
+          "params": [],
+          "display": "toArray()"
+        }
+      },
+      {
+        "name": "count",
+        "description": "Execute the plan and return the number of rows.",
+        "signature": {
+          "params": [],
+          "display": "count()"
+        }
+      },
+      {
+        "name": "show",
+        "description": "Execute and print the first `n` rows as a formatted table; returns the text.",
+        "signature": {
+          "params": [
+            {
+              "name": "n",
+              "optional": true,
+              "rest": false,
+              "defaultValue": "20"
+            }
+          ],
+          "display": "show(n=20)"
+        }
+      },
+      {
+        "name": "chunks",
+        "description": "Execute and stream results as an async iterator of data chunks.",
+        "signature": {
+          "params": [],
+          "display": "chunks()"
+        }
+      }
+    ],
+    "GroupedData": [
+      {
+        "name": "agg",
+        "description": "Apply aggregate `Column` expressions (e.g. `sum`, `avg`, `count`) over each\ngroup, returning a `DataFrame` of group keys and aggregates.",
+        "signature": {
+          "params": [
+            {
+              "name": "columns",
+              "optional": true,
+              "rest": true,
+              "defaultValue": null
+            }
+          ],
+          "display": "agg(...columns)"
+        }
+      }
+    ],
+    "Column": [
+      {
+        "name": "alias",
+        "description": "Rename the column's output to `name`.",
+        "signature": {
+          "params": [
+            {
+              "name": "name",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "alias(name)"
+        }
+      },
+      {
+        "name": "as",
+        "description": "Alias for `alias`.",
+        "signature": {
+          "params": [
+            {
+              "name": "name",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "as(name)"
+        }
+      },
+      {
+        "name": "add",
+        "description": "Arithmetic addition with another column or value.",
+        "signature": {
+          "params": [
+            {
+              "name": "other",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "add(other)"
+        }
+      },
+      {
+        "name": "sub",
+        "description": "Arithmetic subtraction with another column or value.",
+        "signature": {
+          "params": [
+            {
+              "name": "other",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "sub(other)"
+        }
+      },
+      {
+        "name": "mul",
+        "description": "Arithmetic multiplication with another column or value.",
+        "signature": {
+          "params": [
+            {
+              "name": "other",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "mul(other)"
+        }
+      },
+      {
+        "name": "div",
+        "description": "Arithmetic division with another column or value.",
+        "signature": {
+          "params": [
+            {
+              "name": "other",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "div(other)"
+        }
+      },
+      {
+        "name": "eq",
+        "description": "Equality comparison, producing a boolean column.",
+        "signature": {
+          "params": [
+            {
+              "name": "other",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "eq(other)"
+        }
+      },
+      {
+        "name": "ne",
+        "description": "Inequality comparison, producing a boolean column.",
+        "signature": {
+          "params": [
+            {
+              "name": "other",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "ne(other)"
+        }
+      },
+      {
+        "name": "lt",
+        "description": "Less-than comparison, producing a boolean column.",
+        "signature": {
+          "params": [
+            {
+              "name": "other",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "lt(other)"
+        }
+      },
+      {
+        "name": "le",
+        "description": "Less-than-or-equal comparison, producing a boolean column.",
+        "signature": {
+          "params": [
+            {
+              "name": "other",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "le(other)"
+        }
+      },
+      {
+        "name": "gt",
+        "description": "Greater-than comparison, producing a boolean column.",
+        "signature": {
+          "params": [
+            {
+              "name": "other",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "gt(other)"
+        }
+      },
+      {
+        "name": "ge",
+        "description": "Greater-than-or-equal comparison, producing a boolean column.",
+        "signature": {
+          "params": [
+            {
+              "name": "other",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "ge(other)"
+        }
+      },
+      {
+        "name": "and",
+        "description": "Logical AND of two boolean columns.",
+        "signature": {
+          "params": [
+            {
+              "name": "other",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "and(other)"
+        }
+      },
+      {
+        "name": "or",
+        "description": "Logical OR of two boolean columns.",
+        "signature": {
+          "params": [
+            {
+              "name": "other",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "or(other)"
+        }
+      },
+      {
+        "name": "not",
+        "description": "Logical negation of a boolean column.",
+        "signature": {
+          "params": [],
+          "display": "not()"
+        }
+      },
+      {
+        "name": "isNull",
+        "description": "True where the column value is null.",
+        "signature": {
+          "params": [],
+          "display": "isNull()"
+        }
+      },
+      {
+        "name": "isNotNull",
+        "description": "True where the column value is not null.",
+        "signature": {
+          "params": [],
+          "display": "isNotNull()"
+        }
+      },
+      {
+        "name": "like",
+        "description": "SQL `LIKE` match against a string pattern.",
+        "signature": {
+          "params": [
+            {
+              "name": "pattern",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "like(pattern)"
+        }
+      },
+      {
+        "name": "between",
+        "description": "True where the value lies in the inclusive range `[low, high]`.",
+        "signature": {
+          "params": [
+            {
+              "name": "low",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            },
+            {
+              "name": "high",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "between(low, high)"
+        }
+      },
+      {
+        "name": "isin",
+        "description": "True where the value is one of the given values.",
+        "signature": {
+          "params": [
+            {
+              "name": "values",
+              "optional": true,
+              "rest": true,
+              "defaultValue": null
+            }
+          ],
+          "display": "isin(...values)"
+        }
+      },
+      {
+        "name": "cast",
+        "description": "Cast the column to another data type.",
+        "signature": {
+          "params": [
+            {
+              "name": "targetType",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "cast(targetType)"
+        }
+      }
     ]
   },
   "builtins": [
@@ -5987,6 +6591,133 @@
           }
         ],
         "display": "zerosLike(tensor)"
+      },
+      "methods": []
+    },
+    {
+      "name": "name",
+      "kind": "function",
+      "description": "Description.\n```\n\n---",
+      "returns": "Tensor",
+      "signature": null,
+      "methods": []
+    },
+    {
+      "name": "dataframe",
+      "kind": "data",
+      "description": "Build a lazy `DataFrame` from named column arrays, one named argument per\ncolumn: `dataframe(name=[\"a\", \"b\"], age=[30, 40])`. Column types are inferred\nfrom the values. The frame records a query plan and is only executed when\nmaterialized with `collect`, `toArray`, `count`, `show`, or `chunks`.",
+      "returns": "DataFrame",
+      "signature": {
+        "params": [
+          {
+            "name": "columns",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "dataframe(columns)"
+      },
+      "methods": []
+    },
+    {
+      "name": "col",
+      "kind": "function",
+      "description": "Reference a column by name in a `DataFrame` expression, returning a `Column`\nthat can be transformed and compared. Use a dotted name (`\"t.id\"`) to qualify a\ntable alias.",
+      "returns": "Column",
+      "signature": {
+        "params": [
+          {
+            "name": "column",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "col(column)"
+      },
+      "methods": []
+    },
+    {
+      "name": "lit",
+      "kind": "function",
+      "description": "Wrap a constant value as a `Column` literal so it can be combined with other\ncolumns in expressions.",
+      "returns": "Column",
+      "signature": {
+        "params": [
+          {
+            "name": "value",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "lit(value)"
+      },
+      "methods": []
+    },
+    {
+      "name": "expr",
+      "kind": "function",
+      "description": "Parse a scalar SQL string into a `Column`, e.g. `expr(\"price * 1.1\")`. Bound\nagainst the frame's schema at build time.",
+      "returns": "Column",
+      "signature": {
+        "params": [
+          {
+            "name": "sql",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "expr(sql)"
+      },
+      "methods": []
+    },
+    {
+      "name": "avg",
+      "kind": "function",
+      "description": "Aggregate `Column` computing the mean of a column within a `groupBy(...).agg(...)`.",
+      "returns": "Column",
+      "signature": {
+        "params": [
+          {
+            "name": "column",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "avg(column)"
+      },
+      "methods": []
+    },
+    {
+      "name": "count",
+      "kind": "function",
+      "description": "Aggregate `Column` counting non-null values of a column within `agg(...)`.",
+      "returns": "Column",
+      "signature": {
+        "params": [
+          {
+            "name": "column",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "count(column)"
+      },
+      "methods": []
+    },
+    {
+      "name": "countStar",
+      "kind": "function",
+      "description": "Aggregate `Column` counting all rows (`COUNT(*)`) within `agg(...)`.",
+      "returns": "Column",
+      "signature": {
+        "params": [],
+        "display": "countStar()"
       },
       "methods": []
     }

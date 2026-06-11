@@ -335,7 +335,7 @@ export class RuntimeModule {
       shapeValues = RuntimeModule._extractShapeParams(shapeParamMap, tensorShapes, args, bufferMap);
     }
 
-    if (this._wasmParallel && this._wasmParallel.has(name)) {
+    if (this._wasmParallel && this._wasmParallel.has(name) && this._wasmParallel.get(name).poolSafe) {
       const wasmInst = this._wasmInstances.get(name);
       const parallel = this._wasmParallel.get(name);
       const kernel = this.kernels.get(name);
@@ -357,7 +357,7 @@ export class RuntimeModule {
 
   isAsync(name) {
     return !!(this._webgpuKernels && this._webgpuKernels.has(name))
-      || !!(this._wasmParallel && this._wasmParallel.has(name));
+      || !!(this._wasmParallel && this._wasmParallel.has(name) && this._wasmParallel.get(name).poolSafe);
   }
 
   static _extractShapeParams(shapeParamMap, tensorShapes, args, bufferMap) {

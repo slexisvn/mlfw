@@ -334,11 +334,89 @@
 > **metamorphic** (pass phải bảo toàn ngữ nghĩa), **round-trip**, **invariant/verifier**,
 > **property-based**. Mỗi mục dưới ghi rõ oracle dùng.
 
+### TIẾN ĐỘ FUZZ CATALOG (2026-06-11, đợt B→O) — tới mục O thì dừng
+> Quét tầng A→O bằng fuzz để SĂN BUG (fuzz = throwaway scratch, KHÔNG commit). Đa số tầng SẠCH
+> (đã test kỹ từ trước); chỉ tầng K ra bug thật (3 bug WASM scheduling).
+> **Test commit = UNIT TEST cụ thể pin từng fix**, đặt vào file test có sẵn cùng tầng — KHÔNG commit
+> file fuzz random. Cụ thể:
+> - Bug tầng A (argmax/argmin): unit test trong `tests/e2e/differential-nn.test.js` (oracle độc lập, bảng dim×keepdim).
+> - Bug tầng K (3 bug WASM scheduling): unit test trong `tests/backend/wasm/wasm-parallel.test.js`
+>   (reduce axis-0 sync+async + max-reduce + matmul [64,8]@[8,16] sync+async, oracle tính tay). Revert guard
+>   `_vecAccumOperandsUnitStride` → matmul RED.
+> - Các tầng B,C,D,E,F,G,H,I,J,L,M,N,O: fuzz quét SẠCH, KHÔNG commit test (không có bug để pin; vùng đã có
+>   test sẵn). Helper `graph_eval.js` đã xóa (chỉ dùng cho fuzz scratch).
+> Tóm tắt fuzz đã quét (oracle dùng):
+> - **A** ✓ (2 bug argmax/argmin neg-dim + keepdim — xem đợt 13 ở trên).
+> (oracle ghi để lần sau quét lại; file fuzz random đã xóa — fuzz chỉ để săn bug, không commit)
+> - **B** AD: backward-graph verifier invariant + remat metamorphic (remat on/off → cùng grad) + VJP softmax/matmul
+>   vs numerical. SẠCH. (double-backward = feature chưa có `createGraph`, KHÔNG phải bug.)
+> - **C** simplify: metamorphic eval-equality (cse/dce/constant_fold/algebraic on/off == nhau) + verifier-after-pass. SẠCH.
+> - **D** fusion: metamorphic across strategy off/xla/dominator/epilogue vs eager. SẠCH.
+> - **E** decompose/canon: canonicalize idempotent (run 2×==1×) + decomposition composite-op==eager. SẠCH.
+> - **F** lowering: TensorIR verifier + LIR verifier invariant trên random graph. SẠCH.
+> - **G** layout: layout-opt on/off numerically invariant (conv/pool). SẠCH.
+> - **H** memory: inplace/remat/alignment on/off invariant. SẠCH.
+> - **I** partition: mọi op assigned + partitioned-compile==eager. SẠCH.
+> - **J** quant: quant/dequant round-trip error ≤ scale/2 + monotonic. SẠCH.
+> - **K** schedule: scheduling on/off vs eager → ra 3 BUG WASM (xem đợt 14 dưới). Fix xong + unit test
+>   `tests/backend/wasm/wasm-parallel.test.js`.
+> - **L** analysis: use_def topo + opUsers vs brute-force, dominance postDom vs idom-chain, shape/dtype-infer==eager. SẠCH.
+> - **M** autotune: workload_key deterministic + target-sensitive, tuning_db serialize round-trip, autotuned-compile==eager. SẠCH.
+> - **N** backend codegen: SIMD vs scalar metamorphic (WASM simd on/off) + dtype marshalling round-trip
+>   (f32/f64/i32/i16/i8/ui8/f16/bf16 cpu+wasm). SẠCH.
+> - **O** runtime/pipeline: opt-level differential O0/O1/O2 == eager (cpu+wasm). SẠCH.
+> → Đã quét tới hết O. Tổng: 1 batch bug tầng K (3 fix WASM scheduling), các tầng khác đã vững từ trước.
+
+### Bug đã fix đợt 14 (2026-06-11) — tầng K (schedule) trên WASM: 3 bug (fuzz scheduling on/off vs eager)
+> Fuzz `scheduling:{enabled:true}` vs eager (300 prog × cpu+wasm). CPU LUÔN đúng; WASM ra 39/300 sai → 3 bug độc lập
+> trong đường SIMD/parallel scheduling (off-by-default, experimental). Fix xong còn 2/300 (limitation ghi dưới).
+> Unit test pin fix: `tests/backend/wasm/wasm-parallel.test.js` (reduce axis-0 sync+async, max-reduce, matmul sync+async, oracle tính tay). Full regression pass.
+- **BUG 1 — worker-pool partition sai cho reduction/matmul** (`io/node/wasm_pool.js` + `backend/wasm/codegen.js` +
+  `runtime.js`): pool chia MỌI buffer theo `bufLen/extent` contiguous, giả định mọi buffer partition đều theo parallel
+  loop. Sai khi input đọc strided (reduce axis≠cuối: input cột stride; matmul: B đọc full). Fix: (a) codegen thêm
+  `poolSafe` = mọi store nằm TRONG parallel loop + đúng 1 parallel loop top-level (loại reduce/matmul có init/reshape
+  ngoài loop); (b) runtime `isAsync`/`runAsync` chỉ dùng pool khi `poolSafe`, còn lại chạy SYNC full-extent (đã đúng);
+  (c) pool gửi MỌI buffer FULL tại base offset (kernel địa chỉ tuyệt đối) + stitch chỉ partition-range của output.
+- **BUG 2 — `_visitVectorizedFor` vectorize loop reduction (store độc lập vec-var) sai** (`backend/wasm/codegen.js`):
+  schedule vectorize loop có store ghi cùng 1 ô mọi lane (reduction/broadcast-write) → SIMD lane-parallel sai. Fix:
+  guard `_vecStoresLaneIndexed` + `_vecLoadsContiguous` (store/load phải index theo lane var ở vị trí cuối) → nếu không,
+  scalarize (`_emitForLoop`, luôn đúng).
+- **BUG 3 — `_visitVecAccumulator` strided operand sai** (`backend/wasm/codegen.js`): matmul contraction vectorized,
+  operand `buf_B[k, j]` (k=vec var ở index KHÔNG cuối) → vec-load contiguous SAI (cần gather). Fix: guard
+  `_vecAccumOperandsUnitStride` — chỉ đi SIMD-accumulator khi mọi load unit-stride theo vec var; còn lại scalar
+  accumulator (đúng).
+- **LIMITATION còn lại (2/300, KHÔNG fix — ghi rõ):** fused matmul-sau-vectorized-elementwise/reduce với extent
+  KHÔNG chia hết vector-width (vd extent 5) trên WASM SIMD: intermediate SIMD-partial-vector + consumer matmul lệch
+  ~1-10%. SIMD-off đúng. Đây là edge sâu của partial-vector intermediate layout, trong feature off-by-default. CPU
+  luôn đúng. Test section K scope vào reduce/elementwise-all-axes + standalone-matmul (đều pass); ghi nhận edge này.
+
 ### A. Frontend — tracing / dispatcher / IR builder
-- [ ] Round-trip IR: build graph → print → parse → print, hai bản print phải bằng nhau (`ir/graph/printer.js`).
-- [ ] Tracing vs eager: mọi op trace ra IR rồi eval phải == eager (đang có, mở rộng op set).
-- [ ] `_BUILDER_METHOD_MAP` / `_SCALAR_ARG_SPEC`: fuzz đủ scalar-arg (dim âm, keepdim, multi-dim) cho mọi op map.
-- [ ] Invariant: verifier (`ir/graph/verifier.js`) phải PASS sau khi build mọi graph hợp lệ — không dangling operand, SSA đúng, dtype/shape khớp.
+- [~] Round-trip IR: build graph → print → parse → print — CHƯA có IR parser trong repo (chỉ có printer). Đã verify
+  print-determinism (printModule 2 lần == nhau). Round-trip thật cần build parser mới → để lại (ngoài bug-hunt).
+- [x] Tracing vs eager: mở rộng op-set qua block "section A" trong `fuzz-differential.test.js` (400 prog scalar-arg
+  ops: reduce/argreduce/transpose/softmax, neg-dim+keepdim+multi-dim, cpu+wasm).
+- [x] `_BUILDER_METHOD_MAP` / `_SCALAR_ARG_SPEC`: fuzz scalar-arg (dim âm, keepdim, multi-dim) — QUÉT XONG, ra 2 BUG argmax/argmin (dưới).
+- [x] Invariant: verifier PASS sau khi trace mọi graph hợp lệ — section-A fuzzer chạy `verifyModule` trên mọi prog trace (sạch).
+
+### Bug đã fix đợt 13 (2026-06-11) — fuzz section A (frontend scalar-arg): argmax/argmin neg-dim + keepdim
+> Fuzz `_SCALAR_ARG_SPEC` scalar-arg space (dim âm/keepdim/multi-dim). Differential eager-vs-compiled + verifier
+> invariant + INDEPENDENT oracle (vì eager cũng sai ở keepdim → differential bỏ sót).
+- **BUG 1 — argmax/argmin dim ÂM không reduce (sai SHAPE):** `builder.argmax/argmin` (`ir/graph/builder.js`)
+  KHÔNG normalize axis âm trước khi build (khác convention các method khanh — softmax/concat ở dòng 353/358/392
+  đã normalize). `inferArgReduceTypes` (`ops/reduction.js`) so `i === axis` với axis=-1 → không khớp dim nào →
+  KHÔNG giảm rank → ra tensor cùng rank input (vd `argmax([2,2,3],-1)` ra `[2,2,3]i32` thay vì `[2,2]`). Eager
+  ĐÚNG (oracle) → differential bắt qua shape mismatch. Fix: `const dim = axis<0 ? input.type.rank+axis : axis;`
+  trong cả argmax + argmin.
+- **BUG 2 — argmax/argmin keepdim GHI SAI Ô (sai VALUE), cả eager+cpu+wasm:** lowering `registerArgReduce`
+  (`passes/lowering/rules/reduction.js`) index `outBuf` bằng `accNest.indices` = CHỈ spatial-dims, nhưng khi
+  keepdim outBuf có rank = input rank (chèn 1 ở reduceDim) → thiếu 1 index → offset lệch khi reduceDim KHÔNG phải
+  trailing dim (2D dim-cuối "may" đúng vì dim size-1 ở cuối → test cũ `argmax_keepdim` bỏ sót). Fix: helper
+  `outIndicesFor(nest)` — khi keepDims chèn `IntImmNode(0)` ở vị trí reduceDim, spatial ivs ở các vị trí còn lại;
+  non-keepdim giữ nguyên. Áp cho cả init-store + acc load/store.
+- Test: `differential-nn.test.js` block "argmax/argmin: negative dim + keepdim vs independent oracle" (eager+cpu+
+  wasm vs `refArg` thuần JS, 4 shape × mọi dim±× keepdim) + `fuzz-differential.test.js` block "frontend (section A)".
+  Revert builder fix → 48 RED + section-A SHAPE RED; revert lowering fix → 60 RED (keepdim). Full
+  e2e+compiler+tensor+nn+dispatcher+lightning+autograd+backend **3375 pass** (trừ 2 = webgpu GPU segfault, blocker sẵn).
 
 ### B. AD — autodiff (`compiler/ad`, `ad/vjp_rules/*`)
 - [ ] VJP từng op vs numerical gradient (finite-diff) cho mọi op có rule: arithmetic/unary/reduction/linalg/shape/composite.

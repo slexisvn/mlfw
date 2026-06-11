@@ -721,3 +721,74 @@ describe('dynamic shapes: compile once, run on multiple concrete shapes', () => 
     });
   }
 });
+
+describe('argmax/argmin: negative dim + keepdim vs independent oracle (eager+cpu+wasm)', () => {
+  function refArg(arr, shape, dim, keep, kind) {
+    const rank = shape.length;
+    const d = dim < 0 ? rank + dim : dim;
+    const strides = new Array(rank); let st = 1;
+    for (let i = rank - 1; i >= 0; i--) { strides[i] = st; st *= shape[i]; }
+    const outShape = [];
+    for (let i = 0; i < rank; i++) { if (i === d) { if (keep) outShape.push(1); } else outShape.push(shape[i]); }
+    const oStride = new Array(outShape.length); let s2 = 1;
+    for (let i = outShape.length - 1; i >= 0; i--) { oStride[i] = s2; s2 *= outShape[i]; }
+    const spatial = []; for (let i = 0; i < rank; i++) if (i !== d) spatial.push(i);
+    const out = new Array(Math.max(s2, 1)).fill(0);
+    const coord = new Array(rank).fill(0);
+    const rec = (pos) => {
+      if (pos === spatial.length) {
+        let best = null, bi = 0;
+        for (let k = 0; k < shape[d]; k++) {
+          coord[d] = k; let off = 0; for (let i = 0; i < rank; i++) off += coord[i] * strides[i];
+          const v = arr[off];
+          if (best === null || (kind === 'max' ? v > best : v < best)) { best = v; bi = k; }
+        }
+        const oc = []; for (let i = 0; i < rank; i++) { if (i === d) { if (keep) oc.push(0); } else oc.push(coord[i]); }
+        let o = 0; for (let i = 0; i < oc.length; i++) o += oc[i] * oStride[i];
+        out[o] = bi; return;
+      }
+      const di = spatial[pos];
+      for (let k = 0; k < shape[di]; k++) { coord[di] = k; rec(pos + 1); }
+    };
+    rec(0);
+    return out;
+  }
+
+  function argMaxMin(opName, x, dim, keep) {
+    return opName === 'argmax' ? argmax(x, dim, keep) : argmin(x, dim, keep);
+  }
+
+  const DATA = [
+    { shape: [2, 2, 3], values: [1, 2, 3, 4, 5, 6, 7, 8, 9, 0, -1, -2] },
+    { shape: [3, 4], values: [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5, 8] },
+    { shape: [2, 3, 2, 2], values: Array.from({ length: 24 }, (_, i) => ((i * 7 + 3) % 13) - 6) },
+    { shape: [5], values: [2, -1, 7, 8, 3] },
+  ];
+
+  for (const { shape, values } of DATA) {
+    const rank = shape.length;
+    const dims = [];
+    for (let d = 0; d < rank; d++) dims.push(d);
+    for (let d = 1; d <= rank; d++) dims.push(-d);
+    for (const kind of ['max', 'min']) {
+      for (const dim of dims) {
+        for (const keep of [false, true]) {
+          const opName = kind === 'max' ? 'argmax' : 'argmin';
+          const ref = refArg(values, shape, dim, keep, kind);
+          const x = tensor(nest(values, shape));
+
+          it(`eager ${opName}(dim=${dim},keepdim=${keep}) shape=${shape}`, () => {
+            expect(flatten(argMaxMin(opName, x, dim, keep))).toEqual(ref);
+          });
+
+          for (const [tname, T] of [['cpu', CPUTarget], ['wasm', WasmTarget]]) {
+            it(`compiled ${tname} ${opName}(dim=${dim},keepdim=${keep}) shape=${shape}`, async () => {
+              const compiled = compile({ forward: (a) => argMaxMin(opName, a, dim, keep) }, [x], { target: T() });
+              expect(flatten(await compiled(x))).toEqual(ref);
+            });
+          }
+        }
+      }
+    }
+  }
+});

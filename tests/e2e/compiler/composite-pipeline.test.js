@@ -412,6 +412,22 @@ describe('multi-output functions', () => {
     expect(Array.from(o1)).toEqual([1, 2, 3, 4]);
     expect(Array.from(o2)).toEqual([1, 3, 2, 4]);
   });
+
+  // Two outputs returning the SAME value must each receive a distinct buffer + copy;
+  // a prior bug wrote only the first and left the second all-zero.
+  it('returns the same value twice — both outputs are written', () => {
+    const t = new TensorType([4], ScalarType.F32);
+    const func = buildFunction('two_same', [t, t], [t, t], (b, args) => {
+      const s = b.add(args[0], args[1]);
+      b.returnOp([s.getResult(0), s.getResult(0)]);
+    });
+    const r = compile(func);
+    const o1 = new Float32Array(4);
+    const o2 = new Float32Array(4);
+    r.run('two_same', new Float32Array([1, 2, 3, 4]), new Float32Array([10, 20, 30, 40]), o1, o2);
+    expect(Array.from(o1)).toEqual([11, 22, 33, 44]);
+    expect(Array.from(o2)).toEqual([11, 22, 33, 44]);
+  });
 });
 
 describe('fusion data dependency ordering', () => {

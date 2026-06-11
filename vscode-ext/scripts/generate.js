@@ -39,11 +39,19 @@ export function generate(sources = SOURCES, outputs = OUTPUTS) {
   const enriched = builtins.map(b => mergeDoc(b, docs.builtins.get(b.name), docs.kindTemplates));
   const undocumented = enriched.filter(b => !b.documented).map(b => b.name);
 
+  const runtimeNames = new Set(builtins.map(b => b.name));
+  const docOnly = [];
+  for (const [name, doc] of docs.builtins) {
+    if (runtimeNames.has(name)) continue;
+    docOnly.push(buildDocOnlyBuiltin(doc, docs.kindTemplates));
+  }
+  const allBuiltins = [...enriched, ...docOnly];
+
   const pseudoTypes = serializePseudoTypes(docs.pseudoTypes);
 
-  const grammar = buildGrammar({ keywordGroups, operators, builtins: enriched });
-  const languageData = buildLanguageData({ keywords, keywordGroups, operators, builtins: enriched, pseudoTypes });
-  const snippets = buildSnippets({ builtins: enriched });
+  const grammar = buildGrammar({ keywordGroups, operators, builtins: allBuiltins });
+  const languageData = buildLanguageData({ keywords, keywordGroups, operators, builtins: allBuiltins, pseudoTypes });
+  const snippets = buildSnippets({ builtins: allBuiltins });
 
   ensureDir(dirname(outputs.grammar));
   ensureDir(dirname(outputs.snippets));
@@ -77,7 +85,16 @@ const RETURNS_OVERRIDE = {
   encode: null,
   decode: null,
   train_test_split: null,
+  dataframe: 'DataFrame',
+  col: 'Column',
+  lit: 'Column',
+  expr: 'Column',
+  avg: 'Column',
+  count: 'Column',
+  countStar: 'Column',
 };
+
+const DEFAULT_DOC_BUILTIN_KIND = 'function';
 
 function inferReturns(builtin) {
   if (builtin.name in RETURNS_OVERRIDE) return RETURNS_OVERRIDE[builtin.name];
@@ -105,6 +122,22 @@ function mergeDoc(builtin, doc, kindTemplates) {
     signature: doc.params === null ? null : { params: doc.params },
     methods: [...(doc.methods ?? []), ...inherited],
     returns,
+    documented: true,
+  };
+}
+
+function buildDocOnlyBuiltin(doc, kindTemplates) {
+  const kind = doc.kind ?? DEFAULT_DOC_BUILTIN_KIND;
+  const template = kindTemplates.get(kind);
+  const ownMethodNames = new Set((doc.methods ?? []).map(m => m.name));
+  const inherited = (template?.methods ?? []).filter(m => !ownMethodNames.has(m.name));
+  return {
+    name: doc.name,
+    kind,
+    description: doc.description,
+    signature: doc.params === null ? null : { params: doc.params },
+    methods: [...(doc.methods ?? []), ...inherited],
+    returns: inferReturns({ name: doc.name, kind }),
     documented: true,
   };
 }
