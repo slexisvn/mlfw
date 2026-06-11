@@ -197,8 +197,17 @@
   **[5,4,3,2,1]** (reverse-cumsum) thay vì all-ones. Verify: clamp[1,0,1,1], cat[2,2,2,2], flip[3,2,1] đúng.
 - Test: differential-backward.test.js — 15 prog eager-vs-numerical + 4 explicit. Revert → 17 RED (registry) /
   7 RED (dispatch). Full e2e+autograd+tensor+nn+compiler+dispatcher **1913/1913**.
-- [ ] `logical_and`/`logical_or` WASM codegen (`i32.and` trên mask f32, +compare lưu f32) — thử fix `_emitBool`
-  chưa đủ (bug sâu hơn ở store compare-result), reverted. Latent, NO real user → để lại.
+- [x] `logical_and`/`logical_or` WASM codegen — ĐÃ FIX (2026-06-11). Root cause thật (rõ hơn note cũ): bug CHỈ ở
+  đường **SIMD**. `f32x4.gt/lt` tạo mask **all-ones** `0xFFFFFFFF` (true) / `0` (false); `v128.and`/`v128.or` giữ
+  nguyên; bool lưu dạng f32 nên `convert(bool→f32)` trong vec-path là NO-OP (`_emitVecExpr CastNode` bỏ qua cast) →
+  mask all-ones store thẳng ra f32 = **NaN**. (Scalar đúng: `f32.gt→i32 0/1`, `i32.and`, `f32.convert_i32_s→0.0/1.0`.)
+  Chỉ lộ khi mask SIMD bị convert-sang-float-numeric (qua `select`/bitselect thì OK vì all-ones là truthy).
+  - Fix: `backend/wasm/codegen.js` `_emitVecExpr` case `CastNode` — khi cast mask (CompareNode / `&&`/`||`/`!`) sang
+    float thì normalize `v128.and(mask, f32x4.splat(1.0))` (all-ones→1.0, 0→0.0; đúng cả với bool sạch 1.0/0.0).
+    Helper `_isVecMaskExpr`. KHÔNG đụng select (bitselect vẫn dùng raw mask).
+  - Test: `tests/backend/wasm/wasm-compile.test.js` "logical_{and,or} mask converted to float matches oracle"
+    (N=3 scalar + N=8/16 SIMD, cpu+wasm vs oracle 0/1). Revert fix → 4 SIMD case RED, scalar xanh. Full
+    e2e+tensor+wasm+compiler+autograd+nn+dispatcher **2342/2342**.
 
 ### Feature đợt 12 (2026-06-11) — 4 feature deferred (f16/bf16 thật, i64, topk-index, gather/scatter)
 > Tất cả land + test (independent-oracle) + revert-test RED + verify cpu+wasm. Full suite 2939/2939 (trừ gpu segfault).

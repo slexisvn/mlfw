@@ -1521,6 +1521,11 @@ export class WasmCodegen {
         break;
       case 'CastNode':
         this._emitVecExpr(node.expr);
+        if (isDtypeFloat(node.toDtype) && this._isVecMaskExpr(node.expr)) {
+          this._emit('(f32.const 1)');
+          this._emit('f32x4.splat');
+          this._emit('v128.and');
+        }
         break;
       case 'IfThenElseNode':
         this._emitVecSelect(node);
@@ -1529,6 +1534,13 @@ export class WasmCodegen {
         this._emitExpr(node);
         break;
     }
+  }
+
+  _isVecMaskExpr(node) {
+    if (!node) return false;
+    if (node.type === 'CompareNode') return true;
+    if (node.type === 'MathOpNode' && (node.op === '&&' || node.op === '||' || node.op === '!')) return true;
+    return false;
   }
 
   _emitVecMathOp(node) {

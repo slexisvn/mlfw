@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
-import { WasmTarget } from '../../../src/backend/target.js';
+import { WasmTarget, CPUTarget } from '../../../src/backend/target.js';
 
 function compile(func, opts = {}) {
   return compileGraph(func, WasmTarget(), { scheduling: { enabled: true }, ...opts });
@@ -1413,6 +1413,34 @@ describe('WASM boolean ops — compile and run', () => {
     const s = src(result, 'w_bool_cse');
     expect(s).not.toContain('f32.ne');
   });
+
+  for (const kind of ['and', 'or']) {
+    for (const N of [3, 8, 16]) {
+      it(`logical_${kind} mask converted to float matches oracle (N=${N}, ${N < 4 ? 'scalar' : 'SIMD'}) on cpu+wasm`, () => {
+        const make = (name) => buildFunction(name, [tt([N]), tt([N]), tt([N])], [tt([N])], (b, args) => {
+          const [x, lo, hi] = args;
+          const c1 = b.compare(x, lo, 'gt').getResult(0);
+          const c2 = b.compare(x, hi, 'lt').getResult(0);
+          const comb = kind === 'and' ? b.logicalAnd(c1, c2).getResult(0) : b.logicalOr(c1, c2).getResult(0);
+          b.returnOp([b.convert(comb, F32).getResult(0)]);
+        });
+        const pattern = [-2, 2, 7, 3, 1, 4, 0, 6];
+        const x = new Float32Array(N).map((_, i) => pattern[i % 8]);
+        const lo = new Float32Array(N).fill(0);
+        const hi = new Float32Array(N).fill(5);
+        const oracle = Array.from(x).map((v, i) => {
+          const c1 = v > lo[i], c2 = v < hi[i];
+          return (kind === 'and' ? (c1 && c2) : (c1 || c2)) ? 1 : 0;
+        });
+        for (const [tname, T] of [['cpu', CPUTarget], ['wasm', WasmTarget]]) {
+          const result = compileGraph(make(`bm_${kind}_${tname}_${N}`), T(), { scheduling: { enabled: true } });
+          const out = new Float32Array(N);
+          result.run(`bm_${kind}_${tname}_${N}`, x, lo, hi, out);
+          expect(Array.from(out), `${kind} N=${N} ${tname}`).toEqual(oracle);
+        }
+      });
+    }
+  }
 });
 
 
