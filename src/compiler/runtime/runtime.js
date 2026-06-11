@@ -7,7 +7,7 @@ async function getWebGPURuntime() {
 
 let _wasmPoolMod = null;
 async function getWasmPool() {
-  if (!_wasmPoolMod) _wasmPoolMod = await import('./wasm_pool.js');
+  if (!_wasmPoolMod) _wasmPoolMod = await import('#io/wasm_pool');
   return _wasmPoolMod;
 }
 

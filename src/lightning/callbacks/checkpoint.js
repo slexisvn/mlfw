@@ -1,5 +1,5 @@
-import { writeFileSync, existsSync, mkdirSync, unlinkSync } from 'node:fs';
-import { join } from 'node:path';
+import { fs } from '#io/fs';
+import { joinPath } from '../../io/path.js';
 import { Callback } from './callback.js';
 
 export class ModelCheckpoint extends Callback {
@@ -40,13 +40,13 @@ export class ModelCheckpoint extends Callback {
     const filledName = this._fillTemplate(state);
 
     if (this._saveLast) {
-      const lastPath = join(this._dirpath, 'last.ckpt.json');
+      const lastPath = joinPath(this._dirpath, 'last.ckpt.json');
       this._saveCheckpoint(model, trainer, lastPath);
       this._lastModelPath = lastPath;
     }
 
     if (!this._monitor) {
-      const path = join(this._dirpath, filledName + '.ckpt.json');
+      const path = joinPath(this._dirpath, filledName + '.ckpt.json');
       this._saveCheckpoint(model, trainer, path);
       return;
     }
@@ -55,7 +55,7 @@ export class ModelCheckpoint extends Callback {
     const current = metrics[this._monitor];
     if (current === undefined) return;
 
-    const path = join(this._dirpath, filledName + '.ckpt.json');
+    const path = joinPath(this._dirpath, filledName + '.ckpt.json');
     const entry = { score: current, path };
 
     if (this._saveTopK < 0) {
@@ -113,7 +113,7 @@ export class ModelCheckpoint extends Callback {
     }
 
     trainer.callbackConnector.dispatch('onSaveCheckpoint', trainer, model, checkpoint);
-    writeFileSync(path, JSON.stringify(checkpoint));
+    fs.writeFile(path, JSON.stringify(checkpoint));
   }
 
   _fillTemplate(state) {
@@ -123,13 +123,13 @@ export class ModelCheckpoint extends Callback {
   }
 
   _ensureDir() {
-    if (!existsSync(this._dirpath)) {
-      mkdirSync(this._dirpath, { recursive: true });
+    if (!fs.exists(this._dirpath)) {
+      fs.mkdir(this._dirpath);
     }
   }
 
   _tryDelete(path) {
-    try { unlinkSync(path); } catch { /* noop */ }
+    try { fs.remove(path); } catch { /* noop */ }
   }
 }
 

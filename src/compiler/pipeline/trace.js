@@ -1,4 +1,3 @@
-import { performance } from 'node:perf_hooks';
 import { PassResult } from '../passes/pass.js';
 
 export const TraceLevel = Object.freeze({

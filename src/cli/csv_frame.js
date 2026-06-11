@@ -1,5 +1,4 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { fs } from '#io/fs';
 
 export class CsvFrame {
   constructor(headers, columns, numRows) {
@@ -247,7 +246,6 @@ function coerceValue(raw) {
 }
 
 export function loadCsv(filePath, separator = ',') {
-  const absPath = resolve(filePath);
-  const content = readFileSync(absPath, 'utf-8');
+  const content = fs.readFile(filePath);
   return parseCsv(content, separator);
 }

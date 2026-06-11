@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>mlfw notebook</title>
+  <link rel="stylesheet" href="notebook.css" />
+</head>
+<body>
+  <header class="toolbar">
+    <div class="brand">
+      <span class="logo">mlfw</span>
+      <span class="sub">notebook</span>
+    </div>
+    <div class="actions">
+      <button id="run-all" title="Run every cell top to bottom">▶▶ Run All</button>
+      <button id="add-cell" title="Add a cell at the end">＋ Cell</button>
+      <button id="restart" title="Reset variables (fresh kernel)">⟳ Restart</button>
+      <button id="clear-out" title="Clear all outputs">⌫ Clear</button>
+      <button id="theme-toggle" title="Toggle dark mode">🌙 Dark</button>
+      <span class="kernel" id="kernel-status">kernel: ready</span>
+    </div>
+  </header>
+
+  <main id="cells" class="cells"></main>
+
+  <footer class="hint">
+    <kbd>Shift</kbd>+<kbd>Enter</kbd> run &amp; next ·
+    <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>Enter</kbd> run ·
+    <kbd>Tab</kbd> indent · cells share one kernel, like Jupyter
+  </footer>
+
+  <script type="module" src="notebook.js"></script>
+</body>
+</html>

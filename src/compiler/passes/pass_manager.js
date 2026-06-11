@@ -1,4 +1,3 @@
-import { performance } from 'node:perf_hooks';
 import { AnalysisManager } from '../analysis/analysis_manager.js';
 import { FunctionPass, ModulePass, PassResult } from './pass.js';
 import { TraceLevel } from '../pipeline/trace.js';

@@ -1,4 +1,3 @@
-import { performance } from 'node:perf_hooks';
 import { GraphModule } from '../ir/graph/module.js';
 import { PassManager } from '../passes/pass_manager.js';
 import { CanonicalizePass } from '../passes/canonicalize/canonicalize.js';

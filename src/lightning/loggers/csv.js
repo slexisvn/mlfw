@@ -1,5 +1,5 @@
-import { writeFileSync, appendFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { fs } from '#io/fs';
+import { joinPath } from '../../io/path.js';
 import { Logger } from './logger.js';
 
 export class CSVLogger extends Logger {
@@ -22,7 +22,7 @@ export class CSVLogger extends Logger {
 
   get logDir() {
     const ver = this._version !== null ? this._version : this._resolveVersion();
-    return join(this._saveDir, this._name, `version_${ver}`);
+    return joinPath(this._saveDir, this._name, `version_${ver}`);
   }
 
   logMetrics(metrics, step) {
@@ -45,8 +45,8 @@ export class CSVLogger extends Logger {
 
   logHyperparams(params) {
     this._ensureDir();
-    const path = join(this.logDir, 'hparams.json');
-    writeFileSync(path, JSON.stringify(params, null, 2));
+    const path = joinPath(this.logDir, 'hparams.json');
+    fs.writeFile(path, JSON.stringify(params, null, 2));
   }
 
   finalize() {
@@ -59,7 +59,7 @@ export class CSVLogger extends Logger {
 
     if (!this._headerWritten) {
       const header = ['step', ...this._columns].join(',');
-      writeFileSync(path, header + '\n');
+      fs.writeFile(path, header + '\n');
       this._headerWritten = true;
     }
 
@@ -74,34 +74,34 @@ export class CSVLogger extends Logger {
       }
       lines.push(cells.join(','));
     }
-    appendFileSync(path, lines.join('\n') + '\n');
+    fs.appendFile(path, lines.join('\n') + '\n');
     this._buffer.length = 0;
   }
 
   _getFilePath() {
     if (!this._filePath) {
-      this._filePath = join(this.logDir, 'metrics.csv');
+      this._filePath = joinPath(this.logDir, 'metrics.csv');
     }
     return this._filePath;
   }
 
   _ensureDir() {
     const dir = this.logDir;
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true });
+    if (!fs.exists(dir)) {
+      fs.mkdir(dir);
     }
   }
 
   _resolveVersion() {
     if (this._version !== null) return this._version;
-    const baseDir = join(this._saveDir, this._name);
-    if (!existsSync(baseDir)) {
+    const baseDir = joinPath(this._saveDir, this._name);
+    if (!fs.exists(baseDir)) {
       this._version = 0;
       return 0;
     }
     let maxVer = -1;
     try {
-      const entries = readdirSync(baseDir);
+      const entries = fs.readdir(baseDir);
       for (let i = 0; i < entries.length; i++) {
         const match = entries[i].match(/^version_(\d+)$/);
         if (match) {
