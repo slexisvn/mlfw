@@ -257,31 +257,38 @@
     throw nên không phải usable path; để lại.
 - [x] **Empty-axis / all-same reductions** (item 5): len-1 axis, argmax/argmin ties (lowest-index), max len-1,
   mean rỗng→NaN — eager==cpu==wasm khớp.
-- [~] **Shape động (DYNAMIC / sym_int)** (item 6) — TÌM RA FEATURE GẦN NHƯ KO HOẠT ĐỘNG e2e; FIX 1 SUBSET LỚN.
-  Trước khi fix: compile với `dynamic_shapes:[Set([0])]` cho ra kết quả SAI (silent) NGAY CẢ trên shape đã trace.
-  Codegen ĐÃ tham số hoá đúng (kernel nhận `_ds_*`), nhưng nhiều mảnh runtime/tracer/lowering chưa nối. ĐÃ FIX:
-  - **(B) runtime ko truyền `_ds` args**: `compile.js _prepareExecution` truyền raw typed-array → `run()` ko đọc
-    được shape → mọi `_ds` fallback=1. Fix: bọc allArgs thành `RuntimeTensor(data,shape,dtype)` để
-    `RuntimeModule._extractShapeParams` (đã có sẵn) trích đúng dim runtime. (compile.js)
-  - **(fusion) loop extent leak DYNAMIC**: `rules/fusion.js` gọi `makeLoopNest(ctx,outBuf.shape)` THIẾU arg `buf`
-    → `wrapInLoops` ko có extentNodes → bound loop = `-1` literal (DYNAMIC sentinel). Fix: truyền `outBuf` +
-    thread `extentNodes` (như single-op rule). → elementwise CHAIN chạy.
-  - **(A) reduce mất symbol propagation**: `ir/graph/ops/reduction.js` THIẾU `propagateSymbolicShapes` → output
-    sym-shape về `[-1]` (generic trailing-align fallback ở `tracer._propagateSymbolicShape` sai cho op bỏ trục) →
-    output buffer cấp numel -1→len 1. Fix: thêm propagate (mirror inferResultTypes, giữ dim ko bị reduce).
-  - **(robustness) reshape propagate crash**: `ops/shape.js` `inShape.find()` ko guard undefined → throw khi
-    keepdim. Fix: guard `inShape ? … : undefined`.
-  - GIỜ CHẠY ĐÚNG (cpu+wasm, compile-once-run-many): elementwise (single/chain/broadcast-row/same-dyn),
-    reduce-as-FINAL-output (sum/mean/max dim0/dim1 non-keepdim), matmul dynamic M & K.
-  - Test: `differential-nn.test.js` "dynamic shapes: compile once, run on multiple concrete shapes" (20 case
-    cpu+wasm vs eager + 1 explicit oracle sum). Revert từng fix → RED (RuntimeTensor 21, fusion 2, reduce 7).
-  - **CÒN HỎNG (documented gap, KHÔNG phải edge bug — incomplete feature systemic):** reduce-as-INTERMEDIATE
-    (chain qua reduce, keepdim→broadcast, softmax, normalize) + 2-dim-cùng-dynamic. Root: shape-param key theo
-    `(buffer,dim)`; buffer phái sinh (reduce output intermediate, copy/reshape của keepdim) KO được đăng ký key →
-    `cpu/codegen.js:510 _resolveShapeParam` fallback '1' → intermediate cấp `Float32Array(1)`, ghi quá biên bị
-    JS nuốt → NaN. Thêm: `rules/shape.js` (copy/reshape ~8 site) cũng `makeLoopNest` THIẾU buf → leak `-1`.
-    Fix đầy đủ cần unify shape-param theo SYMBOL (ko phải buffer:dim) — refactor lớn xuyên lowering+codegen+runtime,
-    ngoài phạm vi P2 edge-case.
+- [x] **Shape động (DYNAMIC / sym_int)** (item 6) — XONG TRỌN (1 batch lớn). Feature gần như ko hoạt động e2e →
+  giờ chạy đúng cpu+wasm cho elementwise/chain/broadcast, reduce dim0/dim1/keepdim, mean-trên-trục-dynamic,
+  softmax, normalize, matmul (dynM/dynK), **2-dim-cùng-dynamic, và transpose dim dynamic** (compile-once-run-many).
+  > Trước fix: `dynamic_shapes:[Set([0])]` cho kết quả SAI (silent) NGAY CẢ trên shape đã trace. Codegen ĐÃ tham số
+  > hoá (`_ds_*`) nhưng runtime/tracer/lowering/wasm-layout chưa nối. Chuỗi fix (gốc → ngọn):
+  - **runtime ko truyền `_ds` args**: `compile.js _prepareExecution` truyền raw typed-array → `run()` ko đọc shape →
+    mọi `_ds` fallback. Fix: bọc allArgs thành `RuntimeTensor(data,shape,dtype)` để `_extractShapeParams` trích dim.
+  - **`_extractShapeParams` bufferIndex chết**: key bằng VariableNode nhưng query bằng buffer-name string → luôn miss
+    → toàn positional-scan (sai cho transpose/reorder). Fix: build bufferIndex theo buffer NAME (xử lý cả 2 dạng key:
+    test dùng string-key, PrimFunc dùng VarNode→Buffer). `runtime.js`.
+  - **loop extent leak `-1`** ở MỌI lowering rule gọi `makeLoopNest(ctx,shape)` THIẾU `buf` → bound = DYNAMIC literal.
+    Fix: truyền `buf` + thread `extentNodes` ở fusion + shape.js (transpose/reshape/slice/pad/concat/iota/broadcast) +
+    control_flow + layout + linalg(gather/scatter) + lowerConstant + copyPairs.
+  - **buffer phái sinh ko đăng ký `_ds`** → `_resolveShapeParam` fallback '1' → intermediate cấp size 1, ghi quá biên.
+    Fix: `getOrAllocBuffer/allocFreshBuffer` gọi `_registerDynamicDims` (đăng ký mọi DYNAMIC dim của MỌI buffer).
+  - **reduce/transpose mất symbol propagation**: thêm `propagateSymbolicShapes` cho `reduce` + `transpose`
+    (`ir/graph/ops/reduction.js`, `ops/shape.js`). reshape propagate **return null** khi inShape undefined → tracer
+    rơi về generic offset-fallback (đúng cho keepdim reduce→reshape nội bộ).
+  - **mean trên trục DYNAMIC chia sai**: rule mean tính `reduceSize *= inBuf.shape[dim]` = -1 (DYNAMIC) → chia /-1.
+    Fix: tách static part + `extentNode` cho dynamic reduce-dim, dựng divisor runtime + `MathOp('/')`. `rules/reduction.js`.
+  - **WASM memory-layout overlap (2-dim-dynamic)**: `scanner.js computeMemoryLayout` dùng `numel<0` để phát hiện
+    dynamic — `(-1)*(-1)=1` (2 dim dynamic) lọt → intermediate cấp 4 byte → ĐÈ input. Fix: phát hiện dynamic qua
+    `shape.some(d => d<0)`, over-alloc 65536. (cùng bug ở `wasm/codegen.js _layoutBuffers`).
+  - **symbol unification (transpose/reorder intermediate)**: buffer phái sinh đảo chiều (vd transpose [s0,4]→[4,s0])
+    có dim s0 ở vị trí KHÁC → positional-scan giải sai. Fix: tracer gắn `value.symbolicShape` lên IR value;
+    `LoweringContext._shapeParamVar` UNIFY var theo tên symbol (`symbolToVar`) → mọi buffer cùng symbol dùng CHUNG
+    1 `_ds`, giải chính xác qua key của INPUT buffer. dedup `func.shapeParams` theo tên var (graph_to_tensor).
+  - Test: `differential-nn.test.js` "dynamic shapes: compile once, run on multiple concrete shapes" (21 case ×
+    cpu+wasm + oracle tường minh: sum-reuse, mean-trên-trục-dynamic, transpose). Revert từng fix lõi → RED
+    (mean 2, wasm-layout 2, symbol-unify 2). Full e2e+tensor+wasm+compiler+autograd+nn+dispatcher+tracing **2386/2386**.
+  - GIỚI HẠN ghi rõ (KHÔNG phải bug): WASM dynamic intermediate over-alloc cứng 65536 byte/buffer (size runtime lớn
+    >16K float/intermediate sẽ tràn — heuristic sẵn có); softmax wasm lệch eager ~1e-7 (f32 vs f64, trong tol).
 - [x] **Accumulation extremes** (item 7): sum/mean 100k, matmul K=2000, denormal — trong tol (maxrel<1e-5).
   KHÔNG phải bug — chỉ giới hạn precision: WASM dùng kernel f32, eager+CPU-JS dùng f64. 2 case lệch (DOCUMENTED,
   ko fix): (a) `sum([3.4e38,3.4e38,-3.4e38])` WASM f32 acc → +Inf (overflow) vs eager f64 → 3.4e38; (b) catastrophic

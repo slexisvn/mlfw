@@ -3,6 +3,7 @@ import {
   BlockNode, SeqNode, CallExternNode, ForNode, ForKind, IfThenElseNode, CompareNode
 } from '../../../ir/tensor/nodes.js';
 import { Buffer } from '../../../ir/tensor/buffer.js';
+import { DYNAMIC } from '../../../ir/graph/types.js';
 import {
   registerLoweringRule, buildSpatialNest, wrapLoopsWithNodes,
   concatIterVars, bufRefs
@@ -54,10 +55,23 @@ export function register() {
     const parts = [initBody, accBody];
 
     if (rType === 'mean') {
-      let reduceSize = 1;
-      for (let i = 0; i < reduceDims.length; i++) reduceSize *= inBuf.shape[reduceDims[i]];
+      let staticSize = 1;
+      const dynExtents = [];
+      for (let i = 0; i < reduceDims.length; i++) {
+        const d = inBuf.shape[reduceDims[i]];
+        if (d === DYNAMIC) dynExtents.push(ctx.extentNode(DYNAMIC, inBuf, reduceDims[i]));
+        else staticSize *= d;
+      }
       const meanNest = buildSpatialNest(ctx, 'sm', spatialDims, inBuf.shape, inBuf);
-      const divExpr = new MathOpNode('*', new BufferLoadNode(outBuf, meanNest.indices), new FloatImmNode(1.0 / reduceSize));
+      const meanLoad = new BufferLoadNode(outBuf, meanNest.indices);
+      let divExpr;
+      if (dynExtents.length === 0) {
+        divExpr = new MathOpNode('*', meanLoad, new FloatImmNode(1.0 / staticSize));
+      } else {
+        let divisor = new IntImmNode(staticSize);
+        for (const e of dynExtents) divisor = new MathOpNode('*', divisor, e);
+        divExpr = new MathOpNode('/', meanLoad, divisor);
+      }
       const meanStore = new BufferStoreNode(outBuf, meanNest.indices, divExpr);
       const meanBlock = new BlockNode(ctx.blockName('mean_div'), meanNest.ivs, [{ buffer: outBuf }], [{ buffer: outBuf }], meanStore);
       parts.push(spatialDims.length > 0 ? meanNest.wrap(meanBlock) : meanBlock);

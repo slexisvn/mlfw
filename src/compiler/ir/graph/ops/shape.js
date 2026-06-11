@@ -106,11 +106,12 @@ export function register(registry) {
     },
     propagateSymbolicShapes(op, shapes) {
       const inShape = shapes.get(op.getOperand(0));
+      if (!inShape) return null;
       const newShape = op.getAttr('new_shape');
       const resShape = [];
       for (let d of newShape) {
         if (d === -1) {
-          const symVar = inShape ? inShape.find(id => typeof id !== 'number') : undefined;
+          const symVar = inShape.find(id => typeof id !== 'number');
           resShape.push(symVar || -1);
         } else {
           resShape.push(d);
@@ -136,6 +137,13 @@ export function register(registry) {
       if (!perm) return null;
       const newShape = perm.map(i => inp.shape[i]);
       return [new TensorType(newShape, inp.dtype)];
+    },
+    propagateSymbolicShapes(op, shapes) {
+      const inShape = shapes.get(op.getOperand(0));
+      if (!inShape) return null;
+      const perm = op.getAttr('permutation');
+      if (!perm) return null;
+      return [perm.map(i => inShape[i])];
     },
     getCanonicalizationPatterns() { return [new pat.FoldTrivialTranspose()]; },
     verify(op) {

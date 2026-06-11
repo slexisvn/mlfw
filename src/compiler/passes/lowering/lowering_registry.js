@@ -29,6 +29,7 @@ export class LoweringContext {
     this.bufferMap = new Map();
     this.varCounter = 0;
     this.shapeParams = new Map();
+    this.symbolToVar = new Map();
     this._blockCounter = 0;
   }
 
@@ -48,7 +49,9 @@ export class LoweringContext {
     const dtype = t.dtype || 'f32';
     const strides = t.layout ? t.layout.computeStrides(shape) : null;
     buf = new Buffer(`buf_${this.varCounter++}`, shape, dtype, MemoryScope.GLOBAL, strides);
+    if (value.symbolicShape) buf.symbolicShape = value.symbolicShape;
     this.bufferMap.set(value, buf);
+    this._registerDynamicDims(buf);
     return buf;
   }
 
@@ -57,34 +60,43 @@ export class LoweringContext {
     const shape = t.shape || [];
     const dtype = t.dtype || 'f32';
     const strides = t.layout ? t.layout.computeStrides(shape) : null;
-    return new Buffer(`buf_${this.varCounter++}`, shape, dtype, MemoryScope.GLOBAL, strides);
+    const buf = new Buffer(`buf_${this.varCounter++}`, shape, dtype, MemoryScope.GLOBAL, strides);
+    if (value.symbolicShape) buf.symbolicShape = value.symbolicShape;
+    this._registerDynamicDims(buf);
+    return buf;
+  }
+
+  _registerDynamicDims(buf) {
+    for (let i = 0; i < buf.shape.length; i++) {
+      if (buf.shape[i] === DYNAMIC) this.extentNode(DYNAMIC, buf, i);
+    }
+  }
+
+  _shapeParamVar(buf, dimIdx) {
+    const key = dimIdx >= 0 ? `${buf.name}:${dimIdx}` : `${buf.name}:dyn`;
+    let v = this.shapeParams.get(key);
+    if (v) return v;
+    const sym = buf.symbolicShape && dimIdx >= 0 && typeof buf.symbolicShape[dimIdx] !== 'number'
+      ? buf.symbolicShape[dimIdx] : null;
+    if (sym !== null && this.symbolToVar.has(sym)) {
+      v = this.symbolToVar.get(sym);
+    } else {
+      v = this.allocVar(`_ds`);
+      if (sym !== null) this.symbolToVar.set(sym, v);
+    }
+    this.shapeParams.set(key, v);
+    return v;
   }
 
   extentNode(dim, buf, dimIdx = -1) {
     if (dim !== DYNAMIC) return new IntImmNode(dim);
-    const key = dimIdx >= 0 ? `${buf.name}:${dimIdx}` : `${buf.name}:dyn`;
-    let v = this.shapeParams.get(key);
-    if (!v) {
-      v = this.allocVar(`_ds`);
-      this.shapeParams.set(key, v);
-    }
-    return v;
+    return this._shapeParamVar(buf, dimIdx);
   }
 
   extentNodes(shape, buf) {
     const nodes = new Array(shape.length);
     for (let i = 0; i < shape.length; i++) {
-      if (shape[i] === DYNAMIC) {
-        const key = `${buf.name}:${i}`;
-        let v = this.shapeParams.get(key);
-        if (!v) {
-          v = this.allocVar(`_ds`);
-          this.shapeParams.set(key, v);
-        }
-        nodes[i] = v;
-      } else {
-        nodes[i] = new IntImmNode(shape[i]);
-      }
+      nodes[i] = shape[i] === DYNAMIC ? this._shapeParamVar(buf, i) : new IntImmNode(shape[i]);
     }
     return nodes;
   }
@@ -219,10 +231,10 @@ export function lowerConstant(ctx, op) {
   if (outBuf.shape.length === 0) {
     return new BufferStoreNode(outBuf, [], valNode);
   }
-  const { loopVars, loopBinds, indices } = makeLoopNest(ctx, outBuf.shape);
+  const { loopVars, loopBinds, indices, extentNodes } = makeLoopNest(ctx, outBuf.shape, outBuf);
   const store = new BufferStoreNode(outBuf, indices, valNode);
   const block = new BlockNode(ctx.blockName(`${op.opName}_block`), loopBinds, [], [{ buffer: outBuf }], store);
-  return wrapInLoops(block, loopVars, outBuf.shape);
+  return wrapInLoops(block, loopVars, outBuf.shape, extentNodes);
 }
 
 export function parseLayout(str) {

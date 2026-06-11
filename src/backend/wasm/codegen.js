@@ -1790,31 +1790,25 @@ export class WasmCodegen {
     let offset = 0;
     const align = 16;
     this._dynamicBuffers = new Set();
-    for (const [, buf] of primFunc.bufferMap) {
+    const place = (buf) => {
       offset = Math.ceil(offset / align) * align;
       this._bufferOffsets.set(buf.name, offset);
       const numel = buf.numel();
-      if (numel > 0) {
+      const isDynamic = buf.shape.some(d => typeof d !== 'number' || d < 0);
+      if (!isDynamic && numel > 0) {
         offset += numel * wasmBytes(buf.dtype);
       } else {
         this._dynamicBuffers.add(buf.name);
         offset += 65536;
       }
-    }
+    };
+    for (const [, buf] of primFunc.bufferMap) place(buf);
 
     const tempBuffers = new Map();
     this._collectBuffers(primFunc.body, tempBuffers);
     for (const [name, buf] of tempBuffers) {
       if (this._bufferOffsets.has(name)) continue;
-      offset = Math.ceil(offset / align) * align;
-      this._bufferOffsets.set(name, offset);
-      const numel = buf.numel();
-      if (numel > 0) {
-        offset += numel * wasmBytes(buf.dtype);
-      } else {
-        this._dynamicBuffers.add(buf.name);
-        offset += 65536;
-      }
+      place(buf);
     }
 
     this._totalMemBytes = offset;

@@ -364,8 +364,9 @@ export class RuntimeModule {
     const bufferIndex = new Map();
     if (bufferMap) {
       let i = 0;
-      for (const name of bufferMap.keys()) {
-        bufferIndex.set(name, i);
+      for (const [k, buf] of bufferMap) {
+        const name = typeof k === 'string' ? k : (buf && buf.name);
+        if (name !== undefined) bufferIndex.set(name, i);
         i++;
       }
     }

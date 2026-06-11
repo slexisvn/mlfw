@@ -138,6 +138,7 @@ export class Tracer {
     for (let i = 0; i < args.length; i++) {
       const irValue = args[i];
       const tt = this._inputTypes[i];
+      irValue.symbolicShape = this._inputSymShapes[i];
       const st = new SymbolicTensor(irValue, tt.shape, tt.dtype, this, this._inputSymShapes[i]);
       symbolicInputs.push(st);
     }
@@ -166,6 +167,7 @@ export class Tracer {
     const resultValue = op.getResult(0);
     const resultType = resultValue.type;
     const resultSymShape = this._propagateSymbolicShape(opName, op, tensorArgs, resultType);
+    resultValue.symbolicShape = resultSymShape;
 
     return new SymbolicTensor(
       resultValue,

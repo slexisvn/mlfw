@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { tensor, add, mul, div, matmul, relu, sum, mean, max, min, prod, argmax, argmin } from '../../src/index.js';
+import { tensor, add, sub, mul, div, matmul, relu, sum, mean, max, min, prod, argmax, argmin, softmax } from '../../src/index.js';
 import { layer_norm, group_norm } from '../../src/nn/functional/normalization.js';
 import { conv2d } from '../../src/nn/functional/conv.js';
 import { max_pool2d, avg_pool2d } from '../../src/nn/functional/pooling.js';
@@ -633,6 +633,15 @@ describe('dynamic shapes: compile once, run on multiple concrete shapes', () => 
     ['max dim1', (x) => max(x, 1), [S(0)], [[[3, 4]], [[5, 4]]]],
     ['matmul dynamic M', (x, y) => matmul(x, y), [S(0), null], [[[3, 4], [4, 2]], [[7, 4], [4, 2]]]],
     ['matmul dynamic K', (x, y) => matmul(x, y), [S(1), S(0)], [[[3, 4], [4, 2]], [[3, 6], [6, 2]]]],
+    ['sum keepdim dim1', (x) => sum(x, 1, true), [S(0)], [[[3, 4]], [[6, 4]]]],
+    ['mean keepdim over dynamic axis', (x) => mean(x, 0, true), [S(0)], [[[4, 3]], [[2, 3]]]],
+    ['softmax dim1', (x) => softmax(x, 1), [S(0)], [[[3, 5]], [[8, 5]]]],
+    ['normalize (reduce keepdim then broadcast)', (x) => div(x, sum(x, 1, true)), [S(0)], [[[3, 4]], [[5, 4]]]],
+    ['reduce then elementwise', (x) => relu(sub(x, mean(x, 1, true))), [S(0)], [[[3, 4]], [[6, 4]]]],
+    ['reduce-result fed to elementwise', (x) => add(sum(x, 1), sum(relu(x), 1)), [S(0)], [[[3, 4]], [[5, 4]]]],
+    ['two dynamic dims (relu)', (x) => relu(x), [S(0, 1)], [[[3, 4]], [[5, 7]]]],
+    ['two dynamic dims (add)', (x, y) => add(x, y), [S(0, 1), S(0, 1)], [[[3, 4], [3, 4]], [[5, 7], [5, 7]]]],
+    ['transpose with dynamic dim', (x) => add(x.transpose(0, 1), x.transpose(0, 1)), [S(0)], [[[3, 4]], [[5, 4]]]],
   ];
 
   for (const [tname, T] of [['cpu', CPUTarget], ['wasm', WasmTarget]]) {
@@ -647,4 +656,23 @@ describe('dynamic shapes: compile once, run on multiple concrete shapes', () => 
     expect(Array.from((await compiled(tensor([[5, 5, 5, 5]]))).contiguous().data)).toEqual([20]);
     expect(Array.from((await compiled(tensor([[1, 1, 1, 1], [2, 2, 2, 2], [3, 3, 3, 3]]))).contiguous().data)).toEqual([4, 8, 12]);
   });
+
+  for (const [tname, T] of [['cpu', CPUTarget], ['wasm', WasmTarget]]) {
+    it(`explicit oracle: mean over a dynamic axis divides by the runtime extent on ${tname}`, async () => {
+      const compiled = compile({ forward: (x) => mean(x, 0) }, [tensor([[2, 4], [6, 8]])], { target: T(), dynamic_shapes: [new Set([0])] });
+      expect(Array.from((await compiled(tensor([[2, 4], [6, 8]]))).contiguous().data)).toEqual([4, 6]);
+      expect(Array.from((await compiled(tensor([[3, 9], [3, 9], [3, 9], [3, 9]]))).contiguous().data)).toEqual([3, 9]);
+      expect(Array.from((await compiled(tensor([[10, 20]]))).contiguous().data)).toEqual([10, 20]);
+    });
+
+    it(`explicit oracle: transpose of a dynamic dim resolves the right extent on ${tname}`, async () => {
+      const compiled = compile({ forward: (x) => x.transpose(0, 1) }, [tensor([[1, 2, 3], [4, 5, 6]])], { target: T(), dynamic_shapes: [new Set([0])] });
+      const out2 = await compiled(tensor([[1, 2, 3], [4, 5, 6]]));
+      expect(out2.shape).toEqual([3, 2]);
+      expect(Array.from(out2.contiguous().data)).toEqual([1, 4, 2, 5, 3, 6]);
+      const out3 = await compiled(tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]]));
+      expect(out3.shape).toEqual([3, 3]);
+      expect(Array.from(out3.contiguous().data)).toEqual([1, 4, 7, 2, 5, 8, 3, 6, 9]);
+    });
+  }
 });

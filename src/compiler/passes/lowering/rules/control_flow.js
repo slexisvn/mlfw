@@ -10,10 +10,10 @@ import {
 } from '../lowering_registry.js';
 
 function copyBuffer(ctx, srcBuf, dstBuf) {
-  const { loopVars, loopBinds, indices } = makeLoopNest(ctx, dstBuf.shape);
+  const { loopVars, loopBinds, indices, extentNodes } = makeLoopNest(ctx, dstBuf.shape, dstBuf);
   const store = new BufferStoreNode(dstBuf, indices, new BufferLoadNode(srcBuf, indices));
   const block = new BlockNode(ctx.blockName('cf_copy'), loopBinds, [{ buffer: srcBuf }], [{ buffer: dstBuf }], store);
-  return wrapInLoops(block, loopVars, dstBuf.shape);
+  return wrapInLoops(block, loopVars, dstBuf.shape, extentNodes);
 }
 
 function lowerRegionBody(ctx, region, argBuffers) {

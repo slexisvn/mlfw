@@ -155,7 +155,13 @@ export function lowerGraphToPrimFunc(graphFunc) {
     stmts.push(wrapInLoops(block, loopVars, src.shape, extentNodes));
   }
 
-  const shapeParams = [...ctx.shapeParams.values()];
+  const shapeParams = [];
+  const seenSp = new Set();
+  for (const sp of ctx.shapeParams.values()) {
+    if (seenSp.has(sp.name)) continue;
+    seenSp.add(sp.name);
+    shapeParams.push(sp);
+  }
   for (const sp of shapeParams) params.push(sp);
 
   return new PrimFunc(graphFunc.name, params, stmts.length === 1 ? stmts[0] : new SeqNode(stmts), bufferMap, shapeParams, new Map(ctx.shapeParams));

@@ -14,18 +14,18 @@ export function register() {
     const perm = op.getAttr('permutation');
     const inBuf = inputs[0];
     const outBuf = outputs[0];
-    const { loopVars, loopBinds, indices: outIndices } = makeLoopNest(ctx, outBuf.shape);
+    const { loopVars, loopBinds, indices: outIndices, extentNodes } = makeLoopNest(ctx, outBuf.shape, outBuf);
     const inIndices = new Array(inBuf.shape.length);
     for (let i = 0; i < perm.length; i++) inIndices[perm[i]] = outIndices[i];
     const store = new BufferStoreNode(outBuf, outIndices, new BufferLoadNode(inBuf, inIndices));
     const block = new BlockNode(ctx.blockName('transpose_block'), loopBinds, [{ buffer: inBuf }], [{ buffer: outBuf }], store);
-    return wrapInLoops(block, loopVars, outBuf.shape);
+    return wrapInLoops(block, loopVars, outBuf.shape, extentNodes);
   });
 
   registerLoweringRule('reshape', (ctx, op, inputs, outputs) => {
     const inBuf = inputs[0];
     const outBuf = outputs[0];
-    const { loopVars, loopBinds, indices: outIndices } = makeLoopNest(ctx, outBuf.shape);
+    const { loopVars, loopBinds, indices: outIndices, extentNodes } = makeLoopNest(ctx, outBuf.shape, outBuf);
 
     let inIndices;
     const isIdentity = inBuf.shape.length === outBuf.shape.length &&
@@ -53,7 +53,7 @@ export function register() {
 
     const store = new BufferStoreNode(outBuf, outIndices, new BufferLoadNode(inBuf, inIndices));
     const block = new BlockNode(ctx.blockName('reshape_block'), loopBinds, [{ buffer: inBuf }], [{ buffer: outBuf }], store);
-    return wrapInLoops(block, loopVars, outBuf.shape);
+    return wrapInLoops(block, loopVars, outBuf.shape, extentNodes);
   });
 
   registerLoweringRule('slice', (ctx, op, inputs, outputs) => {
@@ -61,7 +61,7 @@ export function register() {
     const outBuf = outputs[0];
     const starts = op.getAttr('starts');
     const strides = op.getAttr('strides') || starts.map(() => 1);
-    const { loopVars, loopBinds, indices: outIndices } = makeLoopNest(ctx, outBuf.shape);
+    const { loopVars, loopBinds, indices: outIndices, extentNodes } = makeLoopNest(ctx, outBuf.shape, outBuf);
     const inIndices = new Array(inBuf.shape.length);
     for (let i = 0; i < inBuf.shape.length; i++) {
       const base = new IntImmNode(starts[i]);
@@ -73,7 +73,7 @@ export function register() {
     }
     const store = new BufferStoreNode(outBuf, outIndices, new BufferLoadNode(inBuf, inIndices));
     const block = new BlockNode(ctx.blockName('slice_block'), loopBinds, [{ buffer: inBuf }], [{ buffer: outBuf }], store);
-    return wrapInLoops(block, loopVars, outBuf.shape);
+    return wrapInLoops(block, loopVars, outBuf.shape, extentNodes);
   });
 
   registerLoweringRule('pad', (ctx, op, inputs, outputs) => {
@@ -82,7 +82,7 @@ export function register() {
     const outBuf = outputs[0];
     const low = op.getAttr('low');
     const interior = op.getAttr('interior') || low.map(() => 0);
-    const { loopVars, loopBinds, indices: outIndices } = makeLoopNest(ctx, outBuf.shape);
+    const { loopVars, loopBinds, indices: outIndices, extentNodes } = makeLoopNest(ctx, outBuf.shape, outBuf);
     const inIndices = new Array(inBuf.shape.length);
     let inBoundsExpr = new IntImmNode(1);
     for (let i = 0; i < inBuf.shape.length; i++) {
@@ -105,7 +105,7 @@ export function register() {
     const expr = new IfThenElseNode(inBoundsExpr, loadIn, loadPad);
     const store = new BufferStoreNode(outBuf, outIndices, expr);
     const block = new BlockNode(ctx.blockName('pad_block'), loopBinds, [{ buffer: inBuf }, { buffer: padVal }], [{ buffer: outBuf }], store);
-    return wrapInLoops(block, loopVars, outBuf.shape);
+    return wrapInLoops(block, loopVars, outBuf.shape, extentNodes);
   });
 
   registerLoweringRule('concat', (ctx, op, inputs, outputs) => {
@@ -115,7 +115,7 @@ export function register() {
     let offset = 0;
     for (let k = 0; k < inputs.length; k++) {
       const inBuf = inputs[k];
-      const { loopVars, loopBinds, indices: inIndices } = makeLoopNest(ctx, inBuf.shape);
+      const { loopVars, loopBinds, indices: inIndices, extentNodes } = makeLoopNest(ctx, inBuf.shape, inBuf);
       const outIndices = new Array(inBuf.shape.length);
       for (let d = 0; d < inBuf.shape.length; d++) {
         outIndices[d] = d === dim && offset > 0
@@ -124,7 +124,7 @@ export function register() {
       }
       const store = new BufferStoreNode(outBuf, outIndices, new BufferLoadNode(inBuf, inIndices));
       const block = new BlockNode(ctx.blockName('concat'), loopBinds, [{ buffer: inBuf }], [{ buffer: outBuf }], store);
-      stmts.push(wrapInLoops(block, loopVars, inBuf.shape));
+      stmts.push(wrapInLoops(block, loopVars, inBuf.shape, extentNodes));
       offset += inBuf.shape[dim];
     }
     return stmts.length === 1 ? stmts[0] : new SeqNode(stmts);
@@ -133,11 +133,11 @@ export function register() {
   registerLoweringRule('iota', (ctx, op, inputs, outputs) => {
     const outBuf = outputs[0];
     const iotaDim = op.getAttr('iota_dimension');
-    const { loopVars, loopBinds, indices } = makeLoopNest(ctx, outBuf.shape);
+    const { loopVars, loopBinds, indices, extentNodes } = makeLoopNest(ctx, outBuf.shape, outBuf);
     const val = new CastNode(indices[iotaDim], 'index', outBuf.dtype);
     const store = new BufferStoreNode(outBuf, indices, val);
     const block = new BlockNode(ctx.blockName('iota_block'), loopBinds, [], [{ buffer: outBuf }], store);
-    return wrapInLoops(block, loopVars, outBuf.shape);
+    return wrapInLoops(block, loopVars, outBuf.shape, extentNodes);
   });
 }
 
@@ -145,7 +145,7 @@ function lowerBroadcast(ctx, op, inputs, outputs) {
   const inBuf = inputs[0];
   const outBuf = outputs[0];
   const broadcastDims = op.getAttr('broadcast_dimensions') || [];
-  const { loopVars, loopBinds, indices: outIndices } = makeLoopNest(ctx, outBuf.shape);
+  const { loopVars, loopBinds, indices: outIndices, extentNodes } = makeLoopNest(ctx, outBuf.shape, outBuf);
   const inIndices = new Array(inBuf.shape.length);
   for (let i = 0; i < inBuf.shape.length; i++) {
     const mapped = broadcastDims.length > 0 ? broadcastDims[i] : i + (outBuf.shape.length - inBuf.shape.length);
@@ -153,5 +153,5 @@ function lowerBroadcast(ctx, op, inputs, outputs) {
   }
   const store = new BufferStoreNode(outBuf, outIndices, new BufferLoadNode(inBuf, inIndices));
   const block = new BlockNode(ctx.blockName('broadcast_block'), loopBinds, [{ buffer: inBuf }], [{ buffer: outBuf }], store);
-  return wrapInLoops(block, loopVars, outBuf.shape);
+  return wrapInLoops(block, loopVars, outBuf.shape, extentNodes);
 }

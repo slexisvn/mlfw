@@ -12,9 +12,9 @@ export function register() {
     const srcOrder = op.getAttr('src_layout');
     const dstOrder = op.getAttr('dst_layout');
 
-    const { loopVars, loopBinds, indices: outIndices } = makeLoopNest(ctx, outBuf.shape);
+    const { loopVars, loopBinds, indices: outIndices, extentNodes } = makeLoopNest(ctx, outBuf.shape, outBuf);
     const store = new BufferStoreNode(outBuf, outIndices, new BufferLoadNode(inBuf, outIndices));
     const block = new BlockNode(ctx.blockName('layout_transform_block'), loopBinds, [{ buffer: inBuf }], [{ buffer: outBuf }], store);
-    return wrapInLoops(block, loopVars, outBuf.shape);
+    return wrapInLoops(block, loopVars, outBuf.shape, extentNodes);
   });
 }

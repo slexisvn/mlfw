@@ -186,7 +186,7 @@ export function register() {
     const collapsedDims = new Set(op.getAttr('collapsed_slice_dims'));
     const startIndexMap = op.getAttr('start_index_map');
     const indexVectorDim = op.getAttr('index_vector_dim');
-    const { loopVars, loopBinds, indices: outIndices } = makeLoopNest(ctx, outBuf.shape);
+    const { loopVars, loopBinds, indices: outIndices, extentNodes } = makeLoopNest(ctx, outBuf.shape, outBuf);
 
     const batchIndices = [];
     const offsetIndices = [];
@@ -219,7 +219,7 @@ export function register() {
 
     const store = new BufferStoreNode(outBuf, outIndices, new BufferLoadNode(operandBuf, operandIndices));
     const block = new BlockNode(ctx.blockName('gather_block'), loopBinds, [{ buffer: operandBuf }, { buffer: indicesBuf }], [{ buffer: outBuf }], store);
-    return wrapInLoops(block, loopVars, outBuf.shape);
+    return wrapInLoops(block, loopVars, outBuf.shape, extentNodes);
   });
 
   registerLoweringRule('scatter', (ctx, op, inputs, outputs) => {
@@ -237,7 +237,7 @@ export function register() {
     const copyBlock = new BlockNode(ctx.blockName('scatter_copy'), copyNest.loopBinds, [{ buffer: operandBuf }], [{ buffer: outBuf }], copyStore);
     const copyBody = wrapInLoops(copyBlock, copyNest.loopVars, operandBuf.shape, copyNest.extentNodes);
 
-    const { loopVars: uVars, loopBinds: uBinds, indices: uIndices } = makeLoopNest(ctx, updatesBuf.shape, updatesBuf);
+    const { loopVars: uVars, loopBinds: uBinds, indices: uIndices, extentNodes: uExtents } = makeLoopNest(ctx, updatesBuf.shape, updatesBuf);
 
     const batchIndices = [];
     const windowIndices = [];
@@ -273,7 +273,7 @@ export function register() {
     const combined = new MathOpNode('+', existingLoad, updateLoad);
     const scatterStore = new BufferStoreNode(outBuf, operandIndices, combined);
     const scatterBlock = new BlockNode(ctx.blockName('scatter_update'), uBinds, [{ buffer: updatesBuf }, { buffer: indicesBuf }], [{ buffer: outBuf }], scatterStore);
-    const scatterBody = wrapInLoops(scatterBlock, uVars, updatesBuf.shape);
+    const scatterBody = wrapInLoops(scatterBlock, uVars, updatesBuf.shape, uExtents);
 
     return new SeqNode([copyBody, scatterBody]);
   });

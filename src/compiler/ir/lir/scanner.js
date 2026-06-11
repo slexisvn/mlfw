@@ -123,19 +123,23 @@ function computeMemoryLayout(primFunc, meta, target) {
   const align = meta.memoryLayout.alignment;
   let offset = 0;
 
+  const bufBytes = (buf) => {
+    const isDynamic = buf.shape.some(d => typeof d !== 'number' || d < 0);
+    const numel = buf.numel();
+    return isDynamic || numel < 0 ? 65536 : numel * wasmBytes(buf.dtype);
+  };
+
   for (const [, buf] of primFunc.bufferMap) {
     offset = Math.ceil(offset / align) * align;
     meta.memoryLayout.bufferOffsets.set(buf.name, offset);
-    const numel = buf.numel();
-    offset += numel < 0 ? 65536 : numel * wasmBytes(buf.dtype);
+    offset += bufBytes(buf);
   }
 
   for (const [name, buf] of meta.usedBuffers) {
     if (meta.memoryLayout.bufferOffsets.has(name)) continue;
     offset = Math.ceil(offset / align) * align;
     meta.memoryLayout.bufferOffsets.set(name, offset);
-    const numel = buf.numel();
-    offset += numel < 0 ? 65536 : numel * wasmBytes(buf.dtype);
+    offset += bufBytes(buf);
   }
 
   meta.memoryLayout.totalBytes = offset;
