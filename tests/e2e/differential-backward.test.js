@@ -261,3 +261,120 @@ describe('differential backward: multi-output fusion (different-shape results) g
     it(`${prog.name} backward on wasm matches eager`, () => checkBackward(prog, WasmTarget));
   }
 });
+
+const COMPOSITE_BWD = [
+  { name: 'cat', shape: [3, 4], fwd: (x) => M.cat([x, M.mul(x, M.tensor([[2]]))], 1) },
+  { name: 'cumsum', shape: [3, 5], fwd: (x) => M.cumsum(x, 1) },
+  { name: 'flip', shape: [3, 4], fwd: (x) => M.flip(x, 1) },
+  { name: 'roll', shape: [3, 4], fwd: (x) => M.roll(x, 1, 1) },
+  { name: 'repeat', shape: [2, 3], fwd: (x) => x.repeat(2, 1) },
+  { name: 'pad', shape: [3, 4], fwd: (x) => M.pad(x, [1, 0], [0, 2], 0) },
+  { name: 'index_select', shape: [4, 3], fwd: (x) => M.index_select(x, 0, M.tensor([2, 0, 1], { dtype: 'i32' })) },
+];
+
+function checkCompositeBackward(prog, makeTarget) {
+  const rng = mulberry32(40009 + prog.name.length * 53);
+  const flatData = Array.from({ length: numel(prog.shape) }, () => -1 + 2 * rng());
+  const fwd = (...a) => prog.fwd(...a);
+  const ins = [tensor(nest(flatData, prog.shape))];
+  const cf = compileWithBackward({ forward: fwd }, ins, { target: makeTarget() });
+  const out = cf(...ins);
+  const g = ones(Array.isArray(out) ? out[0].shape : out.shape);
+  const compiled = cf.backward(g).map((t) => flat(t));
+  const numeric = numericalGrad(fwd, [flatData.slice()], [prog.shape]);
+  for (let k = 0; k < numeric[0].length; k++) {
+    const relErr = Math.abs(numeric[0][k] - compiled[0][k]) / (1 + Math.abs(numeric[0][k]));
+    expect(relErr, `${prog.name} grad idx ${k}: num=${numeric[0][k]} comp=${compiled[0][k]}`).toBeLessThan(5e-2);
+  }
+}
+
+describe('differential backward: composite/new ops vs numerical gradient (independent oracle)', () => {
+  for (const prog of COMPOSITE_BWD) {
+    it(`${prog.name} backward on cpu matches numerical`, () => checkCompositeBackward(prog, CPUTarget));
+    it(`${prog.name} backward on wasm matches numerical`, () => checkCompositeBackward(prog, WasmTarget));
+  }
+});
+
+const EAGER_PRIM_BWD = [
+  { name: 'eager_cat_dim1', shapes: [[3, 4], [3, 2]], fwd: (x, y) => M.cat([x, y], 1) },
+  { name: 'eager_cat_dim0', shapes: [[2, 5], [3, 5]], fwd: (x, y) => M.cat([x, y], 0) },
+  { name: 'eager_cat_three', shapes: [[3, 2], [3, 1], [3, 3]], fwd: (x, y, z) => M.cat([x, y, z], 1) },
+  { name: 'eager_cat_mixed', shapes: [[3, 4]], fwd: (x) => M.cat([x, M.mul(x, M.tensor([[2, 2, 2, 2]]))], 0) },
+  { name: 'eager_clamp', shapes: [[4, 5]], lo: -1, hi: 1, fwd: (x) => M.clamp(x, -0.5, 0.5) },
+  { name: 'eager_pad', shapes: [[3, 4]], fwd: (x) => M.pad(x, [1, 0], [0, 2], 0) },
+  { name: 'eager_index_select_0', shapes: [[4, 3]], fwd: (x) => M.index_select(x, 0, M.tensor([2, 0, 1], { dtype: 'i32' })) },
+  { name: 'eager_index_select_dup', shapes: [[4, 3]], fwd: (x) => M.index_select(x, 0, M.tensor([1, 1, 3, 0], { dtype: 'i32' })) },
+  { name: 'eager_index_select_1', shapes: [[3, 5]], fwd: (x) => M.index_select(x, 1, M.tensor([4, 0, 2], { dtype: 'i32' })) },
+  { name: 'eager_where', shapes: [[3, 4]], fwd: (x) => M.where(M.gt(x, M.tensor([[0, 0, 0, 0]])), x, M.neg(x)) },
+  { name: 'eager_cumsum', shapes: [[3, 5]], fwd: (x) => M.cumsum(x, 1) },
+  { name: 'eager_flip', shapes: [[3, 4]], fwd: (x) => M.flip(x, 1) },
+  { name: 'eager_roll', shapes: [[3, 4]], fwd: (x) => M.roll(x, 1, 1) },
+  { name: 'eager_repeat', shapes: [[2, 3]], fwd: (x) => x.repeat(2, 1) },
+  { name: 'eager_split', shapes: [[3, 4]], fwd: (x) => { const p = x.split(2, 1); return M.add(p[0], p[1]); } },
+];
+
+function checkEagerVsNumerical(prog) {
+  const rng = mulberry32(50021 + prog.name.length * 41);
+  const datas = prog.shapes.map((s) => Array.from({ length: numel(s) }, () => (prog.lo ?? -1) + ((prog.hi ?? 1) - (prog.lo ?? -1)) * rng()));
+
+  const eagerInputs = datas.map((d, i) => tensor(nest(d, prog.shapes[i]), { requiresGrad: true }));
+  const eagerOut = prog.fwd(...eagerInputs);
+  sum(eagerOut).backward();
+  const eagerGrads = eagerInputs.map((x) => flat(x.grad));
+
+  const numeric = numericalGrad((...a) => prog.fwd(...a), datas.map((d) => d.slice()), prog.shapes);
+
+  for (let i = 0; i < eagerGrads.length; i++) {
+    expect(eagerGrads[i].length).toBe(numeric[i].length);
+    for (let k = 0; k < eagerGrads[i].length; k++) {
+      const relErr = Math.abs(eagerGrads[i][k] - numeric[i][k]) / (1 + Math.abs(numeric[i][k]));
+      expect(relErr, `${prog.name} grad input ${i} idx ${k}: eager=${eagerGrads[i][k]} numeric=${numeric[i][k]}`).toBeLessThan(5e-2);
+    }
+  }
+}
+
+describe('differential backward: eager autograd of jit/composite ops vs numerical (independent oracle)', () => {
+  for (const prog of EAGER_PRIM_BWD) {
+    it(`${prog.name} eager backward matches numerical`, () => checkEagerVsNumerical(prog));
+  }
+});
+
+describe('eager autograd: cumsum reverse-gradient smoking-gun + explicit masked grads', () => {
+  it('eager cumsum backward gives reverse-cumsum gradient, not all-ones', () => {
+    const x = tensor([[1, 2, 3, 4, 5]], { requiresGrad: true });
+    sum(M.cumsum(x, 1)).backward();
+    expect(flat(x.grad)).toEqual([5, 4, 3, 2, 1]);
+  });
+  it('eager clamp passes grad only inside bounds', () => {
+    const x = tensor([[0.1, -0.9, 0.3, -0.2]], { requiresGrad: true });
+    sum(M.clamp(x, -0.5, 0.5)).backward();
+    expect(flat(x.grad)).toEqual([1, 0, 1, 1]);
+  });
+  it('eager where routes grad by condition', () => {
+    const x = tensor([[0.5, -0.3, 0.8, -0.2]], { requiresGrad: true });
+    sum(M.where(M.gt(x, M.tensor([[0, 0, 0, 0]])), x, M.neg(x))).backward();
+    expect(flat(x.grad)).toEqual([1, -1, 1, -1]);
+  });
+  it('eager index_select scatter-adds duplicate selected rows', () => {
+    const x = tensor([[1, 1, 1], [2, 2, 2], [3, 3, 3], [4, 4, 4]], { requiresGrad: true });
+    sum(M.index_select(x, 0, M.tensor([1, 1, 3, 0], { dtype: 'i32' }))).backward();
+    expect(flat(x.grad)).toEqual([1, 1, 1, 2, 2, 2, 0, 0, 0, 1, 1, 1]);
+  });
+});
+
+describe('differential backward: clamp/where masked gradients (explicit, away from kinks)', () => {
+  for (const [tname, T] of [['cpu', CPUTarget], ['wasm', WasmTarget]]) {
+    it(`clamp passes grad only inside bounds on ${tname}`, () => {
+      const x = tensor([[0.1, -0.9, 0.3, -0.2]]);
+      const cf = compileWithBackward({ forward: (a) => M.clamp(a, -0.5, 0.5) }, [x], { target: T() });
+      const out = cf(x);
+      expect(cf.backward(ones(out.shape)).map(flat)[0]).toEqual([1, 0, 1, 1]);
+    });
+    it(`where routes grad by condition on ${tname}`, () => {
+      const x = tensor([[0.5, -0.3, 0.8, -0.2]]);
+      const cf = compileWithBackward({ forward: (a) => M.where(M.gt(a, M.tensor([[0, 0, 0, 0]])), a, M.neg(a)) }, [x], { target: T() });
+      const out = cf(x);
+      expect(cf.backward(ones(out.shape)).map(flat)[0]).toEqual([1, -1, 1, -1]);
+    });
+  }
+});

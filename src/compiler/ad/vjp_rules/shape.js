@@ -94,6 +94,20 @@ registerVJPRule('concat', (ctx) => {
   return grads;
 });
 
+registerVJPRule('gather', (ctx) => {
+  const grad = ctx.gradOutputs[0];
+  const [operand, indices] = ctx.operands;
+  const zero = ctx.builder.scalarConstant(0, operand.type.dtype).getResult(0);
+  const zeros = ctx.builder.broadcast(zero, operand.type.shape, []).getResult(0);
+  const gradOperand = ctx.builder.scatterAdd(zeros, indices, grad, {
+    updateWindowDims: ctx.op.getAttr('offset_dims'),
+    insertedWindowDims: ctx.op.getAttr('collapsed_slice_dims'),
+    scatterDimsToOperandDims: ctx.op.getAttr('start_index_map'),
+    indexVectorDim: ctx.op.getAttr('index_vector_dim'),
+  }).getResult(0);
+  return [gradOperand, null];
+});
+
 registerVJPRule('pad', (ctx) => {
   const grad = ctx.gradOutputs[0];
   const low = ctx.op.getAttr('low');

@@ -16,6 +16,11 @@ import {
   SliceBackward, ExpandBackward, PermuteBackward,
 } from './function/view.js';
 
+import {
+  CatBackward, ClampBackward, PadBackward,
+  IndexSelectBackward, WhereBackward,
+} from './function/indexing.js';
+
 const _registry = new Map();
 
 function _register(name, factory) {
@@ -43,6 +48,12 @@ _register('mean', () => new MeanBackward());
 
 _register('matmul', () => new MatmulBackward());
 _register('dot', () => new DotBackward());
+
+_register('cat', () => new CatBackward());
+_register('clamp', () => new ClampBackward());
+_register('pad', () => new PadBackward());
+_register('index_select', () => new IndexSelectBackward());
+_register('where', () => new WhereBackward());
 
 export function getGradFn(opName) {
   const factory = _registry.get(opName);

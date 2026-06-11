@@ -31,6 +31,8 @@ export {
   softmax, log_softmax,
 } from './tensor/ops/ops.js';
 
+export { roll, flip, cumsum, sort, topk } from './tensor/ops/composite.js';
+
 export { noGrad, enableGrad } from './autograd/grad_mode.js';
 
 export {

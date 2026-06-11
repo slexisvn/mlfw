@@ -1,4 +1,5 @@
 import * as ops from './ops.js';
+import * as composite from './composite.js';
 import { installViewOps } from '../view/view_ops.js';
 
 export function installOps(TensorClass) {
@@ -50,6 +51,12 @@ export function installOps(TensorClass) {
   proto.mm = function(other) { return ops.matmul(this, other); };
 
   proto.clone = function() { return ops.clone(this); };
+
+  proto.roll = function(shift, dim = 0) { return composite.roll(this, shift, dim); };
+  proto.flip = function(dims) { return composite.flip(this, dims); };
+  proto.cumsum = function(dim = 0) { return composite.cumsum(this, dim); };
+  proto.sort = function(dim = -1, descending = false) { return composite.sort(this, dim, descending); };
+  proto.topk = function(k, dim = -1, largest = true) { return composite.topk(this, k, dim, largest); };
 
   installViewOps(TensorClass);
 }

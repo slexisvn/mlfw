@@ -5,7 +5,7 @@ import { conv2d } from '../../src/nn/functional/conv.js';
 import { max_pool2d, avg_pool2d } from '../../src/nn/functional/pooling.js';
 import { compile } from '../../src/tracing/compile.js';
 import { CPUTarget, WasmTarget } from '../../src/backend/target.js';
-import { eq, where, gt, clamp, pad, one_hot, index_select, cat, stack } from '../../src/index.js';
+import { eq, where, gt, clamp, pad, one_hot, index_select, cat, stack, roll, flip, cumsum, sort, topk } from '../../src/index.js';
 import { isDtypeFloat } from '../../src/backend/dtype_map.js';
 
 function mulberry32(seed) {
@@ -101,6 +101,16 @@ const BOTH2 = [
   { name: 'repeat_2d', shapes: [[2, 3]], fwd: (x) => x.repeat(2, 3) },
   { name: 'repeat_1d', shapes: [[4]], fwd: (x) => x.repeat(3) },
   { name: 'tile_promote', shapes: [[3]], fwd: (x) => x.tile([2, 2]) },
+  { name: 'roll_dim1', shapes: [[3, 5]], fwd: (x) => roll(x, 2, 1) },
+  { name: 'flip_dims', shapes: [[3, 4]], fwd: (x) => flip(x, [0, 1]) },
+  { name: 'cumsum_dim1', shapes: [[3, 7]], fwd: (x) => cumsum(x, 1) },
+  { name: 'cumsum_dim0', shapes: [[5, 3]], fwd: (x) => cumsum(x, 0) },
+  { name: 'sort_last_pow2', shapes: [[3, 8]], fwd: (x) => sort(x) },
+  { name: 'sort_last_nonpow2', shapes: [[4, 5]], fwd: (x) => sort(x) },
+  { name: 'sort_last_desc', shapes: [[3, 6]], fwd: (x) => sort(x, -1, true) },
+  { name: 'sort_dim0', shapes: [[5, 4]], fwd: (x) => sort(x, 0) },
+  { name: 'topk_last', shapes: [[3, 7]], fwd: (x) => topk(x, 3) },
+  { name: 'topk_smallest', shapes: [[3, 7]], fwd: (x) => topk(x, 2, -1, false) },
 ];
 
 describe('differential nn: eager vs compiled (conv/pool/norm/dtype)', () => {
@@ -230,6 +240,68 @@ describe('composition ops: independent correctness (not eager-vs-compiled)', () 
     const out = Array.from(clamp(tensor([[-2, 0.2], [0.8, 5]]), -0.5, 0.5).contiguous().data);
     const exp = [-0.5, 0.2, 0.5, 0.5];
     for (let i = 0; i < exp.length; i++) expect(out[i]).toBeCloseTo(exp[i], 5);
+  });
+
+  it('roll shifts circularly', () => {
+    const x = tensor([[1, 2, 3, 4], [5, 6, 7, 8]]);
+    expect(Array.from(roll(x, 1, 1).contiguous().data)).toEqual([4, 1, 2, 3, 8, 5, 6, 7]);
+    expect(Array.from(roll(x, -1, 0).contiguous().data)).toEqual([5, 6, 7, 8, 1, 2, 3, 4]);
+  });
+
+  it('flip reverses along dims', () => {
+    const x = tensor([[1, 2, 3], [4, 5, 6]]);
+    expect(Array.from(flip(x, 1).contiguous().data)).toEqual([3, 2, 1, 6, 5, 4]);
+    expect(Array.from(flip(x, [0, 1]).contiguous().data)).toEqual([6, 5, 4, 3, 2, 1]);
+  });
+
+  it('cumsum accumulates prefix sums', () => {
+    const x = tensor([[1, 2, 3, 4, 5]]);
+    expect(Array.from(cumsum(x, 1).contiguous().data)).toEqual([1, 3, 6, 10, 15]);
+    const y = tensor([[1, 1], [2, 2], [3, 3]]);
+    expect(Array.from(cumsum(y, 0).contiguous().data)).toEqual([1, 1, 3, 3, 6, 6]);
+  });
+
+  const jsAsc = (a) => [...a].sort((p, q) => p - q);
+  const jsDesc = (a) => [...a].sort((p, q) => q - p);
+
+  it('sort ascending matches Array.prototype.sort (power-of-two length)', () => {
+    const rows = [[3, 1, 4, 1, 5, 9, 2, 6], [-2, -2, 0, 7, 7, 1, -8, 3]];
+    const out = Array.from(sort(tensor(rows)).contiguous().data);
+    const exp = [...jsAsc(rows[0]), ...jsAsc(rows[1])];
+    expect(out).toEqual(exp);
+  });
+
+  it('sort ascending matches Array.prototype.sort (non-power-of-two length)', () => {
+    const rows = [[5, 3, 1, 4, 2], [-1, -5, 0, 9, 9], [2, 2, 2, 1, 3]];
+    const out = Array.from(sort(tensor(rows)).contiguous().data);
+    const exp = [...jsAsc(rows[0]), ...jsAsc(rows[1]), ...jsAsc(rows[2])];
+    expect(out).toEqual(exp);
+  });
+
+  it('sort descending matches reversed Array.prototype.sort', () => {
+    const rows = [[5, 3, 1, 4, 2, 6], [-1, -5, 0, 9, 9, -3]];
+    const out = Array.from(sort(tensor(rows), -1, true).contiguous().data);
+    const exp = [...jsDesc(rows[0]), ...jsDesc(rows[1])];
+    expect(out).toEqual(exp);
+  });
+
+  it('sort along a non-last dim sorts each column', () => {
+    const x = tensor([[3, 6], [1, 4], [2, 5]]);
+    const out = Array.from(sort(x, 0).contiguous().data);
+    expect(out).toEqual([1, 4, 2, 5, 3, 6]);
+  });
+
+  it('topk largest returns sorted top-k values', () => {
+    const x = tensor([[5, 3, 1, 4, 2], [-1, -5, 0, 9, 9]]);
+    const tk = topk(x, 3);
+    expect(tk.shape).toEqual([2, 3]);
+    expect(Array.from(tk.contiguous().data)).toEqual([5, 4, 3, 9, 9, 0]);
+  });
+
+  it('topk smallest returns sorted bottom-k values', () => {
+    const x = tensor([[5, 3, 1, 4, 2], [-1, -5, 0, 9, 9]]);
+    const tk = topk(x, 2, -1, false);
+    expect(Array.from(tk.contiguous().data)).toEqual([1, 2, -5, -1]);
   });
 });
 

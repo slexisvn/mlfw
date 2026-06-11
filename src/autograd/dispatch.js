@@ -36,6 +36,11 @@ function _anyRequiresGrad(args) {
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a && a._impl && a.requiresGrad) return true;
+    if (Array.isArray(a)) {
+      for (let j = 0; j < a.length; j++) {
+        if (a[j] && a[j]._impl && a[j].requiresGrad) return true;
+      }
+    }
   }
   return false;
 }
@@ -43,7 +48,14 @@ function _anyRequiresGrad(args) {
 function _extractTensors(args) {
   const tensors = [];
   for (let i = 0; i < args.length; i++) {
-    if (args[i] && args[i]._impl) tensors.push(args[i]);
+    const a = args[i];
+    if (a && a._impl) {
+      tensors.push(a);
+    } else if (Array.isArray(a)) {
+      for (let j = 0; j < a.length; j++) {
+        if (a[j] && a[j]._impl) tensors.push(a[j]);
+      }
+    }
   }
   return tensors;
 }

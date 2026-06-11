@@ -1,0 +1,127 @@
+import { AutogradNode } from '../node.js';
+import * as ops from '../../tensor/ops/ops.js';
+import { zeros } from '../../tensor/factory/creation_ops.js';
+import { narrow, contiguous } from '../../tensor/view/view_ops.js';
+
+function _normDim(d, rank) {
+  return d < 0 ? rank + d : d;
+}
+
+export class CatBackward extends AutogradNode {
+  constructor() { super(0); }
+
+  apply(gradOutputs) {
+    const g = gradOutputs[0];
+    const args = this.opArgs();
+    const rank = g.shape.length;
+    const dim = _normDim(args && args.length > 1 ? (args[1] ?? 0) : 0, rank);
+
+    const grads = [];
+    let offset = 0;
+    let i = 0;
+    while (this.inputMetadata(i)) {
+      const meta = this.inputMetadata(i);
+      const length = meta.shape[dim];
+      grads.push(contiguous(narrow(g, dim, offset, length)));
+      offset += length;
+      i++;
+    }
+    return grads;
+  }
+}
+
+export class ClampBackward extends AutogradNode {
+  constructor() { super(3); }
+
+  apply(gradOutputs) {
+    const g = gradOutputs[0];
+    const [self, lo, hi] = this.savedTensors();
+    const z = zeros(g.shape, { dtype: g.dtype, device: g.device });
+    const geLo = ops.ge(self.detach(), lo.detach());
+    const gradAboveLo = ops.where(geLo, g, z);
+    const leHi = ops.le(self.detach(), hi.detach());
+    return [ops.where(leHi, gradAboveLo, z), null, null];
+  }
+}
+
+export class PadBackward extends AutogradNode {
+  constructor() { super(2); }
+
+  apply(gradOutputs) {
+    const g = gradOutputs[0];
+    const args = this.opArgs();
+    const low = args[2];
+    const meta = this.inputMetadata(0);
+    const inputShape = meta.shape;
+
+    let out = g;
+    for (let d = 0; d < inputShape.length; d++) {
+      const start = low[d] || 0;
+      out = narrow(out, d, start, inputShape[d]);
+    }
+    return [contiguous(out), null];
+  }
+}
+
+export class IndexSelectBackward extends AutogradNode {
+  constructor() { super(2); }
+
+  apply(gradOutputs) {
+    const g = gradOutputs[0];
+    const [, index] = this.savedTensors();
+    const meta = this.inputMetadata(0);
+    const inputShape = meta.shape;
+    const rank = inputShape.length;
+    const args = this.opArgs();
+    const dim = _normDim(args && args.length > 2 ? (args[2] ?? 0) : 0, rank);
+
+    const result = zeros(inputShape, { dtype: g.dtype, device: g.device });
+    const outData = result._impl.storage.data;
+    const resultStrides = result.strides;
+
+    const gc = contiguous(g);
+    const gData = gc._impl.storage.data;
+    const gOff = gc._impl.storageOffset;
+    const gShape = gc.shape;
+    const gStrides = gc.strides;
+
+    const idxC = contiguous(index);
+    const idxData = idxC._impl.storage.data;
+    const idxOff = idxC._impl.storageOffset;
+
+    const ndim = gShape.length;
+    const indices = new Int32Array(ndim);
+    let gi = gOff;
+
+    for (let i = 0; i < gc.numel; i++) {
+      let oi = 0;
+      for (let d = 0; d < ndim; d++) {
+        const idx = d === dim ? idxData[idxOff + indices[d]] : indices[d];
+        oi += idx * resultStrides[d];
+      }
+      outData[oi] += gData[gi];
+
+      for (let d = ndim - 1; d >= 0; d--) {
+        indices[d]++;
+        if (indices[d] < gShape[d]) { gi += gStrides[d]; break; }
+        gi -= (gShape[d] - 1) * gStrides[d];
+        indices[d] = 0;
+      }
+    }
+
+    return [result, null];
+  }
+}
+
+export class WhereBackward extends AutogradNode {
+  constructor() { super(3); }
+
+  apply(gradOutputs) {
+    const g = gradOutputs[0];
+    const [cond] = this.savedTensors();
+    const z = zeros(g.shape, { dtype: g.dtype, device: g.device });
+    const gradA = ops.where(cond.detach(), g, z);
+    const gradB = ops.where(cond.detach(), z, g);
+    return [null, gradA, gradB];
+  }
+}

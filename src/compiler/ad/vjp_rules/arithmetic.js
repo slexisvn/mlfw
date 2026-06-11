@@ -25,6 +25,31 @@ function _minMaxVJP(ctx, cmp) {
 registerVJPRule('maximum', (ctx) => _minMaxVJP(ctx, 'ge'));
 registerVJPRule('minimum', (ctx) => _minMaxVJP(ctx, 'le'));
 
+registerVJPRule('clamp', (ctx) => {
+  const grad = ctx.gradOutputs[0];
+  const [lo, x, hi] = ctx.operands;
+  const zero = ctx.builder.scalarConstant(0, x.type.dtype).getResult(0);
+  const zeroBr = ctx.builder.broadcast(zero, x.type.shape, []).getResult(0);
+  const geLo = ctx.builder.compare(x, lo, 'ge').getResult(0);
+  const gradAboveLo = ctx.builder.where(geLo, grad, zeroBr).getResult(0);
+  const leHi = ctx.builder.compare(x, hi, 'le').getResult(0);
+  const gradX = ctx.builder.where(leHi, gradAboveLo, zeroBr).getResult(0);
+  return [null, gradX, null];
+});
+
+function _whereVJP(ctx) {
+  const grad = ctx.gradOutputs[0];
+  const [cond, a] = ctx.operands;
+  const zero = ctx.builder.scalarConstant(0, a.type.dtype).getResult(0);
+  const zeroBr = ctx.builder.broadcast(zero, grad.type.shape, []).getResult(0);
+  const gradA = ctx.builder.where(cond, grad, zeroBr).getResult(0);
+  const gradB = ctx.builder.where(cond, zeroBr, grad).getResult(0);
+  return [null, gradA, gradB];
+}
+
+registerVJPRule('where', _whereVJP);
+registerVJPRule('select', _whereVJP);
+
 registerVJPRule('mul', (ctx) => {
   const grad = ctx.gradOutputs[0];
   const [lhs, rhs] = ctx.operands;
