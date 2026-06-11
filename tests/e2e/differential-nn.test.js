@@ -176,6 +176,63 @@ describe('index ops: eager vs compiled (one_hot/index_select)', () => {
   }
 });
 
+describe('composition ops: independent correctness (not eager-vs-compiled)', () => {
+  it('group_norm normalizes each group to mean~0 var~1', () => {
+    const x = tensor([[[[1, 2], [3, 4]], [[5, 6], [7, 8]], [[-2, -1], [0, 1]], [[10, 20], [30, 40]]]]);
+    const w = tensor([1, 1, 1, 1]);
+    const b = tensor([0, 0, 0, 0]);
+    const out = Array.from(group_norm(x, 2, w, b, 1e-5).contiguous().data);
+    for (const g of [out.slice(0, 8), out.slice(8, 16)]) {
+      const mean = g.reduce((a, c) => a + c, 0) / g.length;
+      const varr = g.reduce((a, c) => a + (c - mean) * (c - mean), 0) / g.length;
+      expect(Math.abs(mean)).toBeLessThan(1e-4);
+      expect(Math.abs(varr - 1)).toBeLessThan(2e-3);
+    }
+  });
+
+  it('group_norm affine applies per-channel weight/bias', () => {
+    const x = tensor([[[[1, 2]], [[3, 4]]]]);
+    const w = tensor([2, 3]);
+    const b = tensor([10, 20]);
+    const out = Array.from(group_norm(x, 1, w, b, 1e-5).contiguous().data);
+    const base = Array.from(group_norm(x, 1, tensor([1, 1]), tensor([0, 0]), 1e-5).contiguous().data);
+    expect(out[0]).toBeCloseTo(base[0] * 2 + 10, 4);
+    expect(out[2]).toBeCloseTo(base[2] * 3 + 20, 4);
+  });
+
+  it('repeat tiles values in PyTorch order', () => {
+    const x = tensor([[1, 2], [3, 4]]);
+    expect(Array.from(x.repeat(2, 3).contiguous().data)).toEqual(
+      [1, 2, 1, 2, 1, 2, 3, 4, 3, 4, 3, 4, 1, 2, 1, 2, 1, 2, 3, 4, 3, 4, 3, 4]);
+    expect(x.repeat(2, 3).shape).toEqual([4, 6]);
+  });
+
+  it('split/chunk produce correct pieces and shapes', () => {
+    const x = tensor([[1, 2, 3, 4, 5]]);
+    const parts = x.split([2, 3], 1);
+    expect(parts.map((p) => Array.from(p.contiguous().data))).toEqual([[1, 2], [3, 4, 5]]);
+    const c = tensor([[1, 2, 3, 4, 5]]).chunk(2, 1);
+    expect(c.map((p) => p.shape[1])).toEqual([3, 2]);
+  });
+
+  it('index_select gathers rows', () => {
+    const x = tensor([[0, 1], [10, 11], [20, 21]]);
+    const out = index_select(x, 0, tensor([2, 0], { dtype: 'i32' }));
+    expect(Array.from(out.contiguous().data)).toEqual([20, 21, 0, 1]);
+  });
+
+  it('one_hot sets exactly one position per index', () => {
+    const out = Array.from(one_hot(tensor([0, 2, 1], { dtype: 'i32' }), 3).contiguous().data);
+    expect(out).toEqual([1, 0, 0, 0, 0, 1, 0, 1, 0]);
+  });
+
+  it('clamp bounds values', () => {
+    const out = Array.from(clamp(tensor([[-2, 0.2], [0.8, 5]]), -0.5, 0.5).contiguous().data);
+    const exp = [-0.5, 0.2, 0.5, 0.5];
+    for (let i = 0; i < exp.length; i++) expect(out[i]).toBeCloseTo(exp[i], 5);
+  });
+});
+
 describe('eager where with bool-dtype condition uses operand dtype for output', () => {
   it('does not wrap float operands through the condition dtype', () => {
     const cond = tensor([[1, 0], [0, 1]], { dtype: 'bool' });
