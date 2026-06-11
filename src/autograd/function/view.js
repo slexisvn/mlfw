@@ -71,6 +71,49 @@ export class SliceBackward extends AutogradNode {
   }
 }
 
+export class SelectBackward extends AutogradNode {
+  constructor(dim, index) {
+    super(1);
+    this._dim = dim;
+    this._index = index;
+  }
+
+  apply(gradOutputs) {
+    const g = gradOutputs[0];
+    const meta = this.inputMetadata(0);
+    const result = zeros(meta.shape, { dtype: g.dtype, device: g.device });
+
+    const outData = result._impl.storage.data;
+    const gData = g._impl.storage.data;
+    const gOff = g._impl.storageOffset;
+    const gShape = g.shape;
+    const gStrides = g.strides;
+    const resultStrides = result.strides;
+
+    const gndim = gShape.length;
+    const indices = new Int32Array(gndim);
+    let gi = gOff;
+
+    for (let i = 0; i < g.numel; i++) {
+      let oi = this._index * resultStrides[this._dim];
+      for (let d = 0; d < gndim; d++) {
+        const od = d < this._dim ? d : d + 1;
+        oi += indices[d] * resultStrides[od];
+      }
+      outData[oi] += gData[gi];
+
+      for (let d = gndim - 1; d >= 0; d--) {
+        indices[d]++;
+        if (indices[d] < gShape[d]) { gi += gStrides[d]; break; }
+        gi -= (gShape[d] - 1) * gStrides[d];
+        indices[d] = 0;
+      }
+    }
+
+    return [result];
+  }
+}
+
 export class ExpandBackward extends AutogradNode {
   constructor() { super(1); }
 

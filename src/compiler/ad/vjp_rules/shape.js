@@ -57,16 +57,18 @@ registerVJPRule('slice', (ctx) => {
   const grad = ctx.gradOutputs[0];
   const [input] = ctx.operands;
   const starts = ctx.op.getAttr('starts');
-  const limits = ctx.op.getAttr('limits');
   const inputShape = input.type.shape;
+  const gradShape = grad.type.shape;
+  const strides = ctx.op.getAttr('strides') || inputShape.map(() => 1);
   const dtype = input.type.dtype;
 
   const low = [...starts];
   const high = new Array(inputShape.length);
+  const interior = new Array(inputShape.length);
   for (let i = 0; i < inputShape.length; i++) {
-    high[i] = inputShape[i] - limits[i];
+    interior[i] = strides[i] - 1;
+    high[i] = inputShape[i] - starts[i] - (gradShape[i] - 1) * strides[i] - 1;
   }
-  const interior = new Array(inputShape.length).fill(0);
 
   const paddingValue = ctx.builder.scalarConstant(0, dtype).getResult(0);
   return [ctx.builder.pad(grad, paddingValue, low, high, interior).getResult(0)];

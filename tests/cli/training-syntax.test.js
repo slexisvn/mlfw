@@ -399,6 +399,20 @@ train_data, test_data = train_test_split(data, test_size=0.3)
     expect(test.numRows).toBe(6);
     expect(train.numRows).toBe(14);
   });
+
+  it('encodes a split with fitted classes', async () => {
+    const runtime = new TeraRuntime({ output: () => {} });
+    await runtime.execute(`
+data = load_csv("tests/cli/fixtures/iris_sample.csv")
+y, classes = data.select("species").encode("species")
+reversed = data.slice(0, 3).select("species")
+y_split, _ = reversed.encode("species", classes=classes)
+`);
+    const classes = runtime.getVariable('classes');
+    const ySplit = runtime.getVariable('y_split').toArray();
+    expect(classes).toEqual(['setosa', 'versicolor', 'virginica']);
+    expect(ySplit).toEqual([0, 0, 1]);
+  });
 });
 
 describe('End-to-end — DSL training', () => {

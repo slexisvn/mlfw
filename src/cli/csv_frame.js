@@ -93,16 +93,21 @@ export class CsvFrame {
     return tensorFn(flat, { shape: [frame._numRows, frame._columns.length] });
   }
 
-  encode(nameOrIndex) {
+  encode(nameOrIndex, knownClasses = null) {
     const col = this.column(nameOrIndex);
     const classMap = new Map();
-    const classes = [];
+    const classes = knownClasses ? [...knownClasses] : [];
+    for (let i = 0; i < classes.length; i++) {
+      const key = typeof classes[i] === 'number' ? String(classes[i]) : classes[i];
+      classMap.set(key, i);
+    }
     const encoded = new Float32Array(col.length);
     for (let i = 0; i < col.length; i++) {
       const val = col[i];
       const key = typeof val === 'number' ? String(val) : val;
       let idx = classMap.get(key);
       if (idx === undefined) {
+        if (knownClasses) throw new Error(`Unknown class '${val}' not present in fitted classes`);
         idx = classes.length;
         classMap.set(key, idx);
         classes.push(val);

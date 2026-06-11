@@ -19,14 +19,20 @@ let _GradMode = null;
 let _ReshapeBackward = null;
 let _TransposeBackward = null;
 let _PermuteBackward = null;
+let _SliceBackward = null;
+let _ExpandBackward = null;
+let _SelectBackward = null;
 let _GradAccumulator = null;
 
-export function _initViewAutograd(GradMode, ReshapeBackward, TransposeBackward, PermuteBackward, GradAccumulator) {
-  _GradMode = GradMode;
-  _ReshapeBackward = ReshapeBackward;
-  _TransposeBackward = TransposeBackward;
-  _PermuteBackward = PermuteBackward;
-  _GradAccumulator = GradAccumulator;
+export function _initViewAutograd(reg) {
+  _GradMode = reg.GradMode;
+  _ReshapeBackward = reg.ReshapeBackward;
+  _TransposeBackward = reg.TransposeBackward;
+  _PermuteBackward = reg.PermuteBackward;
+  _SliceBackward = reg.SliceBackward;
+  _ExpandBackward = reg.ExpandBackward;
+  _SelectBackward = reg.SelectBackward;
+  _GradAccumulator = reg.GradAccumulator;
 }
 
 function _wrapWithAutograd(srcTensor, resultTensor, BackwardClass, ...ctorArgs) {
@@ -140,7 +146,9 @@ export function expand(tensor, targetShape) {
     return _traceView(tensor, 'broadcast_in_dim', { result_shape: resultShape, broadcast_dimensions: broadcastDimensions });
   }
   const { sizes, strides } = computeExpand(tensor.shape, tensor.strides, targetShape);
-  return _makeView(tensor, sizes, strides, 0);
+  const out = _makeView(tensor, sizes, strides, 0);
+  if (_ExpandBackward) _wrapWithAutograd(tensor, out, _ExpandBackward);
+  return out;
 }
 
 function _sliceAttrs(shape, dim, start, end, step) {
@@ -171,7 +179,12 @@ export function slice(tensor, dim, start, end, step) {
   const { sizes, strides, offsetDelta } = computeSlice(
     tensor.shape, tensor.strides, dim, start, end, step
   );
-  return _makeView(tensor, sizes, strides, offsetDelta);
+  const out = _makeView(tensor, sizes, strides, offsetDelta);
+  if (_SliceBackward) {
+    const a = _sliceAttrs(tensor.shape, dim, start, end, step);
+    _wrapWithAutograd(tensor, out, _SliceBackward, a.d, a.starts[a.d], a.limits[a.d], a.strides[a.d]);
+  }
+  return out;
 }
 
 export function unsqueeze(tensor, dim) {
@@ -183,7 +196,9 @@ export function unsqueeze(tensor, dim) {
     return _traceView(tensor, 'reshape', { new_shape: newShape });
   }
   const { sizes, strides } = computeUnsqueeze(tensor.shape, tensor.strides, dim);
-  return _makeView(tensor, sizes, strides, 0);
+  const out = _makeView(tensor, sizes, strides, 0);
+  if (_ReshapeBackward) _wrapWithAutograd(tensor, out, _ReshapeBackward);
+  return out;
 }
 
 export function squeeze(tensor, dim) {
@@ -192,7 +207,9 @@ export function squeeze(tensor, dim) {
     return _traceView(tensor, 'reshape', { new_shape: sizes });
   }
   const { sizes, strides } = computeSqueeze(tensor.shape, tensor.strides, dim);
-  return _makeView(tensor, sizes, strides, 0);
+  const out = _makeView(tensor, sizes, strides, 0);
+  if (_ReshapeBackward) _wrapWithAutograd(tensor, out, _ReshapeBackward);
+  return out;
 }
 
 export function narrow(tensor, dim, start, length) {
@@ -203,7 +220,12 @@ export function narrow(tensor, dim, start, length) {
   const { sizes, strides, offsetDelta } = computeNarrow(
     tensor.shape, tensor.strides, dim, start, length
   );
-  return _makeView(tensor, sizes, strides, offsetDelta);
+  const out = _makeView(tensor, sizes, strides, offsetDelta);
+  if (_SliceBackward) {
+    const a = _sliceAttrs(tensor.shape, dim, start, start + length, 1);
+    _wrapWithAutograd(tensor, out, _SliceBackward, a.d, a.starts[a.d], a.limits[a.d], a.strides[a.d]);
+  }
+  return out;
 }
 
 export function select(tensor, dim, index) {
@@ -219,11 +241,21 @@ export function select(tensor, dim, index) {
   const { sizes, strides, offsetDelta } = computeSelect(
     tensor.shape, tensor.strides, dim, index
   );
-  return _makeView(tensor, sizes, strides, offsetDelta);
+  const out = _makeView(tensor, sizes, strides, offsetDelta);
+  if (_SelectBackward) {
+    const rank = tensor.shape.length;
+    const d = dim < 0 ? rank + dim : dim;
+    const idx = index < 0 ? tensor.shape[d] + index : index;
+    _wrapWithAutograd(tensor, out, _SelectBackward, d, idx);
+  }
+  return out;
 }
 
 export function contiguous(tensor) {
-  if (tensor.isContiguous) return tensor;
+  const impl = tensor._impl;
+  if (tensor.isContiguous && impl.storageOffset === 0 && impl.storage.data.length === tensor.numel) {
+    return tensor;
+  }
   return _copyContiguous(tensor);
 }
 

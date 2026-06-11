@@ -7,6 +7,21 @@
   - Test: `tests/e2e/differential-nn.test.js` (+max_i32_neg, +min_i32_pos), fuzz-differential.test.js.
 - **Chưa commit git.** Full e2e + AD: 413 passed.
 
+### Fix batched/broadcast matmul (P0 rank≠2) — đã xong
+- Bug: matmul N-D sai cả shape lẫn giá trị khi batch-dim cần broadcast (vd `[1,3,4]@[5,4,2]` ra `[1,3,2]`),
+  và `lhs2D @ rhsND` sai thứ tự dim. Eager & compiled CÙNG sai (cùng builder) nên differential eager-vs-compiled
+  KHÔNG bắt được — phải dùng oracle độc lập (ref bmm thuần JS).
+- Nguyên nhân: `builder.matmul` chỉ xử lý 2D×2D và 3D×3D-equal-batch; còn lại fallback dot không có batch.
+  Sau khi cho matmul tự broadcast batch (chèn `broadcast_in_dim`) thì lộ bug 2: `broadcast_in_dim` được hạ
+  thành VIEW (set `srcBuf.broadcastDims`, map result→buffer gốc), nhưng `buildDotGeometry` không tôn trọng
+  `broadcastDims` → extent contracting = `lhs.shape[dim]` ra undefined → vòng lặp không chạy → ra 0.
+- Code:
+  - `src/tensor/utils/shape_utils.js`: thêm `matmulOutputShape` (semantics PyTorch, rank-promote 1D + broadcast batch).
+  - `src/compiler/ir/graph/builder.js`: `matmul` rewrite — promote 1D, broadcast batch qua `broadcast_in_dim`, dot với batch dims; squeeze lại dim 1D. Thêm helper `bcastBatchDims` + `_broadcastBatch`.
+  - `src/dispatcher/jit_dispatch.js` + `src/tensor/native/meta/meta_ops.js`: dùng chung `matmulOutputShape`.
+  - `src/compiler/passes/lowering/lowering_registry.js`: `buildDotGeometry` dùng LOGICAL shape (operand type) cho extent/dim, remap chỉ số vật lý qua `broadcastDims` (helper `physicalDotIndices`).
+- Test (oracle độc lập, không hardcode): `tests/e2e/compiler/linalg-pipeline.test.js` — 12 case tường minh + fuzz 120 prog so với `bmmRef` thuần JS. Revert fix → RED, apply lại → GREEN.
+
 ## Fuzzer mới quét được (phạm vi hẹp)
 - Op: unary/binary(+broadcast row/col)/matmul-2D/reduce(sum,mean,max,min).
 - Shape: chỉ 2D, dim 2–6, chain 2–6 op. Dtype: f32 + i32. Backend: CPU + WASM.
@@ -14,9 +29,34 @@
 ## Việc tiếp theo — ưu tiên cao → thấp
 
 ### P0 — mở rộng generator (mật độ bug lịch sử cao nhất ở đây)
-- [ ] Rank ≠ 2: 0D scalar, 1D, 3D/4D+, batched matmul, broadcast nhiều chiều (cả unsqueeze ngầm).
-- [ ] View-ops trong chain: reshape / transpose / permute / expand / slice (có step) / squeeze / unsqueeze / narrow / select / flatten. Trộn view + compute để bắt lỗi stride/contiguous.
-- [ ] Backward/autodiff: fuzz random graph rồi so gradient eager vs compiled (giờ mới chỉ fuzz forward). Gồm cả double-backward (grad of grad).
+- [x] Rank ≠ 2: batched matmul + broadcast nhiều chiều, + 0D/1D/3D/4D cho unary/binary/reduce + view-ops. Fuzzer `fuzz-differential.test.js` (block "N-D + view-ops", 400 prog × cpu+wasm) xanh.
+- [x] View-ops trong chain: reshape/transpose/permute/expand/slice(step)/squeeze/unsqueeze/narrow/select/flatten — đã có trong N-D fuzzer, trộn với compute.
+- [~] Backward/autodiff: fuzzer mới `differential-backward.test.js` (block "fuzz backward ... numerical finite-difference", 200 prog, oracle ĐỘC LẬP = numerical grad). VJP/AD đã đúng 100% (200/200). CÒN double-backward (grad of grad) chưa fuzz.
+
+### Bug đã fix đợt này (2026-06-10, đợt 2)
+> Forward N-D/view fuzzer + backward numerical fuzzer quét ra một loạt bug. Đã fix (ko comment/hardcode/O(n²)):
+- **matmul N-D broadcast** (sai shape+value): `shape_utils.matmulOutputShape`, `builder.matmul` (promote 1D + broadcast batch qua broadcast_in_dim + dot), `buildDotGeometry` tôn trọng `broadcastDims`. Test: linalg-pipeline.
+- **contiguous()/tensorToContiguous bỏ qua offset/stride của view** (select/slice-step ra data sai/thừa): `view_ops.contiguous`, `jit_dispatch.tensorToContiguous` chỉ fast-path khi offset==0 && storage.len==numel.
+- **broadcast_in_dim hạ thành VIEW nhưng consumer ko phải elementwise/dot ko tôn trọng broadcastDims** (slice/reshape... đọc sai → 0/NaN): `graph_to_tensor` chỉ giữ view khi mọi consumer ∈ `BROADCAST_VIEW_SAFE`, còn lại materialize.
+- **slice VJP bỏ qua step** (grad sai khi step>1): `vjp_rules/shape.js` pad interior=step-1, high tính theo gradShape.
+- **eager autograd view-ops ko ghi backward** (slice/expand/squeeze/unsqueeze/narrow/select share grad của source → grad sai shape/value): wire `_wrapWithAutograd` + `SelectBackward` mới (`autograd/function/view.js`, `view_ops.js`, `dispatch.js`).
+- **ReluBackward đọc raw storage của view đã lưu** (mask sai): `unary.js` dùng `.contiguous()`.
+- **reduce(sum/mean) VJP dùng broadcast_dimensions có lỗ [1,2]** → kích fusion-bug; đổi sang reshape-về-keepdim rồi broadcast identity (`vjp_rules/reduction.js`).
+- **grad của operand bị broadcast ko reduce về shape gốc** (grad sai N lần): `backward_builder.reduceGradToOperandShape` sum các broadcast-dims.
+- **2 return-value trỏ cùng buffer → chỉ ghi 1, cái kia = 0**: `graph_to_tensor` cấp buffer mới + copy khi srcBuf trùng (`usedReturnBuffers`).
+- **lowering theo block-order, ko topo** → consumer (copy của reshape) emit TRƯỚC producer (reduce) ⇒ đọc buffer chưa ghi = 0: `graph_to_tensor.topologicalOps` hạ ops theo thứ tự topo.
+
+### BUG CÒN LẠI — fusion + broadcast index remap (P0, chưa fix)
+> Repro tối thiểu (forward, ko cần backward):
+> ```
+> f([3]) -> (sum(g,[0])->[1], sum(neg(g),[0])->[1])   // 2 reduce CHUNG input
+> // fusion ON: r1 = 0 (sai), r2 = -6 (đúng). fusion OFF: đúng cả hai.
+> ```
+> Và: `mul(mean(x,axis),y_broadcast)` backward bị TRANSPOSE trục khi fusion ON (mean+broadcasting-mul).
+> Bản chất: kernel sau fusion map sai chỉ số khi broadcast_in_dim đổi rank quanh op elementwise có broadcast,
+> hoặc multi-output reduce chung input. Đã thử chặn fuse producer→broadcast consumer → chỉ DỜI bug, ko khỏi.
+> AD/VJP math đã đúng (numerical 200/200 khi tắt fusion). Backward numerical fuzzer tạm tắt fusion để cô lập.
+> → Cần sửa trong tầng fusion lowering (`passes/fusion/*`, `lowering/rules/fusion.js`): per-op index space khi rank đổi.
 
 ### P1 — dtype & op còn trống
 - [ ] f64 (mới test lẻ), f16/bf16 (lỗi rounding/denormal hay ẩn ở đây).

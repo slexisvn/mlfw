@@ -3,9 +3,59 @@ import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
 import { CPUTarget } from '../../../src/backend/target.js';
+import { matmulOutputShape } from '../../../src/tensor/utils/shape_utils.js';
 
 function compile(func, opts = {}) {
   return compileGraph(func, CPUTarget(), opts);
+}
+
+function rng32(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function bmmRef(aShape, aData, bShape, bData) {
+  const a2 = aShape.length === 1 ? [1, aShape[0]] : aShape;
+  const b2 = bShape.length === 1 ? [bShape[0], 1] : bShape;
+  const M = a2[a2.length - 2], K = a2[a2.length - 1], N = b2[b2.length - 1];
+  const aBatch = a2.slice(0, -2), bBatch = b2.slice(0, -2);
+  const nb = Math.max(aBatch.length, bBatch.length);
+  const batch = [];
+  for (let i = 0; i < nb; i++) {
+    const av = aBatch[aBatch.length - nb + i] ?? 1;
+    const bv = bBatch[bBatch.length - nb + i] ?? 1;
+    batch.push(Math.max(av, bv));
+  }
+  const total = batch.reduce((x, y) => x * y, 1);
+  const out = [];
+  const offsetFor = (bShapeArr, coords) => {
+    let off = 0;
+    for (let d = 0; d < bShapeArr.length; d++) {
+      const coord = bShapeArr[d] === 1 ? 0 : coords[nb - bShapeArr.length + d];
+      off = off * bShapeArr[d] + coord;
+    }
+    return off;
+  };
+  const coords = new Array(nb).fill(0);
+  for (let t = 0; t < total; t++) {
+    let rem = t;
+    for (let d = nb - 1; d >= 0; d--) { coords[d] = rem % batch[d]; rem = Math.floor(rem / batch[d]); }
+    const aOff = offsetFor(aBatch, coords) * M * K;
+    const bOff = offsetFor(bBatch, coords) * K * N;
+    for (let i = 0; i < M; i++) {
+      for (let j = 0; j < N; j++) {
+        let s = 0;
+        for (let k = 0; k < K; k++) s += aData[aOff + i * K + k] * bData[bOff + k * N + j];
+        out.push(s);
+      }
+    }
+  }
+  return out;
 }
 
 describe('matmul end-to-end', () => {
@@ -55,6 +105,90 @@ describe('matmul end-to-end', () => {
     const c = new Float32Array(1);
     result.run('dot_prod', a, b, c);
     expect(c[0]).toBe(70);
+  });
+});
+
+describe('batched / broadcast matmul vs independent reference', () => {
+  const cases = [
+    [[2, 3, 4], [2, 4, 5]],
+    [[1, 3, 4], [5, 4, 2]],
+    [[5, 3, 4], [1, 4, 2]],
+    [[2, 1, 3, 4], [2, 5, 4, 6]],
+    [[3, 1, 2, 4], [5, 4, 6]],
+    [[3, 4], [2, 4, 5]],
+    [[2, 3, 4], [4, 5]],
+    [[4], [2, 4, 5]],
+    [[2, 3, 4], [4]],
+    [[3, 4], [4]],
+    [[4], [4, 5]],
+    [[4], [4]],
+  ];
+  for (const [aShape, bShape] of cases) {
+    it(`${JSON.stringify(aShape)} @ ${JSON.stringify(bShape)}`, () => {
+      const numel = (s) => s.reduce((x, y) => x * y, 1);
+      const r = rng32(7919 + aShape.length * 131 + bShape.length);
+      const aData = Float32Array.from({ length: numel(aShape) }, () => -1 + 2 * r());
+      const bData = Float32Array.from({ length: numel(bShape) }, () => -1 + 2 * r());
+      const outShape = matmulOutputShape(aShape, bShape);
+      const func = buildFunction('bmm', [new TensorType(aShape, ScalarType.F32), new TensorType(bShape, ScalarType.F32)], [new TensorType(outShape, ScalarType.F32)], (b, args) => {
+        b.returnOp([b.matmul(args[0], args[1]).getResult(0)]);
+      });
+      const result = compile(func);
+      expect(result.succeeded).toBe(true);
+      const out = new Float32Array(Math.max(numel(outShape), 1));
+      result.run('bmm', aData, bData, out);
+      const ref = bmmRef(aShape, aData, bShape, bData);
+      expect(out.length).toBe(ref.length);
+      for (let i = 0; i < ref.length; i++) {
+        expect(Math.abs(out[i] - ref[i])).toBeLessThan(1e-3);
+      }
+    });
+  }
+});
+
+describe('fuzz: random N-D broadcast matmul vs independent reference', () => {
+  function genShapes(r) {
+    const ri = (lo, hi) => lo + Math.floor(r() * (hi - lo + 1));
+    const M = ri(1, 5), K = ri(1, 5), N = ri(1, 5);
+    const nBatch = ri(0, 3);
+    const aBatch = [], bBatch = [];
+    for (let i = 0; i < nBatch; i++) {
+      const d = ri(1, 4);
+      const mode = ri(0, 2);
+      aBatch.push(mode === 1 ? 1 : d);
+      bBatch.push(mode === 2 ? 1 : d);
+    }
+    let aShape = [...aBatch, M, K];
+    let bShape = [...bBatch, K, N];
+    const drop = ri(0, 3);
+    if (drop === 1 && aShape.length === 2) aShape = [K];
+    else if (drop === 2 && bShape.length === 2) bShape = [K];
+    return [aShape, bShape];
+  }
+
+  it('120 random programs match the reference', () => {
+    const numel = (s) => s.reduce((x, y) => x * y, 1);
+    const fails = [];
+    for (let s = 0; s < 120; s++) {
+      const r = rng32(424242 + s * 2654435761);
+      const [aShape, bShape] = genShapes(r);
+      const aData = Float32Array.from({ length: numel(aShape) }, () => -1 + 2 * r());
+      const bData = Float32Array.from({ length: numel(bShape) }, () => -1 + 2 * r());
+      const outShape = matmulOutputShape(aShape, bShape);
+      const func = buildFunction('fz', [new TensorType(aShape, ScalarType.F32), new TensorType(bShape, ScalarType.F32)], [new TensorType(outShape, ScalarType.F32)], (b, args) => {
+        b.returnOp([b.matmul(args[0], args[1]).getResult(0)]);
+      });
+      const result = compile(func);
+      if (!result.succeeded) { fails.push(`s=${s} ${JSON.stringify(aShape)}@${JSON.stringify(bShape)} compile failed`); continue; }
+      const out = new Float32Array(Math.max(numel(outShape), 1));
+      result.run('fz', aData, bData, out);
+      const ref = bmmRef(aShape, aData, bShape, bData);
+      if (out.length !== ref.length) { fails.push(`s=${s} len ${out.length}!=${ref.length}`); continue; }
+      for (let i = 0; i < ref.length; i++) {
+        if (Math.abs(out[i] - ref[i]) > 1e-3) { fails.push(`s=${s} ${JSON.stringify(aShape)}@${JSON.stringify(bShape)} idx${i} ${out[i]} vs ${ref[i]}`); break; }
+      }
+    }
+    expect(fails, fails.slice(0, 8).join('\n')).toEqual([]);
   });
 });
 

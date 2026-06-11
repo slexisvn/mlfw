@@ -228,22 +228,34 @@ export function parseLayout(str) {
   return m;
 }
 
+function physicalDotIndices(buf, logicalIdx) {
+  if (!buf.broadcastDims) return logicalIdx;
+  const dims = buf.broadcastDims;
+  const idx = new Array(buf.shape.length);
+  for (let j = 0; j < buf.shape.length; j++) {
+    idx[j] = buf.shape[j] === 1 ? new IntImmNode(0) : logicalIdx[dims[j]];
+  }
+  return idx;
+}
+
 export function buildDotGeometry(ctx, op, lhs, rhs) {
   const lhsContracting = op.getAttr('lhs_contracting') || [];
   const rhsContracting = op.getAttr('rhs_contracting') || [];
   const lhsBatch = op.getAttr('lhs_batch') || [];
   const rhsBatch = op.getAttr('rhs_batch') || [];
+  const lhsShape = op.getOperand(0).type.shape;
+  const rhsShape = op.getOperand(1).type.shape;
   const lhsCSet = new Set(lhsContracting);
   const lhsBSet = new Set(lhsBatch);
   const rhsCSet = new Set(rhsContracting);
   const rhsBSet = new Set(rhsBatch);
 
   const lhsSpatial = [];
-  for (let i = 0; i < lhs.shape.length; i++) {
+  for (let i = 0; i < lhsShape.length; i++) {
     if (!lhsCSet.has(i) && !lhsBSet.has(i)) lhsSpatial.push(i);
   }
   const rhsSpatial = [];
-  for (let i = 0; i < rhs.shape.length; i++) {
+  for (let i = 0; i < rhsShape.length; i++) {
     if (!rhsCSet.has(i) && !rhsBSet.has(i)) rhsSpatial.push(i);
   }
 
@@ -260,31 +272,35 @@ export function buildDotGeometry(ctx, op, lhs, rhs) {
     extractIterVars(bIvs), extractIterVars(lsIvs), extractIterVars(rsIvs)
   );
 
-  const lhsIdx = new Array(lhs.shape.length);
-  for (let i = 0; i < lhsBatch.length; i++) lhsIdx[lhsBatch[i]] = bIvs[i].iterVar;
-  for (let i = 0; i < lhsSpatial.length; i++) lhsIdx[lhsSpatial[i]] = lsIvs[i].iterVar;
-  for (let i = 0; i < lhsContracting.length; i++) lhsIdx[lhsContracting[i]] = cIvs[i].iterVar;
+  const lhsLogical = new Array(lhsShape.length);
+  for (let i = 0; i < lhsBatch.length; i++) lhsLogical[lhsBatch[i]] = bIvs[i].iterVar;
+  for (let i = 0; i < lhsSpatial.length; i++) lhsLogical[lhsSpatial[i]] = lsIvs[i].iterVar;
+  for (let i = 0; i < lhsContracting.length; i++) lhsLogical[lhsContracting[i]] = cIvs[i].iterVar;
 
-  const rhsIdx = new Array(rhs.shape.length);
-  for (let i = 0; i < rhsBatch.length; i++) rhsIdx[rhsBatch[i]] = bIvs[i].iterVar;
-  for (let i = 0; i < rhsSpatial.length; i++) rhsIdx[rhsSpatial[i]] = rsIvs[i].iterVar;
-  for (let i = 0; i < rhsContracting.length; i++) rhsIdx[rhsContracting[i]] = cIvs[i].iterVar;
+  const rhsLogical = new Array(rhsShape.length);
+  for (let i = 0; i < rhsBatch.length; i++) rhsLogical[rhsBatch[i]] = bIvs[i].iterVar;
+  for (let i = 0; i < rhsSpatial.length; i++) rhsLogical[rhsSpatial[i]] = rsIvs[i].iterVar;
+  for (let i = 0; i < rhsContracting.length; i++) rhsLogical[rhsContracting[i]] = cIvs[i].iterVar;
+
+  const lhsIdx = physicalDotIndices(lhs, lhsLogical);
+  const rhsIdx = physicalDotIndices(rhs, rhsLogical);
 
   const allIvs = concatIterVars(bIvs, lsIvs, rsIvs, cIvs);
 
   const loopGroups = [
-    { vars: bVars, dims: lhsBatch, buf: lhs },
-    { vars: lsVars, dims: lhsSpatial, buf: lhs },
-    { vars: rsVars, dims: rhsSpatial, buf: rhs },
-    { vars: cVars, dims: lhsContracting, buf: lhs },
+    { vars: bVars, dims: lhsBatch, shape: lhsShape, buf: lhs },
+    { vars: lsVars, dims: lhsSpatial, shape: lhsShape, buf: lhs },
+    { vars: rsVars, dims: rhsSpatial, shape: rhsShape, buf: rhs },
+    { vars: cVars, dims: lhsContracting, shape: lhsShape, buf: lhs },
   ];
 
   function wrapAccBody(body) {
     let result = body;
     for (let g = loopGroups.length - 1; g >= 0; g--) {
-      const { vars, dims, buf } = loopGroups[g];
+      const { vars, dims, shape, buf } = loopGroups[g];
       for (let i = vars.length - 1; i >= 0; i--) {
-        result = new ForNode(vars[i], new IntImmNode(0), ctx.extentNode(buf.shape[dims[i]], buf, dims[i]), ForKind.SERIAL, result);
+        const extent = buf.broadcastDims ? new IntImmNode(shape[dims[i]]) : ctx.extentNode(shape[dims[i]], buf, dims[i]);
+        result = new ForNode(vars[i], new IntImmNode(0), extent, ForKind.SERIAL, result);
       }
     }
     return result;

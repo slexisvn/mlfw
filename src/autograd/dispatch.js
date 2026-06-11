@@ -10,10 +10,13 @@ import { Tensor } from '../tensor/core/tensor.js';
 import { setAutogradEngine } from '../tensor/core/tensor.js';
 import { backward } from './engine.js';
 import { _initViewAutograd } from '../tensor/view/view_ops.js';
-import { ReshapeBackward, TransposeBackward, PermuteBackward } from './function/view.js';
+import { ReshapeBackward, TransposeBackward, PermuteBackward, SliceBackward, ExpandBackward, SelectBackward } from './function/view.js';
 
 setAutogradEngine({ backward });
-_initViewAutograd(GradMode, ReshapeBackward, TransposeBackward, PermuteBackward, GradAccumulator);
+_initViewAutograd({
+  GradMode, ReshapeBackward, TransposeBackward, PermuteBackward,
+  SliceBackward, ExpandBackward, SelectBackward, GradAccumulator,
+});
 
 function _snapshotTensor(t) {
   const impl = t._impl;

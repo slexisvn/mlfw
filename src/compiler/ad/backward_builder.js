@@ -5,6 +5,29 @@ import { UseDefAnalysis } from '../analysis/use_def.js';
 import { GradAccumulator } from './grad_accumulator.js';
 import { getVJPRule } from './vjp_registry.js';
 
+function reduceGradToOperandShape(builder, grad, targetShape) {
+  const gradShape = grad.type.shape;
+  if (gradShape.length === targetShape.length && gradShape.every((d, i) => d === targetShape[i])) {
+    return grad;
+  }
+  const nExtra = gradShape.length - targetShape.length;
+  const dims = [];
+  for (let i = 0; i < nExtra; i++) dims.push(i);
+  for (let i = 0; i < targetShape.length; i++) {
+    if (targetShape[i] === 1 && gradShape[nExtra + i] !== 1) dims.push(nExtra + i);
+  }
+  let g = grad;
+  if (dims.length > 0) {
+    const init = builder.scalarConstant(0, grad.type.dtype).getResult(0);
+    g = builder.reduce(grad, init, dims, 'sum').getResult(0);
+  }
+  const gShape = g.type.shape;
+  if (!(gShape.length === targetShape.length && gShape.every((d, i) => d === targetShape[i]))) {
+    g = builder.reshape(g, targetShape).getResult(0);
+  }
+  return g;
+}
+
 export class BackwardGraphBuilder {
   constructor(opts = {}) {
     this._rematPolicy = opts.rematPolicy || null;
@@ -111,7 +134,7 @@ export class BackwardGraphBuilder {
         if (o >= gradInputs.length || !gradInputs[o]) continue;
         const operandVal = op.getOperand(o);
         if (!needsGrad.has(operandVal.id)) continue;
-        accumulator.accumulate(operandVal.id, gradInputs[o]);
+        accumulator.accumulate(operandVal.id, reduceGradToOperandShape(builder, gradInputs[o], operandVal.type.shape));
       }
     }
 
@@ -418,7 +441,7 @@ export class BackwardGraphBuilder {
           if (o >= gradInputs.length || !gradInputs[o]) continue;
           const operandVal = op.getOperand(o);
           if (!needsGrad.has(operandVal.id)) continue;
-          accumulator.accumulate(operandVal.id, gradInputs[o]);
+          accumulator.accumulate(operandVal.id, reduceGradToOperandShape(builder, gradInputs[o], operandVal.type.shape));
         }
       }
     }

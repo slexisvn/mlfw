@@ -6,7 +6,7 @@ import { CPUTarget, GPUTarget, WasmTarget } from '../backend/target.js';
 import { Tensor } from '../tensor/core/tensor.js';
 import { TensorImpl } from '../tensor/core/tensor_impl.js';
 import { Storage } from '../tensor/core/storage.js';
-import { computeStrides, computeNumel, broadcastShapes } from '../tensor/utils/shape_utils.js';
+import { computeStrides, computeNumel, broadcastShapes, matmulOutputShape } from '../tensor/utils/shape_utils.js';
 import { resultDtype, dtypeSize } from '../tensor/types/dtype.js';
 
 const _TARGET_FOR_KEY = {
@@ -81,14 +81,7 @@ function _inferOutputShape(opName, tensorArgs, scalars) {
   }
 
   if (opName === 'matmul') {
-    const aShape = tensorArgs[0].shape;
-    const bShape = tensorArgs[1].shape;
-    if (aShape.length === 1 && bShape.length === 1) return [];
-    if (aShape.length === 1 && bShape.length === 2) return [bShape[1]];
-    if (aShape.length === 2 && bShape.length === 2) return [aShape[0], bShape[1]];
-    if (aShape.length === 2 && bShape.length === 1) return [aShape[0]];
-    if (aShape.length >= 3) return [...aShape.slice(0, -2), aShape[aShape.length - 2], bShape[bShape.length - 1]];
-    return [aShape[0], bShape[1]];
+    return matmulOutputShape(tensorArgs[0].shape, tensorArgs[1].shape);
   }
 
   if (opName === 'dot') return [];
@@ -144,12 +137,12 @@ function _inferOutputShape(opName, tensorArgs, scalars) {
 }
 
 export function tensorToContiguous(t) {
-  if (t.isContiguous) return t.data;
-  const shape = t.shape;
-  const strides = t.strides;
   const srcData = t._impl.storage.data;
   const srcOff = t._impl.storageOffset;
   const n = t.numel;
+  if (t.isContiguous && srcOff === 0 && srcData.length === n) return t.data;
+  const shape = t.shape;
+  const strides = t.strides;
   const Ctor = srcData.constructor;
   const dst = new Ctor(n);
   const ndim = shape.length;

@@ -2,7 +2,7 @@ import { Tensor } from '../../core/tensor.js';
 import { TensorImpl } from '../../core/tensor_impl.js';
 import { Storage } from '../../core/storage.js';
 import { META_DEVICE } from '../../types/device.js';
-import { broadcastShapes, computeStrides } from '../../utils/shape_utils.js';
+import { broadcastShapes, computeStrides, matmulOutputShape } from '../../utils/shape_utils.js';
 import { resultDtype } from '../../types/dtype.js';
 
 function _metaTensor(shape, dtype) {
@@ -78,20 +78,9 @@ export const metaMin = _metaReduction;
 export const metaProd = _metaReduction;
 
 export function metaMatmul(keySet, self, other) {
-  const aShape = self.shape;
-  const bShape = other.shape;
-  const aRank = aShape.length;
-  const bRank = bShape.length;
-
-  if (aRank === 1 && bRank === 1) return _metaTensor([], self.dtype);
-  if (aRank === 2 && bRank === 2) return _metaTensor([aShape[0], bShape[1]], self.dtype);
-  if (aRank === 2 && bRank === 1) return _metaTensor([aShape[0]], self.dtype);
-  if (aRank === 1 && bRank === 2) return _metaTensor([bShape[1]], self.dtype);
-  if (aRank >= 3 && bRank >= 3) {
-    const batch = aShape.slice(0, aRank - 2);
-    return _metaTensor([...batch, aShape[aRank - 2], bShape[bRank - 1]], self.dtype);
-  }
-  throw new Error(`metaMatmul: unsupported shapes`);
+  const shape = matmulOutputShape(self.shape, other.shape);
+  if (shape === null) throw new Error(`metaMatmul: unsupported shapes`);
+  return _metaTensor(shape, self.dtype);
 }
 
 export function metaClone(keySet, self) {

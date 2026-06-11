@@ -8,26 +8,22 @@ registerVJPRule('reduce', (ctx) => {
   const inputShape = input.type.shape;
   const dtype = input.type.dtype;
 
+  const dimSet = new Set(dimensions);
+  const keepShape = inputShape.map((d, i) => (dimSet.has(i) ? 1 : d));
+  const identityDims = inputShape.map((_, i) => i);
+  const gradKept = ctx.builder.reshape(grad, keepShape).getResult(0);
+
   if (reduceType === 'sum') {
-    const broadcastDims = [];
-    for (let i = 0; i < inputShape.length; i++) {
-      if (!dimensions.includes(i)) broadcastDims.push(i);
-    }
-    const gradBroadcast = ctx.builder.broadcast(grad, inputShape, broadcastDims).getResult(0);
+    const gradBroadcast = ctx.builder.broadcast(gradKept, inputShape, identityDims).getResult(0);
     return [gradBroadcast, null];
   }
 
   if (reduceType === 'mean') {
-    const broadcastDims = [];
     let reduceSize = 1;
     for (let i = 0; i < inputShape.length; i++) {
-      if (dimensions.includes(i)) {
-        reduceSize *= inputShape[i];
-      } else {
-        broadcastDims.push(i);
-      }
+      if (dimSet.has(i)) reduceSize *= inputShape[i];
     }
-    const gradBroadcast = ctx.builder.broadcast(grad, inputShape, broadcastDims).getResult(0);
+    const gradBroadcast = ctx.builder.broadcast(gradKept, inputShape, identityDims).getResult(0);
     const divisor = ctx.builder.scalarConstant(reduceSize, dtype).getResult(0);
     const divisorBr = ctx.builder.broadcast(divisor, inputShape, []).getResult(0);
     const gradScaled = ctx.builder.div(gradBroadcast, divisorBr).getResult(0);

@@ -59,6 +59,23 @@ export function broadcastShapes(a, b) {
   return result;
 }
 
+export function matmulOutputShape(a, b) {
+  const aRank = a.length;
+  const bRank = b.length;
+  if (aRank === 1 && bRank === 1) return [];
+  const aShape = aRank === 1 ? [1, a[0]] : a;
+  const bShape = bRank === 1 ? [b[0], 1] : b;
+  const aR = aShape.length;
+  const bR = bShape.length;
+  const batch = broadcastShapes(aShape.slice(0, aR - 2), bShape.slice(0, bR - 2));
+  if (batch === null) return null;
+  const out = [...batch, aShape[aR - 2], bShape[bR - 1]];
+  const drop = new Set();
+  if (bRank === 1) drop.add(out.length - 1);
+  if (aRank === 1) drop.add(out.length - 2);
+  return out.filter((_, i) => !drop.has(i));
+}
+
 export function broadcastShapesMulti(shapes) {
   if (shapes.length === 0) return [];
   let result = shapes[0];

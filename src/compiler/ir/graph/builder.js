@@ -5,6 +5,17 @@ import { GraphFunction } from './function.js';
 import { GraphModule } from './module.js';
 import { registry } from './ops.js';
 
+function bcastBatchDims(a, b) {
+  const n = Math.max(a.length, b.length);
+  const out = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const av = i < a.length ? a[a.length - 1 - i] : 1;
+    const bv = i < b.length ? b[b.length - 1 - i] : 1;
+    out[n - 1 - i] = av === 1 ? bv : av;
+  }
+  return out;
+}
+
 export class IRBuilder {
   constructor(func) {
     this.func = func;
@@ -171,13 +182,59 @@ export class IRBuilder {
   matmul(lhs, rhs) {
     const lhsRank = lhs.type.rank;
     const rhsRank = rhs.type.rank;
-    if (lhsRank === 2 && rhsRank === 2) {
-      return this.dot(lhs, rhs, [1], [0]);
+    if (lhsRank === 1 && rhsRank === 1) {
+      return this.dot(lhs, rhs, [0], [0]);
     }
-    if (lhsRank === 3 && rhsRank === 3) {
-      return this.dot(lhs, rhs, [2], [1], [0], [0]);
+
+    let L = lhs;
+    let R = rhs;
+    let squeezeLhs = false;
+    let squeezeRhs = false;
+    if (lhsRank === 1) {
+      L = this.reshape(lhs, [1, lhs.type.shape[0]]).getResult(0);
+      squeezeLhs = true;
     }
-    return this.dot(lhs, rhs, [lhsRank - 1], [rhsRank - 2]);
+    if (rhsRank === 1) {
+      R = this.reshape(rhs, [rhs.type.shape[0], 1]).getResult(0);
+      squeezeRhs = true;
+    }
+
+    const lr = L.type.rank;
+    const rr = R.type.rank;
+    const rBatch = R.type.shape.slice(0, rr - 2);
+
+    let result;
+    if (rBatch.length === 0) {
+      result = this.dot(L, R, [lr - 1], [0]);
+    } else {
+      const lBatch = L.type.shape.slice(0, lr - 2);
+      const batch = bcastBatchDims(lBatch, rBatch);
+      const nb = batch.length;
+      const Lb = this._broadcastBatch(L, lBatch, batch);
+      const Rb = this._broadcastBatch(R, rBatch, batch);
+      const range = Array.from({ length: nb }, (_, i) => i);
+      result = this.dot(Lb, Rb, [nb + 1], [nb], range, range);
+    }
+
+    if (!squeezeLhs && !squeezeRhs) return result;
+    const outShape = result.getResult(0).type.shape;
+    const drop = new Set();
+    if (squeezeRhs) drop.add(outShape.length - 1);
+    if (squeezeLhs) drop.add(outShape.length - 2);
+    return this.reshape(result.getResult(0), outShape.filter((_, i) => !drop.has(i)));
+  }
+
+  _broadcastBatch(value, batch, targetBatch) {
+    const matrixDims = value.type.shape.slice(value.type.rank - 2);
+    const targetShape = [...targetBatch, ...matrixDims];
+    if (batch.length === targetBatch.length && batch.every((d, i) => d === targetBatch[i])) {
+      return value;
+    }
+    const offset = targetBatch.length - batch.length;
+    const broadcastDims = [];
+    for (let i = 0; i < batch.length; i++) broadcastDims.push(offset + i);
+    broadcastDims.push(targetShape.length - 2, targetShape.length - 1);
+    return this.broadcast(value, targetShape, broadcastDims).getResult(0);
   }
 
   conv(input, kernel, strides, padding, opts = {}) {

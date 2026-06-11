@@ -18,6 +18,12 @@ import {
 } from './rules/fusion.js';
 import { register as registerPooling } from './rules/pooling.js';
 import { register as registerResize } from './rules/resize.js';
+import { ELEMENTWISE_OPS } from './rules/elementwise.js';
+
+const BROADCAST_VIEW_SAFE = new Set([
+  ...Object.keys(ELEMENTWISE_OPS),
+  'compare', 'select', 'clamp', 'convert', 'copy_to_device', 'dot', 'fusion',
+]);
 
 registerElementwise();
 registerShape();
@@ -31,6 +37,28 @@ registerPooling();
 registerResize();
 
 export { LoweringContext, hasLoweringRule, registerLoweringRule, canInlineFuse, registerInlineFusionBuilder };
+
+function topologicalOps(graphFunc) {
+  const ops = [];
+  for (const op of graphFunc.ops()) ops.push(op);
+  const opSet = new Set(ops);
+  const ordered = [];
+  const state = new Map();
+  const visit = (op) => {
+    const s = state.get(op);
+    if (s === 2) return;
+    if (s === 1) return;
+    state.set(op, 1);
+    for (let i = 0; i < op.numOperands; i++) {
+      const def = op.getOperand(i).definingOp;
+      if (def && opSet.has(def)) visit(def);
+    }
+    state.set(op, 2);
+    ordered.push(op);
+  };
+  for (const op of ops) visit(op);
+  return ordered;
+}
 
 export function lowerGraphToPrimFunc(graphFunc) {
   const ctx = new LoweringContext();
@@ -50,16 +78,18 @@ export function lowerGraphToPrimFunc(graphFunc) {
   }
 
   const copyPairs = [];
+  const usedReturnBuffers = new Set();
   for (let i = 0; i < retOp.numOperands; i++) {
     const v = ctx.allocVar('ret');
     params.push(v);
     const srcBuf = ctx.getOrAllocBuffer(retOp.getOperand(i));
-    if (inputBuffers.has(srcBuf)) {
+    if (inputBuffers.has(srcBuf) || usedReturnBuffers.has(srcBuf)) {
       const outBuf = ctx.allocFreshBuffer(retOp.getOperand(i));
       bufferMap.set(v, outBuf);
       copyPairs.push({ src: srcBuf, dst: outBuf });
     } else {
       bufferMap.set(v, srcBuf);
+      usedReturnBuffers.add(srcBuf);
     }
   }
 
@@ -74,7 +104,7 @@ export function lowerGraphToPrimFunc(graphFunc) {
     if (CONSTANT_OPS.has(op.opName)) stmts.push(lowerConstant(ctx, op));
   }
 
-  for (const op of graphFunc.ops()) {
+  for (const op of topologicalOps(graphFunc)) {
     if (op.opName === 'return' || op.opName === 'yield') continue;
     if (CONSTANT_OPS.has(op.opName)) continue;
 
@@ -87,7 +117,9 @@ export function lowerGraphToPrimFunc(graphFunc) {
       continue;
     }
 
-    if ((op.opName === 'broadcast_in_dim' || op.opName === 'broadcast') && !returnedValues.has(op.getResult(0))) {
+    if ((op.opName === 'broadcast_in_dim' || op.opName === 'broadcast')
+        && !returnedValues.has(op.getResult(0))
+        && op.getResult(0).getUsers().every((u) => BROADCAST_VIEW_SAFE.has(u.opName))) {
       const srcBuf = ctx.getOrAllocBuffer(op.getOperand(0));
       const outShape = op.getResult(0).type.shape;
       const dims = op.getAttr('broadcast_dimensions');

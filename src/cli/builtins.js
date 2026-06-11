@@ -344,8 +344,10 @@ function constructOptimizer(Type, args) {
 function bindFrameMethods(frame, tensorFn) {
   frame.to_tensor = (...cols) => frame.toTensor(tensorFn, ...cols);
   frame.to_array = () => frame.toArray();
-  frame.encode = (col) => {
-    const { encoded, classes } = CsvFrame.prototype.encode.call(frame, col);
+  frame.encode = (col, ...args) => {
+    const named = takeNamed(args);
+    const knownClasses = named.classes ?? args[0] ?? null;
+    const { encoded, classes } = CsvFrame.prototype.encode.call(frame, col, knownClasses);
     return [tensorFn(encoded, { shape: [encoded.length] }), classes];
   };
   const origSelect = frame.select.bind(frame);
