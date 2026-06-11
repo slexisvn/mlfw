@@ -10,6 +10,8 @@ const _SCALAR_ARG_SPEC = {
   max: ['dim', 'keepdim'],
   min: ['dim', 'keepdim'],
   prod: ['dim', 'keepdim'],
+  argmax: ['dim', 'keepdim'],
+  argmin: ['dim', 'keepdim'],
   transpose: ['dim0', 'dim1'],
   softmax: ['dim'],
   log_softmax: ['dim'],

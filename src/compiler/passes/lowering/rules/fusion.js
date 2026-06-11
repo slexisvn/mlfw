@@ -201,12 +201,24 @@ function lowerFusion(ctx, op) {
   return wrapInLoops(block, loopVars, outBuf.shape);
 }
 
+function shapesEqual(a, b) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
 function canLowerAsElementwiseFusion(op) {
   const region = op.regions[0];
   if (!region) return false;
   for (const innerOp of region.entryBlock.ops()) {
     if (innerOp.opName === 'yield') continue;
     if (!INLINE_FUSION_BUILDERS.has(innerOp.opName)) return false;
+  }
+  if (op.numResults > 1) {
+    const refShape = op.getResult(0).type.shape;
+    for (let i = 1; i < op.numResults; i++) {
+      if (!shapesEqual(op.getResult(i).type.shape, refShape)) return false;
+    }
   }
   return true;
 }

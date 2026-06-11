@@ -31,7 +31,7 @@
 ### P0 — mở rộng generator (mật độ bug lịch sử cao nhất ở đây)
 - [x] Rank ≠ 2: batched matmul + broadcast nhiều chiều, + 0D/1D/3D/4D cho unary/binary/reduce + view-ops. Fuzzer `fuzz-differential.test.js` (block "N-D + view-ops", 400 prog × cpu+wasm) xanh.
 - [x] View-ops trong chain: reshape/transpose/permute/expand/slice(step)/squeeze/unsqueeze/narrow/select/flatten — đã có trong N-D fuzzer, trộn với compute.
-- [~] Backward/autodiff: fuzzer mới `differential-backward.test.js` (block "fuzz backward ... numerical finite-difference", 200 prog, oracle ĐỘC LẬP = numerical grad). VJP/AD đã đúng 100% (200/200). CÒN double-backward (grad of grad) chưa fuzz.
+- [x] Backward/autodiff: fuzzer `differential-backward.test.js` (block "fuzz backward ... numerical finite-difference", 200 prog, oracle ĐỘC LẬP = numerical grad), giờ chạy **fusion ON** (workaround đã gỡ sau khi fix bug fusion multi-output). 200/200. CÒN double-backward (grad of grad) chưa fuzz.
 
 ### Bug đã fix đợt này (2026-06-10, đợt 2)
 > Forward N-D/view fuzzer + backward numerical fuzzer quét ra một loạt bug. Đã fix (ko comment/hardcode/O(n²)):
@@ -46,20 +46,42 @@
 - **2 return-value trỏ cùng buffer → chỉ ghi 1, cái kia = 0**: `graph_to_tensor` cấp buffer mới + copy khi srcBuf trùng (`usedReturnBuffers`).
 - **lowering theo block-order, ko topo** → consumer (copy của reshape) emit TRƯỚC producer (reduce) ⇒ đọc buffer chưa ghi = 0: `graph_to_tensor.topologicalOps` hạ ops theo thứ tự topo.
 
-### BUG CÒN LẠI — fusion + broadcast index remap (P0, chưa fix)
-> Repro tối thiểu (forward, ko cần backward):
-> ```
-> f([3]) -> (sum(g,[0])->[1], sum(neg(g),[0])->[1])   // 2 reduce CHUNG input
-> // fusion ON: r1 = 0 (sai), r2 = -6 (đúng). fusion OFF: đúng cả hai.
-> ```
-> Và: `mul(mean(x,axis),y_broadcast)` backward bị TRANSPOSE trục khi fusion ON (mean+broadcasting-mul).
-> Bản chất: kernel sau fusion map sai chỉ số khi broadcast_in_dim đổi rank quanh op elementwise có broadcast,
-> hoặc multi-output reduce chung input. Đã thử chặn fuse producer→broadcast consumer → chỉ DỜI bug, ko khỏi.
-> AD/VJP math đã đúng (numerical 200/200 khi tắt fusion). Backward numerical fuzzer tạm tắt fusion để cô lập.
-> → Cần sửa trong tầng fusion lowering (`passes/fusion/*`, `lowering/rules/fusion.js`): per-op index space khi rank đổi.
+### BUG fusion multi-output khác shape — ĐÃ FIX (2026-06-11)
+> Repro tối thiểu (backward): `mean(sub(sum(x,0,keepdim), y), 0).reshape([1])` → grad x phải `[1,1,1]`,
+> fusion ON ra `[1,0,0]` (lane 1,2 = 0). Cần đủ sum-keepdim + sub-broadcast-y + mean + reshape; bỏ 1 → đúng.
+> Backward numerical fuzzer bật fusion ON: s=152, s=196 đỏ.
+- Root cause: `lowerFusion` lấy `outputs[0].shape` làm loop extent (`rules/fusion.js:91-92`). Khi fusion có
+  NHIỀU output KHÁC shape (vd grad-y `[1]` và grad-x `[3]` qua broadcast_in_dim trong thân fusion), loop chạy
+  theo output đầu `[1]` → các output lớn hơn chỉ ghi lane 0, phần còn lại = 0. Dump PrimFunc xác nhận:
+  `for i in 0..1 { buf17[i]=cse; buf15[i]=cse }` với buf15 shape `[3]`.
+- Fix (ko comment/hardcode): `canLowerAsElementwiseFusion` thêm guard — chỉ đi đường 1-loop elementwise khi
+  MỌI result cùng shape; khác shape → fallback `lowerFusionAsIndividualOps` (mỗi op loop riêng, đúng).
+  Helper `shapesEqual`. File: `src/compiler/passes/lowering/rules/fusion.js`.
+- Test: gỡ workaround `fusion:{enabled:false}` trong `differential-backward.test.js` (fuzz backward giờ chạy
+  fusion ON mặc định = regression test). Revert guard → s=152/196 RED; apply lại → 41/41 GREEN.
+- Verify: e2e+compiler+stress 1236/1236 pass.
+
+### Bug đã fix đợt 3 (2026-06-11) — exploratory fuzz nn/composite ops + f64
+> Exploratory fuzzer (`_explore` scratch) quét softmax/argmax/where/prod/trig... × {f32,f64} × {cpu,wasm}.
+- **prod f64 trên WASM ra ≈0** (denormal rác): `lowerBufferStore` (`tensor_to_lir.js:109`) lấy dtype store từ
+  `inferDtype(value)` (FloatImm→f32) thay vì dtype BUFFER đích → init const f64 bị `f32.store` (4 byte) rồi
+  reduce đọc `f64.load` (8 byte). Fix: `dtype = node.buffer.dtype || inferDtype(value)`. Kéo theo lộ bug 2:
+- **i32 const init dựa byte rác**: `lowerConstant` bọc MỌI số vào `FloatImmNode` kể cả i32 → init min i32
+  (INT_MAX) là f32 không biểu diễn nổi → sau fix store-dtype thì `i32.trunc_f32_s` trap. Fix: emit
+  `IntImmNode` khi `isDtypeInt(outBuf.dtype)` (`lowering_registry.js`). (Trước đây "may mắn" đúng vì bytes rác
+  vẫn là số dương lớn.)
+- **argmax/argmin compile fail rồi sai axis**: `_SCALAR_ARG_SPEC` trong `tracing/dispatch.js` thiếu
+  argmax/argmin → attrs rỗng → axis undefined (throw "Cannot infer result types"), thêm vào tracer map thì
+  default axis 0 (sai). Fix: thêm `argmax/argmin: ['dim','keepdim']` vào dispatch spec + entry tracer
+  `_BUILDER_METHOD_MAP` (`b.argmax(args[0], a?.dim ?? 0, a?.keepdim ?? false)`).
+- Test: `differential-nn.test.js` (+prod_f64, +prod_f32, +argmax_dim1, +argmin_dim0, +argmax_keepdim). Revert
+  → prod_f64 + argmax RED; apply → 46/46 GREEN. Full e2e+compiler+wasm 1572/1573 (1 = stress flaky-under-load).
+- GAP còn lại (chưa fix, op chưa wire cho compile — không phải value bug): `cat`, `stack` (No dispatch key),
+  `pow` (Cannot infer result types — cả eager cũng ko compile). → P1 wiring.
 
 ### P1 — dtype & op còn trống
 - [ ] f64 (mới test lẻ), f16/bf16 (lỗi rounding/denormal hay ẩn ở đây).
+- [ ] Wire cho compile: `cat`, `stack`, `pow` (hiện exploratory fuzz báo No-dispatch / can't-infer).
 - [ ] Quantized i8/u8 — cả quant path (observer→quantize→dequant) chưa fuzz lần nào.
 - [ ] bool/mask, index dtype (gather/scatter index).
 - [ ] conv/pool (đủ stride/pad/dilation/groups), layer_norm/batch_norm/group_norm/softmax/log_softmax, embedding, scatter/gather/index_select, comparison/select/where, cumsum/argmax/argmin, concat/split/stack/pad.

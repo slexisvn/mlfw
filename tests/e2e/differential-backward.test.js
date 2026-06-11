@@ -207,11 +207,7 @@ describe('fuzz backward: compiled gradients vs numerical finite-difference (inde
       let numeric, compiledGrads;
       try {
         const ins = datas.map((d, i) => tensor(nest(d, shapes[i])));
-        // Fusion disabled here to isolate autodiff/VJP correctness from a known,
-        // separately-tracked fusion bug: fused kernels mis-map indices when a
-        // broadcast_in_dim changes rank around a broadcasting elementwise op
-        // (repro + notes in todo.md). With fusion on, the AD math is unchanged.
-        const cf = compileWithBackward({ forward: (...a) => fwd(...a) }, ins, { target: CPUTarget(), fusion: { enabled: false } });
+        const cf = compileWithBackward({ forward: (...a) => fwd(...a) }, ins, { target: CPUTarget() });
         const out = cf(...ins);
         const fwdFlat = flat(Array.isArray(out) ? out[0] : out);
         if (fwdFlat.some((v) => !Number.isFinite(v))) continue;
@@ -248,6 +244,19 @@ const SLICE_BWD = [
 
 describe('differential backward: strided slice gradients vs eager autograd', () => {
   for (const prog of SLICE_BWD) {
+    it(`${prog.name} backward on cpu matches eager`, () => checkBackward(prog, CPUTarget));
+    it(`${prog.name} backward on wasm matches eager`, () => checkBackward(prog, WasmTarget));
+  }
+});
+
+const MULTI_OUT_FUSION_BWD = [
+  { name: 'sum_sub_mean_reshape', shapes: [[3], [1]], fwd: (x, y) => M.mean(M.sub(M.sum(x, 0, true), y), 0, false).reshape([1]) },
+  { name: 'mean_add_mul_mul', shapes: [[3, 4], [3, 1], [3, 4], [3, 4]], fwd: (x, y, z, w) => M.mul(M.mul(M.add(M.mean(x, 1, true), y), z), w) },
+  { name: 'sum_keepdim_broadcast_sub', shapes: [[4, 5]], fwd: (x) => M.sub(x, M.sum(x, 1, true)) },
+];
+
+describe('differential backward: multi-output fusion (different-shape results) gradients vs eager autograd', () => {
+  for (const prog of MULTI_OUT_FUSION_BWD) {
     it(`${prog.name} backward on cpu matches eager`, () => checkBackward(prog, CPUTarget));
     it(`${prog.name} backward on wasm matches eager`, () => checkBackward(prog, WasmTarget));
   }

@@ -1,6 +1,7 @@
 import { TensorType, DYNAMIC } from '../../ir/graph/types.js';
 import { MemoryScope } from '../../ir/tensor/tensor_types.js';
 import { Buffer } from '../../ir/tensor/buffer.js';
+import { isDtypeInt } from '../../../backend/dtype_map.js';
 import {
   ForNode, BlockNode, SeqNode, BufferStoreNode, BufferLoadNode,
   VariableNode, IntImmNode, FloatImmNode, MathOpNode, BlockRealizeNode, ForKind,
@@ -212,7 +213,9 @@ export function lowerPointwise(ctx, op, inputs, outputs, exprBuilder) {
 export function lowerConstant(ctx, op) {
   const outBuf = ctx.getOrAllocBuffer(op.getResult(0));
   const val = op.getAttr('value');
-  const valNode = typeof val === 'number' ? new FloatImmNode(val) : new FloatImmNode(0);
+  const valNode = typeof val === 'number'
+    ? (isDtypeInt(outBuf.dtype) ? new IntImmNode(val) : new FloatImmNode(val))
+    : new FloatImmNode(0);
   if (outBuf.shape.length === 0) {
     return new BufferStoreNode(outBuf, [], valNode);
   }

@@ -106,7 +106,7 @@ function lowerSeqNode(node, ctx) {
 function lowerBufferStore(node, ctx) {
   const offsetExpr = flattenIndex(node.buffer, node.indices, ctx.shapeParamMap);
   const value = lowerExpr(node.value, ctx);
-  const dtype = inferDtype(node.value);
+  const dtype = node.buffer.dtype || inferDtype(node.value);
   return new LIRFlatStoreNode(node.buffer, offsetExpr, value, dtype);
 }
 
