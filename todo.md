@@ -116,8 +116,8 @@
 ### P1 — dtype & op còn trống (cập nhật)
 - [x] Integer dtypes i8/i16/ui8 + bool trên compile cpu+wasm — đã fix (encoder narrow-int) + test.
 - [x] f64 (quét rộng, ổn). f16 (as-f32, ổn).
-- [ ] f16/bf16 ĐÚNG NGHĨA (half-precision thật) — hiện f16 chỉ là alias f32, chưa có rounding/denormal thật.
-- [ ] i64 (BigInt host marshalling) — niche, chưa làm.
+- [x] f16/bf16 ĐÚNG NGHĨA (half-precision thật) — XONG đợt 12 (Uint16Array 2-byte, Giesen RNE, cpu+wasm bit-exact).
+- [x] i64 (BigInt host marshalling) — XONG đợt 12 (encoder i64 opcodes + BigInt plumbing, >2^53 exact).
 - [ ] Quant path (quantize→dequantize observer) fuzz — chưa đụng.
 
 ### Feature đã wire đợt 6 (2026-06-11) — frontend ops (IR+lowering ĐÃ có sẵn, chỉ wire frontend) [subagent]
@@ -200,18 +200,94 @@
 - [ ] `logical_and`/`logical_or` WASM codegen (`i32.and` trên mask f32, +compare lưu f32) — thử fix `_emitBool`
   chưa đủ (bug sâu hơn ở store compare-result), reverted. Latent, NO real user → để lại.
 
-### Feature còn lại (nice-to-have)
-- [ ] `topk` trả INDEX (hiện chỉ values) — cần carry index payload qua bitonic network.
-- [ ] `gather`/`scatter` raw (advanced indexing) — opts XLA 5-attr + scatter combiner. index_select cover case thường.
+### Feature đợt 12 (2026-06-11) — 4 feature deferred (f16/bf16 thật, i64, topk-index, gather/scatter)
+> Tất cả land + test (independent-oracle) + revert-test RED + verify cpu+wasm. Full suite 2939/2939 (trừ gpu segfault).
+- [x] **TRUE f16/bf16 half-precision** — lưu trữ 2-byte THẬT (Uint16Array) + rounding chuẩn (Giesen branchless).
+  - `src/tensor/utils/half.js` (MỚI): f16/bf16<->f32 (Giesen magic, RNE), `coerceForStorage`/`readFromStorage`,
+    đăng ký global `__mlfw_*` cho CPU codegen gọi. Bf16 = top16 + RNE.
+  - Compute model: "store half, compute f32" — normalizeDtype đã map f16/bf16→f32 nên math là f32; CHỈ convert ở
+    boundary load/store. CPU codegen: wrap load `__mlfw_f16_to_f32(buf[i])`, store `buf[i]=__mlfw_f32_to_f16(v)`.
+    WASM codegen: `i32.load16_u`+decode bit-math inline / encode+`i32.store16` (`_emitHalfDecode/Encode`, 3 scratch
+    local). SIMD tự tắt cho f16/bf16 (ko có trong SIMD table) + guard `_treeHasHalf` ở vectorized loop.
+  - dtype plumbing: types.js (BF16 + bytes 2), dtype.js (typedArrayCtor→Uint16Array), dtype_map.js (js Uint16Array,
+    wasm load/store narrow bytes 2), lir/nodes.js normalizeDtype bf16→f32, runtime.js ctors. Input round + read expand
+    ở from_ops/tensor.js (toArray/item). CPU vs WASM BIT-EXACT. encoder: +i32 and/or/xor/shl/shr + reinterpret.
+- [x] **i64 (BigInt host marshalling)** — `tensor([...],{dtype:'i64'})` nhận JS number→BigInt (coerceForStorage).
+  CPU codegen: store i64 wrap `BigInt(...)`, zero/const literal `0n` (BigInt64Array ko nhận Number). WASM: thêm ~25
+  i64 opcode vào encoder (load/store/add/mul/div/cmp/extend/wrap/convert/const sleb-BigInt) + i64 local/param parse;
+  codegen `_numPrefix/_joinPrefix/_convertTo` + int ops dùng prefix (i64.*). Giữ chính xác >2^53 (test 2^53+1).
+- [x] **topk trả INDEX** — carry index payload qua bitonic network: `idx` seed iota, mỗi compare-exchange
+  `takeSelf=where(mask, eq(lo,x), eq(hi,x)); idx=where(takeSelf, idx, partnerIdx)`. Trùng → keep-self (deterministic).
+  `topk`→`[values,indices]` (PyTorch tuple), `+argsort`. `_bitonicLastDim(self,desc,withIdx)`. (composite.js)
+- [x] **gather/scatter RAW (PyTorch dim-indexed)** — `builder.gatherDim/scatterAddDim`: materialize full-coord index
+  (iota các dim khác + index ở dim d → concat) rồi `builder.gather/scatterAdd` (XLA 5-attr, sliceSizes=1, collapse
+  hết). `gather`/`scatter_add` wire như index_select; `scatter` (overwrite) = composition where+scatter_add+mask
+  (unique-idx). VJP: gather có sẵn; thêm `scatter` VJP (grad_operand=grad, grad_updates=gather dual). gather backward
+  vs numerical OK.
+- Test: differential-nn.test.js (half-precision block, i64 block, topk/argsort/gather/scatter trong index-ops +
+  composition oracle), differential-backward.test.js (COMPOSITE_BWD +gather_d1/gather_dup/scatter_add_src).
+- GIỚI HẠN ghi rõ: bf16 WASM bỏ nhánh NaN-mantissa (finite OK, khớp half.js cho data hữu hạn); scatter overwrite chỉ
+  đúng unique-index (PyTorch duplicate = unspecified); i64 toArray() mất chính xác >2^53 (đọc raw BigInt storage thay).
+
+### Feature CŨ (đã xong ở trên)
+- [x] `topk` trả INDEX — xong (đợt 12).
+- [x] `gather`/`scatter` raw (advanced indexing) — xong (đợt 12, PyTorch dim-indexed trên builder.gather/scatterAdd).
 - [ ] grad qua split/flip/roll/cumsum/sort — chưa kiểm VJP (mới test forward). Cần fuzz backward cho nhóm này.
 - [ ] Quantized i8/u8 — cả quant path (observer→quantize→dequant) chưa fuzz lần nào.
 - [ ] bool/mask, index dtype (gather/scatter index).
 - [ ] conv/pool (đủ stride/pad/dilation/groups), layer_norm/batch_norm/group_norm/softmax/log_softmax, embedding, scatter/gather/index_select, comparison/select/where, cumsum/argmax/argmin, concat/split/stack/pad.
 
-### P2 — edge values & shape biên
-- [ ] NaN / Inf / -0 input, empty tensor (dim=0), dim=1 (broadcast biên), overflow i32, div-by-0, reduce trên axis rỗng.
-- [ ] Shape động (DYNAMIC / sym_int): kích thước symbolic, so giữa nhiều giá trị concrete khác nhau.
-- [ ] Số rất lớn / rất nhỏ để ép sai lệch tích luỹ (reduce trên n lớn, matmul K lớn).
+### P2 — edge values & shape biên (2026-06-11, đợt P2)
+- [x] **NaN / Inf / -0** (item 1): quét unary/binary/reduce/matmul/softmax/where/clamp/min/max với NaN,±Inf,-0.
+  eager==cpu==wasm NHẤT QUÁN ở MỌI case (NaN propagation, Inf arithmetic, max/min-NaN, -0 div/sign, softmax-Inf→NaN).
+  Không có divergence — IEEE semantics khớp 3 đường. (Không cần fix.)
+- [x] **Empty / degenerate shapes** (item 2): [0,3]/[3,0], reduce trên axis rỗng, matmul 0-contract, cat/broadcast
+  size-0 — eager==cpu==wasm khớp. sum-rỗng→0, prod-rỗng→1, max/mean-rỗng→-Inf/NaN (reduce-init leak,
+  NHẤT QUÁN 3 đường — giống PyTorch-undefined nhưng không phải differential bug).
+- [x] **i32 / narrow overflow** (item 4): add/mul overflow 2^31, abs/neg INT_MIN, ui8/i16/i8 wrap, sum/matmul
+  accumulate wrap — eager==cpu==wasm khớp (mod-2^n nhất quán).
+- [x] **BUG: i32 div-by-zero & INT_MIN/-1 trap trên WASM** (item 4) — ĐÃ FIX.
+  - Repro: `div(i32[6,0,…], i32[0,0,…])` hoặc `div(i32[INT_MIN],i32[-1])`. eager&cpu→0 (resp. wrap INT_MIN),
+    WASM `i32.div_s` TRAP ("divide by zero" / "divide result unrepresentable"). Cross-backend divergence.
+  - Root: `backend/wasm/codegen.js _emitMathOp` emit thẳng `i32.div_s`/`rem_s` — trap trên /0 và INT_MIN/-1.
+  - Fix: `_emitIntDiv`/`_emitIntRem` (scratch local `_idiv_a/b` + prescan) — safe-divisor select(1,b,trapCond) rồi
+    div_s, kết quả select(0,q,b==0). Khớp JS ToInt32: /0→0, INT_MIN/-1→wrap INT_MIN. i32+i64, lồng nhau OK.
+  - Test: `differential-nn.test.js` "i32 division edge cases" (oracle `(a/b)|0`). Revert→WASM RED, cpu xanh.
+  - GHI CHÚ: i64 div-by-zero — eager BigInt `12n/0n` THROW (không silent), compiled wasm→0. Niche, eager-side
+    throw nên không phải usable path; để lại.
+- [x] **Empty-axis / all-same reductions** (item 5): len-1 axis, argmax/argmin ties (lowest-index), max len-1,
+  mean rỗng→NaN — eager==cpu==wasm khớp.
+- [~] **Shape động (DYNAMIC / sym_int)** (item 6) — TÌM RA FEATURE GẦN NHƯ KO HOẠT ĐỘNG e2e; FIX 1 SUBSET LỚN.
+  Trước khi fix: compile với `dynamic_shapes:[Set([0])]` cho ra kết quả SAI (silent) NGAY CẢ trên shape đã trace.
+  Codegen ĐÃ tham số hoá đúng (kernel nhận `_ds_*`), nhưng nhiều mảnh runtime/tracer/lowering chưa nối. ĐÃ FIX:
+  - **(B) runtime ko truyền `_ds` args**: `compile.js _prepareExecution` truyền raw typed-array → `run()` ko đọc
+    được shape → mọi `_ds` fallback=1. Fix: bọc allArgs thành `RuntimeTensor(data,shape,dtype)` để
+    `RuntimeModule._extractShapeParams` (đã có sẵn) trích đúng dim runtime. (compile.js)
+  - **(fusion) loop extent leak DYNAMIC**: `rules/fusion.js` gọi `makeLoopNest(ctx,outBuf.shape)` THIẾU arg `buf`
+    → `wrapInLoops` ko có extentNodes → bound loop = `-1` literal (DYNAMIC sentinel). Fix: truyền `outBuf` +
+    thread `extentNodes` (như single-op rule). → elementwise CHAIN chạy.
+  - **(A) reduce mất symbol propagation**: `ir/graph/ops/reduction.js` THIẾU `propagateSymbolicShapes` → output
+    sym-shape về `[-1]` (generic trailing-align fallback ở `tracer._propagateSymbolicShape` sai cho op bỏ trục) →
+    output buffer cấp numel -1→len 1. Fix: thêm propagate (mirror inferResultTypes, giữ dim ko bị reduce).
+  - **(robustness) reshape propagate crash**: `ops/shape.js` `inShape.find()` ko guard undefined → throw khi
+    keepdim. Fix: guard `inShape ? … : undefined`.
+  - GIỜ CHẠY ĐÚNG (cpu+wasm, compile-once-run-many): elementwise (single/chain/broadcast-row/same-dyn),
+    reduce-as-FINAL-output (sum/mean/max dim0/dim1 non-keepdim), matmul dynamic M & K.
+  - Test: `differential-nn.test.js` "dynamic shapes: compile once, run on multiple concrete shapes" (20 case
+    cpu+wasm vs eager + 1 explicit oracle sum). Revert từng fix → RED (RuntimeTensor 21, fusion 2, reduce 7).
+  - **CÒN HỎNG (documented gap, KHÔNG phải edge bug — incomplete feature systemic):** reduce-as-INTERMEDIATE
+    (chain qua reduce, keepdim→broadcast, softmax, normalize) + 2-dim-cùng-dynamic. Root: shape-param key theo
+    `(buffer,dim)`; buffer phái sinh (reduce output intermediate, copy/reshape của keepdim) KO được đăng ký key →
+    `cpu/codegen.js:510 _resolveShapeParam` fallback '1' → intermediate cấp `Float32Array(1)`, ghi quá biên bị
+    JS nuốt → NaN. Thêm: `rules/shape.js` (copy/reshape ~8 site) cũng `makeLoopNest` THIẾU buf → leak `-1`.
+    Fix đầy đủ cần unify shape-param theo SYMBOL (ko phải buffer:dim) — refactor lớn xuyên lowering+codegen+runtime,
+    ngoài phạm vi P2 edge-case.
+- [x] **Accumulation extremes** (item 7): sum/mean 100k, matmul K=2000, denormal — trong tol (maxrel<1e-5).
+  KHÔNG phải bug — chỉ giới hạn precision: WASM dùng kernel f32, eager+CPU-JS dùng f64. 2 case lệch (DOCUMENTED,
+  ko fix): (a) `sum([3.4e38,3.4e38,-3.4e38])` WASM f32 acc → +Inf (overflow) vs eager f64 → 3.4e38; (b) catastrophic
+  cancel `sum([1e8,1,-1e8])` WASM f32→0 vs f64→1. Cả hai là bản chất f32-compute, CPU-JS(f64)==eager.
+- [x] **dim=1 broadcast boundaries** (item 3): scalar-tensor [1,1]/[1,1,1], keepdim-reduce→broadcast (NON-dynamic),
+  [1,N]/[N,1] bcast, chain — eager==cpu==wasm khớp (static). (Dynamic keepdim→bcast: xem gap item 6.)
 
 ---
 

@@ -132,7 +132,7 @@ const WASM_NATIVE_OPS = new Set(['sqrt', 'abs', 'ceil', 'floor', 'min', 'max']);
 const DTYPE_NORMALIZE = {
   'int32': 'i32', 'index': 'i32', 'i32': 'i32',
   'float32': 'f32', 'f32': 'f32', 'f64': 'f64',
-  'f16': 'f32', 'i8': 'i32', 'i16': 'i32',
+  'f16': 'f32', 'bf16': 'f32', 'i8': 'i32', 'i16': 'i32',
   'i64': 'i64', 'ui8': 'i32', 'bool': 'i32',
 };
 

@@ -50,6 +50,8 @@ const _OP_DEFS = [
   'pad(Tensor self, Tensor value, int[] low, int[] high) -> Tensor',
   'one_hot(Tensor indices, int depth) -> Tensor',
   'index_select(Tensor self, Tensor index, int dim) -> Tensor',
+  'gather(Tensor self, Tensor index, int dim) -> Tensor',
+  'scatter_add(Tensor self, Tensor index, Tensor src, int dim) -> Tensor',
 
   'sum(Tensor self, int[] dim, bool keepdim) -> Tensor',
   'mean(Tensor self, int[] dim, bool keepdim) -> Tensor',

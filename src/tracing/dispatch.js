@@ -22,6 +22,8 @@ const _SCALAR_ARG_SPEC = {
   pad: ['low', 'high'],
   one_hot: ['depth'],
   index_select: ['dim'],
+  gather: ['dim'],
+  scatter_add: ['dim'],
   cat: ['dim'],
   stack: ['dim'],
 };

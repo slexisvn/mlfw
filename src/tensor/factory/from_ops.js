@@ -4,6 +4,7 @@ import { Storage } from '../core/storage.js';
 import { ScalarType, typedArrayCtor, dtypeSize } from '../types/dtype.js';
 import { CPU_DEVICE } from '../types/device.js';
 import { computeStrides, computeNumel } from '../utils/shape_utils.js';
+import { coerceForStorage } from '../utils/half.js';
 
 export function tensor(data, opts) {
   const dtype = opts?.dtype ?? ScalarType.F32;
@@ -45,10 +46,12 @@ export function scalar(value, opts) {
   return _fromScalar(value, dtype, device, opts?.requiresGrad ?? false);
 }
 
+const _NEEDS_COERCE = new Set(['f16', 'bf16', 'i64']);
+
 function _fromScalar(value, dtype, device, requiresGrad) {
   const Ctor = typedArrayCtor(dtype);
   const data = new Ctor(1);
-  data[0] = value;
+  data[0] = _NEEDS_COERCE.has(dtype) ? coerceForStorage(dtype, value) : value;
   const storage = Storage.fromData(data, device);
   const impl = new TensorImpl(storage, 0, [], [], dtype, device);
   const t = new Tensor(impl);
@@ -59,7 +62,11 @@ function _fromScalar(value, dtype, device, requiresGrad) {
 function _fromTypedArray(data, shape, dtype, device, requiresGrad) {
   const Ctor = typedArrayCtor(dtype);
   const copied = new Ctor(data.length);
-  for (let i = 0; i < data.length; i++) copied[i] = data[i];
+  if (_NEEDS_COERCE.has(dtype)) {
+    for (let i = 0; i < data.length; i++) copied[i] = coerceForStorage(dtype, data[i]);
+  } else {
+    for (let i = 0; i < data.length; i++) copied[i] = data[i];
+  }
 
   const finalShape = shape ?? [data.length];
   const strides = computeStrides(finalShape);
@@ -73,7 +80,11 @@ function _fromTypedArray(data, shape, dtype, device, requiresGrad) {
 function _fromFlatArray(flat, shape, dtype, device, requiresGrad) {
   const Ctor = typedArrayCtor(dtype);
   const data = new Ctor(flat.length);
-  for (let i = 0; i < flat.length; i++) data[i] = flat[i];
+  if (_NEEDS_COERCE.has(dtype)) {
+    for (let i = 0; i < flat.length; i++) data[i] = coerceForStorage(dtype, flat[i]);
+  } else {
+    for (let i = 0; i < flat.length; i++) data[i] = flat[i];
+  }
 
   const strides = computeStrides(shape);
   const storage = Storage.fromData(data, device);

@@ -89,7 +89,7 @@ function lowerFusion(ctx, op) {
   for (let i = 0; i < numOutputs; i++) outputs[i] = ctx.getOrAllocBuffer(op.getResult(i));
 
   const outBuf = outputs[0];
-  const { loopVars, loopBinds, indices: outIndices } = makeLoopNest(ctx, outBuf.shape);
+  const { loopVars, loopBinds, indices: outIndices, extentNodes } = makeLoopNest(ctx, outBuf.shape, outBuf);
   const exprMap = new Map();
 
   const entryBlock = op.regions[0].entryBlock;
@@ -198,7 +198,7 @@ function lowerFusion(ctx, op) {
   }
 
   const block = new BlockNode(ctx.blockName('fusion_block'), loopBinds, bufRefs(inputs), bufRefs(outputs), storeBody);
-  return wrapInLoops(block, loopVars, outBuf.shape);
+  return wrapInLoops(block, loopVars, outBuf.shape, extentNodes);
 }
 
 function shapesEqual(a, b) {

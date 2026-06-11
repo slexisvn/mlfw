@@ -1,5 +1,6 @@
 const DTYPE_TABLE = {
-  'f16':  { js: 'Float32Array', c: '__half',     cPtr: '__half*',      bytes: 2, suffix: 'h', mathSuffix: 'h',  isFloat: true,  isInt: false },
+  'f16':  { js: 'Uint16Array',  c: '__half',     cPtr: '__half*',      bytes: 2, suffix: 'h', mathSuffix: 'h',  isFloat: true,  isInt: false },
+  'bf16': { js: 'Uint16Array',  c: '__nv_bfloat16', cPtr: '__nv_bfloat16*', bytes: 2, suffix: '', mathSuffix: '', isFloat: true, isInt: false },
   'f32':  { js: 'Float32Array', c: 'float',      cPtr: 'float*',      bytes: 4, suffix: 'f', mathSuffix: 'f',  isFloat: true,  isInt: false },
   'f64':  { js: 'Float64Array', c: 'double',     cPtr: 'double*',     bytes: 8, suffix: '',  mathSuffix: '',   isFloat: true,  isInt: false },
   'i8':   { js: 'Int8Array',    c: 'int8_t',     cPtr: 'int8_t*',     bytes: 1, suffix: '',  mathSuffix: '',   isFloat: false, isInt: true  },
@@ -12,7 +13,8 @@ const DTYPE_TABLE = {
 };
 
 const WASM_TYPE_TABLE = {
-  'f16':  { wasm: 'f32', load: 'f32.load', store: 'f32.store', bytes: 4 },
+  'f16':  { wasm: 'f32', load: 'i32.load16_u', store: 'i32.store16', bytes: 2 },
+  'bf16': { wasm: 'f32', load: 'i32.load16_u', store: 'i32.store16', bytes: 2 },
   'f32':  { wasm: 'f32', load: 'f32.load', store: 'f32.store', bytes: 4 },
   'f64':  { wasm: 'f64', load: 'f64.load', store: 'f64.store', bytes: 8 },
   'i8':   { wasm: 'i32', load: 'i32.load8_s', store: 'i32.store8', bytes: 1 },
@@ -141,6 +143,7 @@ export function isJSMathFunc(name) {
 
 const WGSL_TYPE_TABLE = {
   'f16':  { wgsl: 'f16',  bytes: 2 },
+  'bf16': { wgsl: 'f32',  bytes: 4 },
   'f32':  { wgsl: 'f32',  bytes: 4 },
   'f64':  { wgsl: 'f32',  bytes: 4 },
   'i8':   { wgsl: 'i32',  bytes: 4 },

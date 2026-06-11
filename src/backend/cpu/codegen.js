@@ -1,6 +1,10 @@
 import { ForKind } from '../../compiler/ir/tensor/nodes.js';
 import { jsTypedArray, isJSMathFunc, isDtypeInt } from '../dtype_map.js';
 import { inferDtype } from '../../compiler/ir/lir/nodes.js';
+import '../../tensor/utils/half.js';
+
+const _HALF_EXPAND = { f16: '__mlfw_f16_to_f32', bf16: '__mlfw_bf16_to_f32' };
+const _HALF_ROUND = { f16: '__mlfw_f32_to_f16', bf16: '__mlfw_f32_to_bf16' };
 
 export class CPUCodegen {
   constructor(target) {
@@ -87,6 +91,22 @@ export class CPUCodegen {
     this._lines.push('  '.repeat(this._indent) + line);
   }
 
+  _wrapLoad(dtype, expr) {
+    const fn = _HALF_EXPAND[dtype];
+    return fn ? `${fn}(${expr})` : expr;
+  }
+
+  _wrapStoreVal(dtype, expr) {
+    const fn = _HALF_ROUND[dtype];
+    if (fn) return `${fn}(${expr})`;
+    if (dtype === 'i64') return `BigInt(${expr})`;
+    return expr;
+  }
+
+  _zeroLit(dtype) {
+    return dtype === 'i64' ? '0n' : '0';
+  }
+
   _visitNode(startNode) {
     let node = startNode;
     while (node) {
@@ -160,7 +180,7 @@ export class CPUCodegen {
       const prevVar = this._accVar;
       this._accTarget = accInfo;
       this._accVar = accVar;
-      this._emit('let ' + accVar + ' = ' + accInfo.bufName + '[' + accInfo.idxExpr + '];');
+      this._emit('let ' + accVar + ' = ' + this._wrapLoad(accInfo.dtype, accInfo.bufName + '[' + accInfo.idxExpr + ']') + ';');
       this._emit('for (let ' + varName + ' = 0; ' + varName + ' < ' + extent + '; ' + varName + '++) {');
       this._indent++;
       this._loopStack.push(varName);
@@ -168,7 +188,7 @@ export class CPUCodegen {
       this._loopStack.pop();
       this._indent--;
       this._emit('}');
-      this._emit(accInfo.bufName + '[' + accInfo.idxExpr + '] = ' + accVar + ';');
+      this._emit(accInfo.bufName + '[' + accInfo.idxExpr + '] = ' + this._wrapStoreVal(accInfo.dtype, accVar) + ';');
       this._accTarget = prevAcc;
       this._accVar = prevVar;
       return;
@@ -191,7 +211,7 @@ export class CPUCodegen {
       this._emit(this._accVar + ' = ' + this._exprToJS(node.value) + ';');
       return;
     }
-    this._emit(node.buffer.name + '[' + this._exprToJS(node.offsetExpr) + '] = ' + this._exprToJS(node.value) + ';');
+    this._emit(node.buffer.name + '[' + this._exprToJS(node.offsetExpr) + '] = ' + this._wrapStoreVal(node.dtype || node.buffer.dtype, this._exprToJS(node.value)) + ';');
   }
 
   _visitLIRBindings(node) {
@@ -225,7 +245,7 @@ export class CPUCodegen {
     this._indent--;
     this._emit('}');
 
-    this._emit(node.flushStore.buffer.name + '[' + this._accTarget.idxExpr + '] = ' + accVar + ';');
+    this._emit(node.flushStore.buffer.name + '[' + this._accTarget.idxExpr + '] = ' + this._wrapStoreVal(node.flushStore.dtype || node.flushStore.buffer.dtype, accVar) + ';');
     this._accTarget = prevAcc;
     this._accVar = prevVar;
   }
@@ -255,7 +275,7 @@ export class CPUCodegen {
 
     const loopVar = forNode.loopVar.name;
     if (storeIdx.includes(loopVar)) return null;
-    return { bufName: store.buffer.name, idxExpr: storeIdx };
+    return { bufName: store.buffer.name, idxExpr: storeIdx, dtype: store.buffer.dtype };
   }
 
   _visitBlockNode(node) {
@@ -319,7 +339,7 @@ export class CPUCodegen {
       this._emit(this._accVar + ' = ' + this._exprToJS(node.value) + ';');
       return;
     }
-    this._emit(node.buffer.name + '[' + this._flatIndex(node.buffer, node.indices) + '] = ' + this._exprToJS(node.value) + ';');
+    this._emit(node.buffer.name + '[' + this._flatIndex(node.buffer, node.indices) + '] = ' + this._wrapStoreVal(node.buffer.dtype, this._exprToJS(node.value)) + ';');
   }
 
   _exprToJS(root) {
@@ -340,13 +360,14 @@ export class CPUCodegen {
         case 'BufferLoadNode': {
           work.pop();
           if (this._zeroBuffers && this._zeroBuffers.has(node.buffer.name)) {
-            vals.push('0');
+            vals.push(this._zeroLit(node.buffer.dtype));
           } else if (this._constantBuffers && this._constantBuffers.has(node.buffer.name)) {
-            vals.push(this._constantBuffers.get(node.buffer.name));
+            const c = this._constantBuffers.get(node.buffer.name);
+            vals.push(node.buffer.dtype === 'i64' ? `BigInt(${c})` : c);
           } else if (this._accTarget && node.buffer.name === this._accTarget.bufName && this._flatIndex(node.buffer, node.indices) === this._accTarget.idxExpr) {
             vals.push(this._accVar);
           } else {
-            vals.push(node.buffer.name + '[' + this._flatIndex(node.buffer, node.indices) + ']');
+            vals.push(this._wrapLoad(node.buffer.dtype, node.buffer.name + '[' + this._flatIndex(node.buffer, node.indices) + ']'));
           }
           continue;
         }
@@ -354,14 +375,15 @@ export class CPUCodegen {
         case 'LIRFlatLoadNode': {
           work.pop();
           if (this._zeroBuffers && this._zeroBuffers.has(node.buffer.name)) {
-            vals.push('0');
+            vals.push(this._zeroLit(node.dtype || node.buffer.dtype));
           } else if (this._constantBuffers && this._constantBuffers.has(node.buffer.name)) {
-            vals.push(String(this._constantBuffers.get(node.buffer.name)));
+            const c = String(this._constantBuffers.get(node.buffer.name));
+            vals.push((node.dtype || node.buffer.dtype) === 'i64' ? `BigInt(${c})` : c);
           } else if (this._accTarget && node.buffer.name === this._accTarget.bufName
                      && this._exprToJS(node.offsetExpr) === this._accTarget.idxExpr) {
             vals.push(this._accVar);
           } else {
-            vals.push(node.buffer.name + '[' + this._exprToJS(node.offsetExpr) + ']');
+            vals.push(this._wrapLoad(node.dtype || node.buffer.dtype, node.buffer.name + '[' + this._exprToJS(node.offsetExpr) + ']'));
           }
           continue;
         }
@@ -405,6 +427,7 @@ export class CPUCodegen {
             work.pop(); const inner = vals.pop();
             if (node.toDtype === 'bool') vals.push(`(${inner} ? 1 : 0)`);
             else if (isDtypeInt(node.toDtype)) vals.push(`(${inner} | 0)`);
+            else if (_HALF_EXPAND[node.toDtype]) vals.push(`${_HALF_EXPAND[node.toDtype]}(${_HALF_ROUND[node.toDtype]}(${inner}))`);
             else vals.push(`(+${inner})`);
           }
           continue;

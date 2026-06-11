@@ -28,6 +28,18 @@ export function register(registry) {
       }
       return [new TensorType(newShape, inp.dtype)];
     },
+    propagateSymbolicShapes(op, shapes) {
+      const inShape = shapes.get(op.getOperand(0));
+      if (!inShape) return null;
+      const dims = op.getAttr('dimensions');
+      if (!dims) return null;
+      const dimSet = new Set(dims);
+      const resShape = [];
+      for (let i = 0; i < inShape.length; i++) {
+        if (!dimSet.has(i)) resShape.push(inShape[i]);
+      }
+      return [resShape];
+    },
     verify(op) {
       const errs = [];
       if (!op.hasAttr('dimensions')) errs.push('reduce missing dimensions');

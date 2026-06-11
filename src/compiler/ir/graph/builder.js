@@ -445,6 +445,48 @@ export class IRBuilder {
     return this.scatter(operand, indices, updates, opts);
   }
 
+  _dimCoordIndices(index, dim, gridShape) {
+    const r = gridShape.length;
+    const idxI32 = index.type.dtype === 'i32' ? index : this.convert(index, 'i32').getResult(0);
+    const coordShape = [...gridShape, 1];
+    const coords = [];
+    for (let j = 0; j < r; j++) {
+      const cj = j === dim ? idxI32 : this.iota(j, new TensorType(gridShape, 'i32')).getResult(0);
+      coords.push(this.reshape(cj, coordShape).getResult(0));
+    }
+    return this.concat(coords, r).getResult(0);
+  }
+
+  gatherDim(operand, index, dim) {
+    const r = operand.type.rank;
+    const d = dim < 0 ? r + dim : dim;
+    const range = [];
+    const ones = [];
+    for (let j = 0; j < r; j++) { range.push(j); ones.push(1); }
+    const fullIdx = this._dimCoordIndices(index, d, index.type.shape);
+    return this.gather(operand, fullIdx, {
+      offsetDims: [],
+      collapsedSliceDims: range,
+      startIndexMap: range,
+      indexVectorDim: r,
+      sliceSizes: ones,
+    });
+  }
+
+  scatterAddDim(operand, index, updates, dim) {
+    const r = operand.type.rank;
+    const d = dim < 0 ? r + dim : dim;
+    const range = [];
+    for (let j = 0; j < r; j++) range.push(j);
+    const fullIdx = this._dimCoordIndices(index, d, index.type.shape);
+    return this.scatterAdd(operand, fullIdx, updates, {
+      updateWindowDims: [],
+      insertedWindowDims: range,
+      scatterDimsToOperandDims: range,
+      indexVectorDim: r,
+    });
+  }
+
   argmax(input, axis, keepDims = false) {
     return this._inferAndBuild('argmax', [input], { axis, keep_dims: keepDims });
   }

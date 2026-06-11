@@ -1,6 +1,13 @@
-import { cat, add, index_select, minimum, maximum, where, pad } from './ops.js';
-import { zeros } from '../factory/creation_ops.js';
+import { cat, add, index_select, minimum, maximum, where, pad, eq, gt, scatter_add } from './ops.js';
+import { zeros, ones } from '../factory/creation_ops.js';
 import { tensor } from '../factory/from_ops.js';
+
+export function scatter(self, dim, index, src) {
+  const z = zeros(self.shape, { dtype: self.dtype });
+  const scattered = scatter_add(z, dim, index, src);
+  const counts = scatter_add(z, dim, index, ones(src.shape, { dtype: self.dtype }));
+  return where(gt(counts, zeros(counts.shape, { dtype: counts.dtype })), scattered, self);
+}
 
 function _normDim(d, rank) {
   return d < 0 ? rank + d : d;
@@ -49,7 +56,7 @@ function _nextPow2(n) {
   return p;
 }
 
-function _bitonicLastDim(self, descending) {
+function _bitonicLastDim(self, descending, withIdx) {
   const rank = self.shape.length;
   const lastDim = rank - 1;
   const n = self.shape[lastDim];
@@ -67,6 +74,13 @@ function _bitonicLastDim(self, descending) {
   const bcastShape = new Array(rank).fill(1);
   bcastShape[lastDim] = P;
 
+  let idx = null;
+  if (withIdx) {
+    const iotaArr = new Array(P);
+    for (let i = 0; i < P; i++) iotaArr[i] = i;
+    idx = tensor(iotaArr, { dtype: 'i32' }).reshape(bcastShape);
+  }
+
   for (let k = 2; k <= P; k <<= 1) {
     for (let j = k >> 1; j >= 1; j >>= 1) {
       const partnerIdx = new Array(P);
@@ -79,30 +93,52 @@ function _bitonicLastDim(self, descending) {
         if (ixj > i) keepLo[i] = dir ? 1 : 0;
         else keepLo[i] = dir ? 0 : 1;
       }
-      const partner = index_select(x, lastDim, tensor(partnerIdx, { dtype: 'i32' }));
+      const pConst = tensor(partnerIdx, { dtype: 'i32' });
+      const partner = index_select(x, lastDim, pConst);
       const lo = minimum(x, partner);
       const hi = maximum(x, partner);
       const mask = tensor(keepLo, { dtype: 'f32' }).reshape(bcastShape);
+      if (withIdx) {
+        const partnerIdxVals = index_select(idx, lastDim, pConst);
+        const takeSelf = where(mask, eq(lo, x), eq(hi, x));
+        idx = where(takeSelf, idx, partnerIdxVals);
+      }
       x = where(mask, lo, hi);
     }
   }
 
-  if (P > n) x = x.narrow(lastDim, 0, n);
-  return x;
+  if (P > n) {
+    x = x.narrow(lastDim, 0, n);
+    if (withIdx) idx = idx.narrow(lastDim, 0, n);
+  }
+  return withIdx ? { values: x, indices: idx } : x;
 }
 
 export function sort(self, dim = -1, descending = false) {
   const rank = self.shape.length;
   const d = _normDim(dim, rank);
-  if (d === rank - 1) return _bitonicLastDim(self, descending);
+  if (d === rank - 1) return _bitonicLastDim(self, descending, false);
   const x = self.transpose(d, rank - 1);
-  const sorted = _bitonicLastDim(x, descending);
+  const sorted = _bitonicLastDim(x, descending, false);
   return sorted.transpose(d, rank - 1);
+}
+
+function _sortWithIndices(self, dim, descending) {
+  const rank = self.shape.length;
+  const d = _normDim(dim, rank);
+  if (d === rank - 1) return _bitonicLastDim(self, descending, true);
+  const x = self.transpose(d, rank - 1);
+  const r = _bitonicLastDim(x, descending, true);
+  return { values: r.values.transpose(d, rank - 1), indices: r.indices.transpose(d, rank - 1) };
+}
+
+export function argsort(self, dim = -1, descending = false) {
+  return _sortWithIndices(self, dim, descending).indices;
 }
 
 export function topk(self, k, dim = -1, largest = true) {
   const rank = self.shape.length;
   const d = _normDim(dim, rank);
-  const sorted = sort(self, d, largest);
-  return sorted.narrow(d, 0, k);
+  const { values, indices } = _sortWithIndices(self, d, largest);
+  return [values.narrow(d, 0, k), indices.narrow(d, 0, k)];
 }

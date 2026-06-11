@@ -25,13 +25,13 @@ export {
   add, sub, mul, div, neg, pow, maximum, minimum,
   exp, log, sqrt, rsqrt, abs, sin, cos, tanh, sigmoid,
   relu, gelu, silu, sign, floor, ceil,
-  eq, ne, lt, le, gt, ge, where, clamp, pad, one_hot, index_select,
+  eq, ne, lt, le, gt, ge, where, clamp, pad, one_hot, index_select, gather, scatter_add,
   sum, mean, max, min, argmax, argmin, prod,
   matmul, dot, cat, stack, clone,
   softmax, log_softmax,
 } from './tensor/ops/ops.js';
 
-export { roll, flip, cumsum, sort, topk } from './tensor/ops/composite.js';
+export { roll, flip, cumsum, sort, topk, argsort, scatter } from './tensor/ops/composite.js';
 
 export { noGrad, enableGrad } from './autograd/grad_mode.js';
 

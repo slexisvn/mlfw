@@ -51,6 +51,8 @@ export function clamp(self, min, max) { return _dispatch('clamp', self, _asTenso
 export function pad(self, low, high, value = 0) { return _dispatch('pad', self, _asTensor(value, self), low, high); }
 export function one_hot(indices, depth) { return _dispatch('one_hot', indices, depth); }
 export function index_select(self, dim, index) { return _dispatch('index_select', self, index, dim); }
+export function gather(self, dim, index) { return _dispatch('gather', self, index, dim); }
+export function scatter_add(self, dim, index, src) { return _dispatch('scatter_add', self, index, src, dim); }
 
 export function sum(self, dim, keepdim) { return _dispatch('sum', self, dim, keepdim); }
 export function mean(self, dim, keepdim) { return _dispatch('mean', self, dim, keepdim); }

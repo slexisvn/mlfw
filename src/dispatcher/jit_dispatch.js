@@ -33,6 +33,8 @@ const _SCALAR_ARG_SPEC = {
   pad: ['low', 'high'],
   one_hot: ['depth'],
   index_select: ['dim'],
+  gather: ['dim'],
+  scatter_add: ['dim'],
   cat: ['dim'],
   stack: ['dim'],
 };
@@ -173,6 +175,9 @@ function _inferOutputShape(opName, tensorArgs, scalars) {
     shape[dim] = tensorArgs[1].shape.reduce((a, b) => a * b, 1);
     return shape;
   }
+
+  if (opName === 'gather') return [...tensorArgs[1].shape];
+  if (opName === 'scatter_add') return [...tensorArgs[0].shape];
 
   if (opName === 'softmax' || opName === 'log_softmax') return [...tensorArgs[0].shape];
   if (opName === 'layer_norm' || opName === 'batch_norm') return [...tensorArgs[0].shape];

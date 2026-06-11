@@ -57,6 +57,10 @@ export function installOps(TensorClass) {
   proto.cumsum = function(dim = 0) { return composite.cumsum(this, dim); };
   proto.sort = function(dim = -1, descending = false) { return composite.sort(this, dim, descending); };
   proto.topk = function(k, dim = -1, largest = true) { return composite.topk(this, k, dim, largest); };
+  proto.argsort = function(dim = -1, descending = false) { return composite.argsort(this, dim, descending); };
+  proto.gather = function(dim, index) { return ops.gather(this, dim, index); };
+  proto.scatter_add = function(dim, index, src) { return ops.scatter_add(this, dim, index, src); };
+  proto.scatter = function(dim, index, src) { return composite.scatter(this, dim, index, src); };
 
   installViewOps(TensorClass);
 }

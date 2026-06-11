@@ -270,6 +270,9 @@ const COMPOSITE_BWD = [
   { name: 'repeat', shape: [2, 3], fwd: (x) => x.repeat(2, 1) },
   { name: 'pad', shape: [3, 4], fwd: (x) => M.pad(x, [1, 0], [0, 2], 0) },
   { name: 'index_select', shape: [4, 3], fwd: (x) => M.index_select(x, 0, M.tensor([2, 0, 1], { dtype: 'i32' })) },
+  { name: 'gather_d1', shape: [2, 3], fwd: (x) => M.gather(x, 1, M.tensor([[2, 0, 1], [1, 2, 0]], { dtype: 'i32' })) },
+  { name: 'gather_dup', shape: [1, 4], fwd: (x) => M.gather(x, 1, M.tensor([[0, 0, 2, 1]], { dtype: 'i32' })) },
+  { name: 'scatter_add_src', shape: [1, 3], fwd: (x) => M.scatter_add(M.tensor([[0, 0, 0, 0, 0]]), 1, M.tensor([[0, 2, 4]], { dtype: 'i32' }), x) },
 ];
 
 function checkCompositeBackward(prog, makeTarget) {

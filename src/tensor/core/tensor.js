@@ -1,6 +1,9 @@
 import { TensorImpl } from './tensor_impl.js';
 import { AutogradMeta } from './autograd_meta.js';
 import { flatIndex, computeNumel } from '../utils/shape_utils.js';
+import { readFromStorage } from '../utils/half.js';
+
+const _EXPAND_DTYPES = new Set(['f16', 'bf16', 'i64']);
 
 export class Tensor {
   constructor(impl) {
@@ -124,8 +127,8 @@ export class Tensor {
       throw new Error(`item() requires tensor with exactly 1 element, got ${this.numel}`);
     }
     const raw = this._impl.storage.data;
-    if (this._impl.dim() === 0) return raw[this._impl.storageOffset];
-    return raw[this._impl.storageOffset];
+    const v = raw[this._impl.storageOffset];
+    return _EXPAND_DTYPES.has(this._impl.dtype) ? readFromStorage(this._impl.dtype, v) : v;
   }
 
   toArray() {
@@ -133,9 +136,10 @@ export class Tensor {
     const strides = this.strides;
     const data = this._impl.storage.data;
     const offset = this._impl.storageOffset;
+    const dtype = _EXPAND_DTYPES.has(this._impl.dtype) ? this._impl.dtype : null;
 
-    if (sizes.length === 0) return data[offset];
-    return _toNestedArray(data, sizes, strides, offset, 0);
+    if (sizes.length === 0) return dtype ? readFromStorage(dtype, data[offset]) : data[offset];
+    return _toNestedArray(data, sizes, strides, offset, 0, dtype);
   }
 
   toString() {
@@ -190,16 +194,20 @@ export class Tensor {
   }
 }
 
-function _toNestedArray(data, sizes, strides, offset, dim) {
+function _toNestedArray(data, sizes, strides, offset, dim, dtype) {
   const size = sizes[dim];
   if (dim === sizes.length - 1) {
     const arr = new Array(size);
-    for (let i = 0; i < size; i++) arr[i] = data[offset + i * strides[dim]];
+    if (dtype) {
+      for (let i = 0; i < size; i++) arr[i] = readFromStorage(dtype, data[offset + i * strides[dim]]);
+    } else {
+      for (let i = 0; i < size; i++) arr[i] = data[offset + i * strides[dim]];
+    }
     return arr;
   }
   const arr = new Array(size);
   for (let i = 0; i < size; i++) {
-    arr[i] = _toNestedArray(data, sizes, strides, offset + i * strides[dim], dim + 1);
+    arr[i] = _toNestedArray(data, sizes, strides, offset + i * strides[dim], dim + 1, dtype);
   }
   return arr;
 }

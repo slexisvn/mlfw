@@ -108,6 +108,21 @@ registerVJPRule('gather', (ctx) => {
   return [gradOperand, null];
 });
 
+registerVJPRule('scatter', (ctx) => {
+  const grad = ctx.gradOutputs[0];
+  const [operand, indices] = ctx.operands;
+  const insertedWindowDims = ctx.op.getAttr('inserted_window_dims');
+  const sliceSizes = operand.type.shape.map((s, i) => insertedWindowDims.includes(i) ? 1 : s);
+  const gradUpdates = ctx.builder.gather(grad, indices, {
+    offsetDims: ctx.op.getAttr('update_window_dims'),
+    collapsedSliceDims: insertedWindowDims,
+    startIndexMap: ctx.op.getAttr('scatter_dims_to_operand_dims'),
+    indexVectorDim: ctx.op.getAttr('index_vector_dim'),
+    sliceSizes,
+  }).getResult(0);
+  return [grad, null, gradUpdates];
+});
+
 registerVJPRule('pad', (ctx) => {
   const grad = ctx.gradOutputs[0];
   const low = ctx.op.getAttr('low');

@@ -110,7 +110,7 @@ export function register(registry) {
       const resShape = [];
       for (let d of newShape) {
         if (d === -1) {
-          const symVar = inShape.find(id => typeof id !== 'number');
+          const symVar = inShape ? inShape.find(id => typeof id !== 'number') : undefined;
           resShape.push(symVar || -1);
         } else {
           resShape.push(d);

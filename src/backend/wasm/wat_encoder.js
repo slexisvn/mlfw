@@ -1,10 +1,11 @@
 const WASM_MAGIC = [0x00, 0x61, 0x73, 0x6d];
 const WASM_VERSION = [0x01, 0x00, 0x00, 0x00];
 const SEC_TYPE = 1, SEC_IMPORT = 2, SEC_FUNC = 3, SEC_MEMORY = 5, SEC_EXPORT = 7, SEC_CODE = 10;
-const T_I32 = 0x7f, T_F64 = 0x7c, T_F32 = 0x7d, T_V128 = 0x7b, T_FUNC = 0x60, T_VOID = 0x40;
+const T_I32 = 0x7f, T_I64 = 0x7e, T_F64 = 0x7c, T_F32 = 0x7d, T_V128 = 0x7b, T_FUNC = 0x60, T_VOID = 0x40;
 
 function uleb(v) { const r = []; do { let b = v & 0x7f; v >>>= 7; if (v) b |= 0x80; r.push(b); } while (v); return r; }
 function sleb(v) { const r = []; let more = true; while (more) { let b = v & 0x7f; v >>= 7; if ((v === 0 && !(b & 0x40)) || (v === -1 && (b & 0x40))) more = false; else b |= 0x80; r.push(b); } return r; }
+function slebBig(v) { v = BigInt(v); const r = []; let more = true; while (more) { let b = Number(v & 0x7fn); v >>= 7n; if ((v === 0n && !(b & 0x40)) || (v === -1n && (b & 0x40))) more = false; else b |= 0x80; r.push(b); } return r; }
 function encStr(s) { const e = new TextEncoder().encode(s); return [...uleb(e.length), ...e]; }
 function encF32(v) { const b = new ArrayBuffer(4); new Float32Array(b)[0] = v; return [...new Uint8Array(b)]; }
 function encF64(v) { const b = new ArrayBuffer(8); new Float64Array(b)[0] = v; return [...new Uint8Array(b)]; }
@@ -16,6 +17,9 @@ const INSTR = new Map([
   ['local.get', [0x20]], ['local.set', [0x21]],
   ['i32.add', [0x6a]], ['i32.sub', [0x6b]], ['i32.mul', [0x6c]], ['i32.div_s', [0x6d]], ['i32.rem_s', [0x6f]],
   ['i32.eq', [0x46]], ['i32.ne', [0x47]], ['i32.lt_s', [0x48]], ['i32.gt_s', [0x4a]], ['i32.le_s', [0x4c]], ['i32.ge_s', [0x4e]], ['i32.eqz', [0x45]],
+  ['i32.lt_u', [0x49]], ['i32.gt_u', [0x4b]], ['i32.le_u', [0x4d]], ['i32.ge_u', [0x4f]],
+  ['i32.and', [0x71]], ['i32.or', [0x72]], ['i32.xor', [0x73]], ['i32.shl', [0x74]], ['i32.shr_s', [0x75]], ['i32.shr_u', [0x76]],
+  ['i32.reinterpret_f32', [0xbc]], ['f32.reinterpret_i32', [0xbe]],
   ['i32.trunc_f32_s', [0xa8]],
   ['f32.add', [0x92]], ['f32.sub', [0x93]], ['f32.mul', [0x94]], ['f32.div', [0x95]],
   ['f32.neg', [0x8c]], ['f32.abs', [0x8b]], ['f32.ceil', [0x8d]], ['f32.floor', [0x8e]], ['f32.sqrt', [0x91]], ['f32.min', [0x96]], ['f32.max', [0x97]],
@@ -26,6 +30,11 @@ const INSTR = new Map([
   ['f64.neg', [0x9a]], ['f64.abs', [0x99]], ['f64.ceil', [0x9b]], ['f64.floor', [0x9c]], ['f64.sqrt', [0x9f]],
   ['f64.eq', [0x61]], ['f64.ne', [0x62]], ['f64.lt', [0x63]], ['f64.gt', [0x64]], ['f64.le', [0x65]], ['f64.ge', [0x66]],
   ['f64.convert_i32_s', [0xb7]], ['f64.promote_f32', [0xbb]], ['f32.demote_f64', [0xb6]], ['i32.trunc_f64_s', [0xaa]],
+  ['i64.load', [0x29, 0x03, 0x00]], ['i64.store', [0x37, 0x03, 0x00]],
+  ['i64.add', [0x7c]], ['i64.sub', [0x7d]], ['i64.mul', [0x7e]], ['i64.div_s', [0x7f]], ['i64.rem_s', [0x81]],
+  ['i64.and', [0x83]], ['i64.or', [0x84]], ['i64.xor', [0x85]], ['i64.shl', [0x86]], ['i64.shr_s', [0x87]], ['i64.shr_u', [0x88]],
+  ['i64.eqz', [0x50]], ['i64.eq', [0x51]], ['i64.ne', [0x52]], ['i64.lt_s', [0x53]], ['i64.gt_s', [0x55]], ['i64.le_s', [0x57]], ['i64.ge_s', [0x59]],
+  ['i64.extend_i32_s', [0xac]], ['i32.wrap_i64', [0xa7]], ['f64.convert_i64_s', [0xb9]], ['i64.trunc_f64_s', [0xb0]], ['f32.convert_i64_s', [0xb4]], ['i64.trunc_f32_s', [0xae]],
   ['select', [0x1b]],
   ['f32.load', [0x2a, 0x02, 0x00]], ['f32.store', [0x38, 0x02, 0x00]],
   ['f64.load', [0x2b, 0x03, 0x00]], ['f64.store', [0x39, 0x03, 0x00]],
@@ -119,13 +128,14 @@ function parseModule(tokens) {
         p++;
         const inner = eat();
         if (inner === 'export') { funcExportName = eat().replace(/"/g, ''); expect(')'); }
-        else if (inner === 'param') { while (peek() !== ')') { const t = eat(); if (t === 'i32') funcParams.push(T_I32); else if (t === 'f32') funcParams.push(T_F32); else if (t === 'f64') funcParams.push(T_F64); else if (t === 'v128') funcParams.push(T_V128); } expect(')'); }
+        else if (inner === 'param') { while (peek() !== ')') { const t = eat(); if (t === 'i32') funcParams.push(T_I32); else if (t === 'i64') funcParams.push(T_I64); else if (t === 'f32') funcParams.push(T_F32); else if (t === 'f64') funcParams.push(T_F64); else if (t === 'v128') funcParams.push(T_V128); } expect(')'); }
         else if (inner === 'result') { while (peek() !== ')') eat(); expect(')'); }
         else if (inner === 'local') {
           while (peek() !== ')') {
             const t = eat();
             if (t.startsWith('$')) { funcLocalNames.push(t.replace('$', '')); }
             else if (t === 'i32') funcLocals.push(T_I32);
+            else if (t === 'i64') funcLocals.push(T_I64);
             else if (t === 'f32') funcLocals.push(T_F32);
             else if (t === 'f64') funcLocals.push(T_F64);
             else if (t === 'v128') funcLocals.push(T_V128);
@@ -179,6 +189,7 @@ function encodeBody(bodyTokens, localMap, importMap) {
         p++;
         const kw = eat();
         if (kw === 'i32.const') { bytes.push(0x41); bytes.push(...sleb(parseInt(eat()))); expect(')'); }
+        else if (kw === 'i64.const') { bytes.push(0x42); bytes.push(...slebBig(eat())); expect(')'); }
         else if (kw === 'f32.const') { bytes.push(0x43); bytes.push(...encF32(parseFloat(eat()))); expect(')'); }
         else if (kw === 'f64.const') { bytes.push(0x44); bytes.push(...encF64(parseFloat(eat()))); expect(')'); }
         else if (kw === 'local.get') { bytes.push(0x20); bytes.push(...uleb(localIdx(eat()))); expect(')'); }
@@ -206,7 +217,7 @@ function encodeBody(bodyTokens, localMap, importMap) {
           if (peek() === '(') {
             const saved = p;
             p++;
-            if (peek() === 'result') { eat(); const rt = eat(); blockType = rt === 'f32' ? T_F32 : rt === 'f64' ? T_F64 : rt === 'v128' ? T_V128 : T_I32; expect(')'); }
+            if (peek() === 'result') { eat(); const rt = eat(); blockType = rt === 'f32' ? T_F32 : rt === 'f64' ? T_F64 : rt === 'v128' ? T_V128 : rt === 'i64' ? T_I64 : T_I32; expect(')'); }
             else { p = saved; }
           }
           bytes.push(0x04, blockType);

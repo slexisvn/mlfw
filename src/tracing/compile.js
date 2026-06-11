@@ -5,6 +5,7 @@ import { withIncludedKeys } from '../dispatcher/guard.js';
 import { Compiler } from '../compiler/pipeline/compiler.js';
 import { CPUTarget } from '../backend/target.js';
 import { tensorToContiguous, wrapResult } from '../dispatcher/jit_dispatch.js';
+import { RuntimeTensor } from '../compiler/runtime/runtime.js';
 import { typedArrayCtor } from '../tensor/types/dtype.js';
 import { computeNumel } from '../tensor/utils/shape_utils.js';
 import { compileWithBackward } from './compile_backward.js';
@@ -135,9 +136,9 @@ function _prepareExecution(compiled, inputs, shapeEnv) {
 
   const allArgs = new Array(inputArrays.length + paramArrays.length + outputArrays.length);
   let idx = 0;
-  for (let i = 0; i < inputArrays.length; i++) allArgs[idx++] = inputArrays[i];
-  for (let i = 0; i < paramArrays.length; i++) allArgs[idx++] = paramArrays[i];
-  for (let i = 0; i < outputArrays.length; i++) allArgs[idx++] = outputArrays[i];
+  for (let i = 0; i < inputArrays.length; i++) allArgs[idx++] = new RuntimeTensor(inputArrays[i], inputs[i].shape, inputs[i].dtype);
+  for (let i = 0; i < paramArrays.length; i++) allArgs[idx++] = new RuntimeTensor(paramArrays[i], params[i].shape, params[i].dtype);
+  for (let i = 0; i < outputArrays.length; i++) allArgs[idx++] = new RuntimeTensor(outputArrays[i], outputShapes[i], outputTypes[i].dtype);
 
   return { funcName, device, outputTypes, outputArrays, outputShapes, allArgs };
 }

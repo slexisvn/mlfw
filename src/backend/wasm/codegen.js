@@ -1,6 +1,9 @@
 import { ForKind } from '../../compiler/ir/tensor/nodes.js';
 import { wasmType, wasmLoad, wasmStore, wasmBytes, isDtypeFloat, isDtypeInt, wasmSimdEntry, wasmVecOp, wasmVecLoad, wasmVecStore, wasmVecSplat, wasmVecExtractLane, wasmVecReplaceLane, wasmVecLanes } from '../dtype_map.js';
 import { inferDtype } from '../../compiler/ir/lir/nodes.js';
+import { HALF_WASM_CONSTANTS } from '../../tensor/utils/half.js';
+
+const _HALF_DTYPES = new Set(['f16', 'bf16']);
 
 export class WasmCodegen {
   constructor(target) {
@@ -110,6 +113,8 @@ export class WasmCodegen {
     this._intMinMaxDepth = 0;
     this._prescanIntMinMax(func.body);
 
+    this._ensureHalfScratch(func);
+
     const localDecls = [];
     for (const [name, type] of this._locals) {
       localDecls.push('(local $' + name + ' ' + type + ')');
@@ -155,6 +160,162 @@ export class WasmCodegen {
 
   _emit(line) {
     this._lines.push('  '.repeat(this._indent) + line);
+  }
+
+  _emitLoadOp(dtype) {
+    if (_HALF_DTYPES.has(dtype)) { this._emitHalfDecode(dtype); return; }
+    this._emit(wasmLoad(dtype));
+  }
+
+  _emitStoreOp(dtype) {
+    if (_HALF_DTYPES.has(dtype)) { this._emitHalfEncode(dtype); return; }
+    this._emit(wasmStore(dtype));
+  }
+
+  _emitHalfDecode(dtype) {
+    this._emit('i32.load16_u');
+    this._emit('local.set $_half_i');
+    if (dtype === 'bf16') {
+      this._emit('(local.get $_half_i)');
+      this._emit('(i32.const 16)');
+      this._emit('i32.shl');
+      this._emit('f32.reinterpret_i32');
+      return;
+    }
+    this._emit('(local.get $_half_i)');
+    this._emit('(i32.const 32767)');
+    this._emit('i32.and');
+    this._emit('(i32.const 13)');
+    this._emit('i32.shl');
+    this._emit('f32.reinterpret_i32');
+    this._emit('(f32.const ' + HALF_WASM_CONSTANTS.F16_MAGIC_MUL + ')');
+    this._emit('f32.mul');
+    this._emit('local.set $_half_f');
+    this._emit('(local.get $_half_f)');
+    this._emit('i32.reinterpret_f32');
+    this._emit('local.set $_half_i2');
+    this._emit('(local.get $_half_i2)');
+    this._emit('(i32.const 2139095040)');
+    this._emit('i32.or');
+    this._emit('(local.get $_half_i2)');
+    this._emit('(local.get $_half_f)');
+    this._emit('(f32.const 65536)');
+    this._emit('f32.ge');
+    this._emit('select');
+    this._emit('(local.get $_half_i)');
+    this._emit('(i32.const 32768)');
+    this._emit('i32.and');
+    this._emit('(i32.const 16)');
+    this._emit('i32.shl');
+    this._emit('i32.or');
+    this._emit('f32.reinterpret_i32');
+  }
+
+  _emitHalfEncode(dtype) {
+    this._emit('local.set $_half_f');
+    this._emit('(local.get $_half_f)');
+    this._emit('i32.reinterpret_f32');
+    this._emit('local.set $_half_i');
+    if (dtype === 'bf16') {
+      this._emit('(local.get $_half_i)');
+      this._emit('(i32.const 16)');
+      this._emit('i32.shr_u');
+      this._emit('(i32.const 1)');
+      this._emit('i32.and');
+      this._emit('(i32.const 32767)');
+      this._emit('i32.add');
+      this._emit('(local.get $_half_i)');
+      this._emit('i32.add');
+      this._emit('(i32.const 16)');
+      this._emit('i32.shr_u');
+      this._emit('i32.store16');
+      return;
+    }
+    this._emit('(local.get $_half_i)');
+    this._emit('(i32.const 2147483647)');
+    this._emit('i32.and');
+    this._emit('local.set $_half_i2');
+    this._emit('(i32.const 32256)');
+    this._emit('(i32.const 31744)');
+    this._emit('(local.get $_half_i2)');
+    this._emit('(i32.const 2139095040)');
+    this._emit('i32.gt_s');
+    this._emit('select');
+    this._emit('(local.get $_half_i2)');
+    this._emit('f32.reinterpret_i32');
+    this._emit('(f32.const 0.5)');
+    this._emit('f32.add');
+    this._emit('i32.reinterpret_f32');
+    this._emit('(i32.const 1056964608)');
+    this._emit('i32.sub');
+    this._emit('(local.get $_half_i2)');
+    this._emit('(i32.const ' + HALF_WASM_CONSTANTS.F16_ADD_BIAS + ')');
+    this._emit('i32.add');
+    this._emit('(local.get $_half_i2)');
+    this._emit('(i32.const 13)');
+    this._emit('i32.shr_u');
+    this._emit('(i32.const 1)');
+    this._emit('i32.and');
+    this._emit('i32.add');
+    this._emit('(i32.const 13)');
+    this._emit('i32.shr_u');
+    this._emit('(local.get $_half_i2)');
+    this._emit('(i32.const 947912704)');
+    this._emit('i32.lt_s');
+    this._emit('select');
+    this._emit('(local.get $_half_i2)');
+    this._emit('(i32.const 1199570944)');
+    this._emit('i32.ge_s');
+    this._emit('select');
+    this._emit('(local.get $_half_i)');
+    this._emit('(i32.const 16)');
+    this._emit('i32.shr_u');
+    this._emit('(i32.const 32768)');
+    this._emit('i32.and');
+    this._emit('i32.or');
+    this._emit('i32.store16');
+  }
+
+  _ensureHalfScratch(func) {
+    let needs = false;
+    for (const [, buf] of func.bufferMap) {
+      if (_HALF_DTYPES.has(buf.dtype)) { needs = true; break; }
+    }
+    if (!needs && func.metadata && func.metadata.locals) {
+      for (const [, dtype] of func.metadata.locals) {
+        if (_HALF_DTYPES.has(dtype)) { needs = true; break; }
+      }
+    }
+    if (!needs) needs = this._treeHasHalf(func.body);
+    if (needs) {
+      this._ensureLocal('_half_f', 'f32');
+      this._ensureLocal('_half_i', 'i32');
+      this._ensureLocal('_half_i2', 'i32');
+    }
+  }
+
+  _treeHasHalf(root) {
+    const stack = [root];
+    while (stack.length > 0) {
+      const n = stack.pop();
+      if (!n || typeof n !== 'object') continue;
+      if ((n.type === 'BufferLoadNode' || n.type === 'BufferStoreNode') && n.buffer && _HALF_DTYPES.has(n.buffer.dtype)) return true;
+      if ((n.type === 'LIRFlatLoadNode' || n.type === 'LIRFlatStoreNode') && _HALF_DTYPES.has(n.dtype)) return true;
+      if (n.body) stack.push(n.body);
+      if (n.value && typeof n.value === 'object') stack.push(n.value);
+      if (n.stmts) for (const s of n.stmts) stack.push(s);
+      if (n.a) stack.push(n.a);
+      if (n.b) stack.push(n.b);
+      if (n.expr) stack.push(n.expr);
+      if (n.thenBody) stack.push(n.thenBody);
+      if (n.elseBody) stack.push(n.elseBody);
+      if (n.initBody) stack.push(n.initBody);
+      if (n.condition) stack.push(n.condition);
+      if (n.offsetExpr) stack.push(n.offsetExpr);
+      if (n.args) for (const a of n.args) stack.push(a);
+      if (n.indices) for (const idx of n.indices) stack.push(idx);
+    }
+    return false;
   }
 
   _visitNode(startNode) {
@@ -296,13 +457,13 @@ export class WasmCodegen {
       const accLocal = '_wacc_' + (this._waccCounter = (this._waccCounter || 0) + 1);
       this._ensureLocal(accLocal, wasmType(accInfo.buf.dtype));
       this._emitAddr(accInfo.buf, accInfo.outerIndices);
-      this._emit(wasmLoad(accInfo.buf.dtype));
+      this._emitLoadOp(accInfo.buf.dtype);
       this._emit('local.set $' + accLocal);
       this._wasmAcc = { local: accLocal, bufName: accInfo.buf.name, indices: accInfo.indices };
       this._emitForLoop(varName, node.extent, node.body);
       this._emitAddr(accInfo.buf, accInfo.outerIndices);
       this._emit('(local.get $' + accLocal + ')');
-      this._emit(wasmStore(accInfo.buf.dtype));
+      this._emitStoreOp(accInfo.buf.dtype);
       this._wasmAcc = null;
       return;
     }
@@ -318,7 +479,7 @@ export class WasmCodegen {
     }
     this._emitFlatAddr(node.buffer, node.offsetExpr);
     this._emitCoercedTo(node.value, this._numPrefix(node.dtype));
-    this._emit(wasmStore(node.dtype));
+    this._emitStoreOp(node.dtype);
   }
 
   _visitLIRBindings(node) {
@@ -382,7 +543,7 @@ export class WasmCodegen {
 
     this._emitFlatAddr(node.flushStore.buffer, node.flushStore.offsetExpr);
     this._emit('(local.get $' + accLocal + ')');
-    this._emit(wasmStore(node.flushStore.dtype));
+    this._emitStoreOp(node.flushStore.dtype);
 
     this._wasmAcc = prevAcc;
   }
@@ -479,7 +640,7 @@ export class WasmCodegen {
 
     this._emitFlatAddr(node.flushStore.buffer, node.flushStore.offsetExpr);
     this._emit('(local.get $' + accLocal + ')');
-    this._emit(wasmStore(node.flushStore.dtype));
+    this._emitStoreOp(node.flushStore.dtype);
 
     this._wasmAcc = prevAcc;
   }
@@ -586,7 +747,7 @@ export class WasmCodegen {
     }
     this._emitAddr(node.buffer, node.indices);
     this._emitCoercedTo(node.value, this._numPrefix(node.buffer.dtype));
-    this._emit(wasmStore(node.buffer.dtype));
+    this._emitStoreOp(node.buffer.dtype);
   }
 
   _visitIf(node) {
@@ -730,7 +891,7 @@ export class WasmCodegen {
           this._emit('(local.get $' + this._wasmAcc.local + ')');
         } else {
           this._emitAddr(node.buffer, node.indices);
-          this._emit(wasmLoad(node.buffer.dtype));
+          this._emitLoadOp(node.buffer.dtype);
         }
         break;
       case 'LIRFlatLoadNode':
@@ -738,7 +899,7 @@ export class WasmCodegen {
           this._emit('(local.get $' + this._wasmAcc.local + ')');
         } else {
           this._emitFlatAddr(node.buffer, node.offsetExpr);
-          this._emit(wasmLoad(node.dtype));
+          this._emitLoadOp(node.dtype);
         }
         break;
       case 'MathOpNode':
@@ -785,6 +946,7 @@ export class WasmCodegen {
 
   _numPrefix(dtype) {
     if (dtype === 'f64') return 'f64';
+    if (dtype === 'i64') return 'i64';
     if (isDtypeFloat(dtype)) return 'f32';
     return 'i32';
   }
@@ -798,12 +960,19 @@ export class WasmCodegen {
     if (toPrefix === 'f64') {
       if (fromPrefix === 'f32') this._emit('f64.promote_f32');
       else if (fromPrefix === 'i32') this._emit('f64.convert_i32_s');
+      else if (fromPrefix === 'i64') this._emit('f64.convert_i64_s');
     } else if (toPrefix === 'f32') {
       if (fromPrefix === 'f64') this._emit('f32.demote_f64');
       else if (fromPrefix === 'i32') this._emit('f32.convert_i32_s');
+      else if (fromPrefix === 'i64') this._emit('f32.convert_i64_s');
     } else if (toPrefix === 'i32') {
       if (fromPrefix === 'f64') this._emit('i32.trunc_f64_s');
       else if (fromPrefix === 'f32') this._emit('i32.trunc_f32_s');
+      else if (fromPrefix === 'i64') this._emit('i32.wrap_i64');
+    } else if (toPrefix === 'i64') {
+      if (fromPrefix === 'i32') this._emit('i64.extend_i32_s');
+      else if (fromPrefix === 'f32') this._emit('i64.trunc_f32_s');
+      else if (fromPrefix === 'f64') this._emit('i64.trunc_f64_s');
     }
   }
 
@@ -823,13 +992,13 @@ export class WasmCodegen {
 
     if (!node.b) {
       if (node.op === '-') {
-        if (prefix !== 'i32') {
+        if (prefix === 'f32' || prefix === 'f64') {
           this._emitCoercedTo(node.a, prefix);
           this._emit(prefix + '.neg');
         } else {
-          this._emit('(i32.const 0)');
-          this._emitExpr(node.a);
-          this._emit('i32.sub');
+          this._emit('(' + prefix + '.const 0)');
+          this._emitCoercedTo(node.a, prefix);
+          this._emit(prefix + '.sub');
         }
       } else if (node.op === '!') {
         this._emitExpr(node.a);
@@ -851,21 +1020,26 @@ export class WasmCodegen {
       return;
     }
 
+    const isFloat = prefix === 'f32' || prefix === 'f64';
+    if (!isFloat) {
+      if (node.op === '/' || node.op === '//') { this._emitIntDiv(node, prefix); return; }
+      if (node.op === '%') { this._emitIntRem(node, prefix); return; }
+    }
+
     this._emitCoercedTo(node.a, prefix);
     this._emitCoercedTo(node.b, prefix);
 
-    const isFloat = prefix !== 'i32';
     switch (node.op) {
       case '+': this._emit(`${prefix}.add`); break;
       case '-': this._emit(`${prefix}.sub`); break;
       case '*': this._emit(`${prefix}.mul`); break;
-      case '/': this._emit(isFloat ? `${prefix}.div` : 'i32.div_s'); break;
-      case '%': this._emit('i32.rem_s'); break;
-      case '//': this._emit('i32.div_s'); break;
-      case '<': this._emit(isFloat ? `${prefix}.lt` : 'i32.lt_s'); break;
-      case '>': this._emit(isFloat ? `${prefix}.gt` : 'i32.gt_s'); break;
-      case '<=': this._emit(isFloat ? `${prefix}.le` : 'i32.le_s'); break;
-      case '>=': this._emit(isFloat ? `${prefix}.ge` : 'i32.ge_s'); break;
+      case '/': this._emit(isFloat ? `${prefix}.div` : `${prefix}.div_s`); break;
+      case '%': this._emit(`${prefix}.rem_s`); break;
+      case '//': this._emit(`${prefix}.div_s`); break;
+      case '<': this._emit(isFloat ? `${prefix}.lt` : `${prefix}.lt_s`); break;
+      case '>': this._emit(isFloat ? `${prefix}.gt` : `${prefix}.gt_s`); break;
+      case '<=': this._emit(isFloat ? `${prefix}.le` : `${prefix}.le_s`); break;
+      case '>=': this._emit(isFloat ? `${prefix}.ge` : `${prefix}.ge_s`); break;
       default: this._emit(`${prefix}.add`); break;
     }
   }
@@ -873,6 +1047,7 @@ export class WasmCodegen {
   _joinPrefix(pa, pb) {
     if (pa === 'f64' || pb === 'f64') return 'f64';
     if (pa === 'f32' || pb === 'f32') return 'f32';
+    if (pa === 'i64' || pb === 'i64') return 'i64';
     return 'i32';
   }
 
@@ -880,7 +1055,7 @@ export class WasmCodegen {
     const pa = this._exprPrefix(node.a);
     const pb = this._exprPrefix(node.b);
     const prefix = this._joinPrefix(pa, pb);
-    const isFloat = prefix !== 'i32';
+    const isFloat = prefix === 'f32' || prefix === 'f64';
     this._emitCoercedTo(node.a, prefix);
     this._emitCoercedTo(node.b, prefix);
     const ops = { eq: 'eq', ne: 'ne', lt: isFloat ? 'lt' : 'lt_s', le: isFloat ? 'le' : 'le_s', gt: isFloat ? 'gt' : 'gt_s', ge: isFloat ? 'ge' : 'ge_s' };
@@ -968,10 +1143,63 @@ export class WasmCodegen {
     this._emit('select');
   }
 
+  _isIntDivNode(n) {
+    if (n.type !== 'MathOpNode' || !n.b) return false;
+    if (n.op !== '/' && n.op !== '//' && n.op !== '%') return false;
+    const prefix = this._joinPrefix(this._exprPrefix(n.a), this._exprPrefix(n.b));
+    return prefix === 'i32' || prefix === 'i64';
+  }
+
+  _emitIntDiv(node, prefix) {
+    const depth = this._intDivEmitDepth || 0;
+    const a = '_idiv_a' + depth, b = '_idiv_b' + depth;
+    this._intDivEmitDepth = depth + 1;
+    this._emitCoercedTo(node.a, prefix); this._emit('local.set $' + a);
+    this._emitCoercedTo(node.b, prefix); this._emit('local.set $' + b);
+    this._intDivEmitDepth = depth;
+    const MIN = prefix === 'i64' ? '-9223372036854775808' : '-2147483648';
+    this._emit('(local.get $' + a + ')');
+    this._emit('(' + prefix + '.const 1)');
+    this._emit('(local.get $' + b + ')');
+    this._emit('(local.get $' + b + ')'); this._emit(prefix + '.eqz');
+    this._emit('(local.get $' + a + ')'); this._emit('(' + prefix + '.const ' + MIN + ')'); this._emit(prefix + '.eq');
+    this._emit('(local.get $' + b + ')'); this._emit('(' + prefix + '.const -1)'); this._emit(prefix + '.eq');
+    this._emit('i32.and');
+    this._emit('i32.or');
+    this._emit('select');
+    this._emit(prefix + '.div_s');
+    this._emit('local.set $' + a);
+    this._emit('(' + prefix + '.const 0)');
+    this._emit('(local.get $' + a + ')');
+    this._emit('(local.get $' + b + ')'); this._emit(prefix + '.eqz');
+    this._emit('select');
+  }
+
+  _emitIntRem(node, prefix) {
+    const depth = this._intDivEmitDepth || 0;
+    const a = '_idiv_a' + depth, b = '_idiv_b' + depth;
+    this._intDivEmitDepth = depth + 1;
+    this._emitCoercedTo(node.a, prefix); this._emit('local.set $' + a);
+    this._emitCoercedTo(node.b, prefix); this._emit('local.set $' + b);
+    this._intDivEmitDepth = depth;
+    this._emit('(local.get $' + a + ')');
+    this._emit('(' + prefix + '.const 1)');
+    this._emit('(local.get $' + b + ')');
+    this._emit('(local.get $' + b + ')'); this._emit(prefix + '.eqz');
+    this._emit('select');
+    this._emit(prefix + '.rem_s');
+    this._emit('local.set $' + a);
+    this._emit('(' + prefix + '.const 0)');
+    this._emit('(local.get $' + a + ')');
+    this._emit('(local.get $' + b + ')'); this._emit(prefix + '.eqz');
+    this._emit('select');
+  }
+
   _prescanIntMinMax(root) {
-    const visit = (n, depth) => {
+    const visit = (n, depth, divDepth) => {
       if (!n || typeof n !== 'object') return;
       let childDepth = depth;
+      let childDivDepth = divDepth;
       if (n.type === 'CallExternNode' && (n.externName === 'min' || n.externName === 'max') && !isDtypeFloat(n.dtype)) {
         this._ensureLocal('_immm_a' + depth, 'i32');
         this._ensureLocal('_immm_b' + depth, 'i32');
@@ -981,24 +1209,29 @@ export class WasmCodegen {
         this._ensureLocal('_iabs' + depth, 'i32');
         if (depth + 1 > this._intMinMaxDepth) this._intMinMaxDepth = depth + 1;
         childDepth = depth + 1;
+      } else if (this._isIntDivNode(n)) {
+        const t = wasmType(this._joinPrefix(this._exprPrefix(n.a), this._exprPrefix(n.b)));
+        this._ensureLocal('_idiv_a' + divDepth, t);
+        this._ensureLocal('_idiv_b' + divDepth, t);
+        childDivDepth = divDepth + 1;
       }
-      if (n.body) visit(n.body, childDepth);
-      if (n.value && typeof n.value === 'object') visit(n.value, childDepth);
-      if (n.a) visit(n.a, childDepth);
-      if (n.b) visit(n.b, childDepth);
-      if (n.expr) visit(n.expr, childDepth);
-      if (n.condition) visit(n.condition, childDepth);
-      if (n.offsetExpr) visit(n.offsetExpr, childDepth);
-      if (n.thenBody) visit(n.thenBody, childDepth);
-      if (n.elseBody) visit(n.elseBody, childDepth);
-      if (n.initBody) visit(n.initBody, childDepth);
-      if (n.stmts) for (const s of n.stmts) visit(s, childDepth);
-      if (n.args) for (const x of n.args) visit(x, childDepth);
-      if (n.indices) for (const x of n.indices) visit(x, childDepth);
-      if (n.bindings) for (const x of n.bindings) visit(x.expr, childDepth);
-      if (n.iterVars) for (const x of n.iterVars) if (x.binding) visit(x.binding, childDepth);
+      if (n.body) visit(n.body, childDepth, childDivDepth);
+      if (n.value && typeof n.value === 'object') visit(n.value, childDepth, childDivDepth);
+      if (n.a) visit(n.a, childDepth, childDivDepth);
+      if (n.b) visit(n.b, childDepth, childDivDepth);
+      if (n.expr) visit(n.expr, childDepth, childDivDepth);
+      if (n.condition) visit(n.condition, childDepth, childDivDepth);
+      if (n.offsetExpr) visit(n.offsetExpr, childDepth, childDivDepth);
+      if (n.thenBody) visit(n.thenBody, childDepth, childDivDepth);
+      if (n.elseBody) visit(n.elseBody, childDepth, childDivDepth);
+      if (n.initBody) visit(n.initBody, childDepth, childDivDepth);
+      if (n.stmts) for (const s of n.stmts) visit(s, childDepth, childDivDepth);
+      if (n.args) for (const x of n.args) visit(x, childDepth, childDivDepth);
+      if (n.indices) for (const x of n.indices) visit(x, childDepth, childDivDepth);
+      if (n.bindings) for (const x of n.bindings) visit(x.expr, childDepth, childDivDepth);
+      if (n.iterVars) for (const x of n.iterVars) if (x.binding) visit(x.binding, childDepth, childDivDepth);
     };
-    visit(root, 0);
+    visit(root, 0, 0);
   }
 
   _mathImportSig(name, argc) {
@@ -1085,7 +1318,7 @@ export class WasmCodegen {
     const lanes = this.target.vectorWidth;
     const simdEntry = wasmSimdEntry(dtype);
 
-    if (!simdEntry || extent < lanes) {
+    if (!simdEntry || extent < lanes || this._treeHasHalf(node.body)) {
       this._emitForLoop(varName, node.extent, node.body);
       return;
     }

@@ -12,12 +12,15 @@ async function getWasmPool() {
 }
 
 const TYPED_ARRAY_CTORS = {
-  'f16':  Float32Array,
+  'f16':  Uint16Array,
+  'bf16': Uint16Array,
   'f32':  Float32Array,
   'f64':  Float64Array,
   'i8':   Int8Array,
   'i16':  Int16Array,
   'i32':  Int32Array,
+  'i64':  BigInt64Array,
+  'ui8':  Uint8Array,
   'bool': Uint8Array,
   'index': Int32Array,
 };
