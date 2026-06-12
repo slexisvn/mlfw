@@ -7,12 +7,12 @@ campaigns = DataFrame(
   conversions=[180, 95, 60, 210, 90, 110, 72, 80, 165, 102, 66, 88]
 )
 
-performance = (campaigns
+performance = campaigns
   .filter("spend > 0")
   .groupBy("channel")
   .agg(sum("spend").alias("spend"), sum("clicks").alias("clicks"), sum("conversions").alias("conversions"), sum("impressions").alias("impressions"))
   .withColumn("ctr", expr("CAST(clicks AS DOUBLE) * 100 / impressions"))
   .withColumn("cpa", expr("CAST(spend AS DOUBLE) / conversions"))
-  .orderBy("channel"))
+  .orderBy("channel")
 
 chart.bar(performance, x="channel", y="cpa", title="Cost per acquisition by channel")

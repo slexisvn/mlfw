@@ -153,6 +153,12 @@ function addIndentation(tokens) {
         continue;
       }
 
+      // Line continuation: next line starts with '.' (method chaining)
+      if (tokens[j].type === 'symbol' && tokens[j].value === '.') {
+        i = j - 1;
+        continue;
+      }
+
       const nextCol = tokens[j].column;
       const currentIndent = indentStack[indentStack.length - 1];
 

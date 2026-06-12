@@ -7,10 +7,10 @@ sessions = DataFrame(
 
 engaged = sessions.withColumn("segment", expr("CASE WHEN duration_s >= 90 THEN 'engaged' ELSE 'casual' END"))
 
-rates = (engaged
+rates = engaged
   .groupBy("variant", "segment")
   .agg(sum("converted").alias("conversions"), countStar().alias("sessions"))
   .withColumn("rate", expr("CAST(conversions AS DOUBLE) * 100 / sessions"))
-  .orderBy("variant"))
+  .orderBy("variant")
 
 chart.bar(rates, x="variant", y="rate", color="segment", mode="grouped", title="Conversion rate by variant and engagement")
