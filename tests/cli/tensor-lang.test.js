@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { TeraRuntime } from '../../src/cli/runtime.js';
 import { formatValue } from '../../src/cli/format.js';
+import { CsvStreamParser } from '../../src/cli/csv.js';
 
 describe('Tera', () => {
   it('evaluates tensor expressions including matmul', async () => {
@@ -389,5 +390,37 @@ else: 3`)).toBe(3);
     const runtime = new TeraRuntime({ output: () => {} });
     await expect(runtime.execute('tensor([1])[]')).rejects.toThrow(/Expected index expression/);
     await expect(runtime.execute('tensor([1, 2])[::0]')).rejects.toThrow(/Slice step must be a positive integer/);
+  });
+
+  it('streams a CSV into a queryable DataFrame', async () => {
+    const csv = 'id,city,age\n1,HN,20\n2,"Da Nang",35\n3,HN,42\n';
+    const parser = new CsvStreamParser(',');
+    for (let i = 0; i < csv.length; i += 5) parser.feed(csv.slice(i, i + 5));
+    const { columns, headers, rowCount } = parser.finish();
+    expect(headers).toEqual(['id', 'city', 'age']);
+    expect(rowCount).toBe(3);
+    expect(columns.city).toEqual(['HN', 'Da Nang', 'HN']);
+    expect(columns.age).toEqual([20, 35, 42]);
+
+    const runtime = new TeraRuntime({ output: () => {} });
+    runtime.registerDataFrame('people', columns);
+    expect(await runtime.execute('people.count()')).toBe(3);
+    expect(await runtime.execute('people.filter("age > 30").select("city").collect()'))
+      .toEqual([{ city: 'Da Nang' }, { city: 'HN' }]);
+  });
+
+  it('loads an uploaded CSV via load_csv(name)', async () => {
+    const parser = new CsvStreamParser(',');
+    parser.feed('city,amount\nHN,100\nSG,250\nHN,80\n');
+    const { columns } = parser.finish();
+
+    const runtime = new TeraRuntime({ output: () => {} });
+    runtime.registerUploadedCsv('sales.csv', columns);
+    expect(await runtime.execute('load_csv("sales.csv").count()')).toBe(3);
+    expect(await runtime.execute('load_csv("sales.csv").groupBy("city").agg(sum("amount")).orderBy("city").collect()'))
+      .toEqual([{ city: 'HN', sum: 180 }, { city: 'SG', sum: 250 }]);
+
+    runtime.removeUploadedCsv('sales.csv');
+    await expect(runtime.execute('load_csv("sales.csv")')).rejects.toThrow();
   });
 });

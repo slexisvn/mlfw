@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
+import { buildFunction, IRBuilder } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType, Layout } from '../../../src/compiler/ir/graph/types.js';
 import { LayoutTransformPass } from '../../../src/compiler/passes/layout/layout_transform.js';
 import { PassResult } from '../../../src/compiler/passes/pass.js';
-import { CPUTarget, GPUTarget } from '../../../src/backend/target.js';
+import { CPUTarget, GPUTarget, WasmTarget } from '../../../src/backend/target.js';
+import { GraphFunction } from '../../../src/compiler/ir/graph/function.js';
+import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
 
 function run(func, target) {
   return new LayoutTransformPass({ target }).run(func);
@@ -194,11 +196,6 @@ describe('LayoutTransformPass — cost-benefit profitability', () => {
     expect(transforms.length).toBeLessThanOrEqual(2);
   });
 });
-
-import { IRBuilder } from '../../../src/compiler/ir/graph/builder.js';
-import { GraphFunction } from '../../../src/compiler/ir/graph/function.js';
-import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
-import { WasmTarget } from '../../../src/backend/target.js';
 
 const F = ScalarType.F32;
 function buildAuto(name, inTypes, build) {

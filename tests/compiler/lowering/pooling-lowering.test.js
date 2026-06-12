@@ -3,6 +3,8 @@ import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { lowerGraphToPrimFunc } from '../../../src/compiler/passes/lowering/graph_to_tensor.js';
 import { BufferLoadNode, IntImmNode } from '../../../src/compiler/ir/tensor/nodes.js';
+import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
+import { CPUTarget, WasmTarget } from '../../../src/backend/target.js';
 
 const SKIP_KEYS = new Set(['_parent', '_parentKey', '_parentIdx']);
 
@@ -77,9 +79,6 @@ describe('pool2d lowering layout awareness', () => {
     expect(stores.length).toBeGreaterThan(0);
   });
 });
-
-import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
-import { CPUTarget, WasmTarget } from '../../../src/backend/target.js';
 
 function poolRef(inp, N, C, H, W, k, s, pad, type, cip) {
   const oH = Math.floor((H + 2 * pad - k) / s) + 1, oW = Math.floor((W + 2 * pad - k) / s) + 1;

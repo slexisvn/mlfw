@@ -94,9 +94,6 @@ export function register(registry) {
       const zp = attrs.get ? attrs.get('zero_point') : attrs.zero_point;
       if (typeof scale !== 'number' || typeof zp !== 'number') return undefined;
       return (constValues[0] - zp) * scale;
-    },
-    getCanonicalizationPatterns() {
-      return [new qpat.DequantizeQuantizeIdentity()];
     }
   }));
 

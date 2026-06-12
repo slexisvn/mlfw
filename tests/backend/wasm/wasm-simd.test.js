@@ -496,3 +496,42 @@ describe('WASM SIMD — large data stress', () => {
     }
   });
 });
+
+describe('WASM SIMD — numeric equivalence: SIMD on == scalar (simd off), incl. non-power-of-2 remainders', () => {
+  const SCALAR = WasmTarget({ simd: false });
+  const I32 = ScalarType.I32;
+  const T = (sh, dt = F32) => new TensorType(sh, dt);
+
+  function runBoth(name, inTypes, build, inputs, outNumel, tol = 0) {
+    const func = buildFunction(name, inTypes, [build.outT], (b, a) => { b.returnOp([build.fn(b, a).getResult(0)]); });
+    const out = {};
+    for (const [k, target] of [['simd', SIMD], ['scalar', SCALAR]]) {
+      const r = compileGraph(func, target, { scheduling: { enabled: true } });
+      const o = new Float32Array(outNumel); r.run(name, ...inputs, o); out[k] = o;
+    }
+    for (let i = 0; i < outNumel; i++) {
+      if (tol === 0) expect(out.simd[i], `${name} idx ${i}`).toBe(out.scalar[i]);
+      else expect(Math.abs(out.simd[i] - out.scalar[i]) / (1 + Math.abs(out.scalar[i])), `${name} idx ${i}`).toBeLessThan(tol);
+    }
+  }
+  const dataF = (n) => { const a = new Float32Array(n); for (let i = 0; i < n; i++) a[i] = Math.sin(i * 1.3) * 2; return a; };
+  const dataI = (n) => { const a = new Int32Array(n); for (let i = 0; i < n; i++) a[i] = (i * 7) % 23 - 11; return a; };
+
+  for (const n of [3, 4, 5, 7, 8, 13, 16, 17]) {
+    it(`f32 elementwise chain [${n}] simd==scalar`, () => {
+      runBoth(`ew_${n}`, [T([n]), T([n])], { outT: T([n]), fn: (b, a) => b.relu(b.mul(b.add(a[0], a[1]).getResult(0), a[0]).getResult(0)) }, [dataF(n), dataF(n)], n);
+    });
+    it(`f32 reduce-sum [${n}] simd==scalar`, () => {
+      runBoth(`red_${n}`, [T([n])], { outT: T([]), fn: (b, a) => b.reduce(a[0], b.scalarConstant(0, F32).getResult(0), [0], 'sum') }, [dataF(n)], 1, 1e-5);
+    });
+    it(`f32 compare+select mask [${n}] simd==scalar`, () => {
+      runBoth(`sel_${n}`, [T([n]), T([n])], { outT: T([n]), fn: (b, a) => b.select(b.compare(a[0], a[1], 'gt').getResult(0), a[0], b.neg(a[1]).getResult(0)) }, [dataF(n), dataF(n)], n);
+    });
+    it(`i32 add+mul [${n}] simd==scalar`, () => {
+      runBoth(`i32_${n}`, [T([n], I32), T([n], I32)], { outT: T([n], I32), fn: (b, a) => b.add(b.mul(a[0], a[1]).getResult(0), a[0]) }, [dataI(n), dataI(n)], n);
+    });
+    it(`i32 max-reduce [${n}] simd==scalar`, () => {
+      runBoth(`i32red_${n}`, [T([n], I32)], { outT: T([], I32), fn: (b, a) => b.reduce(a[0], b.scalarConstant(-2147483648, I32).getResult(0), [0], 'max') }, [dataI(n)], 1);
+    });
+  }
+});

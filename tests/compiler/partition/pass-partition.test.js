@@ -1,10 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
+import { buildFunction, IRBuilder } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { GraphPartitionPass, PartitionMaterializationPass } from '../../../src/compiler/passes/partition/partition_pass.js';
 import { PassResult } from '../../../src/compiler/passes/pass.js';
 import { CPUTarget, GPUTarget } from '../../../src/backend/target.js';
 import { GraphFunction } from '../../../src/compiler/ir/graph/function.js';
+import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
 
 function findOps(func, opName) {
   const result = [];
@@ -319,9 +320,6 @@ describe('PartitionMaterializationPass', () => {
     }
   });
 });
-
-import { IRBuilder } from '../../../src/compiler/ir/graph/builder.js';
-import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
 
 const F = ScalarType.F32;
 function buildAuto(name, inTypes, build) {

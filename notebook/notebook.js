@@ -1,4 +1,4 @@
-import { TeraRuntime, formatValue } from './dist/mlfw-lang.esm.js';
+import { TeraRuntime, formatValue, CsvStreamParser } from './dist/mlfw-lang.esm.js';
 
 const STORAGE_KEY = 'mlfw-notebook-v1';
 const THEME_KEY = 'mlfw-notebook-theme';
@@ -99,6 +99,120 @@ function makeRuntime() {
 function setKernel(text, busy) {
   kernelStatus.textContent = 'kernel: ' + text;
   kernelStatus.classList.toggle('busy', !!busy);
+}
+
+const uploadedFiles = new Map();
+
+function csvVarName(filename) {
+  let base = filename.replace(/\.[^.]+$/, '').replace(/[^A-Za-z0-9_]/g, '_');
+  if (!/^[A-Za-z_]/.test(base)) base = '_' + base;
+  return base || 'data';
+}
+
+function fmtSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + ' KB';
+  return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+}
+
+function parseCsvInWorker(file, onProgress) {
+  return new Promise((resolve, reject) => {
+    let worker;
+    try {
+      worker = new Worker(new URL('./csv-worker.js', import.meta.url), { type: 'module' });
+    } catch (err) {
+      reject(err);
+      return;
+    }
+    worker.onmessage = (e) => {
+      const m = e.data;
+      if (m.type === 'progress') onProgress(m.read);
+      else if (m.type === 'done') { worker.terminate(); resolve(m); }
+      else if (m.type === 'error') { worker.terminate(); reject(new Error(m.message)); }
+    };
+    worker.onerror = (err) => { worker.terminate(); reject(new Error(err.message || 'worker failed')); };
+    worker.postMessage({ file, separator: ',' });
+  });
+}
+
+async function parseCsvOnMainThread(file, onProgress) {
+  const parser = new CsvStreamParser(',');
+  const reader = file.stream().getReader();
+  const decoder = new TextDecoder();
+  let read = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    read += value.byteLength;
+    parser.feed(decoder.decode(value, { stream: true }));
+    onProgress(read);
+  }
+  parser.feed(decoder.decode());
+  return parser.finish();
+}
+
+async function uploadCsv(file) {
+  const onProgress = (read) => {
+    const pct = file.size ? Math.round((read / file.size) * 100) : 0;
+    setKernel(`loading ${file.name} ${pct}%`, true);
+  };
+  setKernel(`loading ${file.name}…`, true);
+  let result;
+  try {
+    result = await parseCsvInWorker(file, onProgress);
+  } catch {
+    result = await parseCsvOnMainThread(file, onProgress);
+  }
+  runtime.registerUploadedCsv(file.name, result.columns);
+  uploadedFiles.set(file.name, { rowCount: result.rowCount, size: file.size });
+  renderFiles();
+}
+
+async function uploadCsvFiles(fileList) {
+  for (const file of fileList) {
+    try {
+      await uploadCsv(file);
+    } catch (err) {
+      setKernel(`error in ${file.name}: ${err.message || err}`);
+      return;
+    }
+  }
+  setKernel('ready');
+}
+
+function removeFile(name) {
+  uploadedFiles.delete(name);
+  runtime.removeUploadedCsv(name);
+  renderFiles();
+}
+
+function renderFiles() {
+  const list = document.getElementById('files-list');
+  const empty = document.getElementById('files-empty');
+  list.innerHTML = '';
+  empty.style.display = uploadedFiles.size ? 'none' : 'block';
+  for (const [name, meta] of uploadedFiles) {
+    const li = document.createElement('li');
+    li.className = 'file-item';
+    const open = document.createElement('button');
+    open.className = 'file-open';
+    open.title = `Insert load_csv("${name}") cell`;
+    const nameEl = document.createElement('span');
+    nameEl.className = 'file-name';
+    nameEl.textContent = name;
+    const metaEl = document.createElement('span');
+    metaEl.className = 'file-meta';
+    metaEl.textContent = `${meta.rowCount} rows · ${fmtSize(meta.size)}`;
+    open.append(nameEl, metaEl);
+    open.addEventListener('click', () => createCell(`${csvVarName(name)} = load_csv("${name}")`, { focus: true }));
+    const del = document.createElement('button');
+    del.className = 'file-del';
+    del.textContent = '×';
+    del.title = 'Remove file';
+    del.addEventListener('click', () => removeFile(name));
+    li.append(open, del);
+    list.append(li);
+  }
 }
 
 function save() {
@@ -660,10 +774,26 @@ document.getElementById('run-all').addEventListener('click', runAll);
 document.getElementById('add-cell').addEventListener('click', () => createCell('', { focus: true }));
 document.getElementById('restart').addEventListener('click', restart);
 document.getElementById('clear-out').addEventListener('click', clearOutputs);
+const csvInput = document.getElementById('csv-file');
+document.getElementById('upload-csv').addEventListener('click', () => csvInput.click());
+csvInput.addEventListener('change', () => { uploadCsvFiles([...csvInput.files]); csvInput.value = ''; });
+
+const sidebarEl = document.querySelector('.sidebar');
+const hasFiles = (e) => e.dataTransfer && [...e.dataTransfer.types].includes('Files');
+window.addEventListener('dragover', (e) => { if (hasFiles(e)) { e.preventDefault(); sidebarEl.classList.add('drag-over'); } });
+window.addEventListener('dragleave', (e) => { if (e.relatedTarget === null) sidebarEl.classList.remove('drag-over'); });
+window.addEventListener('drop', (e) => {
+  if (!hasFiles(e)) return;
+  e.preventDefault();
+  sidebarEl.classList.remove('drag-over');
+  const files = [...e.dataTransfer.files].filter((f) => /\.csv$/i.test(f.name) || f.type === 'text/csv');
+  if (files.length) uploadCsvFiles(files);
+});
 document.addEventListener('click', (e) => { if (ac.el && !ac.el.contains(e.target)) closeAutocomplete(); });
 document.addEventListener('scroll', hideHover, true);
 
 initTheme();
 loadDocs();
 makeRuntime();
+renderFiles();
 load();

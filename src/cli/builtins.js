@@ -8,7 +8,7 @@ import { printModule } from '../compiler/ir/graph/printer.js';
 import { DataLoader, TensorDataset } from '../data/index.js';
 import { loadCsvRows } from './csv.js';
 import {
-  createEngine, DataFrame, Col,
+  createEngine, DataFrame, Col, InMemoryRelation,
   col as qcol, lit as qlit, expr as qexpr,
   sum as qsum, avg as qavg, min as qmin, max as qmax, count as qcount, countStar as qcountStar,
 } from '#plugins/query-engine';
@@ -39,6 +39,25 @@ const MODULES = [
 let _engine = null;
 function engine() {
   return _engine ?? (_engine = createEngine());
+}
+
+// Uploaded CSV files (browser): name -> typed column arrays. load_csv() reads
+// from here first so streamed uploads are queryable without a filesystem.
+const _uploadedCsv = new Map();
+export function setUploadedCsv(name, columns) { _uploadedCsv.set(name, columns); }
+export function removeUploadedCsv(name) { _uploadedCsv.delete(name); }
+export function listUploadedCsv() { return [..._uploadedCsv.keys()]; }
+
+let _uploadTableId = 0;
+// Build a DataFrame from typed column arrays without materializing row objects —
+// used to ingest streamed CSV uploads into the runtime.
+export function createDataFrameFromColumns(columns) {
+  const eng = engine();
+  const relation = InMemoryRelation.fromColumns(columns);
+  const name = `__upload${_uploadTableId++}`;
+  eng.catalog.registerTable(name, relation.getSchema());
+  eng.catalog.registerTableStorage(name, relation);
+  return eng.sql(`SELECT * FROM ${name}`);
 }
 
 const AGG_FNS = { sum: qsum, min: qmin, max: qmax };
@@ -241,6 +260,7 @@ export function installBuiltins(runtime, define) {
     delete named.__named;
     const path = args[0];
     if (typeof path !== 'string') throw new Error('load_csv() requires a file path string');
+    if (_uploadedCsv.has(path)) return createDataFrameFromColumns(_uploadedCsv.get(path));
     const sep = named.separator ?? named.sep ?? ',';
     const { rows } = loadCsvRows(path, sep);
     return engine().createDataFrame(rows);

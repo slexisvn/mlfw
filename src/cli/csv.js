@@ -87,3 +87,56 @@ function coerceValue(raw) {
   if (!Number.isNaN(num)) return num;
   return raw;
 }
+
+// Incremental CSV parser for streaming large files without holding the whole
+// text in memory. Feed decoded text chunks via feed(); call finish() once to
+// obtain typed column arrays suitable for InMemoryRelation.fromColumns().
+export class CsvStreamParser {
+  constructor(separator = ',') {
+    this.separator = separator;
+    this.inQuotes = false;
+    this.line = '';
+    this.headers = null;
+    this.columns = null;
+    this.rowCount = 0;
+  }
+
+  feed(text) {
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (ch === '"') {
+        this.inQuotes = !this.inQuotes;
+        this.line += ch;
+      } else if ((ch === '\n' || ch === '\r') && !this.inQuotes) {
+        this._emitLine();
+      } else {
+        this.line += ch;
+      }
+    }
+  }
+
+  finish() {
+    if (this.line.length > 0) this._emitLine();
+    if (!this.headers) throw new Error('CSV file is empty');
+    const columns = {};
+    for (let c = 0; c < this.headers.length; c++) columns[this.headers[c]] = this.columns[c];
+    return { headers: this.headers, columns, rowCount: this.rowCount };
+  }
+
+  _emitLine() {
+    const trimmed = this.line.trim();
+    this.line = '';
+    if (trimmed.length === 0) return;
+    const fields = parseRow(trimmed, this.separator);
+    if (!this.headers) {
+      this.headers = fields;
+      this.columns = fields.map(() => []);
+      return;
+    }
+    if (fields.length !== this.headers.length) {
+      throw new Error(`Row ${this.rowCount + 2} has ${fields.length} fields, expected ${this.headers.length}`);
+    }
+    for (let c = 0; c < fields.length; c++) this.columns[c].push(coerceValue(fields[c]));
+    this.rowCount++;
+  }
+}

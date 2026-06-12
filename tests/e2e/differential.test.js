@@ -161,3 +161,42 @@ describe('epilogue fusion (forced on) matches eager — LIR accumulator must not
     }
   }
 });
+
+const OPT_PROGRAMS = [
+  { name: 'ew_chain', shapes: [[6, 8], [6, 8]], fwd: (x, y) => relu(sub(mul(x, y), tanh(x))) },
+  { name: 'mm_relu', shapes: [[8, 12], [12, 5]], fwd: (x, y) => relu(matmul(x, y)) },
+  { name: 'mm_chain', shapes: [[4, 6], [6, 8], [8, 3]], fwd: (x, y, z) => matmul(matmul(x, y), z) },
+  { name: 'softmax', shapes: [[6, 11]], fwd: (x) => softmax(x, 1) },
+  { name: 'reduce_after_mm', shapes: [[6, 5], [5, 7]], fwd: (x, y) => sum(relu(matmul(x, y)), 0) },
+  { name: 'mm_softmax', shapes: [[6, 8], [8, 8]], fwd: (x, y) => softmax(matmul(x, y), 1) },
+  { name: 'reshape_mm', shapes: [[2, 12], [6, 5]], fwd: (x, y) => relu(matmul(x.reshape([4, 6]), y)) },
+];
+
+const OPT_CONFIGS = {
+  O0: { fusion: { enabled: false }, scheduling: { enabled: false }, optimization: { layout: false, rematerialization: false }, memory: { inplaceReuse: false } },
+  O1: { fusion: { enabled: true }, memory: { inplaceReuse: true } },
+  O1dom: { fusion: { enabled: true, strategy: 'dominator' }, memory: { inplaceReuse: true } },
+  O1epi: { fusion: { enabled: true, epilogue: true }, memory: { inplaceReuse: true } },
+  O2: { fusion: { enabled: true }, scheduling: { enabled: true }, optimization: { layout: true, rematerialization: true }, memory: { inplaceReuse: true } },
+};
+
+describe('opt-level differential: every pass-combo preserves semantics (eager == compiled, CPU + WASM)', () => {
+  for (const prog of OPT_PROGRAMS) {
+    for (const [tname, makeTarget] of Object.entries(TARGETS)) {
+      for (const [cname, cfg] of Object.entries(OPT_CONFIGS)) {
+        it(`${prog.name} on ${tname} @ ${cname} matches eager`, async () => {
+          const rng = mulberry32(7000 + prog.name.length * 13 + cname.length);
+          const inputs = prog.shapes.map((s) => mk(rng, s, -1, 1));
+          const eager = flatten(prog.fwd(...inputs));
+          const compiled = compile({ forward: (...a) => prog.fwd(...a) }, inputs, { target: makeTarget(), ...cfg });
+          const out = flatten(await compiled(...inputs));
+          expect(out.length).toBe(eager.length);
+          for (let i = 0; i < eager.length; i++) {
+            const relErr = Math.abs(eager[i] - out[i]) / (1 + Math.abs(eager[i]));
+            expect(relErr, `${prog.name}/${tname}/${cname} idx ${i}: eager=${eager[i]} compiled=${out[i]}`).toBeLessThan(3e-3);
+          }
+        });
+      }
+    }
+  }
+});

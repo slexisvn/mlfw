@@ -5,6 +5,8 @@ import { lowerGraphToPrimFunc } from '../../../src/compiler/passes/lowering/grap
 import {
   IfThenElseNode, WhileNode, BufferStoreNode, BufferLoadNode
 } from '../../../src/compiler/ir/tensor/nodes.js';
+import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
+import { CPUTarget, WasmTarget } from '../../../src/backend/target.js';
 
 const SKIP_KEYS = new Set(['_parent', '_parentKey', '_parentIdx']);
 
@@ -90,9 +92,6 @@ describe('while lowering loop carry and condition', () => {
     expect(bodyStores.length).toBeGreaterThan(0);
   });
 });
-
-import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
-import { CPUTarget, WasmTarget } from '../../../src/backend/target.js';
 
 describe('control flow end-to-end execution vs reference (cpu+wasm)', () => {
   const F = ScalarType.F32, I32 = ScalarType.I32;

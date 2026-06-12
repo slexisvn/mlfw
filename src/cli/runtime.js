@@ -9,7 +9,7 @@ import { compile as tracingCompile } from '../tracing/compile.js';
 import { TraceLevel } from '../compiler/pipeline/trace.js';
 import { parse } from './parser.js';
 import { CompiledProgramView, formatTrace } from './format.js';
-import { installBuiltins, installSignatures, takeNamed } from './builtins.js';
+import { installBuiltins, installSignatures, takeNamed, createDataFrameFromColumns, setUploadedCsv, removeUploadedCsv } from './builtins.js';
 import { SignatureRegistry } from './signature_registry.js';
 
 class Environment {
@@ -38,6 +38,20 @@ export class TeraRuntime {
     this.signatureRegistry = new SignatureRegistry();
     this._installBuiltins();
     installSignatures(this.signatureRegistry);
+  }
+
+  registerDataFrame(name, columns) {
+    const df = createDataFrameFromColumns(columns);
+    this.global.define(name, df);
+    return df;
+  }
+
+  registerUploadedCsv(name, columns) {
+    setUploadedCsv(name, columns);
+  }
+
+  removeUploadedCsv(name) {
+    removeUploadedCsv(name);
   }
 
   async execute(source) {

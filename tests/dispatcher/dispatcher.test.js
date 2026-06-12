@@ -4,6 +4,9 @@ import { KernelFunction } from '../../src/dispatcher/boxing.js';
 import { parseSchema } from '../../src/dispatcher/operator_schema.js';
 import { dispatcher, computeKeySet } from '../../src/dispatcher/dispatcher.js';
 import { tensor } from '../../src/index.js';
+import { jitCompile, jitCacheClear } from '../../src/dispatcher/jit_cache.js';
+import { CPUTarget, WasmTarget } from '../../src/backend/target.js';
+import { ScalarType } from '../../src/compiler/ir/graph/types.js';
 
 describe('dispatch routes to correct kernel by key priority', () => {
   it('redispatch hits highest priority key first, then next', () => {
@@ -171,6 +174,49 @@ describe('dispatch with empty keyset after stripping', () => {
 
     const ks = DispatchKeySet.fromKey(DispatchKey.CPU);
     expect(() => dispatcher.redispatch(handle, ks, tensor([1]))).toThrow();
+  });
+});
+
+describe('jit cache key distinguishes op / shape / dtype / target', () => {
+  const F = ScalarType.F32, I = ScalarType.I32;
+  const ta = (shape, dtype) => ({ shape, dtype });
+
+  it('same op+shape+dtype+target returns the identical cached entry', () => {
+    jitCacheClear();
+    const a = jitCompile('relu', [ta([4, 4], F)], {}, CPUTarget());
+    const b = jitCompile('relu', [ta([4, 4], F)], {}, CPUTarget());
+    expect(a).toBe(b);
+  });
+
+  it('differing dtype yields distinct entries (i32 reduce-init must not leak through cache)', () => {
+    jitCacheClear();
+    const f = jitCompile('sum', [ta([4, 4], F)], {}, CPUTarget());
+    const i = jitCompile('sum', [ta([4, 4], I)], {}, CPUTarget());
+    expect(f).not.toBe(i);
+    expect(f.outDtype).toBe('f32');
+    expect(i.outDtype).toBe('i32');
+  });
+
+  it('differing shape yields distinct entries', () => {
+    jitCacheClear();
+    const a = jitCompile('relu', [ta([4, 4], F)], {}, CPUTarget());
+    const b = jitCompile('relu', [ta([8, 4], F)], {}, CPUTarget());
+    expect(a).not.toBe(b);
+  });
+
+  it('differing target kind yields distinct entries on distinct runtimes', () => {
+    jitCacheClear();
+    const cpu = jitCompile('relu', [ta([4, 4], F)], {}, CPUTarget());
+    const wasm = jitCompile('relu', [ta([4, 4], F)], {}, WasmTarget());
+    expect(cpu).not.toBe(wasm);
+    expect(cpu.runtime).not.toBe(wasm.runtime);
+  });
+
+  it('differing scalar args (reduction dim) yields distinct entries', () => {
+    jitCacheClear();
+    const a = jitCompile('sum', [ta([4, 6], F)], { dim: 0 }, CPUTarget());
+    const b = jitCompile('sum', [ta([4, 6], F)], { dim: 1 }, CPUTarget());
+    expect(a).not.toBe(b);
   });
 });
 

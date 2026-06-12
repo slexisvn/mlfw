@@ -5,6 +5,12 @@ import {
   ForNode, SeqNode, LetStmtNode, EvaluateNode,
   MathOpNode, VariableNode, IntImmNode, ForKind,
 } from '../../../../src/compiler/ir/tensor/nodes.js';
+import { buildFunction, IRBuilder } from '../../../../src/compiler/ir/graph/builder.js';
+import { GraphFunction } from '../../../../src/compiler/ir/graph/function.js';
+import { TensorType, ScalarType } from '../../../../src/compiler/ir/graph/types.js';
+import { lowerGraphToPrimFunc } from '../../../../src/compiler/passes/lowering/graph_to_tensor.js';
+import { lowerToLIR } from '../../../../src/compiler/passes/lowering/tensor_to_lir.js';
+import { WasmTarget } from '../../../../src/backend/target.js';
 
 function idx(name) { return new VariableNode(name, 'index'); }
 
@@ -55,13 +61,6 @@ describe('verifyLIR scope restoration', () => {
     expect(errors.some(e => /unbound variable 't'/.test(e.message))).toBe(true);
   });
 });
-
-import { buildFunction, IRBuilder } from '../../../../src/compiler/ir/graph/builder.js';
-import { GraphFunction } from '../../../../src/compiler/ir/graph/function.js';
-import { TensorType, ScalarType } from '../../../../src/compiler/ir/graph/types.js';
-import { lowerGraphToPrimFunc } from '../../../../src/compiler/passes/lowering/graph_to_tensor.js';
-import { lowerToLIR } from '../../../../src/compiler/passes/lowering/tensor_to_lir.js';
-import { WasmTarget } from '../../../../src/backend/target.js';
 
 function buildAuto(name, inTypes, build) {
   const probe = new GraphFunction(name, inTypes, []);

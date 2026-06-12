@@ -3,7 +3,9 @@ import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { QuantizationPass, QuantizationConfig } from '../../../src/compiler/passes/quantization/quantization_pass.js';
 import { PassResult } from '../../../src/compiler/passes/pass.js';
-import { QuantizationScheme } from '../../../src/compiler/ir/graph/quantization_types.js';
+import { QuantizationScheme, QuantizationParams } from '../../../src/compiler/ir/graph/quantization_types.js';
+import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
+import { CPUTarget, WasmTarget } from '../../../src/backend/target.js';
 
 function run(func, opts = {}) {
   return new QuantizationPass(opts).run(func);
@@ -454,4 +456,37 @@ describe('QuantizationPass IR structure', () => {
     expect(findOps(func, 'quantized_dot').length).toBe(2);
     expect(findOps(func, 'dequantize').length).toBe(2);
   });
+});
+
+describe('fake-quant (dequantize∘quantize) is LOSSY — must not be removed as identity', () => {
+  const I8 = ScalarType.I8, F = ScalarType.F32;
+  const qp = QuantizationParams.fromRange(-6, 6, QuantizationScheme.PER_TENSOR_SYMMETRIC, I8);
+  const scale = qp.getScalarScale();
+  const zp = qp.getScalarZeroPoint();
+  const data = [3.5, -2.1, 5.9, 1.234, -5.9, 0.001];
+
+  function buildFakeQuant(n) {
+    return buildFunction('rt', [new TensorType([n], F)], [new TensorType([n], F)], (b, a) => {
+      const q = b._buildOp('quantize', [a[0]], [new TensorType([n], I8)], { scale, zero_point: zp, scheme: QuantizationScheme.PER_TENSOR_SYMMETRIC, target_dtype: I8 });
+      const dq = b._buildOp('dequantize', [q.getResult(0)], [new TensorType([n], F)], { scale, zero_point: zp, scheme: QuantizationScheme.PER_TENSOR_SYMMETRIC, target_dtype: F });
+      b.returnOp([dq.getResult(0)]);
+    });
+  }
+
+  for (const [tname, makeTarget] of [['cpu', CPUTarget], ['wasm', WasmTarget]]) {
+    it(`compiled dequantize(quantize(x)) matches reference math (not identity) on ${tname}`, () => {
+      const res = compileGraph(buildFakeQuant(data.length), makeTarget());
+      const out = new Float32Array(data.length);
+      res.run('rt', new Float32Array(data), out);
+      const ref = data.map((v) => qp.dequantize(qp.quantize(v)));
+      let appliedQuant = false;
+      for (let i = 0; i < data.length; i++) {
+        expect(Math.abs(out[i] - ref[i]), `idx ${i}: compiled=${out[i]} ref=${ref[i]}`).toBeLessThan(1e-4);
+        expect(Math.abs(out[i] - data[i]), `idx ${i}: quant error must be within step`).toBeLessThanOrEqual(scale + 1e-6);
+        if (Math.abs(out[i] - data[i]) > 1e-6) appliedQuant = true;
+      }
+      // off-grid inputs must show a non-zero rounding error (proves the round-trip was NOT removed)
+      expect(appliedQuant, 'quantization round-trip was eliminated (identity) — fake-quant broken').toBe(true);
+    });
+  }
 });

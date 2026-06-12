@@ -15,6 +15,8 @@
     <div class="actions">
       <button id="run-all" title="Run every cell top to bottom">▶▶ Run All</button>
       <button id="add-cell" title="Add a cell at the end">＋ Cell</button>
+      <button id="upload-csv" title="Stream CSV file(s) — then load with load_csv()">⭱ CSV</button>
+      <input id="csv-file" type="file" accept=".csv,text/csv" multiple hidden />
       <button id="restart" title="Reset variables (fresh kernel)">⟳ Restart</button>
       <button id="clear-out" title="Clear all outputs">⌫ Clear</button>
       <button id="theme-toggle" title="Toggle dark mode">🌙 Dark</button>
@@ -22,7 +24,16 @@
     </div>
   </header>
 
-  <main id="cells" class="cells"></main>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-head">Files</div>
+      <ul id="files-list" class="files-list"></ul>
+      <div id="files-empty" class="files-empty">No files yet. Click <b>⭱ CSV</b> or drag &amp; drop CSV files here, then <code>load_csv("name.csv")</code>.</div>
+    </aside>
+    <div class="content">
+      <main id="cells" class="cells"></main>
+    </div>
+  </div>
 
   <footer class="hint">
     <kbd>Shift</kbd>+<kbd>Enter</kbd> run &amp; next ·

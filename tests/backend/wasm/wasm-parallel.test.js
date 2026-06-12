@@ -398,3 +398,54 @@ describe('parallel WASM execution — scheduled matmul (vectorized contraction)'
     }
   });
 });
+
+describe('parallel WASM execution — fused matmul->reduce with mismatched parallel extents', () => {
+  // The matmul row loop (extent M) and the reduce output loop (extent N) were both marked
+  // PARALLEL and both bound to the shared _par_start/_par_end partition. When M != N the
+  // smaller loop over-iterated, writing one element past its buffer into the adjacent
+  // const-init buffer (manifesting as a uniform constant added to every reduce output).
+  // Each parallel loop now consumes the partition only when its extent matches the
+  // partitioned axis; mismatched-extent parallel loops emit a plain serial loop.
+  function buildMatmulReduce(name, M, K, N) {
+    const ta = new TensorType([M, K], ScalarType.F32);
+    const tb = new TensorType([K, N], ScalarType.F32);
+    const tout = new TensorType([N], ScalarType.F32);
+    return buildFunction(name, [ta, tb], [tout], (b, args) => {
+      const mm = b.matmul(args[0], args[1]).getResult(0);
+      const zero = b.scalarConstant(0, ScalarType.F32);
+      b.returnOp([b.reduce(mm, zero.getResult(0), [0], 'sum').getResult(0)]);
+    });
+  }
+
+  function refMatmulColSum(A, B, M, K, N) {
+    const ref = new Float32Array(N);
+    for (let j = 0; j < N; j++) {
+      let s = 0;
+      for (let i = 0; i < M; i++) { let m = 0; for (let k = 0; k < K; k++) m += A[i * K + k] * B[k * N + j]; s += m; }
+      ref[j] = s;
+    }
+    return ref;
+  }
+
+  it('matmul row-extent == vector-width but != reduce output-extent stays correct', () => {
+    const M = 4, K = 2, N = 5;
+    const A = new Float32Array(M * K); for (let i = 0; i < A.length; i++) A[i] = i + 1;
+    const B = new Float32Array(K * N); for (let i = 0; i < B.length; i++) B[i] = (i % 3) + 1;
+    const out = new Float32Array(N);
+    compilePar(buildMatmulReduce('wp_mmr_45', M, K, N)).run('wp_mmr_45', A, B, out);
+    const ref = refMatmulColSum(A, B, M, K, N);
+    for (let j = 0; j < N; j++) expect(out[j]).toBeCloseTo(ref[j], 4);
+  });
+
+  it('mismatched M/N grid matches reference (sync)', () => {
+    let n = 0;
+    for (const M of [3, 4, 5, 6, 8]) for (const N of [3, 5, 6, 8, 12]) for (const K of [1, 2, 3]) {
+      const A = new Float32Array(M * K); for (let i = 0; i < A.length; i++) A[i] = Math.sin(i * 1.3) * 2;
+      const B = new Float32Array(K * N); for (let i = 0; i < B.length; i++) B[i] = Math.cos(i * 0.9) * 2;
+      const out = new Float32Array(N);
+      compilePar(buildMatmulReduce('wp_mmr_' + (n++), M, K, N)).run('wp_mmr_' + (n - 1), A, B, out);
+      const ref = refMatmulColSum(A, B, M, K, N);
+      for (let j = 0; j < N; j++) expect(out[j], `M=${M} N=${N} K=${K} col ${j}`).toBeCloseTo(ref[j], 3);
+    }
+  });
+});

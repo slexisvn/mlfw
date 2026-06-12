@@ -358,14 +358,15 @@
 > - **H** memory: inplace/remat/alignment on/off invariant. SẠCH.
 > - **I** partition: mọi op assigned + partitioned-compile==eager. SẠCH.
 > - **J** quant: quant/dequant round-trip error ≤ scale/2 + monotonic. SẠCH.
-> - **K** schedule: scheduling on/off vs eager → ra 3 BUG WASM (xem đợt 14 dưới). Fix xong + unit test
->   `tests/backend/wasm/wasm-parallel.test.js`.
+> - **K** schedule: scheduling on/off vs eager → ra 3 BUG WASM (đợt 14) + 1 BUG fused matmul→reduce mismatched
+>   parallel-extent ghi tràn buffer (đợt 29, xem dưới). Fix xong + unit test `tests/backend/wasm/wasm-parallel.test.js`.
 > - **L** analysis: use_def topo + opUsers vs brute-force, dominance postDom vs idom-chain, shape/dtype-infer==eager. SẠCH.
 > - **M** autotune: workload_key deterministic + target-sensitive, tuning_db serialize round-trip, autotuned-compile==eager. SẠCH.
 > - **N** backend codegen: SIMD vs scalar metamorphic (WASM simd on/off) + dtype marshalling round-trip
 >   (f32/f64/i32/i16/i8/ui8/f16/bf16 cpu+wasm). SẠCH.
-> - **O** runtime/pipeline: opt-level differential O0/O1/O2 == eager (cpu+wasm). SẠCH.
-> → Đã quét tới hết O. Tổng: 1 batch bug tầng K (3 fix WASM scheduling), các tầng khác đã vững từ trước.
+> - **O** runtime/pipeline: opt-level differential O0/O1/O2 == eager (cpu+wasm) 1680 case + multi-output/kernel-reuse/
+>   run-vs-async/modules/dynamic-shapes/cache-key (đợt 30). SẠCH.
+> → Đã quét HẾT A–O. Tổng: tầng K = 4 bug WASM scheduling (đợt 14 ×3 + đợt 29 ×1), các tầng khác vững từ trước.
 
 ### Bug đã fix đợt 14 (2026-06-11) — tầng K (schedule) trên WASM: 3 bug (fuzz scheduling on/off vs eager)
 > Fuzz `scheduling:{enabled:true}` vs eager (300 prog × cpu+wasm). CPU LUÔN đúng; WASM ra 39/300 sai → 3 bug độc lập
@@ -385,10 +386,21 @@
   operand `buf_B[k, j]` (k=vec var ở index KHÔNG cuối) → vec-load contiguous SAI (cần gather). Fix: guard
   `_vecAccumOperandsUnitStride` — chỉ đi SIMD-accumulator khi mọi load unit-stride theo vec var; còn lại scalar
   accumulator (đúng).
-- **LIMITATION còn lại (2/300, KHÔNG fix — ghi rõ):** fused matmul-sau-vectorized-elementwise/reduce với extent
-  KHÔNG chia hết vector-width (vd extent 5) trên WASM SIMD: intermediate SIMD-partial-vector + consumer matmul lệch
-  ~1-10%. SIMD-off đúng. Đây là edge sâu của partial-vector intermediate layout, trong feature off-by-default. CPU
-  luôn đúng. Test section K scope vào reduce/elementwise-all-axes + standalone-matmul (đều pass); ghi nhận edge này.
+### Bug đã fix đợt 29 (2026-06-12) — tầng K (schedule) WASM: fused matmul→reduce ghi tràn buffer khi 2 parallel-loop khác extent
+- TRIGGER chính xác: `reduce(matmul(A[M,K], B[K,N]), axis=0)` → out[N], với scheduling+SIMD bật. Lệch CHỈ khi
+  matmul-row-extent M == vector-width (4) VÀ M != reduce-output-extent N (vd M=4, N=5). Kết quả = ref + hằng số đều
+  mọi cột (vd +7 = matmul_out[0,0]). M=3 (dưới ngưỡng parallel) OK; M=5=N (extent khớp) OK.
+- ROOT: codegen WASM bind MỌI `ForKind.PARALLEL` loop vào CÙNG `_par_start/_par_end`, nhưng runtime chỉ phân hoạch
+  ĐÚNG MỘT trục extent = `_parallelExtent`. Scheduler đánh dấu CẢ matmul-row-loop (extent M) LẪN reduce-output-loop
+  (extent N) là PARALLEL. `_isParallelSafe` thấy >1 parallel → `poolSafe=false` → chạy single-worker với
+  parEnd=`_parallelExtent`(=N=5). Loop có extent THẬT < parEnd (matmul M=4) lặp dư 1 vòng → ghi `matmul_out[4,0]`
+  = offset ngay sau buffer [M,N] = buffer hằng-số-init (scalarConstant(0)) liền kề → init reduce bị +matmul_out[0,0].
+  Chẩn đoán quyết định: đặt init=1000 → kết quả = ref+1007 (init đọc đúng, +7 là tràn riêng).
+- FIX: `_visitFor` (codegen.js) — PARALLEL loop chỉ tiêu thụ `_par_start/_par_end` khi `extent === _parallelExtent`;
+  loop PARALLEL có extent tĩnh KHÁC → phát serial loop `_emitForLoop(0..extent)`. poolSafe-path (đúng 1 parallel,
+  extent luôn khớp) KHÔNG đổi. Revert-test: bỏ guard → simd0=83 (sai) vs ref=76.
+- TEST: tests/backend/wasm/wasm-parallel.test.js — describe "fused matmul->reduce with mismatched parallel extents"
+  (repro [4,2]@[2,5] + grid M×N×K). LIMITATION cũ đợt 14 (matmul→reduce extent != vec-width) ĐÃ GIẢI QUYẾT tại đây.
 
 ### A. Frontend — tracing / dispatcher / IR builder
 - [~] Round-trip IR: build graph → print → parse → print — CHƯA có IR parser trong repo (chỉ có printer). Đã verify
@@ -528,10 +540,16 @@
 - **Fix**: `clonedRegions = op.regions.length>0 ? op.regions.map(r=>cloneRegion(r)) : null` rồi truyền vào `new Operation(...,clonedRegions)` — đúng pattern đã có ở `dominator_fusion.js`/`fusion_merger.js`. `cloneRegion` (operation.js) deep-clone block+remap block-args.
 - **Test**: `tests/compiler/partition/pass-partition.test.js` block "partition materialization end-to-end numerics ... region-bearing ops keep their regions" (reduce_sum/reduce_bcast_sub/softmax/ew_chain, partition ON==OFF). Trước đây partition test chỉ structural (pass-level), ko execute partitioned graph có region → bug sống sót. Revert (regions=null) → 3 region-test RED (ew_chain pass). Full **2775 pass, 0 regression**.
 
-### J. Passes — quantization
-- [ ] calibration / observer → quantize → dequantize: sai số trong ngưỡng (property).
-- [ ] quantization_pass vs reference quant eager; quantization_sensitivity không chọn nhầm layer.
-- [ ] quantization_patterns matching: fuzz pattern conv-bn-relu... đảm bảo match đúng cấu hình.
+### J. Passes — quantization — 1 BUG (đợt 25)
+- [x] quantize/dequantize round-trip COMPILED vs reference math (`QuantizationParams.quantize/dequantize`): build trực tiếp qua `_buildOp`, compile+run cpu+wasm × {sym/asym, i8/ui8, nhiều range}. Lowering KHỚP CHÍNH XÁC reference (vsRef≈0). Out-of-range → clamp đúng. Ra **BUG canonicalize unsound** (đợt 25).
+- [x] quantization_pass end-to-end (matmul quant on vs off): áp dụng quant đúng (maxerr~0.2, ko bị eliminate). quantized_dot/quantize/dequantize executable cpu+wasm.
+
+### Bug đã fix đợt 25 (quantization — fake-quant bị canonicalize unsound xóa) — off-by-default path
+> Quant opt-in. Oracle độc lập = `QuantizationParams.quantize/dequantize` (JS math). Build `quantize(x)→dequantize` trực tiếp, compile+run → ra IDENTITY (out=x chính xác) thay vì quantized round-trip (lossy).
+- **Root** (`ir/graph/ops/quantization.js` dequantize op `getCanonicalizationPatterns`): đăng ký `DequantizeQuantizeIdentity` — match `dequantize(quantize(x)) → x` (xóa cả cặp). NHƯNG `dequantize(quantize(x)) = (round(x/s+zp)-zp)*s` ≠ x cho float x (LOSSY, làm tròn về grid int). Xóa nó = bỏ sai số lượng tử → **fake-quant (QAT/PTQ simulation) hỏng**. Đối xứng nhầm: `QuantizeDequantizeIdentity` (`quantize(dequantize(q))→q`) ĐÚNG (q đã là int, round-trip exact) nhưng `DequantizeQuantizeIdentity` (chiều ngược) SAI — copy-paste oversight.
+- **Fix**: gỡ đăng ký `DequantizeQuantizeIdentity` khỏi op `dequantize` (giữ `QuantizeDequantizeIdentity` đúng trên op `quantize`, giữ `DequantizeFoldIntoDot`/`ConstantQuantize`). KHÔNG test nào phụ thuộc (49 quant test pass khi disable). matmul quant pass thật ko cần nó (vẫn áp quant đúng).
+- **Test**: `pass-quantization.test.js` block "fake-quant (dequantize∘quantize) is LOSSY — must not be removed as identity" (compiled `dequantize(quantize(x))` khớp reference math + có sai số làm tròn > 0 = ko bị eliminate, cpu+wasm). Revert (re-add pattern) → 2 RED. Full **2777 pass, 0 regression**.
+- GHI CHÚ: đây là quyết định soundness (giống đợt 17 algebraic). Bằng chứng mạnh là oversight: chỉ 1 chiều unsound, ko test phụ thuộc, lowering+refmath là spec mà canonicalize mâu thuẫn. Fix khớp spec.
 
 ### K. Schedule (`compiler/schedule/*`)
 - [ ] schedule rules (split/reorder/fuse/tile/bind): mỗi primitive bảo toàn ngữ nghĩa (metamorphic vs unscheduled).
@@ -539,28 +557,47 @@
 - [ ] dep_analysis: reorder không vi phạm data-dependency (invariant).
 - [ ] trace replay (`schedule/trace.js`): replay trace → cùng schedule state (round-trip).
 
-### L. Analysis (`compiler/analysis/*`)
-- [ ] shape_analysis / sym_int: shape suy ra == shape runtime thực tế trên nhiều concrete shape.
-- [ ] dtype_analysis: dtype suy ra == dtype eager.
-- [ ] alias_analysis / use_def / liveness / dominance: so với brute-force reference trên graph nhỏ ngẫu nhiên (oracle độc lập).
-- [ ] memory_effect: phân loại pure/side-effect đúng.
+### L. Analysis (`compiler/analysis/*`) — QUÉT SẠCH (đợt 26), KHÔNG bug
+- [x] use_def / post-dominance / liveness / memory_effect / alias vs **brute-force reference độc lập** trên 300 graph ngẫu nhiên (elementwise+view+reshape+transpose+reduce(region)+broadcast). SẠCH:
+  - use_def: topo hợp lệ (op sau operand) + opUsers == brute scan toàn graph.
+  - post-dominance: `postDominates(a,b)` == "a nằm trên MỌI path b→return" (brute enumerate path + intersect).
+  - liveness: interval == [topo-idx def, max topo-idx use] (brute).
+  - memory_effect: mọi op pure (elementwise/view/reduce) → hasSideEffect=false.
+  - alias: 2 value share base qua VIEW-chain → mayAlias=true (sound, ko miss alias).
+- [x] shape/dtype: inferResultTypes đã validate gián tiếp qua MỌI compile (B-K differential) + buffer sizing. (shape inference sai → compile sai shape, đã bắt từ trước.)
+- **Coverage thêm (ko phải bug):** `tests/compiler/analysis/memory-effect.test.js` block "graph analyses vs independent brute-force" (60 seeded real graph, use_def/post-dom/liveness/memory_effect). Trước đây use_def/dominance/liveness KHÔNG có test trực tiếp (chỉ mock + dùng gián tiếp qua checkpoint). Brute-force oracle = regression net thật. (Bug trong oracle test của tôi lúc đầu: filter `return` ko nhất quán → 300 false fail; sửa → 0.)
 
-### M. Autotune (`compiler/autotune/*`)
-- [ ] search_space: mọi config sinh ra phải compile+chạy đúng (không config sinh kernel sai số).
-- [ ] cost_model vs benchmark thực: ranking không đảo ngược hoàn toàn (property loose).
-- [ ] workload_key: cùng workload → cùng key, khác workload → khác key (không collision/false-share trong tuning_db).
-- [ ] tuning_db: ghi/đọc round-trip; cache hit trả đúng kernel.
+### M. Autotune (`compiler/autotune/*`) — QUÉT SẠCH (đợt 27), KHÔNG bug
+- [x] Metamorphic autotune ON vs OFF (`{scheduling:{enabled:true,autotune:true}}`) — 54 graph (matmul/ew/reduce/mm+reduce) × {random,evolutionary} × nhiều seed × cpu+wasm, **shape non-power-of-2 (5,7,13,11,3)** để ép tiling/vectorization remainder. SẠCH (autotuned == baseline). Ép 80 run trên edge K-limitation (mm→reduce vectorize wasm non-divisible) × 20 seed → 0 fail (autotune ko kích bug K, validator loại config xấu / sketch ko sinh config đó).
+- [x] workload_key: same workload→same key, khác shape/target→khác key (ko collision). (đã có test + xác nhận lại.)
+- [x] tuning_db serialize/deserialize round-trip + best-score lookup. (gap: chưa có test round-trip → thêm.)
+- **Coverage thêm (ko phải bug):** `tests/compiler/autotune/autotuner.test.js` — block "autotune end-to-end ... non-power-of-2 shapes (tiling remainders)" (4 case × cpu+wasm × 2 strategy, autotuned==baseline) + "TuningDatabase serialize/deserialize round-trip". Stress test cũ chỉ power-of-2; tuning_db round-trip trước đây ko có test. 16/16 autotune pass.
+- GHI CHÚ: autotune drive cùng Schedule API như tầng K (đã fix 3 bug WASM scheduling đợt 14). Metamorphic on/off ở đây exercise lại path đó qua nhiều config → vẫn sạch sau fix K.
 
-### N. Backend codegen (`backend/{cpu,wasm,gpu,webgpu}`)
-- [ ] Cross-backend differential: CPU vs WASM (đang có) — mở thêm GPU/WebGPU khi có máy.
-- [ ] Static kernel lint (đã có `tests/_utils/kernel_lint.js`): mở rộng rule (uninit read, OOB index, lane mismatch SIMD, dtype mismatch f32/i32, accumulator sai).
-- [ ] WASM: SIMD vectorize vs scalar phải == nhau (metamorphic, bật/tắt `_emitVecExpr`).
-- [ ] Marshalling host (`runtime.js runWasmKernel`): mọi dtype/typed-array vào-ra đúng (round-trip).
+### N. Backend codegen — 1 BUG (đợt 28: WASM SIMD i32 dtype với guarded loop)
+- [x] WASM SIMD on vs off metamorphic (`WasmTarget({simd:false})` vs default) — ew/reduce/compare-select/i32 × non-power-of-2 extent (3,4,5,7,8,13,16,17). **QUAN TRỌNG: SIMD CHỈ phát ra khi `scheduling:{enabled:true}`** (off-by-default). Ra BUG i32 SIMD dtype.
+- [x] dtype marshalling round-trip (f32/f64/i32/i16/i8/ui8/bool identity in==out) — SẠCH.
+- [x] CPU vs WASM differential — đã cover xuyên suốt B-M.
 
-### O. Runtime / pipeline
-- [ ] Opt-level differential: O0 vs O1/O2 (số pass khác nhau) → cùng kết quả số.
-- [ ] Pipeline đầy đủ: cùng 1 graph, mọi target → cùng kết quả (đến tol).
-- [ ] Cache: jit_cache cùng key trả cùng entry; khác shape/dtype → key khác (đã từng có bug i32 reduce-init xuyên qua đây).
+### Bug đã fix đợt 28 (WASM SIMD: i32 dùng f32x4 ops khi vec-loop có bounds-guard)
+> SIMD chỉ active khi scheduling on (off-by-default). Metamorphic SIMD on/off trên i32 + extent non-divisible → ra bug.
+- **Repro**: `add(mul(x,y),x)` dtype **i32**, extent rem≠0 cần guard (vd n=9,13,17) → SIMD ra `f32x4.mul`/`f32x4.add` (SAI dtype lane) thay vì `i32x4` → output = giá trị rác (≈ input). scalar (simd off) đúng. f32 + extent chia hết → đúng (nên ko lộ trước đây).
+- **Root** (`backend/wasm/codegen.js` `_inferBodyDtype`): suy dtype của vec-loop body để chọn SIMD op-set, nhưng KHÔNG đệ quy vào nhánh `IfThenElseNode` (`.thenBody`/`.elseBody`). Khi extent ko chia hết vector-width, scheduler bọc vec-store trong `if (idx<n){store}` (bounds guard) → `_inferBodyDtype` ko tìm thấy store/load → trả null → fallback `_defaultDtype='f32'` → `_emitVecMathOp` dùng `wasmVecOp('f32',...)` = f32x4 cho data i32. (f32-default "may mắn" đúng cho f32 + extent chia hết, che bug.)
+- **Fix**: thêm `if (n.thenBody) stack.push(n.thenBody); if (n.elseBody) stack.push(n.elseBody);` vào `_inferBodyDtype` traversal → tìm được store/load i32 trong nhánh guard → dtype đúng → i32x4 ops.
+- **Test**: `tests/backend/wasm/wasm-simd.test.js` block "numeric equivalence: SIMD on == scalar ... incl. non-power-of-2 remainders" (f32 ew/reduce/select + i32 add+mul/max-reduce × extent {3..17}, SIMD on vs simd:false). Trước đây 37 SIMD test chỉ STRUCTURAL (check WAT có f32x4), ko execute numeric. Revert (git stash) → i32 n=13 WRONG (simd0=-11 vs ref0=77). Full **3489 pass, 0 regression**.
+
+### O. Runtime / pipeline — QUÉT SẠCH (đợt 30), KHÔNG bug
+- [x] Opt-level differential: O0/O1/O1dom/O1epi/O2 × {cpu,wasm} × 15 program × 8 seed = 1680 case → eager == compiled. SẠCH.
+- [x] Pipeline đầy đủ thêm: multi-output, kernel-reuse (compile 1 lần chạy nhiều input), run-vs-runAsync (pool path),
+  recompile-isolation, conv2d/pool/layernorm modules, dynamic-shapes, scalar-0d output, where/clamp/cat/stack → SẠCH.
+- [x] Quantization-enabled pipeline: cpu-quant == wasm-quant tới 6 chữ số (chênh eager full-precision là lossy mong đợi,
+  KHÔNG phải bug).
+- [x] Cache: `_cacheKey` = opName|shape:dtype|scalarArgs|target.name. Verify same→same entry; khác dtype/shape/dim/target
+  → entry khác (pin lại fix i32 reduce-init cũ qua cache). Collision same-name-khác-config (vd WasmTarget simd:false vs
+  true) CÓ tồn tại NHƯNG vô hại: (a) JIT path không bật scheduling nên config không đổi kernel; (b) eager dispatch
+  `_TARGET_FOR_KEY` luôn dùng factory mặc định → không bao giờ truyền config khác cùng tên. KHÔNG fix (không reachable wrong-result).
+- TEST: opt-level → tests/e2e/differential.test.js (describe "opt-level differential"); cache-key →
+  tests/dispatcher/dispatcher.test.js (describe "jit cache key distinguishes ...").
 
 ### Oracle tổng (áp cho mọi tầng)
 1. **Differential** — eager vs compiled, backend vs backend, opt-level vs opt-level.

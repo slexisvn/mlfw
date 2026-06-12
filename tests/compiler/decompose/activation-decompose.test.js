@@ -3,6 +3,8 @@ import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { DecompositionPass } from '../../../src/compiler/passes/decompose/decomposition_pass.js';
 import { PassResult } from '../../../src/compiler/passes/pass.js';
+import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
+import { CPUTarget, WasmTarget } from '../../../src/backend/target.js';
 
 function run(func) {
   return new DecompositionPass().run(func);
@@ -400,9 +402,6 @@ describe('chained activations', () => {
     }
   });
 });
-
-import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
-import { CPUTarget, WasmTarget } from '../../../src/backend/target.js';
 
 const SELU_LAMBDA = 1.0507009873554805;
 const SELU_ALPHA = 1.6732632423543772;

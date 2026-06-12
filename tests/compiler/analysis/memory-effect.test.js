@@ -2,6 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { registry } from '../../../src/compiler/ir/graph/ops.js';
 import { OpDef, SideEffectKind } from '../../../src/compiler/ir/graph/op_registry.js';
 import { MemoryEffectAnalysis } from '../../../src/compiler/analysis/memory_effect.js';
+import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
+import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
+import { UseDefAnalysis } from '../../../src/compiler/analysis/use_def.js';
+import { PostDominanceAnalysis } from '../../../src/compiler/analysis/dominance.js';
+import { LivenessAnalysis } from '../../../src/compiler/analysis/liveness.js';
 
 function makeValue(id) {
   return { id, _uses: [], uses() { return this._uses; } };
@@ -64,5 +69,94 @@ describe('MemoryEffectAnalysis effectKind bitmask gating', () => {
     const result = MemoryEffectAnalysis.compute(func);
     expect(result.getReadersOf(operand)).toContain(op);
     expect(result.getWritersOf(resultVal)).toContain(op);
+  });
+});
+
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+const _ri = (r, lo, hi) => lo + Math.floor(r() * (hi - lo + 1));
+const _pick = (r, arr) => arr[Math.floor(r() * arr.length)];
+const _UNARY = ['neg', 'relu', 'exp', 'tanh', 'sigmoid', 'abs', 'sqrt'];
+const _BINARY = ['add', 'sub', 'mul', 'maximum', 'minimum'];
+
+function genAnalysisGraph(r) {
+  const F = ScalarType.F32;
+  const t = new TensorType([4, 4], F);
+  const nArgs = _ri(r, 2, 3);
+  const nOps = _ri(r, 4, 9);
+  return buildFunction('g', Array.from({ length: nArgs }, () => t), [t], (b, args) => {
+    const e = args.map((a) => ({ v: a, sh: '4,4' }));
+    const same = (k) => e.filter((x) => x.sh === k);
+    for (let i = 0; i < nOps; i++) {
+      const roll = r();
+      if (roll < 0.18) { const s = _pick(r, same('4,4')); const red = b.reduce(s.v, b.scalarConstant(0, F).getResult(0), [1], 'sum'); const v4 = red.getResult(0); e.push({ v: v4, sh: '4' }); e.push({ v: b.broadcast(v4, [4, 4], [0]).getResult(0), sh: '4,4' }); continue; }
+      if (roll < 0.3) { const s = _pick(r, same('4,4')); const rr = b.reshape(s.v, [16]); e.push({ v: b.reshape(rr.getResult(0), [4, 4]).getResult(0), sh: '4,4' }); continue; }
+      if (roll < 0.4) { const s = _pick(r, same('4,4')); e.push({ v: b.transpose(s.v, [1, 0]).getResult(0), sh: '4,4' }); continue; }
+      if (roll < 0.7) { const s = _pick(r, e); e.push({ v: b[_pick(r, _UNARY)](s.v).getResult(0), sh: s.sh }); continue; }
+      const k = _pick(r, ['4,4', '4']); const c = same(k); if (!c.length) continue;
+      e.push({ v: b[_pick(r, _BINARY)](_pick(r, c).v, _pick(r, c).v).getResult(0), sh: k });
+    }
+    const last = [...e].reverse().find((x) => x.sh === '4,4') || e[0];
+    b.returnOp([last.v]);
+  });
+}
+
+describe('graph analyses vs independent brute-force (use_def / post-dominance / liveness / memory_effect)', () => {
+  it('60 random real graphs match brute-force oracles', () => {
+    for (let s = 0; s < 60; s++) {
+      const r = mulberry32(0x5151 + s * 2654435761);
+      const func = genAnalysisGraph(r);
+      const allOps = [...func.ops()];
+      const retOp = func.getReturnOp();
+      const ud = UseDefAnalysis.compute(func);
+      const tIdx = new Map(); ud.topologicalOrder.forEach((op, i) => tIdx.set(op, i));
+
+      // use_def: topo valid + opUsers == brute
+      for (const op of ud.topologicalOrder) {
+        for (let i = 0; i < op.numOperands; i++) { const d = op.getOperand(i).definingOp; if (d && tIdx.has(d)) expect(tIdx.get(d)).toBeLessThan(tIdx.get(op)); }
+      }
+      const brute = new Map(); for (const op of allOps) brute.set(op, new Set());
+      for (const op of allOps) for (let i = 0; i < op.numOperands; i++) { const d = op.getOperand(i).definingOp; if (d && brute.has(d)) brute.get(d).add(op); }
+      for (const op of allOps) {
+        if (op === retOp) continue;
+        const got = [...(ud.opUsers.get(op) || new Set())];
+        expect(got.length, `users ${op.opName}`).toBe(brute.get(op).size);
+        for (const u of got) expect(brute.get(op).has(u)).toBe(true);
+      }
+
+      // post-dominance: postDominates(a,b) == "a on all paths b->return"
+      const pd = PostDominanceAnalysis.compute(func, { useDef: ud });
+      const succ = new Map(); for (const op of allOps) succ.set(op, []);
+      for (const op of allOps) for (let i = 0; i < op.numResults; i++) for (const use of op.getResult(i).uses()) if (succ.has(use.user)) succ.get(op).push(use.user);
+      succ.set(retOp, []);
+      const onAll = (start) => {
+        const paths = [];
+        const dfs = (n, path, seen) => { if (n === retOp) { paths.push([...path, n]); return; } for (const nx of (succ.get(n) || [])) { if (seen.has(nx)) continue; seen.add(nx); dfs(nx, [...path, n], seen); seen.delete(nx); } };
+        dfs(start, [], new Set([start]));
+        if (!paths.length) return null;
+        let inter = new Set(paths[0]); for (const p of paths.slice(1)) { const ps = new Set(p); inter = new Set([...inter].filter((x) => ps.has(x))); }
+        return inter;
+      };
+      for (const b of allOps) {
+        if (b === retOp) continue;
+        const inter = onAll(b); if (!inter) continue;
+        for (const a of allOps) { if (a === b || a === retOp) continue; expect(pd.postDominates(a, b), `pd(${a.opName},${b.opName})`).toBe(inter.has(a)); }
+      }
+
+      // liveness: interval == [def topo idx, max use topo idx]
+      const lv = LivenessAnalysis.compute(func, { useDef: ud });
+      for (const op of ud.topologicalOrder) for (let i = 0; i < op.numResults; i++) {
+        const v = op.getResult(i); let start = tIdx.get(op), end = start;
+        for (const use of v.uses()) { const ui = tIdx.get(use.user); if (ui !== undefined && ui > end) end = ui; }
+        const got = lv.intervalOf(v);
+        if (got) { expect(got.start, 'live start').toBe(start); expect(got.end, 'live end').toBe(end); }
+      }
+
+      // memory_effect: all generated ops are pure (no side effects)
+      const me = MemoryEffectAnalysis.compute(func);
+      for (const op of allOps) if (op !== retOp) expect(me.hasSideEffect(op), `pure ${op.opName}`).toBe(false);
+    }
   });
 });

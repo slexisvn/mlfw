@@ -85,6 +85,13 @@ await Promise.all([
     outfile: resolve(root, 'notebook/dist/mlfw-lang.esm.js'),
     sourcemap: true,
   }),
+  build({
+    ...shared,
+    entryPoints: [resolve(root, 'src/cli/csv.js')],
+    format: 'esm',
+    outfile: resolve(root, 'notebook/dist/csv.esm.js'),
+    sourcemap: true,
+  }),
 ]);
 
 copyFileSync(resolve(root, 'vscode-ext/language-data.json'), resolve(root, 'notebook/dist/language-data.json'));

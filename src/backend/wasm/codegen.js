@@ -461,6 +461,10 @@ export class WasmCodegen {
     const extent = this._constExtent(node.extent);
 
     if (node.kind === ForKind.PARALLEL) {
+      if (extent !== null && this._parallelExtent && extent !== this._parallelExtent) {
+        this._emitForLoop(varName, node.extent, node.body);
+        return;
+      }
       this._emit('(local.get $_par_start)');
       this._emit('local.set $' + varName);
       this._emit('(block $break_' + varName);
@@ -1605,6 +1609,8 @@ export class WasmCodegen {
       if (n.type === 'LIRFlatLoadNode') return n.dtype || this._defaultDtype;
       if (n.body) stack.push(n.body);
       if (n.stmts) for (const s of n.stmts) stack.push(s);
+      if (n.thenBody) stack.push(n.thenBody);
+      if (n.elseBody) stack.push(n.elseBody);
       if (n.value && typeof n.value === 'object') stack.push(n.value);
     }
     return null;
