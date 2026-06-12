@@ -59,6 +59,52 @@ export function group_norm(input, numGroups, weight, bias, eps = 1e-5) {
   return normalized;
 }
 
-export function batch_norm(input, runningMean, runningVar, weight, bias, training = true, eps = 1e-5) {
-  return ops.batch_norm(input, weight, bias, runningMean, runningVar, 1, eps);
+const CHANNEL_AXIS = 1;
+
+function channelShape(ndim, channels) {
+  const shape = new Array(ndim).fill(1);
+  shape[CHANNEL_AXIS] = channels;
+  return shape;
+}
+
+function reduceMeanOver(value, dims) {
+  let result = value;
+  for (let i = dims.length - 1; i >= 0; i--) {
+    result = ops.mean(result, dims[i], true);
+  }
+  return result;
+}
+
+function blendRunning(buffer, stat, momentum) {
+  const data = buffer.data;
+  if (!data) return;
+  const next = stat.reshape([buffer.shape[0]]).toArray();
+  for (let i = 0; i < data.length; i++) {
+    data[i] = data[i] * (1 - momentum) + next[i] * momentum;
+  }
+}
+
+export function batch_norm(input, runningMean, runningVar, weight, bias, training = true, eps = 1e-5, momentum = 0.1) {
+  if (input instanceof SymbolicTensor || input.isSymbolic || !training) {
+    return ops.batch_norm(input, weight, bias, runningMean, runningVar, CHANNEL_AXIS, eps);
+  }
+
+  const dims = [];
+  for (let i = 0; i < input.ndim; i++) {
+    if (i !== CHANNEL_AXIS) dims.push(i);
+  }
+
+  const batchMean = reduceMeanOver(input, dims);
+  const centered = ops.sub(input, batchMean);
+  const batchVar = reduceMeanOver(ops.mul(centered, centered), dims);
+  const invStd = ops.div(full([], 1), ops.sqrt(ops.add(batchVar, full([], eps))));
+  let normalized = ops.mul(centered, invStd);
+
+  const affineShape = channelShape(input.ndim, input.shape[CHANNEL_AXIS]);
+  if (weight) normalized = ops.mul(normalized, weight.reshape(affineShape));
+  if (bias) normalized = ops.add(normalized, bias.reshape(affineShape));
+
+  if (runningMean) blendRunning(runningMean, batchMean, momentum);
+  if (runningVar) blendRunning(runningVar, batchVar, momentum);
+  return normalized;
 }

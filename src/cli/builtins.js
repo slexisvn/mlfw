@@ -5,7 +5,12 @@ import { SymbolicTensor } from '../tracing/symbolic_tensor.js';
 import { CompiledProgramView, formatTrace, formatValue, formatValueCompact } from './format.js';
 import { printModule } from '../compiler/ir/graph/printer.js';
 import { DataLoader, TensorDataset } from '../data/index.js';
-import { loadCsv, CsvFrame } from './csv_frame.js';
+import { loadCsvRows } from './csv.js';
+import {
+  createEngine, DataFrame, Col,
+  col as qcol, lit as qlit, expr as qexpr,
+  sum as qsum, avg as qavg, min as qmin, max as qmax, count as qcount, countStar as qcountStar,
+} from '../../plugins/query-engine/query-engine.node.js';
 import { SGD, Adam, AdamW, StepLR, CosineAnnealingLR, ReduceLROnPlateau } from '../optim/index.js';
 import {
   Trainer, EarlyStopping, ModelCheckpoint, ProgressCallback,
@@ -39,6 +44,75 @@ const MODULES = [
   'BCELoss',
 ];
 
+// One shared query engine backs every DataFrame so they can be joined together.
+let _engine = null;
+function engine() {
+  return _engine ?? (_engine = createEngine());
+}
+
+const AGG_FNS = { sum: qsum, min: qmin, max: qmax };
+
+function isColumnArg(value) {
+  return typeof value === 'string' || value instanceof Col;
+}
+
+// DataFrame is the query-engine class shipped in the plugin bundle. Augment its
+// prototype with tera-facing conveniences: tensor conversion, label encoding,
+// and a readable print form.
+DataFrame.prototype.toString = function () {
+  return `DataFrame(${this.columns().join(', ')})`;
+};
+
+async function dfToTensor(df, cols) {
+  const frame = cols.length > 0 ? df.select(...cols) : df;
+  const names = frame.columns();
+  const rows = await frame.collect();
+  const k = names.length;
+  const n = rows.length;
+  const flat = new Float32Array(n * k);
+  let idx = 0;
+  for (let r = 0; r < n; r++) {
+    for (let c = 0; c < k; c++) {
+      const v = rows[r][names[c]];
+      if (typeof v !== 'number') {
+        throw new Error(`Column '${names[c]}' contains non-numeric value '${v}' at row ${r}. Use encode() for categorical columns.`);
+      }
+      flat[idx++] = v;
+    }
+  }
+  return fw.tensor(flat, { shape: [n, k] });
+}
+
+async function dfEncode(df, column, knownClasses) {
+  const name = column ?? df.columns()[0];
+  const rows = await df.collect();
+  const classMap = new Map();
+  const classes = knownClasses ? [...knownClasses] : [];
+  for (let i = 0; i < classes.length; i++) classMap.set(String(classes[i]), i);
+  const encoded = new Float32Array(rows.length);
+  for (let i = 0; i < rows.length; i++) {
+    const key = String(rows[i][name]);
+    let idx = classMap.get(key);
+    if (idx === undefined) {
+      if (knownClasses) throw new Error(`Unknown class '${rows[i][name]}' not present in fitted classes`);
+      idx = classes.length;
+      classMap.set(key, idx);
+      classes.push(rows[i][name]);
+    }
+    encoded[i] = idx;
+  }
+  return [fw.tensor(encoded, { shape: [encoded.length] }), classes];
+}
+
+DataFrame.prototype.toTensor = function (...cols) { return dfToTensor(this, cols); };
+DataFrame.prototype.to_tensor = DataFrame.prototype.toTensor;
+DataFrame.prototype.to_array = function () { return this.toArray(); };
+DataFrame.prototype.encode = function (column, ...rest) {
+  const named = takeNamed(rest);
+  const knownClasses = named.classes ?? rest[0] ?? null;
+  return dfEncode(this, column, knownClasses);
+};
+
 export function installBuiltins(runtime, define) {
   for (const name of FACTORIES) define(name, (...args) => callWithOptions(fw[name], args));
   for (const name of FUNCTIONS) {
@@ -49,6 +123,8 @@ export function installBuiltins(runtime, define) {
   }
   for (const name of REDUCTIONS) {
     define(name, (input, ...args) => {
+      const agg = AGG_FNS[name];
+      if (agg && isColumnArg(input)) return agg(input);
       const named = takeNamed(args);
       const axis = named.axis ?? args[0];
       const keep = named.keep ?? false;
@@ -182,23 +258,44 @@ export function installBuiltins(runtime, define) {
     return result;
   });
 
+  define('dataframe', (...args) => {
+    const named = takeNamed(args);
+    delete named.__named;
+    const colNames = Object.keys(named);
+    if (colNames.length === 0) {
+      throw new Error('dataframe() requires named column arrays, e.g. dataframe(name=[...], age=[...])');
+    }
+    const n = named[colNames[0]].length;
+    const rows = [];
+    for (let r = 0; r < n; r++) {
+      const row = {};
+      for (const c of colNames) row[c] = named[c][r];
+      rows.push(row);
+    }
+    return engine().createDataFrame(rows);
+  });
+
+  define('col', name => qcol(name));
+  define('lit', value => qlit(value));
+  define('expr', sql => qexpr(sql));
+  define('avg', column => qavg(column));
+  define('count', column => qcount(column));
+  define('countStar', () => qcountStar());
+
   define('load_csv', (...args) => {
     const named = takeNamed(args);
     delete named.__named;
     const path = args[0];
     if (typeof path !== 'string') throw new Error('load_csv() requires a file path string');
     const sep = named.separator ?? named.sep ?? ',';
-    const frame = loadCsv(path, sep);
-    bindFrameMethods(frame, fw.tensor);
-    return frame;
+    const { rows } = loadCsvRows(path, sep);
+    return engine().createDataFrame(rows);
   });
 
   define('encode', (...args) => {
     const data = args[0];
-    if (data instanceof CsvFrame) {
-      if (data.numCols !== 1) throw new Error('encode() on a CsvFrame requires exactly 1 column. Use data.select("col") first.');
-      const { encoded, classes } = data.encode(0);
-      return [fw.tensor(encoded, { shape: [encoded.length] }), classes];
+    if (data instanceof DataFrame) {
+      return data.encode(...args.slice(1));
     }
     if (Array.isArray(data)) {
       const classMap = new Map();
@@ -216,7 +313,7 @@ export function installBuiltins(runtime, define) {
       }
       return [fw.tensor(encoded, { shape: [encoded.length] }), classes];
     }
-    throw new Error('encode() expects a CsvFrame or array');
+    throw new Error('encode() expects a DataFrame or array');
   });
 
   define('decode', (...args) => {
@@ -224,13 +321,11 @@ export function installBuiltins(runtime, define) {
     const classes = args[1];
     if (!Array.isArray(classes)) throw new Error('decode() expects (indices, classes) — classes must be an array');
     if (indices instanceof Tensor) {
-      const data = indices.data;
-      const result = [];
-      for (let i = 0; i < data.length; i++) {
-        const idx = Math.round(data[i]);
+      return indices.contiguous().data.reduce((result, raw) => {
+        const idx = Math.round(raw);
         result.push(idx >= 0 && idx < classes.length ? classes[idx] : `<unknown:${idx}>`);
-      }
-      return result;
+        return result;
+      }, []);
     }
     if (typeof indices === 'number') {
       const idx = Math.round(indices);
@@ -257,21 +352,12 @@ export function installBuiltins(runtime, define) {
     delete named.__named;
     const data = args[0];
     const ratio = named.test_size ?? named.ratio ?? 0.2;
-    if (data instanceof CsvFrame) {
-      const shuffled = data.shuffle();
-      const splitIdx = Math.round(shuffled.numRows * (1 - ratio));
-      const train = shuffled.slice(0, splitIdx);
-      const test = shuffled.slice(splitIdx);
-      bindFrameMethods(train, fw.tensor);
-      bindFrameMethods(test, fw.tensor);
-      return [train, test];
-    }
     if (data instanceof Tensor) {
       const n = data.shape[0];
       const splitIdx = Math.round(n * (1 - ratio));
       return [data.slice(0, 0, splitIdx), data.slice(0, splitIdx, n)];
     }
-    throw new Error('train_test_split() expects a CsvFrame or tensor');
+    throw new Error('train_test_split() expects a tensor');
   });
 }
 
@@ -339,41 +425,6 @@ function constructOptimizer(Type, args) {
   const params = args[0];
   if (!params) throw new Error(`${Type.name}() requires params as first argument`);
   return new Type(params, snakeNamedToCamel(named));
-}
-
-function bindFrameMethods(frame, tensorFn) {
-  frame.to_tensor = (...cols) => frame.toTensor(tensorFn, ...cols);
-  frame.to_array = () => frame.toArray();
-  frame.encode = (col, ...args) => {
-    const named = takeNamed(args);
-    const knownClasses = named.classes ?? args[0] ?? null;
-    const { encoded, classes } = CsvFrame.prototype.encode.call(frame, col, knownClasses);
-    return [tensorFn(encoded, { shape: [encoded.length] }), classes];
-  };
-  const origSelect = frame.select.bind(frame);
-  frame.select = (...names) => {
-    const sub = origSelect(...names);
-    bindFrameMethods(sub, tensorFn);
-    return sub;
-  };
-  const origDrop = frame.drop.bind(frame);
-  frame.drop = (...names) => {
-    const sub = origDrop(...names);
-    bindFrameMethods(sub, tensorFn);
-    return sub;
-  };
-  const origShuffle = frame.shuffle.bind(frame);
-  frame.shuffle = () => {
-    const sub = origShuffle();
-    bindFrameMethods(sub, tensorFn);
-    return sub;
-  };
-  const origSlice = frame.slice.bind(frame);
-  frame.slice = (start, end) => {
-    const sub = origSlice(start, end);
-    bindFrameMethods(sub, tensorFn);
-    return sub;
-  };
 }
 
 function constructScheduler(Type, args, posNames) {
@@ -452,6 +503,13 @@ const TRAINING_SIGNATURES = {
   MetricCollection: [{ name: '...metrics' }],
   optim_config: [{ name: 'optimizer' }, { name: 'lr_scheduler', isOptional: true }],
   load_csv: [{ name: 'path' }, { name: 'separator', defaultValue: '","', isOptional: true }],
+  dataframe: [{ name: 'columns' }],
+  col: [{ name: 'name' }],
+  lit: [{ name: 'value' }],
+  expr: [{ name: 'sql' }],
+  avg: [{ name: 'column' }],
+  count: [{ name: 'column' }],
+  countStar: [],
   encode: [{ name: 'data' }],
   decode: [{ name: 'indices' }, { name: 'classes' }],
   normalize: [{ name: 'tensor' }, { name: 'axis', defaultValue: '0', isOptional: true }],

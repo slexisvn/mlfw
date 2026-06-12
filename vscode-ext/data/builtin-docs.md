@@ -389,19 +389,9 @@ Iterate over a dataset in mini-batches with optional shuffling and `drop_last`.
 Number of batches per epoch.
 
 ## load_csv(path, separator=",")
-Load a CSV file into a `CsvFrame`.
-
-### select(...columns)
-Return a new frame containing only the named columns.
-
-### shuffle()
-Return a new frame with rows randomly permuted.
-
-### slice(start, end)
-Return a new frame with rows in range `[start, end)`.
-
-### encode(column)
-Encode a categorical column to integer ids. Returns `[encoded_tensor, classes_array]`.
+Load a CSV file into a `DataFrame`. Numeric fields are parsed as numbers; use
+the `DataFrame` API (`select`, `filter`, `groupBy`, `to_tensor`, `encode`, …)
+to analyse it.
 
 ## encode(data)
 Encode categorical values to integer ids. Returns `[encoded_tensor, classes_array]`.
@@ -413,7 +403,7 @@ Map integer ids back to original class labels using the `classes` array from `en
 Standardize a tensor along `axis`: subtract mean and divide by standard deviation.
 
 ## train_test_split(data, test_size=0.2)
-Split a `CsvFrame` or tensor into train/test partitions.
+Split a tensor into train/test partitions along the first dimension.
 
 ## dataframe(columns) {data}
 Build a lazy `DataFrame` from named column arrays, one named argument per
@@ -671,20 +661,6 @@ Enable or disable gradient tracking on this tensor.
 ### grad()
 Read the accumulated gradient of this leaf tensor.
 
-## $CsvFrame
-
-### select(...columns)
-Return a new frame containing only the named columns.
-
-### shuffle()
-Return a new frame with rows randomly permuted.
-
-### slice(start, end)
-Return a new frame with rows in range `[start, end)`.
-
-### encode(column)
-Encode a categorical column to integer ids.
-
 ## $Model
 
 ### parameters()
@@ -770,6 +746,17 @@ Execute and print the first `n` rows as a formatted table; returns the text.
 
 ### chunks()
 Execute and stream results as an async iterator of data chunks.
+
+### to_tensor(...columns)
+Materialize the (optionally selected) numeric columns into a 2-D tensor of
+shape `[rows, columns]`. Non-numeric columns raise — encode them first.
+
+### to_array()
+Alias for `collect` — execute and return rows as an array of objects.
+
+### encode(column, classes?)
+Encode a categorical column to integer ids, returning `[encoded_tensor,
+classes_array]`. Pass `classes=` to reuse ids fitted on another frame.
 
 ## $GroupedData
 

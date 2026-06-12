@@ -1,0 +1,47 @@
+# DataFrame basics: build, inspect, and reshape tabular data.
+# A DataFrame is lazy — it records a query plan and only runs on a terminal op
+# (show, collect, to_array, count, to_tensor).
+#
+# Covers: dataframe, columns, schema, count, explain, show, collect, to_array,
+#         select, drop, withColumn, filter, where, orderBy, sort, limit, distinct.
+
+employees = dataframe(
+  name=["Alice", "Bob", "Carol", "Dan", "Eve", "Frank", "Grace", "Heidi"],
+  dept=["Eng", "Eng", "Sales", "Sales", "Eng", "HR", "Sales", "HR"],
+  salary=[120, 95, 80, 75, 110, 60, 90, 65],
+  age=[34, 28, 41, 25, 38, 52, 30, 45],
+)
+
+# Inspect structure and contents
+print("columns:", employees.columns())
+print("row count:", employees.count())
+employees.show()
+
+# Project a subset of columns / drop a column
+employees.select("name", "dept", "salary").show()
+employees.drop("age").show()
+
+# Add a derived column computed from existing columns
+with_bonus = employees.withColumn("bonus", col("salary").mul(lit(0.1)))
+with_bonus.select("name", "salary", "bonus").show()
+
+# Filter rows — filter and its alias where are equivalent
+employees.filter(col("dept").eq("Eng")).show()
+employees.where(col("salary").ge(90)).show()
+
+# Order ascending, take the top rows, page with an offset
+employees.orderBy("salary").show()
+employees.sort("age").limit(3).show()
+employees.limit(2, 4).show()
+
+# Distinct values of a column
+employees.select("dept").distinct().orderBy("dept").show()
+
+# explain() shows the lazy query plan without executing it
+print("plan:")
+print(employees.filter(col("salary").gt(100)).select("name").explain())
+
+# Materialize to plain rows, then index into the result
+rows = employees.orderBy("name").to_array()
+print("row count materialized:", len(rows))
+print("first row:", rows[0])

@@ -1,0 +1,46 @@
+# Column expressions: build computed and boolean columns with col, lit, expr.
+#
+# Covers Column ops: arithmetic (add/sub/mul/div), comparison (eq/ne/lt/le/gt/ge),
+#        logical (and/or/not), isNull/isNotNull, like, between, isin, cast, alias.
+
+products = dataframe(
+  sku=["A-1", "A-2", "B-1", "B-2", "C-9"],
+  category=["alpha", "alpha", "beta", "beta", "gamma"],
+  price=[10.0, 25.0, 40.0, 5.0, 100.0],
+  stock=[100, 0, 30, 0, 7],
+  note=["new", null, "sale", null, "rare"],
+)
+
+# Arithmetic between columns and literals; alias renames the output column
+priced = products.withColumn("price_tax", col("price").mul(lit(1.1)))
+priced = priced.withColumn("inventory_value", col("price").mul(col("stock")))
+priced.select("sku", "price", "price_tax", "inventory_value").show()
+
+# Comparisons combined with logical and / or / not
+print("in stock AND price >= 20:")
+products.filter(col("stock").gt(0).and(col("price").ge(20.0))).select("sku", "price", "stock").show()
+
+print("cheap OR gamma:")
+products.filter(col("price").lt(10.0).or(col("category").eq("gamma"))).select("sku", "price", "category").show()
+
+print("NOT alpha:")
+products.filter(col("category").eq("alpha").not()).select("sku", "category").show()
+
+# Remaining comparison operators
+products.filter(col("category").ne("beta")).select("sku", "category").show()
+products.filter(col("price").le(10.0)).select("sku", "price").show()
+
+# Null handling
+print("note IS NULL:")
+products.filter(col("note").isNull()).select("sku").show()
+print("note IS NOT NULL:")
+products.filter(col("note").isNotNull()).select("sku", "note").show()
+
+# Pattern match, range membership, set membership
+products.filter(col("sku").like("A-%")).select("sku").show()
+products.filter(col("price").between(10.0, 40.0)).select("sku", "price").show()
+products.filter(col("category").isin("alpha", "gamma")).select("sku", "category").show()
+
+# cast to another type, and raw SQL via expr
+products.withColumn("price_int", col("price").cast("INT32")).select("sku", "price_int").show()
+products.withColumn("discounted", expr("price * 0.8")).select("sku", "discounted").show()

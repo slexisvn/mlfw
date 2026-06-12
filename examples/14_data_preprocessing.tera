@@ -1,0 +1,32 @@
+# Data problem: clean and preprocess a raw table into ML-ready tensors.
+# Steps: inspect -> drop rows with missing values -> normalize numeric features
+#        -> encode the categorical label -> report the resulting tensors.
+
+raw = dataframe(
+  age=[25, 40, 35, 50, 28, 33, 45, 60, 29, 38],
+  income=[30.0, null, 55.0, 80.0, null, 42.0, 70.0, 90.0, 33.0, 60.0],
+  city=["A", "B", "A", "C", "B", "A", "C", "C", "B", "A"],
+  plan=["basic", "pro", "basic", "pro", "basic", "pro", "pro", "pro", "basic", "pro"],
+)
+
+print("raw rows:", raw.count())
+print("=== raw data ===")
+raw.show()
+
+# 1. Drop rows where the income field is missing
+clean = raw.filter(col("income").isNotNull())
+print("rows after dropping missing income:", clean.count())
+
+# 2. Numeric features -> standardized tensor (zero mean, unit variance)
+features = normalize(clean.select("age", "income").to_tensor())
+
+# 3. Categorical label -> integer ids + a class lookup table
+labels, classes = clean.select("plan").encode("plan")
+
+print("=== ML-ready output ===")
+print("feature matrix shape:", shape(features))
+print("label vector shape  :", shape(labels))
+print("classes:", classes)
+print("normalized features:")
+print(features)
+print("labels:", labels)

@@ -1,0 +1,64 @@
+# Transformer: self-attention, feed-forward, and cross-attention.
+# Covers: Embedding, Linear, LayerNorm, gelu/softmax/transpose/@,
+#         multi-parameter forward, nested sub-models, compile.
+
+model SelfAttention(d):
+  wq = Linear(d, d)
+  wk = Linear(d, d)
+  wv = Linear(d, d)
+  wo = Linear(d, d)
+  ln = LayerNorm([d])
+
+  forward x:
+    q = wq(x)
+    k = wk(x)
+    v = wv(x)
+    scale = sqrt(tensor(d, dtype=f32))
+    attn = softmax((q @ transpose(k, 0, 1)) / scale)
+    return ln(x + wo(attn @ v))          # residual connection + layer norm
+
+model FeedForward(d):
+  up = Linear(d, d * 4)
+  down = Linear(d * 4, d)
+  ln = LayerNorm([d])
+
+  forward x:
+    return ln(x + down(gelu(up(x))))
+
+model EncoderBlock(d):
+  attn = SelfAttention(d)
+  ffn = FeedForward(d)
+
+  forward x:
+    return ffn(attn(x))
+
+# Embed tokens, then run the encoder block
+d = 32
+embed = Embedding(100, d)
+block = EncoderBlock(d)
+
+tokens = tensor([3, 15, 42, 7, 0, 99], dtype=i32)
+x = embed(tokens)                        # [seq, d]
+out = block(x)
+print("=== Transformer encoder ===")
+print("tokens:", shape(tokens), "-> embed:", shape(x), "-> out:", shape(out))
+
+# Cross-attention: forward takes multiple inputs (query separate from context)
+model CrossAttention(d):
+  wq = Linear(d, d)
+  wk = Linear(d, d)
+  wv = Linear(d, d)
+
+  forward query, context:
+    q = wq(query)
+    k = wk(context)
+    v = wv(context)
+    return softmax(q @ transpose(k, 0, 1)) @ v
+
+cross = CrossAttention(d)
+y = cross(randn([4, d]), randn([6, d]))
+print("cross-attention:", shape(y))
+
+# Compile the encoder block
+compile(block, input=randn([8, d]), target=cpu)
+print("compiled encoder ok")

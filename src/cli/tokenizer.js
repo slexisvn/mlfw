@@ -131,8 +131,10 @@ function addIndentation(tokens) {
       break;
     }
 
-    if (tok.value === '(' || tok.value === '[') bracketDepth++;
-    if (tok.value === ')' || tok.value === ']') bracketDepth--;
+    if (tok.type !== 'string') {
+      if (tok.value === '(' || tok.value === '[') bracketDepth++;
+      if (tok.value === ')' || tok.value === ']') bracketDepth--;
+    }
 
     if (tok.type === 'newline') {
       if (bracketDepth > 0) continue;

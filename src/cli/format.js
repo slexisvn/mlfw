@@ -37,6 +37,7 @@ export function formatValue(value) {
   if (Array.isArray(value)) return JSON.stringify(value);
   if (value === undefined) return '';
   if (typeof value === 'string') return value;
+  if (value && value.constructor === Object) return JSON.stringify(value);
   return String(value);
 }
 

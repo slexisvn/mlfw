@@ -1,0 +1,24 @@
+# Compiler: compile and trace.
+# Covers: compiling to a backend, optimization flags (fusion/scheduling/debug), trace().
+
+model MLP():
+  fc1 = Linear(16, 64)
+  fc2 = Linear(64, 16)
+  forward x:
+    return fc2(relu(fc1(x)))
+
+net = MLP()
+x = randn([8, 16])
+
+print("=== Model ===")
+print("eager output:", shape(net(x)))
+
+# Compile to the CPU backend
+compiled = compile(net, input=x, target=cpu)
+print("=== Compile (cpu) ===")
+print(compiled)
+
+# Enable fusion + scheduling + debug, then inspect the compilation trace
+optimized = compile(net, input=x, target=cpu, fusion=true, scheduling=true, debug=true)
+print("=== Compilation trace ===")
+trace(optimized)

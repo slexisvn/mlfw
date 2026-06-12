@@ -339,67 +339,6 @@
         }
       }
     ],
-    "CsvFrame": [
-      {
-        "name": "select",
-        "description": "Return a new frame containing only the named columns.",
-        "signature": {
-          "params": [
-            {
-              "name": "columns",
-              "optional": true,
-              "rest": true,
-              "defaultValue": null
-            }
-          ],
-          "display": "select(...columns)"
-        }
-      },
-      {
-        "name": "shuffle",
-        "description": "Return a new frame with rows randomly permuted.",
-        "signature": {
-          "params": [],
-          "display": "shuffle()"
-        }
-      },
-      {
-        "name": "slice",
-        "description": "Return a new frame with rows in range `[start, end)`.",
-        "signature": {
-          "params": [
-            {
-              "name": "start",
-              "optional": false,
-              "rest": false,
-              "defaultValue": null
-            },
-            {
-              "name": "end",
-              "optional": false,
-              "rest": false,
-              "defaultValue": null
-            }
-          ],
-          "display": "slice(start, end)"
-        }
-      },
-      {
-        "name": "encode",
-        "description": "Encode a categorical column to integer ids.",
-        "signature": {
-          "params": [
-            {
-              "name": "column",
-              "optional": false,
-              "rest": false,
-              "defaultValue": null
-            }
-          ],
-          "display": "encode(column)"
-        }
-      }
-    ],
     "Model": [
       {
         "name": "parameters",
@@ -746,6 +685,50 @@
         "signature": {
           "params": [],
           "display": "chunks()"
+        }
+      },
+      {
+        "name": "to_tensor",
+        "description": "Materialize the (optionally selected) numeric columns into a 2-D tensor of\nshape `[rows, columns]`. Non-numeric columns raise — encode them first.",
+        "signature": {
+          "params": [
+            {
+              "name": "columns",
+              "optional": true,
+              "rest": true,
+              "defaultValue": null
+            }
+          ],
+          "display": "to_tensor(...columns)"
+        }
+      },
+      {
+        "name": "to_array",
+        "description": "Alias for `collect` — execute and return rows as an array of objects.",
+        "signature": {
+          "params": [],
+          "display": "to_array()"
+        }
+      },
+      {
+        "name": "encode",
+        "description": "Encode a categorical column to integer ids, returning `[encoded_tensor,\nclasses_array]`. Pass `classes=` to reuse ids fitted on another frame.",
+        "signature": {
+          "params": [
+            {
+              "name": "column",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            },
+            {
+              "name": "classes",
+              "optional": true,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "encode(column, classes?)"
         }
       }
     ],
@@ -1457,6 +1440,24 @@
       "methods": []
     },
     {
+      "name": "avg",
+      "kind": "function",
+      "description": "Aggregate `Column` computing the mean of a column within a `groupBy(...).agg(...)`.",
+      "returns": "Column",
+      "signature": {
+        "params": [
+          {
+            "name": "column",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "avg(column)"
+      },
+      "methods": []
+    },
+    {
       "name": "AvgPool2d",
       "kind": "module",
       "description": "2-D average pooling. Downsamples spatial dimensions averaging per window.",
@@ -1806,6 +1807,24 @@
           }
         ],
         "display": "clone(tensor)"
+      },
+      "methods": []
+    },
+    {
+      "name": "col",
+      "kind": "function",
+      "description": "Reference a column by name in a `DataFrame` expression, returning a `Column`\nthat can be transformed and compared. Use a dotted name (`\"t.id\"`) to qualify a\ntable alias.",
+      "returns": "Column",
+      "signature": {
+        "params": [
+          {
+            "name": "column",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "col(column)"
       },
       "methods": []
     },
@@ -2215,6 +2234,35 @@
       ]
     },
     {
+      "name": "count",
+      "kind": "function",
+      "description": "Aggregate `Column` counting non-null values of a column within `agg(...)`.",
+      "returns": "Column",
+      "signature": {
+        "params": [
+          {
+            "name": "column",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "count(column)"
+      },
+      "methods": []
+    },
+    {
+      "name": "countStar",
+      "kind": "function",
+      "description": "Aggregate `Column` counting all rows (`COUNT(*)`) within `agg(...)`.",
+      "returns": "Column",
+      "signature": {
+        "params": [],
+        "display": "countStar()"
+      },
+      "methods": []
+    },
+    {
       "name": "cpu",
       "kind": "device",
       "description": "CPU execution backend.",
@@ -2332,6 +2380,24 @@
           }
         }
       ]
+    },
+    {
+      "name": "dataframe",
+      "kind": "data",
+      "description": "Build a lazy `DataFrame` from named column arrays, one named argument per\ncolumn: `dataframe(name=[\"a\", \"b\"], age=[30, 40])`. Column types are inferred\nfrom the values. The frame records a query plan and is only executed when\nmaterialized with `collect`, `toArray`, `count`, `show`, or `chunks`.",
+      "returns": "DataFrame",
+      "signature": {
+        "params": [
+          {
+            "name": "columns",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "dataframe(columns)"
+      },
+      "methods": []
     },
     {
       "name": "DataLoader",
@@ -2910,6 +2976,24 @@
           }
         ],
         "display": "expand(tensor, shape)"
+      },
+      "methods": []
+    },
+    {
+      "name": "expr",
+      "kind": "function",
+      "description": "Parse a scalar SQL string into a `Column`, e.g. `expr(\"price * 1.1\")`. Bound\nagainst the frame's schema at build time.",
+      "returns": "Column",
+      "signature": {
+        "params": [
+          {
+            "name": "sql",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "expr(sql)"
       },
       "methods": []
     },
@@ -3818,10 +3902,28 @@
       "methods": []
     },
     {
+      "name": "lit",
+      "kind": "function",
+      "description": "Wrap a constant value as a `Column` literal so it can be combined with other\ncolumns in expressions.",
+      "returns": "Column",
+      "signature": {
+        "params": [
+          {
+            "name": "value",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "lit(value)"
+      },
+      "methods": []
+    },
+    {
       "name": "load_csv",
       "kind": "data",
-      "description": "Load a CSV file into a `CsvFrame`.",
-      "returns": "CsvFrame",
+      "description": "Load a CSV file into a `DataFrame`. Numeric fields are parsed as numbers; use\nthe `DataFrame` API (`select`, `filter`, `groupBy`, `to_tensor`, `encode`, …)\nto analyse it.",
+      "returns": "DataFrame",
       "signature": {
         "params": [
           {
@@ -3845,67 +3947,7 @@
         ],
         "display": "load_csv(path, separator=\", \")"
       },
-      "methods": [
-        {
-          "name": "select",
-          "description": "Return a new frame containing only the named columns.",
-          "signature": {
-            "params": [
-              {
-                "name": "columns",
-                "optional": true,
-                "rest": true,
-                "defaultValue": null
-              }
-            ],
-            "display": "select(...columns)"
-          }
-        },
-        {
-          "name": "shuffle",
-          "description": "Return a new frame with rows randomly permuted.",
-          "signature": {
-            "params": [],
-            "display": "shuffle()"
-          }
-        },
-        {
-          "name": "slice",
-          "description": "Return a new frame with rows in range `[start, end)`.",
-          "signature": {
-            "params": [
-              {
-                "name": "start",
-                "optional": false,
-                "rest": false,
-                "defaultValue": null
-              },
-              {
-                "name": "end",
-                "optional": false,
-                "rest": false,
-                "defaultValue": null
-              }
-            ],
-            "display": "slice(start, end)"
-          }
-        },
-        {
-          "name": "encode",
-          "description": "Encode a categorical column to integer ids. Returns `[encoded_tensor, classes_array]`.",
-          "signature": {
-            "params": [
-              {
-                "name": "column",
-                "optional": false,
-                "rest": false,
-                "defaultValue": null
-              }
-            ],
-            "display": "encode(column)"
-          }
-        }
-      ]
+      "methods": []
     },
     {
       "name": "log",
@@ -6274,7 +6316,7 @@
     {
       "name": "train_test_split",
       "kind": "data",
-      "description": "Split a `CsvFrame` or tensor into train/test partitions.",
+      "description": "Split a tensor into train/test partitions along the first dimension.",
       "returns": null,
       "signature": {
         "params": [
@@ -6600,125 +6642,6 @@
       "description": "Description.\n```\n\n---",
       "returns": "Tensor",
       "signature": null,
-      "methods": []
-    },
-    {
-      "name": "dataframe",
-      "kind": "data",
-      "description": "Build a lazy `DataFrame` from named column arrays, one named argument per\ncolumn: `dataframe(name=[\"a\", \"b\"], age=[30, 40])`. Column types are inferred\nfrom the values. The frame records a query plan and is only executed when\nmaterialized with `collect`, `toArray`, `count`, `show`, or `chunks`.",
-      "returns": "DataFrame",
-      "signature": {
-        "params": [
-          {
-            "name": "columns",
-            "optional": false,
-            "rest": false,
-            "defaultValue": null
-          }
-        ],
-        "display": "dataframe(columns)"
-      },
-      "methods": []
-    },
-    {
-      "name": "col",
-      "kind": "function",
-      "description": "Reference a column by name in a `DataFrame` expression, returning a `Column`\nthat can be transformed and compared. Use a dotted name (`\"t.id\"`) to qualify a\ntable alias.",
-      "returns": "Column",
-      "signature": {
-        "params": [
-          {
-            "name": "column",
-            "optional": false,
-            "rest": false,
-            "defaultValue": null
-          }
-        ],
-        "display": "col(column)"
-      },
-      "methods": []
-    },
-    {
-      "name": "lit",
-      "kind": "function",
-      "description": "Wrap a constant value as a `Column` literal so it can be combined with other\ncolumns in expressions.",
-      "returns": "Column",
-      "signature": {
-        "params": [
-          {
-            "name": "value",
-            "optional": false,
-            "rest": false,
-            "defaultValue": null
-          }
-        ],
-        "display": "lit(value)"
-      },
-      "methods": []
-    },
-    {
-      "name": "expr",
-      "kind": "function",
-      "description": "Parse a scalar SQL string into a `Column`, e.g. `expr(\"price * 1.1\")`. Bound\nagainst the frame's schema at build time.",
-      "returns": "Column",
-      "signature": {
-        "params": [
-          {
-            "name": "sql",
-            "optional": false,
-            "rest": false,
-            "defaultValue": null
-          }
-        ],
-        "display": "expr(sql)"
-      },
-      "methods": []
-    },
-    {
-      "name": "avg",
-      "kind": "function",
-      "description": "Aggregate `Column` computing the mean of a column within a `groupBy(...).agg(...)`.",
-      "returns": "Column",
-      "signature": {
-        "params": [
-          {
-            "name": "column",
-            "optional": false,
-            "rest": false,
-            "defaultValue": null
-          }
-        ],
-        "display": "avg(column)"
-      },
-      "methods": []
-    },
-    {
-      "name": "count",
-      "kind": "function",
-      "description": "Aggregate `Column` counting non-null values of a column within `agg(...)`.",
-      "returns": "Column",
-      "signature": {
-        "params": [
-          {
-            "name": "column",
-            "optional": false,
-            "rest": false,
-            "defaultValue": null
-          }
-        ],
-        "display": "count(column)"
-      },
-      "methods": []
-    },
-    {
-      "name": "countStar",
-      "kind": "function",
-      "description": "Aggregate `Column` counting all rows (`COUNT(*)`) within `agg(...)`.",
-      "returns": "Column",
-      "signature": {
-        "params": [],
-        "display": "countStar()"
-      },
       "methods": []
     }
   ]

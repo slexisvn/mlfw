@@ -1,0 +1,47 @@
+# Autograd: automatic differentiation and a manual training loop.
+# Covers: grad=true, backward, grad, requires_grad, detach.
+
+# --- 1. Gradient of an expression ---
+# f = sum(x^2)  =>  df/dx = 2x
+x = tensor([[1.0, 2.0], [3.0, 4.0]], grad=true)
+f = sum(x ** 2.0)
+backward(f)
+print("f = sum(x^2) =", f)
+print("grad(x) (expected 2x) =", grad(x))
+
+# --- 2. Gradient through a linear layer + activation ---
+w = randn([3, 1], grad=true)
+inp = tensor([[1.0, 2.0, 3.0]])
+out = sum(relu(inp @ w))
+backward(out)
+print("grad(w) through relu(inp @ w):", shape(grad(w)))
+
+# --- 3. Linear regression via manual gradient descent ---
+# Centered features that follow y = 2*x1 + 3*x2 + 1.
+xs = tensor([[-2.0, -1.0], [-1.0, 2.0], [0.0, 0.0], [1.0, -2.0], [2.0, 1.0]])
+ys = tensor([[-6.0], [5.0], [1.0], [-3.0], [8.0]])
+
+wp = zeros([2, 1], grad=true)
+bp = zeros([1], grad=true)
+lr = 0.1
+
+next_log = 0
+for step in range(200):
+  pred = xs @ wp + bp
+  loss = mean((pred - ys) ** 2.0)
+  backward(loss)
+  # detach() makes the updated value a fresh leaf that tracks grad again;
+  # without it, backward would not attach gradients on the next iteration.
+  wp = requires_grad(detach(wp - lr * grad(wp)))
+  bp = requires_grad(detach(bp - lr * grad(bp)))
+  if step == next_log:
+    print("step", step, "| loss =", loss)
+    next_log = next_log + 40
+
+print("=== learned params (expect w=[2,3], b=1) ===")
+print("w =", wp)
+print("b =", bp)
+
+# --- 4. detach: break a tensor out of the autograd graph ---
+frozen = detach(wp)
+print("detach(w) =", frozen)

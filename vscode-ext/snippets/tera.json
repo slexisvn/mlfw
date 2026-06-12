@@ -111,6 +111,13 @@
     ],
     "description": "logger: CSVLogger"
   },
+  "dataframe": {
+    "prefix": "dataframe",
+    "body": [
+      "dataframe(${1:columns})$0"
+    ],
+    "description": "data: dataframe"
+  },
   "DataLoader": {
     "prefix": "DataLoader",
     "body": [
@@ -474,12 +481,5 @@
       "zerosLike(${1:tensor})$0"
     ],
     "description": "factory: zerosLike"
-  },
-  "dataframe": {
-    "prefix": "dataframe",
-    "body": [
-      "dataframe(${1:columns})$0"
-    ],
-    "description": "data: dataframe"
   }
 }

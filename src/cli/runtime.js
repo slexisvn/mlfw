@@ -349,7 +349,8 @@ export class TeraRuntime {
 
   async evaluateIndex(node, env) {
     let value = await this.evaluateExpression(node.object, env);
-    if (!(value instanceof Tensor)) throw new Error('Indexing currently expects a Tensor');
+    if (Array.isArray(value)) return this.indexArray(value, node.items, env);
+    if (!(value instanceof Tensor)) throw new Error('Indexing currently expects a Tensor or array');
     let dim = 0;
     for (const item of node.items) {
       if (dim >= value.ndim) throw new Error(`Too many indices for tensor with ${value.ndim} dimensions`);
@@ -374,6 +375,35 @@ export class TeraRuntime {
       }
     }
     return value;
+  }
+
+  async indexArray(value, items, env) {
+    let current = value;
+    for (const item of items) {
+      if (!Array.isArray(current)) throw new Error('Too many indices for array');
+      if (item.type === 'Slice') {
+        const len = current.length;
+        let start = item.start ? await this.evaluateExpression(item.start, env) : 0;
+        let end = item.end ? await this.evaluateExpression(item.end, env) : len;
+        const step = item.step ? await this.evaluateExpression(item.step, env) : 1;
+        if (![start, end, step].every(Number.isInteger)) throw new Error('Slice bounds must be integers');
+        if (step <= 0) throw new Error('Slice step must be a positive integer');
+        if (start < 0) start += len;
+        if (end < 0) end += len;
+        const out = [];
+        for (let i = Math.max(0, start); i < Math.min(len, end); i += step) out.push(current[i]);
+        current = out;
+      } else {
+        let index = await this.evaluateExpression(item, env);
+        if (!Number.isInteger(index)) throw new Error('Array index must be an integer');
+        if (index < 0) index += current.length;
+        if (index < 0 || index >= current.length) {
+          throw new Error(`Index ${index} is out of bounds for array of length ${current.length}`);
+        }
+        current = current[index];
+      }
+    }
+    return current;
   }
 
   async withNode(node, evaluate) {

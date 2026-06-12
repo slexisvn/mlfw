@@ -1,5 +1,5 @@
 import * as ops from '../../tensor/ops/ops.js';
-import { full } from '../../tensor/factory/creation_ops.js';
+import { full, empty } from '../../tensor/factory/creation_ops.js';
 
 export function dropout(input, p = 0.5, training = true) {
   if (!training || p === 0) return input;
@@ -11,7 +11,6 @@ export function dropout(input, p = 0.5, training = true) {
 }
 
 function _bernoulliMask(shape, prob, dtype, device) {
-  const { empty } = require('../../tensor/factory/creation_ops.js');
   const t = empty(shape, { dtype, device });
   const data = t._impl.storage.data;
   if (data) {

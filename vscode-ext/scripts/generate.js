@@ -80,7 +80,7 @@ const RETURNS_OVERRIDE = {
   trace: null,
   graph: null,
   compile: null,
-  load_csv: 'CsvFrame',
+  load_csv: 'DataFrame',
   normalize: 'Tensor',
   encode: null,
   decode: null,
@@ -116,8 +116,11 @@ function mergeDoc(builtin, doc, kindTemplates) {
   }
   const ownMethodNames = new Set((doc.methods ?? []).map(m => m.name));
   const inherited = (template?.methods ?? []).filter(m => !ownMethodNames.has(m.name));
+  // A doc-declared `{kind}` annotation overrides the kind inferred from source.
+  const kind = doc.kind ?? builtin.kind;
   return {
     ...builtin,
+    kind,
     description: doc.description,
     signature: doc.params === null ? null : { params: doc.params },
     methods: [...(doc.methods ?? []), ...inherited],

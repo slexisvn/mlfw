@@ -311,13 +311,13 @@ describe('Builtins — data utilities', () => {
 data = load_csv("tests/cli/fixtures/iris_sample.csv")
 `);
     const data = runtime.getVariable('data');
-    expect(data.numRows).toBe(20);
-    expect(data.numCols).toBe(5);
-    expect(data.headers).toContain('species');
-    expect(data.headers).toContain('sepal_length');
+    expect(await data.count()).toBe(20);
+    expect(data.columns().length).toBe(5);
+    expect(data.columns()).toContain('species');
+    expect(data.columns()).toContain('sepal_length');
   });
 
-  it('CsvFrame.select and drop', async () => {
+  it('DataFrame.select and drop', async () => {
     const runtime = new TeraRuntime({ output: () => {} });
     await runtime.execute(`
 data = load_csv("tests/cli/fixtures/iris_sample.csv")
@@ -325,14 +325,13 @@ subset = data.select("sepal_length", "sepal_width")
 dropped = data.drop("species")
 `);
     const subset = runtime.getVariable('subset');
-    expect(subset.numCols).toBe(2);
-    expect(subset.headers).toEqual(['sepal_length', 'sepal_width']);
+    expect(subset.columns()).toEqual(['sepal_length', 'sepal_width']);
     const dropped = runtime.getVariable('dropped');
-    expect(dropped.numCols).toBe(4);
-    expect(dropped.headers).not.toContain('species');
+    expect(dropped.columns().length).toBe(4);
+    expect(dropped.columns()).not.toContain('species');
   });
 
-  it('CsvFrame.to_tensor converts numeric columns', async () => {
+  it('DataFrame.to_tensor converts numeric columns', async () => {
     const runtime = new TeraRuntime({ output: () => {} });
     const result = await runtime.execute(`
 data = load_csv("tests/cli/fixtures/iris_sample.csv")
@@ -342,7 +341,7 @@ data.drop("species").to_tensor()
     expect(result.shape).toEqual([20, 4]);
   });
 
-  it('CsvFrame.to_tensor rejects string columns', async () => {
+  it('DataFrame.to_tensor rejects string columns', async () => {
     const runtime = new TeraRuntime({ output: () => {} });
     await expect(runtime.execute(`
 data = load_csv("tests/cli/fixtures/iris_sample.csv")
@@ -387,26 +386,26 @@ normalize(x)
     expect(Math.abs(meanCol0)).toBeLessThan(0.01);
   });
 
-  it('train_test_split splits CsvFrame', async () => {
+  it('train_test_split splits a tensor', async () => {
     const runtime = new TeraRuntime({ output: () => {} });
     await runtime.execute(`
-data = load_csv("tests/cli/fixtures/iris_sample.csv")
-train_data, test_data = train_test_split(data, test_size=0.3)
+x = randn([20, 3])
+train_data, test_data = train_test_split(x, test_size=0.3)
 `);
     const train = runtime.getVariable('train_data');
     const test = runtime.getVariable('test_data');
-    expect(train.numRows + test.numRows).toBe(20);
-    expect(test.numRows).toBe(6);
-    expect(train.numRows).toBe(14);
+    expect(train.shape[0] + test.shape[0]).toBe(20);
+    expect(test.shape[0]).toBe(6);
+    expect(train.shape[0]).toBe(14);
   });
 
-  it('encodes a split with fitted classes', async () => {
+  it('encodes a subset with fitted classes', async () => {
     const runtime = new TeraRuntime({ output: () => {} });
     await runtime.execute(`
 data = load_csv("tests/cli/fixtures/iris_sample.csv")
 y, classes = data.select("species").encode("species")
-reversed = data.slice(0, 3).select("species")
-y_split, _ = reversed.encode("species", classes=classes)
+head = data.limit(3).select("species")
+y_split, _ = head.encode("species", classes=classes)
 `);
     const classes = runtime.getVariable('classes');
     const ySplit = runtime.getVariable('y_split').toArray();
