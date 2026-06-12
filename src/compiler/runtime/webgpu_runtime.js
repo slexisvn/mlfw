@@ -2,6 +2,7 @@ let _gpuDevice = null;
 let _gpuInitPromise = null;
 let _bufferUsage = null;
 let _mapMode = null;
+let _shaderStage = null;
 let _dawnInstance = null;
 let _exitRegistered = false;
 
@@ -19,6 +20,7 @@ async function ensureDevice() {
         if (mod.globals) {
           _bufferUsage = mod.globals.GPUBufferUsage;
           _mapMode = mod.globals.GPUMapMode;
+          _shaderStage = mod.globals.GPUShaderStage;
         }
       } catch (_) {
         throw new Error('WebGPU not available: install the "webgpu" npm package or run in a browser with WebGPU support');
@@ -28,6 +30,7 @@ async function ensureDevice() {
     if (!_bufferUsage && typeof GPUBufferUsage !== 'undefined') {
       _bufferUsage = GPUBufferUsage;
       _mapMode = GPUMapMode;
+      _shaderStage = GPUShaderStage;
     }
 
     const adapter = await gpu.requestAdapter();
@@ -73,24 +76,42 @@ export function resetDevice() {
   _gpuInitPromise = null;
   _bufferUsage = null;
   _mapMode = null;
+  _shaderStage = null;
   _dawnInstance = null;
+}
+
+function bindingBufferType(binding) {
+  if (binding.name === '_shapes') return 'uniform';
+  if (binding.mode === 'read_write') return 'storage';
+  return 'read-only-storage';
 }
 
 function createPipeline(device, kernel) {
   const shaderModule = device.createShaderModule({ code: kernel.source });
+  const layoutEntries = [];
+  for (const binding of kernel.metadata.bindings) {
+    layoutEntries.push({
+      binding: binding.index,
+      visibility: _shaderStage.COMPUTE,
+      buffer: { type: bindingBufferType(binding) },
+    });
+  }
+  const bindGroupLayout = device.createBindGroupLayout({ entries: layoutEntries });
+  const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] });
   const pipeline = device.createComputePipeline({
-    layout: 'auto',
+    layout: pipelineLayout,
     compute: { module: shaderModule, entryPoint: kernel.name }
   });
-  return { pipeline, shaderModule };
+  return { pipeline, shaderModule, bindGroupLayout };
 }
 
 export async function instantiateWebGPU(kernel) {
   const device = await ensureDevice();
-  const { pipeline } = createPipeline(device, kernel);
+  const { pipeline, bindGroupLayout } = createPipeline(device, kernel);
   return {
     device,
     pipeline,
+    bindGroupLayout,
     kernel,
     workgroupSize: kernel.metadata.workgroupSize,
     dispatchSize: kernel.metadata.dispatchSize,
@@ -115,7 +136,7 @@ function buildParamIndex(bindings) {
 }
 
 export async function runWebGPUKernel(instance, tensorArgs, shapeValues) {
-  const { device, pipeline, bindings, dispatchSize } = instance;
+  const { device, pipeline, bindGroupLayout, bindings, dispatchSize } = instance;
   const BU = bufUsage();
 
   const gpuBuffers = [];
@@ -175,7 +196,7 @@ export async function runWebGPUKernel(instance, tensorArgs, shapeValues) {
   }
 
   const bindGroup = device.createBindGroup({
-    layout: pipeline.getBindGroupLayout(0),
+    layout: bindGroupLayout,
     entries: bindGroupEntries,
   });
 

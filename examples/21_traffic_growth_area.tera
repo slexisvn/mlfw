@@ -1,0 +1,10 @@
+traffic = DataFrame(
+  day=[1, 2, 3, 4, 5, 6, 7],
+  organic=[420.0, 460.0, 510.0, 540.0, 600.0, 650.0, 720.0],
+  paid=[180.0, 210.0, 190.0, 240.0, 260.0, 230.0, 300.0],
+  referral=[60.0, 75.0, 80.0, 90.0, 110.0, 130.0, 150.0]
+)
+
+ordered = traffic.orderBy("day")
+
+chart.area(ordered, x="day", y=["organic", "paid", "referral"], mode="stacked", title="Daily traffic by acquisition source")

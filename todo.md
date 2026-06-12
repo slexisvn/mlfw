@@ -608,9 +608,36 @@
 6. **Crash-only** — chỉ cần không throw/không hang trên input hợp lệ (bắt assert/infinite-loop).
 
 ### Blocker production (không phải bug đếm được)
-- [ ] GPU / WebGPU backend chưa verify được (không có máy GPU). Đây là blocker lớn nhất.
+- [x] GPU / WebGPU backend đã verify được (máy có GPU, Dawn `webgpu` npm). Fuzz differential GPU-vs-CPU
+  (subprocess-per-program vì Dawn in-process segfault sau vài pipeline) — xem đợt 31 dưới.
 - [ ] Reference (eager) không độc lập — eager từng có bug, differential có thể bỏ sót khi cả 2 cùng sai.
   → Cần oracle độc lập (numerical-diff cho grad, brute-force cho analysis, metamorphic cho pass).
+
+### Bug đã fix đợt 31 (2026-06-12) — WebGPU fuzz (GPU-vs-CPU differential, máy có GPU)
+> Fuzz random program (unary/binary/reduce/softmax/transpose/matmul/layernorm × f32 × 2D/3D) compile WebGPU
+> vs CPU (oracle). Dawn (D3D12) segfault in-process sau ~2 pipeline → chạy 1 program/subprocess. Native
+> segfault (0xC0000005) NHIỀU nhưng FLAKY (mỗi lần khác program) = Dawn-on-Windows instability, KHÔNG phải
+> codegen bug (xác nhận: program crash trong batch chạy lại standalone OK).
+- **BUG binding-layout pruning (sai value / validation fail)** — ĐÃ FIX. Khi forward bỏ qua 1 vài input (vd
+  `(a,b,c)=>f(a)`), codegen vẫn khai báo `@binding(i)` cho MỌI buffer trong bufferMap, nhưng shader ko tham
+  chiếu binding của input thừa → WebGPU `layout:'auto'` LƯỢC BỎ binding ko dùng khỏi bind group layout →
+  runtime (cấp 1 buffer/binding đã khai báo) set binding index ko có trong layout → `CreateBindGroup` fail
+  validation → output buffer giữ nguyên 0 (sai). Lộ qua program reduce-only/elementwise-only ăn input thừa.
+  - Root: `webgpu_runtime.js createPipeline` dùng `layout:'auto'` + `pipeline.getBindGroupLayout(0)` (auto
+    prune binding ko dùng trong shader).
+  - Fix (ko comment/hardcode): dựng explicit `GPUBindGroupLayout` từ `kernel.metadata.bindings` (mỗi binding
+    → type: `_shapes`→uniform / read_write→storage / read→read-only-storage), `createPipelineLayout` tường
+    minh, `runWebGPUKernel` dùng layout đó thay `getBindGroupLayout`. Capture `GPUShaderStage` ở ensureDevice.
+  - Test: `tests/backend/webgpu/webgpu-gpu.test.js` (+ "forward ignoring extra inputs" non-packed +
+    "chained reduces with unused inputs"). Revert (`layout:'auto'`+getBindGroupLayout) → 2 RED; apply → 10/10.
+    Full default suite **3996/3996**.
+- GAP (KHÔNG fix — kiến trúc, ghi rõ): WebGPU fuse TOÀN graph vào 1 kernel single-invocation
+  (`workgroup_size(1,1,1)`, mọi intermediate là `var<private> array`). (a) chain elementwise sâu (~40 op)
+  inline thành 1 expression lồng → WGSL "maximum parser recursive depth reached" (gpuErr, graceful);
+  (b) nhiều buffer reduce/softmax/layernorm khác shape (vd ln+sm+sm+sm = 5 user-op → ~30 private array) →
+  Dawn/D3D12 (FXC) segfault HARD (ko stderr). Ngưỡng ~ số private array trong 1 kernel, ko phụ thuộc data
+  size. Cần kernel-splitting / buffer-coalescing private array (memory-planner hiện chỉ inplace same-shape ở
+  IR, ko giảm count cho WebGPU single-kernel) — work lớn riêng, ngoài phạm vi 1 fix.
 
 ## Ghi chú vận hành
 - Coding rules: ko comment, ko hardcode, ko O(n²); fix xong viết test, đặt vào file test có sẵn, ko có mới tạo mới.

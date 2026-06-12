@@ -1,0 +1,20 @@
+orders = DataFrame(
+  category=["Books", "Books", "Toys", "Toys", "Games", "Games",
+            "Books", "Toys", "Games", "Books", "Toys", "Games",
+            "Games", "Books", "Toys", "Games"],
+  region=["US", "EU", "US", "EU", "US", "EU",
+          "APAC", "APAC", "US", "EU", "US", "APAC",
+          "EU", "US", "APAC", "US"],
+  qty=[3, 2, 5, 1, 4, 2, 6, 3, 1, 4, 2, 5, 3, 7, 1, 6],
+  price=[12.0, 12.0, 9.0, 9.0, 40.0, 40.0,
+         12.0, 9.0, 40.0, 12.0, 9.0, 40.0,
+         40.0, 12.0, 9.0, 40.0]
+)
+
+mix = orders
+  .withColumn("revenue", expr("qty * price"))
+  .groupBy("category", "region")
+  .agg(sum("revenue").alias("revenue"))
+  .orderBy("category", "region")
+
+chart.bar(mix, x="category", y="revenue", color="region", mode="stacked", title="Revenue mix by category and region")

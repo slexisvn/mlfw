@@ -1,0 +1,17 @@
+campaigns = DataFrame(
+  channel=["Search", "Search", "Search", "Social", "Social", "Social",
+           "Display", "Display", "Display", "Email", "Email", "Email"],
+  spend=[1200.0, 1100.0, 900.0, 800.0, 850.0, 620.0,
+         600.0, 700.0, 650.0, 300.0, 250.0, 320.0],
+  clicks=[3600, 3300, 2700, 2800, 2950, 2100,
+          1600, 1900, 1750, 1200, 1050, 1280],
+  conversions=[180, 165, 150, 95, 102, 70,
+               60, 72, 66, 90, 80, 88]
+)
+
+efficiency = campaigns
+  .withColumn("cpa", expr("CAST(spend AS DOUBLE) / conversions"))
+  .filter("conversions > 0")
+  .orderBy("channel")
+
+chart.scatter(efficiency, x="spend", y="conversions", color="channel", title="Campaign spend vs conversions")

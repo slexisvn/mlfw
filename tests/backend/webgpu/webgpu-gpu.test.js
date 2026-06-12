@@ -18,7 +18,7 @@ function runGPUTest(testBody) {
   const indexURL = toFileURL(resolve(PROJECT_ROOT, 'src/index.js'));
   const runtimeURL = toFileURL(resolve(PROJECT_ROOT, 'src/compiler/runtime/webgpu_runtime.js'));
   const script = `
-import { tensor, Linear, Sequential, ReLU, Sigmoid, Tanh, compile, WebGPUTarget } from '${indexURL}';
+import { tensor, Linear, Sequential, ReLU, Sigmoid, Tanh, compile, WebGPUTarget, relu, sum, mean, neg, add, mul } from '${indexURL}';
 import { resetDevice } from '${runtimeURL}';
 async function main() {
   ${testBody}
@@ -178,5 +178,47 @@ describe('webgpu GPU execution', () => {
       process.stdout.write(JSON.stringify(out.shape));
     `);
     expect(JSON.parse(out)).toEqual([1, 4]);
+  });
+
+  // Regression: inputs that the graph never reads still get a @binding slot in
+  // the generated WGSL. With layout:'auto' those bindings were pruned from the
+  // pipeline's bind group layout, so the runtime's bind group (which supplies a
+  // buffer per declared binding) referenced indices absent from the layout —
+  // CreateBindGroup failed validation and the output buffer stayed zero. The
+  // runtime now builds an explicit bind group layout from the kernel bindings.
+  it('forward ignoring extra inputs matches eager (unused bindings)', () => {
+    const out = runGPUTest(`
+      const model = { forward: (a, b, c) => sum(relu(a), 1, false) };
+      const a = tensor([[1, -2, 3], [-4, 5, -6]]);
+      const b = tensor([[9, 9, 9], [9, 9, 9]]);
+      const c = tensor([[7, 7, 7], [7, 7, 7]]);
+      const eager = model.forward(a, b, c);
+      const compiled = compile(model, [a, b, c], { target: WebGPUTarget() });
+      const out = await compiled(a, b, c);
+      const e = Array.from(eager.contiguous ? eager.contiguous().data : eager.data);
+      let d = 0;
+      for (let i = 0; i < e.length; i++) d = Math.max(d, Math.abs(e[i] - out.data[i]));
+      if (d > 1e-4) throw new Error('mismatch: ' + d + ' eager=' + JSON.stringify(e) + ' gpu=' + JSON.stringify(Array.from(out.data)));
+      process.stdout.write(JSON.stringify(Array.from(out.data)));
+    `);
+    expect(JSON.parse(out)).toEqual([4, 5]);
+  });
+
+  it('chained reduces with unused inputs match eager (multi-kernel buffers)', () => {
+    const out = runGPUTest(`
+      const model = { forward: (a, b, c) => neg(mean(neg(mean(a, 1, false)), 1, false)) };
+      const a = tensor([[0.5, -0.3], [0.2, 0.9]]);
+      const b = tensor([[0.1, 0.4], [-0.2, 0.7]]);
+      const c = tensor([[0.3, 0.1], [0.6, -0.5]]);
+      const eager = model.forward(a, b, c);
+      const compiled = compile(model, [a, b, c], { target: WebGPUTarget() });
+      const out = await compiled(a, b, c);
+      const e = Array.from(eager.contiguous ? eager.contiguous().data : eager.data);
+      let d = 0;
+      for (let i = 0; i < e.length; i++) d = Math.max(d, Math.abs(e[i] - out.data[i]));
+      if (d > 1e-4) throw new Error('mismatch: ' + d);
+      process.stdout.write('OK');
+    `);
+    expect(out).toBe('OK');
   });
 });
