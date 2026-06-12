@@ -1,12 +1,8 @@
-# Tensor fundamentals: creation, transforms, linear algebra.
-# Covers: factories, arithmetic/elementwise, comparison + where,
-#         linear algebra, reductions, shape ops, indexing & slicing.
 
-# --- Creating tensors ---
-a = tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])     # a 2x3 matrix
-seq = arange(0, 6)                                  # [0,1,2,3,4,5]
-lin = linspace(0.0, 1.0, 5)                         # 5 evenly spaced points
-ident = eye(3)                                      # 3x3 identity
+a = tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+seq = arange(0, 6)
+lin = linspace(0.0, 1.0, 5)
+ident = eye(3)
 filled = full([2, 2], 7.0)
 noise = randn([2, 3], dtype=f32)
 
@@ -14,7 +10,6 @@ print("a =", a)
 print("shape(a) =", a.shape, "| dtype:", a.dtype)
 print("arange:", seq, "| linspace:", lin)
 
-# --- Arithmetic & elementwise ---
 b = ones([2, 3])
 s = a + b
 scaled = a * 2.0 - 1.0
@@ -25,35 +20,30 @@ prob = a.sigmoid()
 print("a + b =", s)
 print("relu(a - 3) =", activated)
 
-# --- Comparison & conditional select ---
-mask = a.gt(tensor(3.0))                   # elementwise a > 3
-picked = where(mask, a, zeros([2, 3]))     # keep where >3, else 0
+mask = a.gt(tensor(3.0))
+picked = where(mask, a, zeros([2, 3]))
 print("where(a>3, a, 0) =", picked)
 
-# --- Linear algebra ---
 m = tensor([[1.0, 2.0], [3.0, 4.0]])
-mm = m @ ident[0:2, 0:2]                    # matrix multiply
-stacked = stack([m, eye(2)], axis=0)        # 2x2x2
-joined = cat([m, eye(2)], axis=0)           # 4x2
+mm = m @ ident[0:2, 0:2]
+stacked = stack([m, eye(2)], axis=0)
+joined = cat([m, eye(2)], axis=0)
 print("m @ I =", mm)
 print("stack ->", stacked.shape, "| cat ->", joined.shape)
 
-# --- Reductions (whole tensor / per-axis / keepdim) ---
 print("sum(a) =", a.sum())
 print("sum over columns =", a.sum(axis=0))
 print("mean over rows (keepdim) =", a.mean(axis=1, keep=true))
 print("max(a) =", a.max(), "| argmax over rows =", a.argmax(axis=1))
 
-# --- Shape transforms ---
 flat = a.reshape([6])
-t = a.transpose(0, 1)              # 3x2
-u = a.unsqueeze(0)                 # 1x2x3
-perm = u.permute([2, 0, 1])       # 3x1x2
+t = a.transpose(0, 1)
+u = a.unsqueeze(0)
+perm = u.permute([2, 0, 1])
 print("reshape ->", flat.shape, "| transpose ->", t.shape, "| permute ->", perm.shape)
 
-# --- Indexing & slicing ---
-print("a[0]      =", a[0])         # first row (drops a dimension)
-print("a[1, 1:3] =", a[1, 1:3])    # row 1, columns 1..2
-print("a[:, 0]   =", a[:, 0])      # column 0
-print("seq[::2]  =", seq[::2])     # every other element
-print("seq[-1]   =", seq[-1])      # last element
+print("a[0]      =", a[0])
+print("a[1, 1:3] =", a[1, 1:3])
+print("a[:, 0]   =", a[:, 0])
+print("seq[::2]  =", seq[::2])
+print("seq[-1]   =", seq[-1])

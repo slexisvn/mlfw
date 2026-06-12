@@ -144,3 +144,60 @@ describe('QuantizationParams equality and serialization', () => {
     expect(a.hash()).not.toBe(b.hash());
   });
 });
+
+describe('QuantizationParams per-channel from constant array', () => {
+  // weight [K=4, N=3], column n has magnitude ~ (n+1) — wildly different per-channel ranges
+  const K = 4, N = 3;
+  const W = [];
+  for (let k = 0; k < K; k++) for (let n = 0; n < N; n++) W.push(Math.sin(k * 1.7 + n) * (n + 1) * 3);
+
+  it('computes one symmetric scale per output channel (axis=1)', () => {
+    const qp = QuantizationParams.fromConstantArrayPerChannel(W, [K, N], 1, ScalarType.I8);
+    expect(qp.isPerChannel()).toBe(true);
+    expect(qp.axis).toBe(1);
+    expect(qp.numChannels()).toBe(N);
+    for (let n = 0; n < N; n++) {
+      let absMax = 0;
+      for (let k = 0; k < K; k++) absMax = Math.max(absMax, Math.abs(W[k * N + n]));
+      expect(qp.getScaleForChannel(n)).toBeCloseTo(absMax / 127, 10);
+      expect(qp.getZeroPointForChannel(n)).toBe(0);
+    }
+  });
+
+  it('quantize/dequantize round-trip stays within the per-channel step', () => {
+    const qp = QuantizationParams.fromConstantArrayPerChannel(W, [K, N], 1, ScalarType.I8);
+    const q = qp.quantizeArrayPerChannel(W, [K, N]);
+    const d = qp.dequantizeArrayPerChannel(q, [K, N]);
+    for (let k = 0; k < K; k++) for (let n = 0; n < N; n++) {
+      const i = k * N + n;
+      expect(Math.abs(d[i] - W[i])).toBeLessThanOrEqual(qp.getScaleForChannel(n) / 2 + 1e-9);
+    }
+  });
+
+  it('per-channel along a non-last axis (axis=0) maps the stride correctly', () => {
+    const qp = QuantizationParams.fromConstantArrayPerChannel(W, [K, N], 0, ScalarType.I8);
+    expect(qp.numChannels()).toBe(K);
+    for (let k = 0; k < K; k++) {
+      let absMax = 0;
+      for (let n = 0; n < N; n++) absMax = Math.max(absMax, Math.abs(W[k * N + n]));
+      expect(qp.getScaleForChannel(k)).toBeCloseTo(absMax / 127, 10);
+    }
+  });
+
+  it('accuracy harness: per-channel error is markedly lower than per-tensor on skewed weights', () => {
+    const pt = QuantizationParams.fromConstantArray(W, QuantizationScheme.PER_TENSOR_SYMMETRIC, ScalarType.I8);
+    const ptRec = pt.dequantizeArray(pt.quantizeArray(W));
+    let ptErr = 0;
+    for (let i = 0; i < W.length; i++) ptErr += Math.abs(ptRec[i] - W[i]);
+    ptErr /= W.length;
+
+    const pc = QuantizationParams.fromConstantArrayPerChannel(W, [K, N], 1, ScalarType.I8);
+    const pcRec = pc.dequantizeArrayPerChannel(pc.quantizeArrayPerChannel(W, [K, N]), [K, N]);
+    let pcErr = 0;
+    for (let i = 0; i < W.length; i++) pcErr += Math.abs(pcRec[i] - W[i]);
+    pcErr /= W.length;
+
+    expect(pcErr).toBeLessThan(ptErr);
+    expect(ptErr / pcErr).toBeGreaterThan(1.5);
+  });
+});

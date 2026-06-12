@@ -3,29 +3,41 @@ import { PatternSet, PatternApplicator } from '../rewrite/pattern.js';
 import { ShapeAnalysis } from '../../analysis/shape_analysis.js';
 import * as pat from '../../ir/graph/patterns.js';
 
-const _algebraicPatterns = new PatternSet();
-_algebraicPatterns.add(new pat.AddZero());
-_algebraicPatterns.add(new pat.SubZero());
-_algebraicPatterns.add(new pat.SubSelf());
-_algebraicPatterns.add(new pat.MulOne());
-_algebraicPatterns.add(new pat.MulZero());
-_algebraicPatterns.add(new pat.DivOne());
-_algebraicPatterns.add(new pat.DoubleNeg());
-_algebraicPatterns.add(new pat.TransposeTranspose());
-_algebraicPatterns.add(new pat.ReshapeReshape());
-_algebraicPatterns.add(new pat.MulNegNeg());
-_algebraicPatterns.add(new pat.AddNegToSub());
-_algebraicPatterns.add(new pat.SubNegToAdd());
-_algebraicPatterns.add(new pat.DoubleConvert());
+function buildAlgebraicPatterns(fastMath) {
+  const set = new PatternSet();
+  set.add(new pat.AddZero());
+  set.add(new pat.SubZero());
+  set.add(new pat.SubSelf(fastMath));
+  set.add(new pat.MulOne());
+  set.add(new pat.MulZero(fastMath));
+  set.add(new pat.DivOne());
+  set.add(new pat.DoubleNeg());
+  set.add(new pat.TransposeTranspose());
+  set.add(new pat.ReshapeReshape());
+  set.add(new pat.MulNegNeg());
+  set.add(new pat.AddNegToSub());
+  set.add(new pat.SubNegToAdd());
+  set.add(new pat.DoubleConvert());
+  if (fastMath) {
+    set.add(new pat.DivSelf(fastMath));
+    set.add(new pat.ExpLog(fastMath));
+    set.add(new pat.LogExp(fastMath));
+  }
+  return set;
+}
+
+const _soundPatterns = buildAlgebraicPatterns(false);
+const _fastMathPatterns = buildAlgebraicPatterns(true);
 
 export class AlgebraicSimplificationPass extends FunctionPass {
-  constructor() {
+  constructor(opts = {}) {
     super('algebraic_simplify');
     this.preservedAnalyses = new Set([ShapeAnalysis]);
+    this.patterns = opts.fastMath ? _fastMathPatterns : _soundPatterns;
   }
 
   run(func, analysisManager) {
-    const applicator = new PatternApplicator(_algebraicPatterns);
+    const applicator = new PatternApplicator(this.patterns);
     return applicator.applyPatterns(func, 10, this.trace);
   }
 }

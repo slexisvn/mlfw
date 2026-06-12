@@ -89,15 +89,16 @@ function coerceValue(raw) {
 }
 
 // Incremental CSV parser for streaming large files without holding the whole
-// text in memory. Feed decoded text chunks via feed(); call finish() once to
-// obtain typed column arrays suitable for InMemoryRelation.fromColumns().
+// dataset. Feed decoded text chunks via feed(); parsed rows accumulate as row
+// objects in `pending` — drain() them in batches (e.g. into a RelationBuilder)
+// so peak memory stays at one batch instead of the whole file.
 export class CsvStreamParser {
   constructor(separator = ',') {
     this.separator = separator;
     this.inQuotes = false;
     this.line = '';
     this.headers = null;
-    this.columns = null;
+    this.pending = [];
     this.rowCount = 0;
   }
 
@@ -115,12 +116,16 @@ export class CsvStreamParser {
     }
   }
 
+  drain() {
+    const rows = this.pending;
+    this.pending = [];
+    return rows;
+  }
+
   finish() {
     if (this.line.length > 0) this._emitLine();
     if (!this.headers) throw new Error('CSV file is empty');
-    const columns = {};
-    for (let c = 0; c < this.headers.length; c++) columns[this.headers[c]] = this.columns[c];
-    return { headers: this.headers, columns, rowCount: this.rowCount };
+    return { headers: this.headers, rowCount: this.rowCount };
   }
 
   _emitLine() {
@@ -130,13 +135,14 @@ export class CsvStreamParser {
     const fields = parseRow(trimmed, this.separator);
     if (!this.headers) {
       this.headers = fields;
-      this.columns = fields.map(() => []);
       return;
     }
     if (fields.length !== this.headers.length) {
       throw new Error(`Row ${this.rowCount + 2} has ${fields.length} fields, expected ${this.headers.length}`);
     }
-    for (let c = 0; c < fields.length; c++) this.columns[c].push(coerceValue(fields[c]));
+    const row = {};
+    for (let c = 0; c < fields.length; c++) row[this.headers[c]] = coerceValue(fields[c]);
+    this.pending.push(row);
     this.rowCount++;
   }
 }

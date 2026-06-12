@@ -1,6 +1,3 @@
-# Data problem: build an aggregated report, then post-process the result.
-# Aggregate in the DataFrame, materialize with collect(), and compute shares and
-# the top group in plain tera using row.field access.
 
 orders = DataFrame(
   region=["N", "N", "S", "E", "S", "N", "E", "S", "N", "E", "S", "N"],
@@ -16,13 +13,11 @@ by_cat = orders.groupBy("category").agg(
 )
 rows = by_cat.orderBy("category").collect()
 
-# Grand total computed over the materialized rows
 total = 0.0
 for r in rows:
   total += r.revenue
 print("grand total revenue:", total)
 
-# Per-group share of total, and track the top group along the way
 print("category | revenue | orders | share %")
 top_name = ""
 top_rev = 0.0

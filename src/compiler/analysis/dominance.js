@@ -61,81 +61,65 @@ export class PostDominanceAnalysis {
       }
     }
 
-    const exits = [];
+    const exitSet = new Set();
     for (const op of topo) {
       if (op.opName === 'return' || op.opName === 'yield') {
-        exits.push(op);
+        exitSet.add(op);
       }
     }
 
     const sentinel = { opName: '__pdom_root__' };
+    const levels = Math.max(1, Math.ceil(Math.log2(topo.length + 2)) + 1);
     const idom = new Map();
+    const depth = new Map();
+    const up = new Map();
 
-    for (const ex of exits) {
-      idom.set(ex, sentinel);
-    }
-    idom.set(sentinel, sentinel);
+    depth.set(sentinel, 0);
+    up.set(sentinel, new Array(levels).fill(sentinel));
 
-    const rpo = [];
-    for (let i = topo.length - 1; i >= 0; i--) {
-      rpo.push(topo[i]);
-    }
+    const link = (node, parent) => {
+      idom.set(node, parent);
+      depth.set(node, depth.get(parent) + 1);
+      const table = new Array(levels);
+      table[0] = parent;
+      for (let k = 1; k < levels; k++) table[k] = up.get(table[k - 1])[k - 1];
+      up.set(node, table);
+    };
 
-    const rpoIndex = new Map();
-    rpoIndex.set(sentinel, -1);
-    for (let i = 0; i < rpo.length; i++) {
-      rpoIndex.set(rpo[i], i);
-    }
-
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (const op of rpo) {
-        if (idom.get(op) === sentinel && exits.includes(op)) continue;
-
-        const opSuccs = succs.get(op);
-        if (!opSuccs || opSuccs.length === 0) continue;
-
-        let newIdom = null;
-        for (const s of opSuccs) {
-          if (!idom.has(s)) continue;
-          if (newIdom === null) {
-            newIdom = s;
-          } else {
-            newIdom = intersect(newIdom, s, idom, rpoIndex);
-          }
-        }
-
-        if (newIdom === null) continue;
-        if (idom.get(op) !== newIdom) {
-          idom.set(op, newIdom);
-          changed = true;
+    const lca = (u, v) => {
+      if (depth.get(u) < depth.get(v)) { const t = u; u = v; v = t; }
+      let diff = depth.get(u) - depth.get(v);
+      for (let k = 0; k < levels; k++) {
+        if ((diff >> k) & 1) u = up.get(u)[k];
+      }
+      if (u === v) return u;
+      for (let k = levels - 1; k >= 0; k--) {
+        if (up.get(u)[k] !== up.get(v)[k]) {
+          u = up.get(u)[k];
+          v = up.get(v)[k];
         }
       }
+      return up.get(u)[0];
+    };
+
+    for (let i = topo.length - 1; i >= 0; i--) {
+      const op = topo[i];
+      if (exitSet.has(op)) {
+        link(op, sentinel);
+        continue;
+      }
+      let parent = null;
+      for (const s of succs.get(op)) {
+        if (!idom.has(s)) continue;
+        parent = parent === null ? s : lca(parent, s);
+      }
+      if (parent !== null) link(op, parent);
     }
 
-    idom.delete(sentinel);
     for (const [k, v] of idom) {
       if (v === sentinel) idom.delete(k);
     }
 
     return new DominanceResult(idom, topo);
   }
-}
-
-function intersect(a, b, idom, rpoIndex) {
-  let fa = a, fb = b;
-  let limit = rpoIndex.size;
-  while (fa !== fb && limit-- > 0) {
-    const ia = rpoIndex.get(fa) ?? Infinity;
-    const ib = rpoIndex.get(fb) ?? Infinity;
-    if (ia > ib) {
-      fa = idom.get(fa);
-      if (!fa) return fb;
-    } else {
-      fb = idom.get(fb);
-      if (!fb) return fa;
-    }
-  }
-  return fa;
 }

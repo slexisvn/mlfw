@@ -1,5 +1,3 @@
-# Convolutional network (LeNet-style).
-# Covers: Conv2d, BatchNorm2d, MaxPool2d, AdaptiveAvgPool2d, Flatten, softmax, compile.
 
 model SmallCNN(num_classes):
   conv1 = Conv2d(1, 8, 3, padding=1)
@@ -12,14 +10,13 @@ model SmallCNN(num_classes):
   head = Linear(16, num_classes)
 
   forward x:
-    h = pool(bn1(conv1(x)).relu())     # [N,8,14,14]
-    h = pool(bn2(conv2(h)).relu())     # [N,16,7,7]
-    h = flat(gap(h))                   # [N,16]
+    h = pool(bn1(conv1(x)).relu())
+    h = pool(bn2(conv2(h)).relu())
+    h = flat(gap(h))
     return head(h)
 
 net = SmallCNN(10)
 
-# A batch of fake 28x28 grayscale images: [N, C, H, W]
 images = randn([4, 1, 28, 28])
 logits = net(images)
 probs = logits.softmax(axis=1)
@@ -29,6 +26,5 @@ print("input:", images.shape, "-> logits:", logits.shape)
 print("per-sample probability sums (~1):", probs.sum(axis=1))
 print("predicted classes:", logits.argmax(axis=1))
 
-# Compile to the CPU backend
 compiled = compile(net, input=images, target=cpu)
 print(compiled)

@@ -41,24 +41,59 @@ function engine() {
   return _engine ?? (_engine = createEngine());
 }
 
-// Uploaded CSV files (browser): name -> typed column arrays. load_csv() reads
-// from here first so streamed uploads are queryable without a filesystem.
-const _uploadedCsv = new Map();
-export function setUploadedCsv(name, columns) { _uploadedCsv.set(name, columns); }
-export function removeUploadedCsv(name) { _uploadedCsv.delete(name); }
-export function listUploadedCsv() { return [..._uploadedCsv.keys()]; }
-
 let _uploadTableId = 0;
-// Build a DataFrame from typed column arrays without materializing row objects —
-// used to ingest streamed CSV uploads into the runtime.
-export function createDataFrameFromColumns(columns) {
+// Build the relation once from typed column arrays (no row objects) and register
+// it as a scannable table; returns the table name.
+function registerColumnsAsTable(columns) {
   const eng = engine();
   const relation = InMemoryRelation.fromColumns(columns);
   const name = `__upload${_uploadTableId++}`;
   eng.catalog.registerTable(name, relation.getSchema());
   eng.catalog.registerTableStorage(name, relation);
-  return eng.sql(`SELECT * FROM ${name}`);
+  return name;
 }
+
+function dropTable(name) {
+  const eng = engine();
+  const key = name.toUpperCase();
+  eng.catalog.tables?.delete(key);
+  eng.catalog.tableStorage?.delete(key);
+}
+
+export function createDataFrameFromColumns(columns) {
+  return engine().sql(`SELECT * FROM ${registerColumnsAsTable(columns)}`);
+}
+
+// Uploaded CSV files (browser): file name -> registered table name. The relation
+// is built once on upload; load_csv() re-scans it without rebuilding or keeping a
+// second copy of the column data.
+const _uploadedCsv = new Map();
+export function setUploadedCsv(name, columns) { _uploadedCsv.set(name, registerColumnsAsTable(columns)); }
+
+// Streaming ingest: append row batches into a RelationBuilder so the whole file
+// is never held in memory at once. finish() registers the relation under `name`.
+export function beginUploadedCsv(name) {
+  const builder = InMemoryRelation.builder();
+  return {
+    appendRows(rows) { if (rows && rows.length) builder.appendRows(rows); },
+    finish() {
+      const relation = builder.finish();
+      const eng = engine();
+      const table = `__upload${_uploadTableId++}`;
+      eng.catalog.registerTable(table, relation.getSchema());
+      eng.catalog.registerTableStorage(table, relation);
+      const old = _uploadedCsv.get(name);
+      if (old) dropTable(old);
+      _uploadedCsv.set(name, table);
+    },
+  };
+}
+export function removeUploadedCsv(name) {
+  const table = _uploadedCsv.get(name);
+  if (table) dropTable(table);
+  _uploadedCsv.delete(name);
+}
+export function listUploadedCsv() { return [..._uploadedCsv.keys()]; }
 
 const AGG_FNS = { sum: qsum, min: qmin, max: qmax };
 
@@ -71,6 +106,11 @@ function isColumnArg(value) {
 // and a readable print form.
 DataFrame.prototype.toString = function () {
   return `DataFrame(${this.columns().join(', ')})`;
+};
+
+// Pandas-style first-N-rows view; returns a (lazy) DataFrame.
+DataFrame.prototype.head = function (n = 5) {
+  return this.limit(n);
 };
 
 async function dfToTensor(df, cols) {
@@ -260,7 +300,7 @@ export function installBuiltins(runtime, define) {
     delete named.__named;
     const path = args[0];
     if (typeof path !== 'string') throw new Error('load_csv() requires a file path string');
-    if (_uploadedCsv.has(path)) return createDataFrameFromColumns(_uploadedCsv.get(path));
+    if (_uploadedCsv.has(path)) return engine().sql(`SELECT * FROM ${_uploadedCsv.get(path)}`);
     const sep = named.separator ?? named.sep ?? ',';
     const { rows } = loadCsvRows(path, sep);
     return engine().createDataFrame(rows);

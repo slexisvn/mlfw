@@ -6,6 +6,7 @@ export class ScheduleValidator {
     const ctx = {
       boundVars: new Set(),
       threadBindings: new Map(),
+      parallelExtents: new Map(),
       errors
     };
 
@@ -14,7 +15,19 @@ export class ScheduleValidator {
     }
 
     ScheduleValidator._visitNode(primFunc.body, ctx);
+    ScheduleValidator._checkPartitionConsistency(ctx);
     return errors;
+  }
+
+  static _checkPartitionConsistency(ctx) {
+    if (ctx.parallelExtents.size <= 1) return;
+    const entries = [...ctx.parallelExtents.entries()]
+      .map(([extent, varName]) => `'${varName}'(extent ${extent})`);
+    ctx.errors.push(
+      `Ambiguous parallel partition: ${ctx.parallelExtents.size} distinct parallel extents ` +
+      `[${entries.join(', ')}] — runtime partitions a single axis, mismatched-extent ` +
+      `parallel loops corrupt buffers`
+    );
   }
 
   static _visitNode(node, ctx) {
@@ -80,6 +93,13 @@ export class ScheduleValidator {
         if (extent.value <= 0) {
           ctx.errors.push(`Vectorized loop '${varName}' has non-positive extent ${extent.value}`);
         }
+      }
+    }
+
+    if (node.kind === ForKind.PARALLEL) {
+      const extent = node.extent;
+      if (extent && extent.type === 'IntImmNode' && !ctx.parallelExtents.has(extent.value)) {
+        ctx.parallelExtents.set(extent.value, varName);
       }
     }
 

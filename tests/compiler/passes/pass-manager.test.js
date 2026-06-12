@@ -89,3 +89,76 @@ describe('PassManager FAILED handling', () => {
     expect(out.errors[0].passName).toBe('mp');
   });
 });
+
+describe('PassManager verify hook attributes invalid IR to the producing pass', () => {
+  it('FunctionPass that CHANGED into invalid IR is flagged and pipeline stops (strict)', () => {
+    const fA = new FakeFunc('a');
+    const mod = new FakeModule([fA]);
+    const pm = new PassManager();
+    pm.analysisManager.invalidate = () => {};
+    pm.setVerifyHook((target, isModule) => isModule ? [] : ['dangling operand %3']);
+
+    const breaker = new ScriptedFunctionPass('breaker', () => PassResult.CHANGED);
+    const downstream = new ScriptedFunctionPass('downstream', () => PassResult.UNCHANGED);
+    pm.addPass(breaker);
+    pm.addPass(downstream);
+
+    const out = pm.run(mod);
+
+    expect(out.errors[0].passName).toBe('breaker');
+    expect(out.errors[0].message).toContain('produced invalid IR');
+    expect(out.errors[0].message).toContain('dangling operand %3');
+    expect(out.failedFunctions.has('a')).toBe(true);
+    expect(downstream.seen).toEqual([]);
+  });
+
+  it('clean verify hook lets a CHANGED pass through untouched', () => {
+    const fA = new FakeFunc('a');
+    const mod = new FakeModule([fA]);
+    const pm = new PassManager();
+    pm.analysisManager.invalidate = () => {};
+    pm.setVerifyHook(() => []);
+
+    const downstream = new ScriptedFunctionPass('downstream', () => PassResult.UNCHANGED);
+    pm.addPass(new ScriptedFunctionPass('p1', () => PassResult.CHANGED));
+    pm.addPass(downstream);
+
+    const out = pm.run(mod);
+
+    expect(out.errors).toBeNull();
+    expect(downstream.seen).toEqual(['a']);
+  });
+
+  it('resilient mode flags the function but continues other functions', () => {
+    const fA = new FakeFunc('a');
+    const fB = new FakeFunc('b');
+    const mod = new FakeModule([fA, fB]);
+    const pm = new PassManager();
+    pm.analysisManager.invalidate = () => {};
+    pm.setVerifyHook((target) => target.name === 'a' ? ['bad block arg'] : []);
+
+    const changer = new ScriptedFunctionPass('changer', () => PassResult.CHANGED);
+    const downstream = new ScriptedFunctionPass('downstream', () => PassResult.UNCHANGED);
+    pm.addPass(changer);
+    pm.addPass(downstream);
+
+    const out = pm.run(mod, { errorMode: 'resilient' });
+
+    expect(out.failedFunctions.has('a')).toBe(true);
+    expect(out.failedFunctions.has('b')).toBe(false);
+    expect(downstream.seen).toEqual(['b']);
+  });
+
+  it('ModulePass that CHANGED into invalid IR is attributed to the pass', () => {
+    const mod = new FakeModule([new FakeFunc('a')]);
+    const pm = new PassManager();
+    pm.analysisManager.invalidateAll = () => {};
+    pm.setVerifyHook((target, isModule) => isModule ? ['module-level break'] : []);
+
+    pm.addPass(new ScriptedModulePass('mp', PassResult.CHANGED));
+    const out = pm.run(mod);
+
+    expect(out.errors[0].passName).toBe('mp');
+    expect(out.errors[0].message).toContain('module-level break');
+  });
+});

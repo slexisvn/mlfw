@@ -1,6 +1,3 @@
-# Data problem: e-commerce sales analytics.
-# Answer common business questions over an orders table with the DataFrame API:
-# totals, revenue per category/region, averages, filtering, and a profit join.
 
 orders = DataFrame(
   order_id=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
@@ -10,15 +7,12 @@ orders = DataFrame(
   price=[12.0, 25.0, 9.0, 40.0, 15.0, 30.0, 12.0, 18.0, 45.0, 9.0, 28.0, 22.0],
 )
 
-# Revenue is a derived column used by every question below
 orders = orders.withColumn("revenue", col("qty").mul(col("price")))
 
-# Q1: headline totals
 print("total orders:", orders.count())
 print("total units :", orders.select("qty").to_tensor().sum())
 print("total revenue:", orders.select("revenue").to_tensor().sum())
 
-# Q2: revenue, units, and average order value per category
 print("=== per category ===")
 orders.groupBy("category").agg(
   countStar().alias("orders"),
@@ -27,15 +21,12 @@ orders.groupBy("category").agg(
   avg("revenue").alias("avg_order"),
 ).orderBy("category").show()
 
-# Q3: average order value per region
 print("=== average order value per region ===")
 orders.groupBy("region").agg(avg("revenue").alias("avg_order")).orderBy("region").show()
 
-# Q4: large orders only
 print("=== orders with revenue > 75 ===")
 orders.filter(col("revenue").gt(75.0)).select("order_id", "category", "revenue").orderBy("revenue").show()
 
-# Q5: profit by category via a join with a cost-rate lookup
 cost_rates = DataFrame(
   category=["book", "toy", "game"],
   cost_rate=[0.6, 0.5, 0.4],

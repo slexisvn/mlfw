@@ -153,16 +153,14 @@ function lookupMethod(typeName, methodName, languageData, seen = new Set()) {
   if (!typeName || seen.has(typeName)) return null;
   seen.add(typeName);
   const builtin = languageData.builtins.find(b => b.name === typeName);
-  if (builtin) {
-    const own = builtin.methods?.find(m => m.name === methodName);
-    if (own) return { ownerName: typeName, method: own };
-    if (builtin.returns) return lookupMethod(builtin.returns, methodName, languageData, seen);
-    return null;
-  }
-  const pseudo = languageData.pseudoTypes?.[typeName];
-  if (pseudo) {
-    const found = pseudo.find(m => m.name === methodName);
-    if (found) return { ownerName: typeName, method: found };
+  const own = builtin?.methods?.find(m => m.name === methodName);
+  if (own) return { ownerName: typeName, method: own };
+  // A constructor builtin (e.g. DataFrame) and the value type's pseudoType can
+  // share a name; the methods live on the pseudoType.
+  const found = languageData.pseudoTypes?.[typeName]?.find(m => m.name === methodName);
+  if (found) return { ownerName: typeName, method: found };
+  if (builtin?.returns && builtin.returns !== typeName) {
+    return lookupMethod(builtin.returns, methodName, languageData, seen);
   }
   return null;
 }

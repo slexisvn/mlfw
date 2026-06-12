@@ -1,6 +1,3 @@
-# Functions, closures, and control flow.
-# Covers: fn, return, closures, for/while, if/else if/else, break/continue,
-#         range, len, arrays, destructuring, compound assignment.
 
 fn square(n):
   return n * n
@@ -11,7 +8,6 @@ fn factorial(n):
     acc *= i
   return acc
 
-# A closure: a function that returns a function capturing its environment
 fn adder(base):
   fn add(x):
     return base + x
@@ -22,7 +18,6 @@ print("square(7)    =", square(7))
 print("factorial(5) =", factorial(5))
 print("add10(5)     =", add10(5))
 
-# while loop with continue and break
 fn first_over(values, threshold):
   i = 0
   while i < values.length:
@@ -36,7 +31,6 @@ fn first_over(values, threshold):
 nums = [3, 1, 4, 1, 5, 9, 2, 6]
 print("first value > 4:", first_over(nums, 4))
 
-# if / else if / else
 fn grade(score):
   if score >= 90:
     return "A"
@@ -50,7 +44,6 @@ fn grade(score):
 for s in [95, 80, 65, 40]:
   print("score", s, "->", grade(s))
 
-# Destructuring and iterating an array
 a, b, c = [10, 20, 30]
 print("destructured:", a, b, c)
 

@@ -20,6 +20,7 @@ export class PassManager {
     this.passes = [];
     this.analysisManager = new AnalysisManager();
     this.trace = null;
+    this.verifyHook = null;
   }
 
   addPass(pass) {
@@ -28,6 +29,18 @@ export class PassManager {
 
   setTrace(trace) {
     this.trace = trace;
+  }
+
+  setVerifyHook(hook) {
+    this.verifyHook = hook;
+  }
+
+  _verifyAfter(pass, target, isModule) {
+    if (!this.verifyHook) return null;
+    const found = this.verifyHook(target, isModule);
+    if (!found || found.length === 0) return null;
+    const name = isModule ? (target.name || '<module>') : target.name;
+    return new CompilationError('verification', name, `pass '${pass.name}' produced invalid IR: ${found.join('; ')}`, pass.name);
   }
 
   run(module, options = {}) {
@@ -55,6 +68,14 @@ export class PassManager {
         if (result === PassResult.CHANGED) {
           anyChanged = true;
           this.analysisManager.invalidateAll();
+          const verr = this._verifyAfter(pass, module, true);
+          if (verr) {
+            errors.push(verr);
+            if (!resilient) {
+              pass.trace = null;
+              return { changed: anyChanged, results, errors, failedFunctions: failedFunctions.size > 0 ? failedFunctions : null };
+            }
+          }
         } else if (result === PassResult.FAILED) {
           this.analysisManager.invalidateAll();
           const err = new CompilationError('graphPasses', module.name || '<module>', `pass '${pass.name}' failed`, pass.name);
@@ -82,6 +103,8 @@ export class PassManager {
                 anyChanged = true;
                 this.analysisManager.invalidate(func, pass.preservedAnalyses);
                 func.bumpVersion();
+                const verr = this._verifyAfter(pass, func, false);
+                if (verr) { errors.push(verr); failedFunctions.add(func.name); }
               } else if (result === PassResult.FAILED) {
                 this.analysisManager.invalidate(func);
                 errors.push(new CompilationError('graphPasses', func.name, `pass '${pass.name}' failed`, pass.name));
@@ -99,6 +122,13 @@ export class PassManager {
               anyChanged = true;
               this.analysisManager.invalidate(func, pass.preservedAnalyses);
               func.bumpVersion();
+              const verr = this._verifyAfter(pass, func, false);
+              if (verr) {
+                errors.push(verr);
+                failedFunctions.add(func.name);
+                pass.trace = null;
+                return { changed: anyChanged, results, errors, failedFunctions };
+              }
             } else if (result === PassResult.FAILED) {
               this.analysisManager.invalidate(func);
               const err = new CompilationError('graphPasses', func.name, `pass '${pass.name}' failed`, pass.name);

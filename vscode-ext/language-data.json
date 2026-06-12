@@ -1289,6 +1289,23 @@
         }
       },
       {
+        "name": "head",
+        "description": "Return the first `n` rows as a new frame (pandas-style preview).",
+        "returns": "DataFrame",
+        "isGetter": false,
+        "signature": {
+          "params": [
+            {
+              "name": "n",
+              "optional": true,
+              "rest": false,
+              "defaultValue": "5"
+            }
+          ],
+          "display": "head(n=5)"
+        }
+      },
+      {
         "name": "distinct",
         "description": "Return a frame with duplicate rows removed.",
         "returns": "DataFrame",
@@ -5150,7 +5167,7 @@
     {
       "name": "range",
       "kind": "utility",
-      "description": "Python-style integer range: returns an array `[start..stop)` with optional `step`.",
+      "description": "Integer range: returns an array `[start..stop)` with optional `step`.",
       "returns": null,
       "signature": {
         "params": [

@@ -1,5 +1,7 @@
 import { CsvStreamParser } from './dist/csv.esm.js';
 
+const BATCH_ROWS = 16384;
+
 self.onmessage = async (e) => {
   const { file, separator } = e.data;
   const parser = new CsvStreamParser(separator || ',');
@@ -12,11 +14,13 @@ self.onmessage = async (e) => {
       if (done) break;
       read += value.byteLength;
       parser.feed(decoder.decode(value, { stream: true }));
+      if (parser.pending.length >= BATCH_ROWS) self.postMessage({ type: 'batch', rows: parser.drain() });
       self.postMessage({ type: 'progress', read });
     }
-    parser.feed(decoder.decode());
-    const { columns, rowCount, headers } = parser.finish();
-    self.postMessage({ type: 'done', columns, rowCount, headers });
+    const { rowCount, headers } = parser.finish();
+    const last = parser.drain();
+    if (last.length) self.postMessage({ type: 'batch', rows: last });
+    self.postMessage({ type: 'done', rowCount, headers });
   } catch (err) {
     self.postMessage({ type: 'error', message: String((err && err.message) || err) });
   }

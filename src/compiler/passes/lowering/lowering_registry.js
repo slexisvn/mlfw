@@ -225,9 +225,26 @@ export function lowerPointwise(ctx, op, inputs, outputs, exprBuilder) {
 export function lowerConstant(ctx, op) {
   const outBuf = ctx.getOrAllocBuffer(op.getResult(0));
   const val = op.getAttr('value');
-  const valNode = typeof val === 'number'
-    ? (isDtypeInt(outBuf.dtype) ? new IntImmNode(val) : new FloatImmNode(val))
-    : new FloatImmNode(0);
+  const isInt = isDtypeInt(outBuf.dtype);
+  const imm = (x) => isInt ? new IntImmNode(x) : new FloatImmNode(x);
+
+  if (val && typeof val !== 'number' && typeof val.length === 'number') {
+    if (outBuf.shape.length === 0) {
+      return new BufferStoreNode(outBuf, [], imm(val[0]));
+    }
+    const strides = new Array(outBuf.shape.length);
+    let acc = 1;
+    for (let d = outBuf.shape.length - 1; d >= 0; d--) { strides[d] = acc; acc *= outBuf.shape[d]; }
+    const stmts = [];
+    for (let i = 0; i < val.length; i++) {
+      const idx = new Array(outBuf.shape.length);
+      for (let d = 0; d < outBuf.shape.length; d++) idx[d] = new IntImmNode(Math.floor(i / strides[d]) % outBuf.shape[d]);
+      stmts.push(new BufferStoreNode(outBuf, idx, imm(val[i])));
+    }
+    return new SeqNode(stmts);
+  }
+
+  const valNode = typeof val === 'number' ? imm(val) : imm(0);
   if (outBuf.shape.length === 0) {
     return new BufferStoreNode(outBuf, [], valNode);
   }

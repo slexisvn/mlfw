@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   ForNode, BlockNode, BufferStoreNode, BufferLoadNode,
-  VariableNode, IntImmNode, MathOpNode, IfThenElseNode, ForKind
+  VariableNode, IntImmNode, MathOpNode, IfThenElseNode, ForKind, SeqNode
 } from '../../../src/compiler/ir/tensor/nodes.js';
 import { PrimFunc } from '../../../src/compiler/ir/tensor/nodes.js';
 import { Buffer } from '../../../src/compiler/ir/tensor/buffer.js';
@@ -134,5 +134,35 @@ describe('ScheduleValidator recurses into nested expressions', () => {
     const func = new PrimFunc('f', [], body);
 
     expect(ScheduleValidator.validate(func)).toEqual([]);
+  });
+});
+
+describe('ScheduleValidator flags ambiguous parallel partition (mismatched parallel extents)', () => {
+  function parallelLoop(name, extent) {
+    const buf = new Buffer(name, [extent], 'float32', 'global');
+    const v = iv('p_' + name);
+    const block = makeBlock('blk_' + name, buf, [v], new IntImmNode(0));
+    return new ForNode(v, new IntImmNode(0), new IntImmNode(extent), ForKind.PARALLEL, block);
+  }
+
+  it('two sibling parallel loops with distinct extents is rejected', () => {
+    const body = new SeqNode([parallelLoop('A', 4), parallelLoop('B', 5)]);
+    const func = new PrimFunc('f', [], body);
+    const errors = ScheduleValidator.validate(func);
+    expect(errors.some(e => e.includes('parallel partition') && e.includes('extent 4') && e.includes('extent 5'))).toBe(true);
+  });
+
+  it('two sibling parallel loops with the same extent is allowed', () => {
+    const body = new SeqNode([parallelLoop('A', 4), parallelLoop('B', 4)]);
+    const func = new PrimFunc('f', [], body);
+    const errors = ScheduleValidator.validate(func);
+    expect(errors.some(e => e.includes('parallel partition'))).toBe(false);
+  });
+
+  it('a single parallel axis is allowed', () => {
+    const body = new SeqNode([parallelLoop('A', 7)]);
+    const func = new PrimFunc('f', [], body);
+    const errors = ScheduleValidator.validate(func);
+    expect(errors.some(e => e.includes('parallel partition'))).toBe(false);
   });
 });

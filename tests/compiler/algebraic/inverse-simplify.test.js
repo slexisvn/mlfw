@@ -43,6 +43,57 @@ describe('log(exp(x)) / exp(log(x)) are NOT cancelled (IEEE-unsound)', () => {
   });
 });
 
+describe('fastMath gate re-enables IEEE-unsound rewrites only when opted in', () => {
+  function runFast(func) {
+    return new AlgebraicSimplificationPass({ fastMath: true }).run(func);
+  }
+
+  it('exp(log(x)) → x under fastMath', () => {
+    const t = new TensorType([4], ScalarType.F32);
+    const func = buildFunction('f', [t], [t], (b, args) => {
+      b.returnOp([b.exp(b.log(args[0]).getResult(0)).getResult(0)]);
+    });
+    expect(runFast(func)).toBe(PassResult.CHANGED);
+    expect(retVal(func)).toBe(func.entryBlock.arguments[0]);
+  });
+
+  it('log(exp(x)) → x under fastMath', () => {
+    const t = new TensorType([4, 8], ScalarType.F32);
+    const func = buildFunction('f', [t], [t], (b, args) => {
+      b.returnOp([b.log(b.exp(args[0]).getResult(0)).getResult(0)]);
+    });
+    expect(runFast(func)).toBe(PassResult.CHANGED);
+    expect(retVal(func)).toBe(func.entryBlock.arguments[0]);
+  });
+
+  it('div(x, x) → 1 under fastMath, untouched by default', () => {
+    const t = new TensorType([4], ScalarType.F32);
+    const make = () => buildFunction('f', [t], [t], (b, args) => {
+      b.returnOp([b.div(args[0], args[0]).getResult(0)]);
+    });
+    const def = make();
+    expect(run(def)).toBe(PassResult.UNCHANGED);
+    expect(retVal(def).definingOp.opName).toBe('div');
+
+    const fast = make();
+    expect(runFast(fast)).toBe(PassResult.CHANGED);
+    expect(retVal(fast).definingOp.opName).not.toBe('div');
+  });
+
+  it('float sub(x, x) and mul(x, 0) stay by default, fold under fastMath', () => {
+    const t = new TensorType([4], ScalarType.F32);
+    const subDef = buildFunction('f', [t], [t], (b, args) => {
+      b.returnOp([b.sub(args[0], args[0]).getResult(0)]);
+    });
+    expect(run(subDef)).toBe(PassResult.UNCHANGED);
+
+    const subFast = buildFunction('f', [t], [t], (b, args) => {
+      b.returnOp([b.sub(args[0], args[0]).getResult(0)]);
+    });
+    expect(runFast(subFast)).toBe(PassResult.CHANGED);
+  });
+});
+
 describe('transpose(transpose(x)) composition', () => {
   it('composes two permutations into one', () => {
     const inT = new TensorType([2, 3, 4], ScalarType.F32);

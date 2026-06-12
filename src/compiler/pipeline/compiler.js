@@ -30,6 +30,7 @@ import { TraceLog, TraceLevel, CompilationError } from './trace.js';
 import { IRPrinter } from '../ir/graph/printer.js';
 import { printTensorIR } from '../ir/tensor/printer.js';
 import { lowerToLIR } from '../passes/lowering/tensor_to_lir.js';
+import { verifyLIR } from '../ir/lir/verifier.js';
 
 function spread(obj) { return obj && typeof obj === 'object' ? obj : {}; }
 
@@ -46,6 +47,7 @@ export class CompilerConfig {
   constructor(opts = {}) {
     this.target = opts.target;
     this.verify = opts.verify !== false;
+    this.verifyMode = opts.verify === 'full' ? 'full' : 'normal';
     this.errorMode = opts.errorMode || 'strict';
 
     const f = opts.fusion || {};
@@ -74,6 +76,7 @@ export class CompilerConfig {
       layout:            o.layout            ?? opts.enableLayoutOptimization ?? false,
       rematerialization: o.rematerialization ?? opts.enableRematerialization ?? false,
       rematConfig:       o.rematConfig       ?? opts.rematerializationConfig ?? {},
+      fastMath:          o.fastMath          ?? opts.fastMath ?? false,
     };
 
     const m = opts.memory || {};
@@ -179,6 +182,10 @@ export class Compiler {
 
     this._scheduleAll(primFuncs, trace, errors, failed, resilient);
 
+    if (this.config.verifyMode === 'full') {
+      this._verifyAll(primFuncs, errors, failed, resilient);
+    }
+
     this._planMemory(primFuncs, trace, errors, failed, resilient);
 
     if (this.config.verify) {
@@ -217,7 +224,7 @@ export class Compiler {
 
     pm.addPass(new DecompositionPass());
     pm.addPass(new CanonicalizePass());
-    pm.addPass(new AlgebraicSimplificationPass());
+    pm.addPass(new AlgebraicSimplificationPass({ fastMath: this.config.optimization.fastMath }));
     pm.addPass(new ConstantFoldPass());
     pm.addPass(new CSEPass());
     pm.addPass(new DCEPass());
@@ -259,6 +266,13 @@ export class Compiler {
     }
 
     pm.setTrace(trace);
+
+    if (this.config.verifyMode === 'full') {
+      pm.setVerifyHook((target, isModule) => {
+        const found = isModule ? verifyModule(target) : verifyFunction(target);
+        return found.map(e => e.toString());
+      });
+    }
 
     trace.phaseStart('graphPasses');
     const t0 = performance.now();
@@ -448,6 +462,12 @@ export class Compiler {
       try {
         const ft0 = performance.now();
         const lirFunc = lowerToLIR(pf, this.config.target);
+        if (this.config.verifyMode === 'full') {
+          const lirErrors = verifyLIR(lirFunc);
+          if (lirErrors.length > 0) {
+            throw new Error('LIR verification failed: ' + lirErrors.map(e => e.toString()).join('; '));
+          }
+        }
         trace.functionEvent('lirLowering', pf.name, { durationMs: performance.now() - ft0 });
         lirFuncs.push(lirFunc);
       } catch (e) {

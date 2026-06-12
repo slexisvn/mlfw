@@ -1,0 +1,16 @@
+sessions = DataFrame(
+  variant=["A", "A", "A", "A", "B", "B", "B", "B", "C", "C", "C", "C", "A", "B", "C", "A", "B", "C", "A", "B"],
+  device=["mobile", "desktop", "mobile", "desktop", "mobile", "desktop", "mobile", "desktop", "mobile", "desktop", "mobile", "desktop", "mobile", "mobile", "desktop", "desktop", "desktop", "mobile", "mobile", "desktop"],
+  duration_s=[42, 88, 35, 95, 50, 102, 40, 110, 60, 120, 55, 130, 38, 48, 65, 92, 105, 58, 44, 115],
+  converted=[0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 0, 1, 1, 1, 1, 0, 1]
+)
+
+engaged = sessions.withColumn("segment", expr("CASE WHEN duration_s >= 90 THEN 'engaged' ELSE 'casual' END"))
+
+rates = (engaged
+  .groupBy("variant", "segment")
+  .agg(sum("converted").alias("conversions"), countStar().alias("sessions"))
+  .withColumn("rate", expr("CAST(conversions AS DOUBLE) * 100 / sessions"))
+  .orderBy("variant"))
+
+chart.bar(rates, x="variant", y="rate", color="segment", mode="grouped", title="Conversion rate by variant and engagement")

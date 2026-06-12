@@ -1,24 +1,14 @@
-# Iris classification: an end-to-end supervised learning pipeline.
-# Covers: load_csv -> DataFrame -> to_tensor/encode, normalize,
-#         model (Sequential, BatchNorm1d, Dropout), CrossEntropyLoss,
-#         Trainer + callbacks + CosineAnnealingLR + metrics (Accuracy/F1/ConfusionMatrix),
-#         eval(), argmax, decode.
 
-# --- Data: load the CSV into a query-engine DataFrame ---
 data = load_csv("examples/iris.csv")
 print("columns:", data.columns(), "| rows:", data.count())
 
-# 4 numeric features -> normalized tensor; species label -> integer ids + class table
 x = normalize(data.drop("species").to_tensor())
 y, classes = data.select("species").encode("species")
 print("classes:", classes)
 
-# iris.csv is sorted by class, so let the DataLoader shuffle per batch.
-# (Small dataset — we evaluate on the full set for brevity.)
 train_loader = DataLoader(TensorDataset(x, y), batch_size=16, shuffle=true)
 val_loader = DataLoader(TensorDataset(x, y), batch_size=16)
 
-# --- Model ---
 model IrisNet(num_classes):
   net = Sequential(
     Linear(4, 32),
@@ -56,7 +46,6 @@ model IrisNet(num_classes):
     sched = CosineAnnealingLR(opt, t_max=500)
     return optim_config(opt, lr_scheduler=sched)
 
-# --- Train ---
 net = IrisNet(3)
 trainer = Trainer(
   max_epochs=500,
@@ -69,10 +58,8 @@ trainer = Trainer(
     Timer()
   ]
 )
-# (Swap logger=CSVLogger(save_dir="logs", name="iris") to write metrics to disk.)
 trainer.fit(net, train_loader, val_loader)
 
-# --- Final evaluation (full set) ---
 net.eval()
 logits = net(x)
 preds = logits.argmax(axis=1)

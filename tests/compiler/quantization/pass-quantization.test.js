@@ -490,3 +490,61 @@ describe('fake-quant (dequantize∘quantize) is LOSSY — must not be removed as
     });
   }
 });
+
+describe('per-channel int8 matmul (compiled) beats per-tensor on skewed weights', () => {
+  const F = ScalarType.F32, I8 = ScalarType.I8, I32 = ScalarType.I32;
+  const T = (s, d = F) => new TensorType(s, d);
+  const M = 4, K = 8, N = 6;
+
+  const A = new Float32Array(M * K);
+  for (let i = 0; i < A.length; i++) A[i] = Math.sin(i * 0.7);
+  const W = new Float32Array(K * N);
+  for (let k = 0; k < K; k++) for (let n = 0; n < N; n++) W[k * N + n] = Math.sin(k * 1.3 + n) * (n + 1) * 2;
+  const ref = new Float32Array(M * N);
+  for (let m = 0; m < M; m++) for (let n = 0; n < N; n++) { let s = 0; for (let k = 0; k < K; k++) s += A[m * K + k] * W[k * N + n]; ref[m * N + n] = s; }
+  let aMax = 0; for (const v of A) aMax = Math.max(aMax, Math.abs(v)); const aScale = aMax / 127 || 1e-10;
+
+  function buildInt8Matmul(perChannel) {
+    let wInt8, scaleVec;
+    if (perChannel) {
+      const wp = QuantizationParams.fromConstantArrayPerChannel([...W], [K, N], 1, I8);
+      wInt8 = wp.quantizeArrayPerChannel([...W], [K, N]);
+      scaleVec = []; for (let n = 0; n < N; n++) scaleVec.push(aScale * wp.getScaleForChannel(n));
+    } else {
+      const wp = QuantizationParams.fromConstantArray([...W], QuantizationScheme.PER_TENSOR_SYMMETRIC, I8);
+      wInt8 = wp.quantizeArray([...W]);
+      scaleVec = []; for (let n = 0; n < N; n++) scaleVec.push(aScale * wp.getScalarScale());
+    }
+    return buildFunction('q', [T([M, K])], [T([M, N])], (b, a) => {
+      const aq = b._buildOp('quantize', [a[0]], [T([M, K], I8)], { scale: aScale, zero_point: 0, scheme: QuantizationScheme.PER_TENSOR_SYMMETRIC, target_dtype: I8 });
+      const wc = b.constant(wInt8, T([K, N], I8));
+      const qd = b._buildOp('quantized_dot', [aq.getResult(0), wc.getResult(0)], [T([M, N], I32)], { lhs_contracting: [1], rhs_contracting: [0], lhs_zero_point: 0, rhs_zero_point: 0, lhs_scale: aScale, rhs_scale: 1, output_scale: 1, output_zero_point: 0 });
+      const cf = b._buildOp('convert', [qd.getResult(0)], [T([M, N], F)], { target_dtype: F });
+      const sv = b.constant(scaleVec, T([N], F));
+      const bc = b._buildOp('broadcast_in_dim', [sv.getResult(0)], [T([M, N], F)], { broadcast_dimensions: [1], result_shape: [M, N] });
+      b.returnOp([b._buildOp('mul', [cf.getResult(0), bc.getResult(0)], [T([M, N], F)], {}).getResult(0)]);
+    });
+  }
+
+  function meanErr(target, perChannel) {
+    const out = new Float32Array(M * N);
+    compileGraph(buildInt8Matmul(perChannel), target, {}).run('q', A, out);
+    let e = 0; for (let i = 0; i < out.length; i++) e += Math.abs(out[i] - ref[i]);
+    return { err: e / out.length, out };
+  }
+
+  for (const [tname, makeTarget] of [['cpu', CPUTarget], ['wasm', WasmTarget]]) {
+    it(`per-channel error < per-tensor error on ${tname}`, () => {
+      const pt = meanErr(makeTarget(), false);
+      const pc = meanErr(makeTarget(), true);
+      expect(pc.err).toBeLessThan(pt.err);
+      expect(pt.err / pc.err).toBeGreaterThan(1.5);
+    });
+  }
+
+  it('per-channel compiled output is identical across cpu and wasm', () => {
+    const cpu = meanErr(CPUTarget(), true).out;
+    const wasm = meanErr(WasmTarget(), true).out;
+    for (let i = 0; i < cpu.length; i++) expect(wasm[i]).toBeCloseTo(cpu[i], 5);
+  });
+});

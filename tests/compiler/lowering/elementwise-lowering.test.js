@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { lowerGraphToPrimFunc } from '../../../src/compiler/passes/lowering/graph_to_tensor.js';
+import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
+import { CPUTarget, WasmTarget } from '../../../src/backend/target.js';
 import {
   ForNode, BlockNode, BufferStoreNode, BufferLoadNode,
   MathOpNode, FloatImmNode, IntImmNode, CallExternNode, CompareNode,
@@ -335,4 +337,33 @@ describe('loop extents match tensor shape', () => {
     }
     expect(extents).toEqual([2, 3, 4]);
   });
+});
+
+describe('array-valued constants materialize their data (regression: used to lower to 0)', () => {
+  const F = ScalarType.F32, I8 = ScalarType.I8;
+  const T = (s, d = F) => new TensorType(s, d);
+
+  for (const [tname, makeTarget] of [['cpu', CPUTarget], ['wasm', WasmTarget]]) {
+    it(`f32 array constant feeding add is correct on ${tname}`, () => {
+      const data = [10, 20, 30, 40, 50, 60];
+      const func = buildFunction('ac', [T([2, 3])], [T([2, 3])], (b, a) => {
+        const c = b.constant(data, T([2, 3], F));
+        b.returnOp([b.add(a[0], c.getResult(0)).getResult(0)]);
+      });
+      const out = new Float32Array(6);
+      compileGraph(func, makeTarget(), {}).run('ac', new Float32Array(6).fill(1), out);
+      for (let i = 0; i < 6; i++) expect(out[i]).toBeCloseTo(data[i] + 1, 5);
+    });
+
+    it(`int8 array constant materializes exact values on ${tname}`, () => {
+      const data = [1, -2, 3, -4];
+      const func = buildFunction('ic', [T([1])], [T([2, 2])], (b) => {
+        const c = b.constant(data, T([2, 2], I8));
+        b.returnOp([b._buildOp('convert', [c.getResult(0)], [T([2, 2], F)], { target_dtype: F }).getResult(0)]);
+      });
+      const out = new Float32Array(4);
+      compileGraph(func, makeTarget(), {}).run('ic', new Float32Array([0]), out);
+      expect([...out]).toEqual(data);
+    });
+  }
 });

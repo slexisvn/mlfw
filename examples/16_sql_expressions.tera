@@ -1,9 +1,3 @@
-# SQL expressions in DataFrames: filter rows and build columns from raw SQL
-# *expression* strings. This is expression-level SQL — predicates, arithmetic,
-# functions, CASE — bound against the frame's schema, not full SELECT queries.
-#
-# Covers: filter/where with SQL strings, expr() computed columns, SQL functions,
-#         CASE WHEN, LIKE, cross-column arithmetic, expr() in select & withColumn.
 
 sales = DataFrame(
   sku=["A-1", "A-2", "B-1", "B-2", "C-9"],
@@ -12,32 +6,26 @@ sales = DataFrame(
   stock=[100, 0, 30, 0, 7],
 )
 
-# --- Filter with a raw SQL predicate string ---
 print("price > 20:")
 sales.filter("price > 20").select("sku", "price").show()
 
 print("stock > 0 AND price >= 20:")
 sales.where("stock > 0 AND price >= 20").select("sku", "price", "stock").show()
 
-# --- Computed columns via expr() (scalar SQL expression -> Column) ---
 priced = sales.withColumn("price_tax", expr("price * 1.1"))
 priced = priced.withColumn("inventory_value", expr("price * stock"))
 priced.select("sku", "price", "price_tax", "inventory_value").show()
 
-# --- SQL functions and CASE WHEN inside expr() ---
 labeled = sales.withColumn("cat_upper", expr("UPPER(category)"))
 labeled = labeled.withColumn("tier", expr("CASE WHEN price >= 50 THEN 'premium' WHEN price >= 20 THEN 'mid' ELSE 'budget' END"))
 labeled.select("sku", "cat_upper", "tier").show()
 
-# --- expr() as a boolean filter and a LIKE pattern ---
 print("SKUs starting with A-:")
 sales.filter(expr("sku LIKE 'A-%'")).select("sku").show()
 
 print("expensive (expr boolean):")
 sales.filter(expr("price > 30")).select("sku", "price").show()
 
-# --- expr() in select, renamed with alias ---
 sales.select("sku", expr("price * 2").alias("double_price")).show()
 
-# --- Mix SQL expressions with the Column API in one pipeline ---
 sales.filter("category != 'beta'").withColumn("net", expr("price - price * 0.1")).select("sku", "net").show()

@@ -1,4 +1,7 @@
 import { TeraRuntime, formatValue, CsvStreamParser } from './dist/mlfw-lang.esm.js';
+import { createChartApi, isChartSpec, renderChart } from './chart/index.js';
+import { CHART_METHOD_DOCS, chartMethodOwner } from './chart/docs.js';
+import { highlightHtml } from './highlight.js';
 
 const STORAGE_KEY = 'mlfw-notebook-v1';
 const THEME_KEY = 'mlfw-notebook-theme';
@@ -8,68 +11,10 @@ const KEYWORDS = [
   'if', 'else', 'for', 'in', 'while', 'break', 'continue',
   'and', 'or', 'not', 'true', 'false', 'null',
 ];
-const KEYWORD_SET = new Set(KEYWORDS);
-
-const BUILTIN_SET = new Set([
-  'tensor', 'zeros', 'ones', 'empty', 'full', 'randn', 'arange', 'eye', 'linspace', 'randperm',
-  'zerosLike', 'onesLike', 'emptyLike', 'fullLike', 'randnLike',
-  'where', 'cat', 'stack',
-  'sum', 'min', 'max', 'avg', 'count', 'countStar',
-  'DataFrame', 'col', 'lit', 'expr',
-  'range', 'print', 'trace', 'graph', 'compile',
-]);
-
-const TOKEN_RE = /#[^\n]*|"(?:\\.|[^"\n])*"|'(?:\\.|[^'\n])*'|\b\d+(?:\.\d+)?\b|[A-Za-z_]\w*/g;
-
 const PAIR = { '(': ')', '[': ']', '{': '}', '"': '"', "'": "'" };
 const OPENERS = new Set(['(', '[', '{']);
 const QUOTES = new Set(['"', "'"]);
 const CLOSERS = new Set([')', ']', '}']);
-
-function escapeHtml(s) {
-  return s.replace(/[&<>]/g, (c) => (c === '&' ? '&amp;' : c === '<' ? '&lt;' : '&gt;'));
-}
-
-function nonSpaceBefore(code, index) {
-  let i = index - 1;
-  while (i >= 0 && (code[i] === ' ' || code[i] === '\t')) i--;
-  return i >= 0 ? code[i] : '';
-}
-
-function nonSpaceAfter(code, index) {
-  let i = index;
-  while (i < code.length && (code[i] === ' ' || code[i] === '\t')) i++;
-  return i < code.length ? code[i] : '';
-}
-
-function tokenClass(tok, code, index) {
-  if (tok[0] === '#') return 'tok-com';
-  if (tok[0] === '"' || tok[0] === "'") return 'tok-str';
-  if (tok[0] >= '0' && tok[0] <= '9') return 'tok-num';
-  if (nonSpaceBefore(code, index) === '.') {
-    return nonSpaceAfter(code, index + tok.length) === '(' ? 'tok-method' : 'tok-prop';
-  }
-  if (KEYWORD_SET.has(tok)) return 'tok-kw';
-  if (BUILTIN_SET.has(tok)) return 'tok-builtin';
-  if (tok[0] >= 'A' && tok[0] <= 'Z') return 'tok-type';
-  return null;
-}
-
-function highlightHtml(code) {
-  let out = '';
-  let last = 0;
-  let m;
-  TOKEN_RE.lastIndex = 0;
-  while ((m = TOKEN_RE.exec(code))) {
-    out += escapeHtml(code.slice(last, m.index));
-    const cls = tokenClass(m[0], code, m.index);
-    out += cls ? `<span class="${cls}">${escapeHtml(m[0])}</span>` : escapeHtml(m[0]);
-    last = m.index + m[0].length;
-  }
-  out += escapeHtml(code.slice(last));
-  if (code.endsWith('\n') || code === '') out += '​';
-  return out;
-}
 
 function highlight(cell) {
   cell.pre.innerHTML = highlightHtml(cell.editor.value);
@@ -78,6 +23,7 @@ function highlight(cell) {
 const SEED = [
   `a = tensor([[1, 2], [3, 4]])\nb = tensor([[5, 6], [7, 8]])\na @ b`,
   `x = randn([3, 4])\nprint(x.shape)\nx.relu().mean()`,
+  `metrics = DataFrame(epoch=[1, 2, 3, 4], loss=[1.0, 0.72, 0.48, 0.31], val_loss=[1.1, 0.81, 0.6, 0.44])\nchart.line(metrics, x="epoch", y=["loss", "val_loss"], title="Training")`,
   `model MLP(input, hidden, output):\n  fc1 = Linear(input, hidden)\n  fc2 = Linear(hidden, output)\n\n  forward x:\n    x = fc1(x).relu()\n    return fc2(x)\n\nnet = MLP(2, 4, 1)\nnet(randn([8, 2]))`,
   `fn fib(n):\n  if n < 2:\n    return n\n  return fib(n - 1) + fib(n - 2)\n\nfib(12)`,
 ];
@@ -94,6 +40,7 @@ function makeRuntime() {
   execCount = 0;
   activeOutput = [];
   runtime = new TeraRuntime({ output: (t) => activeOutput.push(String(t)) });
+  runtime.registerGlobal('chart', createChartApi());
 }
 
 function setKernel(text, busy) {
@@ -115,7 +62,9 @@ function fmtSize(bytes) {
   return (bytes / 1024 / 1024).toFixed(1) + ' MB';
 }
 
-function parseCsvInWorker(file, onProgress) {
+const BATCH_ROWS = 16384;
+
+function parseCsvInWorker(file, onBatch, onProgress) {
   return new Promise((resolve, reject) => {
     let worker;
     try {
@@ -126,8 +75,9 @@ function parseCsvInWorker(file, onProgress) {
     }
     worker.onmessage = (e) => {
       const m = e.data;
-      if (m.type === 'progress') onProgress(m.read);
-      else if (m.type === 'done') { worker.terminate(); resolve(m); }
+      if (m.type === 'batch') onBatch(m.rows);
+      else if (m.type === 'progress') onProgress(m.read);
+      else if (m.type === 'done') { worker.terminate(); resolve({ rowCount: m.rowCount }); }
       else if (m.type === 'error') { worker.terminate(); reject(new Error(m.message)); }
     };
     worker.onerror = (err) => { worker.terminate(); reject(new Error(err.message || 'worker failed')); };
@@ -135,7 +85,7 @@ function parseCsvInWorker(file, onProgress) {
   });
 }
 
-async function parseCsvOnMainThread(file, onProgress) {
+async function parseCsvOnMainThread(file, onBatch, onProgress) {
   const parser = new CsvStreamParser(',');
   const reader = file.stream().getReader();
   const decoder = new TextDecoder();
@@ -145,10 +95,13 @@ async function parseCsvOnMainThread(file, onProgress) {
     if (done) break;
     read += value.byteLength;
     parser.feed(decoder.decode(value, { stream: true }));
+    if (parser.pending.length >= BATCH_ROWS) onBatch(parser.drain());
     onProgress(read);
   }
-  parser.feed(decoder.decode());
-  return parser.finish();
+  const { rowCount } = parser.finish();
+  const last = parser.drain();
+  if (last.length) onBatch(last);
+  return { rowCount };
 }
 
 async function uploadCsv(file) {
@@ -157,13 +110,17 @@ async function uploadCsv(file) {
     setKernel(`loading ${file.name} ${pct}%`, true);
   };
   setKernel(`loading ${file.name}…`, true);
+  const handle = runtime.beginUploadedCsv(file.name);
+  let appended = false;
+  const onBatch = (rows) => { appended = true; handle.appendRows(rows); };
   let result;
   try {
-    result = await parseCsvInWorker(file, onProgress);
-  } catch {
-    result = await parseCsvOnMainThread(file, onProgress);
+    result = await parseCsvInWorker(file, onBatch, onProgress);
+  } catch (err) {
+    if (appended) throw err;
+    result = await parseCsvOnMainThread(file, onBatch, onProgress);
   }
-  runtime.registerUploadedCsv(file.name, result.columns);
+  handle.finish();
   uploadedFiles.set(file.name, { rowCount: result.rowCount, size: file.size });
   renderFiles();
 }
@@ -272,7 +229,7 @@ function createCell(code = '', { focus = false, before = null } = {}) {
 
   root.append(gutter, main, tools);
 
-  const cell = { root, editor, output, count, pre };
+  const cell = { root, editor, output, count, pre, chartCleanup: null };
 
   runBtn.addEventListener('click', () => runCell(cell));
   addBtn.addEventListener('click', () => {
@@ -313,6 +270,7 @@ function nextSibling(cell) {
 function deleteCell(cell) {
   const idx = cells.indexOf(cell);
   if (idx === -1) return;
+  clearCellOutput(cell);
   cell.root.remove();
   cells.splice(idx, 1);
   if (cells.length === 0) createCell('', { focus: true });
@@ -446,7 +404,7 @@ function insertText(ta, text) {
 async function runCell(cell) {
   closeAutocomplete();
   const code = cell.editor.value;
-  cell.output.innerHTML = '';
+  clearCellOutput(cell);
   if (!code.trim()) { cell.count.textContent = '[ ]'; return; }
 
   cell.count.textContent = '[*]';
@@ -455,8 +413,10 @@ async function runCell(cell) {
 
   let result;
   try {
-    const value = await runtime.execute(code);
-    result = { ok: true, prints: activeOutput.slice(), text: formatValue(value) };
+    // In the notebook, `df.show()` is the idiomatic "display this frame" call —
+    // drop a trailing .show(...) so the DataFrame itself renders as a paginated table.
+    const value = await runtime.execute(code.replace(SHOW_TAIL, ''));
+    result = { ok: true, prints: activeOutput.slice(), value };
   } catch (err) {
     result = { ok: false, prints: activeOutput.slice(), error: (err && err.message) || String(err) };
   }
@@ -485,12 +445,107 @@ function renderOutput(cell, result) {
     out.append(err);
     return;
   }
-  if (result.text) {
+  if (isDataFrame(result.value)) {
+    renderDataFrameTable(out, result.value);
+    return;
+  }
+  if (isChartSpec(result.value)) {
+    cell.chartCleanup = renderChart(out, result.value);
+    return;
+  }
+  const text = result.value === undefined ? '' : formatValue(result.value);
+  if (text) {
     const res = document.createElement('div');
     res.className = 'result';
-    res.textContent = result.text;
+    res.textContent = text;
     out.append(res);
   }
+}
+
+const SHOW_TAIL = /\.show\s*\([^()]*\)\s*;?\s*$/;
+const DF_PAGE_SIZE = 25;
+
+function isDataFrame(v) {
+  return v && typeof v.limit === 'function' && typeof v.collect === 'function' && typeof v.count === 'function';
+}
+
+async function renderDataFrameTable(out, df) {
+  const view = document.createElement('div');
+  view.className = 'df-view';
+  out.append(view);
+  let offset = 0;
+  let total = null;
+  let columns = null;
+
+  async function load() {
+    view.classList.add('df-loading');
+    try {
+      const rows = await df.limit(DF_PAGE_SIZE, offset).collect();
+      if (total === null) total = await df.count();
+      if (columns === null) columns = await df.columns();
+      render(rows);
+    } catch (e) {
+      view.innerHTML = '';
+      const err = document.createElement('div');
+      err.className = 'error';
+      err.textContent = (e && e.message) || String(e);
+      view.append(err);
+    } finally {
+      view.classList.remove('df-loading');
+    }
+  }
+
+  function render(rows) {
+    view.innerHTML = '';
+    const scroll = document.createElement('div');
+    scroll.className = 'df-scroll';
+    const table = document.createElement('table');
+    table.className = 'df-grid';
+    const thead = document.createElement('thead');
+    const htr = document.createElement('tr');
+    for (const c of columns) {
+      const th = document.createElement('th');
+      th.textContent = c;
+      htr.append(th);
+    }
+    thead.append(htr);
+    table.append(thead);
+    const tbody = document.createElement('tbody');
+    for (const row of rows) {
+      const tr = document.createElement('tr');
+      for (const c of columns) {
+        const td = document.createElement('td');
+        const v = row[c];
+        if (v === null || v === undefined) { td.textContent = 'NULL'; td.className = 'df-null'; }
+        else td.textContent = String(v);
+        tr.append(td);
+      }
+      tbody.append(tr);
+    }
+    table.append(tbody);
+    scroll.append(table);
+    view.append(scroll);
+
+    const pager = document.createElement('div');
+    pager.className = 'df-pager';
+    const from = total === 0 ? 0 : offset + 1;
+    const to = offset + rows.length;
+    const info = document.createElement('span');
+    info.className = 'df-info';
+    info.textContent = `${from}–${to} of ${total} · ${columns.length} cols`;
+    const prev = document.createElement('button');
+    prev.textContent = '‹ Prev';
+    prev.disabled = offset <= 0;
+    prev.addEventListener('click', () => { offset = Math.max(0, offset - DF_PAGE_SIZE); load(); });
+    const next = document.createElement('button');
+    next.textContent = 'Next ›';
+    next.disabled = to >= total;
+    next.addEventListener('click', () => { offset += DF_PAGE_SIZE; load(); });
+    pager.append(prev, info, next);
+    view.append(pager);
+  }
+
+  await load();
 }
 
 async function runAll() {
@@ -504,7 +559,7 @@ function restart() {
   makeRuntime();
   for (const cell of cells) {
     cell.count.textContent = '[ ]';
-    cell.output.innerHTML = '';
+    clearCellOutput(cell);
   }
   setKernel('ready');
 }
@@ -512,8 +567,14 @@ function restart() {
 function clearOutputs() {
   for (const cell of cells) {
     cell.count.textContent = '[ ]';
-    cell.output.innerHTML = '';
+    clearCellOutput(cell);
   }
+}
+
+function clearCellOutput(cell) {
+  cell.chartCleanup?.();
+  cell.chartCleanup = null;
+  cell.output.innerHTML = '';
 }
 
 function load() {
@@ -764,7 +825,8 @@ function onEditorHover(e, cell) {
   if (!span) { hideHover(); return; }
   if (span === hoverSpan && hoverEl && hoverEl.style.display === 'block') return;
   const isMember = span.classList.contains('tok-method') || span.classList.contains('tok-prop');
-  const info = isMember ? memberDocs.get(span.textContent) : docs.get(span.textContent);
+  const owner = isMember ? chartMethodOwner(cell.pre, span) : null;
+  const info = owner === 'chart' ? CHART_METHOD_DOCS.get(span.textContent) : isMember ? memberDocs.get(span.textContent) : docs.get(span.textContent);
   if (!info) { hideHover(); return; }
   hoverSpan = span;
   showHoverAt(info, span.getBoundingClientRect());

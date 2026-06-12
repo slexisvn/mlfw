@@ -1,7 +1,3 @@
-# Aggregation, joins, and set operations; then export to a tensor for ML.
-#
-# Covers: groupBy + agg (countStar/sum/avg/min/max/count), multi-key grouping,
-#         join (inner and how="LEFT"), union/unionAll/distinct, to_tensor.
 
 orders = DataFrame(
   region=["N", "N", "S", "S", "E", "E", "N", "S"],
@@ -10,7 +6,6 @@ orders = DataFrame(
   revenue=[100.0, 60.0, 160.0, 40.0, 80.0, 120.0, 140.0, 20.0],
 )
 
-# Group by one key with several aggregates at once
 by_region = orders.groupBy("region").agg(
   countStar().alias("orders"),
   sum("qty").alias("total_qty"),
@@ -22,10 +17,8 @@ by_region = orders.groupBy("region").agg(
 )
 by_region.orderBy("region").show()
 
-# Group by multiple keys
 orders.groupBy("region", "product").agg(sum("revenue").alias("rev")).orderBy("region").show()
 
-# Inner join against a lookup table, then derive a column on the result
 regions = DataFrame(
   region=["N", "S", "E"],
   manager=["An", "Binh", "Cuong"],
@@ -35,18 +28,15 @@ report = by_region.join(regions, "region")
 report = report.withColumn("over_quota", col("total_rev").sub(col("quota")))
 report.select("region", "manager", "total_rev", "quota", "over_quota").orderBy("region").show()
 
-# Left join keeps every left row even when the right side has no match
 extra = DataFrame(region=["N", "S", "E", "W"], note=["hq", "branch", "branch", "new"])
 by_region.join(extra, "region", "LEFT").select("region", "note").orderBy("region").show()
 
-# Set operations on column projections
 n_products = orders.filter(col("region").eq("N")).select("product")
 s_products = orders.filter(col("region").eq("S")).select("product")
 print("union (deduplicated):")
 n_products.union(s_products).distinct().orderBy("product").show()
 print("unionAll row count (keeps duplicates):", n_products.unionAll(s_products).count())
 
-# An aggregated result feeds straight into a model as a feature tensor
 feats = by_region.orderBy("region").select("total_qty", "total_rev", "avg_rev").to_tensor()
 print("feature tensor shape:", feats.shape)
 print(feats)

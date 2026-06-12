@@ -233,6 +233,39 @@ body {
 .output .error { color: var(--error); background: var(--error-bg); padding: 8px 10px; border-radius: 6px; }
 .output .meta { color: var(--muted); font-size: 11px; margin-bottom: 4px; }
 
+.df-view { white-space: normal; }
+.df-view.df-loading { opacity: 0.55; }
+.df-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 7px; }
+.df-grid { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+.df-grid th, .df-grid td {
+  text-align: left;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.df-grid thead th {
+  position: sticky;
+  top: 0;
+  background: var(--gutter-bg);
+  color: var(--muted);
+  font-weight: 600;
+  border-bottom: 1px solid var(--border-strong);
+}
+.df-grid tbody tr:hover { background: var(--accent-soft); }
+.df-grid tbody tr:last-child td { border-bottom: 0; }
+.df-null { color: var(--muted); font-style: italic; }
+.df-pager { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.df-pager button {
+  font: inherit; font-size: 12px;
+  padding: 3px 10px;
+  border: 1px solid var(--border-strong);
+  background: var(--panel); color: var(--text);
+  border-radius: 6px; cursor: pointer;
+}
+.df-pager button:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent); }
+.df-pager button:disabled { opacity: 0.45; cursor: default; }
+.df-info { color: var(--muted); font-size: 11.5px; font-family: var(--code-font); }
+
 .cell-tools {
   grid-column: 2;
   display: flex;

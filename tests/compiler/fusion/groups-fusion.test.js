@@ -220,6 +220,46 @@ describe('FusionGroupBuilder.buildHorizontalGroups', () => {
     const groups = new FusionGroupBuilder(new FusionLegality()).buildHorizontalGroups(func);
     expect(groups.length).toBe(0);
   });
+
+  it('rejects transitive dependency routed through a different-shape intermediate', () => {
+    const t = new TensorType([4], ScalarType.F32);
+    const func = buildFunction('f', [t], [t], (b, args) => {
+      const a = b.relu(args[0]);
+      const r = b.reshape(a.getResult(0), [2, 2]);
+      const back = b.reshape(r.getResult(0), [4]);
+      const a2 = b.relu(back.getResult(0));
+      b.returnOp([b.add(a.getResult(0), a2.getResult(0)).getResult(0)]);
+    });
+
+    const groups = new FusionGroupBuilder(new FusionLegality()).buildHorizontalGroups(func);
+    expect(groups.length).toBe(0);
+  });
+});
+
+describe('FusionGroupBuilder scales linearly on large graphs (no O(n^2)/O(n^3) blowup)', () => {
+  function makeWide(n) {
+    const t = new TensorType([8, 8], ScalarType.F32);
+    return buildFunction('f', [t, t], [t], (b, args) => {
+      let acc = args[0];
+      const outs = [];
+      for (let i = 0; i < n; i++) {
+        const r = b.relu(b.add(acc, args[1]).getResult(0)).getResult(0);
+        outs.push(r);
+        acc = r;
+      }
+      let s = outs[0];
+      for (let i = 1; i < outs.length; i++) s = b.add(s, outs[i]).getResult(0);
+      b.returnOp([s]);
+    });
+  }
+
+  it('fuses ~800 same-shape ops well under a wall-clock bound that O(n^2) would blow', () => {
+    const func = makeWide(800);
+    const t0 = performance.now();
+    new FusionGroupBuilder(new FusionLegality()).buildAllGroups(func);
+    const elapsed = performance.now() - t0;
+    expect(elapsed).toBeLessThan(5000);
+  });
 });
 
 describe('FusionGroupBuilder.buildAllGroups', () => {

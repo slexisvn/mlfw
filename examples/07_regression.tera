@@ -1,15 +1,9 @@
-# Regression with the Trainer API.
-# Covers: model + forward/train/validate/optimizer, Sequential, MSELoss,
-#         SGD + StepLR + optim_config, TensorDataset/DataLoader, Trainer,
-#         ConsoleLogger, train_test_split, eval().
 
-# Synthetic data: y = 2*x1 + 3*x2 + 1 (with small noise)
 n = 256
 x = randn([n, 2])
 w_true = tensor([[2.0], [3.0]])
 y = x @ w_true + 1.0 + randn([n, 1]) * 0.1
 
-# Split train / val (randn data, so a positional split is balanced)
 x_train, x_val = train_test_split(x, test_size=0.2)
 y_train, y_val = train_test_split(y, test_size=0.2)
 
@@ -47,7 +41,6 @@ trainer = Trainer(
 )
 trainer.fit(net, train_loader, val_loader)
 
-# Evaluate
 net.eval()
 pred = net(x_val)
 mae = (pred - y_val).abs().mean()

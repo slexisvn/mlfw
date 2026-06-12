@@ -187,9 +187,10 @@ export class SubZero extends Pattern {
 }
 
 export class SubSelf extends Pattern {
-  constructor() { super('sub_self', 5); this.rootOpName = 'sub'; }
+  constructor(fastMath = false) { super('sub_self', 5); this.rootOpName = 'sub'; this.fastMath = fastMath; }
   match(op) {
-    return op.getOperand(0) === op.getOperand(1) && isDtypeInt(op.getResult(0).type.dtype);
+    if (op.getOperand(0) !== op.getOperand(1)) return false;
+    return isDtypeInt(op.getResult(0).type.dtype) || this.fastMath;
   }
   rewrite(op, builder) {
     const zero = builder.scalarConstant(0, op.getResult(0).type.dtype);
@@ -221,9 +222,9 @@ export class MulOne extends Pattern {
 }
 
 export class MulZero extends Pattern {
-  constructor() { super('mul_zero', 5); this.rootOpName = 'mul'; }
+  constructor(fastMath = false) { super('mul_zero', 5); this.rootOpName = 'mul'; this.fastMath = fastMath; }
   match(op) {
-    if (!isDtypeInt(op.getResult(0).type.dtype)) return false;
+    if (!isDtypeInt(op.getResult(0).type.dtype) && !this.fastMath) return false;
     return isConstantVal(op.getOperand(1).definingOp, 0) || isConstantVal(op.getOperand(0).definingOp, 0);
   }
   rewrite(op, builder) {
@@ -270,8 +271,9 @@ export class DoubleNeg extends Pattern {
 }
 
 export class ExpLog extends Pattern {
-  constructor() { super('exp_log', 5); this.rootOpName = 'exp'; }
+  constructor(fastMath = false) { super('exp_log', 5); this.rootOpName = 'exp'; this.fastMath = fastMath; }
   match(op) {
+    if (!this.fastMath) return false;
     const input = op.getOperand(0).definingOp;
     return input && input.opName === 'log';
   }
@@ -283,8 +285,9 @@ export class ExpLog extends Pattern {
 }
 
 export class LogExp extends Pattern {
-  constructor() { super('log_exp', 5); this.rootOpName = 'log'; }
+  constructor(fastMath = false) { super('log_exp', 5); this.rootOpName = 'log'; this.fastMath = fastMath; }
   match(op) {
+    if (!this.fastMath) return false;
     const input = op.getOperand(0).definingOp;
     return input && input.opName === 'exp';
   }
@@ -296,8 +299,9 @@ export class LogExp extends Pattern {
 }
 
 export class DivSelf extends Pattern {
-  constructor() { super('div_self', 5); this.rootOpName = 'div'; }
+  constructor(fastMath = false) { super('div_self', 5); this.rootOpName = 'div'; this.fastMath = fastMath; }
   match(op) {
+    if (!this.fastMath) return false;
     return op.getOperand(0) === op.getOperand(1);
   }
   rewrite(op, builder) {

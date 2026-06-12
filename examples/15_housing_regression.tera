@@ -1,5 +1,3 @@
-# Data problem: predict house price from tabular features.
-# DataFrame -> feature/target tensors -> train a regressor -> evaluate.
 
 houses = DataFrame(
   area=[50.0, 80.0, 60.0, 100.0, 75.0, 120.0, 45.0, 90.0, 70.0, 110.0, 55.0, 85.0, 65.0, 95.0, 130.0, 40.0],
@@ -8,7 +6,6 @@ houses = DataFrame(
   price=[125.0, 212.5, 137.5, 277.0, 198.0, 338.5, 80.0, 231.0, 182.0, 295.5, 123.0, 219.5, 149.0, 264.0, 358.5, 62.5],
 )
 
-# Standardized numeric features; target scaled to a small range for stable training
 x = normalize(houses.select("area", "rooms", "age_years").to_tensor())
 price = houses.select("price").to_tensor()
 y = price / 100.0
@@ -42,7 +39,6 @@ model HousePricer():
 net = HousePricer()
 Trainer(max_epochs=300, logger=false, enable_progress=false, enable_checkpointing=false).fit(net, train_loader, val_loader)
 
-# Evaluate: undo the /100 scaling to report error in real price units
 net.eval()
 pred = net(x_val) * 100.0
 mae = (pred - y_val * 100.0).abs().mean()

@@ -131,13 +131,12 @@ function resolveMethods(typeName, languageData, seen = new Set()) {
   if (!typeName || seen.has(typeName)) return [];
   seen.add(typeName);
   const builtin = languageData.builtins.find(b => b.name === typeName);
-  if (builtin) {
-    if (builtin.methods?.length) return builtin.methods;
-    if (builtin.returns) return resolveMethods(builtin.returns, languageData, seen);
-    return [];
-  }
+  if (builtin?.methods?.length) return builtin.methods;
+  // A constructor builtin (e.g. DataFrame) and the value type's pseudoType can
+  // share a name; the methods live on the pseudoType.
   const pseudo = languageData.pseudoTypes?.[typeName];
   if (pseudo) return pseudo;
+  if (builtin?.returns && builtin.returns !== typeName) return resolveMethods(builtin.returns, languageData, seen);
   return [];
 }
 

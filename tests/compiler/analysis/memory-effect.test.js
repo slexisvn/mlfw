@@ -160,3 +160,45 @@ describe('graph analyses vs independent brute-force (use_def / post-dominance / 
     }
   });
 });
+
+describe('post-dominance on residual/skip connections (LCA over a DAG)', () => {
+  it('a skip edge means the bypassed op does NOT post-dominate its source', () => {
+    const t = new TensorType([4], ScalarType.F32);
+    let a, mid, merge, out;
+    const func = buildFunction('f', [t], [t], (b, args) => {
+      a = b.relu(args[0]);
+      mid = b.relu(a.getResult(0));
+      merge = b.add(a.getResult(0), mid.getResult(0));
+      out = b.relu(merge.getResult(0));
+      b.returnOp([out.getResult(0)]);
+    });
+
+    const pd = PostDominanceAnalysis.compute(func);
+    expect(pd.postDominates(merge, a)).toBe(true);
+    expect(pd.postDominates(out, a)).toBe(true);
+    expect(pd.postDominates(out, merge)).toBe(true);
+    expect(pd.postDominates(mid, a)).toBe(false);
+    expect(pd.immediatePDom(a)).toBe(merge);
+  });
+});
+
+describe('post-dominance scales sub-quadratically on deep residual chains', () => {
+  it('computes a 12k-op residual graph well under an O(n^2) wall-clock bound', () => {
+    const t = new TensorType([4], ScalarType.F32);
+    const N = 12000;
+    const func = buildFunction('f', [t], [t], (b, args) => {
+      let x = args[0];
+      const tips = [];
+      for (let i = 0; i < N; i++) {
+        x = b.relu(x).getResult(0);
+        if (i % 2 === 0) tips.push(x);
+      }
+      let s = x;
+      for (const tp of tips) s = b.add(s, tp).getResult(0);
+      b.returnOp([s]);
+    });
+    const t0 = performance.now();
+    PostDominanceAnalysis.compute(func);
+    expect(performance.now() - t0).toBeLessThan(2000);
+  });
+});

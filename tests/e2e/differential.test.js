@@ -200,3 +200,24 @@ describe('opt-level differential: every pass-combo preserves semantics (eager ==
     }
   }
 });
+
+describe("verify:'full' runs verifiers after every pass + tensor/LIR, accepts valid IR (eager == compiled)", () => {
+  for (const prog of OPT_PROGRAMS) {
+    for (const [tname, makeTarget] of Object.entries(TARGETS)) {
+      it(`${prog.name} on ${tname} compiles clean under verify:'full' (+scheduling)`, async () => {
+        const rng = mulberry32(4200 + prog.name.length * 7);
+        const inputs = prog.shapes.map((s) => mk(rng, s, -1, 1));
+        const eager = flatten(prog.fwd(...inputs));
+        const compiled = compile({ forward: (...a) => prog.fwd(...a) }, inputs, {
+          target: makeTarget(), verify: 'full', scheduling: { enabled: true },
+        });
+        const out = flatten(await compiled(...inputs));
+        expect(out.length).toBe(eager.length);
+        for (let i = 0; i < eager.length; i++) {
+          const relErr = Math.abs(eager[i] - out[i]) / (1 + Math.abs(eager[i]));
+          expect(relErr, `${prog.name}/${tname} idx ${i}: eager=${eager[i]} compiled=${out[i]}`).toBeLessThan(3e-3);
+        }
+      });
+    }
+  }
+});

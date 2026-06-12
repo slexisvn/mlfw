@@ -1,0 +1,18 @@
+campaigns = DataFrame(
+  channel=["Search", "Social", "Display", "Search", "Email", "Social", "Display", "Email", "Search", "Social", "Display", "Email"],
+  region=["US", "US", "EU", "EU", "US", "EU", "US", "EU", "US", "US", "EU", "US"],
+  spend=[1200, 800, 600, 1500, 300, 900, 700, 250, 1100, 850, 650, 320],
+  impressions=[120000, 95000, 80000, 140000, 40000, 102000, 88000, 35000, 110000, 98000, 84000, 42000],
+  clicks=[3600, 2800, 1600, 4200, 1200, 3100, 1900, 1050, 3300, 2950, 1750, 1280],
+  conversions=[180, 95, 60, 210, 90, 110, 72, 80, 165, 102, 66, 88]
+)
+
+performance = (campaigns
+  .filter("spend > 0")
+  .groupBy("channel")
+  .agg(sum("spend").alias("spend"), sum("clicks").alias("clicks"), sum("conversions").alias("conversions"), sum("impressions").alias("impressions"))
+  .withColumn("ctr", expr("CAST(clicks AS DOUBLE) * 100 / impressions"))
+  .withColumn("cpa", expr("CAST(spend AS DOUBLE) / conversions"))
+  .orderBy("channel"))
+
+chart.bar(performance, x="channel", y="cpa", title="Cost per acquisition by channel")

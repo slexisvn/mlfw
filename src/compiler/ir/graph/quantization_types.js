@@ -47,7 +47,7 @@ export class QuantizationParams {
     const [cMin, cMax] = this.clampRange();
     const result = new Array(floatArr.length);
     if (this.isPerChannel()) {
-      throw new Error('Use quantizeChannel for per-channel quantization');
+      throw new Error('Use quantizeArrayPerChannel(floatArr, shape) for per-channel quantization');
     }
     const s = this.getScalarScale();
     const zp = this.getScalarZeroPoint();
@@ -60,12 +60,43 @@ export class QuantizationParams {
   dequantizeArray(intArr) {
     const result = new Array(intArr.length);
     if (this.isPerChannel()) {
-      throw new Error('Use dequantizeChannel for per-channel dequantization');
+      throw new Error('Use dequantizeArrayPerChannel(intArr, shape) for per-channel dequantization');
     }
     const s = this.getScalarScale();
     const zp = this.getScalarZeroPoint();
     for (let i = 0; i < intArr.length; i++) {
       result[i] = (intArr[i] - zp) * s;
+    }
+    return result;
+  }
+
+  _channelStride(shape) {
+    let stride = 1;
+    for (let d = this.axis + 1; d < shape.length; d++) stride *= shape[d];
+    return stride;
+  }
+
+  quantizeArrayPerChannel(floatArr, shape) {
+    const [cMin, cMax] = this.clampRange();
+    const stride = this._channelStride(shape);
+    const numCh = shape[this.axis];
+    const result = new Array(floatArr.length);
+    for (let i = 0; i < floatArr.length; i++) {
+      const ch = Math.floor(i / stride) % numCh;
+      const s = this.getScaleForChannel(ch);
+      const zp = this.getZeroPointForChannel(ch);
+      result[i] = Math.max(cMin, Math.min(cMax, Math.round(floatArr[i] / s + zp)));
+    }
+    return result;
+  }
+
+  dequantizeArrayPerChannel(intArr, shape) {
+    const stride = this._channelStride(shape);
+    const numCh = shape[this.axis];
+    const result = new Array(intArr.length);
+    for (let i = 0; i < intArr.length; i++) {
+      const ch = Math.floor(i / stride) % numCh;
+      result[i] = (intArr[i] - this.getZeroPointForChannel(ch)) * this.getScaleForChannel(ch);
     }
     return result;
   }
@@ -188,6 +219,26 @@ export class QuantizationParams {
     if (!isFinite(max)) max = 1;
     if (min === max) { min -= 0.5; max += 0.5; }
     return QuantizationParams.fromRange(min, max, scheme, dtype, numBits);
+  }
+
+  static fromConstantArrayPerChannel(data, shape, axis, dtype = ScalarType.I8, numBits = 8) {
+    const numCh = shape[axis];
+    let stride = 1;
+    for (let d = axis + 1; d < shape.length; d++) stride *= shape[d];
+    const mins = new Array(numCh).fill(Infinity);
+    const maxs = new Array(numCh).fill(-Infinity);
+    for (let i = 0; i < data.length; i++) {
+      const ch = Math.floor(i / stride) % numCh;
+      const v = data[i];
+      if (v < mins[ch]) mins[ch] = v;
+      if (v > maxs[ch]) maxs[ch] = v;
+    }
+    for (let c = 0; c < numCh; c++) {
+      if (!isFinite(mins[c])) mins[c] = -1;
+      if (!isFinite(maxs[c])) maxs[c] = 1;
+      if (mins[c] === maxs[c]) { mins[c] -= 0.5; maxs[c] += 0.5; }
+    }
+    return QuantizationParams.fromRangePerChannel(mins, maxs, axis, dtype, numBits);
   }
 
   static isQuantizableDtype(dtype) {

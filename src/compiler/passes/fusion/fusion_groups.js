@@ -229,75 +229,61 @@ export class FusionGroupBuilder {
     return false;
   }
 
-  _anyGroupMemberDependent(group, op) {
-    for (const member of group.ops) {
-      if (this._transitivelyDependent(member, op)) return true;
-    }
-    return false;
-  }
-
-  _transitivelyDependent(opA, opB) {
-    const posA = this._topoIndex.get(opA);
-    const posB = this._topoIndex.get(opB);
-    if (posA === undefined || posB === undefined) return false;
-    const [ancestor, descendant] = posA < posB ? [opA, opB] : [opB, opA];
-    return this._dependsOnOps(descendant, new Set([ancestor]), this._topoIndex.get(ancestor));
+  _bucketable(op, def) {
+    return def && !def.isConstant && !def.isTerminator && !def.isOpaque
+      && op.numResults > 0 && outputShapeKey(op) !== null;
   }
 
   buildHorizontalGroups(func) {
+    const topoOps = [...func.ops()];
     this._topoIndex = new Map();
-    let topoIdx = 0;
-    for (const op of func.ops()) this._topoIndex.set(op, topoIdx++);
+    for (let i = 0; i < topoOps.length; i++) this._topoIndex.set(topoOps[i], i);
+
     const groups = [];
     const opToGroup = new Map();
+    const window = this.legality.maxFusionSize || topoOps.length;
+    const taint = new Map();
+    let version = 0;
 
-    const shapeBuckets = new Map();
-    for (const op of func.ops()) {
-      const def = registry.get(op.opName);
-      if (!def || def.isConstant || def.isTerminator || def.isOpaque) continue;
-      const key = outputShapeKey(op);
-      if (key === null) continue;
-      let bucket = shapeBuckets.get(key);
-      if (!bucket) {
-        bucket = [];
-        shapeBuckets.set(key, bucket);
+    for (let p1 = 0; p1 < topoOps.length; p1++) {
+      const op1 = topoOps[p1];
+      if (opToGroup.has(op1)) continue;
+      const def1 = registry.get(op1.opName);
+      if (!this._bucketable(op1, def1)) continue;
+      const type1 = op1.getResult(0).type;
+
+      version++;
+      taint.set(op1, version);
+      const group = new FusionGroup(this._nextId++);
+      group.addOp(op1, p1);
+      opToGroup.set(op1, group);
+
+      const end = Math.min(topoOps.length, p1 + 1 + window);
+      for (let gp = p1 + 1; gp < end; gp++) {
+        const op = topoOps[gp];
+
+        let dependsOnGroup = false;
+        for (let k = 0; k < op.numOperands; k++) {
+          const d = op.getOperand(k).definingOp;
+          if (d && taint.get(d) === version) { dependsOnGroup = true; break; }
+        }
+        if (dependsOnGroup) { taint.set(op, version); continue; }
+
+        if (group.size >= window) continue;
+        if (opToGroup.has(op)) continue;
+        const def = registry.get(op.opName);
+        if (!this._bucketable(op, def)) continue;
+        if (!type1.equals(op.getResult(0).type)) continue;
+        if (!(this._sharesInput(op1, op) || (def1.isElementwise && def.isElementwise))) continue;
+
+        group.addOp(op, gp);
+        opToGroup.set(op, group);
+        taint.set(op, version);
       }
-      bucket.push(op);
-    }
 
-    for (const [, bucket] of shapeBuckets) {
-      if (bucket.length < 2) continue;
-
-      for (let i = 0; i < bucket.length; i++) {
-        const op1 = bucket[i];
-        if (opToGroup.has(op1)) continue;
-
-        const group = new FusionGroup(this._nextId++);
-        group.addOp(op1);
-        opToGroup.set(op1, group);
-
-        const def1 = registry.get(op1.opName);
-        if (!def1 || op1.numResults === 0) continue;
-        const type1 = op1.getResult(0).type;
-
-        for (let j = i + 1; j < bucket.length; j++) {
-          const op2 = bucket[j];
-          if (opToGroup.has(op2)) continue;
-          if (op2.numResults === 0) continue;
-          if (!type1.equals(op2.getResult(0).type)) continue;
-
-          const def2 = registry.get(op2.opName);
-          if (!(this._sharesInput(op1, op2) || (def1.isElementwise && def2 && def2.isElementwise))) continue;
-          if (this._anyGroupMemberDependent(group, op2)) continue;
-
-          group.addOp(op2);
-          opToGroup.set(op2, group);
-        }
-
-        if (group.size >= 2) {
-          group.kind = FusionKind.HORIZONTAL;
-          groups.push(group);
-        }
+      if (group.size >= 2) {
+        group.kind = FusionKind.HORIZONTAL;
+        groups.push(group);
       }
     }
 
@@ -314,24 +300,34 @@ export class FusionGroupBuilder {
     }
 
     const fusedOps = new Set(opToRep.keys());
-    const result = [...pcGroups];
+    const candidates = [];
     for (const h of horizontalGroups) {
       let overlaps = false;
       for (const op of h.ops) {
-        if (fusedOps.has(op)) {
-          overlaps = true;
-          break;
-        }
+        if (fusedOps.has(op)) { overlaps = true; break; }
       }
       if (overlaps) continue;
+      candidates.push(h);
+    }
 
+    for (const h of candidates) {
+      for (const op of h.ops) opToRep.set(op, h);
+    }
+    if (!this._condensedHasCycle(func, opToRep)) {
+      return [...pcGroups, ...candidates];
+    }
+
+    for (const h of candidates) {
+      for (const op of h.ops) opToRep.delete(op);
+    }
+    const result = [...pcGroups];
+    for (const h of candidates) {
       for (const op of h.ops) opToRep.set(op, h);
       if (this._condensedHasCycle(func, opToRep)) {
         for (const op of h.ops) opToRep.delete(op);
         continue;
       }
       result.push(h);
-      for (const op of h.ops) fusedOps.add(op);
     }
 
     return result;

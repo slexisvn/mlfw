@@ -80,7 +80,7 @@ Aggregate `Column` computing the maximum of a column within a `groupBy(...).agg(
 Aggregate `Column` computing the minimum of a column within a `groupBy(...).agg(...)`.
 
 ## range(start, stop?, step?)
-Python-style integer range: returns an array `[start..stop)` with optional `step`.
+Integer range: returns an array `[start..stop)` with optional `step`.
 
 ## print(...values, sep=" ")
 Print one or more values to the runtime output, separated by `sep`.
@@ -679,6 +679,9 @@ Alias for `orderBy`.
 
 ### limit(count, offset=0) -> DataFrame
 Return at most `count` rows, skipping the first `offset` rows.
+
+### head(n=5) -> DataFrame
+Return the first `n` rows as a new frame (pandas-style preview).
 
 ### distinct() -> DataFrame
 Return a frame with duplicate rows removed.

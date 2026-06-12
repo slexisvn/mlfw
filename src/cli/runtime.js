@@ -9,7 +9,7 @@ import { compile as tracingCompile } from '../tracing/compile.js';
 import { TraceLevel } from '../compiler/pipeline/trace.js';
 import { parse } from './parser.js';
 import { CompiledProgramView, formatTrace } from './format.js';
-import { installBuiltins, installSignatures, takeNamed, createDataFrameFromColumns, setUploadedCsv, removeUploadedCsv } from './builtins.js';
+import { installBuiltins, installSignatures, takeNamed, createDataFrameFromColumns, setUploadedCsv, removeUploadedCsv, beginUploadedCsv } from './builtins.js';
 import { SignatureRegistry } from './signature_registry.js';
 
 class Environment {
@@ -50,6 +50,10 @@ export class TeraRuntime {
     setUploadedCsv(name, columns);
   }
 
+  beginUploadedCsv(name) {
+    return beginUploadedCsv(name);
+  }
+
   removeUploadedCsv(name) {
     removeUploadedCsv(name);
   }
@@ -69,6 +73,13 @@ export class TeraRuntime {
 
   getVariable(name) {
     try { return this.global.get(name); } catch { return undefined; }
+  }
+
+  registerGlobal(name, value) {
+    if (typeof name !== 'string' || !/^[A-Za-z_]\w*$/.test(name)) {
+      throw new Error('Global name must be a valid identifier');
+    }
+    return this.global.define(name, value);
   }
 
   async evaluateProgram(program, env) {
