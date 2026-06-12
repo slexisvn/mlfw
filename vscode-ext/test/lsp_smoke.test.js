@@ -3,6 +3,7 @@ import { createConnection, BrowserMessageReader, BrowserMessageWriter } from 'vs
 import { Duplex } from 'node:stream';
 import * as rpc from 'vscode-jsonrpc/node.js';
 import { startServer } from '../server/index.js';
+import { legend as semanticLegend } from '../server/providers/semantic_tokens.js';
 
 class Pipe extends Duplex {
   _read() {}
@@ -73,7 +74,7 @@ describe('LSP smoke', () => {
 
     const tensorUri = 'file:///t2.tera';
     await client.sendNotification('textDocument/didOpen', {
-      textDocument: { uri: tensorUri, languageId: 'tera', version: 1, text: 'y = relu(x)\ny.' },
+      textDocument: { uri: tensorUri, languageId: 'tera', version: 1, text: 'y = randn([2, 2])\ny.' },
     });
     const tensorResult = await client.sendRequest('textDocument/completion', {
       textDocument: { uri: tensorUri },
@@ -84,6 +85,8 @@ describe('LSP smoke', () => {
     expect(tensorLabels).toContain('reshape');
     expect(tensorLabels).toContain('shape');
     expect(tensorLabels).toContain('backward');
+    expect(tensorLabels).toContain('relu');
+    expect(tensorLabels).toContain('sum');
 
     const linearUri = 'file:///l.tera';
     await client.sendNotification('textDocument/didOpen', {
@@ -118,6 +121,53 @@ describe('LSP smoke', () => {
     const hoverValue = hoverResult?.contents?.value ?? '';
     expect(hoverValue).toContain('fit');
     expect(hoverValue.toLowerCase()).toContain('training loop');
+
+    const chainUri = 'file:///chain.tera';
+    const chainText = 'employees = dataframe()\nemployees.orderBy("salary").show()';
+    await client.sendNotification('textDocument/didOpen', {
+      textDocument: { uri: chainUri, languageId: 'tera', version: 1, text: chainText },
+    });
+    const chainHover = await client.sendRequest('textDocument/hover', {
+      textDocument: { uri: chainUri },
+      position: { line: 1, character: chainText.split('\n')[1].indexOf('show') + 1 },
+    });
+    const chainHoverValue = chainHover?.contents?.value ?? '';
+    expect(chainHoverValue).toContain('show');
+    expect(chainHoverValue).toContain('method of DataFrame');
+
+    const chainTokens = await client.sendRequest('textDocument/semanticTokens/full', {
+      textDocument: { uri: chainUri },
+    });
+    const methodIndex = semanticLegend.tokenTypes.indexOf('method');
+    const data = chainTokens?.data ?? [];
+    let methodCount = 0;
+    for (let i = 0; i < data.length; i += 5) {
+      if (data[i + 3] === methodIndex) methodCount++;
+    }
+    expect(methodCount).toBe(2);
+
+    const paramUri = 'file:///param.tera';
+    const paramText = 'noise = randn([2, 3], dtype=f32)';
+    await client.sendNotification('textDocument/didOpen', {
+      textDocument: { uri: paramUri, languageId: 'tera', version: 1, text: paramText },
+    });
+    const paramTokens = await client.sendRequest('textDocument/semanticTokens/full', {
+      textDocument: { uri: paramUri },
+    });
+    const paramTypeAt = (targetLine, snippet) => {
+      const col = paramText.split('\n')[targetLine].indexOf(snippet);
+      const data2 = paramTokens?.data ?? [];
+      let line = 0;
+      let char = 0;
+      for (let i = 0; i < data2.length; i += 5) {
+        line += data2[i];
+        char = data2[i] === 0 ? char + data2[i + 1] : data2[i + 1];
+        if (line === targetLine && char === col) return semanticLegend.tokenTypes[data2[i + 3]];
+      }
+      return null;
+    };
+    expect(paramTypeAt(0, 'dtype=')).toBe('parameter');
+    expect(paramTypeAt(0, 'randn(')).toBe('function');
 
     client.dispose();
   });

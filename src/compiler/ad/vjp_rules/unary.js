@@ -162,3 +162,12 @@ registerVJPRule('reciprocal', (ctx) => {
   const negResultSq = ctx.builder.neg(resultSq).getResult(0);
   return [ctx.builder.mul(grad, negResultSq).getResult(0)];
 });
+
+registerVJPRule('rsqrt', (ctx) => {
+  const grad = ctx.gradOutputs[0];
+  const result = ctx.results[0];
+  const resultCubed = ctx.builder.mul(ctx.builder.mul(result, result).getResult(0), result).getResult(0);
+  const half = ctx.builder.broadcast(ctx.builder.scalarConstant(-0.5, result.type.dtype).getResult(0), result.type.shape, []).getResult(0);
+  const deriv = ctx.builder.mul(half, resultCubed).getResult(0);
+  return [ctx.builder.mul(grad, deriv).getResult(0)];
+});

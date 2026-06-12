@@ -12,16 +12,15 @@ function retVal(func) {
   return func.getReturnOp().getOperand(0);
 }
 
-describe('exp(log(x)) cancellation', () => {
-  it('eliminates exp(log(x)) and returns original x', () => {
+describe('exp(log(x)) is NOT cancelled (IEEE-unsound: x<0 → log(x)=NaN)', () => {
+  it('exp(log(x)) stays, does not fold to x', () => {
     const t = new TensorType([4, 8], ScalarType.F32);
     const func = buildFunction('f', [t], [t], (b, args) => {
       b.returnOp([b.exp(b.log(args[0]).getResult(0)).getResult(0)]);
     });
 
-    run(func);
-
-    expect(retVal(func)).toBe(func.args[0]);
+    expect(run(func)).toBe(PassResult.UNCHANGED);
+    expect(retVal(func).definingOp.opName).toBe('exp');
   });
 
   it('lone exp is untouched', () => {

@@ -208,6 +208,18 @@ describe('FusionGroupBuilder.buildHorizontalGroups', () => {
     const groups = new FusionGroupBuilder(new FusionLegality()).buildHorizontalGroups(func);
     expect(groups.length).toBe(0);
   });
+
+  it('rejects horizontal grouping when ops are TRANSITIVELY dependent (not just direct)', () => {
+    const t = new TensorType([4], ScalarType.F32);
+    const func = buildFunction('f', [t], [t], (b, args) => {
+      const a = b.neg(args[0]);
+      const m = b.neg(a.getResult(0));
+      b.returnOp([b.neg(m.getResult(0)).getResult(0)]);
+    });
+
+    const groups = new FusionGroupBuilder(new FusionLegality()).buildHorizontalGroups(func);
+    expect(groups.length).toBe(0);
+  });
 });
 
 describe('FusionGroupBuilder.buildAllGroups', () => {

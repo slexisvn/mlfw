@@ -56,10 +56,10 @@ describe('Tera parser', () => {
     expect(stmt).toMatchObject({ type: 'FunctionDeclaration', name: 'greet', params: [] });
   });
 
-  it('parses if/elif/else', () => {
+  it('parses if/else if/else', () => {
     const stmt = parse(`if a:
   b
-elif c:
+else if c:
   d
 else:
   e`).body[0];

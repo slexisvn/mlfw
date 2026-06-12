@@ -1,5 +1,5 @@
 # Functions, closures, and control flow.
-# Covers: fn, return, closures, for/while, if/elif/else, break/continue,
+# Covers: fn, return, closures, for/while, if/else if/else, break/continue,
 #         range, len, arrays, destructuring, compound assignment.
 
 fn square(n):
@@ -25,7 +25,7 @@ print("add10(5)     =", add10(5))
 # while loop with continue and break
 fn first_over(values, threshold):
   i = 0
-  while i < len(values):
+  while i < values.length:
     v = values[i]
     i += 1
     if v <= threshold:
@@ -36,13 +36,13 @@ fn first_over(values, threshold):
 nums = [3, 1, 4, 1, 5, 9, 2, 6]
 print("first value > 4:", first_over(nums, 4))
 
-# if / elif / else
+# if / else if / else
 fn grade(score):
   if score >= 90:
     return "A"
-  elif score >= 75:
+  else if score >= 75:
     return "B"
-  elif score >= 60:
+  else if score >= 60:
     return "C"
   else:
     return "F"
@@ -57,4 +57,4 @@ print("destructured:", a, b, c)
 total = 0
 for x in nums:
   total += x
-print("sum(nums) =", total, "| mean =", total / len(nums))
+print("sum(nums) =", total, "| mean =", total / nums.length)

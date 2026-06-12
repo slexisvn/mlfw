@@ -75,7 +75,7 @@ trainer.fit(net, train_loader, val_loader)
 # --- Final evaluation (full set) ---
 net.eval()
 logits = net(x)
-preds = argmax(logits, axis=1)
+preds = logits.argmax(axis=1)
 
 final_acc = Accuracy(task="multiclass", num_classes=3)
 final_acc(logits, y)

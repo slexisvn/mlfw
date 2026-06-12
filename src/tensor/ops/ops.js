@@ -14,15 +14,15 @@ function _dispatch(name, ...args) {
   return dispatcher.dispatch(handle, ks, ...args);
 }
 
-export function add(self, other) { return _dispatch('add', self, other); }
-export function sub(self, other) { return _dispatch('sub', self, other); }
-export function mul(self, other) { return _dispatch('mul', self, other); }
-export function div(self, other) { return _dispatch('div', self, other); }
+export function add(self, other) { return _dispatch('add', self, _asTensor(other, self)); }
+export function sub(self, other) { return _dispatch('sub', self, _asTensor(other, self)); }
+export function mul(self, other) { return _dispatch('mul', self, _asTensor(other, self)); }
+export function div(self, other) { return _dispatch('div', self, _asTensor(other, self)); }
 export function neg(self) { return _dispatch('neg', self); }
-export function pow(self, exponent) { return _dispatch('pow', self, exponent); }
-export function remainder(self, other) { return _dispatch('rem', self, other); }
-export function maximum(self, other) { return _dispatch('maximum', self, other); }
-export function minimum(self, other) { return _dispatch('minimum', self, other); }
+export function pow(self, exponent) { return _dispatch('pow', self, _asTensor(exponent, self)); }
+export function remainder(self, other) { return _dispatch('rem', self, _asTensor(other, self)); }
+export function maximum(self, other) { return _dispatch('maximum', self, _asTensor(other, self)); }
+export function minimum(self, other) { return _dispatch('minimum', self, _asTensor(other, self)); }
 
 export function exp(self) { return _dispatch('exp', self); }
 export function log(self) { return _dispatch('log', self); }
@@ -40,12 +40,12 @@ export function sign(self) { return _dispatch('sign', self); }
 export function floor(self) { return _dispatch('floor', self); }
 export function ceil(self) { return _dispatch('ceil', self); }
 
-export function eq(self, other) { return _dispatch('eq', self, other); }
-export function ne(self, other) { return _dispatch('ne', self, other); }
-export function lt(self, other) { return _dispatch('lt', self, other); }
-export function le(self, other) { return _dispatch('le', self, other); }
-export function gt(self, other) { return _dispatch('gt', self, other); }
-export function ge(self, other) { return _dispatch('ge', self, other); }
+export function eq(self, other) { return _dispatch('eq', self, _asTensor(other, self)); }
+export function ne(self, other) { return _dispatch('ne', self, _asTensor(other, self)); }
+export function lt(self, other) { return _dispatch('lt', self, _asTensor(other, self)); }
+export function le(self, other) { return _dispatch('le', self, _asTensor(other, self)); }
+export function gt(self, other) { return _dispatch('gt', self, _asTensor(other, self)); }
+export function ge(self, other) { return _dispatch('ge', self, _asTensor(other, self)); }
 export function where(condition, self, other) { return _dispatch('where', condition, self, other); }
 export function clamp(self, min, max) { return _dispatch('clamp', self, _asTensor(min, self), _asTensor(max, self)); }
 export function pad(self, low, high, value = 0) { return _dispatch('pad', self, _asTensor(value, self), low, high); }

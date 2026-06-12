@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DocumentAnalyzer } from '../server/analyzer/document_analyzer.js';
@@ -10,7 +10,8 @@ const EXAMPLES = join(HERE, '../../examples');
 describe('DocumentAnalyzer', () => {
   it('parses examples without errors', () => {
     const analyzer = new DocumentAnalyzer();
-    const sources = ['multiclass.tera', 'binary_classification.tera', 'regression.tera'];
+    const sources = readdirSync(EXAMPLES).filter(f => f.endsWith('.tera'));
+    expect(sources.length).toBeGreaterThan(0);
     for (const file of sources) {
       const text = readFileSync(join(EXAMPLES, file), 'utf8');
       const doc = analyzer.update(`file://${file}`, text);

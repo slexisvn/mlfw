@@ -11,7 +11,7 @@ filled = full([2, 2], 7.0)
 noise = randn([2, 3], dtype=f32)
 
 print("a =", a)
-print("shape(a) =", shape(a), "| dtype:", dtype(a))
+print("shape(a) =", a.shape, "| dtype:", a.dtype)
 print("arange:", seq, "| linspace:", lin)
 
 # --- Arithmetic & elementwise ---
@@ -19,14 +19,14 @@ b = ones([2, 3])
 s = a + b
 scaled = a * 2.0 - 1.0
 powered = a ** 2.0
-activated = relu(a - 3.0)
-smooth = gelu(a)
-prob = sigmoid(a)
+activated = (a - 3.0).relu()
+smooth = a.gelu()
+prob = a.sigmoid()
 print("a + b =", s)
 print("relu(a - 3) =", activated)
 
 # --- Comparison & conditional select ---
-mask = gt(a, tensor(3.0))                  # elementwise a > 3
+mask = a.gt(tensor(3.0))                   # elementwise a > 3
 picked = where(mask, a, zeros([2, 3]))     # keep where >3, else 0
 print("where(a>3, a, 0) =", picked)
 
@@ -36,20 +36,20 @@ mm = m @ ident[0:2, 0:2]                    # matrix multiply
 stacked = stack([m, eye(2)], axis=0)        # 2x2x2
 joined = cat([m, eye(2)], axis=0)           # 4x2
 print("m @ I =", mm)
-print("stack ->", shape(stacked), "| cat ->", shape(joined))
+print("stack ->", stacked.shape, "| cat ->", joined.shape)
 
 # --- Reductions (whole tensor / per-axis / keepdim) ---
-print("sum(a) =", sum(a))
-print("sum over columns =", sum(a, axis=0))
-print("mean over rows (keepdim) =", mean(a, axis=1, keep=true))
-print("max(a) =", max(a), "| argmax over rows =", argmax(a, axis=1))
+print("sum(a) =", a.sum())
+print("sum over columns =", a.sum(axis=0))
+print("mean over rows (keepdim) =", a.mean(axis=1, keep=true))
+print("max(a) =", a.max(), "| argmax over rows =", a.argmax(axis=1))
 
 # --- Shape transforms ---
-flat = reshape(a, [6])
-t = transpose(a, 0, 1)              # 3x2
-u = unsqueeze(a, 0)                 # 1x2x3
-perm = permute(u, [2, 0, 1])       # 3x1x2
-print("reshape ->", shape(flat), "| transpose ->", shape(t), "| permute ->", shape(perm))
+flat = a.reshape([6])
+t = a.transpose(0, 1)              # 3x2
+u = a.unsqueeze(0)                 # 1x2x3
+perm = u.permute([2, 0, 1])       # 3x1x2
+print("reshape ->", flat.shape, "| transpose ->", t.shape, "| permute ->", perm.shape)
 
 # --- Indexing & slicing ---
 print("a[0]      =", a[0])         # first row (drops a dimension)

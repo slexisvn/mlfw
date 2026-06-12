@@ -17,13 +17,13 @@ describe('Tera', () => {
   it('promotes scalars in tensor operators and function calls', async () => {
     const runtime = new TeraRuntime({ output: () => {} });
     expect((await runtime.execute('tensor([1, 2]) * 2 + 1')).toArray()).toEqual([3, 5]);
-    expect((await runtime.execute('mul(tensor([1, 2]), 3)')).toArray()).toEqual([3, 6]);
+    expect((await runtime.execute('tensor([1, 2]).mul(3)')).toArray()).toEqual([3, 6]);
   });
 
   it('formats scalar and CPU tensors for the CLI', async () => {
     const runtime = new TeraRuntime({ output: () => {} });
-    const scalar = await runtime.execute('tensor(2)');
-    const vector = await runtime.execute('tensor([1, 2])');
+    const scalar = await runtime.execute('tensor(2, device=cpu)');
+    const vector = await runtime.execute('tensor([1, 2], device=cpu)');
 
     expect(formatValue(scalar)).toBe('Tensor(2, dtype=f32)');
     expect(formatValue(vector)).toBe('Tensor(shape=[2], dtype=f32)\n[1,2]');
@@ -37,7 +37,7 @@ describe('Tera', () => {
         fc2 = Linear(hidden, output)
 
         forward x:
-          x = relu(fc1(x))
+          x = fc1(x).relu()
           return fc2(x)
 
       model = MLP(4, 3, 2)
@@ -64,7 +64,7 @@ describe('Tera', () => {
     const result = await runtime.execute(`
       model Residual:
         forward x:
-          return relu(x + x)
+          return (x + x).relu()
       net = Residual()
       x = randn([2, 4])
       compile(net, input=x)
@@ -77,7 +77,7 @@ describe('Tera', () => {
     const result = await runtime.execute(`
       model Scale:
         forward x:
-          return mul(x, 2) + 1
+          return x.mul(2) + 1
       net = Scale()
       x = randn([2, 4])
       compile(net, input=x)
@@ -137,7 +137,7 @@ describe('Tera', () => {
 
   it('exposes view and like-operation builtins', async () => {
     const runtime = new TeraRuntime({ output: () => {} });
-    const result = await runtime.execute('transpose(reshape(onesLike(tensor([1, 2, 3, 4])), [2, 2]), 0, 1)');
+    const result = await runtime.execute('onesLike(tensor([1, 2, 3, 4])).reshape([2, 2]).transpose(0, 1)');
     expect(result.shape).toEqual([2, 2]);
     expect(result.toArray()).toEqual([[1, 1], [1, 1]]);
   });
@@ -176,7 +176,7 @@ describe('Tera', () => {
   fc1 = Linear(2, h)
   fc2 = Linear(h, 1)
   forward x:
-    return fc2(relu(fc1(x)))`);
+    return fc2(fc1(x).relu())`);
     await runtime.execute('net = MLP(4)');
 
     const fc1 = await runtime.execute('net.fc1');
@@ -205,9 +205,9 @@ describe('Tera', () => {
     const runtime = new TeraRuntime({ output: () => {} });
     const result = await runtime.execute(`
       x = tensor([2], grad=true)
-      y = sum(x * x)
-      backward(y)
-      grad(x)
+      y = (x * x).sum()
+      y.backward()
+      x.grad
     `);
     expect(result.toArray()).toEqual([4]);
   });
@@ -300,16 +300,16 @@ describe('Tera', () => {
     `)).toBe(25);
   });
 
-  it('evaluates if/elif/else', async () => {
+  it('evaluates if/else if/else', async () => {
     const runtime = new TeraRuntime({ output: () => {} });
     expect(await runtime.execute('if true: 1')).toBe(1);
     expect(await runtime.execute(`if false: 1
 else: 2`)).toBe(2);
     expect(await runtime.execute(`if false: 1
-elif true: 2
+else if true: 2
 else: 3`)).toBe(2);
     expect(await runtime.execute(`if false: 1
-elif false: 2
+else if false: 2
 else: 3`)).toBe(3);
   });
 

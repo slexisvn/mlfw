@@ -49,7 +49,7 @@ describe('Tera CLI commands', () => {
       stderr: vi.fn(),
       repl,
       stdinIsTTY: false,
-      readStdin: async () => 'x = tensor([1, 2])\nshape(x)\nexit\n',
+      readStdin: async () => 'x = tensor([1, 2])\nx.shape\nexit\n',
     })).toBe(0);
     expect(repl).not.toHaveBeenCalled();
     expect(stdout).toHaveBeenCalledWith('[2]');

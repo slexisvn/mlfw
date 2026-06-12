@@ -337,11 +337,11 @@ describe('Transformer — Tera compile', () => {
           q = wq(x)
           k = wk(x)
           v = wv(x)
-          scores = q @ transpose(k, 0, 1)
-          attn = softmax(scores)
+          scores = q @ k.transpose(0, 1)
+          attn = scores.softmax()
           ctx = attn @ v
           h = ln1(x + wo(ctx))
-          return ln2(h + ff2(gelu(ff1(h))))
+          return ln2(h + ff2(ff1(h).gelu()))
 
       net = TransformerBlock(8)
       x = randn([4, 8])
@@ -358,7 +358,7 @@ describe('Transformer — Tera compile', () => {
         fc1 = Linear(d, d * 2)
         fc2 = Linear(d * 2, d)
         forward x:
-          return fc2(gelu(fc1(x)))
+          return fc2(fc1(x).gelu())
 
       model EncoderLayer(d):
         wq = Linear(d, d)
@@ -372,7 +372,7 @@ describe('Transformer — Tera compile', () => {
           q = wq(x)
           k = wk(x)
           v = wv(x)
-          attn = softmax(q @ transpose(k, 0, 1)) @ v
+          attn = (q @ k.transpose(0, 1)).softmax() @ v
           h = ln1(x + attn)
           return ln2(h + ffn(h))
 

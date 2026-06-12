@@ -400,3 +400,48 @@ describe('chained activations', () => {
     }
   });
 });
+
+import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
+import { CPUTarget, WasmTarget } from '../../../src/backend/target.js';
+
+const SELU_LAMBDA = 1.0507009873554805;
+const SELU_ALPHA = 1.6732632423543772;
+const sig = (x) => 1 / (1 + Math.exp(-x));
+
+const ACT_EXEC = [
+  { name: 'elu', build: (b, x) => b.elu(x), ref: (v) => (v > 0 ? v : Math.exp(v) - 1) },
+  { name: 'elu_alpha2', build: (b, x) => b.elu(x, 2.0), ref: (v) => (v > 0 ? v : 2.0 * (Math.exp(v) - 1)) },
+  { name: 'celu', build: (b, x) => b.celu(x), ref: (v) => Math.max(v, 0) + Math.min(0, Math.exp(v) - 1) },
+  { name: 'celu_alpha2', build: (b, x) => b.celu(x, 2.0), ref: (v) => Math.max(v, 0) + Math.min(0, 2.0 * (Math.exp(v / 2.0) - 1)) },
+  { name: 'leaky_relu', build: (b, x) => b.leakyRelu(x), ref: (v) => (v > 0 ? v : 0.01 * v) },
+  { name: 'leaky_relu_slope', build: (b, x) => b.leakyRelu(x, 0.2), ref: (v) => (v > 0 ? v : 0.2 * v) },
+  { name: 'selu', build: (b, x) => b.selu(x), ref: (v) => SELU_LAMBDA * (v > 0 ? v : SELU_ALPHA * (Math.exp(v) - 1)) },
+  { name: 'mish', build: (b, x) => b.mish(x), ref: (v) => v * Math.tanh(Math.log(1 + Math.exp(v))) },
+  { name: 'hardswish', build: (b, x) => b.hardswish(x), ref: (v) => v * Math.min(Math.max(v + 3, 0), 6) / 6 },
+  { name: 'hardsigmoid', build: (b, x) => b.hardsigmoid(x), ref: (v) => Math.min(Math.max(v / 6 + 0.5, 0), 1) },
+  { name: 'silu', build: (b, x) => b.silu(x), ref: (v) => v * sig(v) },
+  { name: 'gelu', build: (b, x) => b.gelu(x), ref: (v) => v * sig(1.702 * v) },
+];
+
+const ACT_INPUT = new Float32Array([0, -0, 3, -3, 6, -6, 0.7, -0.7, 1.5, -1.5, 2.4, -2.4, 0.1, -0.1, 4.2, -4.2]);
+
+describe('activation decomposition: end-to-end numerical correctness vs reference (cpu+wasm)', () => {
+  for (const act of ACT_EXEC) {
+    for (const [tname, makeTarget] of [['cpu', CPUTarget], ['wasm', WasmTarget]]) {
+      it(`${act.name} compiled output matches reference on ${tname}`, () => {
+        const t = new TensorType([ACT_INPUT.length], ScalarType.F32);
+        const func = buildFunction(act.name, [t], [t], (b, a) => {
+          b.returnOp([act.build(b, a[0]).getResult(0)]);
+        });
+        const res = compileGraph(func, makeTarget());
+        const out = new Float32Array(ACT_INPUT.length);
+        res.run(act.name, ACT_INPUT, out);
+        for (let i = 0; i < ACT_INPUT.length; i++) {
+          const ref = act.ref(ACT_INPUT[i]);
+          const relErr = Math.abs(ref - out[i]) / (1 + Math.abs(ref));
+          expect(relErr, `${act.name}/${tname} x=${ACT_INPUT[i]} ref=${ref} got=${out[i]}`).toBeLessThan(3e-3);
+        }
+      });
+    }
+  }
+});

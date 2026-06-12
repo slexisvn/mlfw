@@ -15,7 +15,7 @@ export function extractKeywords(parserSourcePath) {
 
 export function classifyKeywords(keywords) {
   const declarationKeywords = new Set(['model', 'fn', 'forward', 'train', 'validate', 'optimizer']);
-  const controlKeywords = new Set(['if', 'elif', 'else', 'for', 'while', 'in', 'break', 'continue', 'return']);
+  const controlKeywords = new Set(['if', 'else', 'for', 'while', 'in', 'break', 'continue', 'return']);
   const operatorKeywords = new Set(['and', 'or', 'not']);
   const constantKeywords = new Set(['true', 'false', 'null']);
   const groups = {

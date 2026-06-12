@@ -90,3 +90,62 @@ describe('while lowering loop carry and condition', () => {
     expect(bodyStores.length).toBeGreaterThan(0);
   });
 });
+
+import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
+import { CPUTarget, WasmTarget } from '../../../src/backend/target.js';
+
+describe('control flow end-to-end execution vs reference (cpu+wasm)', () => {
+  const F = ScalarType.F32, I32 = ScalarType.I32;
+
+  function buildWhile(K) {
+    const xT = new TensorType([4], F);
+    return buildFunction('wh', [xT], [xT], (b, a) => {
+      const acc0 = b.broadcast(b.scalarConstant(0, F).getResult(0), [4], []).getResult(0);
+      const i0 = b.scalarConstant(0, I32).getResult(0);
+      const w = b.whileOp([acc0, i0],
+        (cb, args) => { cb.yieldOp([cb.compare(args[1], b.scalarConstant(K, I32).getResult(0), 'lt').getResult(0)]); },
+        (bb, args) => { bb.yieldOp([bb.add(args[0], a[0]).getResult(0), bb.add(args[1], b.scalarConstant(1, I32).getResult(0)).getResult(0)]); });
+      b.returnOp([w.getResult(0)]);
+    });
+  }
+
+  for (const [tname, makeTarget] of [['cpu', CPUTarget], ['wasm', WasmTarget]]) {
+    for (const K of [0, 1, 3, 5]) {
+      it(`while accumulates x ${K} times (acc=K*x) on ${tname}`, () => {
+        const res = compileGraph(buildWhile(K), makeTarget());
+        const out = new Float32Array(4);
+        res.run('wh', new Float32Array([1, 2, 3, 4]), out);
+        expect(Array.from(out)).toEqual([1 * K, 2 * K, 3 * K, 4 * K]);
+      });
+    }
+
+    function buildIf(predTrue) {
+      const xT = new TensorType([4], F);
+      return buildFunction('iff', [xT], [xT], (b, a) => {
+        const thr = b.scalarConstant(predTrue ? -100 : 100, F).getResult(0);
+        const s = b.reduce(a[0], b.scalarConstant(0, F).getResult(0), [0], 'sum').getResult(0);
+        const pred = b.compare(s, thr, 'gt').getResult(0);
+        const two = b.broadcast(b.scalarConstant(2, F).getResult(0), [4], []).getResult(0);
+        const one = b.broadcast(b.scalarConstant(1, F).getResult(0), [4], []).getResult(0);
+        const ifo = b.ifOp(pred, [xT],
+          (tb) => { tb.yieldOp([tb.mul(a[0], two).getResult(0)]); },
+          (eb) => { eb.yieldOp([eb.add(a[0], one).getResult(0)]); });
+        b.returnOp([ifo.getResult(0)]);
+      });
+    }
+
+    it(`if selects then-branch (x*2) when predicate true on ${tname}`, () => {
+      const res = compileGraph(buildIf(true), makeTarget());
+      const out = new Float32Array(4);
+      res.run('iff', new Float32Array([1, 2, 3, 4]), out);
+      expect(Array.from(out)).toEqual([2, 4, 6, 8]);
+    });
+
+    it(`if selects else-branch (x+1) when predicate false on ${tname}`, () => {
+      const res = compileGraph(buildIf(false), makeTarget());
+      const out = new Float32Array(4);
+      res.run('iff', new Float32Array([1, 2, 3, 4]), out);
+      expect(Array.from(out)).toEqual([2, 3, 4, 5]);
+    });
+  }
+});

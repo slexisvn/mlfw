@@ -872,7 +872,8 @@ export class WasmCodegen {
     this._indent++;
     this._emit('(loop $wloop');
     this._indent++;
-    this._emit(`(local.get $${node.condVar.name})`);
+    this._emitAddr(node.condVar, []);
+    this._emitLoadOp(node.condVar.dtype);
     this._emit('i32.eqz');
     this._emit('br_if $wbreak');
     this._visitNode(node.loopBody);

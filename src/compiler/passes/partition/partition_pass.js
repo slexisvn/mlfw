@@ -1,5 +1,5 @@
 import { FunctionPass, PassResult } from '../pass.js';
-import { Operation } from '../../ir/graph/operation.js';
+import { Operation, cloneRegion } from '../../ir/graph/operation.js';
 import { Block, Region } from '../../ir/graph/block.js';
 import { GraphFunction } from '../../ir/graph/function.js';
 import { GraphPartitioner, PartitionerConfig } from '../../analysis/partitioner.js';
@@ -229,7 +229,8 @@ export class PartitionMaterializationPass extends FunctionPass {
         for (let i = 0; i < op.numResults; i++) {
           resultTypes.push(op.getResult(i).type);
         }
-        const cloned = new Operation(op.opName, newOperands, resultTypes, new Map(op.attributes));
+        const clonedRegions = op.regions.length > 0 ? op.regions.map(r => cloneRegion(r)) : null;
+        const cloned = new Operation(op.opName, newOperands, resultTypes, new Map(op.attributes), clonedRegions);
         subFunc.entryBlock.pushOp(cloned);
         for (let i = 0; i < op.numResults; i++) {
           valueMap.set(op.getResult(i), cloned.getResult(i));

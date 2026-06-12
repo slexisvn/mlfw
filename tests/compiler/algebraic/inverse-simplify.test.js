@@ -12,27 +12,25 @@ function retVal(func) {
   return func.getReturnOp().getOperand(0);
 }
 
-describe('log(exp(x)) cancellation', () => {
-  it('eliminates log(exp(x)) and returns x', () => {
+describe('log(exp(x)) / exp(log(x)) are NOT cancelled (IEEE-unsound)', () => {
+  it('log(exp(x)) stays (exp overflow → log(Inf)=Inf, not x)', () => {
     const t = new TensorType([4, 8], ScalarType.F32);
     const func = buildFunction('f', [t], [t], (b, args) => {
       b.returnOp([b.log(b.exp(args[0]).getResult(0)).getResult(0)]);
     });
 
-    run(func);
-
-    expect(retVal(func)).toBe(func.args[0]);
+    expect(run(func)).toBe(PassResult.UNCHANGED);
+    expect(retVal(func).definingOp.opName).toBe('log');
   });
 
-  it('exp(log(x)) also cancels (both directions registered)', () => {
+  it('exp(log(x)) stays (x<0 → log(x)=NaN, not x)', () => {
     const t = new TensorType([4], ScalarType.F32);
     const func = buildFunction('f', [t], [t], (b, args) => {
       b.returnOp([b.exp(b.log(args[0]).getResult(0)).getResult(0)]);
     });
 
-    run(func);
-
-    expect(retVal(func)).toBe(func.args[0]);
+    expect(run(func)).toBe(PassResult.UNCHANGED);
+    expect(retVal(func).definingOp.opName).toBe('exp');
   });
 
   it('log(x) alone is untouched', () => {

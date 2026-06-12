@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 
 const BUILTIN_HEADING = /^##\s+([A-Za-z_][A-Za-z0-9_]*)(?:\(([^)]*)\))?(?:\s*\{([A-Za-z_][A-Za-z0-9_]*)\})?\s*$/;
-const METHOD_HEADING = /^###\s+([A-Za-z_][A-Za-z0-9_]*)(?:\(([^)]*)\))?\s*$/;
+const METHOD_HEADING = /^###\s+([A-Za-z_][A-Za-z0-9_]*)(?:\(([^)]*)\))?(?:\s*->\s*([A-Za-z_][A-Za-z0-9_]*))?\s*$/;
 const KIND_TEMPLATE_HEADING = /^##\s+@kind\/([A-Za-z_][A-Za-z0-9_]*)\s*$/;
 const PSEUDO_TYPE_HEADING = /^##\s+\$([A-Za-z_][A-Za-z0-9_]*)\s*$/;
 
@@ -85,6 +85,8 @@ export function extractBuiltinDocs(docPath) {
       currentMethod = {
         name: methodMatch[1],
         params: methodMatch[2] === undefined ? [] : parseParams(methodMatch[2]),
+        returns: methodMatch[3] ?? null,
+        isGetter: methodMatch[2] === undefined,
       };
       continue;
     }

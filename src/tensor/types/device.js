@@ -52,3 +52,11 @@ export const GPU_DEVICE = new Device(DeviceType.GPU);
 export const WASM_DEVICE = new Device(DeviceType.WASM);
 export const META_DEVICE = new Device(DeviceType.META);
 export const LAZY_DEVICE = new Device(DeviceType.LAZY);
+
+let _defaultDevice = CPU_DEVICE;
+export function getDefaultDevice() {
+  return _defaultDevice;
+}
+export function setDefaultDevice(device) {
+  _defaultDevice = device;
+}

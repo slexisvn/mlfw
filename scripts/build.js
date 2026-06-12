@@ -31,11 +31,25 @@ const browserStubPlugin = {
   },
 };
 
+// The query-engine browser plugin lazily imports distributed-execution modules
+// that ship only with the node build. They are never reached in the browser, so
+// resolve them to a stub that throws if ever invoked.
+const distributedStubPlugin = {
+  name: 'mlfw-distributed-stub',
+  setup(b) {
+    b.onResolve({ filter: /[\\/]distributed[\\/]/ }, () => ({ path: 'mlfw-distributed', namespace: 'mlfw-stub-dist' }));
+    b.onLoad({ filter: /.*/, namespace: 'mlfw-stub-dist' }, () => ({
+      contents: 'export default new Proxy({}, { get() { throw new Error("mlfw: distributed execution is not available in the browser build"); } });',
+      loader: 'js',
+    }));
+  },
+};
+
 const shared = {
   bundle: true,
   platform: 'browser',
   target: ['es2022'],
-  plugins: [browserStubPlugin],
+  plugins: [browserStubPlugin, distributedStubPlugin],
   define: { 'process.env.NODE_ENV': '"production"' },
   logLevel: 'info',
 };

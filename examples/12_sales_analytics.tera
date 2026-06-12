@@ -2,7 +2,7 @@
 # Answer common business questions over an orders table with the DataFrame API:
 # totals, revenue per category/region, averages, filtering, and a profit join.
 
-orders = dataframe(
+orders = DataFrame(
   order_id=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
   region=["N", "N", "S", "E", "S", "N", "E", "S", "N", "E", "S", "N"],
   category=["book", "toy", "book", "game", "toy", "game", "book", "toy", "game", "book", "game", "toy"],
@@ -15,8 +15,8 @@ orders = orders.withColumn("revenue", col("qty").mul(col("price")))
 
 # Q1: headline totals
 print("total orders:", orders.count())
-print("total units :", sum(orders.select("qty").to_tensor()))
-print("total revenue:", sum(orders.select("revenue").to_tensor()))
+print("total units :", orders.select("qty").to_tensor().sum())
+print("total revenue:", orders.select("revenue").to_tensor().sum())
 
 # Q2: revenue, units, and average order value per category
 print("=== per category ===")
@@ -36,7 +36,7 @@ print("=== orders with revenue > 75 ===")
 orders.filter(col("revenue").gt(75.0)).select("order_id", "category", "revenue").orderBy("revenue").show()
 
 # Q5: profit by category via a join with a cost-rate lookup
-cost_rates = dataframe(
+cost_rates = DataFrame(
   category=["book", "toy", "game"],
   cost_rate=[0.6, 0.5, 0.4],
 )

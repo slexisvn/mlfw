@@ -101,11 +101,15 @@ export function register() {
     const bodyRegion = op.regions[1];
 
     const loopBufs = new Array(inputs.length);
-    for (let i = 0; i < inputs.length; i++) loopBufs[i] = inputs[i];
+    const initStmts = [];
+    for (let i = 0; i < inputs.length; i++) {
+      const stateBuf = outputs[i] || ctx.getOrAllocBuffer({ type: op.getResult(i).type });
+      loopBufs[i] = stateBuf;
+      initStmts.push(copyBuffer(ctx, inputs[i], stateBuf));
+    }
 
     for (let i = 0; i < op.numResults; i++) {
-      const buf = loopBufs[i] || ctx.getOrAllocBuffer(op.getResult(i));
-      ctx.bufferMap.set(op.getResult(i), buf);
+      ctx.bufferMap.set(op.getResult(i), loopBufs[i]);
     }
 
     const condVar = new Buffer(`_wcond_${ctx.varCounter++}`, [], 'bool', MemoryScope.GLOBAL);
@@ -124,6 +128,6 @@ export function register() {
     }
     const loopBody = bodyStmts.length === 1 ? bodyStmts[0] : new SeqNode(bodyStmts);
 
-    return new WhileNode(condVar, condBody, loopBody);
+    return new SeqNode([...initStmts, new WhileNode(condVar, condBody, loopBody)]);
   });
 }

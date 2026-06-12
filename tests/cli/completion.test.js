@@ -5,7 +5,7 @@ import { TeraRuntime } from '../../src/cli/runtime.js';
 describe('Tera completion', () => {
   it('completes builtins and preserves the expression prefix', () => {
     const runtime = new TeraRuntime({ output: () => {} });
-    expect(completeInput('rel', runtime)).toBe('relu');
+    expect(completeInput('linsp', runtime)).toBe('linspace');
     const randResult = completeInput('x = rand', runtime);
     expect(Array.isArray(randResult)).toBe(true);
     expect(randResult).toContain('randn');
@@ -22,12 +22,12 @@ describe('Tera completion', () => {
 
   it('completes user-defined functions and model names', async () => {
     const runtime = new TeraRuntime({ output: () => {} });
-    await runtime.execute('fn my_normalize(x): return x / sum(x)');
+    await runtime.execute('fn my_normalize(x): return x / x.sum()');
     expect(completeInput('my_n', runtime)).toBe('my_normalize');
 
     await runtime.execute(`model MyNet:
   forward x:
-    return relu(x)`);
+    return x.relu()`);
     expect(completeInput('MyN', runtime)).toBe('MyNet');
   });
 
@@ -37,7 +37,7 @@ describe('Tera completion', () => {
   fc1 = Linear(2, h)
   fc2 = Linear(h, 1)
   forward x:
-    return fc2(relu(fc1(x)))`);
+    return fc2(fc1(x).relu())`);
     await runtime.execute('net = MLP(4)');
 
     expect(completeInput('net.f', runtime)).toBe('net.fc');

@@ -111,12 +111,12 @@
     ],
     "description": "logger: CSVLogger"
   },
-  "dataframe": {
-    "prefix": "dataframe",
+  "DataFrame": {
+    "prefix": "DataFrame",
     "body": [
-      "dataframe(${1:columns})$0"
+      "DataFrame(${1:columns})$0"
     ],
-    "description": "data: dataframe"
+    "description": "data: DataFrame"
   },
   "DataLoader": {
     "prefix": "DataLoader",

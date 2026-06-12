@@ -12,8 +12,8 @@ function retVal(func) {
   return func.getReturnOp().getOperand(0);
 }
 
-describe('exp(log(x)) in canonicalize — registered on exp op', () => {
-  it('cancels when exp feeds log feeds exp', () => {
+describe('exp(log(x)) in canonicalize — NOT cancelled (IEEE-unsound)', () => {
+  it('exp(log(exp(log(x)))) stays (log of negative = NaN)', () => {
     const t = new TensorType([4], ScalarType.F32);
     const func = buildFunction('f', [t], [t], (b, args) => {
       const inner = b.exp(b.log(args[0]).getResult(0));
@@ -22,7 +22,8 @@ describe('exp(log(x)) in canonicalize — registered on exp op', () => {
 
     run(func);
 
-    expect(retVal(func)).toBe(func.args[0]);
+    expect(func.findOp(op => op.opName === 'exp')).not.toBeNull();
+    expect(func.findOp(op => op.opName === 'log')).not.toBeNull();
   });
 });
 
@@ -99,23 +100,23 @@ describe('commutative swap enables further pattern', () => {
     expect(retVal(func)).toBe(func.args[0]);
   });
 
-  it('mul(0, x) → commutative swap → mul(x, 0) → mul-zero annihilation', () => {
-    const t = new TensorType([4], ScalarType.F64);
+  it('mul(0, x) → commutative swap → mul(x, 0) → mul-zero annihilation (int only)', () => {
+    const t = new TensorType([4], ScalarType.I32);
     const func = buildFunction('f', [t], [t], (b, args) => {
-      const zero = b.scalarConstant(0, ScalarType.F64);
+      const zero = b.scalarConstant(0, ScalarType.I32);
       b.returnOp([b.mul(zero.getResult(0), args[0]).getResult(0)]);
     });
 
     run(func);
 
     expect(func.findOp(op => op.opName === 'mul')).toBeNull();
-    expect(retVal(func).type.dtype).toBe(ScalarType.F64);
+    expect(retVal(func).type.dtype).toBe(ScalarType.I32);
   });
 });
 
 describe('sub-self on multi-dimensional', () => {
-  it('sub(x,x) on 3D tensor produces broadcast zero with correct shape', () => {
-    const t = new TensorType([2, 3, 4], ScalarType.F32);
+  it('sub(x,x) on 3D int tensor produces broadcast zero with correct shape', () => {
+    const t = new TensorType([2, 3, 4], ScalarType.I32);
     const func = buildFunction('f', [t], [t], (b, args) => {
       b.returnOp([b.sub(args[0], args[0]).getResult(0)]);
     });

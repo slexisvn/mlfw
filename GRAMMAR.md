@@ -25,7 +25,7 @@ Identifier  →  [A-Za-z_][A-Za-z0-9_]*
 
 ```
 model  forward  train  validate  optimizer
-fn  if  elif  else  for  in  while
+fn  if  else  for  in  while
 break  continue  return  not  and  or  true  false  null
 ```
 
@@ -92,7 +92,7 @@ ExpressionStmt     →  Expression
 
 ```ebnf
 IfStmt    →  'if' Expression ':' Block ElifClause* ElseClause?
-ElifClause →  'elif' Expression ':' Block
+ElifClause →  'else' 'if' Expression ':' Block
 ElseClause →  'else' ':' Block
 
 ForStmt   →  'for' IDENTIFIER 'in' Expression ':' Block
@@ -274,62 +274,68 @@ Options: `dtype`, `device`, `grad` (alias for `requiresGrad`).
 
 ### Arithmetic and Element-wise
 
+Methods on the tensor receiver (binary ops take the left operand as receiver):
+
 ```
-add  sub  mul  div  neg  pow  remainder  maximum  minimum
-exp  log  sqrt  rsqrt  abs  sin  cos  tanh  sigmoid
-relu  gelu  silu  sign  floor  ceil
-softmax  log_softmax
+.add  .sub  .mul  .div  .neg  .pow  .remainder  .maximum  .minimum
+.exp  .log  .sqrt  .rsqrt  .abs  .sin  .cos  .tanh  .sigmoid
+.relu  .gelu  .silu  .sign  .floor  .ceil
+.softmax  .log_softmax
 ```
 
 ### Comparison
 
+Methods on the tensor receiver, except `where` which stays a free function:
+
 ```
-eq  ne  lt  le  gt  ge  where
+.eq  .ne  .lt  .le  .gt  .ge      where(cond, a, b)
 ```
 
 ### Linear Algebra
 
+`matmul` and `dot` are methods; `cat` and `stack` stay free functions:
+
 ```
-matmul  dot  cat  stack  clone
+.matmul  .dot  .clone      cat(...)  stack(...)
 ```
 
 ### Reductions
 
-| Function | Signature |
+| Method | Signature |
 |----------|-----------|
-| `sum` | `sum(input, axis?, keep?)` |
-| `mean` | `mean(input, axis?, keep?)` |
-| `max` | `max(input, axis?, keep?)` |
-| `min` | `min(input, axis?, keep?)` |
-| `argmax` | `argmax(input, axis?, keep?)` |
-| `argmin` | `argmin(input, axis?, keep?)` |
-| `prod` | `prod(input, axis?, keep?)` |
+| `sum` | `tensor.sum(axis?, keep?)` |
+| `mean` | `tensor.mean(axis?, keep?)` |
+| `max` | `tensor.max(axis?, keep?)` |
+| `min` | `tensor.min(axis?, keep?)` |
+| `argmax` | `tensor.argmax(axis?, keep?)` |
+| `argmin` | `tensor.argmin(axis?, keep?)` |
+| `prod` | `tensor.prod(axis?, keep?)` |
 
 ### Shape Operations
 
 ```
-reshape(tensor, shape)         transpose(tensor, dim0, dim1)
-permute(tensor, dims)          expand(tensor, shape)
-slice(tensor, dim, start, end, step=1)
-unsqueeze(tensor, dim)         squeeze(tensor, dim)
-narrow(tensor, dim, start, length)
-select(tensor, dim, index)     contiguous(tensor)
-detach(tensor)
+tensor.reshape(shape)          tensor.transpose(dim0, dim1)
+tensor.permute(dims)           tensor.expand(shape)
+tensor.slice(dim, start, end, step=1)
+tensor.unsqueeze(dim)          tensor.squeeze(dim)
+tensor.narrow(dim, start, length)
+tensor.select(dim, index)      tensor.contiguous()
+tensor.detach()
 ```
 
 ### Autograd
 
 ```
-requires_grad(tensor, flag=true)
-grad(tensor)
-backward(tensor, gradient?)
+tensor.requires_grad(flag=true)
+tensor.grad
+tensor.backward(gradient?)
 ```
 
 ### Utility
 
 ```
-range(start, stop?, step?)     len(value)
-shape(tensor)                  dtype(tensor)
+range(start, stop?, step?)     value.length
+tensor.shape                   tensor.dtype
 print(value)                   compile(model, ...)
 trace(compiled)                graph(compiled)
 Sequential(...modules)
@@ -499,15 +505,15 @@ CrossEntropyLoss()  MSELoss()  NLLLoss()  BCELoss()
 x = tensor([[1, 2], [3, 4]], dtype=f32)
 y = ones([2, 2])
 z = x @ y + 1                # matmul then broadcast add
-print(sum(z, axis=0))
+print(z.sum(axis=0))
 ```
 
 ### Function Definition
 
 ```python
 fn softmax_manual(x):
-  e = exp(x - max(x))
-  return e / sum(e)
+  e = (x - x.max()).exp()
+  return e / e.sum()
 ```
 
 ### Model Definition
@@ -517,7 +523,7 @@ model MLP(hidden):
   fc1 = Linear(784, hidden)
   fc2 = Linear(hidden, 10)
   forward x:
-    x = relu(fc1(x))
+    x = fc1(x).relu()
     return fc2(x)
 
 net = MLP(128)
@@ -565,7 +571,7 @@ model CrossAttention(d):
     q = wq(query)
     k = wk(key)
     v = wv(value)
-    scores = softmax(q @ transpose(k, 0, 1))
+    scores = (q @ k.transpose(0, 1)).softmax()
     return scores @ v
 
 attn = CrossAttention(64)
@@ -591,11 +597,11 @@ model TransformerBlock(d):
     q = wq(x)
     k = wk(x)
     v = wv(x)
-    scores = q @ transpose(k, 0, 1)
-    attn = softmax(scores)
+    scores = q @ k.transpose(0, 1)
+    attn = scores.softmax()
     ctx = attn @ v
     h = ln1(x + wo(ctx))
-    return ln2(h + ff2(gelu(ff1(h))))
+    return ln2(h + ff2(ff1(h).gelu()))
 
 net = TransformerBlock(64)
 out = net(randn([16, 64]))
@@ -611,7 +617,7 @@ model FFN(d):
   fc1 = Linear(d, d * 2)
   fc2 = Linear(d * 2, d)
   forward x:
-    return fc2(gelu(fc1(x)))
+    return fc2(fc1(x).gelu())
 
 model EncoderLayer(d):
   wq = Linear(d, d)
@@ -625,7 +631,7 @@ model EncoderLayer(d):
     q = wq(x)
     k = wk(x)
     v = wv(x)
-    attn = softmax(q @ transpose(k, 0, 1)) @ v
+    attn = (q @ k.transpose(0, 1)).softmax() @ v
     h = ln1(x + attn)
     return ln2(h + ffn(h))
 
@@ -654,9 +660,9 @@ model ResBlock(ch):
   bn2 = BatchNorm2d(ch)
 
   forward x:
-    h = relu(bn1(conv1(x)))
+    h = bn1(conv1(x)).relu()
     h = bn2(conv2(h))
-    return relu(x + h)
+    return (x + h).relu()
 
 model ResNet(num_classes):
   stem = Conv2d(3, 32, 3, padding=1)
@@ -668,7 +674,7 @@ model ResNet(num_classes):
   fc = Linear(32, num_classes)
 
   forward x:
-    x = relu(bn0(stem(x)))
+    x = bn0(stem(x)).relu()
     x = block1(x)
     x = block2(x)
     x = flat(pool(x))
@@ -690,8 +696,8 @@ model Encoder(input_dim, latent_dim):
   fc3 = Linear(128, latent_dim)
 
   forward x:
-    x = relu(fc1(x))
-    x = relu(fc2(x))
+    x = fc1(x).relu()
+    x = fc2(x).relu()
     return fc3(x)
 
 model Decoder(latent_dim, output_dim):
@@ -700,9 +706,9 @@ model Decoder(latent_dim, output_dim):
   fc3 = Linear(256, output_dim)
 
   forward z:
-    z = relu(fc1(z))
-    z = relu(fc2(z))
-    return sigmoid(fc3(z))
+    z = fc1(z).relu()
+    z = fc2(z).relu()
+    return fc3(z).sigmoid()
 
 model Autoencoder(input_dim, latent_dim):
   encoder = Encoder(input_dim, latent_dim)
@@ -733,7 +739,7 @@ classifier = Sequential(
 
 x = randn([32, 784])
 logits = classifier(x)
-probs = softmax(logits)
+probs = logits.softmax()
 compiled = compile(classifier, input=x, target=cpu, debug=true)
 ```
 
@@ -752,9 +758,9 @@ model MultiHeadAttention(d, heads):
     q = wq(x)
     k = wk(x)
     v = wv(x)
-    scores = q @ transpose(k, 0, 1)
-    scale = sqrt(tensor(d, dtype=f32))
-    attn = softmax(scores / scale)
+    scores = q @ k.transpose(0, 1)
+    scale = tensor(d, dtype=f32).sqrt()
+    attn = (scores / scale).softmax()
     return wo(attn @ v)
 
 model TransformerEncoder(d, heads, layers):
@@ -772,10 +778,10 @@ model TransformerEncoder(d, heads, layers):
   forward x:
     # Layer 1
     h = ln1(x + attn1(x))
-    h = ln2(h + ff1_down(gelu(ff1_up(h))))
+    h = ln2(h + ff1_down(ff1_up(h).gelu()))
     # Layer 2
     h = ln3(h + attn2(h))
-    h = ln4(h + ff2_down(gelu(ff2_up(h))))
+    h = ln4(h + ff2_down(ff2_up(h).gelu()))
     return h
 
 net = TransformerEncoder(64, 4, 2)
@@ -803,10 +809,10 @@ model TextClassifier(vocab, d, num_classes):
     q = wq(x)
     k = wk(x)
     v = wv(x)
-    attn = softmax(q @ transpose(k, 0, 1)) @ v
+    attn = (q @ k.transpose(0, 1)).softmax() @ v
     h = ln1(x + attn)
-    h = ln2(h + ff2(gelu(ff1(h))))
-    return head(mean(h, axis=0, keep=true))
+    h = ln2(h + ff2(ff1(h).gelu()))
+    return head(h.mean(axis=0, keep=true))
 ```
 
 ### Training with Trainer API
@@ -821,7 +827,7 @@ model Classifier(num_classes):
   acc = Accuracy(task="multiclass", num_classes=num_classes)
 
   forward x:
-    return fc2(relu(fc1(x)))
+    return fc2(fc1(x).relu())
 
   train batch:
     x, y = batch
@@ -871,12 +877,12 @@ for i in range(100):
   x = tensor([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
   y = tensor([[5.0], [11.0], [17.0]])
   pred = x @ w + b
-  loss = mean((pred - y) ** 2)
-  backward(loss)
-  w_grad = grad(w)
-  b_grad = grad(b)
-  w = requires_grad(w - 0.01 * w_grad)
-  b = requires_grad(b - 0.01 * b_grad)
+  loss = ((pred - y) ** 2.0).mean()
+  loss.backward()
+  w_grad = w.grad
+  b_grad = b.grad
+  w = (w - 0.01 * w_grad).requires_grad()
+  b = (b - 0.01 * b_grad).requires_grad()
 
 print(w)
 print(b)

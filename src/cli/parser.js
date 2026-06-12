@@ -90,7 +90,8 @@ class Parser {
     const body = this.parseBlock();
     const elifs = [];
     this.skipLines();
-    while (this.atIdentifier('elif')) {
+    while (this.atIdentifier('else') && this.peek(1).type === 'identifier' && this.peek(1).value === 'if') {
+      this.next();
       this.next();
       const elifCond = this.parseExpression();
       const elifBody = this.parseBlock();

@@ -2,7 +2,7 @@
 # Steps: inspect -> drop rows with missing values -> normalize numeric features
 #        -> encode the categorical label -> report the resulting tensors.
 
-raw = dataframe(
+raw = DataFrame(
   age=[25, 40, 35, 50, 28, 33, 45, 60, 29, 38],
   income=[30.0, null, 55.0, 80.0, null, 42.0, 70.0, 90.0, 33.0, 60.0],
   city=["A", "B", "A", "C", "B", "A", "C", "C", "B", "A"],
@@ -24,8 +24,8 @@ features = normalize(clean.select("age", "income").to_tensor())
 labels, classes = clean.select("plan").encode("plan")
 
 print("=== ML-ready output ===")
-print("feature matrix shape:", shape(features))
-print("label vector shape  :", shape(labels))
+print("feature matrix shape:", features.shape)
+print("label vector shape  :", labels.shape)
 print("classes:", classes)
 print("normalized features:")
 print(features)

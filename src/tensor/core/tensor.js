@@ -42,6 +42,10 @@ export class Tensor {
     return this._impl.numel();
   }
 
+  get length() {
+    return this._impl.numel();
+  }
+
   get isContiguous() {
     return this._impl.isContiguous();
   }

@@ -8,7 +8,7 @@ import { parseCallContext } from './call_context.js';
 const KEYWORDS = new Set([
   'model', 'forward', 'return', 'true', 'false', 'null',
   'and', 'or', 'not', 'fn',
-  'if', 'elif', 'else', 'for', 'in', 'while', 'break', 'continue',
+  'if', 'else', 'for', 'in', 'while', 'break', 'continue',
 ]);
 const BUILTINS = new Set([
   'tensor', 'zeros', 'ones', 'empty', 'full', 'randn', 'arange', 'eye', 'linspace',

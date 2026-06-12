@@ -99,3 +99,65 @@ describe('differential: eager vs compiled (CPU + WASM)', () => {
     }
   }
 });
+
+const SPECIAL = [
+  { name: 'div_self_zero', data: [0, 2, 0, 3], fwd: (x) => div(x, x) },
+  { name: 'div_self_inf', data: [Infinity, 2, 3, 4], fwd: (x) => div(x, x) },
+  { name: 'sub_self_inf', data: [Infinity, 1, -Infinity, 2], fwd: (x) => sub(x, x) },
+  { name: 'sub_self_nan', data: [NaN, 1, 2, 3], fwd: (x) => sub(x, x) },
+  { name: 'exp_log_neg', data: [-1, -2, 0.5, 1], fwd: (x) => exp(log(x)) },
+  { name: 'div_self_relu', data: [-1, 2, -3, 4], fwd: (x) => { const r = relu(x); return div(r, r); } },
+  { name: 'mul_zero_inf', data: [Infinity, 1, NaN, 2], fwd: (x) => mul(x, sub(x, x)) },
+];
+
+function eqIEEE(a, b) {
+  if (Number.isNaN(a)) return Number.isNaN(b);
+  if (!Number.isFinite(a)) return a === b;
+  return Math.abs(a - b) / (1 + Math.abs(a)) < 1e-4;
+}
+
+describe('algebraic simplification is IEEE-sound: special values (eager == compiled)', () => {
+  for (const prog of SPECIAL) {
+    for (const [tname, makeTarget] of Object.entries(TARGETS)) {
+      it(`${prog.name} on ${tname} matches eager (no unsound x-x/x÷x/exp∘log rewrite)`, async () => {
+        const eager = flatten(prog.fwd(tensor(prog.data)));
+        const compiled = compile({ forward: prog.fwd }, [tensor(prog.data)], { target: makeTarget() });
+        const out = flatten(await compiled(tensor(prog.data)));
+        expect(out.length).toBe(eager.length);
+        for (let i = 0; i < eager.length; i++) {
+          expect(eqIEEE(eager[i], out[i]), `${prog.name}/${tname} idx ${i}: eager=${eager[i]} compiled=${out[i]}`).toBe(true);
+        }
+      });
+    }
+  }
+});
+
+const A4x3 = [[1, 2, 0.5], [3, -1, 2], [0.5, 1, -2], [2, 0, 1]];
+const W3x5 = [[1, 0, 2, 1, 0.5], [0.5, 1, 0, 2, 1], [2, 1, 1, 0, 0.5]];
+const BIAS5 = [0.1, 0.2, -0.3, 0.4, 0.5];
+const EPILOGUE = [
+  { name: 'matmul_bias', ins: [A4x3, W3x5, BIAS5], fwd: (x, w, b) => add(matmul(x, w), b) },
+  { name: 'matmul_bias_relu', ins: [A4x3, W3x5, BIAS5], fwd: (x, w, b) => relu(add(matmul(x, w), b)) },
+  { name: 'matmul_bias_tanh', ins: [A4x3, W3x5, BIAS5], fwd: (x, w, b) => tanh(add(matmul(x, w), b)) },
+  { name: 'matmul_relu', ins: [A4x3, W3x5], fwd: (x, w) => relu(matmul(x, w)) },
+  { name: 'matmul_scale_bias', ins: [A4x3, W3x5, BIAS5], fwd: (x, w, b) => add(mul(matmul(x, w), tensor([2])), b) },
+  { name: 'matmul_bias_exp_neg', ins: [A4x3, W3x5, BIAS5], fwd: (x, w, b) => neg(exp(add(matmul(x, w), b))) },
+];
+
+describe('epilogue fusion (forced on) matches eager — LIR accumulator must not hoist loop-var-dependent index', () => {
+  for (const prog of EPILOGUE) {
+    for (const [tname, makeTarget] of [['cpu', CPUTarget], ['wasm', WasmTarget]]) {
+      it(`${prog.name} on ${tname} matches eager`, async () => {
+        const eager = flatten(prog.fwd(...prog.ins.map((d) => tensor(d))));
+        const target = makeTarget({ enableEpilogueFusion: true });
+        const compiled = compile({ forward: prog.fwd }, prog.ins.map((d) => tensor(d)), { target, fusion: { strategy: 'xla', epilogue: true } });
+        const out = flatten(await compiled(...prog.ins.map((d) => tensor(d))));
+        expect(out.length).toBe(eager.length);
+        for (let i = 0; i < eager.length; i++) {
+          const relErr = Math.abs(eager[i] - out[i]) / (1 + Math.abs(eager[i]));
+          expect(relErr, `${prog.name}/${tname} idx ${i}: eager=${eager[i]} compiled=${out[i]}`).toBeLessThan(3e-3);
+        }
+      });
+    }
+  }
+});

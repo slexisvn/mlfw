@@ -3,6 +3,7 @@ import { Module } from '../nn/module.js';
 import { LightningModule } from '../lightning/core/module.js';
 import { Metric } from '../lightning/metrics/metric.js';
 import { Tensor } from '../tensor/core/tensor.js';
+import { setDefaultDevice, WASM_DEVICE } from '../tensor/types/device.js';
 import { SymbolicTensor } from '../tracing/symbolic_tensor.js';
 import { compile as tracingCompile } from '../tracing/compile.js';
 import { TraceLevel } from '../compiler/pipeline/trace.js';
@@ -32,6 +33,7 @@ class Environment {
 export class TeraRuntime {
   constructor({ output = console.log } = {}) {
     this.output = output;
+    setDefaultDevice(WASM_DEVICE);
     this.global = new Environment();
     this.signatureRegistry = new SignatureRegistry();
     this._installBuiltins();
@@ -121,7 +123,9 @@ export class TeraRuntime {
       if (node.type === 'Member') {
         const object = await this.evaluateExpression(node.object, env);
         const value = object[node.property];
-        return typeof value === 'function' ? value.bind(object) : value;
+        if (typeof value !== 'function') return value;
+        if (isTensorValue(object)) return bindTensorMethod(object, value);
+        return value.bind(object);
       }
       if (node.type === 'Index') return await this.evaluateIndex(node, env);
       if (node.type === 'Call') return await this.evaluateCall(node, env);
@@ -430,7 +434,7 @@ export class TeraRuntime {
       throw new Error('compile() input must be a tensor, for example compile(model, input=x)');
     }
 
-    const targetName = named.target ?? 'cpu';
+    const targetName = named.target ?? 'wasm';
     const target = targetName === 'gpu' ? fw.GPUTarget() : targetName === 'wasm' ? fw.WasmTarget() : targetName === 'webgpu' ? fw.WebGPUTarget() : fw.CPUTarget();
     const debug = named.debug ?? false;
     const showSnippet = named.snippet ?? false;
@@ -478,6 +482,20 @@ export class TeraRuntime {
 
 function isTensorValue(value) {
   return value instanceof Tensor || value instanceof SymbolicTensor;
+}
+
+function bindTensorMethod(object, fn) {
+  return (...args) => {
+    const last = args[args.length - 1];
+    if (last && last.__named) {
+      args.pop();
+      const dim = last.axis ?? last.dim;
+      const keep = last.keep ?? last.keepdim;
+      if (dim !== undefined) args.push(dim);
+      if (keep !== undefined) args.push(keep);
+    }
+    return fn.apply(object, args);
+  };
 }
 
 function promoteScalars(left, right) {

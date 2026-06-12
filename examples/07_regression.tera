@@ -50,6 +50,6 @@ trainer.fit(net, train_loader, val_loader)
 # Evaluate
 net.eval()
 pred = net(x_val)
-mae = mean(abs(pred - y_val))
+mae = (pred - y_val).abs().mean()
 print("=== Regression: y = 2*x1 + 3*x2 + 1 ===")
 print("Validation MAE:", mae)

@@ -5,7 +5,7 @@ const THEME_KEY = 'mlfw-notebook-theme';
 
 const KEYWORDS = [
   'model', 'forward', 'train', 'validate', 'optimizer', 'return', 'fn',
-  'if', 'elif', 'else', 'for', 'in', 'while', 'break', 'continue',
+  'if', 'else', 'for', 'in', 'while', 'break', 'continue',
   'and', 'or', 'not', 'true', 'false', 'null',
 ];
 const KEYWORD_SET = new Set(KEYWORDS);
@@ -13,14 +13,10 @@ const KEYWORD_SET = new Set(KEYWORDS);
 const BUILTIN_SET = new Set([
   'tensor', 'zeros', 'ones', 'empty', 'full', 'randn', 'arange', 'eye', 'linspace', 'randperm',
   'zerosLike', 'onesLike', 'emptyLike', 'fullLike', 'randnLike',
-  'add', 'sub', 'mul', 'div', 'neg', 'pow', 'remainder', 'maximum', 'minimum',
-  'exp', 'log', 'sqrt', 'rsqrt', 'abs', 'sin', 'cos', 'tanh', 'sigmoid', 'relu',
-  'gelu', 'silu', 'sign', 'floor', 'ceil', 'eq', 'ne', 'lt', 'le', 'gt', 'ge',
-  'where', 'matmul', 'dot', 'cat', 'stack', 'clone', 'softmax', 'log_softmax',
-  'sum', 'mean', 'max', 'min', 'argmax', 'argmin', 'prod',
-  'reshape', 'transpose', 'permute', 'expand', 'slice', 'unsqueeze', 'squeeze',
-  'narrow', 'select', 'contiguous', 'detach', 'requires_grad', 'grad', 'backward',
-  'range', 'len', 'shape', 'dtype', 'print', 'trace', 'graph', 'compile',
+  'where', 'cat', 'stack',
+  'sum', 'min', 'max', 'avg', 'count', 'countStar',
+  'DataFrame', 'col', 'lit', 'expr',
+  'range', 'print', 'trace', 'graph', 'compile',
 ]);
 
 const TOKEN_RE = /#[^\n]*|"(?:\\.|[^"\n])*"|'(?:\\.|[^'\n])*'|\b\d+(?:\.\d+)?\b|[A-Za-z_]\w*/g;
@@ -34,10 +30,25 @@ function escapeHtml(s) {
   return s.replace(/[&<>]/g, (c) => (c === '&' ? '&amp;' : c === '<' ? '&lt;' : '&gt;'));
 }
 
-function tokenClass(tok) {
+function nonSpaceBefore(code, index) {
+  let i = index - 1;
+  while (i >= 0 && (code[i] === ' ' || code[i] === '\t')) i--;
+  return i >= 0 ? code[i] : '';
+}
+
+function nonSpaceAfter(code, index) {
+  let i = index;
+  while (i < code.length && (code[i] === ' ' || code[i] === '\t')) i++;
+  return i < code.length ? code[i] : '';
+}
+
+function tokenClass(tok, code, index) {
   if (tok[0] === '#') return 'tok-com';
   if (tok[0] === '"' || tok[0] === "'") return 'tok-str';
   if (tok[0] >= '0' && tok[0] <= '9') return 'tok-num';
+  if (nonSpaceBefore(code, index) === '.') {
+    return nonSpaceAfter(code, index + tok.length) === '(' ? 'tok-method' : 'tok-prop';
+  }
   if (KEYWORD_SET.has(tok)) return 'tok-kw';
   if (BUILTIN_SET.has(tok)) return 'tok-builtin';
   if (tok[0] >= 'A' && tok[0] <= 'Z') return 'tok-type';
@@ -51,7 +62,7 @@ function highlightHtml(code) {
   TOKEN_RE.lastIndex = 0;
   while ((m = TOKEN_RE.exec(code))) {
     out += escapeHtml(code.slice(last, m.index));
-    const cls = tokenClass(m[0]);
+    const cls = tokenClass(m[0], code, m.index);
     out += cls ? `<span class="${cls}">${escapeHtml(m[0])}</span>` : escapeHtml(m[0]);
     last = m.index + m[0].length;
   }
@@ -66,8 +77,8 @@ function highlight(cell) {
 
 const SEED = [
   `a = tensor([[1, 2], [3, 4]])\nb = tensor([[5, 6], [7, 8]])\na @ b`,
-  `x = randn([3, 4])\nprint(shape(x))\nmean(relu(x))`,
-  `model MLP(input, hidden, output):\n  fc1 = Linear(input, hidden)\n  fc2 = Linear(hidden, output)\n\n  forward x:\n    x = relu(fc1(x))\n    return fc2(x)\n\nnet = MLP(2, 4, 1)\nnet(randn([8, 2]))`,
+  `x = randn([3, 4])\nprint(x.shape)\nx.relu().mean()`,
+  `model MLP(input, hidden, output):\n  fc1 = Linear(input, hidden)\n  fc2 = Linear(hidden, output)\n\n  forward x:\n    x = fc1(x).relu()\n    return fc2(x)\n\nnet = MLP(2, 4, 1)\nnet(randn([8, 2]))`,
   `fn fib(n):\n  if n < 2:\n    return n\n  return fib(n - 1) + fib(n - 2)\n\nfib(12)`,
 ];
 
@@ -551,6 +562,7 @@ function acceptAutocomplete(i = ac.index) {
 }
 
 const docs = new Map();
+const memberDocs = new Map();
 let hoverEl = null;
 
 async function loadDocs() {
@@ -568,6 +580,16 @@ async function loadDocs() {
     for (const [group, names] of Object.entries(data.keywordGroups || {})) {
       for (const name of names) {
         if (!docs.has(name)) docs.set(name, { display: name, kind: group + ' keyword', description: null });
+      }
+    }
+    for (const [typeName, methods] of Object.entries(data.pseudoTypes || {})) {
+      for (const m of methods) {
+        if (memberDocs.has(m.name)) continue;
+        memberDocs.set(m.name, {
+          display: typeName + '.' + ((m.signature && m.signature.display) || m.name),
+          kind: (m.isGetter ? 'property of ' : 'method of ') + typeName,
+          description: m.description || null,
+        });
       }
     }
   } catch { /* hover docs unavailable */ }
@@ -627,7 +649,8 @@ function onEditorHover(e, cell) {
   const span = spanAtPoint(cell.pre, e.clientX, e.clientY);
   if (!span) { hideHover(); return; }
   if (span === hoverSpan && hoverEl && hoverEl.style.display === 'block') return;
-  const info = docs.get(span.textContent);
+  const isMember = span.classList.contains('tok-method') || span.classList.contains('tok-prop');
+  const info = isMember ? memberDocs.get(span.textContent) : docs.get(span.textContent);
   if (!info) { hideHover(); return; }
   hoverSpan = span;
   showHoverAt(info, span.getBoundingClientRect());

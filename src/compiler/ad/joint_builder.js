@@ -4,6 +4,7 @@ import { UseDefAnalysis } from '../analysis/use_def.js';
 import { GradAccumulator } from './grad_accumulator.js';
 import { getVJPRule } from './vjp_registry.js';
 import { RematPolicy } from './remat_policy.js';
+import { reduceGradToOperandShape } from './backward_builder.js';
 
 export class JointGraphBuilder {
   constructor(opts = {}) {
@@ -120,7 +121,7 @@ export class JointGraphBuilder {
         if (o >= gradInputs.length || !gradInputs[o]) continue;
         const operandVal = op.getOperand(o);
         if (!needsGrad.has(operandVal.id)) continue;
-        accumulator.accumulate(operandVal.id, gradInputs[o]);
+        accumulator.accumulate(operandVal.id, reduceGradToOperandShape(builder, gradInputs[o], operandVal.type.shape));
       }
     }
 
@@ -303,7 +304,7 @@ export class JointGraphBuilder {
           if (o >= gradInputs.length || !gradInputs[o]) continue;
           const operandVal = op.getOperand(o);
           if (!needsGrad.has(operandVal.id)) continue;
-          accumulator.accumulate(operandVal.id, gradInputs[o]);
+          accumulator.accumulate(operandVal.id, reduceGradToOperandShape(builder, gradInputs[o], operandVal.type.shape));
         }
       }
     }

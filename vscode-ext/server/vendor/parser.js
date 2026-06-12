@@ -90,7 +90,8 @@ class Parser {
     const body = this.parseBlock();
     const elifs = [];
     this.skipLines();
-    while (this.atIdentifier('elif')) {
+    while (this.atIdentifier('else') && this.peek(1).type === 'identifier' && this.peek(1).value === 'if') {
+      this.next();
       this.next();
       const elifCond = this.parseExpression();
       const elifBody = this.parseBlock();
@@ -331,7 +332,7 @@ class Parser {
   peek(n) { return this.tokens[this.pos + n] || this.tokens[this.tokens.length - 1]; }
   next() { return this.tokens[this.pos++]; }
   at(type) { return this.current().type === type; }
-  atValue(value) { return this.current().value === value; }
+  atValue(value) { const tok = this.current(); return tok.type !== 'string' && tok.value === value; }
   atIdentifier(value) { return this.at('identifier') && this.atValue(value); }
   matchValue(value) { if (this.atValue(value)) { this.next(); return true; } return false; }
   expect(type) {

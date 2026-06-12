@@ -19,6 +19,7 @@ export function buildLanguageData({ keywords, keywordGroups, operators, builtins
       methods: (b.methods ?? []).map(m => ({
         name: m.name,
         description: m.description ?? null,
+        returns: m.returns ?? null,
         signature: {
           params: m.params,
           display: formatDisplay(m.name, m.params, b.kind),
@@ -34,9 +35,11 @@ function serializePseudoTypeMethods(types) {
     out[name] = (entry.methods ?? []).map(m => ({
       name: m.name,
       description: m.description ?? null,
+      returns: m.returns ?? null,
+      isGetter: m.isGetter ?? false,
       signature: {
         params: m.params,
-        display: formatDisplay(m.name, m.params, 'method'),
+        display: m.isGetter ? m.name : formatDisplay(m.name, m.params, 'method'),
       },
     }));
   }

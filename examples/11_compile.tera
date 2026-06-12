@@ -5,13 +5,13 @@ model MLP():
   fc1 = Linear(16, 64)
   fc2 = Linear(64, 16)
   forward x:
-    return fc2(relu(fc1(x)))
+    return fc2(fc1(x).relu())
 
 net = MLP()
 x = randn([8, 16])
 
 print("=== Model ===")
-print("eager output:", shape(net(x)))
+print("eager output:", net(x).shape)
 
 # Compile to the CPU backend
 compiled = compile(net, input=x, target=cpu)

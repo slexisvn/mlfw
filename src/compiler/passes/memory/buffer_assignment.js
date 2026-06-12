@@ -83,6 +83,22 @@ export class BufferAssignment {
       this.inplaceMap.set(candidate.dstBuffer, candidate.srcBuffer);
     }
 
+    const ivByBuf = new Map();
+    for (const iv of intervals) ivByBuf.set(iv.buffer, iv);
+    const effLastUse = new Map();
+    for (const iv of intervals) effLastUse.set(iv.buffer, iv.lastUse);
+    for (const [dst] of this.inplaceMap) {
+      const dstIv = ivByBuf.get(dst);
+      if (!dstIv) continue;
+      let cur = this.inplaceMap.get(dst);
+      const seen = new Set();
+      while (cur && ivByBuf.has(cur) && !seen.has(cur)) {
+        seen.add(cur);
+        if (dstIv.lastUse > effLastUse.get(cur)) effLastUse.set(cur, dstIv.lastUse);
+        cur = this.inplaceMap.get(cur);
+      }
+    }
+
     const sorted = [...intervals].sort((a, b) => {
       const aSize = a.size;
       const bSize = b.size;
@@ -142,7 +158,8 @@ export class BufferAssignment {
       const active = activeByScope.get(scope);
 
       for (let i = active.length - 1; i >= 0; i--) {
-        if (active[i].interval.lastUse < interval.firstUse) {
+        const eff = effLastUse.get(active[i].interval.buffer) ?? active[i].interval.lastUse;
+        if (eff < interval.firstUse) {
           pool.release(active[i].block);
           active.splice(i, 1);
         }

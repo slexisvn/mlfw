@@ -61,110 +61,8 @@ Constant-filled tensor matching the shape, dtype, and device of the input.
 ## randnLike(tensor)
 Standard-normal sample with the same shape, dtype, and device as the input.
 
-## add(a, b)
-Element-wise addition. Broadcasts shapes; scalars are auto-promoted.
-
-## sub(a, b)
-Element-wise subtraction.
-
-## mul(a, b)
-Element-wise multiplication (Hadamard product).
-
-## div(a, b)
-Element-wise division.
-
-## neg(x)
-Element-wise unary negation.
-
-## pow(x, y)
-Element-wise power. `pow(x, y) = x ** y`.
-
-## remainder(a, b)
-Element-wise floored remainder (sign follows divisor).
-
-## maximum(a, b)
-Element-wise maximum of two tensors.
-
-## minimum(a, b)
-Element-wise minimum of two tensors.
-
-## exp(x)
-Element-wise natural exponential `e^x`.
-
-## log(x)
-Element-wise natural logarithm.
-
-## sqrt(x)
-Element-wise square root.
-
-## rsqrt(x)
-Element-wise reciprocal square root `1/√x`.
-
-## abs(x)
-Element-wise absolute value.
-
-## sin(x)
-Element-wise sine.
-
-## cos(x)
-Element-wise cosine.
-
-## tanh(x)
-Element-wise hyperbolic tangent.
-
-## sigmoid(x)
-Element-wise logistic sigmoid `1/(1+e^-x)`.
-
-## relu(x)
-Rectified linear unit: `max(0, x)`.
-
-## gelu(x)
-Gaussian Error Linear Unit activation.
-
-## silu(x)
-SiLU/Swish activation: `x * sigmoid(x)`.
-
-## sign(x)
-Element-wise sign: `-1`, `0`, or `+1`.
-
-## floor(x)
-Element-wise floor (round toward `-∞`).
-
-## ceil(x)
-Element-wise ceiling (round toward `+∞`).
-
-## softmax(x, axis=-1)
-Softmax along the specified dimension. Normalizes to a probability distribution.
-
-## log_softmax(x, axis=-1)
-Logarithm of softmax, numerically stable.
-
-## eq(a, b)
-Element-wise equality comparison. Returns a boolean tensor.
-
-## ne(a, b)
-Element-wise inequality comparison.
-
-## lt(a, b)
-Element-wise less-than comparison.
-
-## le(a, b)
-Element-wise less-than-or-equal comparison.
-
-## gt(a, b)
-Element-wise greater-than comparison.
-
-## ge(a, b)
-Element-wise greater-than-or-equal comparison.
-
 ## where(condition, a, b)
 Element-wise conditional selection: pick from `a` where `condition` is true, else from `b`.
-
-## matmul(a, b)
-Matrix multiplication. Same as the `@` operator. Supports broadcasting on leading batch dimensions.
-
-## dot(a, b)
-Inner (dot) product of two 1-D tensors.
 
 ## cat(tensors, axis=0)
 Concatenate tensors along an existing dimension.
@@ -172,83 +70,17 @@ Concatenate tensors along an existing dimension.
 ## stack(tensors, axis=0)
 Stack tensors along a new dimension.
 
-## clone(tensor)
-Return a deep copy of the tensor (separate storage).
+## sum(column) {function}
+Aggregate `Column` computing the sum of a column within a `groupBy(...).agg(...)`.
 
-## sum(input, axis?, keep?)
-Reduce-sum across `axis` (or all elements when `axis` is omitted). `keep=true` preserves the reduced dimension.
+## max(column) {function}
+Aggregate `Column` computing the maximum of a column within a `groupBy(...).agg(...)`.
 
-## mean(input, axis?, keep?)
-Arithmetic mean across `axis` (or all elements).
-
-## max(input, axis?, keep?)
-Maximum value across `axis` (or whole tensor).
-
-## min(input, axis?, keep?)
-Minimum value across `axis` (or whole tensor).
-
-## argmax(input, axis?, keep?)
-Index of the maximum along `axis`.
-
-## argmin(input, axis?, keep?)
-Index of the minimum along `axis`.
-
-## prod(input, axis?, keep?)
-Product of elements across `axis`.
-
-## reshape(tensor, shape)
-Change shape without copying data. Total element count must match.
-
-## transpose(tensor, dim0, dim1)
-Swap two dimensions of the tensor.
-
-## permute(tensor, dims)
-Reorder all dimensions according to a permutation list.
-
-## expand(tensor, shape)
-Broadcast a tensor to a larger shape without copying memory.
-
-## slice(tensor, dim, start, end, step=1)
-View a contiguous slice along `dim` from `start` to `end` (exclusive) with optional `step`.
-
-## unsqueeze(tensor, dim)
-Insert a size-1 dimension at `dim`.
-
-## squeeze(tensor, dim)
-Remove a size-1 dimension at `dim`.
-
-## narrow(tensor, dim, start, length)
-Take `length` elements starting at `start` along `dim`.
-
-## select(tensor, dim, index)
-Pick a single index along `dim`, removing that dimension.
-
-## contiguous(tensor)
-Return a tensor with row-major contiguous memory layout. Materializes views.
-
-## detach(tensor)
-Detach a tensor from the autograd graph; the result shares storage but has no gradient.
-
-## requires_grad(tensor, flag=true)
-Set or query whether a tensor accumulates gradients.
-
-## grad(tensor)
-Read the accumulated gradient of a leaf tensor.
-
-## backward(tensor, gradient?)
-Propagate gradients backward from the given tensor.
+## min(column) {function}
+Aggregate `Column` computing the minimum of a column within a `groupBy(...).agg(...)`.
 
 ## range(start, stop?, step?)
 Python-style integer range: returns an array `[start..stop)` with optional `step`.
-
-## len(value)
-Length of an array, string, or first dimension of a tensor.
-
-## shape(tensor)
-Return the shape (size-per-dimension array) of a tensor.
-
-## dtype(tensor)
-Return the dtype string of a tensor.
 
 ## print(...values, sep=" ")
 Print one or more values to the runtime output, separated by `sep`.
@@ -405,9 +237,9 @@ Standardize a tensor along `axis`: subtract mean and divide by standard deviatio
 ## train_test_split(data, test_size=0.2)
 Split a tensor into train/test partitions along the first dimension.
 
-## dataframe(columns) {data}
+## DataFrame(columns) {data}
 Build a lazy `DataFrame` from named column arrays, one named argument per
-column: `dataframe(name=["a", "b"], age=[30, 40])`. Column types are inferred
+column: `DataFrame(name=["a", "b"], age=[30, 40])`. Column types are inferred
 from the values. The frame records a query plan and is only executed when
 materialized with `collect`, `toArray`, `count`, `show`, or `chunks`.
 
@@ -613,53 +445,182 @@ These don't correspond to a builtin call but capture the type of common results.
 
 ## $Tensor
 
-### shape()
+### shape
 Return the shape (size-per-dimension array) of the tensor.
 
-### dtype()
+### dtype
 Return the dtype string of the tensor.
 
-### reshape(shape)
+### reshape(shape) -> Tensor
 Return a view with the given shape; total element count must match.
 
-### transpose(dim0, dim1)
+### transpose(dim0, dim1) -> Tensor
 Swap two dimensions.
 
-### permute(dims)
+### permute(dims) -> Tensor
 Reorder all dimensions per the permutation list.
 
-### expand(shape)
+### expand(shape) -> Tensor
 Broadcast to a larger shape without copying memory.
 
-### slice(dim, start, end, step=1)
+### slice(dim, start, end, step=1) -> Tensor
 View a contiguous slice along the given dimension.
 
-### unsqueeze(dim)
+### unsqueeze(dim) -> Tensor
 Insert a size-1 dimension at the given position.
 
-### squeeze(dim)
+### squeeze(dim) -> Tensor
 Remove a size-1 dimension at the given position.
 
-### narrow(dim, start, length)
+### narrow(dim, start, length) -> Tensor
 Take `length` elements starting at `start` along `dim`.
 
-### select(dim, index)
+### select(dim, index) -> Tensor
 Select a single index along `dim`, removing that dimension.
 
-### contiguous()
+### contiguous() -> Tensor
 Return a row-major contiguous copy of the tensor.
 
-### detach()
+### detach() -> Tensor
 Return a copy detached from the autograd graph.
 
-### backward(gradient?)
+### backward(gradient?) -> Tensor
 Propagate gradients backward from this tensor.
 
-### requires_grad(flag=true)
+### requires_grad(flag=true) -> Tensor
 Enable or disable gradient tracking on this tensor.
 
-### grad()
+### grad
 Read the accumulated gradient of this leaf tensor.
+
+### length
+Total number of elements (numel).
+
+### neg() -> Tensor
+Element-wise unary negation.
+
+### exp() -> Tensor
+Element-wise natural exponential `e^x`.
+
+### log() -> Tensor
+Element-wise natural logarithm.
+
+### sqrt() -> Tensor
+Element-wise square root.
+
+### rsqrt() -> Tensor
+Element-wise reciprocal square root `1/√x`.
+
+### abs() -> Tensor
+Element-wise absolute value.
+
+### sin() -> Tensor
+Element-wise sine.
+
+### cos() -> Tensor
+Element-wise cosine.
+
+### tanh() -> Tensor
+Element-wise hyperbolic tangent.
+
+### sigmoid() -> Tensor
+Element-wise logistic sigmoid `1/(1+e^-x)`.
+
+### relu() -> Tensor
+Element-wise ReLU activation.
+
+### gelu() -> Tensor
+Gaussian Error Linear Unit activation.
+
+### silu() -> Tensor
+SiLU/Swish activation: `x * sigmoid(x)`.
+
+### sign() -> Tensor
+Element-wise sign: `-1`, `0`, or `+1`.
+
+### floor() -> Tensor
+Element-wise floor (round toward `-∞`).
+
+### ceil() -> Tensor
+Element-wise ceiling (round toward `+∞`).
+
+### clone() -> Tensor
+Return a deep copy of the tensor (separate storage).
+
+### add(other) -> Tensor
+Element-wise addition; scalars are auto-promoted.
+
+### sub(other) -> Tensor
+Element-wise subtraction; scalars are auto-promoted.
+
+### mul(other) -> Tensor
+Element-wise multiplication; scalars are auto-promoted.
+
+### div(other) -> Tensor
+Element-wise division; scalars are auto-promoted.
+
+### pow(exponent) -> Tensor
+Element-wise power `x ** exponent`.
+
+### remainder(other) -> Tensor
+Element-wise floored remainder (sign follows divisor).
+
+### maximum(other) -> Tensor
+Element-wise maximum of two tensors.
+
+### minimum(other) -> Tensor
+Element-wise minimum of two tensors.
+
+### eq(other) -> Tensor
+Element-wise equality comparison. Returns a boolean tensor.
+
+### ne(other) -> Tensor
+Element-wise inequality comparison.
+
+### lt(other) -> Tensor
+Element-wise less-than comparison.
+
+### le(other) -> Tensor
+Element-wise less-than-or-equal comparison.
+
+### gt(other) -> Tensor
+Element-wise greater-than comparison.
+
+### ge(other) -> Tensor
+Element-wise greater-than-or-equal comparison.
+
+### matmul(other) -> Tensor
+Matrix multiplication; broadcasts on leading batch dimensions.
+
+### dot(other) -> Tensor
+Inner (dot) product of two 1-D tensors.
+
+### sum(axis?, keep?) -> Tensor
+Sum over `axis` (or the whole tensor); `keep` retains reduced dims.
+
+### mean(axis?, keep?) -> Tensor
+Arithmetic mean over `axis` (or the whole tensor); `keep` retains reduced dims.
+
+### max(axis?, keep?) -> Tensor
+Maximum over `axis` (or the whole tensor); `keep` retains reduced dims.
+
+### min(axis?, keep?) -> Tensor
+Minimum over `axis` (or the whole tensor); `keep` retains reduced dims.
+
+### argmax(axis?, keep?) -> Tensor
+Index of the maximum along `axis`; `keep` retains reduced dims.
+
+### argmin(axis?, keep?) -> Tensor
+Index of the minimum along `axis`; `keep` retains reduced dims.
+
+### prod(axis?, keep?) -> Tensor
+Product of elements over `axis` (or the whole tensor); `keep` retains reduced dims.
+
+### softmax(axis=-1) -> Tensor
+Softmax along `axis`, normalizing to a probability distribution.
+
+### log_softmax(axis=-1) -> Tensor
+Logarithm of softmax along `axis`, numerically stable.
 
 ## $Model
 
@@ -669,10 +630,10 @@ Return the model's learnable parameter tensors.
 ### forward(*args)
 Run the model's forward block. Calling the model directly is equivalent.
 
-### train()
+### train() -> Model
 Set training mode.
 
-### eval()
+### eval() -> Model
 Set evaluation mode.
 
 ### state_dict()
@@ -692,43 +653,43 @@ Return the frame's schema (fields with names and data types).
 ### explain()
 Return the logical query plan as a human-readable string.
 
-### select(...columns)
+### select(...columns) -> DataFrame
 Project a new frame from the given columns or `Column` expressions.
 
-### filter(condition)
+### filter(condition) -> DataFrame
 Keep only rows matching a boolean `Column` (or SQL string) condition.
 
-### where(condition)
+### where(condition) -> DataFrame
 Alias for `filter`.
 
-### withColumn(name, column)
+### withColumn(name, column) -> DataFrame
 Return a new frame with an added or replaced column computed from `column`.
 
-### drop(...columns)
+### drop(...columns) -> DataFrame
 Return a new frame without the named columns.
 
-### groupBy(...columns)
+### groupBy(...columns) -> GroupedData
 Group rows by the given columns, returning a `GroupedData` for aggregation.
 
-### orderBy(...specs)
+### orderBy(...specs) -> DataFrame
 Sort rows. Each spec is a column name/`Column`, or `{ col, desc }` for ordering.
 
-### sort(...specs)
+### sort(...specs) -> DataFrame
 Alias for `orderBy`.
 
-### limit(count, offset=0)
+### limit(count, offset=0) -> DataFrame
 Return at most `count` rows, skipping the first `offset` rows.
 
-### distinct()
+### distinct() -> DataFrame
 Return a frame with duplicate rows removed.
 
-### union(other)
+### union(other) -> DataFrame
 Concatenate the rows of another frame with matching column types.
 
-### unionAll(other)
+### unionAll(other) -> DataFrame
 Concatenate rows of another frame, keeping duplicates.
 
-### join(other, on, how="INNER")
+### join(other, on, how="INNER") -> DataFrame
 Join with another frame on one or more key columns. `how` is one of
 `INNER`, `LEFT`, `RIGHT`, or `FULL`.
 
@@ -760,71 +721,71 @@ classes_array]`. Pass `classes=` to reuse ids fitted on another frame.
 
 ## $GroupedData
 
-### agg(...columns)
+### agg(...columns) -> DataFrame
 Apply aggregate `Column` expressions (e.g. `sum`, `avg`, `count`) over each
 group, returning a `DataFrame` of group keys and aggregates.
 
 ## $Column
 
-### alias(name)
+### alias(name) -> Column
 Rename the column's output to `name`.
 
-### as(name)
+### as(name) -> Column
 Alias for `alias`.
 
-### add(other)
+### add(other) -> Column
 Arithmetic addition with another column or value.
 
-### sub(other)
+### sub(other) -> Column
 Arithmetic subtraction with another column or value.
 
-### mul(other)
+### mul(other) -> Column
 Arithmetic multiplication with another column or value.
 
-### div(other)
+### div(other) -> Column
 Arithmetic division with another column or value.
 
-### eq(other)
+### eq(other) -> Column
 Equality comparison, producing a boolean column.
 
-### ne(other)
+### ne(other) -> Column
 Inequality comparison, producing a boolean column.
 
-### lt(other)
+### lt(other) -> Column
 Less-than comparison, producing a boolean column.
 
-### le(other)
+### le(other) -> Column
 Less-than-or-equal comparison, producing a boolean column.
 
-### gt(other)
+### gt(other) -> Column
 Greater-than comparison, producing a boolean column.
 
-### ge(other)
+### ge(other) -> Column
 Greater-than-or-equal comparison, producing a boolean column.
 
-### and(other)
+### and(other) -> Column
 Logical AND of two boolean columns.
 
-### or(other)
+### or(other) -> Column
 Logical OR of two boolean columns.
 
-### not()
+### not() -> Column
 Logical negation of a boolean column.
 
-### isNull()
+### isNull() -> Column
 True where the column value is null.
 
-### isNotNull()
+### isNotNull() -> Column
 True where the column value is not null.
 
-### like(pattern)
+### like(pattern) -> Column
 SQL `LIKE` match against a string pattern.
 
-### between(low, high)
+### between(low, high) -> Column
 True where the value lies in the inclusive range `[low, high]`.
 
-### isin(...values)
+### isin(...values) -> Column
 True where the value is one of the given values.
 
-### cast(targetType)
+### cast(targetType) -> Column
 Cast the column to another data type.

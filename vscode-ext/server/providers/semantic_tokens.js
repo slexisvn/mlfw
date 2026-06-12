@@ -5,7 +5,7 @@ export const id = 'semanticTokens';
 export const legend = {
   tokenTypes: [
     'namespace', 'class', 'enumMember', 'parameter', 'variable',
-    'function', 'keyword',
+    'function', 'keyword', 'method',
   ],
   tokenModifiers: ['declaration'],
 };
@@ -50,16 +50,29 @@ function buildTokens(doc, languageData, legend) {
   for (const s of doc.symbols.flat) symbolByName.set(s.name, s);
 
   const tokens = doc.tokens ?? [];
-  for (const tok of tokens) {
+  let callDepth = 0;
+  for (let i = 0; i < tokens.length; i++) {
+    const tok = tokens[i];
+    if (tok.value === '(' || tok.value === '[') callDepth++;
+    else if (tok.value === ')' || tok.value === ']') callDepth = Math.max(0, callDepth - 1);
     if (tok.type !== 'identifier') continue;
-    const builtin = builtinByName.get(tok.value);
-    const type = builtin
-      ? KIND_TO_TYPE[builtin.kind]
-      : KIND_TO_TYPE[symbolByName.get(tok.value)?.kind];
+    const type = resolveTokenType(tokens, i, callDepth, builtinByName, symbolByName);
     if (!type) continue;
     const line = Math.max(0, tok.line - 1);
     const character = Math.max(0, tok.column - 1);
     builder.push(line, character, tok.value.length, typeIndex.get(type), 0);
   }
   return builder.build();
+}
+
+function resolveTokenType(tokens, i, callDepth, builtinByName, symbolByName) {
+  if (callDepth > 0 && tokens[i + 1]?.value === '=') return 'parameter';
+  if (tokens[i - 1]?.value === '.') return tokens[i + 1]?.value === '(' ? 'method' : null;
+  return resolveType(tokens[i].value, builtinByName, symbolByName);
+}
+
+function resolveType(name, builtinByName, symbolByName) {
+  const builtin = builtinByName.get(name);
+  if (builtin) return KIND_TO_TYPE[builtin.kind];
+  return KIND_TO_TYPE[symbolByName.get(name)?.kind];
 }

@@ -50,6 +50,11 @@ export function installOps(TensorClass) {
   proto.dot = function(other) { return ops.dot(this, other); };
   proto.mm = function(other) { return ops.matmul(this, other); };
 
+  proto.softmax = function(dim = -1) { return ops.softmax(this, dim); };
+  proto.log_softmax = function(dim = -1) { return ops.log_softmax(this, dim); };
+
+  proto.requires_grad = function(flag = true) { return this.requiresGrad_(flag); };
+
   proto.clone = function() { return ops.clone(this); };
 
   proto.roll = function(shift, dim = 0) { return composite.roll(this, shift, dim); };

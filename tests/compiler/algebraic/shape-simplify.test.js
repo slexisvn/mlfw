@@ -48,21 +48,23 @@ describe('ReshapeReshape in algebraic pass', () => {
 });
 
 describe('cross-pattern: reshape + arithmetic in algebraic', () => {
-  it('div(x,x) and reshape(reshape) both fire in same pass', () => {
+  it('add(x, 0) and reshape(reshape) both fire in same pass', () => {
     const t = new TensorType([4, 8], ScalarType.F32);
     const func = buildFunction('f', [t], [new TensorType([32], ScalarType.F32)], (b, args) => {
-      const d = b.div(args[0], args[0]);
+      const zero = b.scalarConstant(0, ScalarType.F32);
+      const d = b.add(args[0], zero.getResult(0));
       const r1 = b.reshape(d.getResult(0), [2, 16]);
       b.returnOp([b.reshape(r1.getResult(0), [32]).getResult(0)]);
     });
 
     run(func);
 
-    expect(func.findOp(op => op.opName === 'div')).toBeNull();
+    expect(func.findOp(op => op.opName === 'add')).toBeNull();
 
     const live = retVal(func).definingOp;
     expect(live.opName).toBe('reshape');
     expect(live.getAttr('new_shape')).toEqual([32]);
+    expect(live.getOperand(0)).toBe(func.args[0]);
   });
 });
 
@@ -79,8 +81,8 @@ describe('AddZero and friends in algebraic context', () => {
     expect(retVal(func)).toBe(func.args[0]);
   });
 
-  it('sub(x, x) produces zero in algebraic pass', () => {
-    const t = new TensorType([4], ScalarType.F32);
+  it('sub(x, x) produces zero in algebraic pass (int only)', () => {
+    const t = new TensorType([4], ScalarType.I32);
     const func = buildFunction('f', [t], [t], (b, args) => {
       b.returnOp([b.sub(args[0], args[0]).getResult(0)]);
     });
@@ -90,10 +92,10 @@ describe('AddZero and friends in algebraic context', () => {
     expect(func.findOp(op => op.opName === 'sub')).toBeNull();
   });
 
-  it('mul(x, 0) annihilates in algebraic pass', () => {
-    const t = new TensorType([4], ScalarType.F32);
+  it('mul(x, 0) annihilates in algebraic pass (int only)', () => {
+    const t = new TensorType([4], ScalarType.I32);
     const func = buildFunction('f', [t], [t], (b, args) => {
-      const zero = b.scalarConstant(0, ScalarType.F32);
+      const zero = b.scalarConstant(0, ScalarType.I32);
       b.returnOp([b.mul(args[0], zero.getResult(0)).getResult(0)]);
     });
 

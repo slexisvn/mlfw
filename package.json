@@ -13,6 +13,10 @@
     "#io/wasm_pool": {
       "browser": "./src/io/browser/wasm_pool.js",
       "default": "./src/io/node/wasm_pool.js"
+    },
+    "#plugins/query-engine": {
+      "browser": "./plugins/query-engine/query-engine.browser.js",
+      "default": "./plugins/query-engine/query-engine.node.js"
     }
   },
   "scripts": {

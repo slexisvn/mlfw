@@ -3,7 +3,7 @@
 # Covers Column ops: arithmetic (add/sub/mul/div), comparison (eq/ne/lt/le/gt/ge),
 #        logical (and/or/not), isNull/isNotNull, like, between, isin, cast, alias.
 
-products = dataframe(
+products = DataFrame(
   sku=["A-1", "A-2", "B-1", "B-2", "C-9"],
   category=["alpha", "alpha", "beta", "beta", "gamma"],
   price=[10.0, 25.0, 40.0, 5.0, 100.0],

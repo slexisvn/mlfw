@@ -156,14 +156,16 @@ function collectMemberCompletions(doc, member, position, languageData) {
   return methods.map(m => {
     const item = {
       label: m.name,
-      kind: CompletionItemKind.Method,
+      kind: m.isGetter ? CompletionItemKind.Property : CompletionItemKind.Method,
       detail: m.signature.display,
       sortText: `0_${m.name}`,
     };
     if (m.description) {
       item.documentation = { kind: 'markdown', value: m.description };
     }
-    if (m.signature.params.length) {
+    if (m.isGetter) {
+      item.insertText = m.name;
+    } else if (m.signature.params.length) {
       item.insertText = buildSnippet(m.name, m.signature.params);
       item.insertTextFormat = InsertTextFormat.Snippet;
     } else {

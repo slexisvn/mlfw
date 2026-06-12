@@ -85,7 +85,7 @@ const RETURNS_OVERRIDE = {
   encode: null,
   decode: null,
   train_test_split: null,
-  dataframe: 'DataFrame',
+  DataFrame: 'DataFrame',
   col: 'Column',
   lit: 'Column',
   expr: 'Column',

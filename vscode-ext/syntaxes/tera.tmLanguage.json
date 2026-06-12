@@ -90,7 +90,7 @@
         },
         {
           "name": "keyword.control.tera",
-          "match": "\\b(?:break|continue|elif|else|for|if|in|return|while)\\b"
+          "match": "\\b(?:break|continue|else|for|if|in|return|while)\\b"
         },
         {
           "name": "keyword.operator.logical.tera",
@@ -125,10 +125,6 @@
     "builtins": {
       "patterns": [
         {
-          "name": "support.function.tera",
-          "match": "\\b(?:abs|add|avg|cat|ceil|clone|col|cos|count|countStar|div|dot|eq|exp|expr|floor|ge|gelu|gt|le|lit|log|log_softmax|lt|matmul|maximum|minimum|mul|ne|neg|pow|relu|remainder|rsqrt|sigmoid|sign|silu|sin|softmax|sqrt|stack|sub|tanh|where|name)\\b"
-        },
-        {
           "name": "support.class.metric.tera",
           "match": "\\b(?:Accuracy|ConfusionMatrix|F1Score|MetricCollection|Precision|Recall)\\b"
         },
@@ -145,28 +141,24 @@
           "match": "\\b(?:arange|empty|emptyLike|eye|full|fullLike|linspace|ones|onesLike|randn|randnLike|randperm|tensor|zeros|zerosLike)\\b"
         },
         {
-          "name": "support.function.reduction.tera",
-          "match": "\\b(?:argmax|argmin|max|mean|min|prod|sum)\\b"
-        },
-        {
-          "name": "support.function.autograd.tera",
-          "match": "\\b(?:backward|detach|grad|requires_grad)\\b"
+          "name": "support.function.tera",
+          "match": "\\b(?:avg|col|count|countStar|expr|lit|max|min|sum|name|log)\\b"
         },
         {
           "name": "constant.language.dtype.tera",
           "match": "\\b(?:bool|f16|f32|f64|i32|i64)\\b"
         },
         {
+          "name": "support.function.tera",
+          "match": "\\b(?:cat|stack|where)\\b"
+        },
+        {
           "name": "support.function.utility.tera",
-          "match": "\\b(?:compile|dtype|graph|len|optim_config|print|range|shape|trace)\\b"
+          "match": "\\b(?:compile|graph|optim_config|print|range|trace)\\b"
         },
         {
           "name": "support.class.logger.tera",
           "match": "\\b(?:ConsoleLogger|CSVLogger)\\b"
-        },
-        {
-          "name": "support.function.shape.tera",
-          "match": "\\b(?:contiguous|expand|narrow|permute|reshape|select|slice|squeeze|transpose|unsqueeze)\\b"
         },
         {
           "name": "support.class.scheduler.tera",
@@ -178,7 +170,7 @@
         },
         {
           "name": "support.function.data.tera",
-          "match": "\\b(?:dataframe|DataLoader|decode|encode|load_csv|normalize|TensorDataset|train_test_split)\\b"
+          "match": "\\b(?:DataFrame|DataLoader|decode|encode|load_csv|normalize|TensorDataset|train_test_split)\\b"
         },
         {
           "name": "support.class.callback.tera",

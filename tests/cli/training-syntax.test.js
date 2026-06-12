@@ -197,7 +197,7 @@ describe('Builtins — training infrastructure', () => {
 x = tensor([[1, 2], [3, 4], [5, 6]])
 y = tensor([0, 1, 0])
 ds = TensorDataset(x, y)
-len(ds)
+ds.length
 `);
     expect(result).toBe(3);
   });
@@ -209,7 +209,7 @@ x = tensor([[1, 2], [3, 4]])
 y = tensor([0, 1])
 ds = TensorDataset(x, y)
 dl = DataLoader(ds, batch_size=2)
-len(dl)
+dl.length
 `);
     expect(result).toBe(1);
   });
@@ -536,7 +536,7 @@ model Net():
   loss_fn = CrossEntropyLoss()
 
   forward x:
-    return fc2(relu(fc1(x)))
+    return fc2(fc1(x).relu())
 
   train batch:
     x, y = batch

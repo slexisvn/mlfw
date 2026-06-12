@@ -229,7 +229,25 @@ export class FusionGroupBuilder {
     return false;
   }
 
+  _anyGroupMemberDependent(group, op) {
+    for (const member of group.ops) {
+      if (this._transitivelyDependent(member, op)) return true;
+    }
+    return false;
+  }
+
+  _transitivelyDependent(opA, opB) {
+    const posA = this._topoIndex.get(opA);
+    const posB = this._topoIndex.get(opB);
+    if (posA === undefined || posB === undefined) return false;
+    const [ancestor, descendant] = posA < posB ? [opA, opB] : [opB, opA];
+    return this._dependsOnOps(descendant, new Set([ancestor]), this._topoIndex.get(ancestor));
+  }
+
   buildHorizontalGroups(func) {
+    this._topoIndex = new Map();
+    let topoIdx = 0;
+    for (const op of func.ops()) this._topoIndex.set(op, topoIdx++);
     const groups = [];
     const opToGroup = new Map();
 
@@ -267,13 +285,13 @@ export class FusionGroupBuilder {
           if (opToGroup.has(op2)) continue;
           if (op2.numResults === 0) continue;
           if (!type1.equals(op2.getResult(0).type)) continue;
-          if (this._hasDependency(op1, op2) || this._hasDependency(op2, op1)) continue;
 
           const def2 = registry.get(op2.opName);
-          if (this._sharesInput(op1, op2) || (def1.isElementwise && def2 && def2.isElementwise)) {
-            group.addOp(op2);
-            opToGroup.set(op2, group);
-          }
+          if (!(this._sharesInput(op1, op2) || (def1.isElementwise && def2 && def2.isElementwise))) continue;
+          if (this._anyGroupMemberDependent(group, op2)) continue;
+
+          group.addOp(op2);
+          opToGroup.set(op2, group);
         }
 
         if (group.size >= 2) {
@@ -290,11 +308,12 @@ export class FusionGroupBuilder {
     const pcGroups = this.buildProducerConsumerGroups(func);
     const horizontalGroups = this.buildHorizontalGroups(func);
 
-    const fusedOps = new Set();
+    const opToRep = new Map();
     for (const g of pcGroups) {
-      for (const op of g.ops) fusedOps.add(op);
+      for (const op of g.ops) opToRep.set(op, g);
     }
 
+    const fusedOps = new Set(opToRep.keys());
     const result = [...pcGroups];
     for (const h of horizontalGroups) {
       let overlaps = false;
@@ -304,13 +323,65 @@ export class FusionGroupBuilder {
           break;
         }
       }
-      if (!overlaps) {
-        result.push(h);
-        for (const op of h.ops) fusedOps.add(op);
+      if (overlaps) continue;
+
+      for (const op of h.ops) opToRep.set(op, h);
+      if (this._condensedHasCycle(func, opToRep)) {
+        for (const op of h.ops) opToRep.delete(op);
+        continue;
       }
+      result.push(h);
+      for (const op of h.ops) fusedOps.add(op);
     }
 
     return result;
+  }
+
+  _condensedHasCycle(func, opToRep) {
+    const repOf = (op) => opToRep.get(op) || op;
+    const adj = new Map();
+    const nodes = new Set();
+    for (const op of func.ops()) {
+      const r = repOf(op);
+      nodes.add(r);
+      for (let i = 0; i < op.numOperands; i++) {
+        const def = op.getOperand(i).definingOp;
+        if (!def) continue;
+        const pr = repOf(def);
+        if (pr === r) continue;
+        nodes.add(pr);
+        let succ = adj.get(pr);
+        if (!succ) { succ = new Set(); adj.set(pr, succ); }
+        succ.add(r);
+      }
+    }
+
+    const WHITE = 0, GRAY = 1, BLACK = 2;
+    const color = new Map();
+    for (const n of nodes) color.set(n, WHITE);
+    for (const start of nodes) {
+      if (color.get(start) !== WHITE) continue;
+      const stack = [start];
+      while (stack.length > 0) {
+        const node = stack[stack.length - 1];
+        const c = color.get(node);
+        if (c === WHITE) {
+          color.set(node, GRAY);
+          const succ = adj.get(node);
+          if (succ) {
+            for (const m of succ) {
+              const mc = color.get(m);
+              if (mc === GRAY) return true;
+              if (mc === WHITE) stack.push(m);
+            }
+          }
+        } else {
+          if (c === GRAY) color.set(node, BLACK);
+          stack.pop();
+        }
+      }
+    }
+    return false;
   }
 
   _sharesInput(op1, op2) {

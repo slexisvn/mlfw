@@ -5,7 +5,7 @@ import { UseDefAnalysis } from '../analysis/use_def.js';
 import { GradAccumulator } from './grad_accumulator.js';
 import { getVJPRule } from './vjp_registry.js';
 
-function reduceGradToOperandShape(builder, grad, targetShape) {
+export function reduceGradToOperandShape(builder, grad, targetShape) {
   const gradShape = grad.type.shape;
   if (gradShape.length === targetShape.length && gradShape.every((d, i) => d === targetShape[i])) {
     return grad;

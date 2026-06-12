@@ -138,8 +138,8 @@ body {
   line-height: 1.6;
   tab-size: 2;
   padding: 12px 14px;
-  white-space: pre;
-  overflow-wrap: normal;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
   border: 0;
 }
 
@@ -162,11 +162,13 @@ body {
   background: transparent;
   color: transparent;
   caret-color: var(--text);
-  overflow-x: auto;
+  overflow-x: hidden;
 }
 
 .tok-kw { color: var(--c-kw); }
 .tok-builtin { color: var(--c-fn); }
+.tok-method { color: var(--c-fn); }
+.tok-prop { color: inherit; }
 .tok-num { color: var(--c-num); }
 .tok-str { color: var(--c-str); }
 .tok-com { color: var(--c-com); font-style: italic; }

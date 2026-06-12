@@ -3,13 +3,13 @@ import { TensorImpl } from '../core/tensor_impl.js';
 import { Storage } from '../core/storage.js';
 import { StorageImpl } from '../core/storage_impl.js';
 import { ScalarType, dtypeSize, typedArrayCtor } from '../types/dtype.js';
-import { CPU_DEVICE } from '../types/device.js';
+import { getDefaultDevice } from '../types/device.js';
 import { computeStrides, computeNumel } from '../utils/shape_utils.js';
 
 function _defaultOpts(opts) {
   return {
     dtype: opts?.dtype ?? ScalarType.F32,
-    device: opts?.device ?? CPU_DEVICE,
+    device: opts?.device ?? getDefaultDevice(),
     requiresGrad: opts?.requiresGrad ?? false,
   };
 }
@@ -103,7 +103,7 @@ export function eye(n, m, opts) {
 
 export function randperm(n, opts) {
   const dtype = opts?.dtype ?? ScalarType.I32;
-  const device = opts?.device ?? CPU_DEVICE;
+  const device = opts?.device ?? getDefaultDevice();
   const t = _makeTensor([n], dtype, device, opts?.requiresGrad ?? false);
   const data = t.data;
   for (let i = 0; i < n; i++) data[i] = i;

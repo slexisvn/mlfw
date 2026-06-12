@@ -13,8 +13,8 @@ model SelfAttention(d):
     q = wq(x)
     k = wk(x)
     v = wv(x)
-    scale = sqrt(tensor(d, dtype=f32))
-    attn = softmax((q @ transpose(k, 0, 1)) / scale)
+    scale = tensor(d, dtype=f32).sqrt()
+    attn = ((q @ k.transpose(0, 1)) / scale).softmax()
     return ln(x + wo(attn @ v))          # residual connection + layer norm
 
 model FeedForward(d):
@@ -23,7 +23,7 @@ model FeedForward(d):
   ln = LayerNorm([d])
 
   forward x:
-    return ln(x + down(gelu(up(x))))
+    return ln(x + down(up(x).gelu()))
 
 model EncoderBlock(d):
   attn = SelfAttention(d)
@@ -41,7 +41,7 @@ tokens = tensor([3, 15, 42, 7, 0, 99], dtype=i32)
 x = embed(tokens)                        # [seq, d]
 out = block(x)
 print("=== Transformer encoder ===")
-print("tokens:", shape(tokens), "-> embed:", shape(x), "-> out:", shape(out))
+print("tokens:", tokens.shape, "-> embed:", x.shape, "-> out:", out.shape)
 
 # Cross-attention: forward takes multiple inputs (query separate from context)
 model CrossAttention(d):
@@ -53,11 +53,11 @@ model CrossAttention(d):
     q = wq(query)
     k = wk(context)
     v = wv(context)
-    return softmax(q @ transpose(k, 0, 1)) @ v
+    return (q @ k.transpose(0, 1)).softmax() @ v
 
 cross = CrossAttention(d)
 y = cross(randn([4, d]), randn([6, d]))
-print("cross-attention:", shape(y))
+print("cross-attention:", y.shape)
 
 # Compile the encoder block
 compile(block, input=randn([8, d]), target=cpu)

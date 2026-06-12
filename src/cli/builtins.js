@@ -1,7 +1,8 @@
+import './qe_config.js';
 import * as fw from '../index.js';
 import * as ops from '../tensor/ops/ops.js';
 import { Tensor } from '../tensor/core/tensor.js';
-import { SymbolicTensor } from '../tracing/symbolic_tensor.js';
+import { CPU_DEVICE, GPU_DEVICE, WASM_DEVICE } from '../tensor/types/device.js';
 import { CompiledProgramView, formatTrace, formatValue, formatValueCompact } from './format.js';
 import { printModule } from '../compiler/ir/graph/printer.js';
 import { DataLoader, TensorDataset } from '../data/index.js';
@@ -10,7 +11,7 @@ import {
   createEngine, DataFrame, Col,
   col as qcol, lit as qlit, expr as qexpr,
   sum as qsum, avg as qavg, min as qmin, max as qmax, count as qcount, countStar as qcountStar,
-} from '../../plugins/query-engine/query-engine.node.js';
+} from '#plugins/query-engine';
 import { SGD, Adam, AdamW, StepLR, CosineAnnealingLR, ReduceLROnPlateau } from '../optim/index.js';
 import {
   Trainer, EarlyStopping, ModelCheckpoint, ProgressCallback,
@@ -24,18 +25,8 @@ const FACTORIES = [
   'zerosLike', 'onesLike', 'emptyLike', 'fullLike', 'randnLike',
 ];
 
-const FUNCTIONS = [
-  'add', 'sub', 'mul', 'div', 'neg', 'pow', 'remainder', 'maximum', 'minimum',
-  'exp', 'log', 'sqrt', 'rsqrt', 'abs', 'sin', 'cos', 'tanh', 'sigmoid', 'relu',
-  'gelu', 'silu', 'sign', 'floor', 'ceil', 'eq', 'ne', 'lt', 'le', 'gt', 'ge',
-  'where', 'matmul', 'dot', 'cat', 'stack', 'clone', 'softmax', 'log_softmax',
-];
-
-const REDUCTIONS = ['sum', 'mean', 'max', 'min', 'argmax', 'argmin', 'prod'];
-const BINARY_TENSOR_FUNCTIONS = new Set([
-  'add', 'sub', 'mul', 'div', 'pow', 'remainder', 'maximum', 'minimum',
-  'eq', 'ne', 'lt', 'le', 'gt', 'ge', 'matmul', 'dot',
-]);
+const FREE_TENSOR_FUNCTIONS = ['where', 'cat', 'stack'];
+const COLUMN_AGGREGATES = ['sum', 'min', 'max'];
 const MODULES = [
   'Linear', 'ReLU', 'GELU', 'SiLU', 'Sigmoid', 'Tanh', 'LeakyReLU', 'ELU',
   'Softmax', 'LogSoftmax', 'Flatten', 'Dropout', 'LayerNorm', 'BatchNorm1d',
@@ -115,43 +106,16 @@ DataFrame.prototype.encode = function (column, ...rest) {
 
 export function installBuiltins(runtime, define) {
   for (const name of FACTORIES) define(name, (...args) => callWithOptions(fw[name], args));
-  for (const name of FUNCTIONS) {
-    define(name, (...args) => {
-      if (BINARY_TENSOR_FUNCTIONS.has(name)) promoteScalarArgs(args);
-      return callWithOptions(fw[name] ?? ops[name], args);
-    });
-  }
-  for (const name of REDUCTIONS) {
-    define(name, (input, ...args) => {
-      const agg = AGG_FNS[name];
-      if (agg && isColumnArg(input)) return agg(input);
-      const named = takeNamed(args);
-      const axis = named.axis ?? args[0];
-      const keep = named.keep ?? false;
-      if (axis === undefined || axis === null) return fw[name](input);
-      return fw[name](input, axis, keep);
+  for (const name of FREE_TENSOR_FUNCTIONS) define(name, (...args) => callWithOptions(fw[name] ?? ops[name], args));
+  for (const name of COLUMN_AGGREGATES) {
+    define(name, input => {
+      if (!isColumnArg(input)) throw new Error(`${name}() expects a DataFrame column; call tensor.${name}() for tensors`);
+      return AGG_FNS[name](input);
     });
   }
   for (const name of MODULES) define(name, (...args) => constructWithNamed(fw[name], args));
 
   define('Sequential', (...args) => new fw.Sequential(...args));
-  define('reshape', (value, shape) => value.reshape(shape));
-  define('transpose', (value, dim0, dim1) => value.transpose(dim0, dim1));
-  define('permute', (value, dims) => value.permute(dims));
-  define('expand', (value, shape) => value.expand(shape));
-  define('slice', (value, dim, start, end, step = 1) => value.slice(dim, start, end, step));
-  define('unsqueeze', (value, dim) => value.unsqueeze(dim));
-  define('squeeze', (value, dim) => value.squeeze(dim));
-  define('narrow', (value, dim, start, length) => value.narrow(dim, start, length));
-  define('select', (value, dim, index) => value.select(dim, index));
-  define('contiguous', value => value.contiguous());
-  define('detach', value => value.detach());
-  define('requires_grad', (value, flag = true) => value.requiresGrad_(flag));
-  define('grad', value => value.grad);
-  define('backward', (value, gradient = undefined) => {
-    value.backward(gradient);
-    return value;
-  });
 
   define('range', (...args) => {
     let start = 0, stop, step = 1;
@@ -165,16 +129,6 @@ export function installBuiltins(runtime, define) {
     return result;
   });
 
-  define('len', value => {
-    if (Array.isArray(value)) return value.length;
-    if (typeof value === 'string') return value.length;
-    if (value instanceof Tensor || value instanceof SymbolicTensor) return value.shape[0];
-    if (value && typeof value.length === 'number') return value.length;
-    throw new Error('len() expects an array, string, or tensor');
-  });
-
-  define('shape', value => value.shape);
-  define('dtype', value => value.dtype);
   define('print', (...args) => {
     const named = args.length > 0 && args[args.length - 1]?.__named ? args.pop() : null;
     const sep = named?.sep ?? ' ';
@@ -258,12 +212,12 @@ export function installBuiltins(runtime, define) {
     return result;
   });
 
-  define('dataframe', (...args) => {
+  define('DataFrame', (...args) => {
     const named = takeNamed(args);
     delete named.__named;
     const colNames = Object.keys(named);
     if (colNames.length === 0) {
-      throw new Error('dataframe() requires named column arrays, e.g. dataframe(name=[...], age=[...])');
+      throw new Error('DataFrame() requires named column arrays, e.g. DataFrame(name=[...], age=[...])');
     }
     const n = named[colNames[0]].length;
     const rows = [];
@@ -378,8 +332,13 @@ function callWithOptions(fn, args) {
     args.push(named.axis);
     delete named.axis;
   }
+  if (typeof named.device === 'string') {
+    named.device = DEVICE_BY_NAME[named.device] ?? named.device;
+  }
   return fn(...args, named);
 }
+
+const DEVICE_BY_NAME = { cpu: CPU_DEVICE, gpu: GPU_DEVICE, wasm: WASM_DEVICE };
 
 function constructWithNamed(Type, args) {
   const named = takeNamed(args);
@@ -387,15 +346,6 @@ function constructWithNamed(Type, args) {
   if (Type === fw.Softmax || Type === fw.LogSoftmax) return new Type(named.axis ?? args[0] ?? -1);
   if (Type === fw.Conv1d || Type === fw.Conv2d) return new Type(...args, named);
   return new Type(...args, ...Object.values(named));
-}
-
-function promoteScalarArgs(args) {
-  const reference = args.find(value => value instanceof Tensor || value instanceof SymbolicTensor);
-  if (!reference) return;
-  const options = { dtype: reference.dtype, device: reference.device };
-  for (let i = 0; i < Math.min(args.length, 2); i++) {
-    if (typeof args[i] === 'number' || typeof args[i] === 'boolean') args[i] = fw.tensor(args[i], options);
-  }
 }
 
 function snakeToCamel(name) {
@@ -503,7 +453,7 @@ const TRAINING_SIGNATURES = {
   MetricCollection: [{ name: '...metrics' }],
   optim_config: [{ name: 'optimizer' }, { name: 'lr_scheduler', isOptional: true }],
   load_csv: [{ name: 'path' }, { name: 'separator', defaultValue: '","', isOptional: true }],
-  dataframe: [{ name: 'columns' }],
+  DataFrame: [{ name: 'columns' }],
   col: [{ name: 'name' }],
   lit: [{ name: 'value' }],
   expr: [{ name: 'sql' }],

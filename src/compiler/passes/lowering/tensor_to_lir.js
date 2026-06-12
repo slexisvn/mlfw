@@ -225,9 +225,6 @@ function detectAccumulator(forNode) {
   if (storeKey !== loadKey) return null;
   if (storeKey.includes('?')) return null;
 
-  const loopVarName = forNode.loopVar.name;
-  if (storeKey.includes('$' + loopVarName)) return null;
-
   const outerIndices = store.indices.map(idx => {
     if (idx.type !== 'VariableNode') return idx;
     for (const bind of block.iterVars) {
@@ -237,6 +234,11 @@ function detectAccumulator(forNode) {
     }
     return idx;
   });
+
+  const loopVarName = forNode.loopVar.name;
+  const resolvedKey = indicesKey(outerIndices);
+  if (resolvedKey.includes('?')) return null;
+  if (resolvedKey.includes('$' + loopVarName)) return null;
 
   return {
     store,

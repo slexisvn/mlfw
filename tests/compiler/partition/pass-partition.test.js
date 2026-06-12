@@ -319,3 +319,38 @@ describe('PartitionMaterializationPass', () => {
     }
   });
 });
+
+import { IRBuilder } from '../../../src/compiler/ir/graph/builder.js';
+import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
+
+const F = ScalarType.F32;
+function buildAuto(name, inTypes, build) {
+  const probe = new GraphFunction(name, inTypes, []);
+  const out = build(new IRBuilder(probe), probe.args).getResult(0);
+  return { func: buildFunction(name, inTypes, [out.type], (b, a) => { b.returnOp([build(b, a).getResult(0)]); }), n: out.type.shape.reduce((x, y) => x * y, 1) };
+}
+
+describe('partition materialization: end-to-end numerics match non-partitioned (region-bearing ops keep their regions)', () => {
+  const cpuA = CPUTarget();
+  const cpuB = CPUTarget({ name: 'cpu_b' });
+  const T = (sh) => new TensorType(sh, F);
+  const CASES = [
+    { name: 'reduce_sum', inTypes: [T([3, 4, 5])], build: (b, a) => b.reduce(a[0], b.scalarConstant(0, F).getResult(0), [1], 'sum'), split: new Map([['reduce', cpuB]]) },
+    { name: 'reduce_bcast_sub', inTypes: [T([4, 6])], build: (b, a) => b.sub(a[0], b.broadcast(b.reduce(a[0], b.scalarConstant(0, F).getResult(0), [1], 'sum').getResult(0), [4, 6], [0]).getResult(0)), split: new Map([['reduce', cpuB]]) },
+    { name: 'softmax', inTypes: [T([4, 8])], build: (b, a) => b.softmax(a[0], 1), split: new Map([['sub', cpuB], ['div', cpuB]]) },
+    { name: 'ew_chain', inTypes: [T([4, 5]), T([4, 5])], build: (b, a) => b.relu(b.mul(b.add(a[0], a[1]).getResult(0), a[0]).getResult(0)), split: new Map([['mul', cpuB]]) },
+  ];
+  for (const c of CASES) {
+    it(`${c.name} partitioned == non-partitioned`, () => {
+      const built = buildAuto(c.name, c.inTypes, c.build);
+      const inputs = c.inTypes.map((t, k) => { const a = new Float32Array(t.shape.reduce((x, y) => x * y, 1)); for (let i = 0; i < a.length; i++) a[i] = Math.sin((i + k) * 1.3) * 2; return a; });
+      const r0 = compileGraph(built.func, cpuA, { partition: { enabled: false } });
+      const ref = new Float32Array(built.n); r0.run(c.name, ...inputs, ref);
+      const r1 = compileGraph(built.func, cpuA, { partition: { enabled: true, targets: [cpuA, cpuB], opTargetOverrides: c.split } });
+      const out = new Float32Array(built.n); r1.run(c.name, ...inputs, out);
+      for (let i = 0; i < built.n; i++) {
+        expect(Math.abs(ref[i] - out[i]) / (1 + Math.abs(ref[i])), `${c.name} idx ${i}: ref=${ref[i]} part=${out[i]}`).toBeLessThan(2e-3);
+      }
+    });
+  }
+});

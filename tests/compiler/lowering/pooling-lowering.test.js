@@ -77,3 +77,55 @@ describe('pool2d lowering layout awareness', () => {
     expect(stores.length).toBeGreaterThan(0);
   });
 });
+
+import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
+import { CPUTarget, WasmTarget } from '../../../src/backend/target.js';
+
+function poolRef(inp, N, C, H, W, k, s, pad, type, cip) {
+  const oH = Math.floor((H + 2 * pad - k) / s) + 1, oW = Math.floor((W + 2 * pad - k) / s) + 1;
+  const out = [];
+  for (let n = 0; n < N; n++) for (let c = 0; c < C; c++) for (let oh = 0; oh < oH; oh++) for (let ow = 0; ow < oW; ow++) {
+    let acc = type === 'max' ? -Infinity : 0, cnt = 0;
+    for (let kh = 0; kh < k; kh++) for (let kw = 0; kw < k; kw++) {
+      const ih = oh * s + kh - pad, iw = ow * s + kw - pad;
+      if (ih >= 0 && ih < H && iw >= 0 && iw < W) {
+        const v = inp[((n * C + c) * H + ih) * W + iw];
+        if (type === 'max') acc = Math.max(acc, v); else { acc += v; cnt++; }
+      }
+    }
+    out.push(type === 'max' ? acc : acc / (cip ? k * k : cnt));
+  }
+  return out;
+}
+
+describe('pool2d end-to-end value vs independent reference (cpu+wasm)', () => {
+  const N = 1, C = 2, H = 6, W = 6;
+  let seed = 7;
+  const rng = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  const inp = new Float32Array(N * C * H * W);
+  for (let i = 0; i < inp.length; i++) inp[i] = -3 + 6 * rng();
+
+  const CONFIGS = [];
+  for (const type of ['max', 'avg']) for (const k of [2, 3]) for (const s of [1, 2]) for (const pad of [0, 1]) for (const cip of [false, true]) {
+    if (type === 'max' && cip) continue;
+    CONFIGS.push({ type, k, s, pad, cip });
+  }
+
+  for (const cfg of CONFIGS) {
+    for (const [tname, makeTarget] of [['cpu', CPUTarget], ['wasm', WasmTarget]]) {
+      it(`pool2d ${cfg.type} k${cfg.k} s${cfg.s} pad${cfg.pad} cip${cfg.cip} on ${tname}`, () => {
+        const oH = Math.floor((H + 2 * cfg.pad - cfg.k) / cfg.s) + 1, oW = Math.floor((W + 2 * cfg.pad - cfg.k) / cfg.s) + 1;
+        const ref = poolRef(inp, N, C, H, W, cfg.k, cfg.s, cfg.pad, cfg.type, cfg.cip);
+        const func = buildFunction('p', [new TensorType([N, C, H, W], ScalarType.F32)], [new TensorType([N, C, oH, oW], ScalarType.F32)],
+          (b, a) => { b.returnOp([b.pool2d(a[0], cfg.type, [cfg.k, cfg.k], [cfg.s, cfg.s], [[cfg.pad, cfg.pad], [cfg.pad, cfg.pad]], { countIncludePad: cfg.cip }).getResult(0)]); });
+        const res = compileGraph(func, makeTarget());
+        const out = new Float32Array(N * C * oH * oW);
+        res.run('p', inp, out);
+        for (let i = 0; i < ref.length; i++) {
+          const relErr = Math.abs(ref[i] - out[i]) / (1 + Math.abs(ref[i]));
+          expect(relErr, `idx ${i}: ref=${ref[i]} got=${out[i]}`).toBeLessThan(2e-3);
+        }
+      });
+    }
+  }
+});

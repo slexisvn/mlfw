@@ -2,13 +2,13 @@ import { Tensor } from '../core/tensor.js';
 import { TensorImpl } from '../core/tensor_impl.js';
 import { Storage } from '../core/storage.js';
 import { ScalarType, typedArrayCtor, dtypeSize } from '../types/dtype.js';
-import { CPU_DEVICE } from '../types/device.js';
+import { getDefaultDevice } from '../types/device.js';
 import { computeStrides, computeNumel } from '../utils/shape_utils.js';
 import { coerceForStorage } from '../utils/half.js';
 
 export function tensor(data, opts) {
   const dtype = opts?.dtype ?? ScalarType.F32;
-  const device = opts?.device ?? CPU_DEVICE;
+  const device = opts?.device ?? getDefaultDevice();
   const requiresGrad = opts?.requiresGrad ?? false;
 
   if (ArrayBuffer.isView(data)) {
@@ -29,7 +29,7 @@ export function tensor(data, opts) {
 }
 
 export function fromBuffer(buffer, shape, dtype, opts) {
-  const device = opts?.device ?? CPU_DEVICE;
+  const device = opts?.device ?? getDefaultDevice();
   const requiresGrad = opts?.requiresGrad ?? false;
   const strides = computeStrides(shape);
   const storage = Storage.fromData(buffer, device);
@@ -42,7 +42,7 @@ export function fromBuffer(buffer, shape, dtype, opts) {
 
 export function scalar(value, opts) {
   const dtype = opts?.dtype ?? ScalarType.F32;
-  const device = opts?.device ?? CPU_DEVICE;
+  const device = opts?.device ?? getDefaultDevice();
   return _fromScalar(value, dtype, device, opts?.requiresGrad ?? false);
 }
 

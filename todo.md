@@ -419,49 +419,114 @@
   e2e+compiler+tensor+nn+dispatcher+lightning+autograd+backend **3375 pass** (trừ 2 = webgpu GPU segfault, blocker sẵn).
 
 ### B. AD — autodiff (`compiler/ad`, `ad/vjp_rules/*`)
-- [ ] VJP từng op vs numerical gradient (finite-diff) cho mọi op có rule: arithmetic/unary/reduction/linalg/shape/composite.
-- [ ] BackwardGraphBuilder: forward+backward graph → verifier PASS, không dangling saved-value.
-- [ ] RematPolicy: bật/tắt remat phải cho cùng gradient (metamorphic).
-- [ ] compileWithBackward vs eager autograd trên random graph (saved-value mapping by-source).
-- [ ] Double-backward / gradient của gradient.
+- [x] VJP từng op vs numerical gradient — fuzz rộng (unary đầy đủ + binary div/maximum/minimum + softmax/log_softmax + reduce + view) × {compiled-cpu/wasm, remat on/off, joint}. Ra 2 BUG default-path (rsqrt, log_softmax+reduce fusion) + 2 BUG joint (reduce-grad + fusion-cycle). TẤT CẢ ĐÃ FIX. Fuzz lại 561 prog × 4 oracle = 0 fail.
+- [x] RematPolicy bật/tắt metamorphic — quét sạch (remat on/off cùng grad, trừ NaN/Inf blowup do data, không phải bug).
+- [x] compileWithBackward joint vs separate (mode metamorphic) — XONG, joint giờ khớp separate+numerical (fix đợt 15+16).
+- [ ] BackwardGraphBuilder verifier no-dangling-saved-value — chưa dựng verifier riêng (differential + numerical đã bắt giá trị).
+- [ ] compileWithBackward vs eager autograd random graph (saved-value by-source).
+- [ ] Double-backward / gradient của gradient (feature `createGraph` chưa có).
+
+### Bug đã fix đợt 15 (fuzz section B — AD numerical+metamorphic) — 2 bug DEFAULT-PATH
+> Fuzz 500 prog × {numerical finite-diff, remat on/off, joint, wask} oracle. Tới đâu fix tới đó (ko comment/hardcode/O(n²)).
+- **rsqrt KHÔNG có VJP rule** (`compiler/ad/vjp_rules/unary.js`): compiled backward trả grad RỖNG `[]` (eager cũng ko có autograd node → throw "does not require grad"). rsqrt là op phổ biến (RMSNorm). Fix: thêm `registerVJPRule('rsqrt')` — dy/dx = -0.5·y³ (y=result), chỉ cần result (remat-friendly). cpu+wasm khớp numerical.
+- **broadcast_in_dim giữ-VIEW khi user là `fusion` nhưng TRONG fusion body value bị `reduce` đọc → reduce bỏ qua broadcast dim, ra sai SHAPE+VALUE** (`compiler/passes/lowering/graph_to_tensor.js`): `BROADCAST_VIEW_SAFE` chứa `'fusion'` → broadcast feeding 1 fusion luôn giữ view, NHƯNG check chỉ nhìn op fusion ngoài, ko nhìn op TRONG thân fusion. log_softmax VJP làm `reduce(grad,[axis])` với grad = broadcast của upstream-reduce-grad; khi op sau log_softmax là `reduce` trên TRỤC KHÁC (vd `sum(log_softmax(x,1),2)`), backward sinh kHorizontal-fusion chứa reduce đọc broadcast-view → reduce hạ theo shape VẬT LÝ [2,3,1]→[2,1] thay vì LOGICAL [2,3,2]→[2,2] → consumer đọc OOB → số hạng correction mất → grad = passthrough (comp=1 thay vì đúng). softmax VJP ko dính (reduce 1 product tươi, ko reduce grad trực tiếp). Fix: helper `broadcastViewSafeForUser(value,user)` đệ quy — khi user là fusion, map operand→block-arg rồi check MỌI inner-user của block-arg cũng broadcast-safe (reduce → unsafe → materialize). Ảnh hưởng MỌI VJP reduce-broadcasted-grad (log_softmax/softmax-family) ở default path + wasm.
+- Test: `differential-backward.test.js` block "rsqrt VJP + reduce-after-log_softmax fusion vs numerical" (AD_BWD, 7 case × cpu+wasm, oracle numerical độc lập, data positive-domain cho rsqrt/log). Revert rsqrt → 6 RED; revert broadcast-view → 6 RED.
+
+### Bug đã fix đợt 16 (joint mode = forward+backward fused trong 1 graph) — 2 BUG + 1 fusion-pass bug
+> Joint mode (`compileWithBackward(...,{mode:'joint'})`) sai ~166/500 fuzz so với separate+numerical. Fix cả AD-layer lẫn fusion-pass.
+- **BUG 1 — joint THIẾU `reduceGradToOperandShape`** (`compiler/ad/joint_builder.js`, cả `build` + `_buildCheckpointed`): grad của operand bị broadcast ko sum về shape gốc (separate `backward_builder.js` có, joint quên). Vd `mul(add(x[2,3], y[3]), x)` → grad_y joint ghi 6 phần tử vào buffer 3-ô. Fix: export `reduceGradToOperandShape` từ backward_builder, joint dùng chung (giống separate).
+- **BUG 2 (fusion-pass, catalog D) — horizontal fusion gom op tạo CYCLE giữa 2 group** (`compiler/passes/fusion/fusion_groups.js`): khi vá BUG 1, lộ ra. `buildHorizontalGroups` gom 2 op cùng shape nếu ko phụ thuộc TRỰC TIẾP — nhưng (a) bỏ sót phụ thuộc GIÁN TIẾP (transitive), (b) ko thấy cycle XUYÊN 2 group. Vd joint `mul(mean(x,0)→scalar, y)`: group_A={mean(fwd), reduce(bwd-grad)} + group_B={mul(fwd), mul(bwd)} — mul-fwd(B)←mean(A) và reduce(A)←mul-bwd(B) → CYCLE → IR có `%?` dangling → forward joint ra **0**. Fix 2 phần:
+  1. `_anyGroupMemberDependent` + `_transitivelyDependent` (tái dùng `_dependsOnOps` transitive reachability) thay check `_hasDependency` trực tiếp → ko gom op có path gián tiếp (chống vi phạm thứ tự TRONG group).
+  2. `_condensedHasCycle(func, opToRep)` — condense mỗi group thành super-node, DFS 3-màu phát hiện cycle O(V+E); `buildAllGroups` thử thêm từng horizontal group, nếu tạo cycle giữa các group thì BỎ group đó (horizontal fusion là optional, bỏ luôn an toàn). Chống cycle XUYÊN group.
+- Test: `differential-backward.test.js` block "joint-mode backward ... (fusion-cycle guard)" (JOINT_BWD 6 case: broadcast-row/col, maximum-bcast, scalar-reduce mean→scalar, chain-scalar-reduce, logsoftmax→sum; joint+separate đều vs numerical) + `tests/compiler/fusion/groups-fusion.test.js` "rejects ... TRANSITIVELY dependent". Revert: joint-reduce-grad → 3 RED; cycle-guard → 2 RED; transitive-check → 1 RED.
+- Fuzz lại 561 prog × {numerical, remat, joint, wasm} = **0 fail**. Full e2e+compiler+autograd+backend+nn+dispatcher+tensor+tracing pass (trừ 2 webgpu GPU-segfault + 2 transformer Tera "Unknown name transpose" — CẢ HAI blocker pre-existing, ko liên quan: stash changes của tao vẫn fail y hệt).
 
 ### C. Passes — simplify (`simplify/*`)
-- [ ] Metamorphic: chạy graph CÓ vs KHÔNG mỗi pass (constant_fold / algebraic / cse / dce) → kết quả eval phải bằng nhau.
-- [ ] constant_fold vs eager eval của chính subgraph đó (oracle độc lập, không cần eager toàn graph).
-- [ ] CSE: số op sau CSE ≤ trước; eval không đổi; không gộp nhầm op có side-effect/khác dtype.
-- [ ] DCE: không xoá op có result escape (đã từng có bug class này — `project_dangling_operand_refs`).
-- [ ] algebraic: từng rewrite rule là property (x+0==x, x*1==x, x*0==0, double-neg...) — fuzz input ngẫu nhiên check đẳng thức.
+- [x] Metamorphic differential (800 prog identity-rich eager-vs-compiled cpu+wasm) + property special-value sweep. Ra 1 BUG-class: 5 algebraic rewrite UNSOUND cho float (đợt 17). constant_fold/cse/dce/các algebraic khác: SẠCH.
+- [x] CSE: quét sạch (op-count giảm, eval==eager, hash gồm dtype+attrs nên ko gộp nhầm).
+- [x] DCE: quét sạch (ko xoá escaping-use; differential identity-rich + verifier sau pass).
+- [x] algebraic property: x+0/x*1/x-0/x/1/double-neg/add-neg→sub... SẠCH; x-x/x÷x/x*0/exp∘log/log∘exp UNSOUND → fix (đợt 17).
+- [ ] constant_fold vs eager subgraph oracle độc lập — chưa dựng riêng (differential pipeline đã cover value-correctness).
+
+### Bug đã fix đợt 17 (fuzz section C — simplify) — 5 algebraic rewrite UNSOUND cho float
+> Differential identity-rich (eager vs compiled) sạch trên giá trị thường; property special-value (NaN/Inf/0) ra divergence.
+> Vi phạm bất biến eager==compiled (cùng class P2 NaN/Inf). User chọn: fix cho IEEE-sound.
+- **Root**: 5 rewrite áp dụng vô điều kiện cho float:
+  - `SubSelf` x−x→0: SAI khi x=±Inf/NaN (Inf−Inf=NaN, ko phải 0).
+  - `DivSelf` x/x→1: SAI khi x=0 (0/0=NaN), x=±Inf (Inf/Inf=NaN), x=NaN. (Cả int cũng sai: x=0 → div-by-zero→0≠1.)
+  - `MulZero` x*0→0: SAI khi x=Inf/NaN (Inf*0=NaN). (latent — chỉ fire khi operand là constant-0 thật.)
+  - `ExpLog` exp(log x)→x: SAI khi x<0 (log(x)=NaN→exp=NaN, ko phải x).
+  - `LogExp` log(exp x)→x: SAI khi exp overflow (log(Inf)=Inf, ko phải x).
+- **Fix** (`patterns.js` + `algebraic.js` + `ops/unary.js`):
+  - `SubSelf`/`MulZero`: guard `match` bằng `isDtypeInt(result.dtype)` → CHỈ fire cho integer (x−x=0, x*0=0 luôn đúng, ko NaN/Inf). Vẫn tối ưu cho int.
+  - `DivSelf`/`ExpLog`/`LogExp`: bỏ đăng ký (unsound cho float, ko guard an toàn được; DivSelf unsound cả int x=0). Gỡ khỏi `_algebraicPatterns` + gỡ `getCanonicalizationPatterns` của op `exp` (đăng ký ExpLog ở op-level — đây là chỗ canonicalize tái áp dụng dù đã gỡ khỏi algebraic). LogExp/DivSelf chỉ ở algebraic.
+  - Sound rewrite GIỮ NGUYÊN: AddZero/SubZero/MulOne/DivOne/DoubleNeg/MulNegNeg/AddNegToSub/SubNegToAdd/Transpose²/Reshape²/DoubleConvert (đều đúng IEEE).
+- **Test**: `differential.test.js` block "algebraic ... IEEE-sound: special values" (7 case × cpu+wasm, eager==compiled cho div/sub-self 0/Inf/NaN + exp(log neg) + mul*0-Inf, so bit-NaN). Cập nhật unit test cũ assert hành vi MỚI: `arithmetic-simplify`/`inverse-simplify`/`shape-simplify`/`arithmetic-canonicalize`/`inverse-canonicalize`/`compare-pad-slice-canonicalize` — float→KHÔNG simplify, mechanics (broadcast/scalar/multi-consumer) chuyển sang i32 (vẫn fire, vẫn đúng). Revert fix → 13 RED. Full compiler+e2e+backend+autograd+tensor+dispatcher **2535 pass** (trừ 2 transformer Tera = blocker src/cli pre-existing).
 
 ### D. Passes — fusion (`fusion/*`)
-- [ ] Metamorphic: CÓ vs KHÔNG fusion → eval bằng nhau (dominator / epilogue / multi_output / merger).
-- [ ] Invariant: sau fusion verifier PASS, không escaping-use bị nuốt (hasEscapingUse guard).
-- [ ] fusion_cost / fusion_groups: fuzz graph để cost model không chọn group sinh cycle (dep cycle check).
-- [ ] Số kernel sau fusion ≤ trước; output set không đổi.
+- [x] Metamorphic across strategy {off, xla, dominator, +epilogue} vs eager (700 prog elementwise+reduce+broadcast+matmul+transpose × cpu+wasm). xla/dominator SẠCH. epilogue → ra 1 BUG (đợt 18).
+- [x] fusion_cost / fusion_groups cycle — ĐÃ fix ở đợt 16 (`buildHorizontalGroups` transitive-dep + `_condensedHasCycle` condensed-graph check).
+- [x] hasEscapingUse guard (epilogue): còn nguyên, ko escaping-use bị nuốt (quét sạch).
+- [ ] (ghi chú) epilogue fusion mặc định CHỈ bật cho GPU target (`enableEpilogueFusion`); CPU/WASM gate off. Path GPU ko verify được (blocker no-GPU).
 
-### E. Passes — decompose / canonicalize / rewrite
-- [ ] Decomposition: op phức (softmax/layernorm/gelu...) bung ra primitive → eval == op gốc (metamorphic).
-- [ ] Canonicalize idempotent: chạy 2 lần == chạy 1 lần (fixed-point).
-- [ ] Rewrite pattern (`rewrite/pattern.js`): match→replace bảo toàn ngữ nghĩa, không vòng lặp vô hạn.
+### Bug đã fix đợt 18 (fuzz section D — fusion) — LIR accumulator hoist chỉ số phụ thuộc loop-var
+> Metamorphic fusion strategy sạch cho xla/dominator. Ép epilogue fusion ON trên CPU (`CPUTarget({enableEpilogueFusion:true})` + `fusion:{epilogue:true}`) để test `fused_dot_epilogue` lowering → ra BUG codegen.
+- **Repro**: `add(matmul(x,w), bias)` ép epilogue → kernel sinh `let _acc_1 = buf_7[ep0*5 + ep1_20]` TRƯỚC vòng lặp `for ep1_20` → `ReferenceError: ep1_20 is not defined`. (Epilogue lowering + TensorIR ĐÚNG; bug ở scheduler→LIR.)
+- **Root**: `detectAccumulator` (`passes/lowering/tensor_to_lir.js`) kiểm tra bất biến loop-var SAI: so `forNode.loopVar.name` (vd `ep1_20`) với `store.indices` dùng tên BLOCK ITER VAR (`epv1_21`, bind `epv1_21 = ep1_20` qua BlockRealize). Vì tên khác nhau, `storeKey.includes('$ep1_20')` = false → tưởng nhầm vòng epilogue (in-place `buf[i,j] = buf[i,j] + bias[j]`) là REDUCTION → tạo `LIRAccumulatorNode` hoist init-load `buf[i,j]` ra ngoài vòng `j` → `j` chưa khai báo. (Codegen `_detectReductionAcc` resolve alias trước nên ĐÚNG; chỉ scheduler-LIR sai.)
+- **Fix**: tính `outerIndices` (resolve block iter-var→binding) TRƯỚC, check bất biến trên `resolvedKey = indicesKey(outerIndices)` thay vì raw `storeKey`. Reduction thật (matmul: store index = ls/rs bound to outer loops, ko chứa loop-var c0) vẫn fire đúng; epilogue (index chứa loop-var sau resolve) → bail → hạ thành vòng lồng thường (đúng). Bug chung cho MỌI in-place `+=` có index phụ thuộc loop-var qua BlockRealize, ko riêng epilogue.
+- **Test**: `differential.test.js` block "epilogue fusion (forced on) matches eager" (6 pattern: matmul+bias/+relu/+tanh/+scale/+exp+neg, ép epilogue, cpu+wasm vs eager). Revert (check raw `store.indices`) → matmul_bias RED. Full compiler+e2e+backend+autograd+tensor+nn+dispatcher **2658 pass, 0 fail**.
 
-### F. Passes — lowering (graph→tensor→LIR)
-- [ ] Mỗi lowering rule (elementwise/linalg/pooling/reduction/shape/resize/quantization/control_flow/layout) vs eager op.
-- [ ] graph_to_tensor + tensor_to_lir: round-trip shape/stride, LIR verifier PASS (`ir/lir/verifier.js`).
-- [ ] Scanner/flatten (`ir/lir/*`): fuzz nested loop/scope không mất biến, không sai scope.
+### E. Passes — decompose / canonicalize / rewrite — QUÉT SẠCH (đợt 19), KHÔNG bug
+- [x] Decomposition vs independent reference (15 activation variant incl. custom alpha/slope × 80 seed × cpu+wasm): SẠCH. Composite op (softmax/gelu/silu/sigmoid/elu/celu/selu/mish/hardswish/hardsigmoid/leaky_relu/layer_norm...) KHÔNG có direct lowering → LUÔN decompose; oracle = reference formula thuần JS (đa số op này ko có trên eager nên formula là oracle độc lập đúng). Hạ đúng giá trị.
+- [x] Canonicalize idempotent: 200 graph canonicalize-rich, chạy 2× == 1× (run thứ 2 luôn UNCHANGED) — SẠCH, không oscillation/non-convergence. 69/200 thực sự CHANGED ở run đầu (test ko rỗng).
+- [x] Rewrite framework (`applyPatterns` maxIterations=10): fixed-point đạt, không vòng lặp vô hạn (idempotency test cover).
+- **Coverage thêm (ko phải bug fix):** test decompose activation TRƯỚC CHỈ check op-structure, KHÔNG check số. Thêm block "activation decomposition: end-to-end numerical correctness vs reference" vào `tests/compiler/decompose/activation-decompose.test.js` (12 activation × cpu+wasm, compileGraph+run vs reference formula) — lấp lỗ hổng số học cho elu/celu/selu/mish/hardswish/hardsigmoid/leaky_relu (ko có trên eager nên differential ko cover). 48/48 pass.
 
-### G. Passes — layout
-- [ ] layout_transform: transform rồi inverse phải == gốc (round-trip).
-- [ ] Metamorphic: layout policy NCHW vs NHWC → cùng kết quả số.
-- [ ] layout_analysis: layout gán không mâu thuẫn giữa producer/consumer.
+### Bug đã fix đợt 22 (control_flow lowering — `while` HOÀN TOÀN HỎNG) — đào sâu sau khi user hỏi "nãy giờ ko bug à"
+> E/F/G ban đầu báo sạch vì fuzz nhẹ tay + vùng test kỹ. Đào lại các path CHƯA đụng: control_flow (if/while), resize bilinear, gather/scatter.
+> resize bilinear: khớp reference. `if`: đúng cpu+wasm. **`while`: HỎNG hoàn toàn — vòng lặp vô tận + giá trị sai, chưa từng có e2e test chạy nó.**
+- **Repro**: `whileOp([acc=0, i=0], cond: i<K, body: acc+=x, i+=1)` → kernel sinh `while (_wcond)` (test OBJECT typed-array luôn truthy → vô tận), `buf[0]=(0<3)` (so hằng khởi tạo, ko phải counter), `acc=x` (ko cộng dồn). out=[0,0,0,0].
+- **3 bug**:
+  1. **Lowering** (`passes/lowering/rules/control_flow.js`): loop-state dùng THẲNG buffer hằng khởi tạo (`loopBufs=inputs`). Constant-buffer opt (a) inline đọc thành hằng init (`0<3`, `add(0,x)`), (b) BỎ QUA store vào constant buffer (codegen `_visitBufferStoreNode` skip nếu `_constantBuffers.has`) → copy-back state thành no-op → vô tận. Fix: dùng `outputs[i]` (buffer kết quả, mutable, nối return) làm loop-state + copy init-value vào trước vòng (`initStmts` + `SeqNode`).
+  2. **CPU codegen** (`backend/cpu/codegen.js:326`): `while (${condVar.name})` → test mảng (luôn truthy). Fix `[0]`.
+  3. **WASM codegen** (`backend/wasm/codegen.js:875`): `(local.get $condVar)` nhưng condVar là MEMORY buffer ko phải local → "invalid local index". Fix: `_emitAddr(condVar,[]) + _emitLoadOp(dtype)` (load từ memory như BufferLoadNode).
+- **Test**: `tests/compiler/lowering/control-flow-lowering.test.js` block "control flow end-to-end execution vs reference" (while K=0/1/3/5 acc=K*x + if then/else, cpu+wasm). Trước đây control-flow test CHỈ structural (check WhileNode trong IR, KHÔNG chạy) → bug sống sót. Full **2769 pass, 0 fail**.
+- GHI CHÚ: `while` ko có frontend-op user thật (latent), nhưng là bug đúng nghĩa (hoàn toàn ko chạy được). gpu/webgpu codegen có thể còn bug condVar tương tự (ko verify được, no-GPU).
 
-### H. Passes — memory (`memory/*`)
-- [ ] buffer_liveness / buffer_assignment: hai buffer overlap thời gian sống KHÔNG được chia ô nhớ (invariant) — fuzz graph rồi assert no-alias-while-live.
-- [ ] inplace_analysis: chỉ inplace khi input không còn dùng sau đó; differential phải == không-inplace.
-- [ ] rematerialization: bật/tắt remat → cùng kết quả (metamorphic), peak-mem giảm.
-- [ ] memory_planning: tổng mem ≤ tổng nếu không reuse; không ghi đè buffer còn live.
+### F. Passes — lowering (graph→tensor→LIR) — QUÉT (đợt 20) + bug control_flow (đợt 22)
+- [x] Mỗi lowering rule vs reference/eager: 105 graph parameterized (elementwise/reduce(5 type×axis×keepdim)/argmax-argmin/shape(transpose/reshape/slice-step/pad/concat/iota/broadcast)/matmul/pool2d(max-avg×k×s×pad×count_include_pad)/resize(nearest-bilinear up&down)/conv(stride×pad×dilation×groups)) × cpu+wasm → compile crash-only SẠCH; pool2d value vs JS reference SẠCH.
+- [x] graph_to_tensor + tensor_to_lir + **LIR verifier**: lower 105 graph → `verifyLIR` = 0 error MỌI graph. **Phát hiện: pipeline KHÔNG bao giờ chạy `verifyLIR`** (chỉ TensorVerifier trên PrimFunc, ko verifyLIR trên LIR) — verifyLIR sẽ bắt được bug đợt 18 (unbound `ep1`). Dùng làm invariant oracle.
+- [x] Scanner/flatten (`scanMetadata` chạy trong lowerToLIR): exercise qua verifyLIR + compile, ko mất biến/sai scope.
+- **Coverage thêm (ko phải bug):** (1) `tests/compiler/ir/lir/verifier.test.js` — block "verifyLIR on real lowered graphs across lowering-rule categories" (15 case đại diện mọi rule, lower thật → verifyLIR clean; trước đây verifier chỉ test trên LIR dựng tay). (2) `tests/compiler/lowering/pooling-lowering.test.js` — block "pool2d end-to-end value vs reference" (18 config max/avg×k×s×pad×count_include_pad × cpu+wasm). 252/252 pass.
 
-### I. Passes — partition
-- [ ] partition_pass: ghép các partition lại phải == graph gốc (metamorphic); không cắt giữa op có data-dep sai chiều.
-- [ ] partitioner: fuzz để không sinh partition rỗng / cycle giữa partitions.
+### G. Passes — layout — QUÉT SẠCH (đợt 21), KHÔNG bug
+- [x] Metamorphic layout ON vs OFF (`{optimization:{layout:true/false}}`) trên matmul/double-matmul/matmul-bias-relu/conv/conv-groups/conv-relu-pool/pool/reduce/chain × cpu+wasm → kết quả số TRÙNG KHÍT (relErr<1e-5). Layout opt là semantics-preserving.
+- [x] layout_transform + consumer: NON-trivial (matmul chèn 1, conv chèn 1, double_matmul chèn 2 `layout_transform`) NHƯNG vẫn đúng số → tổ hợp transform+dot/conv sound. (Explorer nghi lowering chỉ copy ko permute; empiric: end-to-end đúng nên ko phải bug — hoặc layout là no-op metadata consumer bỏ qua, hoặc indexing tự khớp.)
+- [x] layout_analysis producer/consumer: round-trip (compose+identity canonicalize patterns) + metamorphic cover; ko mâu thuẫn (numerics bảo toàn).
+- **Coverage thêm (ko phải bug):** `tests/compiler/layout/transform-layout.test.js` block "layout optimization is semantics-preserving: layout ON == layout OFF" (6 graph × cpu+wasm). Trước đây layout test chỉ check STRUCTURAL insertion ở pass-level, ko check end-to-end numerics on/off. 45/45 pass.
+
+### H. Passes — memory (`memory/*`) — 1 BUG latent (đợt 23)
+- [x] buffer_liveness / buffer_assignment no-alias-while-live invariant: fuzz 10 graph × align{64,128,256} × inplace{on,off}, inspect memory plan → **RA BUG: inplace dst chia ô nhớ với buffer interfering** (đợt 23).
+- [x] inplace metamorphic (inplaceReuse on/off) + remat metamorphic (rematerialization on, budget=64) + alignment{64,256}: numerics TRÙNG KHÍT vs ref (inplace=off) cpu+wasm, SẠCH. Memory opt bảo toàn giá trị end-to-end.
+- [x] rematerialization on/off: cùng kết quả (đã có ở B cho AD-remat; ở đây remat pass graph-level cũng sạch).
+
+### Bug đã fix đợt 23 (memory — BufferAssignment inplace lifetime) — LATENT (no-alias-while-live invariant)
+> Oracle độc lập = no-alias invariant trên memory plan: hai buffer interfering (live range chồng STRICT) KHÔNG được chia offset. Fuzz 10 graph → 18 vi phạm (`softmax buf_18[3,6]&buf_23[4,6]` cùng off0; `planner.interfere()=true`).
+- **Root** (`passes/memory/buffer_assignment.js`): nhánh inplace (dst aliases src offset) `continue` mà KHÔNG thêm dst vào `active`/KHÔNG kéo dài lifetime ô nhớ. Inplace yêu cầu `src.lastUse <= dst.firstUse` (src chết trước dst), nên pool release ô nhớ của src theo lifetime NGẮN của src → buffer cấp sau (vd buf_23) tái dùng offset đó TRONG KHI dst inplace (buf_18) còn live → 2 buffer interfering cùng ô nhớ = corruption tiềm ẩn.
+- **Fix**: precompute `effLastUse` — kéo dài lifetime hiệu dụng của src lên `dst.lastUse` (truyền qua chain inplace a→b→c). Release check dùng `effLastUse` thay `interval.lastUse` → ô nhớ của src giữ đến khi dst inplace chết → ko bị tái dùng sớm.
+- **LATENT**: KHÔNG repro được corruption end-to-end (pipeline chuẩn chạy CSE/DCE/fusion trước _planMemory → cấu trúc buffer khác, né được; eager-differential softmax/long_chain + fusion on/off đều khớp). Nhưng là vi phạm invariant THẬT (chứng minh qua `interfere()` + no-alias check). Fix phòng ngừa corruption tương lai.
+- **Test**: `tests/compiler/memory/assignment-memory.test.js` block "inplace destination extends aliased storage lifetime (no-alias-while-live)" (2 case: src→dst inplace + buffer cấp sau ko collide; chain a→b→c giữ ô nhớ tới dst cuối). Revert (gỡ effLastUse extension) → 2 RED + fuzz invariant 18 fails. Full **2769 pass, 0 regression**. Memory tests 67/67.
+
+### I. Passes — partition — 1 BUG (đợt 24)
+- [x] Metamorphic partition ON (CPU/CPU split qua opTargetOverrides) vs OFF: numerics phải khớp. Ra **BUG materialization mất regions** (đợt 24).
+- [x] Structural invariants (no cycle partition-DAG / no empty / full coverage exactly-once): fuzz 6 graph × 6 split config → SẠCH.
+
+### Bug đã fix đợt 24 (partition — materialization mất op regions) — off-by-default path
+> Partition opt-in (cần ≥2 target). Metamorphic ON vs OFF (2 CPU target tên khác nhau → executable trên CPU, force split qua opTargetOverrides).
+- **Repro**: graph có `reduce`/`fusion` (vd `sub(x, bcast(reduce(x,sum)))`, softmax, layernorm) + partition → "Graph verification failed: op 'reduce' expects 1 regions, got 0; op 'fusion' expects 1 regions, got 0".
+- **Root** (`passes/partition/partition_pass.js:232` `PartitionMaterializationPass._materializePartitions`): khi clone op vào sub-function, `new Operation(opName, operands, resultTypes, attrs)` — THIẾU đối số thứ 5 (regions). Op có region (reduce combiner, fusion body, if/while) bị clone ra 0 region → IR invalid → compile fail. (Structural invariant SẠCH vì assignment đúng; chỉ materialization drop region.)
+- **Fix**: `clonedRegions = op.regions.length>0 ? op.regions.map(r=>cloneRegion(r)) : null` rồi truyền vào `new Operation(...,clonedRegions)` — đúng pattern đã có ở `dominator_fusion.js`/`fusion_merger.js`. `cloneRegion` (operation.js) deep-clone block+remap block-args.
+- **Test**: `tests/compiler/partition/pass-partition.test.js` block "partition materialization end-to-end numerics ... region-bearing ops keep their regions" (reduce_sum/reduce_bcast_sub/softmax/ew_chain, partition ON==OFF). Trước đây partition test chỉ structural (pass-level), ko execute partitioned graph có region → bug sống sót. Revert (regions=null) → 3 region-test RED (ew_chain pass). Full **2775 pass, 0 regression**.
 
 ### J. Passes — quantization
 - [ ] calibration / observer → quantize → dequantize: sai số trong ngưỡng (property).

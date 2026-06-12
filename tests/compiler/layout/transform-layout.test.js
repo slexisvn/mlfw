@@ -194,3 +194,50 @@ describe('LayoutTransformPass — cost-benefit profitability', () => {
     expect(transforms.length).toBeLessThanOrEqual(2);
   });
 });
+
+import { IRBuilder } from '../../../src/compiler/ir/graph/builder.js';
+import { GraphFunction } from '../../../src/compiler/ir/graph/function.js';
+import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
+import { WasmTarget } from '../../../src/backend/target.js';
+
+const F = ScalarType.F32;
+function buildAuto(name, inTypes, build) {
+  const probe = new GraphFunction(name, inTypes, []);
+  const out = build(new IRBuilder(probe), probe.args).getResult(0);
+  return { func: buildFunction(name, inTypes, [out.type], (b, a) => { b.returnOp([build(b, a).getResult(0)]); }), outNumel: out.type.shape.reduce((x, y) => x * y, 1) };
+}
+const numel = (s) => s.reduce((a, b) => a * b, 1);
+
+const LAYOUT_METAMORPHIC = [
+  { name: 'matmul', inTypes: [[4, 5], [5, 6]], build: (b, a) => b.matmul(a[0], a[1]) },
+  { name: 'double_matmul', inTypes: [[3, 4], [4, 5], [5, 2]], build: (b, a) => b.matmul(b.matmul(a[0], a[1]).getResult(0), a[2]) },
+  { name: 'matmul_bias_relu', inTypes: [[4, 5], [5, 6], [6]], build: (b, a) => b.relu(b.add(b.matmul(a[0], a[1]).getResult(0), b.broadcast(a[2], [4, 6], [1]).getResult(0)).getResult(0)) },
+  { name: 'conv', inTypes: [[1, 4, 7, 7], [4, 4, 3, 3]], build: (b, a) => b.conv(a[0], a[1], [1, 1], [[0, 0], [0, 0]]) },
+  { name: 'conv_groups', inTypes: [[1, 4, 7, 7], [4, 2, 3, 3]], build: (b, a) => b.conv(a[0], a[1], [1, 1], [[1, 1], [1, 1]], { groups: 2 }) },
+  { name: 'conv_relu_pool', inTypes: [[1, 3, 8, 8], [4, 3, 3, 3]], build: (b, a) => b.pool2d(b.relu(b.conv(a[0], a[1], [1, 1], [[0, 0], [0, 0]]).getResult(0)).getResult(0), 'max', [2, 2], [2, 2], [[0, 0], [0, 0]]) },
+];
+
+describe('layout optimization is semantics-preserving: layout ON == layout OFF (cpu+wasm)', () => {
+  let seed = 99;
+  const rng = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  for (const spec of LAYOUT_METAMORPHIC) {
+    for (const [tname, makeTarget] of [['cpu', CPUTarget], ['wasm', WasmTarget]]) {
+      it(`${spec.name} on ${tname}`, () => {
+        const inTypes = spec.inTypes.map((sh) => new TensorType(sh, F));
+        const built = buildAuto(spec.name, inTypes, spec.build);
+        const inputs = inTypes.map((t) => { const a = new Float32Array(numel(t.shape)); for (let i = 0; i < a.length; i++) a[i] = -1 + 2 * rng(); return a; });
+        const outs = {};
+        for (const lay of [false, true]) {
+          const res = compileGraph(built.func, makeTarget(), { optimization: { layout: lay } });
+          const out = new Float32Array(built.outNumel);
+          res.run(spec.name, ...inputs, out);
+          outs[lay] = out;
+        }
+        for (let i = 0; i < built.outNumel; i++) {
+          const relErr = Math.abs(outs[false][i] - outs[true][i]) / (1 + Math.abs(outs[false][i]));
+          expect(relErr, `${spec.name}/${tname} idx ${i}: off=${outs[false][i]} on=${outs[true][i]}`).toBeLessThan(1e-5);
+        }
+      });
+    }
+  }
+});

@@ -304,6 +304,73 @@ describe('differential backward: composite/new ops vs numerical gradient (indepe
   }
 });
 
+const AD_BWD = [
+  { name: 'rsqrt', shape: [2, 4], lo: 0.5, hi: 2, fwd: (x) => M.rsqrt(x) },
+  { name: 'rsqrt_of_gelu_pos', shape: [2, 3], lo: 0.6, hi: 2, fwd: (x) => M.rsqrt(M.gelu(x)) },
+  { name: 'rsqrt_scaled', shape: [3, 2], lo: 0.5, hi: 2, fwd: (x) => M.mul(M.rsqrt(x), M.tensor([[2, 2]])) },
+  { name: 'logsoftmax1_then_sum2_keepdim', shape: [2, 3, 2], lo: -1, hi: 1, fwd: (x) => M.sum(M.log_softmax(x, 1), 2, true) },
+  { name: 'logsoftmax1_then_sum2_nokeep', shape: [2, 3, 2], lo: -1, hi: 1, fwd: (x) => M.sum(M.log_softmax(x, 1), 2, false) },
+  { name: 'logsoftmax0_then_sum2', shape: [2, 3, 2], lo: -1, hi: 1, fwd: (x) => M.sum(M.log_softmax(x, 0), 2, true) },
+  { name: 'logsoftmax1_then_mean0', shape: [3, 4], lo: -1, hi: 1, fwd: (x) => M.mean(M.log_softmax(x, 1), 0, true) },
+];
+
+function checkADBackward(prog, makeTarget) {
+  const rng = mulberry32(60013 + prog.name.length * 47);
+  const flatData = Array.from({ length: numel(prog.shape) }, () => prog.lo + (prog.hi - prog.lo) * rng());
+  const fwd = (...a) => prog.fwd(...a);
+  const ins = [tensor(nest(flatData, prog.shape))];
+  const cf = compileWithBackward({ forward: fwd }, ins, { target: makeTarget() });
+  const out = cf(...ins);
+  const compiled = cf.backward(ones(Array.isArray(out) ? out[0].shape : out.shape)).map((t) => flat(t));
+  const numeric = numericalGrad(fwd, [flatData.slice()], [prog.shape]);
+  for (let k = 0; k < numeric[0].length; k++) {
+    const relErr = Math.abs(numeric[0][k] - compiled[0][k]) / (1 + Math.abs(numeric[0][k]));
+    expect(relErr, `${prog.name} grad idx ${k}: num=${numeric[0][k]} comp=${compiled[0][k]}`).toBeLessThan(5e-2);
+  }
+}
+
+describe('differential backward: rsqrt VJP + reduce-after-log_softmax fusion vs numerical (independent oracle)', () => {
+  for (const prog of AD_BWD) {
+    it(`${prog.name} backward on cpu matches numerical`, () => checkADBackward(prog, CPUTarget));
+    it(`${prog.name} backward on wasm matches numerical`, () => checkADBackward(prog, WasmTarget));
+  }
+});
+
+const JOINT_BWD = [
+  { name: 'joint_mul_add_broadcast_row', shapes: [[2, 3], [3]], fwd: (x, y) => M.mul(M.add(x, y), x) },
+  { name: 'joint_mul_add_broadcast_col', shapes: [[2, 3], [2, 1]], fwd: (x, y) => M.mul(M.add(x, y), x) },
+  { name: 'joint_mul_maximum_broadcast', shapes: [[2, 3], [3]], fwd: (x, y) => M.mul(M.maximum(x, y), x) },
+  { name: 'joint_mul_scalar_reduce', shapes: [[3], [1]], lo: 0.5, hi: 2, fwd: (x, y) => M.mul(M.mean(x, 0, false), y) },
+  { name: 'joint_chain_scalar_reduce', shapes: [[3], [1]], lo: 0.5, hi: 2, fwd: (x, y) => M.mul(M.silu(M.neg(M.mean(x, 0, false))), y) },
+  { name: 'joint_logsoftmax_then_sum', shapes: [[2, 3, 2]], lo: -1, hi: 1, fwd: (x) => M.sum(M.log_softmax(x, 1), 2, true) },
+];
+
+function checkJointVsSeparate(prog) {
+  const rng = mulberry32(70019 + prog.name.length * 37);
+  const datas = prog.shapes.map((s) => Array.from({ length: numel(s) }, () => (prog.lo ?? -1) + ((prog.hi ?? 1) - (prog.lo ?? -1)) * rng()));
+  const fwd = (...a) => prog.fwd(...a);
+  const numeric = numericalGrad(fwd, datas.map((d) => d.slice()), prog.shapes);
+  for (const mode of ['separate', 'joint']) {
+    const ins = datas.map((d, i) => tensor(nest(d, prog.shapes[i])));
+    const cf = compileWithBackward({ forward: fwd }, ins, { target: CPUTarget(), mode });
+    const out = cf(...ins);
+    const grads = cf.backward(ones((Array.isArray(out) ? out[0] : out).shape)).map((t) => flat(t));
+    for (let i = 0; i < numeric.length; i++) {
+      expect(grads[i].length, `${prog.name} ${mode} grad ${i} length`).toBe(numeric[i].length);
+      for (let k = 0; k < numeric[i].length; k++) {
+        const relErr = Math.abs(numeric[i][k] - grads[i][k]) / (1 + Math.abs(numeric[i][k]));
+        expect(relErr, `${prog.name} ${mode} grad[${i}][${k}]: num=${numeric[i][k]} comp=${grads[i][k]}`).toBeLessThan(5e-2);
+      }
+    }
+  }
+}
+
+describe('joint-mode backward: broadcast-reduce + scalar-reduce vs numerical (fusion-cycle guard)', () => {
+  for (const prog of JOINT_BWD) {
+    it(`${prog.name} joint and separate both match numerical`, () => checkJointVsSeparate(prog));
+  }
+});
+
 const EAGER_PRIM_BWD = [
   { name: 'eager_cat_dim1', shapes: [[3, 4], [3, 2]], fwd: (x, y) => M.cat([x, y], 1) },
   { name: 'eager_cat_dim0', shapes: [[2, 5], [3, 5]], fwd: (x, y) => M.cat([x, y], 0) },

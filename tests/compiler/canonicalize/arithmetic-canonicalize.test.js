@@ -72,10 +72,10 @@ describe('mul identity and annihilation', () => {
     expect(retVal(func)).toBe(func.args[0]);
   });
 
-  it('mul by 0 produces zero broadcast matching result shape and dtype', () => {
-    const t = new TensorType([3, 5], ScalarType.F64);
+  it('mul by 0 produces zero broadcast matching result shape and dtype (int only)', () => {
+    const t = new TensorType([3, 5], ScalarType.I32);
     const func = buildFunction('f', [t], [t], (b, args) => {
-      const zero = b.scalarConstant(0, ScalarType.F64);
+      const zero = b.scalarConstant(0, ScalarType.I32);
       const prod = b.mul(args[0], zero.getResult(0));
       b.returnOp([prod.getResult(0)]);
     });
@@ -84,13 +84,13 @@ describe('mul identity and annihilation', () => {
 
     expect(func.findOp(op => op.opName === 'mul')).toBeNull();
     expect(retVal(func).type.shape).toEqual([3, 5]);
-    expect(retVal(func).type.dtype).toBe(ScalarType.F64);
+    expect(retVal(func).type.dtype).toBe(ScalarType.I32);
   });
 
-  it('mul by 0 on scalar produces scalar constant without broadcast', () => {
-    const t = new TensorType([], ScalarType.F32);
+  it('mul by 0 on scalar produces scalar constant without broadcast (int only)', () => {
+    const t = new TensorType([], ScalarType.I32);
     const func = buildFunction('f', [t], [t], (b, args) => {
-      const zero = b.scalarConstant(0, ScalarType.F32);
+      const zero = b.scalarConstant(0, ScalarType.I32);
       const prod = b.mul(args[0], zero.getResult(0));
       b.returnOp([prod.getResult(0)]);
     });
@@ -99,6 +99,18 @@ describe('mul identity and annihilation', () => {
 
     expect(retVal(func).type.shape).toEqual([]);
     expect(retVal(func).definingOp.opName).toBe('constant');
+  });
+
+  it('float mul by 0 stays (Inf*0=NaN, NaN*0=NaN)', () => {
+    const t = new TensorType([3, 5], ScalarType.F32);
+    const func = buildFunction('f', [t], [t], (b, args) => {
+      const zero = b.scalarConstant(0, ScalarType.F32);
+      b.returnOp([b.mul(args[0], zero.getResult(0)).getResult(0)]);
+    });
+
+    run(func);
+
+    expect(func.findOp(op => op.opName === 'mul')).not.toBeNull();
   });
 });
 
@@ -129,8 +141,8 @@ describe('sub patterns', () => {
     expect(func.findOp(op => op.opName === 'sub')).not.toBeNull();
   });
 
-  it('sub(x, x) produces zero with matching shape', () => {
-    const t = new TensorType([2, 3], ScalarType.F32);
+  it('sub(x, x) produces zero with matching shape (int only)', () => {
+    const t = new TensorType([2, 3], ScalarType.I32);
     const func = buildFunction('f', [t], [t], (b, args) => {
       const diff = b.sub(args[0], args[0]);
       b.returnOp([diff.getResult(0)]);
@@ -146,6 +158,15 @@ describe('sub patterns', () => {
     expect(bcast.getOperand(0).definingOp.getAttr('value')).toBe(0);
   });
 
+  it('float sub(x, x) stays (Inf-Inf=NaN)', () => {
+    const t = new TensorType([2, 3], ScalarType.F32);
+    const func = buildFunction('f', [t], [t], (b, args) => {
+      b.returnOp([b.sub(args[0], args[0]).getResult(0)]);
+    });
+
+    expect(run(func)).toBe(PassResult.UNCHANGED);
+  });
+
   it('sub(x, y) where x !== y is not eliminated', () => {
     const t = new TensorType([4], ScalarType.F32);
     const func = buildFunction('f', [t, t], [t], (b, args) => {
@@ -155,8 +176,8 @@ describe('sub patterns', () => {
     expect(run(func)).toBe(PassResult.UNCHANGED);
   });
 
-  it('sub(x, x) on scalar produces scalar zero without broadcast', () => {
-    const t = new TensorType([], ScalarType.F32);
+  it('sub(x, x) on scalar produces scalar zero without broadcast (int only)', () => {
+    const t = new TensorType([], ScalarType.I32);
     const func = buildFunction('f', [t], [t], (b, args) => {
       b.returnOp([b.sub(args[0], args[0]).getResult(0)]);
     });
@@ -281,8 +302,8 @@ describe('commutative constant canonicalization', () => {
 });
 
 describe('multi-consumer rewiring', () => {
-  it('all users of sub(x,x) receive the same zero broadcast', () => {
-    const t = new TensorType([4], ScalarType.F32);
+  it('all users of sub(x,x) receive the same zero broadcast (int only)', () => {
+    const t = new TensorType([4], ScalarType.I32);
     const func = buildFunction('f', [t], [t], (b, args) => {
       const diff = b.sub(args[0], args[0]);
       b.returnOp([b.add(diff.getResult(0), diff.getResult(0)).getResult(0)]);

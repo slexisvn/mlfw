@@ -1,5 +1,6 @@
 import { Pattern } from '../../passes/rewrite/pattern.js';
 import { TensorType } from './types.js';
+import { isDtypeInt } from '../../../backend/dtype_map.js';
 
 function isConstantVal(op, val) {
   return op && op.opName === 'constant' && op.getAttr('value') === val;
@@ -188,7 +189,7 @@ export class SubZero extends Pattern {
 export class SubSelf extends Pattern {
   constructor() { super('sub_self', 5); this.rootOpName = 'sub'; }
   match(op) {
-    return op.getOperand(0) === op.getOperand(1);
+    return op.getOperand(0) === op.getOperand(1) && isDtypeInt(op.getResult(0).type.dtype);
   }
   rewrite(op, builder) {
     const zero = builder.scalarConstant(0, op.getResult(0).type.dtype);
@@ -222,6 +223,7 @@ export class MulOne extends Pattern {
 export class MulZero extends Pattern {
   constructor() { super('mul_zero', 5); this.rootOpName = 'mul'; }
   match(op) {
+    if (!isDtypeInt(op.getResult(0).type.dtype)) return false;
     return isConstantVal(op.getOperand(1).definingOp, 0) || isConstantVal(op.getOperand(0).definingOp, 0);
   }
   rewrite(op, builder) {

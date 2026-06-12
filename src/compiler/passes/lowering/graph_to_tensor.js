@@ -25,6 +25,22 @@ const BROADCAST_VIEW_SAFE = new Set([
   'compare', 'select', 'clamp', 'convert', 'copy_to_device', 'dot', 'fusion',
 ]);
 
+function broadcastViewSafeForUser(value, user) {
+  if (!BROADCAST_VIEW_SAFE.has(user.opName)) return false;
+  if (user.opName !== 'fusion') return true;
+  const region = user.regions[0];
+  if (!region) return false;
+  const block = region.entryBlock;
+  for (let o = 0; o < user.numOperands; o++) {
+    if (user.getOperand(o) !== value) continue;
+    const blockArg = block.arguments[o];
+    for (const inner of blockArg.getUsers()) {
+      if (!broadcastViewSafeForUser(blockArg, inner)) return false;
+    }
+  }
+  return true;
+}
+
 registerElementwise();
 registerShape();
 registerReduction();
@@ -119,7 +135,7 @@ export function lowerGraphToPrimFunc(graphFunc) {
 
     if ((op.opName === 'broadcast_in_dim' || op.opName === 'broadcast')
         && !returnedValues.has(op.getResult(0))
-        && op.getResult(0).getUsers().every((u) => BROADCAST_VIEW_SAFE.has(u.opName))) {
+        && op.getResult(0).getUsers().every((u) => broadcastViewSafeForUser(op.getResult(0), u))) {
       const srcBuf = ctx.getOrAllocBuffer(op.getOperand(0));
       const outShape = op.getResult(0).type.shape;
       const dims = op.getAttr('broadcast_dimensions');

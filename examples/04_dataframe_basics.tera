@@ -5,7 +5,7 @@
 # Covers: dataframe, columns, schema, count, explain, show, collect, to_array,
 #         select, drop, withColumn, filter, where, orderBy, sort, limit, distinct.
 
-employees = dataframe(
+employees = DataFrame(
   name=["Alice", "Bob", "Carol", "Dan", "Eve", "Frank", "Grace", "Heidi"],
   dept=["Eng", "Eng", "Sales", "Sales", "Eng", "HR", "Sales", "HR"],
   salary=[120, 95, 80, 75, 110, 60, 90, 65],
@@ -43,5 +43,5 @@ print(employees.filter(col("salary").gt(100)).select("name").explain())
 
 # Materialize to plain rows, then index into the result
 rows = employees.orderBy("name").to_array()
-print("row count materialized:", len(rows))
+print("row count materialized:", rows.length)
 print("first row:", rows[0])

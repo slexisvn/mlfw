@@ -12,8 +12,8 @@ model SmallCNN(num_classes):
   head = Linear(16, num_classes)
 
   forward x:
-    h = pool(relu(bn1(conv1(x))))      # [N,8,14,14]
-    h = pool(relu(bn2(conv2(h))))      # [N,16,7,7]
+    h = pool(bn1(conv1(x)).relu())     # [N,8,14,14]
+    h = pool(bn2(conv2(h)).relu())     # [N,16,7,7]
     h = flat(gap(h))                   # [N,16]
     return head(h)
 
@@ -22,12 +22,12 @@ net = SmallCNN(10)
 # A batch of fake 28x28 grayscale images: [N, C, H, W]
 images = randn([4, 1, 28, 28])
 logits = net(images)
-probs = softmax(logits, axis=1)
+probs = logits.softmax(axis=1)
 
 print("=== CNN ===")
-print("input:", shape(images), "-> logits:", shape(logits))
-print("per-sample probability sums (~1):", sum(probs, axis=1))
-print("predicted classes:", argmax(logits, axis=1))
+print("input:", images.shape, "-> logits:", logits.shape)
+print("per-sample probability sums (~1):", probs.sum(axis=1))
+print("predicted classes:", logits.argmax(axis=1))
 
 # Compile to the CPU backend
 compiled = compile(net, input=images, target=cpu)
