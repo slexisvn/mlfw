@@ -32,7 +32,9 @@ export class FusionPass extends FunctionPass {
 
     const validGroups = [];
     for (const group of groups) {
-      if (!this._createsCycle(func, group)) {
+      if (this._createsCycle(func, group)) {
+        this._traceDecision(group, false, 'fusing would create a dependency cycle');
+      } else {
         validGroups.push(group);
       }
     }
@@ -61,14 +63,18 @@ export class FusionPass extends FunctionPass {
 
   _traceDecision(group, fuse, reason) {
     if (!this.trace || this.trace.level < TraceLevel.DEBUG) return;
+    const ops = group.ops.map(o => o.opName);
     this.trace.emit({
       type: 'fusion_decision',
       passName: this.name,
       groupSize: group.ops.length,
+      ops,
+      anchor: ops[ops.length - 1] || null,
       fuse,
       reason: reason || null,
       level: TraceLevel.DEBUG,
     });
+    this.trace.explain('fusion', ops.join('+'), fuse ? 'fused' : 'not-fused', reason || null, { groupSize: ops.length });
   }
 
   _createsCycle(func, group) {

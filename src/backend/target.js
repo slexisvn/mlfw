@@ -20,6 +20,7 @@ export class TargetFeatures {
     this.maxGridDimY = config.maxGridDimY || 1;
     this.maxGridDimZ = config.maxGridDimZ || 1;
     this.sharedMemoryBytes = config.sharedMemoryBytes || 0;
+    this.memoryBudgetBytes = config.memoryBudgetBytes || 0;
     this.registersPerThread = config.registersPerThread || 0;
     this.warpSize = config.warpSize || 1;
     this.memoryBandwidthGBs = config.memoryBandwidthGBs || 0;

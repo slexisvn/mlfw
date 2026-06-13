@@ -8,7 +8,7 @@ export const ForKind = Object.freeze({
 
 export class TensorNode {
   constructor() {
-    this.type = this.constructor.name;
+    this.type = this.constructor.name.replace(/^_+/, '');
     this._parent = null;
     this._parentKey = null;
     this._parentIdx = -1;

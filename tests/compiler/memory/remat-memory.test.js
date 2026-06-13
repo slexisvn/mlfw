@@ -3,6 +3,9 @@ import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { RematerializationPass, RematerializationConfig } from '../../../src/compiler/passes/memory/rematerialization.js';
 import { PassResult } from '../../../src/compiler/passes/pass.js';
+import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
+import { CPUTarget } from '../../../src/backend/target.js';
+import { TraceLevel } from '../../../src/compiler/pipeline/trace.js';
 
 function run(func, opts = {}) {
   return new RematerializationPass(opts).run(func);
@@ -40,6 +43,43 @@ describe('RematerializationPass budget gate', () => {
     });
 
     expect(run(func, { memoryBudget: 1024 * 1024 })).toBe(PassResult.UNCHANGED);
+  });
+
+  it('compiler derives the remat memory budget from target.memoryBudgetBytes', () => {
+    const t = new TensorType([1024, 1024], ScalarType.F32);
+    const func = buildFunction('big', [t], [t], (b, args) => {
+      const a = b.relu(args[0]);
+      const c = b.exp(a.getResult(0));
+      const d = b.neg(a.getResult(0));
+      b.returnOp([b.add(c.getResult(0), d.getResult(0)).getResult(0)]);
+    });
+
+    const events = [];
+    compileGraph(func, CPUTarget({ memoryBudgetBytes: 4096 }), {
+      optimization: { rematerialization: true },
+      trace: { level: TraceLevel.DEBUG, sink: (e) => events.push(e) },
+    });
+
+    const remat = events.find(e => e.budget !== undefined && /Remat/i.test(e.passName || ''));
+    expect(remat).toBeDefined();
+    expect(remat.budget).toBe(4096);
+  });
+
+  it('compiler leaves remat budget Infinity when target has no memoryBudgetBytes', () => {
+    const t = new TensorType([1024, 1024], ScalarType.F32);
+    const func = buildFunction('big', [t], [t], (b, args) => {
+      const a = b.relu(args[0]);
+      b.returnOp([b.add(b.exp(a.getResult(0)).getResult(0), b.neg(a.getResult(0)).getResult(0)).getResult(0)]);
+    });
+
+    const events = [];
+    compileGraph(func, CPUTarget(), {
+      optimization: { rematerialization: true },
+      trace: { level: TraceLevel.DEBUG, sink: (e) => events.push(e) },
+    });
+
+    const remat = events.find(e => e.budget !== undefined && /Remat/i.test(e.passName || ''));
+    expect(remat === undefined || remat.budget === Infinity).toBe(true);
   });
 });
 

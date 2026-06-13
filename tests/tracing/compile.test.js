@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
-  tensor, Linear, Sequential, ReLU, add,
+  tensor, Linear, Sequential, ReLU, add, relu, sum,
 } from '../../src/index.js';
 import { compile } from '../../src/tracing/compile.js';
-import { WasmTarget } from '../../src/backend/target.js';
+import { WasmTarget, CPUTarget } from '../../src/backend/target.js';
 import { Tensor } from '../../src/tensor/core/tensor.js';
 
 describe('compile returns executable tensors', () => {
@@ -164,5 +164,30 @@ describe('compile failures carry a reproduction context', () => {
       { shape: [1, 3], dtype: 'f32' },
       { shape: [1, 4], dtype: 'f32' },
     ]);
+  });
+});
+
+describe('shapeBuckets: static specialization with dynamic fallback', () => {
+  const mk = (rows, cols) => tensor(Array.from({ length: rows }, (_, i) => Array.from({ length: cols }, (_, j) => ((i * cols + j) % 13) / 13 - 0.4)));
+  const fwd = (x) => sum(relu(x), 1);
+
+  it('bucket shapes use a static kernel, off-bucket shapes use the dynamic fallback, all correct', async () => {
+    const compiled = compile({ forward: (a) => fwd(a) }, [mk(3, 4)], {
+      target: CPUTarget(),
+      dynamic_shapes: [new Set([0])],
+      shapeBuckets: [[[8, 4]], [[16, 4]]],
+    });
+
+    expect(compiled.source()).not.toMatch(/_ds/);
+
+    for (const N of [3, 8, 16, 7]) {
+      const x = mk(N, 4);
+      const eager = Array.from(fwd(x).contiguous().data);
+      const out = Array.from((await compiled(x)).data);
+      expect(out.length).toBe(eager.length);
+      for (let i = 0; i < eager.length; i++) {
+        expect(Math.abs(eager[i] - out[i]), `N=${N} idx ${i}`).toBeLessThan(1e-4);
+      }
+    }
   });
 });

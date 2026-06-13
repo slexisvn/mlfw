@@ -165,14 +165,16 @@ export function register() {
 
     let accBody = accBlock;
     for (let s = spatialDims - 1; s >= 0; s--) {
-      accBody = new ForNode(spatialKerVars[s], new IntImmNode(0), new IntImmNode(kerSpatialSizes[s]), ForKind.SERIAL, accBody);
+      const kKey = spatialLayoutKeys[s].toUpperCase();
+      accBody = new ForNode(spatialKerVars[s], new IntImmNode(0), ctx.extentNode(kerSpatialSizes[s], kerBuf, kLayout[kKey]), ForKind.SERIAL, accBody);
     }
-    accBody = new ForNode(icVar, new IntImmNode(0), new IntImmNode(inChannelsPerGroup), ForKind.SERIAL, accBody);
+    accBody = new ForNode(icVar, new IntImmNode(0), ctx.extentNode(inChannelsPerGroup, kerBuf, kLayout['I']), ForKind.SERIAL, accBody);
     for (let s = spatialDims - 1; s >= 0; s--) {
-      accBody = new ForNode(spatialOutVars[s], new IntImmNode(0), new IntImmNode(outShape[iLayout[spatialLayoutKeys[s]]]), ForKind.SERIAL, accBody);
+      const dimIdx = iLayout[spatialLayoutKeys[s]];
+      accBody = new ForNode(spatialOutVars[s], new IntImmNode(0), ctx.extentNode(outShape[dimIdx], outBuf, dimIdx), ForKind.SERIAL, accBody);
     }
-    accBody = new ForNode(ocVar, new IntImmNode(0), new IntImmNode(outChannels), ForKind.SERIAL, accBody);
-    accBody = new ForNode(nVar, new IntImmNode(0), new IntImmNode(batch), ForKind.SERIAL, accBody);
+    accBody = new ForNode(ocVar, new IntImmNode(0), ctx.extentNode(outChannels, kerBuf, kLayout['O']), ForKind.SERIAL, accBody);
+    accBody = new ForNode(nVar, new IntImmNode(0), ctx.extentNode(batch, inBuf, iLayout['N']), ForKind.SERIAL, accBody);
 
     return new SeqNode([initBody, accBody]);
   });

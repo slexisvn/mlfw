@@ -542,9 +542,10 @@ function findDirectChild(parent, child) {
 }
 
 export class SchedulePolicy {
-  constructor(target, rules = null) {
+  constructor(target, rules = null, trace = null) {
     this.target = target;
     this.rules = rules || SchedulePolicy.defaultRules();
+    this.trace = trace;
   }
 
   static defaultRules() {
@@ -575,9 +576,17 @@ export class SchedulePolicy {
     if (rule) {
       rule.apply(schedule, blockName, this.target);
       invalidateClassifyCache();
+      this._explain(blockName, rule.name, `matched rule '${rule.name}' for ${this.target.name}`);
       return rule.name;
     }
+    this._explain(blockName, 'none', 'no schedule rule matched; runs sequentially');
     return null;
+  }
+
+  _explain(blockName, decision, reason) {
+    if (this.trace && this.trace.explainsEnabled) {
+      this.trace.explain('schedule', blockName, decision, reason, { target: this.target.name });
+    }
   }
 
   applyToAllBlocks(schedule) {

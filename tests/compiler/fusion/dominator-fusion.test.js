@@ -94,7 +94,7 @@ describe('DominatorFusionPass — reduction limit enforcement', () => {
 
 describe('DominatorFusionPass — no NaN/Inf in compiled output', () => {
   function compileWithDominator(func, target) {
-    return compileGraph(func, target, { fusion: { dominator: true } });
+    return compileGraph(func, target, { fusion: { strategy: 'dominator' } });
   }
 
   function hasComputedNanInf(src) {
@@ -130,6 +130,46 @@ describe('DominatorFusionPass — no NaN/Inf in compiled output', () => {
     const result = compileWithDominator(func, WasmTarget());
     for (const k of result.listKernels()) {
       expect(hasComputedNanInf(result.getSource(k))).toBe(false);
+    }
+  });
+
+  it('sum(softmax) with dominator equals 1 per row (no cyclic-fusion Inf)', () => {
+    const inT = new TensorType([3, 4], F32);
+    const outT = new TensorType([3], F32);
+    const func = buildFunction('sum_softmax', [inT], [outT], (b, args) => {
+      const zero = b.scalarConstant(0.0, F32);
+      const sm = b.softmax(args[0], 1);
+      const s = b.reduce(sm.getResult(0), zero.getResult(0), [1], 'sum');
+      b.returnOp([s.getResult(0)]);
+    });
+
+    const result = compileWithDominator(func, CPUTarget());
+    const input = new Float32Array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2]);
+    const out = new Float32Array(3);
+    result.run('sum_softmax', input, out);
+
+    for (let i = 0; i < 3; i++) {
+      expect(Number.isFinite(out[i])).toBe(true);
+      expect(Math.abs(out[i] - 1)).toBeLessThan(1e-4);
+    }
+  });
+
+  it('softmax(softmax) with dominator stays finite and matches a reference', () => {
+    const t = new TensorType([3, 4], F32);
+    const func = buildFunction('sm_sm', [t], [t], (b, args) => {
+      b.returnOp([b.softmax(b.softmax(args[0], 1).getResult(0), 1).getResult(0)]);
+    });
+    const dom = compileWithDominator(func, CPUTarget());
+    const base = compileGraph(func, CPUTarget(), {});
+    const input = new Float32Array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2]);
+    const outDom = new Float32Array(12);
+    const outBase = new Float32Array(12);
+    dom.run('sm_sm', input, outDom);
+    base.run('sm_sm', input, outBase);
+
+    for (let i = 0; i < 12; i++) {
+      expect(Number.isFinite(outDom[i])).toBe(true);
+      expect(Math.abs(outDom[i] - outBase[i])).toBeLessThan(1e-4);
     }
   });
 

@@ -175,6 +175,47 @@ describe('BufferAssignment', () => {
     expect(assignment.peakMemory('shared')).toBe(0);
   });
 
+  function noOverlapViolations(intervals, strategy) {
+    const a = new BufferAssignment();
+    a.assign(intervals, [], 64, strategy);
+    let violations = 0;
+    for (let i = 0; i < intervals.length; i++) {
+      for (let j = i + 1; j < intervals.length; j++) {
+        if (!intervals[i].overlaps(intervals[j])) continue;
+        const x = a.getAssignment(intervals[i].buffer);
+        const y = a.getAssignment(intervals[j].buffer);
+        if (x.offset < y.offset + y.size && y.offset < x.offset + x.size) violations++;
+      }
+    }
+    return violations;
+  }
+
+  it('simultaneously-live buffers never share memory (size-desc release-order regression)', () => {
+    const iv = (name, sizeWords, a, b) => new BufferInterval(new Buffer(name, [sizeWords], 'f32', 'global'), a, b, 'global');
+    const intervals = [iv('b0', 48, 0, 2), iv('b1', 48, 0, 0), iv('b2', 48, 3, 5), iv('b3', 16, 0, 3)];
+
+    for (const strategy of ['best-fit', 'interference']) {
+      expect(noOverlapViolations(intervals, strategy), strategy).toBe(0);
+    }
+  });
+
+  it('interference allocation is conflict-free across many random interval sets', () => {
+    let seed = 12345;
+    const rng = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+    for (let t = 0; t < 200; t++) {
+      const k = 3 + Math.floor(rng() * 5);
+      const intervals = [];
+      for (let i = 0; i < k; i++) {
+        const a = Math.floor(rng() * 6);
+        const b = a + Math.floor(rng() * 4);
+        const sizeWords = 16 * (1 + Math.floor(rng() * 3));
+        intervals.push(new BufferInterval(new Buffer('b' + i, [sizeWords], 'f32', 'global'), a, b, 'global'));
+      }
+      expect(noOverlapViolations(intervals, 'best-fit'), `seed ${t} best-fit`).toBe(0);
+      expect(noOverlapViolations(intervals, 'interference'), `seed ${t} interference`).toBe(0);
+    }
+  });
+
   it('inplace candidates share the same offset', () => {
     const srcBuf = new Buffer('src', [16], 'f32', 'global');
     const dstBuf = new Buffer('dst', [16], 'f32', 'global');

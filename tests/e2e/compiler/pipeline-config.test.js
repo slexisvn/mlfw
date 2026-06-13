@@ -103,6 +103,100 @@ describe('trace collects compilation events', () => {
   });
 });
 
+describe('memory allocation strategy', () => {
+  it('interference strategy compiles to correct output (matches best-fit)', () => {
+    const t = new TensorType([8], ScalarType.F32);
+    const func = buildFunction('chain', [t, t], [t], (b, a) => {
+      const p = b.relu(b.add(a[0], a[1]).getResult(0));
+      const q = b.exp(p.getResult(0));
+      const r = b.neg(p.getResult(0));
+      b.returnOp([b.add(q.getResult(0), r.getResult(0)).getResult(0)]);
+    });
+
+    const input = new Float32Array([0.1, -0.2, 0.3, -0.4, 0.5, -0.6, 0.7, -0.8]);
+    const run = (strategy) => {
+      const r = compileGraph(func, CPUTarget(), { memory: { allocStrategy: strategy } });
+      const out = new Float32Array(8);
+      r.run('chain', input, input, out);
+      return out;
+    };
+
+    const best = run('best-fit');
+    const intf = run('interference');
+    for (let i = 0; i < 8; i++) {
+      expect(Number.isFinite(intf[i])).toBe(true);
+      expect(Math.abs(intf[i] - best[i])).toBeLessThan(1e-5);
+    }
+  });
+});
+
+describe('explain logs for why-not-fused / why-this-schedule', () => {
+  const F32 = ScalarType.F32;
+
+  function collectExplains(func, target, cfg) {
+    const events = [];
+    compileGraph(func, target, { trace: { level: TraceLevel.DEBUG, sink: (e) => events.push(e) }, ...cfg });
+    return events.filter(e => e.type === 'explain');
+  }
+
+  it('emits a fusion explain (decision + reason + subject) for each group', () => {
+    const t = new TensorType([8], F32);
+    const func = buildFunction('ew', [t, t], [t], (b, a) => {
+      const s = b.add(a[0], a[1]);
+      b.returnOp([b.neg(b.relu(s.getResult(0)).getResult(0)).getResult(0)]);
+    });
+
+    const fusion = collectExplains(func, CPUTarget(), {}).filter(e => e.category === 'fusion');
+    expect(fusion.length).toBeGreaterThan(0);
+    expect(fusion[0]).toHaveProperty('subject');
+    expect(fusion[0]).toHaveProperty('decision');
+    expect(fusion[0]).toHaveProperty('reason');
+  });
+
+  it('explains why a cyclic dominator group is not fused', () => {
+    const inT = new TensorType([3, 4], F32);
+    const outT = new TensorType([3], F32);
+    const func = buildFunction('sm', [inT], [outT], (b, a) => {
+      const zero = b.scalarConstant(0, F32);
+      const sm = b.softmax(a[0], 1);
+      b.returnOp([b.reduce(sm.getResult(0), zero.getResult(0), [1], 'sum').getResult(0)]);
+    });
+
+    const ex = collectExplains(func, CPUTarget(), { fusion: { strategy: 'dominator' } });
+    const notFused = ex.filter(e => e.category === 'fusion' && e.decision === 'not-fused');
+    expect(notFused.some(e => /cycle/.test(e.reason || ''))).toBe(true);
+  });
+
+  it('emits a schedule explain naming the rule applied to each block', () => {
+    const inT = new TensorType([16, 16], F32);
+    const outT = new TensorType([16], F32);
+    const func = buildFunction('red', [inT], [outT], (b, a) => {
+      const zero = b.scalarConstant(0, F32);
+      b.returnOp([b.reduce(b.relu(a[0]).getResult(0), zero.getResult(0), [1], 'sum').getResult(0)]);
+    });
+
+    const sched = collectExplains(func, CPUTarget(), { scheduling: { enabled: true } }).filter(e => e.category === 'schedule');
+    expect(sched.length).toBeGreaterThan(0);
+    expect(sched[0]).toHaveProperty('subject');
+    expect(sched[0]).toHaveProperty('decision');
+    expect(sched[0].reason).toBeTruthy();
+  });
+
+  it('emits an autotune schedule explain naming the chosen sketch per block', () => {
+    const inT = new TensorType([16, 16], F32);
+    const outT = new TensorType([16], F32);
+    const func = buildFunction('red', [inT], [outT], (b, a) => {
+      const zero = b.scalarConstant(0, F32);
+      b.returnOp([b.reduce(b.relu(a[0]).getResult(0), zero.getResult(0), [1], 'sum').getResult(0)]);
+    });
+
+    const sched = collectExplains(func, CPUTarget(), { scheduling: { enabled: true, autotune: true, seed: 7 } })
+      .filter(e => e.category === 'schedule');
+    expect(sched.length).toBeGreaterThan(0);
+    expect(sched.some(e => /autotuned/.test(e.reason || ''))).toBe(true);
+  });
+});
+
 describe('constant folding', () => {
   it('compile-time constants folded to literals in generated source', () => {
     const t = new TensorType([4], ScalarType.F32);

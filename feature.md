@@ -153,15 +153,27 @@
 
 ## P2 — Độ chín & vận hành
 
-### P2.1 — Observability / debug compiler  ◑ (đợt 36, crash-repro xong)
+### P2.1 — Observability / debug compiler  ✅ (đợt 40, explain log xong)
 - **What:**
   - [x] IR dump mỗi phase: ĐÃ CÓ (`trace.irDump`/`shouldSnapshot` afterGraphPasses/afterLowering/afterScheduling).
-  - [ ] "Why-not-fused" / "why-this-schedule" explain log cho từng block. (chưa)
+  - [x] **"Why-not-fused" / "why-this-schedule" explain log** (đợt 40): `TraceLog.explain(category, subject,
+    decision, reason, data)` ở DEBUG level (no-op mặc định). Wire:
+    - Fusion (XLA `FusionPass` + `DominatorFusionPass`): mỗi group → `fused`/`not-fused` + lý do (cost-model
+      reason / cycle / reduction-limit / không inline-fusable). Vd: `div+reduce+exp+sub -> not-fused: fusing
+      would create a dependency cycle`.
+    - Schedule (`SchedulePolicy.applyToBlock`): mỗi block → rule áp + lý do (vd `reduce_acc_5 -> reduction_cpu`),
+      hoặc `none: no rule matched; runs sequentially`.
+    - Autotune (`_scheduleAll`): mỗi block → sketch chọn + score (`reduce_acc -> reduction_cpu: autotuned, score
+      3.758`).
+    - Test: `pipeline-config.test.js` (fusion explain shape; cyclic-dominator not-fused reason; schedule rule
+      per block; autotune sketch per block). Gated DEBUG → 0 perf mặc định.
   - [x] **Crash repro tự động** (đợt 36): `compile()` đính `error.repro` khi compile/run throw — gồm `phase`
     (compile/run), `target`, `inputs` (shape+dtype mỗi input), `config` (fusion/scheduling/optimization/quant/
     dynamicShapes). Best-effort, không che lỗi gốc. Wrap `_compile` + `_execute` (sync+async). Test:
     `tests/tracing/compile.test.js` ("compile failures carry a reproduction context").
-- **Refs:** `src/tracing/compile.js` (`_attachRepro`), `src/compiler/pipeline/trace.js`, `src/compiler/ir/*/printer.js`.
+- **Done when:** ✅ Mọi quyết định fuse/schedule có explain (subject+decision+reason) ở DEBUG; crash repro; IR dump.
+- **Refs:** `src/compiler/pipeline/trace.js` (`explain`), `passes/fusion/{fusion_pass,dominator_fusion}.js`,
+  `schedule/rules.js` (SchedulePolicy), `pipeline/compiler.js` (autotune explain), `src/tracing/compile.js`.
 
 ### P2.2 — API stability & error UX  ◑ (đợt 36, error UX xong)
 - **What:**
@@ -173,7 +185,7 @@
     `PassManager` resilient gom lỗi/func-fail, không nuốt). Xác nhận.
 - **Refs:** `src/compiler/ir/graph/builder.js` (`describeType`), `src/tracing/compile.js`, `src/compiler/pipeline/compiler.js` (CompilationError/CompilationResult).
 
-### P2.3 — Dynamic shapes diện rộng  ◑ (đợt 36, matmul/attention/layernorm xong; conv là gap)
+### P2.3 — Dynamic shapes diện rộng  ✅ (đợt 36 + 39 + 41)
 - **Why:** sym_int chạy end-to-end (verify đợt P2 edge), nhưng cần phủ rộng hơn cho production serving.
 - **What:**
   - [x] Specialization cache theo shape-class: ĐÃ CÓ (`compile.js` `_cacheEntries` + shape-guard `evaluateGuards`,
@@ -181,21 +193,36 @@
   - [x] **Differential dynamic-shape rộng hơn** (đợt 36): thêm **matmul-chain** (dyn M), **attention-like**
     (softmax→matmul, dyn rows), **layernorm** (dyn batch) vào `differential-nn.test.js` block dynamic (vs eager,
     cpu+wasm). Cùng matmul dyn M/K, reduce, transpose, two-dynamic-dims sẵn có.
-  - [ ] **GAP (bug thật, chưa fix): conv2d dynamic batch N** → shape đúng nhưng batch>0 ra **0** (extent N không
-    thread vào conv lowering, chỉ batch 0 được tính). Cần fix sizing/loop-extent dynamic cho conv. Deep, để lại.
-  - [ ] Bucketing/guard nâng cao cho dynamic dim. (chưa)
-- **Refs:** `src/tracing/compile.js` (dynamicShapes), `src/compiler/analysis/sym_int.js`, `tests/e2e/differential-nn.test.js`.
+  - [x] **conv2d/conv1d dynamic batch N** (đợt 39): FIX — loop accumulate dùng `IntImmNode(batch=-1)` thay
+    `ctx.extentNode(...)` → `for cn < -1` không chạy → ra 0. Thay mọi extent buffer-shape bằng `ctx.extentNode`
+    (`linalg.js` + `quantization.js`). Test: differential-nn dynamic (+conv2d/conv1d/pad-stride × cpu+wasm).
+  - [x] **Bucketing/guard nâng cao cho dynamic dim** (đợt 41): `compile()` thêm `shapeBuckets` — pre-compile
+    kernel TĨNH (tối ưu hơn) cho các shape "nóng" khai báo trước, đặt TRƯỚC entry dynamic trong cache. Runtime
+    `_findCachedEntry` ưu tiên bucket khớp chính xác (static kernel nhanh), shape khác rơi về dynamic fallback.
+    Không padding/mask (đúng tuyệt đối). Test: `tests/tracing/compile.test.js` (bucket shape dùng static entry,
+    shape ngoài bucket dùng dynamic; cả hai đúng giá trị).
+- **Refs:** `src/tracing/compile.js` (dynamicShapes/shapeBuckets), `src/compiler/analysis/sym_int.js`, `tests/e2e/differential-nn.test.js`.
 
-### P2.4 — Memory planning nâng cấp  ◑ (đợt 36, best-fit + fragmentation metric xong)
+### P2.4 — Memory planning nâng cấp  ✅ (đợt 36 + 42)
 - **What:**
   - [x] **Best-fit + đo fragmentation** (đợt 36): `MemoryPool` thêm `strategy` ('best-fit' default | 'first-fit')
     — best-fit chọn gap KHÍT NHẤT (giảm phân mảnh khi size khác nhau) thay vì gap thấp nhất. Viết lại `_findFreeOffset`
-    gap-based O(L log L) (trước O(L²)/allocate). Thêm `fragmentation()` = phần peak không bị live-block chiếm. Test:
-    `assignment-memory.test.js` (best-fit→tight gap vs first-fit→lowest; fragmentation metric). Full suite 4013, cpu+
-    wasm+webgpu xanh (đổi layout, không đổi đúng đắn).
-  - [ ] Interference-graph allocation (khi best-fit kém). (chưa — best-fit đủ cho hiện tại)
-  - [ ] Remat kết hợp scheduling + memory-budget thật của target. (chưa, remat vẫn chạy tách)
-- **Refs:** `src/compiler/passes/memory/{buffer_assignment,rematerialization}.js`.
+    gap-based O(L log L) (trước O(L²)/allocate). Thêm `fragmentation()` = phần peak không bị live-block chiếm.
+  - [x] **Interference-graph allocation + FIX BUG allocator default** (đợt 42): implement allocation theo interference
+    chính xác (gán offset né MỌI buffer interfering = interval chồng nhau, không chỉ "active set"). **Phát hiện bug
+    thật**: `BufferAssignment` cũ (active-set + sort size-desc) FREE buffer theo thứ-tự-xử-lý, một buffer đã free có
+    thể bị buffer xử-lý-sau (interval chồng) tái-overlap → 2 buffer SỐNG-CÙNG-LÚC dùng CHUNG offset (sai kết quả
+    tiềm ẩn). Fuzz 2000 interval-set: best-fit cũ **335 vi phạm**, interference **0**. Fix: cả 2 strategy dùng
+    `_interferenceOffset` (xét toàn bộ interfering placed; 'best-fit'=gap khít nhất, 'interference'/'first-fit'=gap
+    thấp nhất) → đều conflict-free. Interference cũng pack chặt hơn (559 win vs 195 trên fuzz). Config
+    `memory.allocStrategy`. Test: `assignment-memory.test.js` (seed-12 regression + 200 random conflict-free) +
+    `pipeline-config.test.js` (e2e interference==best-fit). Revert (HEAD allocator) → seed-12 vi phạm 1. Full
+    suite **4031/4031**.
+  - [x] **Remat dùng memory-budget thật của target** (đợt 42): trước remat budget mặc định `Infinity` → no-op luôn.
+    Thêm `target.memoryBudgetBytes`; compiler suy `rematConfig.memoryBudget` từ target nếu chưa set → remat THỰC SỰ
+    chạy khi target có giới hạn bộ nhớ. Test: `remat-memory.test.js` (target budget → pass dùng budget đó; không
+    budget → Infinity/no-op). (Remat↔scheduling co-design sâu = P3 redesign, ngoài phạm vi.)
+- **Refs:** `src/compiler/passes/memory/{buffer_assignment,memory_planning,rematerialization}.js`, `src/backend/target.js`.
 
 ---
 
@@ -264,3 +291,16 @@
   - P2.3: differential dynamic-shape +matmul-chain/attention/layernorm. +cases. (conv-dyn batch là gap, ghi rõ)
   - P2.4: best-fit + `fragmentation()`, `_findFreeOffset` O(L²)→O(L log L). +2 test.
   - KHÔNG comment/hardcode/O(n²). Full regression **4013 pass / 0 fail** + webgpu-chrome 14/14.
+- 2026-06-12 (đợt 37–39): bug-hunt tiếp (xem todo.md) — conv+maxpool autotune (cross-workgroup serialize),
+  dominator fusion cycle (NaN/Inf), conv dynamic-batch (-1 extent), browser-bundle pooling (node-type tag esbuild
+  rename). Full regression **4021/4021**.
+- 2026-06-12 (đợt 40): **P2.1 xong** — explain log "why-not-fused / why-this-schedule" cho từng block ở DEBUG
+  (fusion cost/cycle/reduction-limit; schedule rule per block; autotune sketch+score). `TraceLog.explain`. +4 test.
+  No-op mặc định (gated DEBUG). Full regression **4025/4025**.
+- 2026-06-12 (đợt 42): **P2.4 xong** — interference-graph allocation (phát hiện+fix BUG allocator default: 2 buffer
+  sống-cùng-lúc dùng chung offset, 335/2000 fuzz vi phạm → 0) + remat dùng `target.memoryBudgetBytes`. +6 test.
+  Revert-test load-bearing. Full regression **4031/4031**.
+- 2026-06-12 (đợt 41): **P2.3 xong** — conv dynamic-batch đã fix (đợt 39), cập nhật feature.md. Thêm `shapeBuckets`:
+  pre-compile kernel TĨNH cho shape "nóng" khai báo + dynamic fallback (entry static đặt trước, runtime ưu tiên
+  khớp chính xác). Không padding/mask → đúng tuyệt đối. +1 test (bucket dùng static kernel `!/_ds/`, off-bucket
+  dùng dynamic, đều đúng). Revert → RED. Full regression **4026/4026**.

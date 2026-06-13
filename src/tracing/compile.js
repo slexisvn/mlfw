@@ -175,6 +175,7 @@ export function compile(model, exampleInputs, opts) {
   const target = opts?.target ?? CPUTarget();
   const compilerOpts = { target, verify: false, ...opts };
   const dynamicShapes = opts?.dynamic_shapes || null;
+  const shapeBuckets = opts?.shapeBuckets || null;
 
   const _cacheEntries = [];
 
@@ -211,12 +212,12 @@ export function compile(model, exampleInputs, opts) {
     };
   }
 
-  function _compile(inputs) {
+  function _compileWith(inputs, dynShapes) {
     try {
       const traced = _traceCore(
         (...args) => model.forward(...args),
         inputs,
-        { name: model.constructor.name || 'compiled', dynamicShapes }
+        { name: model.constructor.name || 'compiled', dynamicShapes: dynShapes }
       );
       if (traced && typeof traced.then === 'function') {
         return traced.then(_finalize, e => { throw _attachRepro(e, inputs, 'compile'); });
@@ -225,6 +226,14 @@ export function compile(model, exampleInputs, opts) {
     } catch (e) {
       throw _attachRepro(e, inputs, 'compile');
     }
+  }
+
+  function _compile(inputs) {
+    return _compileWith(inputs, dynamicShapes);
+  }
+
+  function _bucketInputs(shapes) {
+    return shapes.map((shape, i) => ({ shape, dtype: exampleInputs[i].dtype }));
   }
 
   function _findCachedEntry(inputs) {
@@ -269,11 +278,18 @@ export function compile(model, exampleInputs, opts) {
 
   let _ready = null;
   if (exampleInputs) {
-    const result = _compile(exampleInputs);
-    if (result && typeof result.then === 'function') {
-      _ready = result.then(c => { _cacheEntries.push(c); });
+    const pending = [];
+    if (shapeBuckets) {
+      for (const bucketShapes of shapeBuckets) {
+        pending.push(_compileWith(_bucketInputs(bucketShapes), null));
+      }
+    }
+    pending.push(_compile(exampleInputs));
+
+    if (pending.some(r => r && typeof r.then === 'function')) {
+      _ready = Promise.all(pending).then(entries => { for (const c of entries) _cacheEntries.push(c); });
     } else {
-      _cacheEntries.push(result);
+      for (const c of pending) _cacheEntries.push(c);
     }
   }
 

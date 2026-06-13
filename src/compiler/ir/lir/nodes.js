@@ -2,7 +2,7 @@ import { isDtypeFloat } from '../../../backend/dtype_map.js';
 
 export class LIRNode {
   constructor() {
-    this.type = this.constructor.name;
+    this.type = this.constructor.name.replace(/^_+/, '');
     this._parent = null;
     this._parentKey = null;
     this._parentIdx = -1;

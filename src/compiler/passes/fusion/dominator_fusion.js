@@ -41,8 +41,12 @@ export class DominatorFusionPass extends FunctionPass {
 
     const filtered = [];
     for (const group of groups) {
-      if (!group.allOpsInlineFusable()) continue;
+      if (!group.allOpsInlineFusable()) {
+        this._explain(group, false, 'group contains ops without inline fusion support');
+        continue;
+      }
       const decision = this.costModel.shouldFuse(group);
+      this._explain(group, decision.fuse, decision.reason);
       if (decision.fuse) filtered.push(group);
     }
 
@@ -61,6 +65,12 @@ export class DominatorFusionPass extends FunctionPass {
     }
 
     return PassResult.CHANGED;
+  }
+
+  _explain(group, fuse, reason) {
+    if (!this.trace || !this.trace.explainsEnabled) return;
+    const ops = group.ops.map(o => o.opName);
+    this.trace.explain('fusion', ops.join('+'), fuse ? 'fused' : 'not-fused', reason || null, { groupSize: ops.length, strategy: 'dominator' });
   }
 
   _buildGroups(topo, pdom) {
@@ -129,7 +139,48 @@ export class DominatorFusionPass extends FunctionPass {
       result.push(group);
     }
 
-    return result.filter(group => this._checkGroupReductions(group));
+    const accepted = [];
+    for (const group of result) {
+      if (!this._checkGroupReductions(group)) {
+        this._explain(group, false, `group exceeds the ${this.maxReductions}-reduction limit`);
+        continue;
+      }
+      if (this._createsCycle(group)) {
+        this._explain(group, false, 'fusing would create a dependency cycle');
+        continue;
+      }
+      accepted.push(group);
+    }
+    return accepted;
+  }
+
+  _createsCycle(group) {
+    const inputDefs = new Set();
+    for (const v of group.getInputValues()) {
+      if (v.definingOp && !group.hasOp(v.definingOp)) inputDefs.add(v.definingOp);
+    }
+    if (inputDefs.size === 0) return false;
+
+    const visited = new Set();
+    const stack = [];
+    for (const v of group.getOutputValues()) {
+      for (const use of v.uses()) {
+        if (!group.hasOp(use.user)) stack.push(use.user);
+      }
+    }
+
+    while (stack.length > 0) {
+      const op = stack.pop();
+      if (visited.has(op)) continue;
+      visited.add(op);
+      if (inputDefs.has(op)) return true;
+      for (let r = 0; r < op.numResults; r++) {
+        for (const use of op.getResult(r).uses()) {
+          if (!group.hasOp(use.user)) stack.push(use.user);
+        }
+      }
+    }
+    return false;
   }
 
   _canFusePatterns(producer, consumer) {

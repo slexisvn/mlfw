@@ -96,7 +96,8 @@ describe.skipIf(!deps)('webgpu via Chrome (differential vs CPU)', () => {
           + "export { compile } from './src/tracing/compile.js';\n"
           + "export { CPUTarget, WebGPUTarget } from './src/backend/target.js';\n"
           + "export { layer_norm } from './src/nn/functional/normalization.js';\n"
-          + "export { conv2d } from './src/nn/functional/conv.js';\n",
+          + "export { conv2d } from './src/nn/functional/conv.js';\n"
+          + "export { max_pool2d, avg_pool2d } from './src/nn/functional/pooling.js';\n",
         resolveDir: PROJECT_ROOT,
         loader: 'js',
       },
@@ -226,6 +227,13 @@ describe.skipIf(!deps)('webgpu via Chrome (differential vs CPU)', () => {
   const SCHED = { scheduling: { enabled: true } };
   const AUTOTUNE = { scheduling: { enabled: true, autotune: true } };
   const grid = (rows, cols, seed) => Array.from({ length: rows }, (_, i) => Array.from({ length: cols }, (_, j) => Math.sin((i * cols + j + seed) * 0.7)));
+
+  it('max_pool2d / avg_pool2d match CPU (bundled node-type tag regression)', async () => {
+    const x = { data: [[grid(8, 8, 1), grid(8, 8, 2)]] };
+    const mp = await caseClose("(M,x)=>M.max_pool2d(x,[2,2],[2,2])", [x]);
+    expect(mp.cpu.every(Number.isFinite)).toBe(true);
+    await caseClose("(M,x)=>M.avg_pool2d(x,[2,2],[2,2])", [x]);
+  });
 
   it('scheduled reduction matches CPU (no thread-race)', async () => {
     await caseClose("(M,x)=>M.sum(M.relu(x),1)", [{ data: grid(16, 16, 1) }], SCHED);

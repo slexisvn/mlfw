@@ -26,6 +26,11 @@ export class MemoryPool {
   allocate(size, buffer) {
     const aligned = this._align(size);
     const offset = this._findFreeOffset(aligned, buffer);
+    return this.placeAt(offset, aligned, buffer);
+  }
+
+  placeAt(offset, size, buffer) {
+    const aligned = this._align(size);
     const block = new MemoryBlock(offset, aligned, buffer);
     this.blocks.push(block);
     const end = offset + aligned;
@@ -77,7 +82,7 @@ export class BufferAssignment {
     this.inplaceMap = new Map();
   }
 
-  assign(intervals, inplaceCandidates = [], alignment = 64) {
+  assign(intervals, inplaceCandidates = [], alignment = 64, strategy = 'best-fit') {
     for (const candidate of inplaceCandidates) {
       this.inplaceMap.set(candidate.dstBuffer, candidate.srcBuffer);
     }
@@ -154,18 +159,11 @@ export class BufferAssignment {
       }
 
       if (!activeByScope.has(scope)) activeByScope.set(scope, []);
-      const active = activeByScope.get(scope);
-
-      for (let i = active.length - 1; i >= 0; i--) {
-        const eff = effLastUse.get(active[i].interval.buffer) ?? active[i].interval.lastUse;
-        if (eff < interval.firstUse) {
-          pool.release(active[i].block);
-          active.splice(i, 1);
-        }
-      }
-
-      const block = pool.allocate(size, buf);
-      active.push({ interval, block });
+      const placed = activeByScope.get(scope);
+      const lastUseEff = effLastUse.get(buf) ?? interval.lastUse;
+      const offset = this._interferenceOffset(placed, interval.firstUse, lastUseEff, pool._align(size), alignment, strategy);
+      const block = pool.placeAt(offset, size, buf);
+      placed.push({ firstUse: interval.firstUse, lastUseEff, offset: block.offset, size: block.size });
 
       this.assignments.set(buf, {
         offset: block.offset,
@@ -177,6 +175,32 @@ export class BufferAssignment {
     }
 
     return this;
+  }
+
+  _interferenceOffset(placed, firstUse, lastUseEff, size, alignment, strategy) {
+    const ranges = [];
+    for (const p of placed) {
+      if (p.firstUse <= lastUseEff && firstUse <= p.lastUseEff) {
+        ranges.push([p.offset, p.offset + p.size]);
+      }
+    }
+    ranges.sort((a, b) => a[0] - b[0]);
+
+    let cursor = 0;
+    let best = null;
+    for (const [lo, hi] of ranges) {
+      const start = Math.ceil(cursor / alignment) * alignment;
+      const gap = lo - start;
+      if (gap >= size) {
+        if (strategy === 'best-fit') {
+          if (best === null || gap < best.gap) best = { offset: start, gap };
+        } else {
+          return start;
+        }
+      }
+      if (hi > cursor) cursor = hi;
+    }
+    return best !== null ? best.offset : Math.ceil(cursor / alignment) * alignment;
   }
 
   getOffset(buffer) {

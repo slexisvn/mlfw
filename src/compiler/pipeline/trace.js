@@ -95,6 +95,12 @@ export class TraceLog {
     this.emit({ type: 'error', phase, funcName, message, passName: passName || null, level: TraceLevel.INFO });
   }
 
+  explain(category, subject, decision, reason, data) {
+    this.emit({ type: 'explain', category, subject, decision, reason, ...(data || {}), level: TraceLevel.DEBUG });
+  }
+
+  get explainsEnabled() { return this.level >= TraceLevel.DEBUG; }
+
   shouldSnapshot(point) {
     return this.level >= TraceLevel.DEBUG && !!this.irSnapshot[point];
   }

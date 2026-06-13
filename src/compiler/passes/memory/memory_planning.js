@@ -49,6 +49,7 @@ export class MemoryPlanner {
   constructor(config = {}) {
     this.alignment = config.alignment || 64;
     this.enableInplace = config.enableInplace !== false;
+    this.allocStrategy = config.allocStrategy || 'best-fit';
   }
 
   plan(primFunc) {
@@ -61,7 +62,7 @@ export class MemoryPlanner {
     }
 
     const assignment = new BufferAssignment();
-    assignment.assign(temporaries, inplaceCandidates, this.alignment);
+    assignment.assign(temporaries, inplaceCandidates, this.alignment, this.allocStrategy);
 
     return new MemoryPlan(assignment, livenessResult, inplaceCandidates);
   }

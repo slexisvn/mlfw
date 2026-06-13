@@ -84,6 +84,7 @@ export class CompilerConfig {
     this.memory = {
       alignment:    m.alignment    ?? opts.memoryAlignment ?? 64,
       inplaceReuse: m.inplaceReuse ?? opts.enableInplaceReuse ?? true,
+      allocStrategy: m.allocStrategy ?? opts.allocStrategy ?? 'best-fit',
     };
 
     const p = opts.partition || {};
@@ -265,7 +266,11 @@ export class Compiler {
     }
 
     if (this.config.optimization.rematerialization) {
-      pm.addPass(new RematerializationPass(this.config.optimization.rematConfig));
+      const rcfg = { ...this.config.optimization.rematConfig };
+      if (rcfg.memoryBudget === undefined && this.config.target && this.config.target.memoryBudgetBytes > 0) {
+        rcfg.memoryBudget = this.config.target.memoryBudgetBytes;
+      }
+      pm.addPass(new RematerializationPass(rcfg));
     }
 
     pm.setTrace(trace);
@@ -353,7 +358,14 @@ export class Compiler {
           let cacheHits = 0, blockCount = 0;
           if (tuneResult && tuneResult.results) {
             blockCount = tuneResult.results.size;
-            for (const [, r] of tuneResult.results) { if (r.fromCache) cacheHits++; }
+            for (const [blockName, r] of tuneResult.results) {
+              if (r.fromCache) cacheHits++;
+              if (trace.explainsEnabled) {
+                trace.explain('schedule', blockName, r.sketchName,
+                  `autotuned: best of search${r.fromCache ? ' (cached)' : ''}, score ${r.score != null ? r.score.toFixed(3) : 'n/a'}`,
+                  { target: this.config.target.name, params: r.params });
+              }
+            }
           }
           trace.autotuneStats(pf.name, { durationMs, blockCount, applied: !!(tuneResult && tuneResult.applied), cacheHits });
         } catch (e) {
@@ -365,7 +377,7 @@ export class Compiler {
         }
       }
     } else if (sCfg.enabled) {
-      const policy = new SchedulePolicy(this.config.target);
+      const policy = new SchedulePolicy(this.config.target, null, trace);
       for (const pf of primFuncs) {
         if (failed.has(pf.name)) continue;
         try {
@@ -395,7 +407,7 @@ export class Compiler {
     trace.phaseStart('memoryPlanning');
     const t0 = performance.now();
     const alignment = this.config.memory.alignment || this.config.target?.cacheLineSizeBytes || 64;
-    const planner = new MemoryPlanner({ alignment, enableInplace: this.config.memory.inplaceReuse });
+    const planner = new MemoryPlanner({ alignment, enableInplace: this.config.memory.inplaceReuse, allocStrategy: this.config.memory.allocStrategy });
     for (const pf of primFuncs) {
       if (failed.has(pf.name)) continue;
       try {

@@ -690,6 +690,9 @@ describe('dynamic shapes: compile once, run on multiple concrete shapes', () => 
     ['matmul chain dynamic M', (x, y, z) => matmul(matmul(x, y), z), [S(0), null, null], [[[3, 4], [4, 5], [5, 2]], [[6, 4], [4, 5], [5, 2]]]],
     ['attention-like: softmax then matmul, dynamic rows', (x, y) => matmul(softmax(x, 1), y), [S(0), null], [[[3, 4], [4, 2]], [[5, 4], [4, 2]]]],
     ['layernorm with dynamic batch', (x) => layer_norm(x, [4], null, null, 1e-5), [S(0)], [[[3, 4]], [[6, 4]], [[1, 4]]]],
+    ['conv2d with dynamic batch N', (x, w) => conv2d(x, w, null, [1, 1], [[0, 0], [0, 0]]), [S(0), null], [[[1, 2, 6, 6], [3, 2, 3, 3]], [[2, 2, 6, 6], [3, 2, 3, 3]], [[4, 2, 6, 6], [3, 2, 3, 3]]]],
+    ['conv2d pad+stride dynamic batch', (x, w) => conv2d(x, w, null, [2, 2], [[1, 1], [1, 1]]), [S(0), null], [[[1, 2, 7, 7], [3, 2, 3, 3]], [[3, 2, 7, 7], [3, 2, 3, 3]]]],
+    ['conv1d with dynamic batch N', (x, w) => conv1d(x, w, null, 1, 0), [S(0), null], [[[1, 2, 10], [4, 2, 3]], [[2, 2, 10], [4, 2, 3]]]],
   ];
 
   for (const [tname, T] of [['cpu', CPUTarget], ['wasm', WasmTarget]]) {

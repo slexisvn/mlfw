@@ -710,7 +710,7 @@
     Full suite **3999/3999**.
 - **KHÔNG phải bug WebGPU (đã xác minh, ghi để khỏi đào lại):**
   - `fusion.strategy='dominator'`: SAI cả trên **CPU** (NaN/Inf cho chuỗi softmax/reduce). Bug pass dominator chung,
-    ko phải WebGPU (WebGPU chỉ render trung thực graph đã hỏng). → cần fix riêng DominatorFusionPass nếu muốn dùng.
+    ko phải WebGPU. **ĐÃ FIX đợt 38** (xem dưới).
   - conv+**max_pool2d** eager ra NaN trong **browser bundle** (esbuild) nhưng ĐÚNG trên node → artifact bundling của
     harness, ko phải WebGPU codegen (conv+maxpool default chạy đúng trên node WebGPU).
 ### Đợt 37 (2026-06-12) — FIX conv+maxpool autotune (cross-workgroup shared intermediate)
@@ -730,8 +730,37 @@
   `webgpu-chrome.test.js` "wide bottleneck matmul serialized == CPU" (Chrome); `webgpu-exec.test.js` "wide bottleneck
   serializes to one invocation" (structural). Revert serialize → exec RED + maxErr 0.19. Verify node WebGPU 5 autotune
   seed + evolutionary + non-zero output: maxErr ~1e-7. Full suite **4013/4013** + chrome 15/15.
-- GHI CHÚ còn lại: browser-bundle hỏng maxpool eager (artifact esbuild, node đúng) — chưa truy, ko ảnh hưởng codegen;
-  conv dynamic-batch N (P2.3 gap). dominator fusion (bug pass chung, ko phải WebGPU).
+- GHI CHÚ còn lại: ĐÃ FIX cả hai ở đợt 39 (conv dynamic-batch + browser-bundle maxpool).
+
+### Đợt 38 (2026-06-12) — FIX dominator fusion sinh CYCLE (NaN/Inf, cả CPU+WASM)
+> Repro tối thiểu: `sum(softmax(x,1),1)` → đáng lẽ 1.0, dominator ra **Infinity**; `softmax(softmax(x))` → **NaN**.
+- **Root**: `DominatorFusionPass._absorbIntermediates` hút op `exp` (của softmax) vào group, NHƯNG consumer của exp là
+  `reduce_sum` (mẫu số softmax) bị loại khỏi group do `maxReductions=1` (group đã có outer reduce). `reduce_sum` đó
+  vừa ĐỌC exp (output group) vừa FEED divisor NGƯỢC vào group → **chu trình** fusion↔reduce_sum. Materialize ra graph
+  có `%6 = reduce(%?, …)` operand dangling → đọc rác → div ra Inf. (Verify qua dump IR: thấy `%?`.)
+- **Fix** (`passes/fusion/dominator_fusion.js`): thêm `_createsCycle(group)` — BFS xuôi từ MỌI output-consumer (ngoài
+  group); nếu chạm definingOp của một group-INPUT → có cycle → loại group khỏi `filtered` (không fuse, graph gốc giữ
+  nguyên = đúng). O(số op + use), không O(n²). Filter: `_checkGroupReductions && !_createsCycle`.
+- **Bonus fix test**: `dominator-fusion.test.js` `compileWithDominator` dùng SAI config `{fusion:{dominator:true}}`
+  (không kích strategy dominator → strategy vẫn 'xla') → mọi test "no NaN" CŨ test nhầm đường XLA. Sửa thành
+  `{fusion:{strategy:'dominator'}}` → giờ test THẬT dominator.
+- **Test**: +2 value-test ("sum(softmax)=1 per row", "softmax(softmax) finite == reference XLA"). Revert `_createsCycle`
+  → 2 RED. Fuzz 300 random reduce/softmax/elementwise chain dominator vs eager: **0 fail**. Full suite **4015/4015**.
+
+### Đợt 39 (2026-06-12) — FIX 2 gap cuối: conv dynamic-batch + browser-bundle pooling
+- **BUG conv/quantized_conv dynamic-batch N ra 0** (cả shape traced N=1 cũng 0): loop accumulate dùng
+  `new IntImmNode(batch)` với `batch = inBuf.shape[N] = -1` (DYNAMIC sentinel) → `for cn < -1` không chạy.
+  (init loop dùng makeLoopNest nên đúng `_ds`.) Cùng class bug "extent leak -1" đã fix cho op khác (đợt P2 item 6),
+  conv/quant-conv bị bỏ sót. Fix: thay MỌI extent suy từ buffer-shape bằng `ctx.extentNode(extent, buf, dimIdx)`
+  (static→IntImm, dynamic→shape-param). `linalg.js` + `quantization.js`. Test: `differential-nn.test.js` block dynamic
+  (+conv2d dyn-N, conv2d pad+stride, conv1d × cpu+wasm). Revert → 2 RED. cpu+wasm OK.
+- **BUG pooling (max/avg) ra rác KHI BUNDLE browser** (eager ra init -Inf/0; node thì đúng): root = `TensorNode`/
+  `LIRNode` base `this.type = this.constructor.name`. esbuild scope-hoisting đổi tên class `CompareNode`→`_CompareNode`
+  (đụng tên) → `node.type` thành `'_CompareNode'` → codegen check `=== 'CompareNode'` MISS → IfThenElse condition
+  (in-bounds check của pooling) fold nhầm thành `0` → window luôn out-of-bounds → ra init. (Chỉ pooling lộ vì dùng
+  tensor-IR CompareNode trong bounds-guard; lý do node ko dính: ko rename.) Fix: `this.constructor.name.replace(/^_+/,'')`
+  ở 2 base class (gỡ underscore-prefix esbuild thêm). Test: `webgpu-chrome.test.js` "max_pool2d/avg_pool2d == CPU"
+  (bundle browser → chạy). Revert → RED. Full suite **4021/4021** + chrome 16/16.
 
 ## Ghi chú vận hành
 - Coding rules: ko comment, ko hardcode, ko O(n²); fix xong viết test, đặt vào file test có sẵn, ko có mới tạo mới.
