@@ -8,7 +8,7 @@ import {
   MathOpNode, VariableNode, IntImmNode, FloatImmNode,
   ForKind,
 } from '../../../../src/compiler/ir/tensor/nodes.js';
-import { WasmTarget, CPUTarget, GPUTarget } from '../../../../src/backend/target.js';
+import { WasmTarget, CPUTarget, CUDATarget } from '../../../../src/backend/target.js';
 
 function buf(name, shape, dtype = 'f32') {
   return new Buffer(name, shape, dtype, 'global');
@@ -228,7 +228,7 @@ describe('scanMetadata — threadBindings (GPU)', () => {
     const loop = new ForNode(idx('tid'), new IntImmNode(0), new IntImmNode(256), ForKind.THREAD_BINDING, blk);
     loop.threadTag = 'threadIdx.x';
     const pf = makePrimFunc('test', ['p0'], loop, new Map([['p0', b]]));
-    const meta = scanMetadata(pf, GPUTarget());
+    const meta = scanMetadata(pf, CUDATarget());
     expect(meta.threadBindings.has('threadIdx.x')).toBe(true);
     expect(meta.threadBindings.get('threadIdx.x')[0].varName).toBe('tid');
     expect(meta.threadBindings.get('threadIdx.x')[0].extent).toBe(256);
@@ -243,7 +243,7 @@ describe('scanMetadata — sharedBuffers', () => {
     const loop = new ForNode(idx('i'), new IntImmNode(0), new IntImmNode(64), ForKind.SERIAL, blk);
     const alloc = new AllocateNode(shared, 'shared', loop);
     const pf = makePrimFunc('test', [], alloc, new Map());
-    const meta = scanMetadata(pf, GPUTarget());
+    const meta = scanMetadata(pf, CUDATarget());
     expect(meta.sharedBuffers.length).toBe(1);
     expect(meta.sharedBuffers[0].name).toBe('smem');
   });

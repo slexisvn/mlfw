@@ -85,7 +85,8 @@ function blendRunning(buffer, stat, momentum) {
 }
 
 export function batch_norm(input, runningMean, runningVar, weight, bias, training = true, eps = 1e-5, momentum = 0.1) {
-  if (input instanceof SymbolicTensor || input.isSymbolic || !training) {
+  const symbolic = input instanceof SymbolicTensor || input.isSymbolic;
+  if (!training) {
     return ops.batch_norm(input, weight, bias, runningMean, runningVar, CHANNEL_AXIS, eps);
   }
 
@@ -104,7 +105,9 @@ export function batch_norm(input, runningMean, runningVar, weight, bias, trainin
   if (weight) normalized = ops.mul(normalized, weight.reshape(affineShape));
   if (bias) normalized = ops.add(normalized, bias.reshape(affineShape));
 
-  if (runningMean) blendRunning(runningMean, batchMean, momentum);
-  if (runningVar) blendRunning(runningVar, batchVar, momentum);
+  if (!symbolic) {
+    if (runningMean) blendRunning(runningMean, batchMean, momentum);
+    if (runningVar) blendRunning(runningVar, batchVar, momentum);
+  }
   return normalized;
 }

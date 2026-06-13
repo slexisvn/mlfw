@@ -5,7 +5,7 @@ import { lowerGraphToPrimFunc } from '../../../src/compiler/passes/lowering/grap
 import { BlockNode } from '../../../src/compiler/ir/tensor/nodes.js';
 import { Schedule } from '../../../src/compiler/schedule/schedule.js';
 import { SchedulePolicy } from '../../../src/compiler/schedule/rules.js';
-import { GPUTarget } from '../../../src/backend/target.js';
+import { CUDATarget } from '../../../src/backend/target.js';
 
 function lower(name, inTypes, outTypes, bodyFn) {
   const func = buildFunction(name, inTypes, outTypes, bodyFn);
@@ -124,7 +124,7 @@ describe('GPU scheduling with unique block names', () => {
         b.returnOp([x]);
       });
       const sch = new Schedule(pf);
-      new SchedulePolicy(GPUTarget()).applyToAllBlocks(sch);
+      new SchedulePolicy(CUDATarget()).applyToAllBlocks(sch);
       return nodeCount(pf.body);
     }
 
@@ -142,7 +142,7 @@ describe('GPU scheduling with unique block names', () => {
     });
 
     const sch = new Schedule(pf);
-    const applied = new SchedulePolicy(GPUTarget()).applyToAllBlocks(sch);
+    const applied = new SchedulePolicy(CUDATarget()).applyToAllBlocks(sch);
 
     const appliedNames = [...applied.keys()];
     expect(new Set(appliedNames).size).toBe(appliedNames.length);
@@ -155,7 +155,7 @@ describe('GPU scheduling with unique block names', () => {
     });
 
     const sch = new Schedule(pf);
-    const applied = new SchedulePolicy(GPUTarget()).applyToAllBlocks(sch);
+    const applied = new SchedulePolicy(CUDATarget()).applyToAllBlocks(sch);
 
     const matmulRules = [...applied.entries()].filter(([name]) => name.includes('matmul'));
     expect(matmulRules.length).toBeGreaterThan(0);

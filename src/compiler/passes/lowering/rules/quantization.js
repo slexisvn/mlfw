@@ -1,7 +1,7 @@
 import {
   IntImmNode, FloatImmNode, MathOpNode, CompareNode,
   ForNode, ForKind, BufferStoreNode, BufferLoadNode,
-  BlockNode, SeqNode, IfThenElseNode, CastNode, CallExternNode
+  BlockNode, SeqNode, IfThenElseNode, CastNode, CallExternNode, mathOp
 } from '../../../ir/tensor/nodes.js';
 import {
   registerLoweringRule, lowerPointwise, buildSpatialNest,
@@ -20,7 +20,7 @@ export function register() {
 
     return lowerPointwise(ctx, op, inputs, outputs, (_op, loads) => {
       const scaled = new MathOpNode('/', loads[0], new FloatImmNode(scale));
-      const shifted = new MathOpNode('+', scaled, new FloatImmNode(zeroPoint));
+      const shifted = zeroPoint !== 0 ? new MathOpNode('+', scaled, new FloatImmNode(zeroPoint)) : scaled;
       const rounded = new CallExternNode('round', [shifted], 'f32');
       const clamped = new CallExternNode('min', [
         new CallExternNode('max', [rounded, new FloatImmNode(cMin)], 'f32'),
@@ -38,7 +38,7 @@ export function register() {
 
     return lowerPointwise(ctx, op, inputs, outputs, (_op, loads) => {
       const asFloat = new CastNode(loads[0], srcDtype, tgtDtype);
-      const shifted = new MathOpNode('-', asFloat, new FloatImmNode(zeroPoint));
+      const shifted = zeroPoint !== 0 ? new MathOpNode('-', asFloat, new FloatImmNode(zeroPoint)) : asFloat;
       return new MathOpNode('*', shifted, new FloatImmNode(scale));
     });
   });
@@ -131,19 +131,21 @@ export function register() {
     for (let s = 0; s < spatialDims; s++) {
       const key = spatialLayoutKeys[s];
       const kKey = key.toUpperCase();
-      const inSpatialIdx = new MathOpNode('+',
-        new MathOpNode('*', soBinds[s].iterVar, new IntImmNode(strides[s])),
-        new MathOpNode('+',
-          new MathOpNode('*', skBinds[s].iterVar, new IntImmNode(dilation[s])),
+      const inSpatialIdx = mathOp('+',
+        mathOp('*', soBinds[s].iterVar, new IntImmNode(strides[s])),
+        mathOp('+',
+          mathOp('*', skBinds[s].iterVar, new IntImmNode(dilation[s])),
           new IntImmNode(-padding[s][0])
         )
       );
       inIdx[iLayout[key]] = inSpatialIdx;
       kerIdx[kLayout[kKey]] = skBinds[s].iterVar;
-      const ge = new CompareNode('ge', inSpatialIdx, new IntImmNode(0));
-      const lt = new CompareNode('lt', inSpatialIdx, new IntImmNode(inBuf.shape[iLayout[key]]));
-      const dimOk = new MathOpNode('*', ge, lt);
-      inBoundsExpr = inBoundsExpr ? new MathOpNode('*', inBoundsExpr, dimOk) : dimOk;
+      if (padding[s][0] !== 0 || padding[s][1] !== 0) {
+        const ge = new CompareNode('ge', inSpatialIdx, new IntImmNode(0));
+        const lt = new CompareNode('lt', inSpatialIdx, new IntImmNode(inBuf.shape[iLayout[key]]));
+        const dimOk = new MathOpNode('*', ge, lt);
+        inBoundsExpr = inBoundsExpr ? new MathOpNode('*', inBoundsExpr, dimOk) : dimOk;
+      }
     }
 
     const loadIn = new CastNode(new BufferLoadNode(inBuf, inIdx), inBuf.dtype, 'i32');

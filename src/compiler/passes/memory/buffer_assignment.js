@@ -91,15 +91,35 @@ export class BufferAssignment {
     for (const iv of intervals) ivByBuf.set(iv.buffer, iv);
     const effLastUse = new Map();
     for (const iv of intervals) effLastUse.set(iv.buffer, iv.lastUse);
-    for (const [dst] of this.inplaceMap) {
-      const dstIv = ivByBuf.get(dst);
-      if (!dstIv) continue;
-      let cur = this.inplaceMap.get(dst);
-      const seen = new Set();
-      while (cur && ivByBuf.has(cur) && !seen.has(cur)) {
-        seen.add(cur);
-        if (dstIv.lastUse > effLastUse.get(cur)) effLastUse.set(cur, dstIv.lastUse);
-        cur = this.inplaceMap.get(cur);
+    const children = new Map();
+    for (const [dst, src] of this.inplaceMap) {
+      if (!ivByBuf.has(dst) || !ivByBuf.has(src)) continue;
+      if (!children.has(src)) children.set(src, []);
+      children.get(src).push(dst);
+    }
+    if (children.size > 0) {
+      const state = new Map();
+      for (const iv of intervals) {
+        const root = iv.buffer;
+        if (state.get(root) === 1) continue;
+        const stack = [root];
+        while (stack.length) {
+          const node = stack[stack.length - 1];
+          const kids = children.get(node);
+          if (state.get(node) === undefined) {
+            state.set(node, 0);
+            if (kids) for (const c of kids) if (state.get(c) === undefined) stack.push(c);
+            continue;
+          }
+          stack.pop();
+          if (state.get(node) === 1) continue;
+          if (kids) {
+            let m = effLastUse.get(node);
+            for (const c of kids) { const cv = effLastUse.get(c); if (cv > m) m = cv; }
+            effLastUse.set(node, m);
+          }
+          state.set(node, 1);
+        }
       }
     }
 

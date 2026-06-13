@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
-import { CPUTarget } from '../../../src/backend/target.js';
+import { CPUTarget, CUDATarget } from '../../../src/backend/target.js';
 
 function compile(func, opts = {}) {
   return compileGraph(func, CPUTarget(), opts);
@@ -346,6 +346,39 @@ describe('Kernel audit — reduction quality', () => {
 
     const r = compile(func);
     const src = r.getSource('rowmean');
+    expect(hasArithmeticNoise(src)).toEqual([]);
+  });
+});
+
+describe('Kernel audit — quantized conv quality (affine index folding)', () => {
+  const mkConvQ = (xShape, kShape, outShape, pad) =>
+    buildFunction('cq', [new TensorType(xShape, ScalarType.F32), new TensorType(kShape, ScalarType.F32)],
+      [new TensorType(outShape, ScalarType.F32)], (b, args) => {
+        b.returnOp([b.conv(args[0], args[1], [1, 1], pad).getResult(0)]);
+      });
+
+  it('CPU quantized conv pad=0: no arithmetic noise, no bounds checks', () => {
+    const r = compileGraph(mkConvQ([1, 3, 10, 10], [4, 3, 3, 3], [1, 4, 8, 8], [[0, 0], [0, 0]]),
+      CPUTarget(), { quantization: { enabled: true } });
+    const src = r.getSource('cq');
+    expect(hasArithmeticNoise(src)).toEqual([]);
+    expect(hasBoundsChecks(src)).toBe(0);
+    expect(hasExtent1Loops(src)).toBe(0);
+  });
+
+  it('GPU quantized conv pad=0: no arithmetic noise, no bounds checks', () => {
+    const r = compileGraph(mkConvQ([1, 3, 10, 10], [4, 3, 3, 3], [1, 4, 8, 8], [[0, 0], [0, 0]]),
+      CUDATarget(), { quantization: { enabled: true } });
+    const src = r.getSource('cq');
+    expect(hasArithmeticNoise(src)).toEqual([]);
+    expect(hasBoundsChecks(src)).toBe(0);
+  });
+
+  it('GPU quantized conv pad=1: bounds checks present but no arithmetic noise', () => {
+    const r = compileGraph(mkConvQ([1, 3, 8, 8], [4, 3, 3, 3], [1, 4, 8, 8], [[1, 1], [1, 1]]),
+      CUDATarget(), { quantization: { enabled: true } });
+    const src = r.getSource('cq');
+    expect(hasBoundsChecks(src)).toBeGreaterThan(0);
     expect(hasArithmeticNoise(src)).toEqual([]);
   });
 });

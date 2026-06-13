@@ -3,7 +3,7 @@ import { buildFunction, IRBuilder } from '../../../src/compiler/ir/graph/builder
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { GraphPartitionPass, PartitionMaterializationPass } from '../../../src/compiler/passes/partition/partition_pass.js';
 import { PassResult } from '../../../src/compiler/passes/pass.js';
-import { CPUTarget, GPUTarget } from '../../../src/backend/target.js';
+import { CPUTarget, CUDATarget } from '../../../src/backend/target.js';
 import { GraphFunction } from '../../../src/compiler/ir/graph/function.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
 
@@ -39,7 +39,7 @@ describe('GraphPartitionPass', () => {
       const sum = b.add(args[0], args[1]);
       b.returnOp([b.neg(sum.getResult(0)).getResult(0)]);
     });
-    const pass = new GraphPartitionPass({ targets: [CPUTarget(), GPUTarget()] });
+    const pass = new GraphPartitionPass({ targets: [CPUTarget(), CUDATarget()] });
     const result = pass.run(func);
     if (result === PassResult.UNCHANGED) {
       expect(findOps(func, 'copy_to_device').length).toBe(0);
@@ -48,7 +48,7 @@ describe('GraphPartitionPass', () => {
 
   it('annotates ops with partition_id and partition_target', () => {
     const cpu = CPUTarget();
-    const gpu = GPUTarget();
+    const gpu = CUDATarget();
     const t = new TensorType([256, 256], ScalarType.F32);
     const tSmall = new TensorType([4], ScalarType.F32);
     const func = buildFunction('f', [t, t, tSmall, tSmall], [t, tSmall], (b, args) => {
@@ -72,7 +72,7 @@ describe('GraphPartitionPass', () => {
 
   it('inserts copy_to_device for cross-device data transfer', () => {
     const cpu = CPUTarget();
-    const gpu = GPUTarget();
+    const gpu = CUDATarget();
     const t = new TensorType([256, 256], ScalarType.F32);
     const tSmall = new TensorType([4], ScalarType.F32);
     const func = buildFunction('f', [t, tSmall], [t], (b, args) => {
@@ -106,7 +106,7 @@ describe('GraphPartitionPass', () => {
 
   it('copy_to_device rewires consumer operands', () => {
     const cpu = CPUTarget();
-    const gpu = GPUTarget();
+    const gpu = CUDATarget();
     const t = new TensorType([256, 256], ScalarType.F32);
     const tSmall = new TensorType([4], ScalarType.F32);
     const func = buildFunction('f', [t, tSmall], [t], (b, args) => {
@@ -139,7 +139,7 @@ describe('GraphPartitionPass', () => {
 
   it('same-device edges do NOT get copy_to_device', () => {
     const cpu = CPUTarget();
-    const gpu = GPUTarget();
+    const gpu = CUDATarget();
     const t = new TensorType([256, 256], ScalarType.F32);
     const func = buildFunction('f', [t, t], [t], (b, args) => {
       const sum = b.add(args[0], args[1]);
@@ -179,7 +179,7 @@ describe('GraphPartitionPass topo sort and insertion ordering', () => {
 
   it('copy_to_device is inserted after the transferred value definingOp', () => {
     const cpu = CPUTarget();
-    const gpu = GPUTarget();
+    const gpu = CUDATarget();
     const t = new TensorType([256, 256], ScalarType.F32);
     const tSmall = new TensorType([4], ScalarType.F32);
     const func = buildFunction('f', [t, tSmall], [t], (b, args) => {
@@ -231,7 +231,7 @@ describe('PartitionMaterializationPass', () => {
 
   it('materializes partitions into sub-functions with correct IO', () => {
     const cpu = CPUTarget();
-    const gpu = GPUTarget();
+    const gpu = CUDATarget();
     const t = new TensorType([256, 256], ScalarType.F32);
     const tSmall = new TensorType([4], ScalarType.F32);
     const func = buildFunction('f', [t, t, tSmall, tSmall], [t, tSmall], (b, args) => {
@@ -261,7 +261,7 @@ describe('PartitionMaterializationPass', () => {
 
   it('sub-function ops are cloned — not shared with original', () => {
     const cpu = CPUTarget();
-    const gpu = GPUTarget();
+    const gpu = CUDATarget();
     const t = new TensorType([256, 256], ScalarType.F32);
     const tSmall = new TensorType([4], ScalarType.F32);
     const func = buildFunction('f', [t, t, tSmall, tSmall], [t, tSmall], (b, args) => {
@@ -290,7 +290,7 @@ describe('PartitionMaterializationPass', () => {
 
   it('sub-function operands use block arguments not original values', () => {
     const cpu = CPUTarget();
-    const gpu = GPUTarget();
+    const gpu = CUDATarget();
     const t = new TensorType([256, 256], ScalarType.F32);
     const tSmall = new TensorType([4], ScalarType.F32);
     const func = buildFunction('f', [t, t, tSmall, tSmall], [t, tSmall], (b, args) => {

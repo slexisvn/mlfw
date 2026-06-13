@@ -1,7 +1,7 @@
 import { ForKind } from '../ir/tensor/nodes.js';
 import { TargetKind } from '../../backend/target.js';
 import { ScheduleTrace } from '../schedule/trace.js';
-import { classifyBlock, isReductionLoop } from '../schedule/rules.js';
+import { classifyBlock, isReductionLoop, primFuncHasReduction } from '../schedule/rules.js';
 
 export class SearchVariable {
   constructor(name, candidates) {
@@ -40,6 +40,10 @@ const TILE_CANDIDATES = [1, 2, 4, 8, 16, 32, 64, 128, 256];
 const BLOCK_SIZE_CANDIDATES = [32, 64, 128, 256, 512, 1024];
 const UNROLL_CANDIDATES = [1, 2, 4, 8, 16];
 const VECTOR_CANDIDATES = [1, 2, 4, 8, 16];
+
+function gpuThreadCap(target) {
+  return Math.min((target && target.maxThreadsPerBlock) || 256, 256);
+}
 const REDUCE_TILE_CANDIDATES = [1, 2, 4, 8, 16, 32];
 
 export function createElementwiseCPUSketch() {
@@ -95,7 +99,12 @@ export function createElementwiseGPUSketch() {
     }
 
     const totalElements = extent.value;
-    const blockSize = Math.min(params.block_size, totalElements);
+    const singleBlockCap = Math.min(target.maxThreadsPerBlock, 1024);
+    if (primFuncHasReduction(schedule.func) && totalElements <= singleBlockCap) {
+      schedule.bindThread(fusedLoop, 'threadIdx.x');
+      return;
+    }
+    const blockSize = Math.min(params.block_size, gpuThreadCap(target));
     if (totalElements > blockSize) {
       const [bx, tx] = schedule.split(fusedLoop, blockSize);
       schedule.bindThread(bx, 'blockIdx.x');
@@ -140,7 +149,7 @@ export function createReductionGPUSketch() {
       schedule.bindThread(fused, 'threadIdx.x');
       return;
     }
-    const blockSize = Math.min(params.block_size, extent.value);
+    const blockSize = Math.min(params.block_size, gpuThreadCap(target));
     if (extent.value > blockSize) {
       const [bx, tx] = schedule.split(fused, blockSize);
       schedule.bindThread(bx, 'blockIdx.x');
@@ -194,13 +203,23 @@ export function createMatmulGPUSketch() {
     const mExtent = mLoop.extent.type === 'IntImmNode' ? mLoop.extent.value : null;
     const nExtent = nLoop.extent.type === 'IntImmNode' ? nLoop.extent.value : null;
 
+    const cap = gpuThreadCap(target);
+    const threadsOf = (bt, tt) => Math.max(1, Math.ceil(bt / tt));
+    let ttm = Math.max(1, params.thread_tile_m);
+    let ttn = Math.max(1, params.thread_tile_n);
+    while (threadsOf(params.block_tile_m, ttm) * threadsOf(params.block_tile_n, ttn) > cap) {
+      if (threadsOf(params.block_tile_m, ttm) >= threadsOf(params.block_tile_n, ttn)) ttm *= 2;
+      else ttn *= 2;
+      if (ttm >= params.block_tile_m && ttn >= params.block_tile_n) break;
+    }
+
     if (mExtent && mExtent >= params.block_tile_m) {
       const [mBlock, mRem] = schedule.split(mLoop, params.block_tile_m);
       schedule.bindThread(mBlock, 'blockIdx.y');
       const updated = schedule.getLoops(blockName);
       const cur = updated.find(l => l.loopVar.name === mRem.loopVar.name);
-      if (cur && params.thread_tile_m <= params.block_tile_m) {
-        const [mto] = schedule.split(cur, params.thread_tile_m);
+      if (cur && ttm <= params.block_tile_m) {
+        const [mto] = schedule.split(cur, ttm);
         schedule.bindThread(mto, 'threadIdx.y');
       }
     }
@@ -212,8 +231,8 @@ export function createMatmulGPUSketch() {
       schedule.bindThread(nBlock, 'blockIdx.x');
       const updated3 = schedule.getLoops(blockName);
       const curN = updated3.find(l => l.loopVar.name === nRem.loopVar.name);
-      if (curN && params.thread_tile_n <= params.block_tile_n) {
-        const [nto] = schedule.split(curN, params.thread_tile_n);
+      if (curN && ttn <= params.block_tile_n) {
+        const [nto] = schedule.split(curN, ttn);
         schedule.bindThread(nto, 'threadIdx.x');
       }
     }

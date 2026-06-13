@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType, Layout } from '../../../src/compiler/ir/graph/types.js';
 import { LayoutPolicy, LayoutPreference } from '../../../src/compiler/passes/layout/layout_policy.js';
-import { CPUTarget, GPUTarget, WasmTarget } from '../../../src/backend/target.js';
+import { CPUTarget, CUDATarget, WasmTarget } from '../../../src/backend/target.js';
 
 function ops(func) {
   const list = [];
@@ -21,7 +21,7 @@ describe('LayoutPolicy conv rule', () => {
       b.returnOp([b.conv(args[0], args[1], [1, 1], [0, 0, 0, 0]).getResult(0)]);
     });
 
-    const policy = new LayoutPolicy(GPUTarget());
+    const policy = new LayoutPolicy(CUDATarget());
     const pref = policy.getPreference(ops(func)[0]);
     const nhwc = new Layout([0, 2, 3, 1]);
     expect(pref.inputs[0].equals(nhwc)).toBe(true);
@@ -44,7 +44,7 @@ describe('LayoutPolicy conv rule', () => {
 
   it('preferredConvLayout overrides default NHWC', () => {
     const custom = new Layout([0, 3, 1, 2]);
-    const target = GPUTarget({ preferredConvLayout: custom });
+    const target = CUDATarget({ preferredConvLayout: custom });
     const inp = new TensorType([1, 3, 32, 32], ScalarType.F32);
     const ker = new TensorType([16, 3, 3, 3], ScalarType.F32);
     const out = new TensorType([1, 16, 30, 30], ScalarType.F32);
@@ -69,7 +69,7 @@ describe('LayoutPolicy conv rule rank guard', () => {
   }
 
   it('GPU conv with non-rank-4 input returns null (no invalid NHWC permutation)', () => {
-    const policy = new LayoutPolicy(GPUTarget());
+    const policy = new LayoutPolicy(CUDATarget());
     expect(policy.getPreference(fakeConv(3))).toBeNull();
     expect(policy.getPreference(fakeConv(5))).toBeNull();
   });
@@ -80,7 +80,7 @@ describe('LayoutPolicy conv rule rank guard', () => {
   });
 
   it('GPU conv with rank-4 still yields valid NHWC permutation', () => {
-    const policy = new LayoutPolicy(GPUTarget());
+    const policy = new LayoutPolicy(CUDATarget());
     const pref = policy.getPreference(fakeConv(4));
     expect(pref.inputs[0].equals(new Layout([0, 2, 3, 1]))).toBe(true);
   });
@@ -109,7 +109,7 @@ describe('LayoutPolicy dot rule', () => {
       b.returnOp([b.matmul(args[0], args[1]).getResult(0)]);
     });
 
-    const pref = new LayoutPolicy(GPUTarget()).getPreference(ops(func)[0]);
+    const pref = new LayoutPolicy(CUDATarget()).getPreference(ops(func)[0]);
     expect(pref.inputs[0].equals(Layout.rowMajor(2))).toBe(true);
     expect(pref.inputs[1].equals(Layout.rowMajor(2))).toBe(true);
   });

@@ -293,13 +293,13 @@ describe('webgpu compilation output', () => {
     expect(depth).toBe(0);
   });
 
-  it('wide bottleneck: cross-workgroup shared intermediate serializes to one invocation', () => {
+  it('wide bottleneck: cross-workgroup shared intermediate stays within one workgroup', () => {
     const model = new Sequential(new Linear(4, 64), new ReLU(), new Linear(64, 2));
     const x = tensor([[1, 2, 3, 4]]);
     const compiled = compileWebGPU(model, [x], { enableSchedule: true });
     const src = compiled.source();
 
-    expect(src).toMatch(/@workgroup_size\(1, 1, 1\)/);
+    expect(src).toMatch(/@workgroup_size\(\d+, 1, 1\)/);
     expect(src).not.toContain('_wid');
     let depth = 0;
     for (const ch of src) { if (ch === '{') depth++; if (ch === '}') depth--; }

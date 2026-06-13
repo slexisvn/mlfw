@@ -87,7 +87,7 @@ export class PatternApplicator {
 
     while (iteration < maxIterations) {
       let iterChanged = false;
-      for (const op of [...func.opsArray()]) {
+      for (const op of [...func.opsRecursive()]) {
         if (!op.parentBlock) continue;
 
         const patterns = this.patternSet.getForOp(op.opName);

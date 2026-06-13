@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { GPUCodegen, GPUKernel } from '../../../src/backend/gpu/codegen.js';
-import { GPUTarget } from '../../../src/backend/target.js';
+import { CUDACodegen, CUDAKernel } from '../../../src/backend/cuda/codegen.js';
+import { CUDATarget } from '../../../src/backend/target.js';
 import { Buffer } from '../../../src/compiler/ir/tensor/buffer.js';
 import {
   PrimFunc, ForNode, BlockNode, SeqNode,
@@ -12,7 +12,7 @@ import {
 } from '../../../src/compiler/ir/tensor/nodes.js';
 
 function makeCodegen(overrides = {}) {
-  return new GPUCodegen(GPUTarget(overrides));
+  return new CUDACodegen(CUDATarget(overrides));
 }
 
 function buf(name, shape, dtype = 'f32', scope = 'global') {
@@ -31,7 +31,7 @@ function threadFor(loopVar, extent, tag, body) {
   return new ForNode(loopVar, new IntImmNode(0), new IntImmNode(extent), ForKind.THREAD_BINDING, body, tag);
 }
 
-describe('GPUCodegen._exprToC', () => {
+describe('CUDACodegen._exprToC', () => {
   function exprToC(node) {
     const cg = makeCodegen();
     cg._defaultDtype = 'f32';
@@ -101,7 +101,7 @@ describe('GPUCodegen._exprToC', () => {
   it('renders IfThenElseNode as ternary', () => {
     const cond = new CompareNode('gt', new VariableNode('x', 'f32'), new FloatImmNode(0));
     const node = new IfThenElseNode(cond, new FloatImmNode(1), new FloatImmNode(0));
-    expect(exprToC(node)).toBe('((x > 0f) ? 1f : 0f)');
+    expect(exprToC(node)).toBe('((x > 0.0f) ? 1.0f : 0.0f)');
   });
 
   it('renders CastNode', () => {
@@ -130,7 +130,7 @@ describe('GPUCodegen._exprToC', () => {
   });
 });
 
-describe('GPUCodegen._emitExternCall', () => {
+describe('CUDACodegen._emitExternCall', () => {
   function externCall(name, args, dtype = 'f32') {
     const cg = makeCodegen();
     cg._defaultDtype = dtype;
@@ -181,7 +181,7 @@ describe('GPUCodegen._emitExternCall', () => {
   });
 });
 
-describe('GPUCodegen._flatIndex', () => {
+describe('CUDACodegen._flatIndex', () => {
   function flatIndex(buffer, indices) {
     const cg = makeCodegen();
     cg._primFunc = null;
@@ -218,7 +218,7 @@ describe('GPUCodegen._flatIndex', () => {
   });
 });
 
-describe('GPUCodegen._scanBindings', () => {
+describe('CUDACodegen._scanBindings', () => {
   it('extracts threadIdx.x binding and sets blockDim', () => {
     const cg = makeCodegen();
     const store = new BufferStoreNode(buf('out', [256]), [idx('tid')], new FloatImmNode(0));
@@ -285,7 +285,7 @@ describe('GPUCodegen._scanBindings', () => {
   });
 });
 
-describe('GPUCodegen._applyBindingDim', () => {
+describe('CUDACodegen._applyBindingDim', () => {
   it('maps threadIdx.x to blockDim[0]', () => {
     const cg = makeCodegen();
     cg._applyBindingDim('threadIdx.x', 128);
@@ -330,7 +330,7 @@ describe('GPUCodegen._applyBindingDim', () => {
   });
 });
 
-describe('GPUCodegen.generate — kernel signature', () => {
+describe('CUDACodegen.generate — kernel signature', () => {
   it('emits __global__ void with correct param types', () => {
     const inBuf = buf('x', [4], 'f32');
     const outBuf = buf('y', [4], 'f32');
@@ -378,7 +378,7 @@ describe('GPUCodegen.generate — kernel signature', () => {
   });
 });
 
-describe('GPUCodegen.generate — thread bindings', () => {
+describe('CUDACodegen.generate — thread bindings', () => {
   it('emits const int assignments for thread bindings', () => {
     const inBuf = buf('x', [1024], 'f32');
     const outBuf = buf('y', [1024], 'f32');
@@ -426,11 +426,11 @@ describe('GPUCodegen.generate — thread bindings', () => {
 
     const kernel = makeCodegen().generate(pf);
     expect(kernel.source).toMatch(/const int tid = threadIdx\.x/);
-    expect(kernel.source).toMatch(/out\[tid\] = 1f/);
+    expect(kernel.source).toMatch(/out\[tid\] = 1\.0f/);
   });
 });
 
-describe('GPUCodegen.generate — for loops', () => {
+describe('CUDACodegen.generate — for loops', () => {
   it('emits serial for loop with C syntax', () => {
     const outBuf = buf('y', [4], 'f32');
     const store = new BufferStoreNode(outBuf, [idx('i')], new FloatImmNode(0));
@@ -457,7 +457,7 @@ describe('GPUCodegen.generate — for loops', () => {
   });
 });
 
-describe('GPUCodegen.generate — shared memory', () => {
+describe('CUDACodegen.generate — shared memory', () => {
   it('declares __shared__ buffers and computes sharedMemBytes', () => {
     const sharedBuf = buf('smem', [64], 'f32', 'shared');
     const outBuf = buf('out', [64], 'f32');
@@ -493,7 +493,7 @@ describe('GPUCodegen.generate — shared memory', () => {
   });
 });
 
-describe('GPUCodegen.generate — local allocation', () => {
+describe('CUDACodegen.generate — local allocation', () => {
   it('emits local array declaration for non-shared AllocateNode', () => {
     const localBuf = buf('local_buf', [8], 'f32', 'local');
     const outBuf = buf('out', [8], 'f32');
@@ -512,7 +512,7 @@ describe('GPUCodegen.generate — local allocation', () => {
   });
 });
 
-describe('GPUCodegen.generate — if/else statements', () => {
+describe('CUDACodegen.generate — if/else statements', () => {
   it('emits if block for conditional store', () => {
     const inBuf = buf('x', [4], 'f32');
     const outBuf = buf('y', [4], 'f32');
@@ -547,7 +547,7 @@ describe('GPUCodegen.generate — if/else statements', () => {
   });
 });
 
-describe('GPUCodegen.generate — LetStmtNode', () => {
+describe('CUDACodegen.generate — LetStmtNode', () => {
   it('emits typed variable binding', () => {
     const inBuf = buf('x', [4], 'f32');
     const outBuf = buf('y', [4], 'f32');
@@ -586,7 +586,7 @@ describe('GPUCodegen.generate — LetStmtNode', () => {
   });
 });
 
-describe('GPUCodegen.generate — WhileNode', () => {
+describe('CUDACodegen.generate — WhileNode', () => {
   it('emits while loop', () => {
     const outBuf = buf('y', [1], 'f32');
     const condVar = new VariableNode('running', 'i32');
@@ -602,7 +602,7 @@ describe('GPUCodegen.generate — WhileNode', () => {
   });
 });
 
-describe('GPUCodegen.generate — BlockNode with iterVars', () => {
+describe('CUDACodegen.generate — BlockNode with iterVars', () => {
   it('emits const int for each bound iter var', () => {
     const outBuf = buf('y', [4], 'f32');
     const store = new BufferStoreNode(outBuf, [idx('vi')], new FloatImmNode(42));
@@ -621,7 +621,7 @@ describe('GPUCodegen.generate — BlockNode with iterVars', () => {
   });
 });
 
-describe('GPUCodegen.generate — BlockNode with initBody', () => {
+describe('CUDACodegen.generate — BlockNode with initBody', () => {
   it('emits initBody before main body', () => {
     const accBuf = buf('acc', [4], 'f32');
     const inBuf = buf('inp', [4, 8], 'f32');
@@ -648,10 +648,10 @@ describe('GPUCodegen.generate — BlockNode with initBody', () => {
   });
 });
 
-describe('GPUCodegen.generate — dim clamping', () => {
+describe('CUDACodegen.generate — dim clamping', () => {
   it('clamps blockDim to target max', () => {
-    const target = GPUTarget({ maxBlockDimX: 512 });
-    const cg = new GPUCodegen(target);
+    const target = CUDATarget({ maxBlockDimX: 512 });
+    const cg = new CUDACodegen(target);
 
     const outBuf = buf('out', [2048], 'f32');
     const store = new BufferStoreNode(outBuf, [idx('tid')], new FloatImmNode(0));
@@ -665,8 +665,8 @@ describe('GPUCodegen.generate — dim clamping', () => {
   });
 
   it('clamps gridDim to target max', () => {
-    const target = GPUTarget({ maxGridDimY: 100 });
-    const cg = new GPUCodegen(target);
+    const target = CUDATarget({ maxGridDimY: 100 });
+    const cg = new CUDACodegen(target);
 
     const outBuf = buf('out', [200], 'f32');
     const store = new BufferStoreNode(outBuf, [idx('by')], new FloatImmNode(0));
@@ -680,7 +680,7 @@ describe('GPUCodegen.generate — dim clamping', () => {
   });
 });
 
-describe('GPUCodegen.generate — SeqNode', () => {
+describe('CUDACodegen.generate — SeqNode', () => {
   it('visits all statements in order', () => {
     const outBuf = buf('y', [4], 'f32');
     const store1 = new BufferStoreNode(outBuf, [new IntImmNode(0)], new FloatImmNode(1));
@@ -693,16 +693,16 @@ describe('GPUCodegen.generate — SeqNode', () => {
 
     const kernel = makeCodegen().generate(pf);
     const src = kernel.source;
-    const idx1 = src.indexOf('1f');
-    const idx2 = src.indexOf('2f');
-    const idx3 = src.indexOf('3f');
+    const idx1 = src.indexOf('1.0f');
+    const idx2 = src.indexOf('2.0f');
+    const idx3 = src.indexOf('3.0f');
     expect(idx1).toBeGreaterThan(-1);
     expect(idx2).toBeGreaterThan(idx1);
     expect(idx3).toBeGreaterThan(idx2);
   });
 });
 
-describe('GPUCodegen.generate — full elementwise GPU kernel', () => {
+describe('CUDACodegen.generate — full elementwise GPU kernel', () => {
   it('generates a correct CUDA kernel for vector add with thread bindings', () => {
     const aBuf = buf('a', [1024], 'f32');
     const bBuf = buf('b', [1024], 'f32');
@@ -728,7 +728,7 @@ describe('GPUCodegen.generate — full elementwise GPU kernel', () => {
 
     const kernel = makeCodegen().generate(pf);
 
-    expect(kernel).toBeInstanceOf(GPUKernel);
+    expect(kernel).toBeInstanceOf(CUDAKernel);
     expect(kernel.name).toBe('vec_add');
     expect(kernel.blockDim).toEqual([256, 1, 1]);
     expect(kernel.gridDim).toEqual([4, 1, 1]);
@@ -742,7 +742,7 @@ describe('GPUCodegen.generate — full elementwise GPU kernel', () => {
   });
 });
 
-describe('GPUCodegen.generate — tiled matmul pattern', () => {
+describe('CUDACodegen.generate — tiled matmul pattern', () => {
   it('generates correct structure for a tiled matmul with shared memory', () => {
     const aBuf = buf('A', [64, 64], 'f32');
     const bBuf = buf('B', [64, 64], 'f32');
@@ -796,7 +796,7 @@ describe('GPUCodegen.generate — tiled matmul pattern', () => {
   });
 });
 
-describe('GPUCodegen.generate — dtype handling in generated code', () => {
+describe('CUDACodegen.generate — dtype handling in generated code', () => {
   it('uses __half for f16 buffers', () => {
     const inBuf = buf('x', [4], 'f16');
     const outBuf = buf('y', [4], 'f16');
@@ -826,7 +826,7 @@ describe('GPUCodegen.generate — dtype handling in generated code', () => {
   });
 });
 
-describe('GPUCodegen.generate — dynamic shapes', () => {
+describe('CUDACodegen.generate — dynamic shapes', () => {
   it('resolves shape params for dynamic strides', () => {
     const inBuf = buf('x', [-1, -1], 'f32');
     const outBuf = buf('y', [-1, -1], 'f32');
@@ -854,7 +854,7 @@ describe('GPUCodegen.generate — dynamic shapes', () => {
   });
 });
 
-describe('GPUCodegen.generate — CastNode in kernel', () => {
+describe('CUDACodegen.generate — CastNode in kernel', () => {
   it('emits C-style cast', () => {
     const inBuf = buf('x', [4], 'f32');
     const outBuf = buf('y', [4], 'i32');
@@ -872,7 +872,7 @@ describe('GPUCodegen.generate — CastNode in kernel', () => {
   });
 });
 
-describe('GPUCodegen.generate — reduction with thread bindings', () => {
+describe('CUDACodegen.generate — reduction with thread bindings', () => {
   it('generates reduction kernel with spatial parallelism and serial reduction', () => {
     const inBuf = buf('inp', [32, 64], 'f32');
     const outBuf = buf('out', [32], 'f32');
@@ -903,7 +903,7 @@ describe('GPUCodegen.generate — reduction with thread bindings', () => {
   });
 });
 
-describe('GPUCodegen.generate — extern math calls in kernel', () => {
+describe('CUDACodegen.generate — extern math calls in kernel', () => {
   it('generates correct math function calls in CUDA code', () => {
     const inBuf = buf('x', [256], 'f32');
     const outBuf = buf('y', [256], 'f32');
@@ -921,7 +921,7 @@ describe('GPUCodegen.generate — extern math calls in kernel', () => {
   });
 });
 
-describe('GPUCodegen.generate — complex expression nesting', () => {
+describe('CUDACodegen.generate — complex expression nesting', () => {
   it('generates correct code for fused multiply-add pattern', () => {
     const aBuf = buf('a', [256], 'f32');
     const bBuf = buf('b', [256], 'f32');
@@ -944,7 +944,7 @@ describe('GPUCodegen.generate — complex expression nesting', () => {
   });
 });
 
-describe('GPUCodegen — state reset between generate calls', () => {
+describe('CUDACodegen — state reset between generate calls', () => {
   it('does not leak state between successive calls', () => {
     const cg = makeCodegen();
 

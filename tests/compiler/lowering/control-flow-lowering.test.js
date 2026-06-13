@@ -148,3 +148,49 @@ describe('control flow end-to-end execution vs reference (cpu+wasm)', () => {
     });
   }
 });
+
+describe('decomposition recurses into control-flow regions', () => {
+  const I32 = ScalarType.I32;
+  const sigmoid = (v) => 1 / (1 + Math.exp(-v));
+  const refs = { sigmoid, silu: (v) => v * sigmoid(v), gelu: (v) => v * sigmoid(1.702 * v) };
+
+  for (const op of ['sigmoid', 'gelu', 'silu']) {
+    for (const [tname, makeTarget] of [['cpu', CPUTarget], ['wasm', WasmTarget]]) {
+      it(`${op} inside an if-branch compiles + runs on ${tname}`, () => {
+        const t = new TensorType([4], F32);
+        const pred = new TensorType([], BOOL);
+        const func = buildFunction('iff', [pred, t], [t], (b, a) => {
+          const io = b.ifOp(a[0], [t],
+            (tb) => tb.yieldOp([tb[op](a[1]).getResult(0)]),
+            (eb) => eb.yieldOp([eb.neg(a[1]).getResult(0)]));
+          b.returnOp([io.getResult(0)]);
+        });
+        const res = compileGraph(func, makeTarget());
+        const x = new Float32Array([0.5, -0.5, 1.0, -1.0]);
+        const out = new Float32Array(4);
+        res.run('iff', new Uint8Array([1]), x, out);
+        for (let i = 0; i < 4; i++) expect(out[i]).toBeCloseTo(refs[op](x[i]), 5);
+      });
+    }
+  }
+
+  for (const [tname, makeTarget] of [['cpu', CPUTarget], ['wasm', WasmTarget]]) {
+    it(`sigmoid inside a while body compiles + runs on ${tname}`, () => {
+      const t = new TensorType([4], F32);
+      const func = buildFunction('w', [t], [t], (b, a) => {
+        const cnt = b.scalarConstant(2, I32).getResult(0);
+        const one = b.scalarConstant(1, I32).getResult(0);
+        const zero = b.scalarConstant(0, I32).getResult(0);
+        const w = b.whileOp([a[0], cnt],
+          (cb, c) => cb.yieldOp([cb.compare(c[1], zero, 'gt').getResult(0)]),
+          (bb, c) => bb.yieldOp([bb.sigmoid(c[0]).getResult(0), bb.sub(c[1], one).getResult(0)]));
+        b.returnOp([w.getResult(0)]);
+      });
+      const res = compileGraph(func, makeTarget());
+      const x = new Float32Array([0.5, -0.5, 1.0, -1.0]);
+      const out = new Float32Array(4);
+      res.run('w', x, out);
+      for (let i = 0; i < 4; i++) expect(out[i]).toBeCloseTo(sigmoid(sigmoid(x[i])), 5);
+    });
+  }
+});

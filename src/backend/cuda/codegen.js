@@ -2,18 +2,19 @@ import { ForKind } from '../../compiler/ir/tensor/nodes.js';
 import { cType, cPtrType, cLiteralSuffix, cMathFunc } from '../dtype_map.js';
 import { inferDtype } from '../../compiler/ir/lir/nodes.js';
 
-export class GPUKernel {
-  constructor(name, source, blockDim, gridDim, sharedMemBytes, params) {
+export class CUDAKernel {
+  constructor(name, source, blockDim, gridDim, sharedMemBytes, params, outputIndices) {
     this.name = name;
     this.source = source;
     this.blockDim = blockDim;
     this.gridDim = gridDim;
     this.sharedMemBytes = sharedMemBytes;
     this.params = params;
+    this.outputIndices = outputIndices;
   }
 }
 
-export class GPUCodegen {
+export class CUDACodegen {
   constructor(target) {
     this.target = target;
     this._indent = 0;
@@ -61,10 +62,14 @@ export class GPUCodegen {
 
     const paramParts = [];
     const paramNames = [];
+    const outputIndices = [];
+    let bufferIdx = 0;
     for (const [, buf] of func.bufferMap) {
       paramNames.push(buf.name);
       paramParts.push(`${cPtrType(buf.dtype)} ${buf.name}`);
       this._defaultDtype = buf.dtype;
+      if (this._storeBuffers.has(buf.name)) outputIndices.push(bufferIdx);
+      bufferIdx++;
     }
     for (const sp of func.shapeParams) {
       paramNames.push(sp.name);
@@ -109,12 +114,18 @@ export class GPUCodegen {
       Math.min(this._gridDim[2], t.maxGridDimZ),
     ];
 
-    return new GPUKernel(
+    const blockThreads = blockDim[0] * blockDim[1] * blockDim[2];
+    if (blockThreads > t.maxThreadsPerBlock) {
+      throw new Error(`[codegen] kernel '${func.name}' block ${blockDim.join('x')} = ${blockThreads} threads exceeds maxThreadsPerBlock ${t.maxThreadsPerBlock}`);
+    }
+
+    return new CUDAKernel(
       func.name,
       this._lines.join('\n'),
       blockDim, gridDim,
       this._sharedBuffers.reduce((sum, b) => sum + Math.max(b.sizeInBytes(), 0), 0),
-      paramNames
+      paramNames,
+      outputIndices
     );
   }
 
@@ -325,7 +336,9 @@ export class GPUCodegen {
     if (value === Infinity) return 'INFINITY';
     if (value === -Infinity) return '(-INFINITY)';
     const suffix = cLiteralSuffix(this._defaultDtype);
-    return `${value}${suffix}`;
+    const s = String(value);
+    const mantissa = /[.eEnN]/.test(s) ? s : s + '.0';
+    return `${mantissa}${suffix}`;
   }
 
   _emitExternCall(node) {

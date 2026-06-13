@@ -1,5 +1,27 @@
 import { Block, Region } from './block.js';
 
+function* opsInRegions(op) {
+  if (!op.regions || op.regions.length === 0) return;
+  for (const region of op.regions) {
+    for (const block of region.blocks) {
+      for (const inner of block.ops()) {
+        yield inner;
+        yield* opsInRegions(inner);
+      }
+    }
+  }
+}
+
+function* blocksInRegions(op) {
+  if (!op.regions || op.regions.length === 0) return;
+  for (const region of op.regions) {
+    for (const block of region.blocks) {
+      yield block;
+      for (const inner of block.ops()) yield* blocksInRegions(inner);
+    }
+  }
+}
+
 export class GraphFunction {
   constructor(name, inputTypes, outputTypes) {
     this.name = name;
@@ -21,6 +43,20 @@ export class GraphFunction {
   *ops() {
     for (const block of this.body) {
       yield* block;
+    }
+  }
+
+  *opsRecursive() {
+    for (const op of this.ops()) {
+      yield op;
+      yield* opsInRegions(op);
+    }
+  }
+
+  *blocksRecursive() {
+    for (const block of this.body) {
+      yield block;
+      for (const op of block) yield* blocksInRegions(op);
     }
   }
 

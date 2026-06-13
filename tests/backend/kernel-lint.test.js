@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { buildFunction } from '../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../src/compiler/pipeline/compiler.js';
-import { CPUTarget, WasmTarget, GPUTarget, WebGPUTarget } from '../../src/backend/target.js';
+import { CPUTarget, WasmTarget, CUDATarget, WebGPUTarget } from '../../src/backend/target.js';
 import { lintKernel, lintKernelStrict } from '../_utils/kernel_lint.js';
 
 const F32 = ScalarType.F32;
@@ -43,7 +43,7 @@ const MODELS = {
   }),
 };
 
-const TARGETS = { cpu: CPUTarget, wasm: WasmTarget, gpu: GPUTarget, webgpu: WebGPUTarget };
+const TARGETS = { cpu: CPUTarget, wasm: WasmTarget, gpu: CUDATarget, webgpu: WebGPUTarget };
 
 describe('static kernel quality lint across backends', () => {
   for (const [mname, build] of Object.entries(MODELS)) {

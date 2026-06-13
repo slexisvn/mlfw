@@ -229,8 +229,7 @@ export class Schedule {
     );
 
     this._replaceNode(loop, outerLoop);
-    this._srefTree.replaceLoop(loop, outerLoop, innerLoop);
-    this.state.invalidate();
+    this._rebuildSRefTree();
 
     if (!this._replaying) {
       this.trace.record('split', [loop.loopVar.name, factor]);

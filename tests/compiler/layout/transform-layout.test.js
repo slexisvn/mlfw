@@ -3,7 +3,7 @@ import { buildFunction, IRBuilder } from '../../../src/compiler/ir/graph/builder
 import { TensorType, ScalarType, Layout } from '../../../src/compiler/ir/graph/types.js';
 import { LayoutTransformPass } from '../../../src/compiler/passes/layout/layout_transform.js';
 import { PassResult } from '../../../src/compiler/passes/pass.js';
-import { CPUTarget, GPUTarget, WasmTarget } from '../../../src/backend/target.js';
+import { CPUTarget, CUDATarget, WasmTarget } from '../../../src/backend/target.js';
 import { GraphFunction } from '../../../src/compiler/ir/graph/function.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
 
@@ -95,7 +95,7 @@ describe('LayoutTransformPass', () => {
       b.returnOp([b.matmul(args[0], args[1]).getResult(0)]);
     });
 
-    expect(run(func, GPUTarget())).toBe(PassResult.UNCHANGED);
+    expect(run(func, CUDATarget())).toBe(PassResult.UNCHANGED);
     expect(findOps(func, 'layout_transform').length).toBe(0);
   });
 
@@ -123,7 +123,7 @@ describe('LayoutTransformPass', () => {
       b.returnOp([b.conv(args[0], args[1], [1, 1], [0, 0, 0, 0]).getResult(0)]);
     });
 
-    expect(run(func, GPUTarget())).toBe(PassResult.CHANGED);
+    expect(run(func, CUDATarget())).toBe(PassResult.CHANGED);
 
     const transforms = findOps(func, 'layout_transform');
     expect(transforms.length).toBeGreaterThanOrEqual(1);
@@ -179,7 +179,7 @@ describe('LayoutTransformPass — cost-benefit profitability', () => {
       b.returnOp([b.conv(args[0], args[1], [1, 1], [0, 0, 0, 0]).getResult(0)]);
     });
 
-    expect(run(func, GPUTarget())).toBe(PassResult.CHANGED);
+    expect(run(func, CUDATarget())).toBe(PassResult.CHANGED);
     expect(findOps(func, 'layout_transform').length).toBeGreaterThanOrEqual(1);
   });
 

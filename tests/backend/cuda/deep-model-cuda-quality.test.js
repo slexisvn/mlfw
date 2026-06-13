@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
-import { GPUTarget } from '../../../src/backend/target.js';
+import { CUDATarget } from '../../../src/backend/target.js';
 import {
   tensor, Linear, Sequential, ReLU, Sigmoid, Tanh,
   GELU, SiLU, LeakyReLU,
@@ -15,11 +15,11 @@ const F64 = ScalarType.F64;
 function t(shape, dtype = F32) { return new TensorType(shape, dtype); }
 
 function compile(func, opts = {}) {
-  return compileGraph(func, GPUTarget(), { scheduling: { enabled: true }, ...opts });
+  return compileGraph(func, CUDATarget(), { scheduling: { enabled: true }, ...opts });
 }
 
 function compileGPU(model, inputs, opts) {
-  return modelCompile(model, inputs, { target: GPUTarget(), ...opts });
+  return modelCompile(model, inputs, { target: CUDATarget(), ...opts });
 }
 
 function getSource(result, name) { return result.getSource(name); }

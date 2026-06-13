@@ -66,7 +66,8 @@ export class MemoryEffectAnalysis {
       list.push({ op, effect });
     };
 
-    for (const op of func.ops()) {
+    const allOps = typeof func.opsRecursive === 'function' ? func.opsRecursive() : func.ops();
+    for (const op of allOps) {
       const def = registry.get(op.opName);
       const effects = [];
 

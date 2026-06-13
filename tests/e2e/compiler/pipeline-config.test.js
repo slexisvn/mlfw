@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { Compiler, compileGraph } from '../../../src/compiler/pipeline/compiler.js';
-import { CPUTarget, GPUTarget } from '../../../src/backend/target.js';
+import { CPUTarget, CUDATarget } from '../../../src/backend/target.js';
 import { GraphModule } from '../../../src/compiler/ir/graph/module.js';
 import { TraceLevel } from '../../../src/compiler/pipeline/trace.js';
 
@@ -227,7 +227,7 @@ describe('GPU target compilation (codegen only — no execution)', () => {
       b.returnOp([b.matmul(args[0], args[1]).getResult(0)]);
     });
 
-    const result = compileGraph(func, GPUTarget());
+    const result = compileGraph(func, CUDATarget());
     expect(result.succeeded).toBe(true);
     const source = result.getSource('gpu_mm');
     expect(source.length).toBeGreaterThan(0);

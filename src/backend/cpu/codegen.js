@@ -511,40 +511,28 @@ export class CPUCodegen {
   }
 
   _cleanupSource(src) {
-    let lines = src.split('\n');
-    let changed = true;
-    while (changed) {
-      changed = false;
-      const next = [];
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        if (/^\s*for\s*\(/.test(line) && line.includes('{')) {
-          if (i + 1 < lines.length && /^\s*\}\s*$/.test(lines[i + 1])) {
-            i++;
-            changed = true;
-            continue;
-          }
-          if (i + 2 < lines.length && /^\s*for\s*\(/.test(lines[i + 1]) && lines[i + 1].includes('{') &&
-              /^\s*\}\s*$/.test(lines[i + 2]) && i + 3 < lines.length && /^\s*\}\s*$/.test(lines[i + 3])) {
-            i += 3;
-            changed = true;
-            continue;
-          }
-        }
-        const allocMatch = line.match(/^\s*const (\w+) = new \w+Array\(\d+\);\s*$/);
-        if (allocMatch) {
-          const bufName = allocMatch[1];
-          let used = false;
-          for (let j = i + 1; j < lines.length; j++) {
-            if (lines[j].includes(bufName)) { used = true; break; }
-          }
-          if (!used) { changed = true; continue; }
-        }
-        next.push(line);
-      }
-      lines = next;
+    const lines = src.split('\n');
+
+    const allocName = new Array(lines.length).fill(null);
+    const counts = new Map();
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(/^\s*const (\w+) = new \w+Array\(\d+\);\s*$/);
+      if (m) allocName[i] = m[1];
+      const ids = lines[i].match(/[A-Za-z_]\w*/g);
+      if (ids) for (const id of ids) counts.set(id, (counts.get(id) || 0) + 1);
     }
-    return lines.join('\n');
+
+    const out = [];
+    for (let i = 0; i < lines.length; i++) {
+      if (allocName[i] !== null && counts.get(allocName[i]) === 1) continue; // dead alloc
+      const line = lines[i];
+      if (/^\s*\}\s*$/.test(line) && out.length > 0 && /^\s*for\s*\(.*\{\s*$/.test(out[out.length - 1])) {
+        out.pop();
+        continue;
+      }
+      out.push(line);
+    }
+    return out.join('\n');
   }
 
   _isRedundantZeroFill(node) {

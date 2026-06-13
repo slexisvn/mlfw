@@ -268,4 +268,13 @@ describe.skipIf(!deps)('webgpu via Chrome (differential vs CPU)', () => {
     await caseClose("(M,x,w1,w2)=>M.matmul(M.relu(M.matmul(x,w1)),w2)", [x, w1, w2], SCHED);
     await caseClose("(M,x,w1,w2)=>M.matmul(M.relu(M.matmul(x,w1)),w2)", [x, w1, w2], AUTOTUNE);
   });
+
+  it('autotuned matmul larger than one workgroup matches CPU (thread cap)', async () => {
+    for (const N of [32, 64]) {
+      const a = { data: grid(N, N, 1) };
+      const b = { data: grid(N, N, 2) };
+      await caseClose("(M,a,b)=>M.relu(M.matmul(a,b))", [a, b], SCHED);
+      await caseClose("(M,a,b)=>M.relu(M.matmul(a,b))", [a, b], AUTOTUNE);
+    }
+  });
 });

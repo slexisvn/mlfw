@@ -18,7 +18,7 @@ export class DCEPass extends FunctionPass {
       : MemoryEffectAnalysis.compute(func);
 
     const worklist = [];
-    for (const op of func.opsArray()) {
+    for (const op of func.opsRecursive()) {
       if (this._isDead(op, memEffects)) {
         worklist.push(op);
       }
@@ -60,6 +60,8 @@ export class DCEPass extends FunctionPass {
 
   _isDead(op, memEffects) {
     if (op.opName === 'return' || op.opName === 'yield') return false;
+
+    if (op.regions && op.regions.length > 0) return false;
 
     for (let i = 0; i < op.numResults; i++) {
       if (op.getResult(i).hasUses) return false;

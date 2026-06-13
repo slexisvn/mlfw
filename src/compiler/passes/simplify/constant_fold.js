@@ -51,7 +51,7 @@ export class ConstantFoldPass extends FunctionPass {
     let foldedCount = 0;
     const builder = new IRBuilder(func);
 
-    for (const op of [...func.opsArray()]) {
+    for (const op of [...func.opsRecursive()]) {
       if (!op.parentBlock) continue;
       if (CONSTANT_OPS.has(op.opName)) continue;
 

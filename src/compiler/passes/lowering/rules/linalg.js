@@ -1,12 +1,17 @@
 import {
   IntImmNode, FloatImmNode, MathOpNode, CompareNode,
   ForNode, ForKind, BufferStoreNode, BufferLoadNode,
-  BlockNode, SeqNode, IfThenElseNode, CallExternNode, mathOp
+  BlockNode, SeqNode, IfThenElseNode, CallExternNode, CastNode, mathOp
 } from '../../../ir/tensor/nodes.js';
+import { ScalarType, isFloatType } from '../../../ir/graph/types.js';
 import {
   registerLoweringRule, buildSpatialNest, buildDotGeometry,
   parseLayout, bufRefs, computeBroadcastIndices, makeLoopNest, wrapInLoops
 } from '../lowering_registry.js';
+
+function asIndexValue(load, dtype) {
+  return isFloatType(dtype) ? new CastNode(load, dtype, ScalarType.I32) : load;
+}
 
 const EPILOGUE_TAG_LOWERERS = new Map();
 
@@ -214,7 +219,7 @@ export function register() {
         if (d === indexVectorDim) idxLookup[d] = new IntImmNode(k);
         else idxLookup[d] = batchIndices[batchIdx++];
       }
-      const startVal = new BufferLoadNode(indicesBuf, idxLookup);
+      const startVal = asIndexValue(new BufferLoadNode(indicesBuf, idxLookup), indicesBuf.dtype);
       const targetDim = startIndexMap[k];
       operandIndices[targetDim] = new MathOpNode('+', operandIndices[targetDim], startVal);
     }
@@ -265,7 +270,7 @@ export function register() {
         if (d === indexVectorDim) idxLookup[d] = new IntImmNode(k);
         else idxLookup[d] = batchIndices[batchIdx++];
       }
-      const startVal = new BufferLoadNode(indicesBuf, idxLookup);
+      const startVal = asIndexValue(new BufferLoadNode(indicesBuf, idxLookup), indicesBuf.dtype);
       const targetDim = scatterDimsToOperandDims[k];
       operandIndices[targetDim] = new MathOpNode('+', operandIndices[targetDim], startVal);
     }

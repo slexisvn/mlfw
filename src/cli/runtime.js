@@ -460,7 +460,7 @@ export class TeraRuntime {
     }
 
     const targetName = named.target ?? 'wasm';
-    const target = targetName === 'gpu' ? fw.GPUTarget() : targetName === 'wasm' ? fw.WasmTarget() : targetName === 'webgpu' ? fw.WebGPUTarget() : fw.CPUTarget();
+    const target = targetName === 'gpu' ? fw.CUDATarget() : targetName === 'wasm' ? fw.WasmTarget() : targetName === 'webgpu' ? fw.WebGPUTarget() : fw.CPUTarget();
     const debug = named.debug ?? false;
     const showSnippet = named.snippet ?? false;
 

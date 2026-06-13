@@ -20,7 +20,7 @@ export class DecompositionPass extends FunctionPass {
 
   run(func) {
     const worklist = [];
-    for (const op of func.ops()) {
+    for (const op of func.opsRecursive()) {
       if (decompositionRules.has(op.opName)) worklist.push(op);
     }
     if (worklist.length === 0) return PassResult.UNCHANGED;

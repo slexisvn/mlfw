@@ -14,6 +14,10 @@
       "browser": "./src/io/browser/wasm_pool.js",
       "default": "./src/io/node/wasm_pool.js"
     },
+    "#io/cuda_runtime": {
+      "browser": "./src/io/browser/cuda_runtime.js",
+      "default": "./src/io/node/cuda_runtime.js"
+    },
     "#plugins/query-engine": {
       "browser": "./plugins/query-engine/query-engine.browser.js",
       "default": "./plugins/query-engine/query-engine.node.js"
@@ -22,8 +26,9 @@
   "scripts": {
     "start": "node src/cli/index.js",
     "build": "node scripts/build.js",
-    "test": "vitest run --exclude '**/node_modules/**' --exclude '**/stress/**' --exclude '**/webgpu-gpu.test.*' --exclude '**/webgpu-chrome.test.*' --exclude '**/vscode-ext/**'",
+    "test": "vitest run --exclude '**/node_modules/**' --exclude '**/stress/**' --exclude '**/webgpu-gpu.test.*' --exclude '**/webgpu-chrome.test.*' --exclude '**/cuda/cuda-exec.test.*' --exclude '**/cuda/cuda-perf.test.*' --exclude '**/cuda/cuda-model.test.*' --exclude '**/vscode-ext/**'",
     "test:webgpu": "vitest run tests/backend/webgpu/webgpu-chrome.test.js",
+    "test:cuda": "vitest run tests/backend/cuda/",
     "test:all": "vitest run",
     "build:vscode": "node vscode-ext/scripts/generate.js",
     "test:coverage": "vitest run --coverage",
@@ -38,6 +43,7 @@
   },
   "dependencies": {
     "cli-highlight": "^2.1.11",
+    "koffi": "^3.0.2",
     "terminal-kit": "^3.1.2",
     "webgpu": "^0.4.0"
   }

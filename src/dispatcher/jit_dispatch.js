@@ -2,7 +2,7 @@ import { DispatchKey } from './dispatch_key.js';
 import { KernelFunction } from './boxing.js';
 import { dispatcher } from './dispatcher.js';
 import { jitCompile } from './jit_cache.js';
-import { CPUTarget, GPUTarget, WasmTarget } from '../backend/target.js';
+import { CPUTarget, CUDATarget, WasmTarget } from '../backend/target.js';
 import { Tensor } from '../tensor/core/tensor.js';
 import { TensorImpl } from '../tensor/core/tensor_impl.js';
 import { Storage } from '../tensor/core/storage.js';
@@ -11,7 +11,7 @@ import { resultDtype, dtypeSize, typedArrayCtor } from '../tensor/types/dtype.js
 
 const _TARGET_FOR_KEY = {
   [DispatchKey.CPU]: () => CPUTarget(),
-  [DispatchKey.GPU]: () => GPUTarget(),
+  [DispatchKey.GPU]: () => CUDATarget(),
   [DispatchKey.WASM]: () => WasmTarget(),
 };
 

@@ -3,11 +3,11 @@ import {
   LibrarySelector, LibraryCall,
   createGPULibrarySelector, createCPULibrarySelector
 } from '../../../src/backend/library_selector.js';
-import { GPUTarget, CPUTarget } from '../../../src/backend/target.js';
+import { CUDATarget, CPUTarget } from '../../../src/backend/target.js';
 
 describe('LibrarySelector.register and select', () => {
   it('selects a registered library call matching op, dtype, and constraints', () => {
-    const selector = new LibrarySelector(GPUTarget());
+    const selector = new LibrarySelector(CUDATarget());
     selector.register('dot', 'cublas', { dtypes: ['f32', 'f64'] });
 
     const call = selector.select('dot', [64, 64], 'f32');
@@ -18,24 +18,24 @@ describe('LibrarySelector.register and select', () => {
   });
 
   it('returns null for unregistered op', () => {
-    const selector = new LibrarySelector(GPUTarget());
+    const selector = new LibrarySelector(CUDATarget());
     expect(selector.select('softmax', [64], 'f32')).toBeNull();
   });
 
   it('returns null when dtype does not match', () => {
-    const selector = new LibrarySelector(GPUTarget());
+    const selector = new LibrarySelector(CUDATarget());
     selector.register('dot', 'cublas', { dtypes: ['f32'] });
     expect(selector.select('dot', [64, 64], 'i32')).toBeNull();
   });
 
   it('returns null when no library func mapping exists for dtype', () => {
-    const selector = new LibrarySelector(GPUTarget());
+    const selector = new LibrarySelector(CUDATarget());
     selector.register('dot', 'cublas', { dtypes: ['f32', 'i8'] });
     expect(selector.select('dot', [64, 64], 'i8')).toBeNull();
   });
 
   it('registers multiple entries and selects first match', () => {
-    const selector = new LibrarySelector(GPUTarget());
+    const selector = new LibrarySelector(CUDATarget());
     selector.register('dot', 'cublas', { dtypes: ['f32'] });
     selector.register('dot', 'custom_lib', { dtypes: ['f32'] });
 
@@ -46,7 +46,7 @@ describe('LibrarySelector.register and select', () => {
 
 describe('LibrarySelector._matchesConstraints', () => {
   it('respects minElements constraint', () => {
-    const selector = new LibrarySelector(GPUTarget());
+    const selector = new LibrarySelector(CUDATarget());
     selector.register('dot', 'cublas', { dtypes: ['f32'], minElements: 1000 });
 
     expect(selector.select('dot', [10, 10], 'f32')).toBeNull();
@@ -54,7 +54,7 @@ describe('LibrarySelector._matchesConstraints', () => {
   });
 
   it('computes numel as product of all shape dims', () => {
-    const selector = new LibrarySelector(GPUTarget());
+    const selector = new LibrarySelector(CUDATarget());
     selector.register('dot', 'cublas', { dtypes: ['f32'], minElements: 100 });
 
     expect(selector.select('dot', [5, 5, 5], 'f32')).not.toBeNull();
@@ -62,7 +62,7 @@ describe('LibrarySelector._matchesConstraints', () => {
   });
 
   it('respects maxRank constraint', () => {
-    const selector = new LibrarySelector(GPUTarget());
+    const selector = new LibrarySelector(CUDATarget());
     selector.register('dot', 'cublas', { dtypes: ['f32'], maxRank: 2 });
 
     expect(selector.select('dot', [4, 4], 'f32')).not.toBeNull();
@@ -70,13 +70,13 @@ describe('LibrarySelector._matchesConstraints', () => {
   });
 
   it('passes when no constraints are specified', () => {
-    const selector = new LibrarySelector(GPUTarget());
+    const selector = new LibrarySelector(CUDATarget());
     selector.register('dot', 'cublas', {});
     expect(selector.select('dot', [4, 4], 'f32')).not.toBeNull();
   });
 
   it('checks all constraints together', () => {
-    const selector = new LibrarySelector(GPUTarget());
+    const selector = new LibrarySelector(CUDATarget());
     selector.register('dot', 'cublas', { dtypes: ['f32'], minElements: 50, maxRank: 3 });
 
     expect(selector.select('dot', [10, 10], 'f32')).not.toBeNull();
@@ -88,13 +88,13 @@ describe('LibrarySelector._matchesConstraints', () => {
 
 describe('LibrarySelector.shouldUseLibrary', () => {
   it('returns true when a library call can be selected', () => {
-    const selector = new LibrarySelector(GPUTarget());
+    const selector = new LibrarySelector(CUDATarget());
     selector.register('dot', 'cublas', { dtypes: ['f32'] });
     expect(selector.shouldUseLibrary('dot', [64, 64], 'f32')).toBe(true);
   });
 
   it('returns false when no library call matches', () => {
-    const selector = new LibrarySelector(GPUTarget());
+    const selector = new LibrarySelector(CUDATarget());
     selector.register('dot', 'cublas', { dtypes: ['f32'] });
     expect(selector.shouldUseLibrary('dot', [64, 64], 'i32')).toBe(false);
     expect(selector.shouldUseLibrary('conv', [64, 64], 'f32')).toBe(false);
@@ -102,7 +102,7 @@ describe('LibrarySelector.shouldUseLibrary', () => {
 });
 
 describe('createGPULibrarySelector', () => {
-  const selector = createGPULibrarySelector(GPUTarget());
+  const selector = createGPULibrarySelector(CUDATarget());
 
   it('selects cublasSgemm for f32 dot', () => {
     const call = selector.select('dot', [64, 64], 'f32');
@@ -185,7 +185,7 @@ describe('LibraryCall properties', () => {
 
 describe('GPU vs CPU library selection differences', () => {
   it('GPU has no minElements for dot, CPU has minElements=64', () => {
-    const gpuSel = createGPULibrarySelector(GPUTarget());
+    const gpuSel = createGPULibrarySelector(CUDATarget());
     const cpuSel = createCPULibrarySelector(CPUTarget());
 
     expect(gpuSel.select('dot', [2, 2], 'f32')).not.toBeNull();
@@ -193,7 +193,7 @@ describe('GPU vs CPU library selection differences', () => {
   });
 
   it('GPU supports f16 dot, CPU does not', () => {
-    const gpuSel = createGPULibrarySelector(GPUTarget());
+    const gpuSel = createGPULibrarySelector(CUDATarget());
     const cpuSel = createCPULibrarySelector(CPUTarget());
 
     expect(gpuSel.select('dot', [64, 64], 'f16')).not.toBeNull();
@@ -201,7 +201,7 @@ describe('GPU vs CPU library selection differences', () => {
   });
 
   it('GPU supports conv, CPU does not', () => {
-    const gpuSel = createGPULibrarySelector(GPUTarget());
+    const gpuSel = createGPULibrarySelector(CUDATarget());
     const cpuSel = createCPULibrarySelector(CPUTarget());
 
     expect(gpuSel.select('conv', [1, 3, 32, 32], 'f32')).not.toBeNull();

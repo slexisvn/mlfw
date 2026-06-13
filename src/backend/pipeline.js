@@ -1,15 +1,15 @@
 import { TargetKind } from './target.js';
 import { CPUCodegen } from './cpu/codegen.js';
-import { GPUCodegen } from './gpu/codegen.js';
+import { CUDACodegen } from './cuda/codegen.js';
 import { WasmCodegen } from './wasm/codegen.js';
 import { WebGPUCodegen } from './webgpu/codegen.js';
 import { createCPULibrarySelector, createGPULibrarySelector } from './library_selector.js';
 import { buildSnippet as cpuSnippet } from './cpu/snippet.js';
 import { buildSnippet as wasmSnippet } from './wasm/snippet.js';
 import { buildSnippet as webgpuSnippet } from './webgpu/snippet.js';
-import { buildSnippet as gpuSnippet } from './gpu/snippet.js';
+import { buildSnippet as cudaSnippet } from './cuda/snippet.js';
 
-const SNIPPET_BUILDERS = { js: cpuSnippet, wasm: wasmSnippet, webgpu: webgpuSnippet, cuda: gpuSnippet };
+const SNIPPET_BUILDERS = { js: cpuSnippet, wasm: wasmSnippet, webgpu: webgpuSnippet, cuda: cudaSnippet };
 
 export class CompiledKernel {
   constructor(name, source, target, metadata = {}) {
@@ -40,7 +40,7 @@ export class BackendPipeline {
     if (this.target.isWasm()) return this._compileWasm(primFunc);
     if (this.target.isCPU()) return this._compileCPU(primFunc);
     if (this.target.isWebGPU()) return this._compileWebGPU(primFunc);
-    if (this.target.isGPU()) return this._compileGPU(primFunc);
+    if (this.target.isGPU()) return this._compileCUDA(primFunc);
     throw new Error(`Unsupported target kind: ${this.target.kind}`);
   }
 
@@ -87,15 +87,16 @@ export class BackendPipeline {
     });
   }
 
-  _compileGPU(primFunc) {
-    const codegen = new GPUCodegen(this.target);
+  _compileCUDA(primFunc) {
+    const codegen = new CUDACodegen(this.target);
     const kernel = codegen.generate(primFunc);
     return new CompiledKernel(primFunc.name, kernel.source, this.target, {
       kind: 'cuda',
       blockDim: kernel.blockDim,
       gridDim: kernel.gridDim,
       sharedMemBytes: kernel.sharedMemBytes,
-      params: kernel.params
+      params: kernel.params,
+      outputIndices: kernel.outputIndices
     });
   }
 }

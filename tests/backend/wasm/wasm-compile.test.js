@@ -1445,7 +1445,7 @@ describe('WASM boolean ops — compile and run', () => {
 
 
 function runTyped(result, name, specs) {
-  const inst = result.module._wasmInstances.get(name);
+  const inst = result.module._instances.get(name).instance;
   const { exports, memory, bufferOffsets } = inst;
   const offsets = [...bufferOffsets.values()];
   for (let i = 0; i < specs.length; i++) {

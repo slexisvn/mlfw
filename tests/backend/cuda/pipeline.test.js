@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { BackendPipeline, CompiledKernel } from '../../../src/backend/pipeline.js';
-import { GPUTarget } from '../../../src/backend/target.js';
+import { CUDATarget } from '../../../src/backend/target.js';
 import { Buffer } from '../../../src/compiler/ir/tensor/buffer.js';
 import {
   PrimFunc, ForNode, BlockNode, SeqNode,
@@ -28,7 +28,7 @@ function threadFor(loopVar, extent, tag, body) {
 
 describe('BackendPipeline — GPU compile', () => {
   it('returns CompiledKernel with cuda metadata', () => {
-    const pipeline = new BackendPipeline(GPUTarget());
+    const pipeline = new BackendPipeline(CUDATarget());
 
     const inBuf = buf('x', [256], 'f32');
     const outBuf = buf('y', [256], 'f32');
@@ -52,7 +52,7 @@ describe('BackendPipeline — GPU compile', () => {
   });
 
   it('preserves shared memory info in metadata', () => {
-    const pipeline = new BackendPipeline(GPUTarget());
+    const pipeline = new BackendPipeline(CUDATarget());
 
     const smem = buf('smem', [64], 'f32', 'shared');
     const outBuf = buf('out', [64], 'f32');
@@ -67,7 +67,7 @@ describe('BackendPipeline — GPU compile', () => {
   });
 
   it('GPU pipeline has a GPU library selector', () => {
-    const pipeline = new BackendPipeline(GPUTarget());
+    const pipeline = new BackendPipeline(CUDATarget());
     expect(pipeline.librarySelector).not.toBeNull();
     expect(pipeline.librarySelector.shouldUseLibrary('dot', [64, 64], 'f32')).toBe(true);
   });
@@ -75,7 +75,7 @@ describe('BackendPipeline — GPU compile', () => {
 
 describe('BackendPipeline.compileAll', () => {
   it('compiles multiple PrimFuncs', () => {
-    const pipeline = new BackendPipeline(GPUTarget());
+    const pipeline = new BackendPipeline(CUDATarget());
 
     const funcs = [1, 2, 3].map(i => {
       const inBuf = buf(`x${i}`, [64], 'f32');
@@ -97,7 +97,7 @@ describe('BackendPipeline.compileAll', () => {
 
 describe('BackendPipeline — GPU elementwise kernel correctness', () => {
   it('generates valid CUDA for vector negate', () => {
-    const pipeline = new BackendPipeline(GPUTarget());
+    const pipeline = new BackendPipeline(CUDATarget());
 
     const inBuf = buf('x', [4], 'f32');
     const outBuf = buf('y', [4], 'f32');
@@ -114,7 +114,7 @@ describe('BackendPipeline — GPU elementwise kernel correctness', () => {
   });
 
   it('generates valid CUDA for fused add+exp', () => {
-    const pipeline = new BackendPipeline(GPUTarget());
+    const pipeline = new BackendPipeline(CUDATarget());
 
     const aBuf = buf('a', [4], 'f32');
     const bBuf = buf('b', [4], 'f32');
@@ -137,7 +137,7 @@ describe('BackendPipeline — GPU elementwise kernel correctness', () => {
 
 describe('BackendPipeline — GPU with thread-bound kernels', () => {
   it('produces correct block/grid dimensions in metadata', () => {
-    const pipeline = new BackendPipeline(GPUTarget());
+    const pipeline = new BackendPipeline(CUDATarget());
 
     const outBuf = buf('out', [1024], 'f32');
     const store = new BufferStoreNode(outBuf, [
@@ -159,7 +159,7 @@ describe('BackendPipeline — GPU with thread-bound kernels', () => {
 
 describe('BackendPipeline — GPU kernel with mixed loops', () => {
   it('generates serial for loop inside thread binding', () => {
-    const pipeline = new BackendPipeline(GPUTarget());
+    const pipeline = new BackendPipeline(CUDATarget());
 
     const inBuf = buf('inp', [32, 16], 'f32');
     const outBuf = buf('out', [32], 'f32');

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
-import { GPUTarget, CPUTarget } from '../../../src/backend/target.js';
+import { CUDATarget, CPUTarget } from '../../../src/backend/target.js';
 import {
   tensor, Linear, Sequential, ReLU, Sigmoid, Tanh,
   GELU, SiLU, LeakyReLU,
@@ -10,11 +10,11 @@ import {
 } from '../../../src/index.js';
 
 function compile(func, opts = {}) {
-  return compileGraph(func, GPUTarget(), { scheduling: { enabled: true }, ...opts });
+  return compileGraph(func, CUDATarget(), { scheduling: { enabled: true }, ...opts });
 }
 
 function compileNoSchedule(func, opts = {}) {
-  return compileGraph(func, GPUTarget(), { scheduling: { enabled: false }, ...opts });
+  return compileGraph(func, CUDATarget(), { scheduling: { enabled: false }, ...opts });
 }
 
 function getSource(result, name) {
@@ -564,7 +564,7 @@ describe('GPU kernel quality — matmul structure', () => {
       b.returnOp([b.matmul(args[0], args[1]).getResult(0)]);
     });
     const src = getSource(compile(func), 'q_mm_init');
-    expect(src).toMatch(/= 0f/);
+    expect(src).toMatch(/= 0\.0f/);
   });
 
   it('matmul has multiply-add accumulation pattern', () => {
@@ -606,7 +606,7 @@ describe('GPU kernel quality — reduction structure', () => {
       b.returnOp([b.reduce(args[0], zero.getResult(0), [1], 'sum').getResult(0)]);
     });
     const src = getSource(compile(func), 'q_rsum_init');
-    expect(src).toMatch(/= 0f/);
+    expect(src).toMatch(/= 0\.0f/);
   });
 
   it('max reduction initializes to -INFINITY', () => {
@@ -963,7 +963,7 @@ describe('GPU kernel quality — matmul contraction loop', () => {
 
 
 describe('GPU kernel quality — large matmul tiling', () => {
-  it('128x128 matmul: uses blockIdx for tiling', () => {
+  it('128x128 matmul: parallelizes across blocks and threads', () => {
     const t = new TensorType([128, 128], ScalarType.F32);
     const func = buildFunction('q_mm_tile', [t, t], [t], (b, args) => {
       b.returnOp([b.matmul(args[0], args[1]).getResult(0)]);
@@ -971,11 +971,11 @@ describe('GPU kernel quality — large matmul tiling', () => {
     const src = getSource(compile(func), 'q_mm_tile');
     expect(findUndeclaredVars(src)).toEqual([]);
     expect(hasThreadBinding(src, 'blockIdx.x')).toBe(true);
-    expect(hasThreadBinding(src, 'blockIdx.y')).toBe(true);
+    expect(hasThreadBinding(src, 'threadIdx.x')).toBe(true);
   });
 
-  it('128x128 matmul: has guard conditions for non-divisible tiles', () => {
-    const t = new TensorType([128, 128], ScalarType.F32);
+  it('130x130 matmul: has guard conditions for non-divisible tiles', () => {
+    const t = new TensorType([130, 130], ScalarType.F32);
     const func = buildFunction('q_mm_guard', [t, t], [t], (b, args) => {
       b.returnOp([b.matmul(args[0], args[1]).getResult(0)]);
     });
@@ -1230,7 +1230,7 @@ describe('GPU kernel quality — reduction combine ops', () => {
     const src = getSource(compile(func), 'q_csum');
     expect(findUndeclaredVars(src)).toEqual([]);
     expect(hasThreadBinding(src, 'threadIdx.x')).toBe(true);
-    expect(src).toMatch(/= 0f/);
+    expect(src).toMatch(/= 0\.0f/);
   });
 });
 
@@ -1328,14 +1328,14 @@ describe('GPU kernel quality — matmul size variants', () => {
       expect(findUndeclaredVars(src)).toEqual([]);
       expect(hasNoopStore(src)).toBe(false);
       expect(src).toMatch(/__global__/);
-      expect(src).toMatch(/= 0f/);
+      expect(src).toMatch(/= 0\.0f/);
     });
   }
 });
 
 
 function compileGPU(model, inputs, opts) {
-  return modelCompile(model, inputs, { target: GPUTarget(), ...opts });
+  return modelCompile(model, inputs, { target: CUDATarget(), ...opts });
 }
 
 describe('GPU kernel quality — scheduled shared memory + barriers', () => {

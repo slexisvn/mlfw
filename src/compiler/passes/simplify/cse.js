@@ -13,44 +13,52 @@ export class CSEPass extends FunctionPass {
   run(func, analysisManager) {
     let changed = false;
     let eliminated = 0;
-    const available = new Map();
 
-    for (const op of [...func.opsArray()]) {
-      if (!op.parentBlock) continue;
+    const blocks = typeof func.blocksRecursive === 'function'
+      ? [...func.blocksRecursive()]
+      : [...func.body];
 
-      const def = registry.get(op.opName);
+    for (const block of blocks) {
+      const available = new Map();
+      for (const op of [...block.ops()]) {
+        if (!op.parentBlock) continue;
 
-      if (def && (def.sideEffects || (def.hasTrait && def.hasTrait(OpTrait.SIDE_EFFECT)))) continue;
-      if (def && def.getMemoryEffects && def.getMemoryEffects(op).length > 0) continue;
+        if (op.regions && op.regions.length > 0) continue;
 
-      const hash = op.structuralHash();
+        const def = registry.get(op.opName);
 
-      if (!available.has(hash)) {
-        available.set(hash, [op]);
-        continue;
-      }
+        if (def && (def.sideEffects || (def.hasTrait && def.hasTrait(OpTrait.SIDE_EFFECT)))) continue;
+        if (def && def.getMemoryEffects && def.getMemoryEffects(op).length > 0) continue;
 
-      const candidates = available.get(hash);
-      let replaced = false;
+        const hash = op.structuralHash();
 
-      for (const candidate of candidates) {
-        if (!candidate.parentBlock) continue;
-        if (candidate.structuralEquals(op)) {
-          const results = [];
-          for (let i = 0; i < candidate.numResults; i++) {
-            results.push(candidate.getResult(i));
-          }
-          op.replaceAllResultsWith(results);
-          op.erase();
-          changed = true;
-          eliminated++;
-          replaced = true;
-          break;
+        if (!available.has(hash)) {
+          available.set(hash, [op]);
+          continue;
         }
-      }
 
-      if (!replaced) {
-        candidates.push(op);
+        const candidates = available.get(hash);
+        let replaced = false;
+
+        for (const candidate of candidates) {
+          if (!candidate.parentBlock) continue;
+          if (candidate.structuralEquals(op)) {
+            const results = [];
+            for (let i = 0; i < candidate.numResults; i++) {
+              results.push(candidate.getResult(i));
+            }
+            op.replaceAllResultsWith(results);
+            op.erase();
+            changed = true;
+            eliminated++;
+            replaced = true;
+            break;
+          }
+        }
+
+        if (!replaced) {
+          candidates.push(op);
+        }
       }
     }
 

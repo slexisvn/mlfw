@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { GraphPartitioner, PartitionerConfig } from '../../../src/compiler/analysis/partitioner.js';
-import { CPUTarget, GPUTarget } from '../../../src/backend/target.js';
+import { CPUTarget, CUDATarget } from '../../../src/backend/target.js';
 
 function ops(func) {
   const list = [];
@@ -15,7 +15,7 @@ function ops(func) {
 describe('GraphPartitioner._scoreTargetForOp', () => {
   it('GPU wins by default — computeTFLOPs*10=150 dominates CPU bonus +30', () => {
     const cpu = CPUTarget();
-    const gpu = GPUTarget();
+    const gpu = CUDATarget();
     const t = new TensorType([4], ScalarType.F32);
     const func = buildFunction('f', [t, t], [t], (b, args) => {
       b.returnOp([b.add(args[0], args[1]).getResult(0)]);
@@ -23,12 +23,12 @@ describe('GraphPartitioner._scoreTargetForOp', () => {
 
     const config = new PartitionerConfig({ targets: [cpu, gpu] });
     const result = new GraphPartitioner(config).partition(func);
-    expect(result.getPartition(ops(func)[0]).target.name).toBe('gpu_generic');
+    expect(result.getPartition(ops(func)[0]).target.name).toBe('cuda_generic');
   });
 
   it('GPU large elementwise gets +50 on top of compute base', () => {
     const cpu = CPUTarget();
-    const gpu = GPUTarget();
+    const gpu = CUDATarget();
     const t = new TensorType([256, 256], ScalarType.F32);
     const func = buildFunction('f', [t, t], [t], (b, args) => {
       b.returnOp([b.add(args[0], args[1]).getResult(0)]);
@@ -36,12 +36,12 @@ describe('GraphPartitioner._scoreTargetForOp', () => {
 
     const config = new PartitionerConfig({ targets: [cpu, gpu] });
     const result = new GraphPartitioner(config).partition(func);
-    expect(result.getPartition(ops(func)[0]).target.name).toBe('gpu_generic');
+    expect(result.getPartition(ops(func)[0]).target.name).toBe('cuda_generic');
   });
 
   it('CPU small bonus +30 kicks in when GPU compute is low enough', () => {
     const cpu = CPUTarget({ computeTFLOPs: 2 });
-    const gpu = GPUTarget({ computeTFLOPs: 2 });
+    const gpu = CUDATarget({ computeTFLOPs: 2 });
     const t = new TensorType([4], ScalarType.F32);
     const func = buildFunction('f', [t, t], [t], (b, args) => {
       b.returnOp([b.add(args[0], args[1]).getResult(0)]);
@@ -54,7 +54,7 @@ describe('GraphPartitioner._scoreTargetForOp', () => {
 
   it('libraryOps +100 can beat GPU when compute gap is < 100/10 = 10 TFLOPs', () => {
     const cpu = CPUTarget({ computeTFLOPs: 5, libraryOps: new Set(['dot']) });
-    const gpu = GPUTarget({ computeTFLOPs: 5, libraryOps: new Set() });
+    const gpu = CUDATarget({ computeTFLOPs: 5, libraryOps: new Set() });
     const lhs = new TensorType([4, 8], ScalarType.F32);
     const rhs = new TensorType([8, 6], ScalarType.F32);
     const func = buildFunction('f', [lhs, rhs], [new TensorType([4, 6], ScalarType.F32)], (b, args) => {
@@ -68,7 +68,7 @@ describe('GraphPartitioner._scoreTargetForOp', () => {
 
   it('libraryOps +100 loses to GPU default compute gap of 14.5 TFLOPs', () => {
     const cpu = CPUTarget({ libraryOps: new Set(['dot']) });
-    const gpu = GPUTarget({ libraryOps: new Set() });
+    const gpu = CUDATarget({ libraryOps: new Set() });
     const lhs = new TensorType([4, 8], ScalarType.F32);
     const rhs = new TensorType([8, 6], ScalarType.F32);
     const func = buildFunction('f', [lhs, rhs], [new TensorType([4, 6], ScalarType.F32)], (b, args) => {
@@ -77,14 +77,14 @@ describe('GraphPartitioner._scoreTargetForOp', () => {
 
     const config = new PartitionerConfig({ targets: [cpu, gpu] });
     const result = new GraphPartitioner(config).partition(func);
-    expect(result.getPartition(ops(func)[0]).target.name).toBe('gpu_generic');
+    expect(result.getPartition(ops(func)[0]).target.name).toBe('cuda_generic');
   });
 });
 
 describe('GraphPartitioner target override mechanisms', () => {
   it('opTargetOverrides forces op to specific target regardless of score', () => {
     const cpu = CPUTarget();
-    const gpu = GPUTarget();
+    const gpu = CUDATarget();
     const t = new TensorType([256, 256], ScalarType.F32);
     const func = buildFunction('f', [t, t], [t], (b, args) => {
       b.returnOp([b.add(args[0], args[1]).getResult(0)]);
@@ -98,7 +98,7 @@ describe('GraphPartitioner target override mechanisms', () => {
 
   it('device attribute on op overrides score and opTargetOverrides', () => {
     const cpu = CPUTarget();
-    const gpu = GPUTarget();
+    const gpu = CUDATarget();
     const t = new TensorType([256, 256], ScalarType.F32);
     const func = buildFunction('f', [t, t], [t], (b, args) => {
       const addOp = b.add(args[0], args[1]);
@@ -113,7 +113,7 @@ describe('GraphPartitioner target override mechanisms', () => {
 
   it('device attribute resolves by target kind string', () => {
     const cpu = CPUTarget();
-    const gpu = GPUTarget();
+    const gpu = CUDATarget();
     const t = new TensorType([8], ScalarType.F32);
     const func = buildFunction('f', [t], [t], (b, args) => {
       const negOp = b.neg(args[0]);
@@ -130,7 +130,7 @@ describe('GraphPartitioner target override mechanisms', () => {
 describe('GraphPartitioner partition building', () => {
   it('producer-consumer on same target merge into one partition', () => {
     const cpu = CPUTarget();
-    const gpu = GPUTarget();
+    const gpu = CUDATarget();
     const t = new TensorType([256, 256], ScalarType.F32);
     const func = buildFunction('f', [t, t], [t], (b, args) => {
       const sum = b.add(args[0], args[1]);
@@ -145,7 +145,7 @@ describe('GraphPartitioner partition building', () => {
 
   it('ops forced to different targets create separate partitions', () => {
     const cpu = CPUTarget();
-    const gpu = GPUTarget();
+    const gpu = CUDATarget();
     const t = new TensorType([8], ScalarType.F32);
     const func = buildFunction('f', [t, t], [t, t], (b, args) => {
       const a = b.add(args[0], args[1]);
@@ -160,13 +160,13 @@ describe('GraphPartitioner partition building', () => {
 
     const addPart = result.getPartition(allOps.find(o => o.opName === 'add'));
     const negPart = result.getPartition(allOps.find(o => o.opName === 'neg'));
-    expect(addPart.target.name).toBe('gpu_generic');
+    expect(addPart.target.name).toBe('cuda_generic');
     expect(negPart.target.name).toBe('cpu_generic');
   });
 
   it('memoryLimits prevents second op from merging into partition', () => {
     const cpu = CPUTarget();
-    const gpu = GPUTarget();
+    const gpu = CUDATarget();
     const t = new TensorType([1024, 1024], ScalarType.F32);
     const func = buildFunction('f', [t, t], [t], (b, args) => {
       const sum = b.add(args[0], args[1]);
@@ -174,11 +174,11 @@ describe('GraphPartitioner partition building', () => {
     });
 
     const singleOpMem = 1024 * 1024 * 4;
-    const limits = new Map([['gpu_generic', singleOpMem]]);
+    const limits = new Map([['cuda_generic', singleOpMem]]);
     const config = new PartitionerConfig({ targets: [cpu, gpu], memoryLimits: limits });
     const result = new GraphPartitioner(config).partition(func);
 
-    const gpuParts = result.partitions.filter(p => p.target.name === 'gpu_generic');
+    const gpuParts = result.partitions.filter(p => p.target.name === 'cuda_generic');
     expect(gpuParts.length).toBeGreaterThanOrEqual(2);
     for (const p of gpuParts) {
       expect(p.size).toBe(1);
@@ -189,7 +189,7 @@ describe('GraphPartitioner partition building', () => {
 describe('GraphPartitioner transfer edges', () => {
   it('cross-device data flow creates transfer edges with correct src/dst', () => {
     const cpu = CPUTarget();
-    const gpu = GPUTarget();
+    const gpu = CUDATarget();
     const t = new TensorType([8], ScalarType.F32);
     const func = buildFunction('f', [t, t], [t, t], (b, args) => {
       const gpuAdd = b.add(args[0], args[1]);
@@ -209,7 +209,7 @@ describe('GraphPartitioner transfer edges', () => {
 
   it('same-target producer-consumer has no transfer edge', () => {
     const cpu = CPUTarget();
-    const gpu = GPUTarget();
+    const gpu = CUDATarget();
     const t = new TensorType([256, 256], ScalarType.F32);
     const func = buildFunction('f', [t, t], [t], (b, args) => {
       const sum = b.add(args[0], args[1]);
@@ -227,7 +227,7 @@ describe('GraphPartitioner transfer edges', () => {
 
   it('transfer edge sizeBytes matches the value tensor size', () => {
     const cpu = CPUTarget();
-    const gpu = GPUTarget();
+    const gpu = CUDATarget();
     const t = new TensorType([16], ScalarType.F32);
     const func = buildFunction('f', [t, t], [t, t], (b, args) => {
       const gpuAdd = b.add(args[0], args[1]);
@@ -248,7 +248,7 @@ describe('GraphPartitioner transfer edges', () => {
 
   it('no duplicate edges for same value to same dst partition', () => {
     const cpu = CPUTarget();
-    const gpu = GPUTarget();
+    const gpu = CUDATarget();
     const t = new TensorType([8], ScalarType.F32);
     const func = buildFunction('f', [t, t], [t, t], (b, args) => {
       const gpuAdd = b.add(args[0], args[1]);
@@ -273,7 +273,7 @@ describe('GraphPartitioner transfer edges', () => {
 describe('GraphPartitioner merge small partitions', () => {
   it('single-op partitions below minPartitionSize merge with same-target neighbor', () => {
     const cpu = CPUTarget();
-    const gpu = GPUTarget();
+    const gpu = CUDATarget();
     const t = new TensorType([8], ScalarType.F32);
     const func = buildFunction('f', [t, t], [t], (b, args) => {
       const sum = b.add(args[0], args[1]);
@@ -287,7 +287,7 @@ describe('GraphPartitioner merge small partitions', () => {
 
   it('merge picks candidate with most shared data edges', () => {
     const cpu = CPUTarget();
-    const gpu = GPUTarget();
+    const gpu = CUDATarget();
     const t = new TensorType([8], ScalarType.F32);
     const func = buildFunction('f', [t, t], [t], (b, args) => {
       const a = b.add(args[0], args[1]);
@@ -308,7 +308,7 @@ describe('GraphPartitioner merge small partitions', () => {
 describe('GraphPartitioner cycle avoidance and op coverage', () => {
   it('does not merge an op into a producer partition when it would create a back-edge', () => {
     const cpu = CPUTarget();
-    const gpu = GPUTarget();
+    const gpu = CUDATarget();
     const t = new TensorType([8], ScalarType.F32);
     const func = buildFunction('f', [t, t], [t], (b, args) => {
       const a = b.add(args[0], args[1]);
@@ -347,7 +347,7 @@ describe('GraphPartitioner cycle avoidance and op coverage', () => {
 
   it('every partitionable op lands in exactly one emitted partition', () => {
     const cpu = CPUTarget();
-    const gpu = GPUTarget();
+    const gpu = CUDATarget();
     const t = new TensorType([8], ScalarType.F32);
     const func = buildFunction('f', [t, t], [t], (b, args) => {
       const a = b.add(args[0], args[1]);
@@ -369,7 +369,7 @@ describe('GraphPartitioner cycle avoidance and op coverage', () => {
 describe('PartitionResult queries', () => {
   it('getPartitionsForTarget filters correctly', () => {
     const cpu = CPUTarget();
-    const gpu = GPUTarget();
+    const gpu = CUDATarget();
     const t = new TensorType([8], ScalarType.F32);
     const func = buildFunction('f', [t, t], [t, t], (b, args) => {
       const gpuAdd = b.add(args[0], args[1]);
@@ -384,13 +384,13 @@ describe('PartitionResult queries', () => {
     const cpuParts = result.getPartitionsForTarget(cpu);
     const gpuParts = result.getPartitionsForTarget(gpu);
     for (const p of cpuParts) expect(p.target.name).toBe('cpu_generic');
-    for (const p of gpuParts) expect(p.target.name).toBe('gpu_generic');
+    for (const p of gpuParts) expect(p.target.name).toBe('cuda_generic');
     expect(cpuParts.length + gpuParts.length).toBe(result.numPartitions);
   });
 
   it('numPartitions matches partitions array length', () => {
     const cpu = CPUTarget();
-    const gpu = GPUTarget();
+    const gpu = CUDATarget();
     const t = new TensorType([8], ScalarType.F32);
     const func = buildFunction('f', [t, t], [t], (b, args) => {
       b.returnOp([b.add(args[0], args[1]).getResult(0)]);

@@ -165,6 +165,21 @@ export class ElementwiseCPURule extends ScheduleRule {
   }
 }
 
+export function primFuncHasReduction(primFunc) {
+  const stack = [primFunc.body];
+  while (stack.length > 0) {
+    const n = stack.pop();
+    if (!n) continue;
+    if (n.type === 'BlockNode' && (n.initBody !== null || computeReductionLoopVars(n).size > 0)) return true;
+    if (n.body) stack.push(n.body);
+    if (n.stmts) for (const s of n.stmts) stack.push(s);
+    if (n.thenBody) stack.push(n.thenBody);
+    if (n.elseBody) stack.push(n.elseBody);
+    if (n.initBody) stack.push(n.initBody);
+  }
+  return false;
+}
+
 export class ElementwiseGPURule extends ScheduleRule {
   constructor() {
     super('elementwise_gpu');
@@ -197,6 +212,12 @@ export class ElementwiseGPURule extends ScheduleRule {
     }
 
     const totalElements = extent.value;
+    const singleBlockCap = Math.min(target.maxThreadsPerBlock, 1024);
+    if (primFuncHasReduction(schedule.func) && totalElements <= singleBlockCap) {
+      schedule.bindThread(fusedLoop, 'threadIdx.x');
+      return;
+    }
+
     const blockSize = Math.min(target.maxThreadsPerBlock, 256);
     const numBlocks = Math.ceil(totalElements / blockSize);
 
@@ -360,46 +381,25 @@ export class MatmulTiledGPURule extends ScheduleRule {
     const loops = schedule.getLoops(blockName);
     if (loops.length < 3) return;
 
-    const mLoop = loops[0];
-    const nLoop = loops[1];
+    const info = classifyBlock(schedule.func, blockName);
+    const spatial = loops.filter(l => !info || !isReductionLoop(l, info));
+    if (spatial.length === 0) return;
 
-    const smemBytes = target.sharedMemoryBytes || 49152;
-    const tcScale = target.supportsTensorCore ? 2 : 1;
-    const bytesPerTile = 4 * 2;
-    const blockTileDim = Math.max(16, Math.min(128, Math.floor(Math.sqrt(smemBytes / bytesPerTile)) * tcScale));
-    const blockTileM = blockTileDim;
-    const blockTileN = blockTileDim;
-    const warp = target.warpSize || 32;
-    const threadTileM = Math.max(4, Math.min(16, Math.floor(blockTileM / (warp / 4))));
-    const threadTileN = Math.max(4, Math.min(16, Math.floor(blockTileN / (warp / 4))));
-
-    const mExtent = mLoop.extent.type === 'IntImmNode' ? mLoop.extent.value : null;
-    const nExtent = nLoop.extent.type === 'IntImmNode' ? nLoop.extent.value : null;
-
-    if (mExtent && mExtent >= blockTileM) {
-      const [mBlock, mThread] = schedule.split(mLoop, blockTileM);
-      schedule.bindThread(mBlock, 'blockIdx.y');
-
-      const updatedLoops = schedule.getLoops(blockName);
-      const currentMThread = updatedLoops.find(l => l.loopVar.name === mThread.loopVar.name);
-      if (currentMThread) {
-        const [mto, mti] = schedule.split(currentMThread, threadTileM);
-        schedule.bindThread(mto, 'threadIdx.y');
-      }
+    let fused = spatial[0];
+    for (let i = 1; i < spatial.length; i++) {
+      const current = schedule.getLoops(blockName);
+      const next = current.find(l => l.loopVar.name === spatial[i].loopVar.name);
+      if (next && findDirectChild(fused, next)) fused = schedule.fuseLoops(fused, next);
     }
 
-    const updatedLoops2 = schedule.getLoops(blockName);
-    const currentN = updatedLoops2.find(l => l.loopVar.name === nLoop.loopVar.name);
-    if (currentN && nExtent && nExtent >= blockTileN) {
-      const [nBlock, nThread] = schedule.split(currentN, blockTileN);
-      schedule.bindThread(nBlock, 'blockIdx.x');
-
-      const updatedLoops3 = schedule.getLoops(blockName);
-      const currentNThread = updatedLoops3.find(l => l.loopVar.name === nThread.loopVar.name);
-      if (currentNThread) {
-        const [nto, nti] = schedule.split(currentNThread, threadTileN);
-        schedule.bindThread(nto, 'threadIdx.x');
-      }
+    const extent = fused.extent;
+    const blockSize = Math.min(target.maxThreadsPerBlock, 256);
+    if (extent.type === 'IntImmNode' && extent.value > blockSize) {
+      const [bx, tx] = schedule.split(fused, blockSize);
+      schedule.bindThread(bx, 'blockIdx.x');
+      schedule.bindThread(tx, 'threadIdx.x');
+    } else {
+      schedule.bindThread(fused, 'threadIdx.x');
     }
   }
 }

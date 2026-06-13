@@ -1,15 +1,4 @@
-import { encodeWat } from '../../backend/wasm/wat_encoder.js';
-let _webgpuMod = null;
-async function getWebGPURuntime() {
-  if (!_webgpuMod) _webgpuMod = await import('./webgpu_runtime.js');
-  return _webgpuMod;
-}
-
-let _wasmPoolMod = null;
-async function getWasmPool() {
-  if (!_wasmPoolMod) _wasmPoolMod = await import('#io/wasm_pool');
-  return _wasmPoolMod;
-}
+import { getBackend } from './backend_registry.js';
 
 const TYPED_ARRAY_CTORS = {
   'f16':  Uint16Array,
@@ -142,63 +131,6 @@ export class RuntimeMemoryManager {
   get currentUsage() { return this._allocated; }
 }
 
-const MATH_IMPORTS = {
-  exp: Math.exp, log: Math.log, sin: Math.sin, cos: Math.cos,
-  tan: Math.tan, tanh: Math.tanh, pow: Math.pow, fmod: (a, b) => a % b,
-  rsqrt: x => 1 / Math.sqrt(x), sign: Math.sign, round: Math.round,
-};
-
-function instantiateWasm(kernel) {
-  let binary;
-  try { binary = encodeWat(kernel.source); } catch(e) { throw new Error('encodeWat: ' + e.message + '\n' + kernel.source); }
-  let mod;
-  try { mod = new WebAssembly.Module(binary); } catch(e) { throw new Error('WASM: ' + e.message + '\n' + kernel.source); }
-  const mathImports = {};
-  if (kernel.metadata.imports) {
-    for (const [name] of kernel.metadata.imports) {
-      mathImports[name] = MATH_IMPORTS[name] || Math[name] || (x => x);
-    }
-  }
-  const instance = new WebAssembly.Instance(mod, { math: mathImports });
-  return {
-    exports: instance.exports,
-    memory: instance.exports.memory,
-    bufferOffsets: kernel.metadata.bufferOffsets,
-    funcName: kernel.name,
-    binary,
-  };
-}
-
-function runWasmKernel(wasmInstance, name, tensorArgs, shapeValues, parStart, parEnd) {
-  const { exports, memory, bufferOffsets } = wasmInstance;
-  const fn = exports[name];
-  const offsets = [...bufferOffsets.values()];
-  const nBufs = Math.min(offsets.length, tensorArgs.length);
-
-  for (let i = 0; i < nBufs; i++) {
-    const data = tensorArgs[i];
-    if (ArrayBuffer.isView(data)) {
-      new data.constructor(memory.buffer, offsets[i], data.length).set(data);
-    }
-  }
-
-  const callArgs = offsets.slice(0, nBufs);
-  if (shapeValues) {
-    for (const v of shapeValues) callArgs.push(v);
-  }
-  if (parStart !== undefined && parEnd !== undefined) {
-    callArgs.push(parStart, parEnd);
-  }
-  fn(...callArgs);
-
-  for (let i = 0; i < nBufs; i++) {
-    const data = tensorArgs[i];
-    if (ArrayBuffer.isView(data)) {
-      data.set(new data.constructor(memory.buffer, offsets[i], data.length));
-    }
-  }
-}
-
 export class WasmTensorPool {
   constructor(wasmInstance) {
     this._inst = wasmInstance;
@@ -240,28 +172,14 @@ export class RuntimeModule {
     this.name = name;
     this.kernels = new KernelRegistry();
     this.memory = new RuntimeMemoryManager();
-    this._compiledFuncs = new Map();
-    this._wasmInstances = new Map();
+    this._instances = new Map();
   }
 
   addCompiledKernel(compiledKernel) {
     this.kernels.register(compiledKernel.name, compiledKernel);
-    if (compiledKernel.metadata.kind === 'js') {
-      const fn = new Function('return ' + compiledKernel.source)();
-      this._compiledFuncs.set(compiledKernel.name, fn);
-    } else if (compiledKernel.metadata.kind === 'wasm') {
-      const inst = instantiateWasm(compiledKernel);
-      this._wasmInstances.set(compiledKernel.name, inst);
-      if (compiledKernel.metadata.parallel) {
-        if (!this._wasmParallel) this._wasmParallel = new Map();
-        this._wasmParallel.set(compiledKernel.name, compiledKernel.metadata.parallel);
-      }
-    } else if (compiledKernel.metadata.kind === 'webgpu') {
-      if (!this._webgpuKernels) this._webgpuKernels = new Map();
-      if (!this._webgpuInstances) this._webgpuInstances = new Map();
-      this._webgpuKernels.set(compiledKernel.name, compiledKernel);
-      this._webgpuInstances.set(compiledKernel.name, getWebGPURuntime().then(m => m.instantiateWebGPU(compiledKernel)));
-    }
+    const backend = getBackend(compiledKernel.metadata.kind);
+    if (!backend) throw new Error('No runtime backend registered for kind: ' + compiledKernel.metadata.kind);
+    this._instances.set(compiledKernel.name, { backend, instance: backend.instantiate(compiledKernel) });
   }
 
   setShapeParamMap(name, shapeParamMap, bufferMap) {
@@ -273,7 +191,7 @@ export class RuntimeModule {
     }
   }
 
-  run(name, ...args) {
+  _prepareArgs(name, args) {
     const tensorArgs = [];
     const tensorShapes = new Map();
     for (let i = 0; i < args.length; i++) {
@@ -284,80 +202,38 @@ export class RuntimeModule {
         tensorArgs.push(args[i]);
       }
     }
-
     const shapeParamMap = this._shapeParamMaps && this._shapeParamMaps.get(name);
     let shapeValues = null;
     if (shapeParamMap && shapeParamMap.size > 0) {
       const bufferMap = this._bufferMaps && this._bufferMaps.get(name);
       shapeValues = RuntimeModule._extractShapeParams(shapeParamMap, tensorShapes, args, bufferMap);
     }
+    return { tensorArgs, shapeValues };
+  }
 
-    if (this._webgpuKernels && this._webgpuKernels.has(name)) {
-      throw new Error('WebGPU kernel requires async execution — use runAsync()');
+  run(name, ...args) {
+    const entry = this._instances.get(name);
+    if (!entry) throw new Error('Kernel \'' + name + '\' not found or not executable');
+    if (entry.instance instanceof Promise) {
+      throw new Error('Kernel \'' + name + '\' requires async execution — use runAsync()');
     }
-
-    const wasmInst = this._wasmInstances.get(name);
-    if (wasmInst) {
-      const parallel = this._wasmParallel && this._wasmParallel.get(name);
-      if (parallel) {
-        runWasmKernel(wasmInst, name, tensorArgs, shapeValues, 0, parallel.extent);
-      } else {
-        runWasmKernel(wasmInst, name, tensorArgs, shapeValues);
-      }
-      return;
-    }
-
-    const fn = this._compiledFuncs.get(name);
-    if (fn) {
-      const callArgs = shapeValues ? [...tensorArgs, ...shapeValues] : tensorArgs;
-      return fn(...callArgs);
-    }
-
-    throw new Error('Kernel \'' + name + '\' not found or not executable');
+    const { tensorArgs, shapeValues } = this._prepareArgs(name, args);
+    return entry.backend.runSync(entry.instance, tensorArgs, shapeValues);
   }
 
   async runAsync(name, ...args) {
-    const tensorArgs = [];
-    const tensorShapes = new Map();
-    for (let i = 0; i < args.length; i++) {
-      if (args[i] instanceof RuntimeTensor) {
-        tensorArgs.push(args[i].data);
-        tensorShapes.set(i, args[i].shape);
-      } else {
-        tensorArgs.push(args[i]);
-      }
-    }
-
-    const shapeParamMap = this._shapeParamMaps && this._shapeParamMaps.get(name);
-    let shapeValues = null;
-    if (shapeParamMap && shapeParamMap.size > 0) {
-      const bufferMap = this._bufferMaps && this._bufferMaps.get(name);
-      shapeValues = RuntimeModule._extractShapeParams(shapeParamMap, tensorShapes, args, bufferMap);
-    }
-
-    if (this._wasmParallel && this._wasmParallel.has(name) && this._wasmParallel.get(name).poolSafe) {
-      const wasmInst = this._wasmInstances.get(name);
-      const parallel = this._wasmParallel.get(name);
-      const kernel = this.kernels.get(name);
-      const mathNames = kernel.metadata.imports ? [...kernel.metadata.imports.keys()] : [];
-      const { runWasmParallel: runPar } = await getWasmPool();
-      await runPar(wasmInst, name, tensorArgs, shapeValues, parallel, mathNames);
-      return;
-    }
-
-    if (this._webgpuInstances && this._webgpuInstances.has(name)) {
-      const instance = await this._webgpuInstances.get(name);
-      const { runWebGPUKernel } = await getWebGPURuntime();
-      await runWebGPUKernel(instance, tensorArgs, shapeValues);
-      return;
-    }
-
-    this.run(name, ...args);
+    const entry = this._instances.get(name);
+    if (!entry) throw new Error('Kernel \'' + name + '\' not found or not executable');
+    const { tensorArgs, shapeValues } = this._prepareArgs(name, args);
+    const instance = await entry.instance;
+    return entry.backend.runAsync(instance, tensorArgs, shapeValues);
   }
 
   isAsync(name) {
-    return !!(this._webgpuKernels && this._webgpuKernels.has(name))
-      || !!(this._wasmParallel && this._wasmParallel.has(name) && this._wasmParallel.get(name).poolSafe);
+    const entry = this._instances.get(name);
+    if (!entry) return false;
+    const inst = entry.instance instanceof Promise ? null : entry.instance;
+    return entry.backend.isAsync(inst);
   }
 
   static _extractShapeParams(shapeParamMap, tensorShapes, args, bufferMap) {
@@ -399,8 +275,10 @@ export class RuntimeModule {
   }
 
   getWasmPool(name) {
-    const inst = this._wasmInstances.get(name);
-    if (!inst) return null;
+    const entry = this._instances.get(name);
+    if (!entry || entry.instance instanceof Promise) return null;
+    const inst = entry.instance;
+    if (!inst || !inst.exports || !inst.bufferOffsets) return null;
     return new WasmTensorPool(inst);
   }
 

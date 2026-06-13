@@ -1,6 +1,6 @@
 export const TargetKind = Object.freeze({
   CPU: 'cpu',
-  GPU: 'gpu',
+  CUDA: 'cuda',
   WEBGPU: 'webgpu',
   WASM: 'wasm',
   ACCELERATOR: 'accelerator'
@@ -40,7 +40,7 @@ export class TargetFeatures {
   }
 
   isGPU() {
-    return this.kind === TargetKind.GPU || this.kind === TargetKind.WEBGPU;
+    return this.kind === TargetKind.CUDA || this.kind === TargetKind.WEBGPU;
   }
 
   isWebGPU() {
@@ -95,9 +95,9 @@ export const CPUTarget = (overrides = {}) => new TargetFeatures({
   ...overrides
 });
 
-export const GPUTarget = (overrides = {}) => new TargetFeatures({
-  kind: TargetKind.GPU,
-  name: 'gpu_generic',
+export const CUDATarget = (overrides = {}) => new TargetFeatures({
+  kind: TargetKind.CUDA,
+  name: 'cuda_generic',
   vectorWidth: 1,
   numCores: 80,
   maxThreadsPerBlock: 1024,
