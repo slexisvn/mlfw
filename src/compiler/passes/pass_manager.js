@@ -15,6 +15,14 @@ function countOps(target) {
   return -1;
 }
 
+export class FixedPointGroup {
+  constructor(name, passes, maxIterations = 8) {
+    this.name = name;
+    this.passes = passes;
+    this.maxIterations = maxIterations;
+  }
+}
+
 export class PassManager {
   constructor() {
     this.passes = [];
@@ -43,108 +51,136 @@ export class PassManager {
     return new CompilationError('verification', name, `pass '${pass.name}' produced invalid IR: ${found.join('; ')}`, pass.name);
   }
 
-  run(module, options = {}) {
-    let anyChanged = false;
-    const results = [];
-    const verbose = this.trace && this.trace.level >= TraceLevel.VERBOSE;
-    const resilient = options.errorMode === 'resilient';
-    const errors = [];
-    const failedFunctions = new Set();
+  _applyPass(pass, module, ctx, results) {
+    if (this.trace) pass.trace = this.trace;
+    const verbose = ctx.verbose;
+    const resilient = ctx.resilient;
+    let changed = false;
+    let fatal = false;
 
-    for (const pass of this.passes) {
-      if (this.trace) pass.trace = this.trace;
+    if (pass instanceof ModulePass) {
+      const opsBefore = verbose ? countOps(module) : -1;
+      const t0 = verbose ? performance.now() : 0;
 
-      if (pass instanceof ModulePass) {
-        const opsBefore = verbose ? countOps(module) : -1;
+      const result = pass.run(module, this.analysisManager);
+      results.push(result);
+
+      if (verbose) this.trace.passRun(pass.name, result, performance.now() - t0, opsBefore, countOps(module));
+
+      if (result === PassResult.CHANGED) {
+        changed = true;
+        ctx.anyChanged = true;
+        this.analysisManager.invalidateAll();
+        const verr = this._verifyAfter(pass, module, true);
+        if (verr) {
+          ctx.errors.push(verr);
+          if (!resilient) fatal = true;
+        }
+      } else if (result === PassResult.FAILED) {
+        this.analysisManager.invalidateAll();
+        ctx.errors.push(new CompilationError('graphPasses', module.name || '<module>', `pass '${pass.name}' failed`, pass.name));
+        if (!resilient) fatal = true;
+      }
+    } else if (pass instanceof FunctionPass) {
+      let passChanged = false;
+
+      for (const func of module) {
+        if (ctx.failedFunctions.has(func.name)) continue;
+
+        const opsBefore = verbose ? countOps(func) : -1;
         const t0 = verbose ? performance.now() : 0;
 
-        const result = pass.run(module, this.analysisManager);
-        results.push(result);
-
-        if (verbose) {
-          this.trace.passRun(pass.name, result, performance.now() - t0, opsBefore, countOps(module));
-        }
-
-        if (result === PassResult.CHANGED) {
-          anyChanged = true;
-          this.analysisManager.invalidateAll();
-          const verr = this._verifyAfter(pass, module, true);
-          if (verr) {
-            errors.push(verr);
-            if (!resilient) {
-              pass.trace = null;
-              return { changed: anyChanged, results, errors, failedFunctions: failedFunctions.size > 0 ? failedFunctions : null };
-            }
-          }
-        } else if (result === PassResult.FAILED) {
-          this.analysisManager.invalidateAll();
-          const err = new CompilationError('graphPasses', module.name || '<module>', `pass '${pass.name}' failed`, pass.name);
-          errors.push(err);
-          if (!resilient) {
-            pass.trace = null;
-            return { changed: anyChanged, results, errors, failedFunctions: failedFunctions.size > 0 ? failedFunctions : null };
-          }
-        }
-      } else if (pass instanceof FunctionPass) {
-        let passChanged = false;
-
-        for (const func of module) {
-          if (failedFunctions.has(func.name)) continue;
-
-          const opsBefore = verbose ? countOps(func) : -1;
-          const t0 = verbose ? performance.now() : 0;
-
-          if (resilient) {
-            try {
-              const result = pass.run(func, this.analysisManager);
-              if (verbose) this.trace.passRun(pass.name, result, performance.now() - t0, opsBefore, countOps(func));
-              if (result === PassResult.CHANGED) {
-                passChanged = true;
-                anyChanged = true;
-                this.analysisManager.invalidate(func, pass.preservedAnalyses);
-                func.bumpVersion();
-                const verr = this._verifyAfter(pass, func, false);
-                if (verr) { errors.push(verr); failedFunctions.add(func.name); }
-              } else if (result === PassResult.FAILED) {
-                this.analysisManager.invalidate(func);
-                errors.push(new CompilationError('graphPasses', func.name, `pass '${pass.name}' failed`, pass.name));
-                failedFunctions.add(func.name);
-              }
-            } catch (e) {
-              errors.push(new CompilationError('graphPasses', func.name, e.message, pass.name));
-              failedFunctions.add(func.name);
-            }
-          } else {
+        if (resilient) {
+          try {
             const result = pass.run(func, this.analysisManager);
             if (verbose) this.trace.passRun(pass.name, result, performance.now() - t0, opsBefore, countOps(func));
             if (result === PassResult.CHANGED) {
               passChanged = true;
-              anyChanged = true;
+              ctx.anyChanged = true;
               this.analysisManager.invalidate(func, pass.preservedAnalyses);
               func.bumpVersion();
               const verr = this._verifyAfter(pass, func, false);
-              if (verr) {
-                errors.push(verr);
-                failedFunctions.add(func.name);
-                pass.trace = null;
-                return { changed: anyChanged, results, errors, failedFunctions };
-              }
+              if (verr) { ctx.errors.push(verr); ctx.failedFunctions.add(func.name); }
             } else if (result === PassResult.FAILED) {
               this.analysisManager.invalidate(func);
-              const err = new CompilationError('graphPasses', func.name, `pass '${pass.name}' failed`, pass.name);
-              errors.push(err);
-              failedFunctions.add(func.name);
-              pass.trace = null;
-              return { changed: anyChanged, results, errors, failedFunctions };
+              ctx.errors.push(new CompilationError('graphPasses', func.name, `pass '${pass.name}' failed`, pass.name));
+              ctx.failedFunctions.add(func.name);
             }
+          } catch (e) {
+            ctx.errors.push(new CompilationError('graphPasses', func.name, e.message, pass.name));
+            ctx.failedFunctions.add(func.name);
+          }
+        } else {
+          const result = pass.run(func, this.analysisManager);
+          if (verbose) this.trace.passRun(pass.name, result, performance.now() - t0, opsBefore, countOps(func));
+          if (result === PassResult.CHANGED) {
+            passChanged = true;
+            ctx.anyChanged = true;
+            this.analysisManager.invalidate(func, pass.preservedAnalyses);
+            func.bumpVersion();
+            const verr = this._verifyAfter(pass, func, false);
+            if (verr) {
+              ctx.errors.push(verr);
+              ctx.failedFunctions.add(func.name);
+              fatal = true;
+              break;
+            }
+          } else if (result === PassResult.FAILED) {
+            this.analysisManager.invalidate(func);
+            ctx.errors.push(new CompilationError('graphPasses', func.name, `pass '${pass.name}' failed`, pass.name));
+            ctx.failedFunctions.add(func.name);
+            fatal = true;
+            break;
           }
         }
-        results.push(passChanged ? PassResult.CHANGED : PassResult.UNCHANGED);
       }
-
-      pass.trace = null;
+      results.push(passChanged ? PassResult.CHANGED : PassResult.UNCHANGED);
+      changed = passChanged;
     }
 
-    return { changed: anyChanged, results, errors: errors.length > 0 ? errors : null, failedFunctions: failedFunctions.size > 0 ? failedFunctions : null };
+    pass.trace = null;
+    return { changed, fatal };
+  }
+
+  _runGroup(group, module, ctx, results) {
+    const maxIter = group.maxIterations > 0 ? group.maxIterations : 1;
+    for (let iter = 0; iter < maxIter; iter++) {
+      let iterChanged = false;
+      for (const pass of group.passes) {
+        const { changed, fatal } = this._applyPass(pass, module, ctx, results);
+        if (fatal) return true;
+        if (changed) iterChanged = true;
+      }
+      if (!iterChanged) return false;
+    }
+    if (this.trace) this.trace.passRun(`${group.name}:max-iter`, PassResult.UNCHANGED, 0, -1, -1);
+    return false;
+  }
+
+  run(module, options = {}) {
+    const ctx = {
+      verbose: this.trace && this.trace.level >= TraceLevel.VERBOSE,
+      resilient: options.errorMode === 'resilient',
+      errors: [],
+      failedFunctions: new Set(),
+      anyChanged: false,
+    };
+    const results = [];
+
+    for (const item of this.passes) {
+      const fatal = item instanceof FixedPointGroup
+        ? this._runGroup(item, module, ctx, results)
+        : this._applyPass(item, module, ctx, results).fatal;
+      if (fatal) {
+        return { changed: ctx.anyChanged, results, errors: ctx.errors, failedFunctions: ctx.failedFunctions.size > 0 ? ctx.failedFunctions : null };
+      }
+    }
+
+    return {
+      changed: ctx.anyChanged,
+      results,
+      errors: ctx.errors.length > 0 ? ctx.errors : null,
+      failedFunctions: ctx.failedFunctions.size > 0 ? ctx.failedFunctions : null,
+    };
   }
 }

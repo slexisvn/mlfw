@@ -1,6 +1,7 @@
 import { ForKind } from '../ir/tensor/nodes.js';
 import { TargetKind } from '../../backend/target.js';
 import { ScheduleTrace } from '../schedule/trace.js';
+import { classifyBlock, isReductionLoop } from '../schedule/rules.js';
 
 export class SearchVariable {
   constructor(name, candidates) {
@@ -115,6 +116,40 @@ export function createReductionCPUSketch() {
   });
 }
 
+export function createReductionGPUSketch() {
+  return new ScheduleSketch('reduction_gpu', [
+    new SearchVariable('block_size', BLOCK_SIZE_CANDIDATES)
+  ], (schedule, blockName, target, params) => {
+    const loops = schedule.getLoops(blockName);
+    if (loops.length === 0) return;
+
+    const info = classifyBlock(schedule.func, blockName);
+    const spatialLoops = loops.filter(l => !info || !isReductionLoop(l, info));
+    if (spatialLoops.length === 0) return;
+
+    let fused = spatialLoops[0];
+    for (let i = 1; i < spatialLoops.length; i++) {
+      const current = schedule.getLoops(blockName);
+      const next = current.find(l => l.loopVar.name === spatialLoops[i].loopVar.name);
+      if (next && fused.body === next) fused = schedule.fuseLoops(fused, next);
+    }
+
+    const extent = fused.extent;
+    if (extent.type !== 'IntImmNode') {
+      schedule.bindThread(fused, 'threadIdx.x');
+      return;
+    }
+    const blockSize = Math.min(params.block_size, extent.value);
+    if (extent.value > blockSize) {
+      const [bx, tx] = schedule.split(fused, blockSize);
+      schedule.bindThread(bx, 'blockIdx.x');
+      schedule.bindThread(tx, 'threadIdx.x');
+    } else {
+      schedule.bindThread(fused, 'threadIdx.x');
+    }
+  });
+}
+
 export function createMatmulCPUSketch() {
   return new ScheduleSketch('matmul_cpu', [
     new SearchVariable('tile_m', TILE_CANDIDATES),
@@ -184,16 +219,16 @@ export function createMatmulGPUSketch() {
   });
 }
 
-function classifyBlockForSketch(blockName, blockMap) {
-  const block = blockMap ? blockMap.get(blockName) : null;
+function classifyBlockForSketch(primFunc, blockName) {
+  const info = classifyBlock(primFunc, blockName);
   return {
-    hasReduction: block ? block.initBody !== null : false,
+    hasReduction: info ? info.hasReduction : false,
     isMatmul: blockName.includes('matmul')
   };
 }
 
 export function getSketchesForBlock(primFunc, blockName, target, blockMap) {
-  const info = classifyBlockForSketch(blockName, blockMap);
+  const info = classifyBlockForSketch(primFunc, blockName);
   const sketches = [];
 
   if (target.kind === TargetKind.CPU) {
@@ -202,6 +237,7 @@ export function getSketchesForBlock(primFunc, blockName, target, blockMap) {
     else sketches.push(createElementwiseCPUSketch());
   } else if (target.isGPU()) {
     if (info.isMatmul) sketches.push(createMatmulGPUSketch());
+    else if (info.hasReduction) sketches.push(createReductionGPUSketch());
     else sketches.push(createElementwiseGPUSketch());
   }
 

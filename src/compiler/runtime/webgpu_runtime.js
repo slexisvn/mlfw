@@ -1,3 +1,6 @@
+import { wgslType, wgslBytes } from '../../backend/dtype_map.js';
+import { bf16ToF32, f32ToBf16 } from '../../tensor/utils/half.js';
+
 let _gpuDevice = null;
 let _gpuInitPromise = null;
 let _bufferUsage = null;
@@ -5,6 +8,37 @@ let _mapMode = null;
 let _shaderStage = null;
 let _dawnInstance = null;
 let _exitRegistered = false;
+
+function wgslViewCtor(dtype) {
+  switch (wgslType(dtype)) {
+    case 'i32': return Int32Array;
+    case 'u32': return Uint32Array;
+    case 'f16': return Uint16Array;
+    default: return Float32Array;
+  }
+}
+
+function packTensorInto(view, src, dtype, offset) {
+  if (dtype === 'bf16') {
+    for (let i = 0; i < src.length; i++) view[offset + i] = bf16ToF32(src[i]);
+  } else if (dtype === 'i64') {
+    for (let i = 0; i < src.length; i++) view[offset + i] = Number(BigInt.asIntN(32, src[i]));
+  } else {
+    view.set(src, offset);
+  }
+}
+
+function unpackTensorFrom(dst, view, dtype, offset, size) {
+  if (dtype === 'bf16') {
+    for (let i = 0; i < size; i++) dst[i] = f32ToBf16(view[offset + i]);
+  } else if (dtype === 'i64') {
+    for (let i = 0; i < size; i++) dst[i] = BigInt(view[offset + i]);
+  } else {
+    dst.set(view.subarray(offset, offset + size));
+  }
+}
+
+function align4(n) { return Math.ceil(n / 4) * 4; }
 
 async function ensureDevice() {
   if (_gpuDevice) return _gpuDevice;
@@ -47,7 +81,9 @@ async function ensureDevice() {
     for (const key of liftKeys) {
       if (adapterLimits[key] !== undefined) requiredLimits[key] = adapterLimits[key];
     }
-    _gpuDevice = await adapter.requestDevice({ requiredLimits });
+    const requiredFeatures = [];
+    if (adapter.features && adapter.features.has('shader-f16')) requiredFeatures.push('shader-f16');
+    _gpuDevice = await adapter.requestDevice({ requiredLimits, requiredFeatures });
 
     if (!_exitRegistered && typeof process !== 'undefined' && process.on) {
       _exitRegistered = true;
@@ -159,19 +195,22 @@ export async function runWebGPUKernel(instance, tensorArgs, shapeValues) {
       continue;
     }
 
+    const elemBytes = wgslBytes(binding.dtype);
+    const ViewCtor = wgslViewCtor(binding.dtype);
+
     if (binding.packed) {
-      const totalBytes = binding.packedSize * 4;
+      const totalBytes = align4(binding.packedSize * elemBytes);
       const isOutput = binding.mode === 'read_write';
       const usage = isOutput
         ? BU.STORAGE | BU.COPY_SRC | BU.COPY_DST
         : BU.STORAGE | BU.COPY_DST;
 
       const gpuBuf = device.createBuffer({ size: Math.max(totalBytes, 4), usage, mappedAtCreation: true });
-      const mapped = new Float32Array(gpuBuf.getMappedRange());
+      const mapped = new ViewCtor(gpuBuf.getMappedRange());
       for (const entry of binding.packed) {
         const srcIdx = paramIdx.get(entry.name);
         const src = tensorArgs[srcIdx];
-        if (src) mapped.set(src, entry.offset);
+        if (src) packTensorInto(mapped, src, entry.dtype, entry.offset);
       }
       gpuBuf.unmap();
       gpuBuffers.push(gpuBuf);
@@ -181,14 +220,14 @@ export async function runWebGPUKernel(instance, tensorArgs, shapeValues) {
 
     const idx = paramIdx.get(binding.name);
     const data = tensorArgs[idx];
-    const byteLength = data.byteLength;
+    const byteLength = align4(data.length * elemBytes);
     const isOutput = binding.mode === 'read_write';
     const usage = isOutput
       ? BU.STORAGE | BU.COPY_SRC | BU.COPY_DST
       : BU.STORAGE | BU.COPY_DST;
 
     const gpuBuf = device.createBuffer({ size: Math.max(byteLength, 4), usage, mappedAtCreation: true });
-    new Float32Array(gpuBuf.getMappedRange()).set(data);
+    packTensorInto(new ViewCtor(gpuBuf.getMappedRange()), data, binding.dtype, 0);
     gpuBuf.unmap();
 
     gpuBuffers.push(gpuBuf);
@@ -214,20 +253,22 @@ export async function runWebGPUKernel(instance, tensorArgs, shapeValues) {
     if (binding.mode !== 'read_write') continue;
 
     const gpuBuf = gpuBuffers[i];
+    const elemBytes = wgslBytes(binding.dtype);
+    const ViewCtor = wgslViewCtor(binding.dtype);
 
     if (binding.packed) {
       for (const entry of binding.packed) {
-        const byteOff = entry.offset * 4;
-        const byteLen = entry.size * 4;
+        const byteOff = entry.offset * elemBytes;
+        const byteLen = align4(entry.size * elemBytes);
         const readBuf = device.createBuffer({ size: byteLen, usage: BU.MAP_READ | BU.COPY_DST });
         encoder.copyBufferToBuffer(gpuBuf, byteOff, readBuf, 0, byteLen);
-        outputReadbacks.push({ readBuf, tensorIdx: paramIdx.get(entry.name), size: entry.size });
+        outputReadbacks.push({ readBuf, tensorIdx: paramIdx.get(entry.name), size: entry.size, dtype: entry.dtype, ViewCtor });
       }
     } else {
       const size = gpuBuf.size;
       const readBuf = device.createBuffer({ size, usage: BU.MAP_READ | BU.COPY_DST });
       encoder.copyBufferToBuffer(gpuBuf, 0, readBuf, 0, size);
-      outputReadbacks.push({ readBuf, tensorIdx: paramIdx.get(binding.name), size: size / 4 });
+      outputReadbacks.push({ readBuf, tensorIdx: paramIdx.get(binding.name), size: tensorArgs[paramIdx.get(binding.name)].length, dtype: binding.dtype, ViewCtor });
     }
   }
 
@@ -235,8 +276,8 @@ export async function runWebGPUKernel(instance, tensorArgs, shapeValues) {
 
   for (const rb of outputReadbacks) {
     await rb.readBuf.mapAsync(mapModeRead());
-    const result = new Float32Array(rb.readBuf.getMappedRange());
-    tensorArgs[rb.tensorIdx].set(result.subarray(0, rb.size));
+    const result = new rb.ViewCtor(rb.readBuf.getMappedRange());
+    unpackTensorFrom(tensorArgs[rb.tensorIdx], result, rb.dtype, 0, rb.size);
     rb.readBuf.unmap();
     rb.readBuf.destroy();
   }

@@ -178,6 +178,26 @@ export function compile(model, exampleInputs, opts) {
 
   const _cacheEntries = [];
 
+  function _attachRepro(error, inputs, phase) {
+    if (!error || typeof error !== 'object' || error.repro) return error;
+    try {
+      error.repro = {
+        name: model.constructor?.name || 'compiled',
+        phase,
+        target: target?.name,
+        inputs: (inputs || []).map(t => ({ shape: t.shape, dtype: t.dtype })),
+        config: {
+          fusion: compilerOpts.fusion,
+          scheduling: compilerOpts.scheduling,
+          optimization: compilerOpts.optimization,
+          quantization: compilerOpts.quantization,
+          dynamicShapes: !!dynamicShapes,
+        },
+      };
+    } catch (_) { return error; }
+    return error;
+  }
+
   function _finalize(traced) {
     const result = new Compiler(compilerOpts).compile(traced.graph);
     return {
@@ -192,15 +212,19 @@ export function compile(model, exampleInputs, opts) {
   }
 
   function _compile(inputs) {
-    const traced = _traceCore(
-      (...args) => model.forward(...args),
-      inputs,
-      { name: model.constructor.name || 'compiled', dynamicShapes }
-    );
-    if (traced && typeof traced.then === 'function') {
-      return traced.then(_finalize);
+    try {
+      const traced = _traceCore(
+        (...args) => model.forward(...args),
+        inputs,
+        { name: model.constructor.name || 'compiled', dynamicShapes }
+      );
+      if (traced && typeof traced.then === 'function') {
+        return traced.then(_finalize, e => { throw _attachRepro(e, inputs, 'compile'); });
+      }
+      return _finalize(traced);
+    } catch (e) {
+      throw _attachRepro(e, inputs, 'compile');
     }
-    return _finalize(traced);
   }
 
   function _findCachedEntry(inputs) {
@@ -213,6 +237,18 @@ export function compile(model, exampleInputs, opts) {
     return null;
   }
 
+  function _execute(entry, inputs) {
+    try {
+      const out = executeCompiled(entry, inputs, entry.shapeEnv);
+      if (out && typeof out.then === 'function') {
+        return out.then(undefined, e => { throw _attachRepro(e, inputs, 'run'); });
+      }
+      return out;
+    } catch (e) {
+      throw _attachRepro(e, inputs, 'run');
+    }
+  }
+
   function compiledForward(...inputs) {
     let entry = _findCachedEntry(inputs);
     if (!entry) {
@@ -221,14 +257,14 @@ export function compile(model, exampleInputs, opts) {
         return result.then(c => {
           _cacheEntries.push(c);
           c.shapeEnv.bindInputShapes(inputs);
-          return executeCompiled(c, inputs, c.shapeEnv);
+          return _execute(c, inputs);
         });
       }
       entry = result;
       _cacheEntries.push(entry);
       entry.shapeEnv.bindInputShapes(inputs);
     }
-    return executeCompiled(entry, inputs, entry.shapeEnv);
+    return _execute(entry, inputs);
   }
 
   let _ready = null;

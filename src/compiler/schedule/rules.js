@@ -18,7 +18,7 @@ export class ScheduleRule {
 let _classifyCache = null;
 let _classifyCacheOwner = null;
 
-function classifyBlock(primFunc, blockName) {
+export function classifyBlock(primFunc, blockName) {
   if (_classifyCacheOwner !== primFunc || !_classifyCache) {
     _classifyCache = new Map();
     collectBlockInfo(primFunc.body, _classifyCache, []);
@@ -32,6 +32,47 @@ function invalidateClassifyCache() {
   _classifyCacheOwner = null;
 }
 
+function collectVarNames(node, out) {
+  const stack = [node];
+  while (stack.length > 0) {
+    const n = stack.pop();
+    if (!n || typeof n !== 'object') continue;
+    if (n.type === 'VariableNode') { out.add(n.name); continue; }
+    for (const k of ['a', 'b', 'condition', 'thenBody', 'elseBody', 'expr', 'value', 'offsetExpr', 'extent']) {
+      if (n[k]) stack.push(n[k]);
+    }
+    if (n.indices) for (const i of n.indices) stack.push(i);
+    if (n.args) for (const a of n.args) stack.push(a);
+  }
+}
+
+function computeReductionLoopVars(blockNode) {
+  const writeBufs = new Set((blockNode.writes || []).map(w => w.buffer && w.buffer.name));
+  const writeIdxVars = new Set();
+  const stack = [blockNode.body, blockNode.initBody];
+  while (stack.length > 0) {
+    const n = stack.pop();
+    if (!n) continue;
+    if (n.type === 'BufferStoreNode' && n.buffer && writeBufs.has(n.buffer.name)) {
+      for (const idx of n.indices) collectVarNames(idx, writeIdxVars);
+    }
+    if (n.body) stack.push(n.body);
+    if (n.stmts) for (const s of n.stmts) stack.push(s);
+    if (n.thenBody) stack.push(n.thenBody);
+    if (n.elseBody) stack.push(n.elseBody);
+    if (n.value) stack.push(n.value);
+  }
+  const red = new Set();
+  for (const iv of (blockNode.iterVars || [])) {
+    const bindVars = new Set();
+    collectVarNames(iv.binding, bindVars);
+    const isSpatial = (iv.iterVar && writeIdxVars.has(iv.iterVar.name))
+      || [...bindVars].some(v => writeIdxVars.has(v));
+    if (!isSpatial) for (const v of bindVars) red.add(v);
+  }
+  return red;
+}
+
 function collectBlockInfo(root, result, initialLoopStack) {
   const stack = [{ node: root, loops: [...initialLoopStack] }];
   while (stack.length > 0) {
@@ -40,10 +81,11 @@ function collectBlockInfo(root, result, initialLoopStack) {
     if (node.type === 'ForNode') {
       stack.push({ node: node.body, loops: [...loops, node] });
     } else if (node.type === 'BlockNode') {
-      const writeRank = node.writes.length > 0 ? (node.writes[0].buffer.shape?.length || 0) : 0;
+      const reductionLoopVars = computeReductionLoopVars(node);
       result.set(node.name, {
         loopCount: loops.length,
-        hasReduction: node.initBody !== null || (node.writes.length > 0 && loops.length > writeRank),
+        hasReduction: node.initBody !== null || reductionLoopVars.size > 0,
+        reductionLoopVars,
         readBuffers: node.reads.map(r => r.buffer.name),
         writeBuffers: node.writes.map(r => r.buffer.name),
         loops: [...loops]
@@ -490,20 +532,9 @@ export class FallbackRule extends ScheduleRule {
   }
 }
 
-function isReductionLoop(loop, blockInfo) {
-  const loopIdx = blockInfo.loops.indexOf(loop);
-  if (loopIdx < 0) return false;
-  const spatialCount = blockInfo.writeBuffers.length > 0
-    ? estimateSpatialDims(blockInfo)
-    : blockInfo.loopCount - 1;
-  return loopIdx >= spatialCount;
-}
-
-function estimateSpatialDims(blockInfo) {
-  if (blockInfo.hasReduction) {
-    return Math.max(1, blockInfo.loopCount - 1);
-  }
-  return blockInfo.loopCount;
+export function isReductionLoop(loop, blockInfo) {
+  if (!blockInfo.reductionLoopVars) return false;
+  return blockInfo.reductionLoopVars.has(loop.loopVar.name);
 }
 
 function findDirectChild(parent, child) {

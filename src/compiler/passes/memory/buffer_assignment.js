@@ -15,9 +15,10 @@ export class MemoryBlock {
 }
 
 export class MemoryPool {
-  constructor(scope, alignment = 64) {
+  constructor(scope, alignment = 64, strategy = 'best-fit') {
     this.scope = scope;
     this.alignment = alignment;
+    this.strategy = strategy;
     this.blocks = [];
     this.peakUsage = 0;
   }
@@ -36,33 +37,31 @@ export class MemoryPool {
     return Math.ceil(size / this.alignment) * this.alignment;
   }
 
-  _findFreeOffset(size, buffer) {
-    if (this.blocks.length === 0) return 0;
+  _findFreeOffset(size) {
+    const live = this.blocks.slice().sort((a, b) => a.offset - b.offset);
+    let cursor = 0;
+    let best = null;
 
-    const candidates = [0];
-    for (const block of this.blocks) {
-      candidates.push(block.end);
-    }
-
-    candidates.sort((a, b) => a - b);
-
-    for (const candidate of candidates) {
-      const alignedCandidate = Math.ceil(candidate / this.alignment) * this.alignment;
-      let fits = true;
-      for (const existing of this.blocks) {
-        if (alignedCandidate < existing.end && existing.offset < alignedCandidate + size) {
-          fits = false;
-          break;
+    for (const block of live) {
+      const start = this._align(cursor);
+      const gap = block.offset - start;
+      if (gap >= size) {
+        if (this.strategy === 'best-fit') {
+          if (best === null || gap < best.gap) best = { offset: start, gap };
+        } else {
+          return start;
         }
       }
-      if (fits) return alignedCandidate;
+      if (block.end > cursor) cursor = block.end;
     }
 
-    let maxEnd = 0;
-    for (const block of this.blocks) {
-      if (block.end > maxEnd) maxEnd = block.end;
-    }
-    return Math.ceil(maxEnd / this.alignment) * this.alignment;
+    return best !== null ? best.offset : this._align(cursor);
+  }
+
+  fragmentation() {
+    if (this.peakUsage === 0) return 0;
+    const used = this.blocks.reduce((sum, b) => sum + b.size, 0);
+    return Math.max(0, 1 - used / this.peakUsage);
   }
 
   release(block) {

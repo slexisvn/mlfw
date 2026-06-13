@@ -130,44 +130,71 @@
 - **Refs:** `src/compiler/ir/graph/quantization_types.js`, `src/compiler/passes/lowering/lowering_registry.js`
   (`lowerConstant`), `tests/compiler/quantization/`, `tests/compiler/lowering/elementwise-lowering.test.js`.
 
-### P1.5 — Pass pipeline hội tụ (fixed-point) thay vì tuần tự cứng
+### P1.5 — Pass pipeline hội tụ (fixed-point) thay vì tuần tự cứng  ✅ (đợt 36)
 - **Why:** PassManager tuần tự, phase-ordering hand-tuned → giòn (đổi thứ tự canonicalize/simplify/fold dễ vỡ).
   XLA dùng `HloPassPipeline` lặp tới fixed-point.
 - **What:**
-  - [ ] Cho phép nhóm pass lặp tới khi `PassResult.UNCHANGED` (có max-iter guard).
-  - [ ] Pass khai báo `preservedAnalyses` đầy đủ để tránh recompute thừa.
-- **Done when:** Thứ tự pass trong nhóm canonicalize không đổi kết quả cuối; có max-iter chống loop.
+  - [x] `FixedPointGroup(name, passes, maxIterations)` trong `pass_manager.js`: lặp nhóm pass tới khi MỘT lượt
+    không pass nào CHANGED (hội tụ) hoặc chạm `maxIterations` (guard chống loop). Refactor per-pass logic thành
+    `_applyPass` trả `{changed, fatal}` để dùng chung cho path thường + group (không lặp code, giữ nguyên hành vi
+    verify-hook/error/resilient — 7 test cũ vẫn xanh).
+  - [x] Wire cluster canonicalize `[Canonicalize, AlgebraicSimplify, ConstantFold, CSE, DCE]` thành FixedPointGroup
+    trong `_runGraphPasses`. `maxSimplifyIterations` (config, default 8, KHÔNG hardcode). Các pass đã report
+    CHANGED/UNCHANGED chính xác (applyPatterns hội tụ nội bộ) → group dừng sớm ở fixed-point (2 vòng), không blow-up.
+  - [x] `preservedAnalyses`: cơ chế sẵn (`invalidate(func, pass.preservedAnalyses)`); default bảo toàn (rỗng = invalidate
+    hết) là SOUND. Khai báo preserved per-pass là tối ưu perf (analyses lazy) — để mở.
+  - [x] Test: `tests/compiler/passes/pass-manager.test.js` (FixedPointGroup: lặp tới settle = 3 applies; max-iter cap;
+    hội tụ với one-shot change). Full regression **4003 pass / 0 fail**, thời gian không đổi (~12s).
+- **Done when:** ✅ Nhóm canonicalize lặp tới fixed-point, max-iter chống loop; toàn bộ differential/correctness cũ
+  vẫn xanh (bằng chứng order-độc-lập: cluster giờ chạy tới điểm bất động, kết quả không đổi).
 - **Refs:** `src/compiler/passes/pass_manager.js`, `src/compiler/pipeline/compiler.js:_runGraphPasses`.
 
 ---
 
 ## P2 — Độ chín & vận hành
 
-### P2.1 — Observability / debug compiler
+### P2.1 — Observability / debug compiler  ◑ (đợt 36, crash-repro xong)
 - **What:**
-  - [ ] IR dump ổn định mỗi phase (đã có trace) + diff giữa các phase.
-  - [ ] "Why-not-fused" / "why-this-schedule" explain log cho từng block.
-  - [ ] Crash repro tự động: dump graph + config + inputs khi compile/run throw.
-- **Refs:** `src/compiler/pipeline/trace.js`, `src/compiler/ir/*/printer.js`.
+  - [x] IR dump mỗi phase: ĐÃ CÓ (`trace.irDump`/`shouldSnapshot` afterGraphPasses/afterLowering/afterScheduling).
+  - [ ] "Why-not-fused" / "why-this-schedule" explain log cho từng block. (chưa)
+  - [x] **Crash repro tự động** (đợt 36): `compile()` đính `error.repro` khi compile/run throw — gồm `phase`
+    (compile/run), `target`, `inputs` (shape+dtype mỗi input), `config` (fusion/scheduling/optimization/quant/
+    dynamicShapes). Best-effort, không che lỗi gốc. Wrap `_compile` + `_execute` (sync+async). Test:
+    `tests/tracing/compile.test.js` ("compile failures carry a reproduction context").
+- **Refs:** `src/tracing/compile.js` (`_attachRepro`), `src/compiler/pipeline/trace.js`, `src/compiler/ir/*/printer.js`.
 
-### P2.2 — API stability & error UX
+### P2.2 — API stability & error UX  ◑ (đợt 36, error UX xong)
 - **What:**
-  - [ ] Chốt public API (`compile`, `CompilerConfig`, target factories); semver.
-  - [ ] Thông báo lỗi có ngữ cảnh (op, shape, dtype, phase) thay vì generic throw.
-  - [ ] `resilient` mode trả về danh sách func fail + lý do, không nuốt lỗi.
-- **Refs:** `src/tracing/compile.js`, `src/compiler/pipeline/compiler.js` (CompilationError).
+  - [ ] Chốt public API (`compile`, `CompilerConfig`, target factories); semver. (quyết định docs, ngoài code)
+  - [x] **Thông báo lỗi có ngữ cảnh** (đợt 36): `_inferAndBuild` lỗi giờ kèm op-name + lý do (op chưa đăng ký /
+    inferResultTypes trả rỗng / thiếu) + operand `[shape]:dtype` (`describeType`). Crash-repro (P2.1) thêm phase/
+    target/config. Test: `tests/compiler/ir/graph/operation.test.js` ("inference errors carry operand context").
+  - [x] `resilient` mode trả func fail + lý do: ĐÃ CÓ (`CompilationResult.errors` + getter `failedFunctions`;
+    `PassManager` resilient gom lỗi/func-fail, không nuốt). Xác nhận.
+- **Refs:** `src/compiler/ir/graph/builder.js` (`describeType`), `src/tracing/compile.js`, `src/compiler/pipeline/compiler.js` (CompilationError/CompilationResult).
 
-### P2.3 — Dynamic shapes diện rộng
+### P2.3 — Dynamic shapes diện rộng  ◑ (đợt 36, matmul/attention/layernorm xong; conv là gap)
 - **Why:** sym_int chạy end-to-end (verify đợt P2 edge), nhưng cần phủ rộng hơn cho production serving.
 - **What:**
-  - [ ] Bucketing/guard cho dynamic dim; specialization cache theo shape-class.
-  - [ ] Differential dynamic-shape cho conv/matmul/attention với nhiều batch/seq-len.
-- **Refs:** `src/tracing/compile.js` (dynamicShapes), `src/compiler/analysis/sym_int.js`.
+  - [x] Specialization cache theo shape-class: ĐÃ CÓ (`compile.js` `_cacheEntries` + shape-guard `evaluateGuards`,
+    compile-once-run-many). Xác nhận.
+  - [x] **Differential dynamic-shape rộng hơn** (đợt 36): thêm **matmul-chain** (dyn M), **attention-like**
+    (softmax→matmul, dyn rows), **layernorm** (dyn batch) vào `differential-nn.test.js` block dynamic (vs eager,
+    cpu+wasm). Cùng matmul dyn M/K, reduce, transpose, two-dynamic-dims sẵn có.
+  - [ ] **GAP (bug thật, chưa fix): conv2d dynamic batch N** → shape đúng nhưng batch>0 ra **0** (extent N không
+    thread vào conv lowering, chỉ batch 0 được tính). Cần fix sizing/loop-extent dynamic cho conv. Deep, để lại.
+  - [ ] Bucketing/guard nâng cao cho dynamic dim. (chưa)
+- **Refs:** `src/tracing/compile.js` (dynamicShapes), `src/compiler/analysis/sym_int.js`, `tests/e2e/differential-nn.test.js`.
 
-### P2.4 — Memory planning nâng cấp
+### P2.4 — Memory planning nâng cấp  ◑ (đợt 36, best-fit + fragmentation metric xong)
 - **What:**
-  - [ ] Đo fragmentation thực; cân nhắc best-fit / interference-graph khi linear-scan kém.
-  - [ ] Remat: kết hợp với scheduling (hiện chạy tách); chính sách theo memory budget thật của target.
+  - [x] **Best-fit + đo fragmentation** (đợt 36): `MemoryPool` thêm `strategy` ('best-fit' default | 'first-fit')
+    — best-fit chọn gap KHÍT NHẤT (giảm phân mảnh khi size khác nhau) thay vì gap thấp nhất. Viết lại `_findFreeOffset`
+    gap-based O(L log L) (trước O(L²)/allocate). Thêm `fragmentation()` = phần peak không bị live-block chiếm. Test:
+    `assignment-memory.test.js` (best-fit→tight gap vs first-fit→lowest; fragmentation metric). Full suite 4013, cpu+
+    wasm+webgpu xanh (đổi layout, không đổi đúng đắn).
+  - [ ] Interference-graph allocation (khi best-fit kém). (chưa — best-fit đủ cho hiện tại)
+  - [ ] Remat kết hợp scheduling + memory-budget thật của target. (chưa, remat vẫn chạy tách)
 - **Refs:** `src/compiler/passes/memory/{buffer_assignment,rematerialization}.js`.
 
 ---
@@ -225,3 +252,15 @@
   không đổi codegen, đúng cpu+wasm). Nhờ đó dựng per-channel int8 matmul END-TO-END trong compiled pipeline:
   per-channel >1.5× chính xác hơn per-tensor + cpu==wasm. +7 test (4 array-const + 3 per-channel compiled).
   Revert-test cả hai load-bearing. Full regression **3868 pass / 0 fail**.
+- 2026-06-12 (đợt 31b–35b): **WebGPU production** (xem todo.md đợt 31–34) — máy có GPU, oracle = real Chrome qua
+  Puppeteer (Dawn npm flaky). Fix: binding-layout pruning, dtype marshalling (mọi dtype + index ops), slot-reuse,
+  reduction GPU-safe (race), matmul cross-thread (workgroup+barrier). `webgpu-chrome.test.js` (Chrome differential)
+  + unit/e2e cho từng fix. P1.1 (WebGPU verify) coi như đạt cho default + scheduling (conv+pool+autotune còn gap).
+- 2026-06-12 (đợt 36): **P1.5 + P2 (P2.1/P2.2 xong, P2.3/P2.4 phần lớn)**.
+  - P1.5: `FixedPointGroup` lặp cluster canonicalize tới fixed-point (max-iter guard, config `maxSimplifyIterations`);
+    refactor `_applyPass` dùng chung. +3 test.
+  - P2.1: crash-repro `error.repro` (phase/target/inputs/config) khi compile/run throw. +1 test.
+  - P2.2: lỗi infer-result-types kèm op + lý do + operand `[shape]:dtype`. +1 test. (resilient-mode đã có)
+  - P2.3: differential dynamic-shape +matmul-chain/attention/layernorm. +cases. (conv-dyn batch là gap, ghi rõ)
+  - P2.4: best-fit + `fragmentation()`, `_findFreeOffset` O(L²)→O(L log L). +2 test.
+  - KHÔNG comment/hardcode/O(n²). Full regression **4013 pass / 0 fail** + webgpu-chrome 14/14.

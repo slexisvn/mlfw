@@ -177,6 +177,16 @@ describe('webgpu compilation output', () => {
     expect(src).not.toContain('workgroupBarrier()');
   });
 
+  it('scheduled activation-before-matmul promotes cross-thread intermediate to workgroup', () => {
+    const model = new Sequential(new Tanh(), new Linear(4, 4));
+    const x = tensor([[0.5, -0.3, 0.1, 0.8]]);
+    const compiled = compileWebGPU(model, [x], { enableSchedule: true });
+    const src = compiled.source();
+
+    expect(src).toContain('var<workgroup>');
+    expect(src).toContain('workgroupBarrier()');
+  });
+
   it('scheduled workgroup_size matches largest stage extent', () => {
     const model = new Sequential(new Linear(4, 16), new ReLU(), new Linear(16, 2));
     const x = tensor([[1, 2, 3, 4]]);
@@ -283,17 +293,17 @@ describe('webgpu compilation output', () => {
     expect(depth).toBe(0);
   });
 
-  it('wide bottleneck: Linear(4,64)->ReLU->Linear(64,2) scheduled', () => {
+  it('wide bottleneck: cross-workgroup shared intermediate serializes to one invocation', () => {
     const model = new Sequential(new Linear(4, 64), new ReLU(), new Linear(64, 2));
     const x = tensor([[1, 2, 3, 4]]);
     const compiled = compileWebGPU(model, [x], { enableSchedule: true });
     const src = compiled.source();
 
-    const wgMatch = src.match(/@workgroup_size\((\d+)/);
-    expect(Number(wgMatch[1])).toBeGreaterThanOrEqual(64);
-    expect(src).toContain('var<workgroup>');
-    expect(src).toContain('workgroupBarrier()');
-    expect(src).toMatch(/if \(i32\(_lid\.x\) < 2\)/);
+    expect(src).toMatch(/@workgroup_size\(1, 1, 1\)/);
+    expect(src).not.toContain('_wid');
+    let depth = 0;
+    for (const ch of src) { if (ch === '{') depth++; if (ch === '}') depth--; }
+    expect(depth).toBe(0);
   });
 
   it('5-layer deep MLP scheduled compiles with valid WGSL', () => {

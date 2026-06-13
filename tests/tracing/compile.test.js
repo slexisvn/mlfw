@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
-  tensor, Linear, Sequential, ReLU,
+  tensor, Linear, Sequential, ReLU, add,
 } from '../../src/index.js';
 import { compile } from '../../src/tracing/compile.js';
+import { WasmTarget } from '../../src/backend/target.js';
 import { Tensor } from '../../src/tensor/core/tensor.js';
 
 describe('compile returns executable tensors', () => {
@@ -141,5 +142,27 @@ describe('compile lazy (no exampleInputs)', () => {
     expect(r).toBeInstanceOf(Tensor);
     expect(r.shape).toEqual([1, 2]);
     expect(compiled.kernels().length).toBeGreaterThan(0);
+  });
+});
+
+describe('compile failures carry a reproduction context', () => {
+  it('attaches input shapes/dtypes, target, and config on a compile error', () => {
+    const model = { forward: (a, b) => add(a, b) };
+    const a = tensor([[1, 2, 3]]);
+    const b = tensor([[1, 2, 3, 4]]);
+
+    let err = null;
+    try {
+      compile(model, [a, b], { target: WasmTarget() });
+    } catch (e) { err = e; }
+
+    expect(err).not.toBeNull();
+    expect(err.repro).toBeDefined();
+    expect(err.repro.phase).toBe('compile');
+    expect(err.repro.target).toBe('wasm_generic');
+    expect(err.repro.inputs).toEqual([
+      { shape: [1, 3], dtype: 'f32' },
+      { shape: [1, 4], dtype: 'f32' },
+    ]);
   });
 });

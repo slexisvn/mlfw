@@ -5,6 +5,15 @@ import { GraphFunction } from './function.js';
 import { GraphModule } from './module.js';
 import { registry } from './ops.js';
 
+function describeType(type) {
+  if (!type) return '?';
+  if (type instanceof TupleType) return `tuple(${type.types.map(describeType).join(', ')})`;
+  if (type.shape !== undefined && type.dtype !== undefined) {
+    return `[${type.shape.join(',')}]:${type.dtype}`;
+  }
+  return String(type);
+}
+
 export function indexSelectGatherOpts(operandType, dim, indicesRank) {
   const rank = operandType.rank;
   const d = dim < 0 ? rank + dim : dim;
@@ -71,7 +80,11 @@ export class IRBuilder {
       resultTypes = opDef.inferResultTypes(operandTypes, attrMap, explicitResultTypes);
     }
     if (!resultTypes) {
-      throw new Error(`Cannot infer result types for op '${name}'`);
+      const operandDesc = operands.map(o => describeType(o.type)).join(', ');
+      const reason = opDef
+        ? (opDef.inferResultTypes ? 'inferResultTypes returned no types' : 'op has no inferResultTypes and none were given')
+        : 'op is not registered';
+      throw new Error(`Cannot infer result types for op '${name}' (${reason}); operands: [${operandDesc}]`);
     }
     return this._buildOp(name, operands, resultTypes, attributes, regions);
   }

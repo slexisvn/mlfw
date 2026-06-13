@@ -576,7 +576,53 @@ describe('WebGPUCodegen.generate — local arrays', () => {
     const pf = makePrimFunc('local_test', ['p0'], forNode, bufferMap);
 
     const kernel = makeCodegen().generate(pf);
-    expect(kernel.source).toMatch(/var tmp: array<f32, 8>/);
+    const slot = kernel.source.match(/var (_lt\d+): array<f32, 8>/);
+    expect(slot).not.toBeNull();
+    expect(kernel.source).toMatch(new RegExp(`out\\[i\\] = ${slot[1]}\\[i\\]`));
+  });
+
+  it('reuses one slot for locals whose live ranges do not overlap', () => {
+    const p0 = buf('p0', [8], 'f32');
+    const out = buf('out', [8], 'f32');
+    const t0 = buf('t0', [8], 'f32', 'local');
+    const t1 = buf('t1', [8], 'f32', 'local');
+    const t2 = buf('t2', [8], 'f32', 'local');
+    const copyLoop = (dst, src) => new ForNode(
+      idx('i'), new IntImmNode(0), new IntImmNode(8), ForKind.SERIAL,
+      new BufferStoreNode(dst, [idx('i')], new BufferLoadNode(src, [idx('i')])));
+    const body = new SeqNode([
+      copyLoop(t0, p0),
+      copyLoop(t1, t0),
+      copyLoop(t2, t1),
+      copyLoop(out, t2),
+    ]);
+    const pf = makePrimFunc('chain', ['p0'], body, new Map([['p0', p0], ['out', out]]));
+
+    const kernel = makeCodegen().generate(pf);
+    const slots = kernel.source.match(/var _lt\d+: array<f32, 8>/g) || [];
+    expect(slots.length).toBe(2);
+  });
+
+  it('keeps distinct slots for locals that are simultaneously live', () => {
+    const p0 = buf('p0', [8], 'f32');
+    const out = buf('out', [8], 'f32');
+    const a = buf('a', [8], 'f32', 'local');
+    const b = buf('b', [8], 'f32', 'local');
+    const c = buf('c', [8], 'f32', 'local');
+    const defLoop = (dst) => new ForNode(
+      idx('i'), new IntImmNode(0), new IntImmNode(8), ForKind.SERIAL,
+      new BufferStoreNode(dst, [idx('i')], new BufferLoadNode(p0, [idx('i')])));
+    const sumLoop = new ForNode(
+      idx('i'), new IntImmNode(0), new IntImmNode(8), ForKind.SERIAL,
+      new BufferStoreNode(out, [idx('i')],
+        new MathOpNode('+', new BufferLoadNode(a, [idx('i')]),
+          new MathOpNode('+', new BufferLoadNode(b, [idx('i')]), new BufferLoadNode(c, [idx('i')])))));
+    const body = new SeqNode([defLoop(a), defLoop(b), defLoop(c), sumLoop]);
+    const pf = makePrimFunc('fanin', ['p0'], body, new Map([['p0', p0], ['out', out]]));
+
+    const kernel = makeCodegen().generate(pf);
+    const slots = kernel.source.match(/var _lt\d+: array<f32, 8>/g) || [];
+    expect(slots.length).toBe(3);
   });
 });
 

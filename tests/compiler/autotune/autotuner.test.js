@@ -8,7 +8,7 @@ import {
   BufferStoreNode,
   BufferLoadNode,
 } from '../../../src/compiler/ir/tensor/nodes.js';
-import { CPUTarget, WasmTarget } from '../../../src/backend/target.js';
+import { CPUTarget, WasmTarget, WebGPUTarget } from '../../../src/backend/target.js';
 import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
@@ -24,16 +24,22 @@ function reductionPrimFunc() {
   return new PrimFunc('f', [], block, new Map());
 }
 
-describe('getSketchesForBlock requires blockMap to classify reductions', () => {
-  it('selects a different sketch family when blockMap is provided vs omitted', () => {
-    const target = CPUTarget();
+describe('getSketchesForBlock classifies reductions from the primFunc', () => {
+  it('selects the reduction sketch regardless of whether blockMap is passed', () => {
     const pf = reductionPrimFunc();
     const blockMap = buildBlockMap(pf.body);
 
-    const withMap = getSketchesForBlock(pf, 'reduce_blk', target, blockMap);
-    const withoutMap = getSketchesForBlock(pf, 'reduce_blk', target);
+    const withMap = getSketchesForBlock(pf, 'reduce_blk', CPUTarget(), blockMap);
+    const withoutMap = getSketchesForBlock(pf, 'reduce_blk', CPUTarget());
 
-    expect(withMap[0].name).not.toBe(withoutMap[0].name);
+    expect(withMap[0].name).toBe('reduction_cpu');
+    expect(withoutMap[0].name).toBe('reduction_cpu');
+  });
+
+  it('picks the GPU reduction sketch (not elementwise) for a reduction block', () => {
+    const pf = reductionPrimFunc();
+    const sketches = getSketchesForBlock(pf, 'reduce_blk', WebGPUTarget());
+    expect(sketches[0].name).toBe('reduction_gpu');
   });
 });
 

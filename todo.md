@@ -608,8 +608,10 @@
 6. **Crash-only** — chỉ cần không throw/không hang trên input hợp lệ (bắt assert/infinite-loop).
 
 ### Blocker production (không phải bug đếm được)
-- [x] GPU / WebGPU backend đã verify được (máy có GPU, Dawn `webgpu` npm). Fuzz differential GPU-vs-CPU
-  (subprocess-per-program vì Dawn in-process segfault sau vài pipeline) — xem đợt 31 dưới.
+- [x] GPU / WebGPU backend đã verify được. Oracle ĐÚNG = **real Chrome WebGPU qua Puppeteer** (Dawn+DXC, ổn
+  định), KHÔNG dùng `webgpu` npm (Dawn+FXC, segfault flaky → false fail). Fuzz differential CPU-vs-WebGPU
+  trong-browser 200+ program SẠCH (fuzz = scratch throwaway, ĐÃ XÓA; chỉ commit unit/e2e xác định cho bug
+  thật). `npm run test:webgpu`. Xem đợt 31 dưới.
 - [ ] Reference (eager) không độc lập — eager từng có bug, differential có thể bỏ sót khi cả 2 cùng sai.
   → Cần oracle độc lập (numerical-diff cho grad, brute-force cho analysis, metamorphic cho pass).
 
@@ -628,16 +630,108 @@
   - Fix (ko comment/hardcode): dựng explicit `GPUBindGroupLayout` từ `kernel.metadata.bindings` (mỗi binding
     → type: `_shapes`→uniform / read_write→storage / read→read-only-storage), `createPipelineLayout` tường
     minh, `runWebGPUKernel` dùng layout đó thay `getBindGroupLayout`. Capture `GPUShaderStage` ở ensureDevice.
-  - Test: `tests/backend/webgpu/webgpu-gpu.test.js` (+ "forward ignoring extra inputs" non-packed +
-    "chained reduces with unused inputs"). Revert (`layout:'auto'`+getBindGroupLayout) → 2 RED; apply → 10/10.
-    Full default suite **3996/3996**.
-- GAP (KHÔNG fix — kiến trúc, ghi rõ): WebGPU fuse TOÀN graph vào 1 kernel single-invocation
-  (`workgroup_size(1,1,1)`, mọi intermediate là `var<private> array`). (a) chain elementwise sâu (~40 op)
-  inline thành 1 expression lồng → WGSL "maximum parser recursive depth reached" (gpuErr, graceful);
-  (b) nhiều buffer reduce/softmax/layernorm khác shape (vd ln+sm+sm+sm = 5 user-op → ~30 private array) →
-  Dawn/D3D12 (FXC) segfault HARD (ko stderr). Ngưỡng ~ số private array trong 1 kernel, ko phụ thuộc data
-  size. Cần kernel-splitting / buffer-coalescing private array (memory-planner hiện chỉ inplace same-shape ở
-  IR, ko giảm count cho WebGPU single-kernel) — work lớn riêng, ngoài phạm vi 1 fix.
+  - **Spec-level bug, KHÔNG phải Dawn**: xác nhận trên real Chrome — revert fix → `gpu=[0,0]` (sai), apply →
+    `gpu=[4,5]` (đúng). (WebGPU spec: `layout:'auto'` prune binding ko reference trong shader.)
+  - Test: `webgpu-chrome.test.js` ("forward ignoring extra inputs" → [4,5]) + `webgpu-gpu.test.js` (Dawn-node,
+    opt-in). Revert → RED; apply → GREEN. Full default suite **3998/3998**.
+
+- **"Deep-kernel segfault" HÓA RA KHÔNG phải bug** (chốt qua Chrome): mọi kernel segfault trên `webgpu` npm
+  (q43=ln+sm+sigmoid+sqrt+abs, ln+sm×3, 8-layer ln-chain, mm-chain...) chạy **ĐÚNG trên real Chrome** (maxErr
+  ~1e-8). Segfault + "parser recursive depth" CHỈ là Dawn-node (FXC) lởm dưới tải / kernel single-invocation
+  lớn — KHÔNG phải lỗi codegen. → Bài học: test WebGPU phải dùng Chrome (Puppeteer), đừng tin `webgpu` npm.
+- **Tối ưu kèm theo (ko bắt buộc nhưng giữ): buffer-slot reuse cho private array** (`backend/webgpu/codegen.js`).
+  Trước: mỗi intermediate là 1 `var<private> array` riêng (deep graph → 30-40 array → ép giới hạn private/
+  register + làm Dawn-node crash). Giờ: liveness-based slot allocation — buffer ko chồng live-range share 1 slot
+  (`_assignLocalSlots` + `_computeBufferLiveness` loop-backedge-safe + `MinHeap` O(n log n), ko O(n²)). ln+sm×3:
+  22 array → 7 slot; lnsm3 từ crash→pass cả trên Dawn-node. Verify ĐÚNG trên Chrome (200 fuzz + targeted).
+  Test: `webgpu/codegen.test.js` (+"reuses one slot for non-overlapping locals"=2 slot, +"keeps distinct slots
+  for simultaneously-live"=3 slot). Revert reuse → tên buffer gốc, slot test RED.
+- HẠ TẦNG test mới: `tests/backend/webgpu/webgpu-chrome.test.js` (esbuild bundle browser → http server → Puppeteer
+  headless Chrome → CPU-vs-WebGPU in-page; self-skip nếu thiếu Chrome/puppeteer-core). CHỈ test XÁC ĐỊNH:
+  unused-binding (pin bug binding) + 2 e2e deep kernel (ln/sm chain + mm chain) verify slot-reuse đúng trên GPU
+  thật. KHÔNG có vòng fuzz random (fuzz chỉ để săn bug, throwaway). `npm run test:webgpu`. Excluded khỏi
+  `npm test`. devDep: `puppeteer-core` + Chrome hệ thống.
+
+### Bug đã fix đợt 32 (2026-06-12) — WebGPU dtype marshalling (probe Chrome ra)
+> Probe rộng op/dtype trên Chrome: f32 ổn, NHƯNG mọi dtype ≠ f32 ra rác. Root = runtime marshal hardcode
+> `Float32Array`.
+- **BUG: WebGPU runtime marshal MỌI buffer bằng Float32Array** (`webgpu_runtime.js`) → i32/i16/i8/ui8/bool/
+  f16/bf16/i64/f64 sai bit + buffer size sai (narrow-int cấp numel×1 byte thay vì ×4). Kéo theo MỌI op dùng
+  index tensor i32 (index_select/gather/scatter/embedding/one_hot, argmax/topk/argsort trả index) sai vì index
+  bị đọc như f32. Xác nhận node+Chrome: `sum(i32)` → `[-1,-28]` (đúng `[6,15]`); `index_select` lấy nhầm hàng.
+  - Fix: marshal theo WGSL element type. Codegen gắn `dtype` vào mỗi binding (+ packed entry); guard packing chỉ
+    khi MỌI buffer cùng wgslType. Runtime `wgslViewCtor` (i32→Int32, u32→Uint32, f16→Uint16, else Float32) +
+    `packTensorInto`/`unpackTensorFrom` (bf16 decode/encode qua half.js, i64 BigInt↔i32 truncate, còn lại
+    .set numeric-convert/wrap), size theo `wgslBytes` + `align4` (f16 2-byte). Bật device feature `shader-f16`.
+  - Test: `webgpu-chrome.test.js` (i32 reduce/elementwise, i16/i8/ui8 wrap, bool where, index_select/gather i32,
+    f16/bf16 bit-exact, i64, f64). Revert (Float32Array-only) → 5 RED; apply → 10/10. Full suite **3998/3998**.
+  - GIỚI HẠN: i64 dùng WGSL i32 (no native 64-bit) → đúng <2^31, lớn hơn truncate; f16 cần adapter có
+    `shader-f16` (đa số desktop có). bf16/f64 compute ở f32 (như CPU path).
+
+### Đợt 33 (2026-06-12) — test compiler OPTIONS trên WebGPU (Chrome) — FIX scheduling GPU-reduction race
+> Bật từng option compiler, differential WebGPU-vs-CPU-default (oracle) trên Chrome, 8 prog (elem/reduce/softmax/
+> matmul/layernorm/conv2d...). Ma trận 10 config × 8 prog.
+- SẠCH (WebGPU đúng): default, `fusion.strategy=dominator`, `fusion.epilogue`, `optimization.rematerialization`,
+  `optimization.layout`, `optimization.fastMath`, `memory.inplaceReuse=false`. → 7 config OK.
+- **BUG: `scheduling.enabled` (+`autotune`) sinh kernel SAI trên GPU** (off-by-default nên compile() thường ko dính):
+  - `scheduling:{enabled:true}` → conv2d sai. `+autotune` → reduce ra **0**, softmax/layernorm/conv2d sai.
+  - **Root**: scheduler FUSE trục REDUCTION (serial) vào chiều THREAD song song. Vd `sum(relu(x),1)` [16,16]:
+    `workgroup_size(256)`, `sav0=lid.x/16` (output row), `rv0=lid.x%16` (reduce col), rồi
+    `buf_3[sav0] = buf_3[sav0] + buf_10[...]` → **16 thread đua nhau read-modify-write cùng buf_3[sav0]** = data
+    race (cần atomic hoặc tree/shared-mem reduction). ĐÚNG trên CPU/WASM (1 core, vòng lặp tuần tự), SAI trên GPU
+    (256 thread). Autotune chọn config fuse reduce-into-thread → kích race ở nhiều op.
+  - **ĐÃ FIX (GPU-safe reduction)**: trục reduce giữ là vòng lặp TUẦN TỰ trong mỗi thread; chỉ trục spatial (output)
+    bind vào thread. Sau fix kernel reduce: `if (lid.x < 16) { var acc = buf_3[sa0]; for r0 in 0..16 { acc +=
+    buf_10[sa0*16+r0]; } buf_3[sa0] = acc; }` — KO race.
+    - Fix 1 (`schedule/rules.js`): thay heuristic vị trí (`estimateSpatialDims=loopCount-1`, sai cho multi-axis
+      reduce như conv) bằng **classifier cấu trúc** `computeReductionLoopVars`: loop là reduction iff iterVar của nó
+      KO xuất hiện trong index của buffer WRITE (chỉ index read → bị contract). Xử lý đúng conv (3 trục reduce) +
+      keepdim. `isReductionLoop` dùng set này. Export `classifyBlock`/`isReductionLoop`.
+    - Fix 2 (`autotune/search_space.js`): thêm `createReductionGPUSketch` (chỉ parallel spatial, reduce tuần tự),
+      và `getSketchesForBlock` chọn nó cho GPU+reduction (trước rơi về elementwise-sketch fuse-tất-cả). Dùng
+      `classifyBlock` (robust) thay `classifyBlockForSketch` (cũ chỉ xem initBody → reduce_acc ko có initBody → miss).
+    - Test: `webgpu-chrome.test.js` (scheduled reduce/conv2d/softmax/layernorm vs CPU, `scheduling` + `autotune`),
+      `autotuner.test.js` (sketch selection: CPU→reduction_cpu, GPU→reduction_gpu). Revert classifier → 3 RED;
+      apply → 13/13 Chrome + autotuner 11/11. Ma trận option full lại trên Chrome: **40/40 OK** (default/scheduling/
+      autotune/ALL × reduce/conv/softmax/layernorm/matmul...). Full suite **3999/3999**.
+  - GHI CHÚ: `compile()` mặc định vẫn scheduling=OFF (single-invocation), giờ scheduling=ON cũng đúng trên WebGPU.
+
+### Đợt 34 (2026-06-12) — fuzz kỹ MỌI option trên Chrome (chain × 9 config × 50 seed)
+> Differential: gpu(config) vs cpu(SAME config) = bug WebGPU; cpu(config) vs cpu(default) = bug pass (ko phải WebGPU).
+- **FIX BUG WebGPU: matmul có elementwise-prefix dưới scheduling/autotune sai** (vd `matmul(tanh(x),y)`): intermediate
+  tanh là `var<private>` per-thread; thread k chỉ ghi `_lt0[k]` nhưng matmul đọc CẢ HÀNG `_lt0[i*3+c]` (cross-thread)
+  → đọc rác thread khác. Phải để workgroup memory + barrier.
+  - Root: `_analyzeSharing` (`backend/webgpu/codegen.js`) CHỈ promote+barrier khi thread-extent KHÁC nhau; matmul-tanh
+    mọi stage cùng extent → ko trigger. Fix: thêm `_findCrossThreadBuffers` — phát hiện local buffer ĐỌC trong vòng
+    lặp với loop-var trong index (range-read = cross-thread) trong khi GHI per-thread; promote chúng lên `var<workgroup>`
+    + barrier. Gate: chỉ khi có thread bindings (đường single-invocation ko cần). Precise: single Linear (đọc cùng index)
+    KO bị promote → ko thừa barrier.
+  - Test: `webgpu-exec.test.js` (sẵn: single-layer no-barrier vẫn pass). Fuzz lại Chrome: sched/autotune/ALL **CLEAN**.
+    Full suite **3999/3999**.
+- **KHÔNG phải bug WebGPU (đã xác minh, ghi để khỏi đào lại):**
+  - `fusion.strategy='dominator'`: SAI cả trên **CPU** (NaN/Inf cho chuỗi softmax/reduce). Bug pass dominator chung,
+    ko phải WebGPU (WebGPU chỉ render trung thực graph đã hỏng). → cần fix riêng DominatorFusionPass nếu muốn dùng.
+  - conv+**max_pool2d** eager ra NaN trong **browser bundle** (esbuild) nhưng ĐÚNG trên node → artifact bundling của
+    harness, ko phải WebGPU codegen (conv+maxpool default chạy đúng trên node WebGPU).
+### Đợt 37 (2026-06-12) — FIX conv+maxpool autotune (cross-workgroup shared intermediate)
+> Trước ghi "còn tồn"; đào tiếp ra root + fix.
+- **Root**: kernel fused multi-stage có intermediate cross-thread (đợt 34) được promote lên `var<workgroup>` + barrier.
+  NHƯNG khi data > maxThreadsPerBlock (vd conv output 300 > 256), scheduler split stage ra NHIỀU workgroup
+  (`blockIdx.x`/`_wid.x`, dispatch>1). `var<workgroup>` + `workgroupBarrier` chỉ phạm vi 1 workgroup → workgroup 1
+  KO thấy data workgroup 0 ghi → maxpool đọc rác/0. (Cũng dính Linear(4,64)→ReLU→Linear(64,2): exec test cũ chỉ check
+  CẤU TRÚC nên lọt, thực ra GPU ra SAI — xác minh revert maxErr 0.19.)
+- **Fix** (`backend/webgpu/codegen.js`): khi có cross-thread-shared intermediate VÀ dispatch>1 (đa-workgroup, ko biểu
+  diễn được bằng workgroup mem) → `_serializeThreads`: emit MỌI thread-binding loop thành vòng lặp TUẦN TỰ
+  (workgroup_size 1, single invocation, `_gid`, ko barrier). Đúng tuyệt đối (1 thread tuần tự); mất parallel cho case
+  này nhưng ĐÚNG. Case fit-1-workgroup (matmul-tanh nhỏ) vẫn parallel như cũ.
+  - Phụ: `_findCrossThreadBuffers` follow LET/iterVar ALIAS của loop-var (maxpool index qua `let pv4=pkh` chứ ko dùng
+    pkh trực tiếp → trước miss). Thêm LIRBindings/BlockNode-iterVar/LetStmt alias-tracking.
+- **Test**: `webgpu-gpu.test.js` (node subprocess, maxpool chạy đúng ở node) "conv2d+relu+maxpool autotune == CPU";
+  `webgpu-chrome.test.js` "wide bottleneck matmul serialized == CPU" (Chrome); `webgpu-exec.test.js` "wide bottleneck
+  serializes to one invocation" (structural). Revert serialize → exec RED + maxErr 0.19. Verify node WebGPU 5 autotune
+  seed + evolutionary + non-zero output: maxErr ~1e-7. Full suite **4013/4013** + chrome 15/15.
+- GHI CHÚ còn lại: browser-bundle hỏng maxpool eager (artifact esbuild, node đúng) — chưa truy, ko ảnh hưởng codegen;
+  conv dynamic-batch N (P2.3 gap). dominator fusion (bug pass chung, ko phải WebGPU).
 
 ## Ghi chú vận hành
 - Coding rules: ko comment, ko hardcode, ko O(n²); fix xong viết test, đặt vào file test có sẵn, ko có mới tạo mới.

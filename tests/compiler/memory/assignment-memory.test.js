@@ -79,6 +79,36 @@ describe('MemoryPool', () => {
     pool.release(fakeBlock);
     expect(pool.blocks.length).toBe(0);
   });
+
+  function buildGappedPool(strategy) {
+    const pool = new MemoryPool('global', 64, strategy);
+    const buf = () => new Buffer('x', [1], 'f32', 'global');
+    pool.allocate(64, buf());
+    const big = pool.allocate(192, buf());
+    pool.allocate(64, buf());
+    const mid = pool.allocate(128, buf());
+    pool.allocate(64, buf());
+    pool.release(big);
+    pool.release(mid);
+    return pool;
+  }
+
+  it('best-fit picks the tightest gap, first-fit the lowest', () => {
+    const firstFit = buildGappedPool('first-fit');
+    const bestFit = buildGappedPool('best-fit');
+
+    const fa = firstFit.allocate(128, new Buffer('f', [1], 'f32', 'global'));
+    const ba = bestFit.allocate(128, new Buffer('b', [1], 'f32', 'global'));
+
+    expect(fa.offset).toBe(64);
+    expect(ba.offset).toBe(320);
+  });
+
+  it('fragmentation reports the fraction of peak not occupied by live blocks', () => {
+    const pool = buildGappedPool('best-fit');
+    expect(pool.fragmentation()).toBeGreaterThan(0);
+    expect(pool.fragmentation()).toBeLessThanOrEqual(1);
+  });
 });
 
 describe('BufferAssignment', () => {

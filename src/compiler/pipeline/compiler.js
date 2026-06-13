@@ -1,5 +1,5 @@
 import { GraphModule } from '../ir/graph/module.js';
-import { PassManager } from '../passes/pass_manager.js';
+import { PassManager, FixedPointGroup } from '../passes/pass_manager.js';
 import { CanonicalizePass } from '../passes/canonicalize/canonicalize.js';
 import { AlgebraicSimplificationPass } from '../passes/simplify/algebraic.js';
 import { ConstantFoldPass } from '../passes/simplify/constant_fold.js';
@@ -77,6 +77,7 @@ export class CompilerConfig {
       rematerialization: o.rematerialization ?? opts.enableRematerialization ?? false,
       rematConfig:       o.rematConfig       ?? opts.rematerializationConfig ?? {},
       fastMath:          o.fastMath          ?? opts.fastMath ?? false,
+      maxSimplifyIterations: o.maxSimplifyIterations ?? opts.maxSimplifyIterations ?? 8,
     };
 
     const m = opts.memory || {};
@@ -223,11 +224,13 @@ export class Compiler {
     const pm = new PassManager();
 
     pm.addPass(new DecompositionPass());
-    pm.addPass(new CanonicalizePass());
-    pm.addPass(new AlgebraicSimplificationPass({ fastMath: this.config.optimization.fastMath }));
-    pm.addPass(new ConstantFoldPass());
-    pm.addPass(new CSEPass());
-    pm.addPass(new DCEPass());
+    pm.addPass(new FixedPointGroup('canonicalize', [
+      new CanonicalizePass(),
+      new AlgebraicSimplificationPass({ fastMath: this.config.optimization.fastMath }),
+      new ConstantFoldPass(),
+      new CSEPass(),
+      new DCEPass(),
+    ], this.config.optimization.maxSimplifyIterations));
 
     if (this.config.optimization.layout && this.config.target) {
       pm.addPass(new LayoutTransformPass({ target: this.config.target }));

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { Operation } from '../../../../src/compiler/ir/graph/operation.js';
 import { Block, Region } from '../../../../src/compiler/ir/graph/block.js';
 import { TensorType, ScalarType } from '../../../../src/compiler/ir/graph/types.js';
+import { buildFunction } from '../../../../src/compiler/ir/graph/builder.js';
 
 function f32(shape) {
   return new TensorType(shape, ScalarType.F32);
@@ -62,5 +63,22 @@ describe('Operation.clone region value remap', () => {
     outer.clone();
 
     expect(inner.getOperand(0)).toBe(block.arguments[0]);
+  });
+});
+
+describe('IRBuilder result-type inference errors carry operand context', () => {
+  const f32 = (shape) => new TensorType(shape, ScalarType.F32);
+
+  it('reports op name, reason, and operand shape:dtype on inference failure', () => {
+    let err = null;
+    try {
+      buildFunction('t', [f32([3]), f32([4])], [f32([3])],
+        (b, a) => { b.returnOp([b.add(a[0], a[1]).getResult(0)]); });
+    } catch (e) { err = e; }
+
+    expect(err).not.toBeNull();
+    expect(err.message).toContain("op 'add'");
+    expect(err.message).toContain('[3]:f32');
+    expect(err.message).toContain('[4]:f32');
   });
 });

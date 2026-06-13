@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { PassManager } from '../../../src/compiler/passes/pass_manager.js';
+import { PassManager, FixedPointGroup } from '../../../src/compiler/passes/pass_manager.js';
 import { FunctionPass, ModulePass, PassResult } from '../../../src/compiler/passes/pass.js';
 
 class FakeFunc {
@@ -160,5 +160,48 @@ describe('PassManager verify hook attributes invalid IR to the producing pass', 
 
     expect(out.errors[0].passName).toBe('mp');
     expect(out.errors[0].message).toContain('module-level break');
+  });
+});
+
+describe('FixedPointGroup iterates passes to convergence', () => {
+  it('re-runs a group until no pass reports CHANGED', () => {
+    const mod = new FakeModule([new FakeFunc('a')]);
+    const pm = new PassManager();
+    pm.analysisManager.invalidate = () => {};
+
+    let n = 0;
+    const settling = new ScriptedFunctionPass('settle', () => (n++ < 2 ? PassResult.CHANGED : PassResult.UNCHANGED));
+    pm.addPass(new FixedPointGroup('canon', [settling], 8));
+    const out = pm.run(mod);
+
+    expect(settling.seen.length).toBe(3);
+    expect(out.changed).toBe(true);
+  });
+
+  it('stops at maxIterations when a pass never settles', () => {
+    const mod = new FakeModule([new FakeFunc('a')]);
+    const pm = new PassManager();
+    pm.analysisManager.invalidate = () => {};
+
+    const churner = new ScriptedFunctionPass('churn', () => PassResult.CHANGED);
+    pm.addPass(new FixedPointGroup('canon', [churner], 3));
+    pm.run(mod);
+
+    expect(churner.seen.length).toBe(3);
+  });
+
+  it('converges regardless of having a one-shot change among stable passes', () => {
+    const mod = new FakeModule([new FakeFunc('a')]);
+    const pm = new PassManager();
+    pm.analysisManager.invalidate = () => {};
+
+    let once = false;
+    const a = new ScriptedFunctionPass('a', () => (once ? PassResult.UNCHANGED : (once = true, PassResult.CHANGED)));
+    const b = new ScriptedFunctionPass('b', () => PassResult.UNCHANGED);
+    pm.addPass(new FixedPointGroup('canon', [a, b], 8));
+    pm.run(mod);
+
+    expect(a.seen.length).toBe(2);
+    expect(b.seen.length).toBe(2);
   });
 });

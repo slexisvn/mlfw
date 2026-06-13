@@ -687,6 +687,9 @@ describe('dynamic shapes: compile once, run on multiple concrete shapes', () => 
     ['two dynamic dims (relu)', (x) => relu(x), [S(0, 1)], [[[3, 4]], [[5, 7]]]],
     ['two dynamic dims (add)', (x, y) => add(x, y), [S(0, 1), S(0, 1)], [[[3, 4], [3, 4]], [[5, 7], [5, 7]]]],
     ['transpose with dynamic dim', (x) => add(x.transpose(0, 1), x.transpose(0, 1)), [S(0)], [[[3, 4]], [[5, 4]]]],
+    ['matmul chain dynamic M', (x, y, z) => matmul(matmul(x, y), z), [S(0), null, null], [[[3, 4], [4, 5], [5, 2]], [[6, 4], [4, 5], [5, 2]]]],
+    ['attention-like: softmax then matmul, dynamic rows', (x, y) => matmul(softmax(x, 1), y), [S(0), null], [[[3, 4], [4, 2]], [[5, 4], [4, 2]]]],
+    ['layernorm with dynamic batch', (x) => layer_norm(x, [4], null, null, 1e-5), [S(0)], [[[3, 4]], [[6, 4]], [[1, 4]]]],
   ];
 
   for (const [tname, T] of [['cpu', CPUTarget], ['wasm', WasmTarget]]) {
