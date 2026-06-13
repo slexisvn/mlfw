@@ -130,6 +130,7 @@ export class Tracer {
 
   _initGraph() {
     this._func = new GraphFunction(this._name, this._inputTypes, []);
+    this._func.inputTypes = [...this._func.inputTypes];
     this._builder = new IRBuilder(this._func);
     this._module = new GraphModule(this._name);
 
@@ -232,7 +233,7 @@ export class Tracer {
     }
 
     const tt = new TensorType(tensor.shape, tensor.dtype);
-    this._func.inputTypes = Object.freeze([...this._func.inputTypes, tt]);
+    this._func.inputTypes.push(tt);
 
     const block = this._func.entryBlock;
     const irValue = block.addArgument(tt);
@@ -272,6 +273,9 @@ export class Tracer {
 
   getGraphModule() {
     this._func.outputTypes = Object.freeze(this._outputTypes);
+    if (!Object.isFrozen(this._func.inputTypes)) {
+      this._func.inputTypes = Object.freeze(this._func.inputTypes);
+    }
     this._module.addFunction(this._func);
     return this._module;
   }

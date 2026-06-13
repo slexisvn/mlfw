@@ -109,18 +109,6 @@ export class DependencyAnalysis {
     return deps;
   }
 
-  allDeps() {
-    const blocks = this._tree.allBlocks().map(s => s.node.name);
-    const result = [];
-    for (let i = 0; i < blocks.length; i++) {
-      for (let j = i + 1; j < blocks.length; j++) {
-        const deps = this.computeDeps(blocks[i], blocks[j]);
-        for (const d of deps) result.push(d);
-      }
-    }
-    return result;
-  }
-
   canReorder(blockA, blockB) {
     const srcAcc = this._blockAccesses.get(blockA);
     const dstAcc = this._blockAccesses.get(blockB);

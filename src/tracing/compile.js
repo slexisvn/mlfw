@@ -9,6 +9,7 @@ import { RuntimeTensor } from '../compiler/runtime/runtime.js';
 import { typedArrayCtor } from '../tensor/types/dtype.js';
 import { computeNumel } from '../tensor/utils/shape_utils.js';
 import { compileWithBackward } from './compile_backward.js';
+import { foldWeightParams } from './fold_params.js';
 
 let _tracingRegistered = false;
 
@@ -176,6 +177,7 @@ export function compile(model, exampleInputs, opts) {
   const compilerOpts = { target, verify: false, ...opts };
   const dynamicShapes = opts?.dynamic_shapes || null;
   const shapeBuckets = opts?.shapeBuckets || null;
+  const foldWeights = opts?.foldWeights ?? opts?.quantization?.foldWeights ?? false;
 
   const _cacheEntries = [];
 
@@ -200,15 +202,16 @@ export function compile(model, exampleInputs, opts) {
   }
 
   function _finalize(traced) {
-    const result = new Compiler(compilerOpts).compile(traced.graph);
+    const prepared = foldWeights ? foldWeightParams(traced, tensorToContiguous) : traced;
+    const result = new Compiler(compilerOpts).compile(prepared.graph);
     return {
       result,
-      graph: traced.graph,
-      capturedParams: traced.capturedParams,
-      numUserInputs: traced.numUserInputs,
-      outputTypes: traced.outputTypes,
-      shapeEnv: traced.shapeEnv,
-      outputSymShapes: traced.outputSymShapes,
+      graph: prepared.graph,
+      capturedParams: prepared.capturedParams,
+      numUserInputs: prepared.numUserInputs,
+      outputTypes: prepared.outputTypes,
+      shapeEnv: prepared.shapeEnv,
+      outputSymShapes: prepared.outputSymShapes,
     };
   }
 

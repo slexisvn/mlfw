@@ -7,6 +7,7 @@ import { ScheduleTrace } from './trace.js';
 import { ScheduleValidator } from './validator.js';
 import { ScheduleState } from './schedule_state.js';
 import { SRefTree } from './sref.js';
+import { loopCarriesReduction } from './legality.js';
 
 function substituteVar(node, oldName, exprFactory) {
   if (!node || typeof node !== 'object') return node;
@@ -391,6 +392,10 @@ export class Schedule {
     if (loop.type !== 'ForNode') throw new Error('vectorize expects ForNode');
     const extent = getConstExtent(loop.extent);
     if (extent === null) throw new Error('Cannot vectorize loop with non-constant extent');
+    const reductionBlock = loopCarriesReduction(loop);
+    if (reductionBlock !== null) {
+      throw new Error(`Cannot vectorize reduction loop '${loop.loopVar.name}' (loop-carried dependency in block '${reductionBlock}')`);
+    }
     loop.kind = ForKind.VECTORIZED;
     if (!this._replaying) {
       this.trace.record('vectorize', [loop.loopVar.name]);
@@ -407,6 +412,10 @@ export class Schedule {
 
   parallelize(loop) {
     if (loop.type !== 'ForNode') throw new Error('parallelize expects ForNode');
+    const reductionBlock = loopCarriesReduction(loop);
+    if (reductionBlock !== null) {
+      throw new Error(`Cannot parallelize reduction loop '${loop.loopVar.name}' (loop-carried dependency in block '${reductionBlock}')`);
+    }
     loop.kind = ForKind.PARALLEL;
     if (!this._replaying) {
       this.trace.record('parallelize', [loop.loopVar.name]);

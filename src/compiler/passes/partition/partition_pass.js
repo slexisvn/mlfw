@@ -47,6 +47,8 @@ export class GraphPartitionPass extends FunctionPass {
 
   _insertTransferOps(func) {
     const block = func.entryBlock;
+    const order = this._buildOrderIndex(block);
+    const { useMap, firstInPart } = this._buildInsertionIndex(block);
 
     for (const edge of this.partitionResult.transferEdges) {
       const value = edge.value;
@@ -64,8 +66,8 @@ export class GraphPartitionPass extends FunctionPass {
       copyOp.setAttr('partition_id', edge.dst.id);
       copyOp.setAttr('partition_target', dstDevice);
 
-      const order = this._buildOrderIndex(block);
-      const firstUse = this._findInsertionPoint(block, edge.dst, value);
+      const partUses = useMap.get(edge.dst);
+      const firstUse = (partUses && partUses.get(value)) || firstInPart.get(edge.dst) || null;
       const defOp = value.definingOp;
 
       if (firstUse && defOp && order.has(defOp) && order.has(firstUse) &&
@@ -95,17 +97,24 @@ export class GraphPartitionPass extends FunctionPass {
     }
   }
 
-  _findInsertionPoint(block, dstPartition, value) {
+  _buildInsertionIndex(block) {
+    const dstParts = [...new Set(this.partitionResult.transferEdges.map(e => e.dst))];
+    const useMap = new Map();
+    const firstInPart = new Map();
+    for (const p of dstParts) useMap.set(p, new Map());
+
     for (const op of block.ops()) {
-      if (!dstPartition.hasOp(op)) continue;
-      for (let i = 0; i < op.numOperands; i++) {
-        if (op.getOperand(i) === value) return op;
+      for (const p of dstParts) {
+        if (!p.hasOp(op)) continue;
+        if (!firstInPart.has(p)) firstInPart.set(p, op);
+        const uses = useMap.get(p);
+        for (let i = 0; i < op.numOperands; i++) {
+          const v = op.getOperand(i);
+          if (!uses.has(v)) uses.set(v, op);
+        }
       }
     }
-    for (const op of block.ops()) {
-      if (dstPartition.hasOp(op)) return op;
-    }
-    return null;
+    return { useMap, firstInPart };
   }
 
   _buildOrderIndex(block) {

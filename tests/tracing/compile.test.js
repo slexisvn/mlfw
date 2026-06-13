@@ -2,8 +2,11 @@ import { describe, it, expect } from 'vitest';
 import {
   tensor, Linear, Sequential, ReLU, add, relu, sum,
 } from '../../src/index.js';
-import { compile } from '../../src/tracing/compile.js';
+import { compile, _traceCore } from '../../src/tracing/compile.js';
+import { foldWeightParams } from '../../src/tracing/fold_params.js';
+import { tensorToContiguous } from '../../src/dispatcher/jit_dispatch.js';
 import { WasmTarget, CPUTarget } from '../../src/backend/target.js';
+import { QuantizationScheme } from '../../src/compiler/ir/graph/quantization_types.js';
 import { Tensor } from '../../src/tensor/core/tensor.js';
 
 describe('compile returns executable tensors', () => {
@@ -189,5 +192,95 @@ describe('shapeBuckets: static specialization with dynamic fallback', () => {
         expect(Math.abs(eager[i] - out[i]), `N=${N} idx ${i}`).toBeLessThan(1e-4);
       }
     }
+  });
+});
+
+describe('foldWeightParams folds captured weight params into constants', () => {
+  it('folds rank-2 float weight params, prunes them from capturedParams and entry args', () => {
+    const lin = new Linear(4, 3, false);
+    const model = new Sequential(lin);
+    const x = tensor([[0.5, -0.3, 0.8, 0.1]]);
+
+    const traced = _traceCore((...a) => model.forward(...a), [x], { name: 'fold' });
+    expect(traced.capturedParams.length).toBe(1);
+    const func = traced.graph.functions().next().value;
+    const argsBefore = func.entryBlock.arguments.length;
+
+    const folded = foldWeightParams(traced, tensorToContiguous);
+    expect(folded.capturedParams.length).toBe(0);
+    const func2 = folded.graph.functions().next().value;
+    expect(func2.entryBlock.arguments.length).toBe(argsBefore - 1);
+    expect(func2.inputTypes.length).toBe(func2.entryBlock.arguments.length);
+  });
+
+  it('compiling with foldWeights produces identical output to the baseline', async () => {
+    const model = new Sequential(new Linear(4, 5, false), new ReLU(), new Linear(5, 3, false));
+    const x = tensor([[0.5, -0.3, 0.8, 0.1], [0.2, 0.9, -0.4, 0.6]]);
+
+    const baseline = compile(model, [x]);
+    const folded = compile(model, [x], { foldWeights: true });
+    const ob = await baseline(x);
+    const of = await folded(x);
+
+    expect(of.shape).toEqual(ob.shape);
+    for (let i = 0; i < ob.data.length; i++) {
+      expect(of.data[i]).toBeCloseTo(ob.data[i], 5);
+    }
+    expect(folded.source()).not.toBe(baseline.source());
+  });
+});
+
+describe('per-channel int8 quantization preserves top-1 on a real traced classifier', () => {
+  it('quantized top-1 matches float top-1 and the ground-truth labels', async () => {
+    const D = 6, C = 4, NTEST = 40;
+    const proto = [];
+    for (let c = 0; c < C; c++) {
+      const p = [];
+      for (let d = 0; d < D; d++) p.push((d === c % D ? 1 : 0.15) * Math.cos(c * 1.7 + d * 0.9) * (c + 1));
+      proto.push(p);
+    }
+    const lin = new Linear(D, C, false);
+    const model = new Sequential(lin);
+    for (let c = 0; c < C; c++) for (let d = 0; d < D; d++) lin.weight.data[c * D + d] = proto[c][d];
+
+    let seed = 12345;
+    const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 0x100000000; };
+    const xs = [], labels = [];
+    for (let i = 0; i < NTEST; i++) {
+      const c = i % C;
+      const row = [];
+      for (let d = 0; d < D; d++) row.push(proto[c][d] + (rnd() - 0.5) * 0.25);
+      xs.push(row);
+      labels.push(c);
+    }
+    const X = tensor(xs);
+
+    const floatModel = compile(model, [X]);
+    const quantModel = compile(model, [X], {
+      foldWeights: true,
+      quantization: { enabled: true, scheme: QuantizationScheme.PER_CHANNEL, quantizableOps: new Set(['dot']) },
+    });
+    const fo = await floatModel(X);
+    const qo = await quantModel(X);
+
+    const top1 = (data) => {
+      const r = [];
+      for (let i = 0; i < NTEST; i++) {
+        let bi = 0, bv = -Infinity;
+        for (let c = 0; c < C; c++) { const v = data[i * C + c]; if (v > bv) { bv = v; bi = c; } }
+        r.push(bi);
+      }
+      return r;
+    };
+    const fp = top1(fo.data), qp = top1(qo.data);
+    let fAcc = 0, qAcc = 0, agree = 0;
+    for (let i = 0; i < NTEST; i++) {
+      if (fp[i] === labels[i]) fAcc++;
+      if (qp[i] === labels[i]) qAcc++;
+      if (fp[i] === qp[i]) agree++;
+    }
+    expect(fAcc).toBe(NTEST);
+    expect(qAcc).toBe(NTEST);
+    expect(agree).toBe(NTEST);
   });
 });

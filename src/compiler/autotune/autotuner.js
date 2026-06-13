@@ -6,6 +6,7 @@ import { getSketchesForBlock } from './search_space.js';
 import { RandomSearch, EvolutionarySearch } from './search.js';
 import { TuningRecord, TuningDatabase } from './tuning_db.js';
 import { BenchmarkRunner } from './benchmark.js';
+import { Deadline } from './budget.js';
 import { buildBlockMap, computeWorkloadKey } from './workload_key.js';
 import { PrimFunc, ForNode, SeqNode, BlockNode } from '../ir/tensor/nodes.js';
 
@@ -17,10 +18,13 @@ export class AutotuneConfig {
     this.numGenerations = opts.numGenerations || 10;
     this.seed = opts.seed || 42;
     this.timeBudgetMs = opts.timeBudgetMs || 30000;
+    this.clock = opts.clock || null;
+    this.tuningDB = opts.tuningDB || null;
     this.useTuningDB = opts.useTuningDB !== false;
     this.enableBenchmark = opts.enableBenchmark ?? false;
     this.benchmarkWarmup = opts.benchmarkWarmup ?? 3;
     this.benchmarkRepeat = opts.benchmarkRepeat ?? 10;
+    this.benchmarkMaxCv = opts.benchmarkMaxCv ?? 0;
     this.topKForBenchmark = opts.topKForBenchmark ?? 5;
   }
 }
@@ -194,9 +198,13 @@ export class Autotuner {
     this.config = config instanceof AutotuneConfig ? config : new AutotuneConfig(config);
     this.costModel = new AnalyticalCostModel(target);
     this.learnedModel = new LearnedCostModel();
-    this.db = new TuningDatabase();
+    this.db = this.config.tuningDB instanceof TuningDatabase ? this.config.tuningDB : new TuningDatabase();
     this.benchmarkRunner = this.config.enableBenchmark
-      ? new BenchmarkRunner(target, { warmup: this.config.benchmarkWarmup, repeat: this.config.benchmarkRepeat })
+      ? new BenchmarkRunner(target, {
+          warmup: this.config.benchmarkWarmup,
+          repeat: this.config.benchmarkRepeat,
+          maxCv: this.config.benchmarkMaxCv
+        })
       : null;
   }
 
@@ -205,6 +213,7 @@ export class Autotuner {
     const blockMap = buildBlockMap(primFunc.body);
     const results = new Map();
     const keyToResult = new Map();
+    const deadline = new Deadline(this.config.timeBudgetMs, this.config.clock);
 
     for (const name of blockNames) {
       const key = computeWorkloadKey(primFunc, name, this.target, blockMap);
@@ -212,7 +221,7 @@ export class Autotuner {
         results.set(name, keyToResult.get(key));
         continue;
       }
-      const result = this._tuneBlock(primFunc, name, blockMap);
+      const result = this._tuneBlock(primFunc, name, blockMap, deadline);
       if (result) {
         results.set(name, result);
         keyToResult.set(key, result);
@@ -242,7 +251,7 @@ export class Autotuner {
     return { func: primFunc, results: tuneResults, applied: false };
   }
 
-  _tuneBlock(primFunc, blockName, blockMap) {
+  _tuneBlock(primFunc, blockName, blockMap, deadline = null) {
     const workloadKey = computeWorkloadKey(primFunc, blockName, this.target, blockMap);
 
     if (this.config.useTuningDB && this.db.has(workloadKey)) {
@@ -266,13 +275,15 @@ export class Autotuner {
       const search = new EvolutionarySearch({
         populationSize: this.config.populationSize,
         numGenerations: this.config.numGenerations,
-        seed: this.config.seed
+        seed: this.config.seed,
+        deadline
       });
       candidates = search.search(sketches, evaluator);
     } else {
       const search = new RandomSearch({
         numTrials: this.config.numTrials,
-        seed: this.config.seed
+        seed: this.config.seed,
+        deadline
       });
       candidates = search.search(sketches, evaluator);
     }
@@ -282,7 +293,7 @@ export class Autotuner {
     let best = candidates[0];
 
     if (this.benchmarkRunner && candidates.length > 0) {
-      const measured = this._refineByCostModel(primFunc, blockName, candidates, blockMap);
+      const measured = this._refineByCostModel(primFunc, blockName, candidates, blockMap, deadline);
       if (measured.length > 0) {
         best = measured[0];
       }
@@ -326,9 +337,9 @@ export class Autotuner {
       const blockMap = buildBlockMap(primFunc.body);
       const applied = new Set();
       for (const [blockName, result] of tuneResults) {
-        if (result.fromCache) continue;
         if (applied.has(result)) continue;
         applied.add(result);
+        if (!result.sketchName || !result.params) continue;
         const sketches = getSketchesForBlock(primFunc, blockName, this.target, blockMap);
         const sketch = sketches.find(s => s.name === result.sketchName);
         if (sketch) {
@@ -342,7 +353,7 @@ export class Autotuner {
     }
   }
 
-  _refineByCostModel(primFunc, blockName, candidates, blockMap) {
+  _refineByCostModel(primFunc, blockName, candidates, blockMap, deadline = null) {
     const topK = candidates.slice(0, this.config.topKForBenchmark);
     const sketches = getSketchesForBlock(primFunc, blockName, this.target, blockMap);
     const sketchByName = new Map();
@@ -351,6 +362,7 @@ export class Autotuner {
     const measured = [];
 
     for (const candidate of topK) {
+      if (deadline && deadline.expired) break;
       try {
         const sketch = sketchByName.get(candidate.sketchName);
         if (!sketch) continue;

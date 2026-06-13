@@ -28,6 +28,18 @@ export class Block {
     return arg;
   }
 
+  removeArguments(indices) {
+    const drop = indices instanceof Set ? indices : new Set(indices);
+    if (drop.size === 0) return this;
+    const kept = [];
+    for (let i = 0; i < this.arguments.length; i++) {
+      if (!drop.has(i)) kept.push(this.arguments[i]);
+    }
+    this.arguments = kept;
+    for (let i = 0; i < kept.length; i++) kept[i].argIndex = i;
+    return this;
+  }
+
   pushOp(op) {
     op.parentBlock = this;
     op._prev = this._tail;

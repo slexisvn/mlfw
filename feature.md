@@ -73,17 +73,24 @@
 - **Done when:** WebGPU vào differential gate như cpu/wasm.
 - **Refs:** `src/backend/wasm/...`, `src/compiler/runtime/webgpu_runtime.js`, `tests/stress`, `tests/webgpu`.
 
-### P1.2 — Autotune đo thật (measurement-based), không chỉ cost-model
+### P1.2 — Autotune đo thật (measurement-based), không chỉ cost-model  ✅ (đợt 43)
 - **Why:** Hiện cost-model analytical mặc định, đo thật chỉ refine top-K. AutoTVM/Ansor đo mọi candidate vì
   cost-model analytical lệch thực tế. Production cần số đo thật + cache bền.
 - **What:**
-  - [ ] Bật benchmark-loop ổn định (warmup/repeat/median) cho top-K rộng hơn; chống nhiễu (lock affinity nếu được).
-  - [ ] `LearnedCostModel`: nâng từ linear regression → mô hình mạnh hơn (gradient-boosted / small MLP) HOẶC ghi rõ
-    giới hạn.
-  - [ ] `TuningDatabase` persist ra đĩa + versioning theo target/compiler-version; invalidate khi đổi codegen.
-  - [ ] Time-budget thực thi (`timeBudgetMs` hiện không enforce).
-- **Done when:** Tuned kernel ≥ baseline trên benchmark thật, tái lập qua phiên, tôn trọng time budget.
-- **Refs:** `src/compiler/autotune/{autotuner,cost_model,tuning_db,benchmark}.js`.
+  - [x] **Benchmark-loop ổn định + chống nhiễu** (đợt 43): `robustStats` (median/min/trimmed-mean 10% + coefficient
+    of variation); `BenchmarkRunner` re-measure 1 vòng khi `cv > benchmarkMaxCv` (bounded, không O(n²)); top-K rộng
+    qua `topKForBenchmark`. Giới hạn: V8/JS không set được CPU affinity → dùng trimmed-stat + re-measure thay cho pin.
+  - [x] **`LearnedCostModel` → MLP** (đợt 43): thay linear-regression bằng MLP 1 hidden-layer (tanh) + chuẩn-hoá
+    feature/target + seeded init (deterministic). Fit được tương tác phi tuyến (XOR: MSE→0; linear floor 0.25).
+  - [x] **`TuningDatabase` persist đĩa + versioning** (đợt 43): `CODEGEN_VERSION`; `serialize` nhúng version,
+    `deserialize` **invalidate** khi `codegenVersion` lệch; `saveToFile/loadFromFile` (DI `fs` — browser-safe, không
+    import `node:fs`). Inject DB qua `scheduling.tuningDB` → tái dùng cross-session. FIX kèm: `_applyBestSchedule`
+    trước **bỏ qua** kết quả `fromCache` (cache chỉ tiết kiệm search, KHÔNG re-apply schedule → run-2 rớt về baseline)
+    → giờ apply cached sketch+params → **tái lập qua phiên** (run-2 sinh source y hệt run-1).
+  - [x] **Time-budget enforce** (đợt 43): `Deadline(timeBudgetMs, clock)` chia sẻ toàn `tune()`; Random/Evolutionary
+    search + refine-loop break khi hết hạn. Clock injectable (test deterministic).
+- **Done when:** Tuned kernel ≥ baseline trên benchmark thật, tái lập qua phiên, tôn trọng time budget. ✅
+- **Refs:** `src/compiler/autotune/{autotuner,cost_model,tuning_db,benchmark,search,budget}.js`.
 
 ### P1.3 — Scale: bỏ O(n²) trên graph lớn  ✅ phần fusion (đợt 32)
 - **Why:** Đo thực tế: `FusionPass` blow-up **O(n³)** — graph 400 op fuse mất **29 GIÂY**, 3200 op mất **138 GIÂY**.
@@ -123,8 +130,16 @@
     quantize(act) + int8-weight-constant + `quantized_dot` + per-channel dequant (convert + mul broadcast scaleVec).
     Compiled accuracy harness: per-channel error **>1.5×** thấp hơn per-tensor + **cpu == wasm bit-khớp**. Test:
     `tests/compiler/quantization/pass-quantization.test.js`.
-  - [ ] (mở rộng) Quant PASS tự động phát hiện per-channel weight (weight là captured-param khi trace, cần
-    per-channel quantize codegen hoặc fold param→const) + accuracy top-1 trên model thật. Capability codegen đã đủ.
+  - [x] **(mở rộng) Quant PASS tự auto-detect per-channel weight + fold param→const + top-1 model thật** (đợt 44):
+    (1) `QuantizationPass` nay tự nhận diện weight per-channel: khi `scheme=PER_CHANNEL` và rhs của `dot` là constant
+    array → sinh `quantized_dot` (rhs int8 đã quantize per-channel) + dequant per-channel (`convert`→`broadcast_in_dim`
+    scaleVec→`mul`), thay vì âm thầm rớt về per-tensor như trước. (2) **fold param→const**: `foldWeightParams` hạ
+    captured-weight-param (block-arg khi trace) thành `constant` baked-in + prune khỏi `capturedParams`/inputTypes
+    (`Block.removeArgument`); wire qua `compile(model, x, { foldWeights:true })`. (3) **transpose constant-fold** mới
+    (`transpose(const)`→`const`) để `Linear` (`matmul(x, transpose(W))`) sau khi fold W lộ rhs constant cho pass.
+    (4) Top-1 model thật: classifier traced (`Sequential(Linear)`) quantize per-channel int8 → top-1 == float == nhãn
+    (100%/40 mẫu). Per-channel error <per-tensor **2.18×** (weight lệch + activation chặt), cpu==wasm bit-khớp.
+    +9 test. 4 revert-test load-bearing.
 - **Done when:** ✅ Per-channel params + int8 kernel thật + array-const bug fix + per-channel compiled harness
   (cpu==wasm). Auto-pass-detection cho trace-param-weight là mở rộng (capability đã chứng minh).
 - **Refs:** `src/compiler/ir/graph/quantization_types.js`, `src/compiler/passes/lowering/lowering_registry.js`
@@ -228,26 +243,57 @@
 
 ## P3 — Mở rộng / dài hạn
 
-### P3.1 — Schedule trace-authoritative (tái thiết kế)
+### P3.1 — Schedule trace-authoritative (tái thiết kế)  ✅ legality-per-primitive (đợt 48)
 - **Why:** Schedule đang mutate IR in-place + rebuild `SRefTree` như index → cả lớp bug kiểu K. TensorIR coi
   schedule-state là chân lý, validate từng primitive.
 - **What:**
-  - [ ] Chuyển sang: schedule = chuỗi decision áp lên state đã-validate; IR là sản phẩm sinh ra.
-  - [ ] Mỗi primitive kiểm tra legality với `ScheduleState`/`DependencyAnalysis` trước khi áp.
-- **Done when:** Không primitive nào tạo được IR vi phạm invariant codegen.
-- **Refs:** `src/compiler/schedule/{schedule,sref,schedule_state,trace}.js`.
+  - [ ] Chuyển sang: schedule = chuỗi decision áp lên state đã-validate; IR là sản phẩm sinh ra. (còn — tái thiết kế lớn)
+  - [x] **Mỗi primitive kiểm tra legality TRƯỚC khi áp** (đợt 48, `schedule/legality.js`): `parallelize`/`vectorize`
+    nay **reject reduction loop** (loop-carried dep: biến loop *đọc* nhưng không có trong write-index → các vòng song
+    song đua trên accumulator = bug kiểu K, vd race conv/reduction đợt 37). Check chạy TRƯỚC mutation → IR không bao
+    giờ vào trạng thái invalid; trace chỉ chứa decision đã-validate (trace-authoritative). Backstop: `ScheduleValidator`
+    cũng flag PARALLEL/VECTORIZED reduction loop (theo-dõi stack par-loop, O(n·depth), KHÔNG O(n²)). Spatial loop
+    (biến ∈ write-index) vẫn parallelize/vectorize bình thường → không false-positive (full regression xác nhận).
+- **Done when:** Không primitive nào tạo được IR vi phạm invariant codegen. ✅ cho lớp reduction-race (parallelize/
+  vectorize); các invariant khác đã có sẵn trong validator.
+- **Refs:** `src/compiler/schedule/{schedule,validator,legality,sref,schedule_state,trace}.js`.
 
-### P3.2 — Ansor-style sketch auto-generation
+### P3.2 — Ansor-style sketch auto-generation  ✅ (đợt 45)
 - **Why:** Sketch hiện hand-written (AutoTVM template). Ansor auto-generate phủ pattern rộng hơn.
+- **What (đợt 45):** `getSketchesForBlock` viết lại thành **rule-based derivation** (Ansor-style) thay vì chọn template
+  bằng `blockName.includes('matmul')` (string-match hardcode, cũ). Phân loại **cấu trúc** từ IR (`analyzeBlockStructure`:
+  spatial/reduction loop count + read-buffer count + hasReduction), rồi áp tập **derivation rules** (`CPU_SKETCH_RULES`/
+  `GPU_SKETCH_RULES`) → sinh **nhiều** sketch/block (Ansor diversity). Rule compute-intensive (reduction + spatial≥1 +
+  ≥2 read) → `mlt_cpu` (multi-level tiling MỚI: tile spatial0/spatial1/reduction + parallelize + vectorize) **+**
+  `reduction_cpu`. GPU matmul rule gated `spatial===2` (matmul thật, không áp template matmul cho conv). Reduction-only
+  → `reduction_*`; spatial-only → `elementwise_*`. Backward-compat: pure-reduction block vẫn `reduction_cpu/gpu` đầu tiên.
+  Bỏ hoàn toàn string-match. +3 test (matmul-struct→mlt; matmul-NAME-nhưng-elementwise→elementwise [chứng minh hết
+  hardcode]; mlt sinh schedule hợp lệ toàn param-space). 2 revert-test load-bearing. Không O(n²) (O(loops)+O(rules)).
 - **Refs:** `src/compiler/autotune/search_space.js`.
 
 ### P3.3 — Backend mở rộng
 - [ ] LLVM/native (qua WASM→native hoặc binding) cho server.
 - [ ] Library-op offload (BLAS/cuBLAS/oneDNN) thay vì codegen thuần cho matmul/conv lớn.
 
-### P3.4 — Training path production
-- [ ] AD đã có (VJP/joint/backward builder); cần optimizer fusion, grad checkpoint policy, mixed-precision loop.
-- **Refs:** `src/compiler/ad/`.
+### P3.4 — Training path production  ✅ (đợt 46–47)
+- AD đã có (VJP/joint/backward builder); cần optimizer fusion, grad checkpoint policy, mixed-precision loop.
+- **What (đợt 46):**
+  - [x] **Optimizer fusion** (`src/optim/fused.js`): `FusedSGD`/`FusedAdam` build bước update thành **đồ thị
+    elementwise** rồi `compileGraph` → **1 kernel fused** (SGD `w-lr·g`, Adam `m/v/w` multi-output → **1 loop, 0 temp**)
+    thay vì nhiều vòng eager. Update **in-place** (alias buffer in=out), cache kernel theo `numel` (O(số-shape)), khớp
+    eager tới ~1e-7 (SGD plain/mom/wd/nesterov; Adam/wd/amsgrad). Scalar step-varying (lr, stepSize, bc2sqrt) là input
+    rank-0; hằng cấu trúc (betas/eps/momentum/wd) baked.
+  - [x] **Grad checkpoint policy** — ĐÃ CÓ SẴN (`ad/checkpoint_policy.js`: EveryK/Sqrt/MemoryBudget/Explicit +
+    boundary; `ad/remat_policy.js`). Xác nhận.
+  - [x] **Mixed-precision loop — loss scaling** (`src/optim/grad_scaler.js`): `GradScaler` dynamic loss-scale
+    (`scale`/`unscale_`/`step`/`update`): phát hiện grad inf/nan → **skip step** + **backoff** scale; chuỗi clean ≥
+    `growthInterval` → **grow**. `enabled:false` = pass-through. Default PyTorch (initScale 2¹⁶, growth 2000).
+  - [x] **f16-autocast graph pass** (đợt 47, `src/compiler/passes/precision/mixed_precision.js`): `applyAutocast`/
+    `MixedPrecisionPass` bọc op trong allow-list (default `dot`/`conv`) thành `convert→f16 → op(f16) → convert→f32`
+    (không cần dtype-propagation; convert thừa giữa 2 allow-op kề nhau tự triệt tiêu qua simplifier). Xác nhận f16
+    codegen CPU/wasm THẬT (helper `__mlfw_f32_to_f16`/`f16_to_f32`; quanh compute matmul ra sai số **~3e-3** đúng độ lớn
+    f16; op block-list như `reduce` giữ f32 chính xác). +5 test, 1 revert-test load-bearing.
+- **Refs:** `src/compiler/ad/`, `src/optim/{fused,grad_scaler}.js`, `src/compiler/passes/precision/mixed_precision.js`.
 
 ---
 
@@ -255,7 +301,7 @@
 1. P0 xanh toàn bộ: soundness IEEE, verifier-as-truth, schedule↔codegen invariant, differential gate.
 2. ≥1 backend (cpu **và** wasm) qua differential + nightly fuzz, 0 known-wrong-result.
 3. GPU/WebGPU hoặc xanh-trong-CI hoặc gắn nhãn experimental rõ ràng.
-4. Autotune đo thật + tuning DB bền; tuned ≥ baseline.
+4. Autotune đo thật + tuning DB bền; tuned ≥ baseline.  ✅ (đợt 43)
 5. Compile-time có guard scale; API + error UX chốt; docs phủ public surface.
 
 ---
@@ -300,6 +346,47 @@
 - 2026-06-12 (đợt 42): **P2.4 xong** — interference-graph allocation (phát hiện+fix BUG allocator default: 2 buffer
   sống-cùng-lúc dùng chung offset, 335/2000 fuzz vi phạm → 0) + remat dùng `target.memoryBudgetBytes`. +6 test.
   Revert-test load-bearing. Full regression **4031/4031**.
+- 2026-06-13 (đợt 48): **P3.1 legality-per-primitive xong** — `parallelize`/`vectorize` reject reduction loop TRƯỚC
+  khi mutate (`schedule/legality.js`: `loopCarriesReduction` = biến loop đọc nhưng ∉ write-index của block đóng);
+  IR không bao giờ invalid → trace-authoritative. Backstop trong `ScheduleValidator` (stack par-loop, O(n·depth) KHÔNG
+  O(n²)). +6 test, 2 revert-test load-bearing (primitive 3 RED + validator 1 RED). Spatial loop không bị false-positive.
+  Full regression **4158/4159** (1 = ResNet vitest-timeout flake; standalone 2/2 pass). Còn phần tái-thiết-kế lớn
+  (IR-as-generated-product) — chưa.
+- 2026-06-13 (đợt 47): **P3.4 xong nốt** — f16-autocast graph pass (`applyAutocast`/`MixedPrecisionPass`): bọc
+  allow-op (`dot`/`conv`) thành `convert→f16 → op → convert→f32`. Xác minh f16 codegen CPU thật (sai số ~3e-3 quanh
+  matmul, `reduce` giữ f32). +5 test, 1 revert-test load-bearing (no-op→3 RED). Full regression **4153/4153**.
+- 2026-06-13 (đợt 46): **P3.4 phần lớn xong** — training path production. (1) **Optimizer fusion**: `FusedSGD`/
+  `FusedAdam` compile update thành đồ thị elementwise → 1 kernel fused (1 loop, 0 temp; Adam m/v/w multi-output),
+  in-place, cache theo numel, == eager ~1e-7. (2) **Grad checkpoint**: đã có sẵn (checkpoint_policy/remat_policy),
+  xác nhận. (3) **Mixed-precision loop**: `GradScaler` dynamic loss-scaling (skip-step+backoff khi inf/nan, grow sau
+  growthInterval clean). +19 test (12 fused + 7 scaler), 2 revert-test load-bearing (tắt fusion→nhiều loop RED; bỏ
+  overflow-guard→step-không-skip RED). Còn f16-autocast graph pass (hoãn — rủi ro f16 codegen). No comment/hardcode/
+  O(n²). Full regression **4148/4148**.
+- 2026-06-13 (đợt 45): **P3.2 xong** + **audit O(n²)/hardcode feature cũ**. (A) P3.2 Ansor-style sketch
+  auto-generation: `getSketchesForBlock` rule-based derivation theo CẤU TRÚC (bỏ `blockName.includes('matmul')`
+  string-match), sinh nhiều sketch/block; thêm `mlt_cpu` (multi-level tiling) + `createMultiLevelTileCPUSketch`; GPU
+  matmul gated `spatial===2` (không áp lên conv). +3 test, 2 revert-test load-bearing. (B) Audit feature cũ (đợt 32–42)
+  bằng 5 sub-agent + verify: **fix 4 vi phạm thật** — `quantization_patterns.js` hardcode `?8:8`→`scalarBytes*8`;
+  `partition_pass.js` O(N²) (order-index/find-insert rebuild mỗi edge)→precompute 1-lần O(N×devices); `tracer.js`
+  `captureConstant` O(P²) (rebuild inputTypes mỗi param)→mutable+freeze-1-lần O(P); `codegen.js` O(B²) `.some()`→Set.
+  (C) Xoá dead-code `dep_analysis.allDeps` (O(blocks²), 0 caller). Báo cáo phần intrinsic/bounded/defensible không sửa.
+  Full regression **4128/4129** (1 fail = Dawn-node flake concurrency; conv-GPU test standalone 11/11).
+- 2026-06-13 (đợt 44): **P1.4 mở rộng xong** — Quant PASS tự auto-detect per-channel weight + fold param→const +
+  top-1 model thật. (1) `QuantizationPass` per-channel cho `dot` constant-weight: int8 const + dequant per-channel
+  (convert→broadcast→mul); trước đó `scheme=PER_CHANNEL` âm thầm rớt về per-tensor-asymmetric. (2) `foldWeightParams`
+  hạ captured-weight-param→constant (+`Block.removeArgument`, prune capturedParams/inputTypes), wire qua
+  `compile(...,{foldWeights:true})`. (3) `transpose(const)`→`const` constant-fold (cho `Linear` lộ rhs constant).
+  (4) Top-1 classifier traced per-channel int8 == float == nhãn (100%); per-channel err <per-tensor 2.18×; cpu==wasm.
+  +9 test (transpose-fold×2, per-channel pass×2, foldWeightParams×2, fold-wiring×1, top-1×1, + numerics). 4 revert-test
+  load-bearing. Full regression **4125/4126** (1 fail = flake có sẵn: ResNet-stress dùng `Math.random` init không seed
+  → output đôi khi non-finite; ngoài path đụng tới).
+- 2026-06-13 (đợt 43): **P1.2 xong** — autotune đo thật + cost-model mạnh hơn + DB bền + time-budget. (1) `robustStats`
+  median/min/trimmed-mean/cv + re-measure khi nhiễu cao (bounded); (2) `LearnedCostModel` linear→**MLP** 1-hidden-tanh
+  chuẩn-hoá + seeded (XOR MSE→0 vs linear floor 0.25); (3) `TuningDatabase` versioning (`CODEGEN_VERSION` invalidate)
+  + `saveToFile/loadFromFile` (DI fs, browser-safe) + inject qua `scheduling.tuningDB`; FIX `_applyBestSchedule` bỏ
+  qua `fromCache` → giờ re-apply (tái lập cross-session: run-2 source ≡ run-1); (4) `Deadline` enforce `timeBudgetMs`
+  ở search + refine. +15 test. 4 revert-test load-bearing (budget×2, MLP, DB-version, cache-apply). No comment/
+  hardcode/O(n²). Browser-bundle OK. Full regression **4119/4119**.
 - 2026-06-12 (đợt 41): **P2.3 xong** — conv dynamic-batch đã fix (đợt 39), cập nhật feature.md. Thêm `shapeBuckets`:
   pre-compile kernel TĨNH cho shape "nóng" khai báo + dynamic fallback (entry static đặt trước, runtime ưu tiên
   khớp chính xác). Không padding/mask → đúng tuyệt đối. +1 test (bucket dùng static kernel `!/_ds/`, off-bucket

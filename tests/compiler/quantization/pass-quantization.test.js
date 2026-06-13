@@ -548,3 +548,70 @@ describe('per-channel int8 matmul (compiled) beats per-tensor on skewed weights'
     for (let i = 0; i < cpu.length; i++) expect(wasm[i]).toBeCloseTo(cpu[i], 5);
   });
 });
+
+describe('QuantizationPass auto-detects per-channel weight (constant rhs of dot)', () => {
+  const F = ScalarType.F32, I8 = ScalarType.I8;
+  const T = (s, d = F) => new TensorType(s, d);
+  const K = 6, N = 4;
+  const W = [];
+  for (let k = 0; k < K; k++) for (let n = 0; n < N; n++) W.push(Math.sin(k * 1.3 + n) * (n + 1) * (n + 1));
+
+  function buildDot() {
+    return buildFunction('mm', [T([3, K])], [T([3, N])], (b, a) => {
+      const wc = b.constant([...W], T([K, N]));
+      b.returnOp([b.matmul(a[0], wc.getResult(0)).getResult(0)]);
+    });
+  }
+
+  it('rewrites a constant-weight matmul into quantized_dot + per-channel dequant (convert→broadcast→mul)', () => {
+    const func = buildDot();
+    const fn = func.functions ? func.functions().next().value : func;
+    run(fn, { enabled: true, scheme: QuantizationScheme.PER_CHANNEL, quantizableOps: new Set(['dot']), target: CPUTarget() });
+
+    const qd = findOps(fn, 'quantized_dot');
+    expect(qd.length).toBe(1);
+    expect(qd[0].getAttr('rhs_scale')).toBe(1);
+    expect(qd[0].getResult(0).type.dtype).toBe(ScalarType.I32);
+    expect(findOps(fn, 'convert').length).toBe(1);
+    expect(findOps(fn, 'broadcast_in_dim').length).toBe(1);
+    expect(findOps(fn, 'mul').length).toBe(1);
+
+    const i8Const = findOps(fn, 'constant').find(c => c.getResult(0).type.dtype === I8);
+    expect(i8Const).toBeTruthy();
+    const scaleVec = findOps(fn, 'constant').find(c => {
+      const v = c.getAttr('value');
+      return v && v.length === N && c.getResult(0).type.dtype === F;
+    });
+    expect(scaleVec).toBeTruthy();
+    const sv = Array.from(scaleVec.getAttr('value'));
+    expect(new Set(sv).size).toBeGreaterThan(1);
+  });
+
+  it('compiled per-channel error beats per-tensor on skewed weights (tight activation), cpu==wasm', () => {
+    const M = 4;
+    const A = new Float32Array(M * K);
+    for (let i = 0; i < A.length; i++) A[i] = Math.sin(i * 0.7) * 5.5;
+    const ref = new Float32Array(M * N);
+    for (let m = 0; m < M; m++) for (let n = 0; n < N; n++) { let s = 0; for (let k = 0; k < K; k++) s += A[m * K + k] * W[k * N + n]; ref[m * N + n] = s; }
+
+    const build = () => buildFunction('q', [T([M, K])], [T([M, N])], (b, a) => {
+      const wc = b.constant([...W], T([K, N]));
+      b.returnOp([b.matmul(a[0], wc.getResult(0)).getResult(0)]);
+    });
+    const errOut = (target, scheme) => {
+      const r = compileGraph(build(), target, { quantization: { enabled: true, scheme, quantizableOps: new Set(['dot']) } });
+      const out = new Float32Array(M * N);
+      r.run('q', A, out);
+      let e = 0; for (let i = 0; i < out.length; i++) e += Math.abs(out[i] - ref[i]);
+      return { err: e / out.length, out };
+    };
+
+    const pt = errOut(CPUTarget(), QuantizationScheme.PER_TENSOR_SYMMETRIC).err;
+    const pc = errOut(CPUTarget(), QuantizationScheme.PER_CHANNEL);
+    expect(pc.err).toBeLessThan(pt);
+    expect(pt / pc.err).toBeGreaterThan(1.5);
+
+    const wasm = errOut(WasmTarget(), QuantizationScheme.PER_CHANNEL).out;
+    for (let i = 0; i < pc.out.length; i++) expect(wasm[i]).toBeCloseTo(pc.out[i], 5);
+  });
+});

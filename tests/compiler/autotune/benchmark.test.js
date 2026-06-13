@@ -1,7 +1,39 @@
 import { describe, it, expect } from 'vitest';
-import { BenchmarkRunner } from '../../../src/compiler/autotune/benchmark.js';
+import { BenchmarkRunner, BenchmarkResult, robustStats } from '../../../src/compiler/autotune/benchmark.js';
 import { Buffer } from '../../../src/compiler/ir/tensor/buffer.js';
 import { CPUTarget } from '../../../src/backend/target.js';
+
+describe('robustStats noise handling', () => {
+  it('trimmed mean ignores an outlier spike that drags the raw mean', () => {
+    const samples = [1, 1, 1, 1, 1, 1, 1, 1, 1, 100];
+    const rawMean = samples.reduce((a, b) => a + b, 0) / samples.length;
+    const s = robustStats(samples, 0.1);
+    expect(s.median).toBe(1);
+    expect(s.min).toBe(1);
+    expect(s.trimmedMean).toBeLessThan(2);
+    expect(s.trimmedMean).toBeLessThan(rawMean);
+  });
+
+  it('reports zero coefficient of variation for uniform samples and positive for noisy', () => {
+    expect(robustStats([5, 5, 5, 5, 5]).cv).toBe(0);
+    expect(robustStats([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]).cv).toBeGreaterThan(0);
+  });
+
+  it('handles empty input without throwing', () => {
+    expect(robustStats([])).toEqual({ median: 0, min: 0, trimmedMean: 0, cv: 0 });
+  });
+});
+
+describe('BenchmarkResult exposes stability metrics', () => {
+  it('carries trimmedMeanMs and cv, defaulting trimmedMeanMs to median', () => {
+    const r = new BenchmarkResult(5, 4, [4, 5, 6], 1024, 5.2, 0.1);
+    expect(r.trimmedMeanMs).toBe(5.2);
+    expect(r.cv).toBeCloseTo(0.1);
+    const r2 = new BenchmarkResult(5, 4, [], 0);
+    expect(r2.trimmedMeanMs).toBe(5);
+    expect(r2.cv).toBe(0);
+  });
+});
 
 function fakePrimFunc(sizes) {
   const bufferMap = new Map();

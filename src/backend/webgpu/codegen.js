@@ -361,12 +361,13 @@ export class WebGPUCodegen {
     this._scanBufferRefs(func.body, refBuffers);
     const allocatedNames = new Set();
     this._scanAllocateNodes(func.body, allocatedNames);
+    const candidateNames = new Set(candidates.map(c => c.name));
     for (const [name, buf] of refBuffers) {
       if (storageNames.has(name) || allocatedNames.has(name)) continue;
-      if (candidates.some(c => c.name === name)) continue;
+      if (candidateNames.has(name)) continue;
       const numel = buf.numel();
       const size = numel > 0 ? numel : this._estimateBufferSize(buf);
-      if (size > 0) candidates.push({ name, dtype: buf.dtype, size });
+      if (size > 0) { candidates.push({ name, dtype: buf.dtype, size }); candidateNames.add(name); }
     }
 
     candidates.sort((a, b) => (crossThread.has(b.name) ? 1 : 0) - (crossThread.has(a.name) ? 1 : 0));

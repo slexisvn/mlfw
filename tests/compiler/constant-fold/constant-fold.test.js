@@ -276,3 +276,30 @@ describe('transcendental fold through recursive resolution', () => {
     expect(retVal(func).definingOp.getAttr('value')).toBeCloseTo(2, 10);
   });
 });
+
+describe('transpose of a constant folds to the transposed constant', () => {
+  const F = ScalarType.F32;
+
+  it('folds transpose([[1,2,3],[4,5,6]], perm [1,0]) to [1,4,2,5,3,6]', () => {
+    const func = buildFunction('t', [], [new TensorType([3, 2], F)], (b) => {
+      const wc = b.constant([1, 2, 3, 4, 5, 6], new TensorType([2, 3], F));
+      const tr = b._buildOp('transpose', [wc.getResult(0)], [new TensorType([3, 2], F)], { permutation: [1, 0] });
+      b.returnOp([tr.getResult(0)]);
+    });
+
+    run(func);
+    const ret = retVal(func).definingOp;
+    expect(ret.opName).toBe('constant');
+    expect(Array.from(ret.getAttr('value'))).toEqual([1, 4, 2, 5, 3, 6]);
+  });
+
+  it('leaves transpose of a non-constant operand untouched', () => {
+    const func = buildFunction('t', [new TensorType([2, 3], F)], [new TensorType([3, 2], F)], (b, a) => {
+      const tr = b._buildOp('transpose', [a[0]], [new TensorType([3, 2], F)], { permutation: [1, 0] });
+      b.returnOp([tr.getResult(0)]);
+    });
+
+    run(func);
+    expect(retVal(func).definingOp.opName).toBe('transpose');
+  });
+});

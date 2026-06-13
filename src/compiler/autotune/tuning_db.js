@@ -1,5 +1,7 @@
 import { computeWorkloadKey } from './workload_key.js';
 
+export const CODEGEN_VERSION = 'mlfw-codegen-1';
+
 export class TuningRecord {
   constructor(workloadKey, sketchName, params, score, traceData, version) {
     this.workloadKey = workloadKey;
@@ -70,11 +72,14 @@ export class TuningDatabase {
         });
       }
     }
-    return { version: this.version, entries };
+    return { version: this.version, codegenVersion: CODEGEN_VERSION, entries };
   }
 
   static deserialize(data) {
     const db = new TuningDatabase(data.version);
+    if (data.codegenVersion !== undefined && data.codegenVersion !== CODEGEN_VERSION) {
+      return db;
+    }
     for (const entry of data.entries) {
       const record = new TuningRecord(
         entry.workloadKey, entry.sketchName, entry.params,
@@ -84,6 +89,16 @@ export class TuningDatabase {
       db.store(entry.workloadKey, record);
     }
     return db;
+  }
+
+  saveToFile(path, fsImpl) {
+    fsImpl.writeFile(path, JSON.stringify(this.serialize()));
+    return path;
+  }
+
+  static loadFromFile(path, fsImpl) {
+    if (!fsImpl.exists(path)) return new TuningDatabase();
+    return TuningDatabase.deserialize(JSON.parse(fsImpl.readFile(path)));
   }
 
   clear() {

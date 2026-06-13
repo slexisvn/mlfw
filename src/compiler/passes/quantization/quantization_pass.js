@@ -61,7 +61,11 @@ export class QuantizationPass extends FunctionPass {
 
       const nativeVariant = NATIVE_QUANTIZED_VARIANTS.get(op.opName);
       if (nativeVariant && allOperandsCanQuantize(op, quantizedValues, cfg)) {
-        changed = this._replaceWithNativeQuantized(op, nativeVariant, quantizedValues, cfg) || changed;
+        if (cfg.scheme === QuantizationScheme.PER_CHANNEL && this._canPerChannelDot(op, quantizedValues)) {
+          changed = this._replacePerChannelDot(op, cfg) || changed;
+        } else {
+          changed = this._replaceWithNativeQuantized(op, nativeVariant, quantizedValues, cfg) || changed;
+        }
         continue;
       }
 
@@ -258,6 +262,105 @@ export class QuantizationPass extends FunctionPass {
       op.erase();
     }
 
+    return true;
+  }
+
+  _canPerChannelDot(op, quantizedValues) {
+    if (op.opName !== 'dot') return false;
+    const lhs = op.getOperand(0);
+    const rhs = op.getOperand(1);
+    if (quantizedValues.has(lhs) || quantizedValues.has(rhs)) return false;
+    if (!(lhs.type instanceof TensorType) || lhs.type.shape.length !== 2) return false;
+    if (!(rhs.type instanceof TensorType) || rhs.type.shape.length !== 2) return false;
+    const rhsDef = rhs.definingOp;
+    if (!rhsDef || rhsDef.opName !== 'constant') return false;
+    const data = rhsDef.getAttr('value');
+    if (!data || typeof data === 'number' || typeof data.length !== 'number') return false;
+    const rhsC = op.getAttr('rhs_contracting') || [];
+    const lhsC = op.getAttr('lhs_contracting') || [];
+    if (rhsC.length !== 1 || lhsC.length !== 1) return false;
+    if ((op.getAttr('rhs_batch') || []).length !== 0) return false;
+    if ((op.getAttr('lhs_batch') || []).length !== 0) return false;
+    return true;
+  }
+
+  _activationParams(value, cfg) {
+    const numBits = scalarBytes(cfg.targetDtype) * 8;
+    const scheme = QuantizationScheme.PER_TENSOR_SYMMETRIC;
+    if (cfg.calibration && cfg.calibration.hasData(value)) {
+      return cfg.calibration.getQuantParams(value, scheme, cfg.targetDtype);
+    }
+    return QuantizationParams.defaultForActivation(scheme, cfg.targetDtype, numBits);
+  }
+
+  _replacePerChannelDot(op, cfg) {
+    const lhs = op.getOperand(0);
+    const rhs = op.getOperand(1);
+    const rhsShape = rhs.type.shape;
+    const wData = rhs.definingOp.getAttr('value');
+    const numBits = scalarBytes(cfg.targetDtype) * 8;
+
+    const rhsContracting = op.getAttr('rhs_contracting');
+    const channelAxis = rhsContracting[0] === 0 ? 1 : 0;
+    const wp = QuantizationParams.fromConstantArrayPerChannel([...wData], rhsShape, channelAxis, cfg.targetDtype, numBits);
+    const wInt8 = wp.quantizeArrayPerChannel([...wData], rhsShape);
+
+    const aqp = this._activationParams(lhs, cfg);
+    const aScale = aqp.getScalarScale();
+    const aZp = aqp.getScalarZeroPoint();
+
+    const block = op.parentBlock;
+    if (!block) return false;
+
+    const wConstType = new TensorType(rhsShape, cfg.targetDtype);
+    const wConst = new Operation('constant', [], [wConstType], { value: wInt8, tensor_type: wConstType });
+    block.insertBefore(wConst, op);
+
+    const aqType = new TensorType(lhs.type.shape, cfg.targetDtype);
+    const aQuant = new Operation('quantize', [lhs], [aqType], {
+      scale: aScale, zero_point: aZp,
+      scheme: QuantizationScheme.PER_TENSOR_SYMMETRIC, target_dtype: cfg.targetDtype
+    });
+    block.insertBefore(aQuant, op);
+
+    const outShape = op.getResult(0).type.shape;
+    const attrs = {};
+    for (const [k, v] of op.attributes || []) attrs[k] = v;
+    attrs.lhs_scale = aScale; attrs.lhs_zero_point = aZp;
+    attrs.rhs_scale = 1; attrs.rhs_zero_point = 0;
+    attrs.output_scale = 1; attrs.output_zero_point = 0;
+
+    const i32Type = new TensorType(outShape, ScalarType.I32);
+    const qdot = new Operation('quantized_dot', [aQuant.getResult(0), wConst.getResult(0)], [i32Type], attrs);
+    block.insertBefore(qdot, op);
+
+    const f32Type = new TensorType(outShape, ScalarType.F32);
+    const conv = new Operation('convert', [qdot.getResult(0)], [f32Type], { target_dtype: ScalarType.F32 });
+    block.insertBefore(conv, op);
+
+    const numCh = rhsShape[channelAxis];
+    const scaleVec = new Array(numCh);
+    for (let c = 0; c < numCh; c++) scaleVec[c] = aScale * wp.getScaleForChannel(c);
+
+    const lhsC = new Set(op.getAttr('lhs_contracting') || []);
+    let lhsSpatial = 0;
+    for (let i = 0; i < lhs.type.shape.length; i++) if (!lhsC.has(i)) lhsSpatial++;
+    const outChannelAxis = lhsSpatial;
+
+    const svType = new TensorType([numCh], ScalarType.F32);
+    const sv = new Operation('constant', [], [svType], { value: scaleVec, tensor_type: svType });
+    block.insertBefore(sv, op);
+
+    const bc = new Operation('broadcast_in_dim', [sv.getResult(0)], [f32Type], {
+      broadcast_dimensions: [outChannelAxis], result_shape: outShape
+    });
+    block.insertBefore(bc, op);
+
+    const mul = new Operation('mul', [conv.getResult(0), bc.getResult(0)], [f32Type], {});
+    block.insertBefore(mul, op);
+
+    op.replaceAllResultsWith([mul.getResult(0)]);
+    op.erase();
     return true;
   }
 }

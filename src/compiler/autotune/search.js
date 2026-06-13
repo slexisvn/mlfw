@@ -11,6 +11,7 @@ export class RandomSearch {
   constructor(config = {}) {
     this.numTrials = config.numTrials || 64;
     this.seed = config.seed || 42;
+    this.deadline = config.deadline || null;
     this._rngState = this.seed;
   }
 
@@ -19,11 +20,17 @@ export class RandomSearch {
     return this._rngState % max;
   }
 
+  _expired() {
+    return this.deadline ? this.deadline.expired : false;
+  }
+
   search(sketches, evaluator) {
     const candidates = [];
 
     for (const sketch of sketches) {
+      if (this._expired()) break;
       for (let i = 0; i < this.numTrials; i++) {
+        if (this._expired()) break;
         const params = sketch.sampleParams((max) => this._rng(max));
         const result = evaluator(sketch, params);
         if (result) {
@@ -44,6 +51,7 @@ export class EvolutionarySearch {
     this.mutationRate = config.mutationRate || 0.3;
     this.eliteRatio = config.eliteRatio || 0.2;
     this.seed = config.seed || 42;
+    this.deadline = config.deadline || null;
     this._rngState = this.seed;
   }
 
@@ -57,10 +65,15 @@ export class EvolutionarySearch {
     return this._rngState / 0x7fffffff;
   }
 
+  _expired() {
+    return this.deadline ? this.deadline.expired : false;
+  }
+
   search(sketches, evaluator) {
     let population = this._initPopulation(sketches);
 
     for (let gen = 0; gen < this.numGenerations; gen++) {
+      if (this._expired()) break;
       const scored = [];
       for (const individual of population) {
         const result = evaluator(individual.sketch, individual.params);

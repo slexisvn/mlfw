@@ -146,6 +146,32 @@ export function register(registry) {
       return [perm.map(i => inShape[i])];
     },
     getCanonicalizationPatterns() { return [new pat.FoldTrivialTranspose()]; },
+    fold(constValues, attrs, constOps) {
+      const data = constValues[0];
+      if (data == null || typeof data === 'number' || typeof data.length !== 'number') return undefined;
+      const perm = attrs.get ? attrs.get('permutation') : attrs.permutation;
+      if (!perm) return undefined;
+      const inType = constOps && constOps[0] ? constOps[0].getResult(0).type : null;
+      const inShape = inType instanceof TensorType ? inType.shape : null;
+      if (!inShape || inShape.length !== perm.length) return undefined;
+      const inStrides = new Array(inShape.length);
+      let acc = 1;
+      for (let d = inShape.length - 1; d >= 0; d--) { inStrides[d] = acc; acc *= inShape[d]; }
+      const outShape = perm.map(i => inShape[i]);
+      const n = data.length;
+      const out = new Array(n);
+      const idx = new Array(perm.length).fill(0);
+      for (let i = 0; i < n; i++) {
+        let src = 0;
+        for (let d = 0; d < perm.length; d++) src += idx[d] * inStrides[perm[d]];
+        out[i] = data[src];
+        for (let d = perm.length - 1; d >= 0; d--) {
+          if (++idx[d] < outShape[d]) break;
+          idx[d] = 0;
+        }
+      }
+      return out;
+    },
     verify(op) {
       const errs = [];
       if (!op.hasAttr('permutation')) { errs.push('transpose missing permutation'); return errs; }

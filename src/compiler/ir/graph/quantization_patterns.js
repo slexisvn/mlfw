@@ -1,5 +1,5 @@
 import { Pattern } from '../../passes/rewrite/pattern.js';
-import { TensorType, ScalarType } from './types.js';
+import { TensorType, ScalarType, scalarBytes } from './types.js';
 
 function quantParamsMatch(opA, opB) {
   const scaleA = opA.getAttr('scale');
@@ -94,7 +94,7 @@ export class ConstantQuantize extends Pattern {
     const zp = op.getAttr('zero_point');
     if (typeof scale !== 'number' || typeof zp !== 'number') return false;
     const tgtDtype = op.getAttr('target_dtype');
-    const bits = tgtDtype === ScalarType.UI8 ? 8 : 8;
+    const bits = scalarBytes(tgtDtype) * 8;
     const isUnsigned = tgtDtype === ScalarType.UI8;
     const cMin = isUnsigned ? 0 : -(1 << (bits - 1));
     const cMax = isUnsigned ? (1 << bits) - 1 : (1 << (bits - 1)) - 1;

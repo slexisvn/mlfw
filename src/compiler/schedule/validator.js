@@ -1,4 +1,5 @@
 import { ForKind } from '../ir/tensor/nodes.js';
+import { collectVarsUsed, collectWriteIndexVars } from './legality.js';
 
 export class ScheduleValidator {
   static validate(primFunc) {
@@ -7,6 +8,7 @@ export class ScheduleValidator {
       boundVars: new Set(),
       threadBindings: new Map(),
       parallelExtents: new Map(),
+      parLoops: [],
       errors
     };
 
@@ -107,9 +109,14 @@ export class ScheduleValidator {
       ScheduleValidator._checkNoNestedParallel(node.body, varName, ctx);
     }
 
+    const tracksReduction = node.kind === ForKind.PARALLEL || node.kind === ForKind.VECTORIZED;
+    if (tracksReduction) ctx.parLoops.push({ varName, kind: node.kind });
+
     ctx.boundVars.add(varName);
     ScheduleValidator._visitNode(node.body, ctx);
     ctx.boundVars.delete(varName);
+
+    if (tracksReduction) ctx.parLoops.pop();
 
     if (node.kind === ForKind.THREAD_BINDING && node.threadTag) {
       ctx.threadBindings.delete(node.threadTag);
@@ -130,6 +137,22 @@ export class ScheduleValidator {
   static _visitBlock(node, ctx) {
     for (const r of node.iterVars) {
       if (r.iterVar) ctx.boundVars.add(r.iterVar.name);
+    }
+    if (ctx.parLoops.length > 0) {
+      const used = new Set();
+      collectVarsUsed(node.body, used);
+      if (node.initBody) collectVarsUsed(node.initBody, used);
+      const written = new Set();
+      collectWriteIndexVars(node, written);
+      for (const pl of ctx.parLoops) {
+        if (used.has(pl.varName) && !written.has(pl.varName)) {
+          const kind = pl.kind === ForKind.VECTORIZED ? 'Vectorized' : 'Parallel';
+          ctx.errors.push(
+            `${kind} loop '${pl.varName}' carries a reduction in block '${node.name}': ` +
+            `the loop variable is read but never written, so parallel iterations race on the accumulator`
+          );
+        }
+      }
     }
     ScheduleValidator._visitNode(node.body, ctx);
     if (node.initBody) ScheduleValidator._visitNode(node.initBody, ctx);

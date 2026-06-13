@@ -40,6 +40,7 @@ const TILE_CANDIDATES = [1, 2, 4, 8, 16, 32, 64, 128, 256];
 const BLOCK_SIZE_CANDIDATES = [32, 64, 128, 256, 512, 1024];
 const UNROLL_CANDIDATES = [1, 2, 4, 8, 16];
 const VECTOR_CANDIDATES = [1, 2, 4, 8, 16];
+const REDUCE_TILE_CANDIDATES = [1, 2, 4, 8, 16, 32];
 
 export function createElementwiseCPUSketch() {
   return new ScheduleSketch('elementwise_cpu', [
@@ -219,27 +220,89 @@ export function createMatmulGPUSketch() {
   });
 }
 
-function classifyBlockForSketch(primFunc, blockName) {
-  const info = classifyBlock(primFunc, blockName);
-  return {
-    hasReduction: info ? info.hasReduction : false,
-    isMatmul: blockName.includes('matmul')
-  };
+export function createMultiLevelTileCPUSketch() {
+  return new ScheduleSketch('mlt_cpu', [
+    new SearchVariable('tile_s0', TILE_CANDIDATES),
+    new SearchVariable('tile_s1', TILE_CANDIDATES),
+    new SearchVariable('tile_k', REDUCE_TILE_CANDIDATES)
+  ], (schedule, blockName, target, params) => {
+    const info = classifyBlock(schedule.func, blockName);
+    const loops = schedule.getLoops(blockName);
+    if (loops.length === 0) return;
+
+    const isRed = (l) => !!(info && isReductionLoop(l, info));
+    const spatial = loops.filter(l => !isRed(l));
+    const reduction = loops.filter(l => isRed(l));
+    if (spatial.length === 0) return;
+
+    const staticExtent = (l) => (l.extent.type === 'IntImmNode' ? l.extent.value : null);
+    const findLoop = (name) => schedule.getLoops(blockName).find(l => l.loopVar.name === name);
+
+    const s0e = staticExtent(spatial[0]);
+    let outer = spatial[0];
+    if (s0e !== null && params.tile_s0 > 1 && s0e >= params.tile_s0) {
+      const [s0o] = schedule.split(spatial[0], params.tile_s0);
+      outer = s0o;
+    }
+    schedule.parallelize(outer);
+
+    if (spatial.length >= 2) {
+      const s1 = findLoop(spatial[1].loopVar.name);
+      const s1e = s1 ? staticExtent(s1) : null;
+      if (s1 && s1e !== null && params.tile_s1 > 1 && s1e >= params.tile_s1) {
+        const [, s1i] = schedule.split(s1, params.tile_s1);
+        schedule.vectorize(s1i);
+      }
+    }
+
+    if (reduction.length >= 1) {
+      const k = findLoop(reduction[0].loopVar.name);
+      const ke = k ? staticExtent(k) : null;
+      if (k && ke !== null && params.tile_k > 1 && ke >= params.tile_k) {
+        schedule.split(k, params.tile_k);
+      }
+    }
+  });
 }
 
-export function getSketchesForBlock(primFunc, blockName, target, blockMap) {
-  const info = classifyBlockForSketch(primFunc, blockName);
-  const sketches = [];
-
-  if (target.kind === TargetKind.CPU) {
-    if (info.isMatmul) sketches.push(createMatmulCPUSketch());
-    else if (info.hasReduction) sketches.push(createReductionCPUSketch());
-    else sketches.push(createElementwiseCPUSketch());
-  } else if (target.isGPU()) {
-    if (info.isMatmul) sketches.push(createMatmulGPUSketch());
-    else if (info.hasReduction) sketches.push(createReductionGPUSketch());
-    else sketches.push(createElementwiseGPUSketch());
+function analyzeBlockStructure(primFunc, blockName) {
+  const info = classifyBlock(primFunc, blockName);
+  if (!info) return { spatial: 0, reduction: 0, reads: 0, hasReduction: false };
+  let spatial = 0;
+  let reduction = 0;
+  for (const l of info.loops) {
+    if (info.reductionLoopVars.has(l.loopVar.name)) reduction++;
+    else spatial++;
   }
+  return { spatial, reduction, reads: info.readBuffers.length, hasReduction: info.hasReduction };
+}
 
-  return sketches;
+const CPU_SKETCH_RULES = [
+  { match: (s) => s.hasReduction && s.spatial >= 1 && s.reads >= 2,
+    derive: () => [createMultiLevelTileCPUSketch(), createReductionCPUSketch()] },
+  { match: (s) => s.hasReduction,
+    derive: () => [createReductionCPUSketch()] },
+  { match: () => true,
+    derive: () => [createElementwiseCPUSketch()] }
+];
+
+const GPU_SKETCH_RULES = [
+  { match: (s) => s.hasReduction && s.spatial === 2 && s.reads >= 2,
+    derive: () => [createMatmulGPUSketch(), createReductionGPUSketch()] },
+  { match: (s) => s.hasReduction,
+    derive: () => [createReductionGPUSketch()] },
+  { match: () => true,
+    derive: () => [createElementwiseGPUSketch()] }
+];
+
+export function getSketchesForBlock(primFunc, blockName, target, blockMap) {
+  const rules = target.kind === TargetKind.CPU ? CPU_SKETCH_RULES
+    : (target.isGPU() ? GPU_SKETCH_RULES : null);
+  if (!rules) return [];
+
+  const struct = analyzeBlockStructure(primFunc, blockName);
+  for (const rule of rules) {
+    if (rule.match(struct)) return rule.derive();
+  }
+  return [];
 }
