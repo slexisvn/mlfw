@@ -262,3 +262,23 @@ describe('layout optimization', () => {
     expect(Array.from(c2)).toEqual(Array.from(c1));
   });
 });
+
+describe('hardwareMeasure resolves the measurer from the target kind', () => {
+  it('throws a clear error when no measurer is registered for the target', async () => {
+    const { Autotuner } = await import('../../../src/compiler/autotune/autotuner.js');
+    const { WasmTarget } = await import('../../../src/backend/target.js');
+    expect(() => new Autotuner(WasmTarget(), { hardwareMeasure: true }))
+      .toThrow(/no measurer is registered/);
+  });
+
+  it('resolves the registered measurer for the matching target kind', async () => {
+    const { Autotuner } = await import('../../../src/compiler/autotune/autotuner.js');
+    const { WebGPUTarget } = await import('../../../src/backend/target.js');
+    const { registerMeasurer } = await import('../../../src/compiler/runtime/measurer_registry.js');
+    const probe = (compiled, byteSizes) => [byteSizes.length];
+    registerMeasurer('webgpu', probe);
+    const tuner = new Autotuner(WebGPUTarget(), { hardwareMeasure: true });
+    expect(tuner.config.measurer).toBe(probe);
+    registerMeasurer('webgpu', null);
+  });
+});

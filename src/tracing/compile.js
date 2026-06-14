@@ -8,7 +8,7 @@ import { tensorToContiguous, wrapResult } from '../dispatcher/jit_dispatch.js';
 import { RuntimeTensor } from '../compiler/runtime/runtime.js';
 import { typedArrayCtor } from '../tensor/types/dtype.js';
 import { computeNumel } from '../tensor/utils/shape_utils.js';
-import { compileWithBackward } from './compile_backward.js';
+
 import { foldWeightParams } from './fold_params.js';
 
 let _tracingRegistered = false;
@@ -158,6 +158,12 @@ function _wrapOutputs(device, outputTypes, outputArrays, outputShapes) {
 export function executeCompiled(compiled, inputs, shapeEnv) {
   const { funcName, device, outputTypes, outputArrays, outputShapes, allArgs } =
     _prepareExecution(compiled, inputs, shapeEnv);
+
+  const plan = compiled.result.module.executionPlan;
+  if (plan) {
+    return compiled.result.module.runPlanAsync(plan, allArgs)
+      .then(() => _wrapOutputs(device, outputTypes, outputArrays, outputShapes));
+  }
 
   if (compiled.result.isAsync(funcName)) {
     return compiled.result.runAsync(funcName, ...allArgs)

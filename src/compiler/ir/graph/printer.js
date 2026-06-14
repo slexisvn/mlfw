@@ -1,5 +1,5 @@
-import { TensorType, TupleType, TokenType, FunctionType, typeToString, DYNAMIC } from './types.js';
-import { BlockArgument } from './value.js';
+import { TensorType, typeToString } from './types.js';
+
 
 export class IRPrinter {
   constructor(options = {}) {

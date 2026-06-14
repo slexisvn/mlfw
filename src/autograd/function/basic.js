@@ -1,6 +1,6 @@
 import { AutogradNode } from '../node.js';
 import * as ops from '../../tensor/ops/ops.js';
-import { ones, full } from '../../tensor/factory/creation_ops.js';
+import { ones } from '../../tensor/factory/creation_ops.js';
 
 export class AddBackward extends AutogradNode {
   constructor() { super(2); }

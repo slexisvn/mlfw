@@ -1,9 +1,9 @@
 import { Tensor } from '../core/tensor.js';
 import { TensorImpl } from '../core/tensor_impl.js';
 import { Storage } from '../core/storage.js';
-import { ScalarType, typedArrayCtor, dtypeSize } from '../types/dtype.js';
+import { ScalarType, typedArrayCtor } from '../types/dtype.js';
 import { getDefaultDevice } from '../types/device.js';
-import { computeStrides, computeNumel } from '../utils/shape_utils.js';
+import { computeStrides } from '../utils/shape_utils.js';
 import { coerceForStorage } from '../utils/half.js';
 
 export function tensor(data, opts) {

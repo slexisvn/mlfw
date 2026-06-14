@@ -1,9 +1,6 @@
 import { PrimFunc, SeqNode, BufferStoreNode, BufferLoadNode, BlockNode } from '../../ir/tensor/nodes.js';
-import { Buffer } from '../../ir/tensor/buffer.js';
-import {
-  LoweringContext, registerLoweringRule, hasLoweringRule, getLoweringRule,
-  lowerConstant, CONSTANT_OPS, makeLoopNest, wrapInLoops
-} from './lowering_registry.js';
+
+import { LoweringContext, registerLoweringRule, hasLoweringRule, getLoweringRule, lowerConstant, CONSTANT_OPS, makeLoopNest, wrapInLoops } from './lowering_registry.js';
 import { register as registerElementwise } from './rules/elementwise.js';
 import { register as registerShape } from './rules/shape.js';
 import { register as registerReduction } from './rules/reduction.js';
@@ -11,11 +8,7 @@ import { register as registerLinalg } from './rules/linalg.js';
 import { register as registerControlFlow } from './rules/control_flow.js';
 import { register as registerLayout } from './rules/layout.js';
 import { register as registerQuantization } from './rules/quantization.js';
-import {
-  register as registerFusion,
-  canInlineFuse, lowerFusion, canLowerAsElementwiseFusion,
-  lowerFusionAsIndividualOps, registerInlineFusionBuilder
-} from './rules/fusion.js';
+import { register as registerFusion, canInlineFuse, lowerFusion, canLowerAsElementwiseFusion, lowerFusionAsIndividualOps, registerInlineFusionBuilder } from './rules/fusion.js';
 import { register as registerPooling } from './rules/pooling.js';
 import { register as registerResize } from './rules/resize.js';
 import { ELEMENTWISE_OPS } from './rules/elementwise.js';

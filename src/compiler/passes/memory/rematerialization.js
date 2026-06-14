@@ -2,7 +2,7 @@ import { FunctionPass, PassResult } from '../pass.js';
 import { Operation } from '../../ir/graph/operation.js';
 import { TensorType, DYNAMIC } from '../../ir/graph/types.js';
 import { registry } from '../../ir/graph/ops.js';
-import { LivenessAnalysis } from '../../analysis/liveness.js';
+
 import { TraceLevel } from '../../pipeline/trace.js';
 import { UseDefAnalysis } from '../../analysis/use_def.js';
 

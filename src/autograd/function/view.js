@@ -1,7 +1,7 @@
 import { AutogradNode } from '../node.js';
 import * as ops from '../../tensor/ops/ops.js';
 import { zeros } from '../../tensor/factory/creation_ops.js';
-import { reshape, transpose, expand, permute } from '../../tensor/view/view_ops.js';
+import { reshape, transpose, permute } from '../../tensor/view/view_ops.js';
 
 export class ReshapeBackward extends AutogradNode {
   constructor() { super(1); }

@@ -1,8 +1,4 @@
-import {
-  IntImmNode, FloatImmNode, MathOpNode, CastNode,
-  ForNode, ForKind, BufferStoreNode, BufferLoadNode,
-  BlockNode, CallExternNode
-} from '../../../ir/tensor/nodes.js';
+import { FloatImmNode, MathOpNode, CastNode, BufferStoreNode, BufferLoadNode, BlockNode, CallExternNode } from '../../../ir/tensor/nodes.js';
 import { registerLoweringRule, buildSpatialNest } from '../lowering_registry.js';
 
 export function register() {

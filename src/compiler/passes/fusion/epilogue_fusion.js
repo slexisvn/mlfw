@@ -1,7 +1,7 @@
 import { FunctionPass, PassResult } from '../pass.js';
 import { Operation } from '../../ir/graph/operation.js';
 import { registry } from '../../ir/graph/ops.js';
-import { TensorType } from '../../ir/graph/types.js';
+
 import { TraceLevel } from '../../pipeline/trace.js';
 
 const CONSTANT_OPS = new Set(['constant', 'scalar_constant']);

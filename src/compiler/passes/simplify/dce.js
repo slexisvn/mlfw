@@ -1,6 +1,6 @@
 import { FunctionPass, PassResult } from '../pass.js';
 import { MemoryEffectAnalysis } from '../../analysis/memory_effect.js';
-import { UseDefAnalysis } from '../../analysis/use_def.js';
+
 import { ShapeAnalysis } from '../../analysis/shape_analysis.js';
 import { TraceLevel } from '../../pipeline/trace.js';
 

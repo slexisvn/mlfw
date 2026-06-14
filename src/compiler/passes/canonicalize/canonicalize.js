@@ -1,4 +1,4 @@
-import { FunctionPass, PassResult } from '../pass.js';
+import { FunctionPass } from '../pass.js';
 import { PatternSet, PatternApplicator } from '../rewrite/pattern.js';
 import { registry } from '../../ir/graph/ops.js';
 

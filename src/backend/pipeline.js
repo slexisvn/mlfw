@@ -1,4 +1,4 @@
-import { TargetKind } from './target.js';
+
 import { CPUCodegen } from './cpu/codegen.js';
 import { CUDACodegen } from './cuda/codegen.js';
 import { WasmCodegen } from './wasm/codegen.js';
@@ -10,6 +10,39 @@ import { buildSnippet as webgpuSnippet } from './webgpu/snippet.js';
 import { buildSnippet as cudaSnippet } from './cuda/snippet.js';
 
 const SNIPPET_BUILDERS = { js: cpuSnippet, wasm: wasmSnippet, webgpu: webgpuSnippet, cuda: cudaSnippet };
+
+export function detectPureMatmul(primFunc) {
+  const blocks = [];
+  const stack = [primFunc.body];
+  while (stack.length > 0) {
+    const n = stack.pop();
+    if (!n) continue;
+    if (n.type === 'BlockNode') { blocks.push(n); stack.push(n.body); continue; }
+    if (n.body) stack.push(n.body);
+    if (n.stmts) for (const s of n.stmts) stack.push(s);
+    if (n.thenBody) stack.push(n.thenBody);
+    if (n.elseBody) stack.push(n.elseBody);
+  }
+  let matmul = null;
+  for (const b of blocks) {
+    if (b.name.includes('matmul')) {
+      if (b.reads.length >= 2 && b.writes.length >= 1) matmul = b;
+    } else {
+      return null;
+    }
+  }
+  if (!matmul) return null;
+  const A = matmul.reads[0].buffer, B = matmul.reads[1].buffer, C = matmul.writes[0].buffer;
+  if (A.dtype !== 'f32' || B.dtype !== 'f32' || C.dtype !== 'f32') return null;
+  if (A.shape.length !== 2 || B.shape.length !== 2 || C.shape.length !== 2) return null;
+  const M = C.shape[0], N = C.shape[1], K = A.shape[1];
+  if (![M, N, K].every(d => typeof d === 'number')) return null;
+  const names = [];
+  for (const [, buf] of primFunc.bufferMap) names.push(buf.name);
+  const aIdx = names.indexOf(A.name), bIdx = names.indexOf(B.name), cIdx = names.indexOf(C.name);
+  if (aIdx < 0 || bIdx < 0 || cIdx < 0) return null;
+  return { M, N, K, aIdx, bIdx, cIdx };
+}
 
 export class CompiledKernel {
   constructor(name, source, target, metadata = {}) {
@@ -27,8 +60,9 @@ export class CompiledKernel {
 }
 
 export class BackendPipeline {
-  constructor(target) {
+  constructor(target, options = {}) {
     this.target = target;
+    this.matmulBackend = options.matmulBackend || 'native';
     this.librarySelector = target.isCPU()
       ? createCPULibrarySelector(target)
       : target.isGPU()
@@ -88,6 +122,13 @@ export class BackendPipeline {
   }
 
   _compileCUDA(primFunc) {
+    if (this.matmulBackend === 'cublas' && primFunc.cublasInfo) {
+      return new CompiledKernel(primFunc.name, '', this.target, {
+        kind: 'cuda',
+        cublas: primFunc.cublasInfo,
+        outputIndices: [primFunc.cublasInfo.cIdx]
+      });
+    }
     const codegen = new CUDACodegen(this.target);
     const kernel = codegen.generate(primFunc);
     return new CompiledKernel(primFunc.name, kernel.source, this.target, {

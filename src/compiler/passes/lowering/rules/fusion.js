@@ -1,13 +1,6 @@
-import {
-  FloatImmNode, IntImmNode, MathOpNode, CompareNode,
-  BufferStoreNode, BufferLoadNode,
-  BlockNode, SeqNode, IfThenElseNode, CallExternNode, CastNode, LetStmtNode
-} from '../../../ir/tensor/nodes.js';
-import { Buffer } from '../../../ir/tensor/buffer.js';
-import {
-  registerLoweringRule, getLoweringRule, makeLoopNest, wrapInLoops,
-  computeBroadcastIndices, bufRefs, lowerConstant, CONSTANT_OPS
-} from '../lowering_registry.js';
+import { FloatImmNode, IntImmNode, MathOpNode, CompareNode, BufferStoreNode, BufferLoadNode, BlockNode, SeqNode, IfThenElseNode, CallExternNode, CastNode, LetStmtNode } from '../../../ir/tensor/nodes.js';
+
+import { getLoweringRule, makeLoopNest, wrapInLoops, computeBroadcastIndices, bufRefs, lowerConstant, CONSTANT_OPS } from '../lowering_registry.js';
 import { buildElementwiseExpr, ELEMENTWISE_OPS } from './elementwise.js';
 
 const INLINE_FUSION_BUILDERS = new Map();

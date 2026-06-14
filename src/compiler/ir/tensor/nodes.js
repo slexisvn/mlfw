@@ -175,6 +175,12 @@ export class EvaluateNode extends TensorNode {
   }
 }
 
+export class SyncThreadsNode extends TensorNode {
+  constructor() {
+    super();
+  }
+}
+
 export class CallExternNode extends TensorNode {
   constructor(name, args, dtype) {
     super();

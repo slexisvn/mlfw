@@ -1,11 +1,8 @@
-import { TensorType, DYNAMIC } from '../../ir/graph/types.js';
+import { DYNAMIC } from '../../ir/graph/types.js';
 import { MemoryScope } from '../../ir/tensor/tensor_types.js';
 import { Buffer } from '../../ir/tensor/buffer.js';
 import { isDtypeInt } from '../../../backend/dtype_map.js';
-import {
-  ForNode, BlockNode, SeqNode, BufferStoreNode, BufferLoadNode,
-  VariableNode, IntImmNode, FloatImmNode, MathOpNode, BlockRealizeNode, ForKind,
-} from '../../ir/tensor/nodes.js';
+import { ForNode, BlockNode, SeqNode, BufferStoreNode, BufferLoadNode, VariableNode, IntImmNode, FloatImmNode, BlockRealizeNode, ForKind } from '../../ir/tensor/nodes.js';
 
 const loweringRules = new Map();
 const CONSTANT_OPS = new Set(['constant', 'scalar_constant']);

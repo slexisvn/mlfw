@@ -31,10 +31,6 @@ for (const [name, val] of Object.entries(DispatchKey)) {
   }
 }
 
-export function dispatchKeyName(key) {
-  return _KEY_NAMES[key] || null;
-}
-
 const _BACKEND_KEY_FOR_DEVICE = Object.freeze({
   cpu: DispatchKey.CPU,
   gpu: DispatchKey.GPU,

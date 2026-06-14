@@ -1,5 +1,5 @@
 import { Layout, TensorType } from '../../ir/graph/types.js';
-import { BlockedLayout } from '../../ir/graph/blocked_layout.js';
+
 
 export class LayoutPreference {
   constructor(inputs, outputs, cost = 0) {

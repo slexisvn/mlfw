@@ -1,4 +1,4 @@
-import { DispatchKey, backendKeyForDevice } from '../../dispatcher/dispatch_key.js';
+import { backendKeyForDevice } from '../../dispatcher/dispatch_key.js';
 
 export const DeviceType = Object.freeze({
   CPU: 'cpu',
@@ -7,16 +7,6 @@ export const DeviceType = Object.freeze({
   META: 'meta',
   LAZY: 'lazy',
 });
-
-const _TARGET_KIND_MAP = Object.freeze({
-  cpu: DeviceType.CPU,
-  gpu: DeviceType.GPU,
-  wasm: DeviceType.WASM,
-});
-
-export function deviceTypeFromTargetKind(kind) {
-  return _TARGET_KIND_MAP[kind] || null;
-}
 
 export class Device {
   constructor(type, index = 0) {
@@ -51,7 +41,6 @@ export const CPU_DEVICE = new Device(DeviceType.CPU);
 export const GPU_DEVICE = new Device(DeviceType.GPU);
 export const WASM_DEVICE = new Device(DeviceType.WASM);
 export const META_DEVICE = new Device(DeviceType.META);
-export const LAZY_DEVICE = new Device(DeviceType.LAZY);
 
 let _defaultDevice = CPU_DEVICE;
 export function getDefaultDevice() {

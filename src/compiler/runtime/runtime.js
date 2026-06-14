@@ -82,96 +82,10 @@ export class KernelRegistry {
   names() { return [...this._kernels.keys()]; }
 }
 
-const SCOPE_PRIORITY = { 'register': 0, 'local': 1, 'shared': 2, 'global': 3 };
-
-export class RuntimeMemoryManager {
-  constructor() {
-    this._pools = new Map();
-    this._allocated = 0;
-    this._peak = 0;
-  }
-
-  allocate(sizeBytes, dtype = 'f32', scope = 'global') {
-    const Ctor = typedArrayCtor(dtype);
-    const bytesPerElement = Ctor.BYTES_PER_ELEMENT;
-    const count = Math.ceil(sizeBytes / bytesPerElement);
-    const poolKey = dtype + ':' + scope;
-    let pool = this._pools.get(poolKey);
-    if (pool && pool.length > 0) {
-      let fitIdx = -1;
-      for (let i = 0; i < pool.length; i++) {
-        if (pool[i].length >= count && (fitIdx === -1 || pool[i].length < pool[fitIdx].length)) {
-          fitIdx = i;
-        }
-      }
-      if (fitIdx !== -1) {
-        const buf = pool[fitIdx];
-        pool[fitIdx] = pool[pool.length - 1];
-        pool.pop();
-        this._allocated += sizeBytes;
-        if (this._allocated > this._peak) this._peak = this._allocated;
-        return buf;
-      }
-    }
-    const data = new Ctor(count);
-    this._allocated += sizeBytes;
-    if (this._allocated > this._peak) this._peak = this._allocated;
-    return data;
-  }
-
-  release(data, sizeBytes, dtype = 'f32', scope = 'global') {
-    this._allocated -= sizeBytes;
-    const poolKey = dtype + ':' + scope;
-    let pool = this._pools.get(poolKey);
-    if (!pool) { pool = []; this._pools.set(poolKey, pool); }
-    if (pool.length < 32) pool.push(data);
-  }
-
-  get peakUsage() { return this._peak; }
-  get currentUsage() { return this._allocated; }
-}
-
-export class WasmTensorPool {
-  constructor(wasmInstance) {
-    this._inst = wasmInstance;
-    this._views = new Map();
-  }
-
-  bind(slotIndex, tensor) {
-    const offsets = [...this._inst.bufferOffsets.values()];
-    const offset = offsets[slotIndex];
-    const mem = this._inst.memory;
-    new Float32Array(mem.buffer, offset, tensor.data.length).set(tensor.data);
-    const view = new Float32Array(mem.buffer, offset, tensor.data.length);
-    this._views.set(slotIndex, { tensor, view, offset });
-    return view;
-  }
-
-  sync(slotIndex) {
-    const entry = this._views.get(slotIndex);
-    if (entry) entry.tensor.data.set(entry.view);
-  }
-
-  syncAll() {
-    for (const [, entry] of this._views) entry.tensor.data.set(entry.view);
-  }
-
-  runDirect(name, shapeValues) {
-    const { exports, bufferOffsets } = this._inst;
-    const offsets = [...bufferOffsets.values()];
-    const callArgs = [...offsets];
-    if (shapeValues) {
-      for (const v of shapeValues) callArgs.push(v);
-    }
-    exports[name](...callArgs);
-  }
-}
-
 export class RuntimeModule {
   constructor(name) {
     this.name = name;
     this.kernels = new KernelRegistry();
-    this.memory = new RuntimeMemoryManager();
     this._instances = new Map();
   }
 
@@ -236,6 +150,46 @@ export class RuntimeModule {
     return entry.backend.isAsync(inst);
   }
 
+  async runPlanAsync(plan, args) {
+    const slots = new Array(plan.numSlots).fill(null);
+    for (let i = 0; i < args.length; i++) slots[plan.argSlots[i]] = args[i];
+    for (const it of plan.intermediates) {
+      let numel = 1;
+      for (const d of it.shape) numel *= d;
+      slots[it.slot] = new RuntimeTensor(new (typedArrayCtor(it.dtype))(Math.max(numel, 1)), it.shape, it.dtype);
+    }
+
+    const planBackend = this._uniformPlanBackend(plan);
+    if (planBackend && planBackend.runPlan) {
+      const steps = plan.steps.map(step => {
+        const stepArgs = [];
+        for (const s of step.inputSlots) stepArgs.push(slots[s]);
+        for (const s of step.outputSlots) stepArgs.push(slots[s]);
+        const { shapeValues } = this._prepareArgs(step.name, stepArgs);
+        return { name: step.name, inputSlots: step.inputSlots, outputSlots: step.outputSlots, kernel: this.kernels.get(step.name), shapeValues };
+      });
+      return planBackend.runPlan(plan, slots, steps);
+    }
+
+    for (const step of plan.steps) {
+      const stepArgs = [];
+      for (const s of step.inputSlots) stepArgs.push(slots[s]);
+      for (const s of step.outputSlots) stepArgs.push(slots[s]);
+      await this.runAsync(step.name, ...stepArgs);
+    }
+  }
+
+  _uniformPlanBackend(plan) {
+    let backend = null;
+    for (const step of plan.steps) {
+      const entry = this._instances.get(step.name);
+      if (!entry || entry.instance instanceof Promise) return null;
+      if (backend === null) backend = entry.backend;
+      else if (entry.backend !== backend) return null;
+    }
+    return backend;
+  }
+
   static _extractShapeParams(shapeParamMap, tensorShapes, args, bufferMap) {
     const bufferIndex = new Map();
     if (bufferMap) {
@@ -272,14 +226,6 @@ export class RuntimeModule {
       result.push(resolved !== null ? resolved : 1);
     }
     return result;
-  }
-
-  getWasmPool(name) {
-    const entry = this._instances.get(name);
-    if (!entry || entry.instance instanceof Promise) return null;
-    const inst = entry.instance;
-    if (!inst || !inst.exports || !inst.bufferOffsets) return null;
-    return new WasmTensorPool(inst);
   }
 
   getKernelSource(name) {

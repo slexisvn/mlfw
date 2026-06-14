@@ -1,13 +1,7 @@
-import {
-  MathOpNode, FloatImmNode, IntImmNode, BufferStoreNode, BufferLoadNode,
-  BlockNode, SeqNode, CallExternNode, ForNode, ForKind, IfThenElseNode, CompareNode
-} from '../../../ir/tensor/nodes.js';
+import { MathOpNode, FloatImmNode, IntImmNode, BufferStoreNode, BufferLoadNode, BlockNode, SeqNode, CallExternNode, IfThenElseNode, CompareNode } from '../../../ir/tensor/nodes.js';
 import { Buffer } from '../../../ir/tensor/buffer.js';
 import { DYNAMIC } from '../../../ir/graph/types.js';
-import {
-  registerLoweringRule, buildSpatialNest, wrapLoopsWithNodes,
-  concatIterVars, bufRefs
-} from '../lowering_registry.js';
+import { registerLoweringRule, buildSpatialNest, wrapLoopsWithNodes, concatIterVars } from '../lowering_registry.js';
 
 const REDUCE_COMBINERS = {
   'sum':  (a, b) => new MathOpNode('+', a, b),

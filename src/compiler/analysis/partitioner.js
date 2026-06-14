@@ -106,17 +106,6 @@ export class PartitionerConfig {
   }
 }
 
-export class PartitionerAnalysis {
-  static get name() { return 'partitioner'; }
-  static get depKey() { return 'partitioner'; }
-  static get dependencies() { return []; }
-
-  static compute(func, deps, config) {
-    const partitioner = new GraphPartitioner(config);
-    return partitioner.partition(func);
-  }
-}
-
 export class PartitionResult {
   constructor(partitions, opToPartition, transferEdges) {
     this.partitions = partitions;

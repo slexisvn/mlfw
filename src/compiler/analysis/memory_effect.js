@@ -1,5 +1,5 @@
 import { registry } from '../ir/graph/ops.js';
-import { SideEffectKind, OpTrait } from '../ir/graph/op_registry.js';
+import { SideEffectKind } from '../ir/graph/op_registry.js';
 
 export class MemoryEffect {
   constructor(kind, value) {

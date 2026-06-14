@@ -1,5 +1,5 @@
 import { OpDef, SideEffectKind, OpTrait } from '../op_registry.js';
-import { TensorType } from '../types.js';
+
 
 export function register(registry) {
   registry.register(new OpDef({

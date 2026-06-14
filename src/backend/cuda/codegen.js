@@ -1,6 +1,6 @@
 import { ForKind } from '../../compiler/ir/tensor/nodes.js';
 import { cType, cPtrType, cLiteralSuffix, cMathFunc } from '../dtype_map.js';
-import { inferDtype } from '../../compiler/ir/lir/nodes.js';
+
 
 export class CUDAKernel {
   constructor(name, source, blockDim, gridDim, sharedMemBytes, params, outputIndices) {
@@ -187,6 +187,7 @@ export class CUDACodegen {
         case 'IfThenElseNode': this._visitIfStmt(cur); continue;
         case 'LetStmtNode': this._visitLetStmtNode(cur); continue;
         case 'BufferStoreNode': this._visitBufferStoreNode(cur); continue;
+        case 'SyncThreadsNode': this._emit('__syncthreads();'); continue;
         case 'LIRFlatStoreNode': this._visitLIRFlatStore(cur); continue;
         case 'LIRBindingsNode': this._visitLIRBindings(cur); continue;
         case 'LIRAccumulatorNode': this._visitLIRAccumulator(cur); continue;
@@ -431,6 +432,10 @@ export class CUDACodegen {
   }
 
   _analyzeSharing(func) {
+    if (func.gpuRegisterBlocked) {
+      this._needsBarriers = false;
+      return;
+    }
     const extents = new Set();
     for (const [, entries] of this._threadBindings) {
       for (const e of entries) {

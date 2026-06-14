@@ -1,6 +1,6 @@
 import { FunctionPass, PassResult } from '../pass.js';
 import { Operation, cloneRegion } from '../../ir/graph/operation.js';
-import { Block, Region } from '../../ir/graph/block.js';
+
 import { GraphFunction } from '../../ir/graph/function.js';
 import { GraphPartitioner, PartitionerConfig } from '../../analysis/partitioner.js';
 import { TraceLevel } from '../../pipeline/trace.js';

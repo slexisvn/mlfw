@@ -93,7 +93,6 @@ export function removeUploadedCsv(name) {
   if (table) dropTable(table);
   _uploadedCsv.delete(name);
 }
-export function listUploadedCsv() { return [..._uploadedCsv.keys()]; }
 
 const AGG_FNS = { sum: qsum, min: qmin, max: qmax };
 

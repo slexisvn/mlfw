@@ -26,7 +26,7 @@
   "scripts": {
     "start": "node src/cli/index.js",
     "build": "node scripts/build.js",
-    "test": "vitest run --exclude '**/node_modules/**' --exclude '**/stress/**' --exclude '**/webgpu-gpu.test.*' --exclude '**/webgpu-chrome.test.*' --exclude '**/cuda/cuda-exec.test.*' --exclude '**/cuda/cuda-perf.test.*' --exclude '**/cuda/cuda-model.test.*' --exclude '**/vscode-ext/**'",
+    "test": "vitest run --exclude '**/node_modules/**' --exclude '**/stress/**' --exclude '**/webgpu-gpu.test.*' --exclude '**/webgpu-chrome.test.*' --exclude '**/cuda/cuda-exec.test.*' --exclude '**/cuda/cuda-perf.test.*' --exclude '**/cuda/cuda-model.test.*' --exclude '**/cuda/cuda-autotune.test.*' --exclude '**/cuda/cuda-cublas.test.*' --exclude '**/cuda/cuda-multikernel.test.*' --exclude '**/cuda/cuda-ansor.test.*' --exclude '**/cuda/cuda-quant.test.*' --exclude '**/cuda/cuda-training.test.*' --exclude '**/cuda/cuda-device-resident.test.*' --exclude '**/vscode-ext/**'",
     "test:webgpu": "vitest run tests/backend/webgpu/webgpu-chrome.test.js",
     "test:cuda": "vitest run tests/backend/cuda/",
     "test:all": "vitest run",

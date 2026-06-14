@@ -1,8 +1,4 @@
-import {
-  PrimFunc, ForNode, BlockNode, SeqNode, BufferStoreNode, BufferLoadNode,
-  IfThenElseNode, LetStmtNode, AllocateNode, EvaluateNode, CallExternNode,
-  MathOpNode, CompareNode, VariableNode, IntImmNode, FloatImmNode
-} from './nodes.js';
+
 
 export class TensorIRPrinter {
   constructor() {

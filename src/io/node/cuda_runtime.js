@@ -1,18 +1,54 @@
 import { getDevice } from './cuda/device.js';
 import { getProgram } from './cuda/program.js';
-import { alloc, copyHostToDevice, copyDeviceToHost, free } from './cuda/memory.js';
+import { acquire, copyHostToDevice, copyDeviceToHost, release } from './cuda/memory.js';
 import { launch } from './cuda/launcher.js';
+import { runCudaPlan } from './cuda/device_plan.js';
+import { registerMeasurer } from '../../compiler/runtime/measurer_registry.js';
 
-export function instantiateCuda(compiledKernel) {
-  getDevice();
-  const program = getProgram(compiledKernel.source, compiledKernel.name);
-  return { kernel: compiledKernel, program };
-}
+export { runCudaPlan };
 
-export async function runCudaKernel(compiledKernel, tensorArgs, shapeValues) {
+export function measureCudaKernel(compiledKernel, bufferByteSizes, shapeValues = [], opts = {}) {
   getDevice();
   const { func } = getProgram(compiledKernel.source, compiledKernel.name);
   const meta = compiledKernel.metadata;
+  const warmup = opts.warmup ?? 5;
+  const repeat = opts.repeat ?? 30;
+  const minWarmupMs = opts.minWarmupMs ?? 25;
+  const maxWarmup = opts.maxWarmup ?? 100000;
+  const grid = meta.gridDim;
+  const block = meta.blockDim;
+  const smem = meta.sharedMemBytes || 0;
+  const sizes = bufferByteSizes.map(bytes => Math.max(bytes, 1));
+  const ptrs = sizes.map(bytes => acquire(bytes));
+  try {
+    const wStart = performance.now();
+    let w = 0;
+    while (w < warmup || (performance.now() - wStart) < minWarmupMs) {
+      launch(func, grid, block, smem, ptrs, shapeValues);
+      if (++w >= maxWarmup) break;
+    }
+    const samples = [];
+    for (let i = 0; i < repeat; i++) {
+      const t0 = performance.now();
+      launch(func, grid, block, smem, ptrs, shapeValues);
+      samples.push(performance.now() - t0);
+    }
+    return samples;
+  } finally {
+    for (let i = 0; i < ptrs.length; i++) release(ptrs[i], sizes[i]);
+  }
+}
+
+export async function runCudaKernel(compiledKernel, tensorArgs, shapeValues) {
+  const meta = compiledKernel.metadata;
+  if (meta.cublas) {
+    const { M, N, K, aIdx, bIdx, cIdx, transB } = meta.cublas;
+    const { cublasMatmul } = await import('./cuda/cublas.js');
+    cublasMatmul(M, N, K, tensorArgs[aIdx], tensorArgs[bIdx], tensorArgs[cIdx], transB);
+    return;
+  }
+  getDevice();
+  const { func } = getProgram(compiledKernel.source, compiledKernel.name);
 
   const buffers = [];
   const scalars = [];
@@ -25,7 +61,7 @@ export async function runCudaKernel(compiledKernel, tensorArgs, shapeValues) {
   const outputs = meta.outputIndices || buffers.map((_, i) => i);
   const ptrs = [];
   for (const host of buffers) {
-    const dptr = alloc(host.byteLength);
+    const dptr = acquire(host.byteLength);
     copyHostToDevice(dptr, host);
     ptrs.push(dptr);
   }
@@ -36,5 +72,7 @@ export async function runCudaKernel(compiledKernel, tensorArgs, shapeValues) {
   for (let i = 0; i < buffers.length; i++) {
     if (outputSet.has(i)) copyDeviceToHost(buffers[i], ptrs[i]);
   }
-  for (const dptr of ptrs) free(dptr);
+  for (let i = 0; i < ptrs.length; i++) release(ptrs[i], buffers[i].byteLength);
 }
+
+registerMeasurer('cuda', measureCudaKernel);

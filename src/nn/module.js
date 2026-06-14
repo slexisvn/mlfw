@@ -1,5 +1,5 @@
 import { Parameter } from './parameter.js';
-import { Tensor } from '../tensor/core/tensor.js';
+
 
 export class Module {
   constructor() {

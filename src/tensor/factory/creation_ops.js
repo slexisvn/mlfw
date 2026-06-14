@@ -1,8 +1,8 @@
 import { Tensor } from '../core/tensor.js';
 import { TensorImpl } from '../core/tensor_impl.js';
 import { Storage } from '../core/storage.js';
-import { StorageImpl } from '../core/storage_impl.js';
-import { ScalarType, dtypeSize, typedArrayCtor } from '../types/dtype.js';
+
+import { ScalarType, dtypeSize } from '../types/dtype.js';
 import { getDefaultDevice } from '../types/device.js';
 import { computeStrides, computeNumel } from '../utils/shape_utils.js';
 

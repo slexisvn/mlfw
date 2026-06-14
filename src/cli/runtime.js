@@ -1,7 +1,7 @@
 import * as fw from '../index.js';
 import { Module } from '../nn/module.js';
 import { LightningModule } from '../lightning/core/module.js';
-import { Metric } from '../lightning/metrics/metric.js';
+
 import { Tensor } from '../tensor/core/tensor.js';
 import { setDefaultDevice, WASM_DEVICE } from '../tensor/types/device.js';
 import { SymbolicTensor } from '../tracing/symbolic_tensor.js';
@@ -557,9 +557,6 @@ function bindLog(callEnv, instance) {
     instance.log(name, v, opts);
   });
 }
-
-/** @deprecated Use TeraRuntime instead */
-export const TensorLangRuntime = TeraRuntime;
 
 export class LangRuntimeError extends Error {
   constructor(message, line, column, cause) {

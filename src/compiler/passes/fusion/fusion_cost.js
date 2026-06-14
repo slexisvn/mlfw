@@ -1,4 +1,4 @@
-import { TensorType, DYNAMIC, scalarBytes } from '../../ir/graph/types.js';
+import { TensorType, DYNAMIC } from '../../ir/graph/types.js';
 import { registry } from '../../ir/graph/ops.js';
 
 export class FusionCostModel {

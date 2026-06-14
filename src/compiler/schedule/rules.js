@@ -1,4 +1,4 @@
-import { ForKind } from '../ir/tensor/nodes.js';
+
 import { TargetKind } from '../../backend/target.js';
 
 export class ScheduleRule {

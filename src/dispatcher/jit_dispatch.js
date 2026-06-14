@@ -7,7 +7,7 @@ import { Tensor } from '../tensor/core/tensor.js';
 import { TensorImpl } from '../tensor/core/tensor_impl.js';
 import { Storage } from '../tensor/core/storage.js';
 import { computeStrides, computeNumel, broadcastShapes, matmulOutputShape } from '../tensor/utils/shape_utils.js';
-import { resultDtype, dtypeSize, typedArrayCtor } from '../tensor/types/dtype.js';
+import { resultDtype, typedArrayCtor } from '../tensor/types/dtype.js';
 
 const _TARGET_FOR_KEY = {
   [DispatchKey.CPU]: () => CPUTarget(),

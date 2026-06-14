@@ -1,4 +1,4 @@
-import { TensorType, ScalarType, DYNAMIC, TupleType } from './types.js';
+import { TensorType, ScalarType, TupleType } from './types.js';
 import { Operation } from './operation.js';
 import { Block, Region } from './block.js';
 import { GraphFunction } from './function.js';

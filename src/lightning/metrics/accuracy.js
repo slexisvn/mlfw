@@ -1,5 +1,5 @@
 import { Metric } from './metric.js';
-import { argmax, eq, sum, gt } from '../../tensor/ops/ops.js';
+
 
 export class Accuracy extends Metric {
   constructor({ task = 'multiclass', numClasses = null, topK = 1, threshold = 0.5 } = {}) {

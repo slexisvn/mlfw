@@ -1,6 +1,6 @@
 import { ForKind } from '../../compiler/ir/tensor/nodes.js';
 import { wgslType, wgslBytes, wgslMathFunc, hasWgslMathFunc } from '../dtype_map.js';
-import { inferDtype } from '../../compiler/ir/lir/nodes.js';
+
 
 const BOOL_OPS = new Set(['!', '&&', '||']);
 const CMP_OPS = new Set(['<', '>', '<=', '>=', '==', '!=']);

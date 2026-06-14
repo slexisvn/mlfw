@@ -1,4 +1,4 @@
-import { _traceCore, executeCompiled } from './compile.js';
+import { _traceCore } from './compile.js';
 import { Compiler } from '../compiler/pipeline/compiler.js';
 import { CPUTarget } from '../backend/target.js';
 import { GraphModule } from '../compiler/ir/graph/module.js';
@@ -127,6 +127,12 @@ export function compileWithBackward(model, exampleInputs, opts = {}) {
     return compiled.outputTypes[i].shape;
   }
 
+  function _runK(result, funcName, allArgs) {
+    if (result.isAsync(funcName)) return result.runAsync(funcName, ...allArgs);
+    result.run(funcName, ...allArgs);
+    return null;
+  }
+
   function _executeSeparateForward(compiled, inputs) {
     const kernels = compiled.fwdResult.listKernels();
     const funcName = kernels[0];
@@ -150,13 +156,14 @@ export function compileWithBackward(model, exampleInputs, opts = {}) {
     }
 
     const allArgs = [...inputArrays, ...paramArrays, ...outputArrays];
-    compiled.fwdResult.run(funcName, ...allArgs);
-
-    const results = numRealOutputs === 1
-      ? wrapResult(outputArrays[0], outputShapes[0], allOutputTypes[0].dtype, device)
-      : Array.from({ length: numRealOutputs }, (_, i) => wrapResult(outputArrays[i], outputShapes[i], allOutputTypes[i].dtype, device));
-
-    return { results, inputArrays, paramArrays, outputArrays, device };
+    const build = () => {
+      const results = numRealOutputs === 1
+        ? wrapResult(outputArrays[0], outputShapes[0], allOutputTypes[0].dtype, device)
+        : Array.from({ length: numRealOutputs }, (_, i) => wrapResult(outputArrays[i], outputShapes[i], allOutputTypes[i].dtype, device));
+      return { results, inputArrays, paramArrays, outputArrays, device };
+    };
+    const pending = _runK(compiled.fwdResult, funcName, allArgs);
+    return pending ? pending.then(build) : build();
   }
 
   function _executeSeparateBackward(compiled, gradOutputs, savedContext) {
@@ -188,11 +195,11 @@ export function compileWithBackward(model, exampleInputs, opts = {}) {
     }
 
     const allArgs = [...gradArrays, ...savedArrays, ...gradInputArrays];
-    compiled.bwdResult.run(funcName, ...allArgs);
-
-    return gradInputArrays.map((arr, i) =>
+    const build = () => gradInputArrays.map((arr, i) =>
       wrapResult(arr, gradInputShapes[i], bwdFunc.outputTypes[i].dtype, savedContext.device)
     );
+    const pending = _runK(compiled.bwdResult, funcName, allArgs);
+    return pending ? pending.then(build) : build();
   }
 
   function _findCachedEntry(inputs) {
@@ -219,6 +226,7 @@ export function compileWithBackward(model, exampleInputs, opts = {}) {
     }
 
     const ctx = _executeSeparateForward(meta, inputs);
+    if (ctx && ctx.then) return ctx.then((c) => { _savedValues = c; return c.results; });
     _savedValues = ctx;
     return ctx.results;
   }
@@ -256,14 +264,15 @@ export function compileWithBackward(model, exampleInputs, opts = {}) {
     _savedValues = { inputArrays, paramArrays, gradOutputArrays, outputArrays, outputShapes, device, compiled };
 
     const allArgs = [...inputArrays, ...paramArrays, ...gradOutputArrays, ...outputArrays];
-    compiled.result.run(funcName, ...allArgs);
-
-    const fwdOutputs = [];
-    for (let i = 0; i < compiled.numForwardOutputs; i++) {
-      fwdOutputs.push(wrapResult(outputArrays[i], outputShapes[i], jointFunc.outputTypes[i].dtype, device));
-    }
-
-    return fwdOutputs.length === 1 ? fwdOutputs[0] : fwdOutputs;
+    const build = () => {
+      const fwdOutputs = [];
+      for (let i = 0; i < compiled.numForwardOutputs; i++) {
+        fwdOutputs.push(wrapResult(outputArrays[i], outputShapes[i], jointFunc.outputTypes[i].dtype, device));
+      }
+      return fwdOutputs.length === 1 ? fwdOutputs[0] : fwdOutputs;
+    };
+    const pending = _runK(compiled.result, funcName, allArgs);
+    return pending ? pending.then(build) : build();
   }
 
   compiledForward.backward = function (...gradOutputs) {
@@ -300,19 +309,20 @@ export function compileWithBackward(model, exampleInputs, opts = {}) {
     }
 
     const allArgs = [...inputArrays, ...paramArrays, ...gradArrays, ...newOutputArrays];
-    compiled.result.run(compiled.result.listKernels()[0], ...allArgs);
-
-    const gradInputs = [];
-    for (let i = compiled.numForwardOutputs; i < numOutputs; i++) {
-      gradInputs.push(wrapResult(
-        newOutputArrays[i],
-        newOutputShapes[i],
-        jointFunc.outputTypes[i].dtype,
-        device
-      ));
-    }
-
-    return gradInputs;
+    const build = () => {
+      const gradInputs = [];
+      for (let i = compiled.numForwardOutputs; i < numOutputs; i++) {
+        gradInputs.push(wrapResult(
+          newOutputArrays[i],
+          newOutputShapes[i],
+          jointFunc.outputTypes[i].dtype,
+          device
+        ));
+      }
+      return gradInputs;
+    };
+    const pending = _runK(compiled.result, compiled.result.listKernels()[0], allArgs);
+    return pending ? pending.then(build) : build();
   }
 
   compiledForward.original = model;

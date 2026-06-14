@@ -1,5 +1,29 @@
 import { BackendPipeline } from '../../backend/pipeline.js';
 
+const MAX_MEASURED_SERIAL_TRIPS = 1e6;
+
+function maxSerialTripCount(node, acc) {
+  if (!node) return 0;
+  if (node.type === 'ForNode') {
+    const ext = node.extent && node.extent.type === 'IntImmNode' ? node.extent.value : 1;
+    const next = node.threadTag ? acc : acc * ext;
+    return maxSerialTripCount(node.body, next);
+  }
+  if (node.type === 'BlockNode') {
+    return Math.max(acc, maxSerialTripCount(node.body, acc), node.initBody ? maxSerialTripCount(node.initBody, acc) : 0);
+  }
+  if (node.type === 'SeqNode') {
+    let m = acc;
+    for (const s of node.stmts) m = Math.max(m, maxSerialTripCount(s, acc));
+    return m;
+  }
+  if (node.type === 'IfThenElseNode') {
+    return Math.max(maxSerialTripCount(node.thenBody, acc), node.elseBody ? maxSerialTripCount(node.elseBody, acc) : acc);
+  }
+  if (node.type === 'AllocateNode' || node.type === 'LetStmtNode') return maxSerialTripCount(node.body, acc);
+  return acc;
+}
+
 export class BenchmarkResult {
   constructor(medianMs, minMs, samples, totalBytes, trimmedMeanMs = null, cv = 0) {
     this.medianMs = medianMs;
@@ -55,6 +79,7 @@ export class BenchmarkRunner {
     this.minRepeatMs = config.minRepeatMs ?? 0;
     this.maxCv = config.maxCv ?? 0;
     this.maxReMeasures = config.maxReMeasures ?? 1;
+    this.measurer = config.measurer || null;
     this._bufferCache = new Map();
   }
 
@@ -81,8 +106,10 @@ export class BenchmarkRunner {
   }
 
   run(primFunc) {
-    if (!this.target.isCPU()) return null;
     if (!primFunc || !primFunc.body) return null;
+    if (!this.target.isCPU()) {
+      return this.measurer ? this._runMeasured(primFunc) : null;
+    }
 
     const backend = new BackendPipeline(this.target);
     let compiled;
@@ -115,6 +142,33 @@ export class BenchmarkRunner {
       if (this.maxCv <= 0 || stats.cv <= this.maxCv) break;
     }
 
+    return new BenchmarkResult(stats.median, stats.min, samples, totalBytes, stats.trimmedMean, stats.cv);
+  }
+
+  _runMeasured(primFunc) {
+    if (primFunc.shapeParams && primFunc.shapeParams.length > 0) return null;
+    if (maxSerialTripCount(primFunc.body, 1) > MAX_MEASURED_SERIAL_TRIPS) return null;
+    let compiled;
+    try {
+      compiled = new BackendPipeline(this.target).compile(primFunc);
+    } catch {
+      return null;
+    }
+    const byteSizes = [];
+    let totalBytes = 0;
+    for (const [, buf] of primFunc.bufferMap) {
+      const bytes = Math.max(buf.sizeInBytes(), 1);
+      byteSizes.push(bytes);
+      totalBytes += bytes;
+    }
+    let samples;
+    try {
+      samples = this.measurer(compiled, byteSizes, [], { warmup: this.warmup, repeat: this.repeat });
+    } catch {
+      return null;
+    }
+    if (!samples || samples.length === 0) return null;
+    const stats = robustStats(samples);
     return new BenchmarkResult(stats.median, stats.min, samples, totalBytes, stats.trimmedMean, stats.cv);
   }
 

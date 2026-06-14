@@ -1,4 +1,4 @@
-import { DispatchKeySet, EMPTY_KEY_SET } from './dispatch_key.js';
+import { EMPTY_KEY_SET } from './dispatch_key.js';
 import { OperatorEntry } from './operator_entry.js';
 import { OperatorHandle } from './operator_handle.js';
 import { FallbackTable } from './fallback.js';

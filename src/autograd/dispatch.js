@@ -1,4 +1,4 @@
-import { DispatchKey, DispatchKeySet, AUTOGRAD_KEY_SET } from '../dispatcher/dispatch_key.js';
+import { DispatchKey, AUTOGRAD_KEY_SET } from '../dispatcher/dispatch_key.js';
 import { KernelFunction } from '../dispatcher/boxing.js';
 import { dispatcher } from '../dispatcher/dispatcher.js';
 import { GradMode } from './grad_mode.js';
@@ -69,70 +69,6 @@ function _getOrCreateAccumulator(tensor) {
     meta.setGradAccumulator(acc);
   }
   return acc;
-}
-
-function autogradFallback(keySet, stack) {
-  const opName = stack._opName;
-  const args = stack._args;
-  const handle = stack._handle;
-
-  if (!GradMode.isEnabled() || !_anyRequiresGrad(args)) {
-    return dispatcher.redispatch(handle, keySet, ...args);
-  }
-
-  const gradFn = getGradFn(opName);
-  if (!gradFn) {
-    return dispatcher.redispatch(handle, keySet, ...args);
-  }
-
-  const tensorArgs = _extractTensors(args);
-  for (let i = 0; i < tensorArgs.length; i++) {
-    gradFn.saveTensor(_snapshotTensor(tensorArgs[i]));
-    gradFn.saveInputMetadata(i, [...tensorArgs[i].shape], tensorArgs[i].dtype);
-  }
-
-  for (let i = 0; i < tensorArgs.length; i++) {
-    const t = tensorArgs[i];
-    if (t.requiresGrad) {
-      const fn = t.gradFn;
-      if (fn) {
-        const outputNr = t._impl.autogradMeta ? t._impl.autogradMeta.outputNr : 0;
-        gradFn.setNextEdge(i, fn, outputNr);
-      } else {
-        const acc = _getOrCreateAccumulator(t);
-        if (acc) gradFn.setNextEdge(i, acc, 0);
-      }
-    }
-  }
-
-  const result = dispatcher.redispatch(handle, keySet, ...args);
-
-  if (result && result._impl) {
-    if (!result._impl.autogradMeta) {
-      result._impl.setAutogradMeta(new AutogradMeta());
-    }
-    const meta = result._impl.autogradMeta;
-    meta.setGradFn(gradFn, 0);
-    meta.requiresGrad = true;
-    result._impl._updateKeySet();
-  }
-
-  return result;
-}
-
-export function registerAutogradDispatch() {
-  const AUTOGRAD = DispatchKey.AUTOGRAD;
-  const AUTOGRAD_CPU = DispatchKey.AUTOGRAD_CPU;
-  const AUTOGRAD_GPU = DispatchKey.AUTOGRAD_GPU;
-  const AUTOGRAD_WASM = DispatchKey.AUTOGRAD_WASM;
-
-  const wrapper = (key) => {
-    return (keySetFromDispatch, ...args) => {
-      const handle = args._handle;
-      const opName = args._opName;
-      return autogradFallback(keySetFromDispatch, { _opName: opName, _args: args, _handle: handle });
-    };
-  };
 }
 
 export function wrapWithAutograd(opName, handle) {

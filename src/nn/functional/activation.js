@@ -1,5 +1,5 @@
 import * as ops from '../../tensor/ops/ops.js';
-import { scalar } from '../../tensor/factory/from_ops.js';
+
 import { full } from '../../tensor/factory/creation_ops.js';
 
 export function relu(input) {

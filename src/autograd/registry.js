@@ -1,25 +1,12 @@
-import {
-  AddBackward, SubBackward, MulBackward,
-  DivBackward, NegBackward, PowBackward,
-} from './function/basic.js';
+import { AddBackward, SubBackward, MulBackward, DivBackward, NegBackward, PowBackward } from './function/basic.js';
 
-import {
-  ExpBackward, LogBackward, SqrtBackward,
-  TanhBackward, SigmoidBackward, ReluBackward,
-  GeluBackward, SiluBackward,
-} from './function/unary.js';
+import { ExpBackward, LogBackward, SqrtBackward, TanhBackward, SigmoidBackward, ReluBackward, GeluBackward, SiluBackward } from './function/unary.js';
 
 import { SumBackward, MeanBackward } from './function/reduction.js';
 import { MatmulBackward, DotBackward } from './function/linalg.js';
-import {
-  ReshapeBackward, TransposeBackward,
-  SliceBackward, ExpandBackward, PermuteBackward,
-} from './function/view.js';
 
-import {
-  CatBackward, ClampBackward, PadBackward,
-  IndexSelectBackward, WhereBackward,
-} from './function/indexing.js';
+
+import { CatBackward, ClampBackward, PadBackward, IndexSelectBackward, WhereBackward } from './function/indexing.js';
 
 const _registry = new Map();
 
@@ -62,8 +49,4 @@ export function getGradFn(opName) {
 
 export function hasGradFn(opName) {
   return _registry.has(opName);
-}
-
-export function registerGradFn(opName, factory) {
-  _registry.set(opName, factory);
 }

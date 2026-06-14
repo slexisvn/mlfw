@@ -65,10 +65,3 @@ export function tensorsOverlap(implA, implB) {
 
   return rangeA.start < rangeB.end && rangeB.start < rangeA.end;
 }
-
-export function assertNoPartialOverlap(implA, implB) {
-  if (implA === implB) return;
-  if (tensorsOverlap(implA, implB)) {
-    throw new Error('Tensors have overlapping memory regions');
-  }
-}

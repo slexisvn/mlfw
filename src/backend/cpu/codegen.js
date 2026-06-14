@@ -1,6 +1,6 @@
 import { ForKind } from '../../compiler/ir/tensor/nodes.js';
 import { jsTypedArray, isJSMathFunc, isDtypeInt } from '../dtype_map.js';
-import { inferDtype } from '../../compiler/ir/lir/nodes.js';
+
 import '../../tensor/utils/half.js';
 
 const _HALF_EXPAND = { f16: '__mlfw_f16_to_f32', bf16: '__mlfw_bf16_to_f32' };

@@ -3,7 +3,7 @@ import { transpose as viewTranspose } from '../../tensor/view/view_ops.js';
 import { SymbolicTensor } from '../../tracing/symbolic_tensor.js';
 import { empty, full } from '../../tensor/factory/creation_ops.js';
 import { dropout } from './dropout.js';
-import { GradMode } from '../../autograd/grad_mode.js';
+
 
 function _softmax(x, dim) {
   if (x instanceof SymbolicTensor || x.isSymbolic) {

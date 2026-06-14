@@ -2,7 +2,7 @@ import { FunctionPass, PassResult } from '../pass.js';
 import { Operation, cloneRegion } from '../../ir/graph/operation.js';
 import { Block, Region } from '../../ir/graph/block.js';
 import { registry } from '../../ir/graph/ops.js';
-import { FusionKind, classifyFusionKind, classifyOpPattern } from './fusion_analysis.js';
+import { FusionKind, classifyOpPattern } from './fusion_analysis.js';
 import { FusionGroup } from './fusion_groups.js';
 import { FusionCostModel } from './fusion_cost.js';
 import { PostDominanceAnalysis } from '../../analysis/dominance.js';

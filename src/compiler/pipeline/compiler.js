@@ -16,7 +16,7 @@ import { lowerGraphToPrimFunc } from '../passes/lowering/graph_to_tensor.js';
 import { Schedule } from '../schedule/schedule.js';
 import { SchedulePolicy } from '../schedule/rules.js';
 import { MemoryPlanner } from '../passes/memory/memory_planning.js';
-import { BackendPipeline } from '../../backend/pipeline.js';
+import { BackendPipeline, detectPureMatmul } from '../../backend/pipeline.js';
 import { RuntimeModule } from '../runtime/runtime.js';
 import { Autotuner } from '../autotune/autotuner.js';
 import { TensorVerifier } from '../ir/tensor/verifier.js';
@@ -25,7 +25,8 @@ import { CalibrationCollector } from '../analysis/calibration.js';
 import { DecompositionPass } from '../passes/decompose/decomposition_pass.js';
 import { RematerializationPass } from '../passes/memory/rematerialization.js';
 import { GraphPartitionPass, PartitionMaterializationPass } from '../passes/partition/partition_pass.js';
-import { TargetFeatures } from '../../backend/target.js';
+import { splitGraphForCublas } from '../passes/partition/cublas_split.js';
+
 import { TraceLog, TraceLevel, CompilationError } from './trace.js';
 import { IRPrinter } from '../ir/graph/printer.js';
 import { printTensorIR } from '../ir/tensor/printer.js';
@@ -64,6 +65,8 @@ export class CompilerConfig {
       autotune: s.autotune ?? opts.enableAutotune ?? false,
       ...spread(opts.autotuneConfig), ...omit(s, 'enabled', 'autotune'),
     };
+
+    this.matmulBackend = opts.matmulBackend || 'native';
 
     const q = opts.quantization || {};
     this.quantization = {
@@ -176,11 +179,22 @@ export class Compiler {
       this._runPartitioning(graphModule, trace);
     }
 
+    let cublasSplit = null;
+    if (this.config.matmulBackend === 'cublas') {
+      cublasSplit = splitGraphForCublas(graphModule);
+    }
+
     if (this.config.verify) {
       this._verifyGraph(graphModule, 'after graph passes', trace, errors, failed, resilient);
     }
 
     const primFuncs = this._lowerAll(graphModule, trace, errors, failed, resilient);
+
+    if (this.config.matmulBackend === 'cublas') {
+      for (const pf of primFuncs) {
+        pf.cublasInfo = cublasSplit ? (cublasSplit.cublasInfos.get(pf.name) || null) : detectPureMatmul(pf);
+      }
+    }
 
     this._scheduleAll(primFuncs, trace, errors, failed, resilient);
 
@@ -197,6 +211,8 @@ export class Compiler {
     const lirFuncs = this._lowerToLIR(primFuncs, trace, errors, failed, resilient);
 
     const runtimeModule = this._codegen(lirFuncs, trace, errors, failed, resilient);
+
+    if (cublasSplit) runtimeModule.executionPlan = cublasSplit.plan;
 
     trace.phaseEnd('compile', performance.now() - t0);
 
@@ -244,9 +260,9 @@ export class Compiler {
       pm.addPass(new DCEPass());
     }
 
-    const shouldEpilogueFuse = this.config.fusion.epilogue !== undefined
+    const shouldEpilogueFuse = this.config.matmulBackend !== 'cublas' && (this.config.fusion.epilogue !== undefined
       ? this.config.fusion.epilogue
-      : (this.config.target && this.config.target.enableEpilogueFusion);
+      : (this.config.target && this.config.target.enableEpilogueFusion));
 
     if (shouldEpilogueFuse) {
       pm.addPass(new EpilogueFusionPass({ target: this.config.target }));
@@ -351,6 +367,7 @@ export class Compiler {
       const autotuner = new Autotuner(this.config.target, sCfg);
       for (const pf of primFuncs) {
         if (failed.has(pf.name)) continue;
+        if (pf.cublasInfo) continue;
         try {
           const ft0 = performance.now();
           const tuneResult = autotuner.tuneAndApply(pf);
@@ -380,6 +397,7 @@ export class Compiler {
       const policy = new SchedulePolicy(this.config.target, null, trace);
       for (const pf of primFuncs) {
         if (failed.has(pf.name)) continue;
+        if (pf.cublasInfo) continue;
         try {
           const ft0 = performance.now();
           const sch = new Schedule(pf);
@@ -410,6 +428,7 @@ export class Compiler {
     const planner = new MemoryPlanner({ alignment, enableInplace: this.config.memory.inplaceReuse, allocStrategy: this.config.memory.allocStrategy });
     for (const pf of primFuncs) {
       if (failed.has(pf.name)) continue;
+      if (pf.gpuRegisterBlocked) continue;
       try {
         const ft0 = performance.now();
         const { plan } = planner.planAndRewrite(pf);
@@ -477,6 +496,8 @@ export class Compiler {
       try {
         const ft0 = performance.now();
         const lirFunc = lowerToLIR(pf, this.config.target);
+        if (pf.cublasInfo) lirFunc.cublasInfo = pf.cublasInfo;
+        if (pf.gpuRegisterBlocked) lirFunc.gpuRegisterBlocked = true;
         if (this.config.verifyMode === 'full') {
           const lirErrors = verifyLIR(lirFunc);
           if (lirErrors.length > 0) {
@@ -503,12 +524,13 @@ export class Compiler {
     const runtimeMod = new RuntimeModule('compiled');
 
     const usePartition = this.config.partition.enabled && this.config.partition.targets.length >= 2;
+    const backendOpts = { matmulBackend: this.config.matmulBackend };
     const backendCache = new Map();
     const getBackend = (target) => {
-      if (!backendCache.has(target.name)) backendCache.set(target.name, new BackendPipeline(target));
+      if (!backendCache.has(target.name)) backendCache.set(target.name, new BackendPipeline(target, backendOpts));
       return backendCache.get(target.name);
     };
-    const defaultBackend = usePartition ? null : new BackendPipeline(this.config.target);
+    const defaultBackend = usePartition ? null : new BackendPipeline(this.config.target, backendOpts);
 
     for (const pf of primFuncs) {
       if (failed.has(pf.name)) continue;

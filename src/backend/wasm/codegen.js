@@ -1,5 +1,5 @@
 import { ForKind } from '../../compiler/ir/tensor/nodes.js';
-import { wasmType, wasmLoad, wasmStore, wasmBytes, isDtypeFloat, isDtypeInt, wasmSimdEntry, wasmVecOp, wasmVecLoad, wasmVecStore, wasmVecSplat, wasmVecExtractLane, wasmVecReplaceLane, wasmVecLanes } from '../dtype_map.js';
+import { wasmType, wasmLoad, wasmStore, wasmBytes, isDtypeFloat, wasmSimdEntry, wasmVecOp } from '../dtype_map.js';
 import { inferDtype } from '../../compiler/ir/lir/nodes.js';
 import { HALF_WASM_CONSTANTS } from '../../tensor/utils/half.js';
 

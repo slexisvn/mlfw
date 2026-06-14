@@ -11,7 +11,7 @@ const STDINT_TYPEDEFS =
   'typedef signed char int8_t;\ntypedef short int16_t;\ntypedef int int32_t;\ntypedef long long int64_t;\n' +
   'typedef unsigned char uint8_t;\ntypedef unsigned short uint16_t;\ntypedef unsigned int uint32_t;\ntypedef unsigned long long uint64_t;\n';
 
-function hashSource(s) {
+export function hashSource(s) {
   let h = 0x811c9dc5;
   for (let i = 0; i < s.length; i++) {
     h ^= s.charCodeAt(i);
@@ -20,9 +20,11 @@ function hashSource(s) {
   return (h >>> 0).toString(16);
 }
 
-export function getProgram(source, kernelName) {
-  const key = hashSource(source) + ':' + kernelName;
-  const cached = _cache.get(key);
+const _ptxCache = new Map();
+
+export function compileToPTX(source, kernelName) {
+  const key = hashSource(source);
+  const cached = _ptxCache.get(key);
   if (cached) return cached;
 
   const { arch } = getDevice();
@@ -46,7 +48,16 @@ export function getProgram(source, kernelName) {
   const ptx = new Uint8Array(Number(sz[0]));
   checkCU('nvrtcGetPTX', nv.getPTX(prog[0], ptx));
   nv.destroyProgram(prog);
+  _ptxCache.set(key, ptx);
+  return ptx;
+}
 
+export function getProgram(source, kernelName) {
+  const key = hashSource(source) + ':' + kernelName;
+  const cached = _cache.get(key);
+  if (cached) return cached;
+
+  const ptx = compileToPTX(source, kernelName);
   const mod = [null];
   checkCU('cuModuleLoadData', cu.moduleLoadData(mod, ptx));
   const func = [null];

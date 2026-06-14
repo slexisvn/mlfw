@@ -47,6 +47,7 @@ export const cu = {
   launchKernel: drv.func('int cuLaunchKernel(void *f, uint gx, uint gy, uint gz, uint bx, uint by, uint bz, uint shmem, void *stream, void **params, void **extra)'),
   streamCreate: drv.func('int cuStreamCreate(_Out_ void **stream, uint flags)'),
   streamSynchronize: drv.func('int cuStreamSynchronize(void *stream)'),
+  ctxSetCurrent: drv.func('int cuCtxSetCurrent(void *ctx)'),
 };
 
 export const nv = {

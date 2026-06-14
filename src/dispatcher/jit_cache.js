@@ -168,10 +168,6 @@ export function jitCompile(opName, tensorArgs, scalarArgs, target) {
   return entry;
 }
 
-export function jitCacheSize() {
-  return _cache.size;
-}
-
 export function jitCacheClear() {
   _cache.clear();
   _runtimeModules.clear();

@@ -1,4 +1,4 @@
-import { Schedule, resetVarCounter } from '../schedule/schedule.js';
+import { Schedule } from '../schedule/schedule.js';
 import { ScheduleValidator } from '../schedule/validator.js';
 import { FeatureExtractor } from './features.js';
 import { AnalyticalCostModel, LearnedCostModel } from './cost_model.js';
@@ -9,6 +9,16 @@ import { BenchmarkRunner } from './benchmark.js';
 import { Deadline } from './budget.js';
 import { buildBlockMap, computeWorkloadKey } from './workload_key.js';
 import { PrimFunc, ForNode, SeqNode, BlockNode } from '../ir/tensor/nodes.js';
+import { getMeasurer } from '../runtime/measurer_registry.js';
+
+function resolveMeasurer(target) {
+  if (target.isCPU()) return null;
+  const measurer = getMeasurer(target.kind);
+  if (!measurer) {
+    throw new Error('hardwareMeasure requested for target \'' + target.kind + '\' but no measurer is registered for it; the corresponding runtime must be loaded (Node: import \'#io/cuda_runtime\') before compiling');
+  }
+  return measurer;
+}
 
 export class AutotuneConfig {
   constructor(opts = {}) {
@@ -21,7 +31,9 @@ export class AutotuneConfig {
     this.clock = opts.clock || null;
     this.tuningDB = opts.tuningDB || null;
     this.useTuningDB = opts.useTuningDB !== false;
-    this.enableBenchmark = opts.enableBenchmark ?? false;
+    this.measurer = opts.measurer || null;
+    this.hardwareMeasure = opts.hardwareMeasure ?? false;
+    this.enableBenchmark = opts.enableBenchmark ?? (this.hardwareMeasure || !!opts.measurer);
     this.benchmarkWarmup = opts.benchmarkWarmup ?? 3;
     this.benchmarkRepeat = opts.benchmarkRepeat ?? 10;
     this.benchmarkMaxCv = opts.benchmarkMaxCv ?? 0;
@@ -196,6 +208,7 @@ export class Autotuner {
   constructor(target, config = {}) {
     this.target = target;
     this.config = config instanceof AutotuneConfig ? config : new AutotuneConfig(config);
+    if (this.config.hardwareMeasure) this.config.measurer = resolveMeasurer(target);
     this.costModel = new AnalyticalCostModel(target);
     this.learnedModel = new LearnedCostModel();
     this.db = this.config.tuningDB instanceof TuningDatabase ? this.config.tuningDB : new TuningDatabase();
@@ -203,7 +216,8 @@ export class Autotuner {
       ? new BenchmarkRunner(target, {
           warmup: this.config.benchmarkWarmup,
           repeat: this.config.benchmarkRepeat,
-          maxCv: this.config.benchmarkMaxCv
+          maxCv: this.config.benchmarkMaxCv,
+          measurer: this.config.measurer
         })
       : null;
   }
@@ -259,8 +273,23 @@ export class Autotuner {
       return { sketchName: cached.sketchName, params: cached.params, score: cached.score, fromCache: true };
     }
 
-    const sketches = getSketchesForBlock(primFunc, blockName, this.target, blockMap);
+    const richGpu = !!this.config.measurer;
+    const sketches = getSketchesForBlock(primFunc, blockName, this.target, blockMap, { richGpu });
     if (sketches.length === 0) return null;
+
+    if (this.benchmarkRunner && sketches.length === 1 && typeof sketches[0].enumerate === 'function') {
+      const enumerated = sketches[0].enumerate().map(params => ({ sketchName: sketches[0].name, params }));
+      const measured = this._refineByCostModel(primFunc, blockName, enumerated, blockMap, deadline, enumerated.length);
+      if (measured.length === 0) return null;
+      const best = measured[0];
+      if (this.config.useTuningDB) {
+        const record = new TuningRecord(workloadKey, best.sketchName, best.params, best.score, null, this.db.version);
+        record.medianMs = best.medianMs || null;
+        record.minMs = best.minMs || null;
+        this.db.store(workloadKey, record);
+      }
+      return { sketchName: best.sketchName, params: best.params, score: best.score, fromCache: false, medianMs: best.medianMs, minMs: best.minMs };
+    }
 
     const mini = extractBlockMini(primFunc, blockName, blockMap);
     const miniBlockName = mini ? blockName : null;
@@ -340,7 +369,7 @@ export class Autotuner {
         if (applied.has(result)) continue;
         applied.add(result);
         if (!result.sketchName || !result.params) continue;
-        const sketches = getSketchesForBlock(primFunc, blockName, this.target, blockMap);
+        const sketches = getSketchesForBlock(primFunc, blockName, this.target, blockMap, { richGpu: !!this.config.measurer });
         const sketch = sketches.find(s => s.name === result.sketchName);
         if (sketch) {
           const apply = sketch.instantiate(result.params);
@@ -353,9 +382,9 @@ export class Autotuner {
     }
   }
 
-  _refineByCostModel(primFunc, blockName, candidates, blockMap, deadline = null) {
-    const topK = candidates.slice(0, this.config.topKForBenchmark);
-    const sketches = getSketchesForBlock(primFunc, blockName, this.target, blockMap);
+  _refineByCostModel(primFunc, blockName, candidates, blockMap, deadline = null, maxK = null) {
+    const topK = candidates.slice(0, maxK ?? this.config.topKForBenchmark);
+    const sketches = getSketchesForBlock(primFunc, blockName, this.target, blockMap, { richGpu: !!this.config.measurer });
     const sketchByName = new Map();
     for (const s of sketches) sketchByName.set(s.name, s);
 

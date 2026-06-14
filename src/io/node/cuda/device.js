@@ -3,7 +3,10 @@ import { cu, checkCU, ATTR_CC_MAJOR, ATTR_CC_MINOR } from './ffi.js';
 let _ctx = null;
 
 export function getDevice() {
-  if (_ctx) return _ctx;
+  if (_ctx) {
+    checkCU('cuCtxSetCurrent', cu.ctxSetCurrent(_ctx.ctx));
+    return _ctx;
+  }
   checkCU('cuInit', cu.init(0));
   const dev = [0];
   checkCU('cuDeviceGet', cu.deviceGet(dev, 0));

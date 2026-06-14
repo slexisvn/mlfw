@@ -1,4 +1,4 @@
-import { OpDef, SideEffectKind, OpTrait } from '../op_registry.js';
+import { OpDef, OpTrait } from '../op_registry.js';
 import { TensorType, TupleType, ScalarType } from '../types.js';
 
 export function register(registry) {

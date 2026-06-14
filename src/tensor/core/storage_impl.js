@@ -29,10 +29,6 @@ export function getAllocator(deviceType) {
   return _ALLOCATORS.get(deviceType) || _ALLOCATORS.get(DeviceType.CPU);
 }
 
-export function registerAllocator(deviceType, allocator) {
-  _ALLOCATORS.set(deviceType, allocator);
-}
-
 export class StorageImpl {
   constructor(data, nbytes, device, allocator) {
     this._data = data;

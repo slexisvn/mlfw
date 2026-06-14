@@ -1,6 +1,6 @@
 import { GraphFunction } from '../ir/graph/function.js';
 import { IRBuilder } from '../ir/graph/builder.js';
-import { TensorType } from '../ir/graph/types.js';
+
 import { UseDefAnalysis } from '../analysis/use_def.js';
 import { GradAccumulator } from './grad_accumulator.js';
 import { getVJPRule } from './vjp_registry.js';

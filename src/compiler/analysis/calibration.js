@@ -1,4 +1,4 @@
-import { QuantizationParams, QuantizationScheme } from '../ir/graph/quantization_types.js';
+import { QuantizationParams } from '../ir/graph/quantization_types.js';
 import { TensorType, isFloatType } from '../ir/graph/types.js';
 
 export class ValueObserver {

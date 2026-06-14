@@ -10,7 +10,3 @@ export function getHandle(name) {
   }
   return h;
 }
-
-export function clearHandleCache() {
-  _cache.clear();
-}

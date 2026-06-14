@@ -1,7 +1,7 @@
 import { AutogradNode } from '../node.js';
 import * as ops from '../../tensor/ops/ops.js';
-import { ones, full, zeros } from '../../tensor/factory/creation_ops.js';
-import { expand, unsqueeze, reshape, contiguous } from '../../tensor/view/view_ops.js';
+import { full, zeros } from '../../tensor/factory/creation_ops.js';
+import { unsqueeze } from '../../tensor/view/view_ops.js';
 
 function _normalizeDims(dim, rank) {
   if (dim === undefined || dim === null) {

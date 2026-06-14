@@ -1,7 +1,8 @@
-import { ForKind } from '../ir/tensor/nodes.js';
+
 import { TargetKind } from '../../backend/target.js';
-import { ScheduleTrace } from '../schedule/trace.js';
+
 import { classifyBlock, isReductionLoop, primFuncHasReduction } from '../schedule/rules.js';
+import { matmulTileDims, enumerateRegisterBlockConfigs, createMatmulRegisterBlockGPUSketch } from './gpu_matmul_sketch.js';
 
 export class SearchVariable {
   constructor(name, candidates) {
@@ -314,7 +315,68 @@ const GPU_SKETCH_RULES = [
     derive: () => [createElementwiseGPUSketch()] }
 ];
 
-export function getSketchesForBlock(primFunc, blockName, target, blockMap) {
+function collectAllBlockNames(root) {
+  const names = [];
+  const stack = [root];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (!node) continue;
+    if (node.type === 'BlockNode') names.push(node.name);
+    if (node.body) stack.push(node.body);
+    if (node.stmts) for (const s of node.stmts) stack.push(s);
+    if (node.thenBody) stack.push(node.thenBody);
+    if (node.elseBody) stack.push(node.elseBody);
+    if (node.initBody) stack.push(node.initBody);
+  }
+  return names;
+}
+
+export function analyzePureMatmul(primFunc, target) {
+  const names = collectAllBlockNames(primFunc.body);
+  let reductionBlock = null;
+  for (const name of names) {
+    const s = analyzeBlockStructure(primFunc, name);
+    if (s.hasReduction && s.spatial === 2 && s.reads >= 2) {
+      if (reductionBlock) return null;
+      reductionBlock = name;
+    }
+  }
+  if (!reductionBlock) return null;
+  const dims = matmulTileDims(primFunc, reductionBlock);
+  if (!dims) return null;
+  for (const name of names) {
+    if (name === reductionBlock) continue;
+    const info = classifyBlock(primFunc, name);
+    if (!info) return null;
+    if (info.hasReduction) return null;
+    if (info.readBuffers.length > 0) return null;
+    for (const w of info.writeBuffers) if (w !== dims.C.name) return null;
+  }
+  return { reductionBlock, dims };
+}
+
+let _matmulSketchCache = null;
+let _matmulSketchOwner = null;
+
+function richMatmulSketches(primFunc, blockName, target) {
+  const plan = analyzePureMatmul(primFunc, target);
+  if (!plan) return null;
+  if (_matmulSketchOwner !== primFunc) {
+    const configs = enumerateRegisterBlockConfigs(target, plan.dims);
+    _matmulSketchCache = configs.length > 0 ? createMatmulRegisterBlockGPUSketch(configs) : null;
+    _matmulSketchOwner = primFunc;
+  }
+  if (!_matmulSketchCache) return null;
+  if (blockName === plan.reductionBlock) return [_matmulSketchCache];
+  return [];
+}
+
+export function getSketchesForBlock(primFunc, blockName, target, blockMap, opts = {}) {
+  if (opts.richGpu && target.isGPU()) {
+    const rich = richMatmulSketches(primFunc, blockName, target);
+    if (rich !== null) return rich;
+  }
+
   const rules = target.kind === TargetKind.CPU ? CPU_SKETCH_RULES
     : (target.isGPU() ? GPU_SKETCH_RULES : null);
   if (!rules) return [];

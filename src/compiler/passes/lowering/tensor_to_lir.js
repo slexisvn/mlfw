@@ -44,6 +44,7 @@ function lowerStmt(node, ctx) {
     case 'IfThenElseNode': return lowerIfThenElse(node, ctx);
     case 'WhileNode': return lowerWhile(node, ctx);
     case 'EvaluateNode': return new EvaluateNode(lowerExpr(node.value, ctx));
+    case 'SyncThreadsNode': return node;
     default: return node;
   }
 }

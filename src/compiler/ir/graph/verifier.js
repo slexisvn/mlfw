@@ -1,5 +1,5 @@
-import { TensorType, TupleType, TokenType, typeToString, DYNAMIC } from './types.js';
-import { Value, BlockArgument } from './value.js';
+import { TensorType, typeToString } from './types.js';
+import { Value } from './value.js';
 import { registry } from './ops.js';
 
 export class VerificationError {

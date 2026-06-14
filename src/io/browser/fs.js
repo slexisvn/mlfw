@@ -23,5 +23,3 @@ export const fs = {
   },
   remove(path) { files.delete(path); },
 };
-
-export const memfs = files;

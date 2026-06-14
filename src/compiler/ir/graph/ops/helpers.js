@@ -1,4 +1,4 @@
-import { TensorType, ScalarType, DYNAMIC, isFloatType } from '../types.js';
+import { TensorType, ScalarType, isFloatType } from '../types.js';
 import { OpTrait } from '../op_registry.js';
 
 export function inferBinaryElementwise(operandTypes) {

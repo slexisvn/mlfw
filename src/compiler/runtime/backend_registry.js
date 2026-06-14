@@ -152,5 +152,9 @@ registerBackend('cuda', {
     const { runCudaKernel } = await getCudaRuntime();
     await runCudaKernel(inst.kernel, tensorArgs, shapeValues);
   },
+  async runPlan(plan, slots, steps) {
+    const { runCudaPlan } = await getCudaRuntime();
+    await runCudaPlan(plan, slots, steps);
+  },
   isAsync() { return true; },
 });

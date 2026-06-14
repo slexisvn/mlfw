@@ -1,6 +1,6 @@
 import { TensorImpl } from './tensor_impl.js';
 import { AutogradMeta } from './autograd_meta.js';
-import { flatIndex, computeNumel } from '../utils/shape_utils.js';
+
 import { readFromStorage } from '../utils/half.js';
 
 const _EXPAND_DTYPES = new Set(['f16', 'bf16', 'i64']);
