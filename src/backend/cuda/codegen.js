@@ -1,5 +1,5 @@
 import { ForKind } from '../../compiler/ir/tensor/nodes.js';
-import { cType, cPtrType, cLiteralSuffix, cMathFunc } from '../dtype_map.js';
+import { cType, cPtrType, cLiteralSuffix, cMathFunc, isDtypeInt, dtypeBytes } from '../dtype_map.js';
 
 
 export class CUDAKernel {
@@ -119,11 +119,17 @@ export class CUDACodegen {
       throw new Error(`[codegen] kernel '${func.name}' block ${blockDim.join('x')} = ${blockThreads} threads exceeds maxThreadsPerBlock ${t.maxThreadsPerBlock}`);
     }
 
+    const sharedBytes = this._sharedBuffers.reduce((sum, b) => sum + Math.max(b.sizeInBytes(), 0), 0)
+      + this._promotedBufferDecls.reduce((sum, d) => sum + Math.max(d.size, 0) * dtypeBytes(d.dtype), 0);
+    if (sharedBytes > t.sharedMemoryBytes) {
+      throw new Error(`[codegen] kernel '${func.name}' shared memory ${sharedBytes} bytes exceeds device limit ${t.sharedMemoryBytes}`);
+    }
+
     return new CUDAKernel(
       func.name,
       this._lines.join('\n'),
       blockDim, gridDim,
-      this._sharedBuffers.reduce((sum, b) => sum + Math.max(b.sizeInBytes(), 0), 0),
+      sharedBytes,
       paramNames,
       outputIndices
     );
@@ -354,6 +360,13 @@ export class CUDACodegen {
       const zero = `0.0${cLiteralSuffix(dtype)}`;
       return `((${v} > ${zero}) - (${v} < ${zero}))`;
     }
+    if (node.externName === 'min' || node.externName === 'max') {
+      if (isDtypeInt(dtype)) {
+        const op = node.externName === 'min' ? '<' : '>';
+        return `((${args[0]}) ${op} (${args[1]}) ? (${args[0]}) : (${args[1]}))`;
+      }
+      return `${cMathFunc(node.externName, dtype)}(${joined})`;
+    }
     const fn = cMathFunc(node.externName, dtype);
     return `${fn}(${joined})`;
   }
@@ -436,13 +449,15 @@ export class CUDACodegen {
       this._needsBarriers = false;
       return;
     }
-    const extents = new Set();
+    let crossThreadShared = false;
     for (const [, entries] of this._threadBindings) {
+      const perTag = new Set();
       for (const e of entries) {
-        if (e.extent > 0) extents.add(e.extent);
+        if (e.extent > 0) perTag.add(e.extent);
       }
+      if (perTag.size > 1) { crossThreadShared = true; break; }
     }
-    if (extents.size <= 1) return;
+    if (!crossThreadShared) return;
 
     this._needsBarriers = true;
 

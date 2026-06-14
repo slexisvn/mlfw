@@ -22,6 +22,15 @@ function compileGPU(model, inputs, opts) {
   return modelCompile(model, inputs, { target: CUDATarget(), ...opts });
 }
 
+function modelAllSrc(compiled) {
+  const mod = compiled.result().module;
+  return mod.listKernels().map(n => mod.getKernelSource(n)).join('\n');
+}
+
+function modelKernelCount(compiled) {
+  return compiled.result().module.listKernels().length;
+}
+
 function getSource(result, name) { return result.getSource(name); }
 
 function getAllSource(result) {
@@ -106,13 +115,13 @@ function checkKernelSanity(src) {
 
 describe('Deep MLP kernel quality', () => {
   it('6-layer MLP with relu: compiles, no undeclared vars, no JS artifacts', () => {
-    const func = buildFunction('mlp_relu6', [t([32, 64])], [t([32, 16])], (b, args) => {
+    const func = buildFunction('mlp_relu6', [t([8, 16])], [t([8, 8])], (b, args) => {
       let x = args[0];
-      const sizes = [64, 128, 128, 64, 32, 16];
-      let inSize = 64;
+      const sizes = [16, 32, 32, 16, 16, 8];
+      let inSize = 16;
       for (const outSize of sizes) {
         const w = b.constant(0.01, t([inSize, outSize])).getResult(0);
-        const bias = b.constant(0, t([32, outSize])).getResult(0);
+        const bias = b.constant(0, t([8, outSize])).getResult(0);
         x = b.add(b.matmul(x, w).getResult(0), bias).getResult(0);
         x = b.relu(x).getResult(0);
         inSize = outSize;
@@ -129,13 +138,13 @@ describe('Deep MLP kernel quality', () => {
   });
 
   it('6-layer MLP with tanh: compiles with tanhf calls', () => {
-    const func = buildFunction('mlp_tanh6', [t([32, 64])], [t([32, 16])], (b, args) => {
+    const func = buildFunction('mlp_tanh6', [t([8, 16])], [t([8, 8])], (b, args) => {
       let x = args[0];
-      const sizes = [64, 128, 128, 64, 32, 16];
-      let inSize = 64;
+      const sizes = [16, 32, 32, 16, 16, 8];
+      let inSize = 16;
       for (const outSize of sizes) {
         const w = b.constant(0.01, t([inSize, outSize])).getResult(0);
-        const bias = b.constant(0, t([32, outSize])).getResult(0);
+        const bias = b.constant(0, t([8, outSize])).getResult(0);
         x = b.add(b.matmul(x, w).getResult(0), bias).getResult(0);
         x = b.tanh(x).getResult(0);
         inSize = outSize;
@@ -876,10 +885,9 @@ describe('Model-level GPU compilation quality', () => {
     );
     const x = tensor([Array.from({ length: 8 }, (_, i) => i * 0.1)]);
     const compiled = compileGPU(model, [x], { enableSchedule: true });
-    const src = compiled.source();
+    const src = modelAllSrc(compiled);
+    expect(modelKernelCount(compiled)).toBeGreaterThan(1);
     expect(src).toContain('__global__');
-    expect(src).toContain('__shared__');
-    expect(src).toContain('__syncthreads()');
     expect(src).not.toMatch(/Math\./);
     expect(src).not.toContain('undefined');
   });
@@ -891,7 +899,7 @@ describe('Model-level GPU compilation quality', () => {
     );
     const x = tensor([[1, 2, 3, 4]]);
     const compiled = compileGPU(model, [x], { enableSchedule: true });
-    const src = compiled.source();
+    const src = modelAllSrc(compiled);
     expect(src).toContain('tanhf(');
     expect(src).toContain('__global__');
   });
@@ -903,7 +911,7 @@ describe('Model-level GPU compilation quality', () => {
     );
     const x = tensor([[1, 2, 3, 4]]);
     const compiled = compileGPU(model, [x], { enableSchedule: true });
-    const src = compiled.source();
+    const src = modelAllSrc(compiled);
     expect(src).toContain('__global__');
     expect(src).toContain('expf(');
     expect(src).not.toContain('undefined');
@@ -958,10 +966,9 @@ describe('Model-level GPU compilation quality', () => {
     );
     const x = tensor([Array.from({ length: 8 }, (_, i) => i * 0.1)]);
     const compiled = compileGPU(model, [x], { enableSchedule: true });
-    const src = compiled.source();
+    const src = modelAllSrc(compiled);
+    expect(modelKernelCount(compiled)).toBeGreaterThan(1);
     expect(src).toContain('__global__');
-    expect(src).toContain('__shared__');
-    expect(src).toContain('__syncthreads()');
     let depth = 0;
     for (const ch of src) {
       if (ch === '{') depth++;

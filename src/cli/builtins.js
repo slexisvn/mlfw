@@ -31,7 +31,7 @@ const MODULES = [
   'Linear', 'ReLU', 'GELU', 'SiLU', 'Sigmoid', 'Tanh', 'LeakyReLU', 'ELU',
   'Softmax', 'LogSoftmax', 'Flatten', 'Dropout', 'LayerNorm', 'BatchNorm1d',
   'BatchNorm2d', 'Conv1d', 'Conv2d', 'MaxPool2d', 'AvgPool2d',
-  'AdaptiveAvgPool2d', 'Embedding', 'CrossEntropyLoss', 'MSELoss', 'NLLLoss',
+  'AdaptiveAvgPool2d', 'Embedding', 'GRU', 'GRUCell', 'LSTM', 'LSTMCell', 'CrossEntropyLoss', 'MSELoss', 'NLLLoss',
   'BCELoss',
 ];
 
@@ -193,7 +193,6 @@ export function installBuiltins(runtime, define) {
     const compact = args.length > 1;
     const text = args.map(v => compact ? formatValueCompact(v) : formatValue(v)).join(sep);
     runtime.output(text);
-    return args.length === 1 ? args[0] : undefined;
   });
   define('trace', value => {
     const view = value?._isCompiled ? value._compiledView : value instanceof CompiledProgramView ? value : null;

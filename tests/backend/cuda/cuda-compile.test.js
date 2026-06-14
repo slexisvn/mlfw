@@ -1338,24 +1338,34 @@ function compileGPU(model, inputs, opts) {
   return modelCompile(model, inputs, { target: CUDATarget(), ...opts });
 }
 
+function splitInfo(compiled) {
+  const mod = compiled.result().module;
+  const names = mod.listKernels();
+  const sources = names.map(n => mod.getKernelSource(n));
+  let depth = 0;
+  for (const src of sources) for (const ch of src) { if (ch === '{') depth++; if (ch === '}') depth--; }
+  return { count: names.length, allSrc: sources.join('\n'), balanced: depth === 0 };
+}
+
 describe('GPU kernel quality — scheduled shared memory + barriers', () => {
-  it('scheduled multi-stage kernel uses __shared__ and __syncthreads', () => {
+  it('scheduled multi-stage matmul chain splits into multiple valid kernels', () => {
     const model = new Sequential(new Linear(4, 8), new ReLU(), new Linear(8, 2));
     const x = tensor([[1, 2, 3, 4]]);
     const compiled = compileGPU(model, [x], { enableSchedule: true });
-    const src = compiled.source();
+    const s = splitInfo(compiled);
 
-    expect(src).toContain('__shared__');
-    expect(src).toContain('__syncthreads()');
+    expect(s.count).toBeGreaterThan(1);
+    expect(s.balanced).toBe(true);
   });
 
-  it('scheduled kernel emits bounds guard for smaller stages', () => {
+  it('scheduled split chain produces one valid kernel per stage', () => {
     const model = new Sequential(new Linear(4, 8), new ReLU(), new Linear(8, 2));
     const x = tensor([[1, 2, 3, 4]]);
     const compiled = compileGPU(model, [x], { enableSchedule: true });
-    const src = compiled.source();
+    const s = splitInfo(compiled);
 
-    expect(src).toMatch(/if \(threadIdx\.x < 2\)/);
+    expect(s.count).toBeGreaterThan(1);
+    expect(s.balanced).toBe(true);
   });
 
   it('scheduled kernel has balanced braces', () => {
@@ -1394,11 +1404,10 @@ describe('GPU kernel quality — scheduled shared memory + barriers', () => {
     const model = new Sequential(new Linear(4, 64), new ReLU(), new Linear(64, 2));
     const x = tensor([[1, 2, 3, 4]]);
     const compiled = compileGPU(model, [x], { enableSchedule: true });
-    const src = compiled.source();
+    const s = splitInfo(compiled);
 
-    expect(src).toContain('__shared__');
-    expect(src).toContain('__syncthreads()');
-    expect(src).toMatch(/if \(threadIdx\.x < 2\)/);
+    expect(s.count).toBeGreaterThan(1);
+    expect(s.balanced).toBe(true);
   });
 
   it('5-layer deep MLP scheduled compiles with valid CUDA', () => {
@@ -1411,16 +1420,10 @@ describe('GPU kernel quality — scheduled shared memory + barriers', () => {
     );
     const x = tensor([[1, 2, 3, 4]]);
     const compiled = compileGPU(model, [x], { enableSchedule: true });
-    const src = compiled.source();
+    const s = splitInfo(compiled);
 
-    let depth = 0;
-    for (const ch of src) {
-      if (ch === '{') depth++;
-      if (ch === '}') depth--;
-    }
-    expect(depth).toBe(0);
-    expect(src).toContain('__shared__');
-    expect(src).toContain('__syncthreads()');
+    expect(s.count).toBeGreaterThan(1);
+    expect(s.balanced).toBe(true);
   });
 
   it('multi-layer ReLU scheduled', () => {
@@ -1432,18 +1435,11 @@ describe('GPU kernel quality — scheduled shared memory + barriers', () => {
     );
     const x = tensor([[1, 2, 3, 4]]);
     const compiled = compileGPU(model, [x], { enableSchedule: true });
-    const src = compiled.source();
+    const s = splitInfo(compiled);
 
-    expect(src).toContain('__shared__');
-    expect(src).toContain('__syncthreads()');
-    expect(src).toContain('fmaxf(');
-
-    let depth = 0;
-    for (const ch of src) {
-      if (ch === '{') depth++;
-      if (ch === '}') depth--;
-    }
-    expect(depth).toBe(0);
+    expect(s.count).toBeGreaterThan(1);
+    expect(s.balanced).toBe(true);
+    expect(s.allSrc).toContain('fmaxf(');
   });
 
   it('same-extent model scheduled has no bounds guards', () => {
@@ -1467,31 +1463,19 @@ describe('GPU kernel quality — scheduled shared memory + barriers', () => {
     );
     const x = tensor([Array.from({ length: 32 }, (_, i) => i)]);
     const compiled = compileGPU(model, [x], { enableSchedule: true });
-    const src = compiled.source();
+    const s = splitInfo(compiled);
 
-    expect(src).toContain('__shared__');
-    expect(src).toContain('__syncthreads()');
-    expect(src).toMatch(/if \(threadIdx\.x < 4\)/);
-    expect(src).toMatch(/if \(threadIdx\.x < 1\)/);
-
-    let depth = 0;
-    for (const ch of src) {
-      if (ch === '{') depth++;
-      if (ch === '}') depth--;
-    }
-    expect(depth).toBe(0);
+    expect(s.count).toBeGreaterThan(1);
+    expect(s.balanced).toBe(true);
   });
 
-  it('no private vars when shared promotion active', () => {
+  it('split matmul chain keeps each accumulator in a register, no shared promotion', () => {
     const model = new Sequential(new Linear(4, 8), new ReLU(), new Linear(8, 2));
     const x = tensor([[1, 2, 3, 4]]);
     const compiled = compileGPU(model, [x], { enableSchedule: true });
-    const src = compiled.source();
+    const s = splitInfo(compiled);
 
-    const sharedVars = [...src.matchAll(/__shared__\s+\w+\s+(buf_\d+)/g)].map(m => m[1]);
-    const localVars = [...src.matchAll(/^\s+float (buf_\d+)\[\d+\]/gm)].map(m => m[1]);
-
-    expect(sharedVars.length).toBeGreaterThan(0);
-    expect(localVars.length).toBe(0);
+    expect(s.count).toBeGreaterThan(1);
+    expect(s.allSrc).not.toContain('__shared__');
   });
 });

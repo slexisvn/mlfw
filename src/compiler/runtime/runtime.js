@@ -18,6 +18,17 @@ function typedArrayCtor(dtype) {
   return TYPED_ARRAY_CTORS[dtype] || Float32Array;
 }
 
+function dtypeOfTypedArray(a) {
+  if (a instanceof Float64Array) return 'f64';
+  if (a instanceof Int32Array) return 'i32';
+  if (a instanceof Int16Array) return 'i16';
+  if (a instanceof Int8Array) return 'i8';
+  if (a instanceof Uint16Array) return 'ui16';
+  if (a instanceof Uint8Array) return 'ui8';
+  if (a instanceof BigInt64Array) return 'i64';
+  return 'f32';
+}
+
 export class RuntimeTensor {
   constructor(data, shape, dtype, strides = null) {
     this.data = data;
@@ -152,7 +163,11 @@ export class RuntimeModule {
 
   async runPlanAsync(plan, args) {
     const slots = new Array(plan.numSlots).fill(null);
-    for (let i = 0; i < args.length; i++) slots[plan.argSlots[i]] = args[i];
+    for (let i = 0; i < args.length; i++) {
+      const a = args[i];
+      slots[plan.argSlots[i]] = a instanceof RuntimeTensor ? a
+        : new RuntimeTensor(a, [a.length], dtypeOfTypedArray(a));
+    }
     for (const it of plan.intermediates) {
       let numel = 1;
       for (const d of it.shape) numel *= d;

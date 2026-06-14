@@ -128,6 +128,8 @@ export function compileWithBackward(model, exampleInputs, opts = {}) {
   }
 
   function _runK(result, funcName, allArgs) {
+    const mod = result.module || result;
+    if (mod.executionPlan) return mod.runPlanAsync(mod.executionPlan, allArgs);
     if (result.isAsync(funcName)) return result.runAsync(funcName, ...allArgs);
     result.run(funcName, ...allArgs);
     return null;

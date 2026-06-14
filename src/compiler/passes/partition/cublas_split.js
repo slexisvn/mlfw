@@ -214,48 +214,23 @@ function materializePartition(part, name, dotInfoMap) {
   return { part, subFunc, inputs, outputs, dotOp };
 }
 
-export function splitGraphForCublas(graphModule) {
-  if (graphModule.functionCount !== 1) return null;
-  const func = graphModule.functions().next().value;
-  const retOp = func.getReturnOp();
-  if (!retOp) return null;
+const BOUNDARY_OP_NAMES = new Set(['dot']);
 
-  const partitionOps = [];
-  const opTarget = new Map();
-  const dotInfoMap = new Map();
-  let dotCount = 0;
-
-  for (const op of func.ops()) {
-    if (TERMINATORS.has(op.opName)) continue;
-    if (isConstantOp(op)) continue;
-    const info = cublasDotInfo(op);
-    if (info) {
-      opTarget.set(op, 'cublas#' + dotCount);
-      dotInfoMap.set(op, info);
-      dotCount++;
-    } else {
-      opTarget.set(op, 'native');
+function containsBoundaryOp(op) {
+  if (BOUNDARY_OP_NAMES.has(op.opName)) return true;
+  if (op.regions) {
+    for (const region of op.regions) {
+      const block = region.entryBlock;
+      if (!block) continue;
+      for (const inner of block.ops()) {
+        if (containsBoundaryOp(inner)) return true;
+      }
     }
-    partitionOps.push(op);
   }
+  return false;
+}
 
-  if (dotCount === 0 || partitionOps.length === 0) return null;
-
-  const { partitions, preds } = buildPartitions(partitionOps, opTarget);
-  if (partitions.length < 2) return null;
-
-  const orderedParts = topoSortPartitions(partitions, preds);
-  if (!orderedParts) return null;
-
-  const baseName = func.name;
-  const built = [];
-  let idx = 0;
-  for (const part of orderedParts) {
-    const m = materializePartition(part, baseName + '_p' + (idx++), dotInfoMap);
-    if (!m) return null;
-    built.push(m);
-  }
-
+function buildExecutionPlan(func, retOp, built) {
   const slotOf = new Map();
   let nextSlot = 0;
   const getSlot = (v) => {
@@ -303,6 +278,99 @@ export function splitGraphForCublas(graphModule) {
     intermediates.push({ slot: s, shape: [...v.type.shape], dtype: v.type.dtype });
   }
 
+  return { plan: { numSlots: nextSlot, argSlots, intermediates, steps } };
+}
+
+export function splitGraphForNative(graphModule) {
+  if (graphModule.functionCount !== 1) return null;
+  const func = graphModule.functions().next().value;
+  const retOp = func.getReturnOp();
+  if (!retOp) return null;
+
+  const partitionOps = [];
+  const opTarget = new Map();
+  let boundaryCount = 0;
+
+  for (const op of func.ops()) {
+    if (TERMINATORS.has(op.opName)) continue;
+    if (isConstantOp(op)) continue;
+    if (containsBoundaryOp(op)) opTarget.set(op, 'boundary#' + boundaryCount++);
+    else opTarget.set(op, 'native');
+    partitionOps.push(op);
+  }
+
+  if (boundaryCount < 2 || partitionOps.length === 0) return null;
+
+  const { partitions, preds } = buildPartitions(partitionOps, opTarget);
+  if (partitions.length < 2) return null;
+
+  const orderedParts = topoSortPartitions(partitions, preds);
+  if (!orderedParts) return null;
+
+  const baseName = func.name;
+  const built = [];
+  const emptyDotInfo = new Map();
+  let idx = 0;
+  for (const part of orderedParts) {
+    const m = materializePartition(part, baseName + '_p' + (idx++), emptyDotInfo);
+    if (!m) return null;
+    built.push(m);
+  }
+
+  const planResult = buildExecutionPlan(func, retOp, built);
+  if (!planResult) return null;
+
+  graphModule.removeFunction(func.name);
+  for (const b of built) graphModule.addFunction(b.subFunc);
+
+  return { plan: planResult.plan };
+}
+
+export function splitGraphForCublas(graphModule) {
+  if (graphModule.functionCount !== 1) return null;
+  const func = graphModule.functions().next().value;
+  const retOp = func.getReturnOp();
+  if (!retOp) return null;
+
+  const partitionOps = [];
+  const opTarget = new Map();
+  const dotInfoMap = new Map();
+  let dotCount = 0;
+
+  for (const op of func.ops()) {
+    if (TERMINATORS.has(op.opName)) continue;
+    if (isConstantOp(op)) continue;
+    const info = cublasDotInfo(op);
+    if (info) {
+      opTarget.set(op, 'cublas#' + dotCount);
+      dotInfoMap.set(op, info);
+      dotCount++;
+    } else {
+      opTarget.set(op, 'native');
+    }
+    partitionOps.push(op);
+  }
+
+  if (dotCount === 0 || partitionOps.length === 0) return null;
+
+  const { partitions, preds } = buildPartitions(partitionOps, opTarget);
+  if (partitions.length < 2) return null;
+
+  const orderedParts = topoSortPartitions(partitions, preds);
+  if (!orderedParts) return null;
+
+  const baseName = func.name;
+  const built = [];
+  let idx = 0;
+  for (const part of orderedParts) {
+    const m = materializePartition(part, baseName + '_p' + (idx++), dotInfoMap);
+    if (!m) return null;
+    built.push(m);
+  }
+
+  const planResult = buildExecutionPlan(func, retOp, built);
+  if (!planResult) return null;
+
   const cublasInfos = new Map();
   for (const b of built) {
     if (!b.dotOp) continue;
@@ -322,5 +390,5 @@ export function splitGraphForCublas(graphModule) {
   graphModule.removeFunction(func.name);
   for (const b of built) graphModule.addFunction(b.subFunc);
 
-  return { plan: { numSlots: nextSlot, argSlots, intermediates, steps }, cublasInfos };
+  return { plan: planResult.plan, cublasInfos };
 }

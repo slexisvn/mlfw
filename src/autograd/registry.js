@@ -1,12 +1,12 @@
 import { AddBackward, SubBackward, MulBackward, DivBackward, NegBackward, PowBackward } from './function/basic.js';
 
-import { ExpBackward, LogBackward, SqrtBackward, TanhBackward, SigmoidBackward, ReluBackward, GeluBackward, SiluBackward } from './function/unary.js';
+import { ExpBackward, LogBackward, SqrtBackward, TanhBackward, SigmoidBackward, ReluBackward, GeluBackward, SiluBackward, SoftmaxBackward, LogSoftmaxBackward } from './function/unary.js';
 
 import { SumBackward, MeanBackward } from './function/reduction.js';
 import { MatmulBackward, DotBackward } from './function/linalg.js';
 
 
-import { CatBackward, ClampBackward, PadBackward, IndexSelectBackward, WhereBackward } from './function/indexing.js';
+import { CatBackward, StackBackward, ClampBackward, PadBackward, IndexSelectBackward, WhereBackward } from './function/indexing.js';
 
 const _registry = new Map();
 
@@ -27,6 +27,8 @@ _register('sqrt', () => new SqrtBackward());
 _register('tanh', () => new TanhBackward());
 _register('sigmoid', () => new SigmoidBackward());
 _register('relu', () => new ReluBackward());
+_register('softmax', () => new SoftmaxBackward());
+_register('log_softmax', () => new LogSoftmaxBackward());
 _register('gelu', () => new GeluBackward());
 _register('silu', () => new SiluBackward());
 
@@ -37,6 +39,7 @@ _register('matmul', () => new MatmulBackward());
 _register('dot', () => new DotBackward());
 
 _register('cat', () => new CatBackward());
+_register('stack', () => new StackBackward());
 _register('clamp', () => new ClampBackward());
 _register('pad', () => new PadBackward());
 _register('index_select', () => new IndexSelectBackward());

@@ -1,0 +1,94 @@
+vocab = [
+  "<pad>",
+  "love", "great", "amazing", "best", "wonderful", "excellent", "brilliant", "enjoyed", "fantastic",
+  "hate", "terrible", "awful", "worst", "boring", "poor", "disappointing", "horrible", "dreadful"
+]
+sentiments = ["positive", "negative"]
+
+positive_train = tensor([
+  [1, 2, 6, 8, 0, 0],
+  [4, 5, 3, 1, 0, 0],
+  [7, 9, 2, 6, 5, 0],
+  [8, 1, 4, 3, 0, 0],
+  [2, 6, 9, 7, 0, 0],
+  [5, 3, 1, 8, 2, 0]
+], dtype=i32)
+
+negative_train = tensor([
+  [10, 11, 14, 16, 0, 0],
+  [13, 12, 15, 10, 0, 0],
+  [17, 18, 11, 14, 12, 0],
+  [16, 10, 13, 15, 0, 0],
+  [11, 14, 18, 17, 0, 0],
+  [12, 15, 10, 16, 11, 0]
+], dtype=i32)
+
+x_train = cat([positive_train, negative_train], 0)
+y_train = cat([
+  zeros([positive_train.shape[0]], dtype=i32),
+  ones([negative_train.shape[0]], dtype=i32)
+], 0)
+
+positive_val = tensor([[3, 7, 6, 1, 0, 0], [9, 2, 5, 4, 0, 0]], dtype=i32)
+negative_val = tensor([[14, 17, 10, 13, 0, 0], [18, 12, 16, 11, 0, 0]], dtype=i32)
+x_val = cat([positive_val, negative_val], 0)
+y_val = cat([
+  zeros([positive_val.shape[0]], dtype=i32),
+  ones([negative_val.shape[0]], dtype=i32)
+], 0)
+
+train_loader = DataLoader(TensorDataset(x_train, y_train), batch_size=4, shuffle=true)
+val_loader = DataLoader(TensorDataset(x_val, y_val), batch_size=4)
+
+model SentimentNet(vocab_size, embed_dim, hidden, num_classes):
+  embed = Embedding(vocab_size, embed_dim)
+  gru = GRU(embed_dim, hidden, 1, true)
+  attend = Linear(hidden, 1)
+  classify = Linear(hidden, num_classes)
+  loss_fn = CrossEntropyLoss()
+  acc = Accuracy(task="multiclass", num_classes=num_classes)
+
+  forward ids:
+    embedded = embed(ids)
+    encoded, last = gru(embedded)
+    weights = attend(encoded).softmax(1)
+    pooled = (encoded * weights).sum(1)
+    return classify(pooled)
+
+  train batch:
+    ids, labels = batch
+    loss = loss_fn(SentimentNet(ids), labels)
+    log("train_loss", loss, prog_bar=true)
+    return loss
+
+  validate batch:
+    ids, labels = batch
+    logits = SentimentNet(ids)
+    log("val_loss", loss_fn(logits, labels), prog_bar=true)
+    acc(logits, labels)
+    log("val_acc", acc, prog_bar=true)
+
+  optimizer:
+    return optim_config(Adam(SentimentNet.parameters(), lr=0.02))
+
+net = SentimentNet(vocab.length, 16, 24, sentiments.length)
+trainer = Trainer(
+  max_epochs=40,
+  accelerator="gpu",
+  logger=false,
+  enable_progress=false,
+  callbacks=[EarlyStopping(monitor="val_loss", patience=12)]
+)
+trainer.fit(net, train_loader, val_loader)
+
+net.eval()
+logits = net(x_val)
+preds = logits.argmax(axis=1)
+
+final_acc = Accuracy(task="multiclass", num_classes=sentiments.length)
+final_acc(logits, y_val)
+
+print("=== Sentiment classification (trained on GPU) ===")
+print("validation accuracy:", final_acc.compute())
+for i in range(x_val.shape[0]):
+  print("review", i, "predicted:", sentiments[preds[i]], "| actual:", sentiments[y_val[i]])

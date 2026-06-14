@@ -51,6 +51,32 @@ export class SigmoidBackward extends AutogradNode {
   }
 }
 
+export class SoftmaxBackward extends AutogradNode {
+  constructor() { super(1); }
+  apply(gradOutputs) {
+    const [input] = this.savedTensors();
+    const args = this.opArgs();
+    const dim = (args && args.length > 1 && args[1] != null) ? args[1] : -1;
+    const g = gradOutputs[0];
+    const y = ops.softmax(input.detach(), dim);
+    const inner = ops.sum(ops.mul(g, y), dim, true);
+    return [ops.mul(y, ops.sub(g, inner))];
+  }
+}
+
+export class LogSoftmaxBackward extends AutogradNode {
+  constructor() { super(1); }
+  apply(gradOutputs) {
+    const [input] = this.savedTensors();
+    const args = this.opArgs();
+    const dim = (args && args.length > 1 && args[1] != null) ? args[1] : -1;
+    const g = gradOutputs[0];
+    const sm = ops.softmax(input.detach(), dim);
+    const gsum = ops.sum(g, dim, true);
+    return [ops.sub(g, ops.mul(sm, gsum))];
+  }
+}
+
 export class ReluBackward extends AutogradNode {
   constructor() { super(1); }
   apply(gradOutputs) {

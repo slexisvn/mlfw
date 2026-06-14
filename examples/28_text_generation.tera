@@ -1,0 +1,76 @@
+fn index_of(items, target):
+  i = 0
+  while i < items.length:
+    if items[i] == target:
+      return i
+    i += 1
+  return 0
+
+vocab = [
+  "<end>",
+  "the", "cat", "dog", "sat", "ran", "on", "mat", "fast",
+  "i", "you", "love", "cook", "good", "tasty", "food", "cake"
+]
+
+corpus = tensor([
+  [1, 2, 4, 6, 1, 7],
+  [1, 3, 5, 8, 0, 0],
+  [1, 2, 5, 8, 0, 0],
+  [9, 11, 13, 15, 0, 0],
+  [10, 12, 14, 16, 0, 0],
+  [9, 12, 13, 15, 0, 0]
+], dtype=i32)
+
+seq_len = corpus.shape[1]
+inputs = corpus[:, 0:seq_len - 1]
+targets = corpus[:, 1:seq_len]
+loader = DataLoader(TensorDataset(inputs, targets), batch_size=3, shuffle=true)
+
+model WordLM(vocab_size, embed_dim, hidden):
+  embed = Embedding(vocab_size, embed_dim)
+  lstm = LSTM(embed_dim, hidden, 1, true)
+  head = Linear(hidden, vocab_size)
+  loss_fn = CrossEntropyLoss()
+
+  forward ids:
+    embedded = embed(ids)
+    encoded, state = lstm(embedded)
+    return head(encoded)
+
+  train batch:
+    inp, tgt = batch
+    logits = WordLM(inp)
+    shape = logits.shape
+    rows = shape[0] * shape[1]
+    loss = loss_fn(logits.reshape([rows, shape[2]]), tgt.reshape([rows]))
+    log("train_loss", loss, prog_bar=true)
+    return loss
+
+  optimizer:
+    return optim_config(Adam(WordLM.parameters(), lr=0.02))
+
+net = WordLM(vocab.length, 24, 32)
+trainer = Trainer(max_epochs=150, accelerator="gpu", logger=false, enable_progress=false)
+trainer.fit(net, loader)
+
+net.eval()
+
+fn generate(model, words, seed, steps):
+  cell = model.lstm.cells[0]
+  state = null
+  last = index_of(words, seed)
+  result = seed
+  for step in range(steps):
+    embedded = model.embed(tensor([[last]], dtype=i32))
+    stepped = embedded.reshape([1, embedded.shape[2]])
+    state = cell(stepped, state)
+    logits = model.head(state[0]).reshape([words.length])
+    last = logits.argmax().item()
+    if last == 0:
+      return result
+    result = result + " " + words[last]
+  return result
+
+print("=== Word-level text generation (LSTM, trained on GPU) ===")
+for seed in ["the", "i", "you"]:
+  print(generate(net, vocab, seed, seq_len))

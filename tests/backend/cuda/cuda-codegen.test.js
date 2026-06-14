@@ -179,6 +179,13 @@ describe('CUDACodegen._emitExternCall', () => {
     expect(externCall('min', [a, b])).toBe('fminf(a, b)');
     expect(externCall('pow', [a, b])).toBe('powf(a, b)');
   });
+
+  it('integer min/max emit a ternary (CUDA fmin/fmax reject int args)', () => {
+    const a = new VariableNode('a', 'i32');
+    const b = new VariableNode('b', 'i32');
+    expect(externCall('max', [a, b], 'i32')).toBe('((a) > (b) ? (a) : (b))');
+    expect(externCall('min', [a, b], 'i32')).toBe('((a) < (b) ? (a) : (b))');
+  });
 });
 
 describe('CUDACodegen._flatIndex', () => {

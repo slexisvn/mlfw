@@ -1,7 +1,7 @@
 import { AutogradNode } from '../node.js';
 import * as ops from '../../tensor/ops/ops.js';
 import { zeros } from '../../tensor/factory/creation_ops.js';
-import { narrow, contiguous } from '../../tensor/view/view_ops.js';
+import { narrow, contiguous, select } from '../../tensor/view/view_ops.js';
 
 function _normDim(d, rank) {
   return d < 0 ? rank + d : d;
@@ -24,6 +24,25 @@ export class CatBackward extends AutogradNode {
       const length = meta.shape[dim];
       grads.push(contiguous(narrow(g, dim, offset, length)));
       offset += length;
+      i++;
+    }
+    return grads;
+  }
+}
+
+export class StackBackward extends AutogradNode {
+  constructor() { super(0); }
+
+  apply(gradOutputs) {
+    const g = gradOutputs[0];
+    const args = this.opArgs();
+    const rank = g.shape.length;
+    const dim = _normDim(args && args.length > 1 ? (args[1] ?? 0) : 0, rank);
+
+    const grads = [];
+    let i = 0;
+    while (this.inputMetadata(i)) {
+      grads.push(contiguous(select(g, dim, i)));
       i++;
     }
     return grads;

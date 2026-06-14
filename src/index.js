@@ -44,6 +44,8 @@ export {
   Dropout,
   CrossEntropyLoss, MSELoss, NLLLoss, BCELoss,
   Embedding,
+  GRU, GRUCell,
+  LSTM, LSTMCell,
   Sequential, ModuleList, ModuleDict,
   Flatten,
   MultiheadAttention,

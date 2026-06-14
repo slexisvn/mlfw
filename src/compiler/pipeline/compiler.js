@@ -25,7 +25,7 @@ import { CalibrationCollector } from '../analysis/calibration.js';
 import { DecompositionPass } from '../passes/decompose/decomposition_pass.js';
 import { RematerializationPass } from '../passes/memory/rematerialization.js';
 import { GraphPartitionPass, PartitionMaterializationPass } from '../passes/partition/partition_pass.js';
-import { splitGraphForCublas } from '../passes/partition/cublas_split.js';
+import { splitGraphForCublas, splitGraphForNative } from '../passes/partition/cublas_split.js';
 
 import { TraceLog, TraceLevel, CompilationError } from './trace.js';
 import { IRPrinter } from '../ir/graph/printer.js';
@@ -180,8 +180,11 @@ export class Compiler {
     }
 
     let cublasSplit = null;
+    let nativeSplit = null;
     if (this.config.matmulBackend === 'cublas') {
       cublasSplit = splitGraphForCublas(graphModule);
+    } else if (this._cudaMatmulChain) {
+      nativeSplit = splitGraphForNative(graphModule);
     }
 
     if (this.config.verify) {
@@ -213,6 +216,7 @@ export class Compiler {
     const runtimeModule = this._codegen(lirFuncs, trace, errors, failed, resilient);
 
     if (cublasSplit) runtimeModule.executionPlan = cublasSplit.plan;
+    else if (nativeSplit) runtimeModule.executionPlan = nativeSplit.plan;
 
     trace.phaseEnd('compile', performance.now() - t0);
 
@@ -260,9 +264,17 @@ export class Compiler {
       pm.addPass(new DCEPass());
     }
 
-    const shouldEpilogueFuse = this.config.matmulBackend !== 'cublas' && (this.config.fusion.epilogue !== undefined
-      ? this.config.fusion.epilogue
-      : (this.config.target && this.config.target.enableEpilogueFusion));
+    let dotCount = 0;
+    for (const func of graphModule) {
+      for (const op of func.ops()) {
+        if (op.opName === 'dot') dotCount++;
+      }
+    }
+    this._cudaMatmulChain = this.config.target.kind === 'cuda' && dotCount >= 2;
+    const shouldEpilogueFuse = this.config.matmulBackend !== 'cublas' && !this._cudaMatmulChain
+      && (this.config.fusion.epilogue !== undefined
+        ? this.config.fusion.epilogue
+        : (this.config.target && this.config.target.enableEpilogueFusion));
 
     if (shouldEpilogueFuse) {
       pm.addPass(new EpilogueFusionPass({ target: this.config.target }));

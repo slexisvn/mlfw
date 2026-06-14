@@ -35,6 +35,8 @@ export { MaxPool2d, AvgPool2d, AdaptiveAvgPool2d } from './modules/pooling.js';
 export { Dropout } from './modules/dropout.js';
 export { CrossEntropyLoss, MSELoss, NLLLoss, BCELoss } from './modules/loss.js';
 export { Embedding } from './modules/embedding.js';
+export { GRU, GRUCell } from './modules/gru.js';
+export { LSTM, LSTMCell } from './modules/lstm.js';
 export { Sequential, ModuleList, ModuleDict } from './modules/container.js';
 export { Flatten } from './modules/flatten.js';
 export {
