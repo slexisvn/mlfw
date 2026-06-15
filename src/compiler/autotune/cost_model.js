@@ -26,6 +26,10 @@ export class AnalyticalCostModel {
     return this.estimateFromFeatures(features);
   }
 
+  score(primFunc) {
+    return this.estimate(primFunc).score;
+  }
+
   estimateFromFeatures(features) {
     const parallelismScore = this._scoreParallelism(features);
     const vectorScore = this._scoreVectorization(features);
@@ -118,18 +122,25 @@ export class LearnedCostModel {
     this._trainingData = [];
   }
 
-  addSample(features, measuredScore) {
-    this._trainingData.push({ features: features.toVector(), score: measuredScore });
+  addSample(stmtVecs, measuredScore) {
+    if (!stmtVecs || stmtVecs.length === 0) return;
+    this._trainingData.push({ stmts: stmtVecs, score: measuredScore });
   }
 
-  _normalizers() {
-    const dim = this._trainingData[0].features.length;
+  _flatten() {
+    const flat = [];
+    for (const s of this._trainingData) for (const v of s.stmts) flat.push(v);
+    return flat;
+  }
+
+  _normalizers(flat) {
+    const dim = flat[0].length;
     const mean = new Array(dim).fill(0);
-    for (const s of this._trainingData) for (let i = 0; i < dim; i++) mean[i] += s.features[i];
-    for (let i = 0; i < dim; i++) mean[i] /= this._trainingData.length;
+    for (const v of flat) for (let i = 0; i < dim; i++) mean[i] += v[i];
+    for (let i = 0; i < dim; i++) mean[i] /= flat.length;
     const std = new Array(dim).fill(0);
-    for (const s of this._trainingData) for (let i = 0; i < dim; i++) { const d = s.features[i] - mean[i]; std[i] += d * d; }
-    for (let i = 0; i < dim; i++) std[i] = Math.sqrt(std[i] / this._trainingData.length) || 1;
+    for (const v of flat) for (let i = 0; i < dim; i++) { const d = v[i] - mean[i]; std[i] += d * d; }
+    for (let i = 0; i < dim; i++) std[i] = Math.sqrt(std[i] / flat.length) || 1;
 
     let yMean = 0;
     for (const s of this._trainingData) yMean += s.score;
@@ -142,9 +153,11 @@ export class LearnedCostModel {
 
   train() {
     if (this._trainingData.length === 0) return;
-    const dim = this._trainingData[0].features.length;
+    const flat = this._flatten();
+    if (flat.length === 0) return;
+    const dim = flat[0].length;
     const H = this.hidden;
-    const { mean, std, yMean, yStd } = this._normalizers();
+    const { mean, std, yMean, yStd } = this._normalizers(flat);
 
     const rng = this._rng();
     const r1 = 1 / Math.sqrt(dim);
@@ -154,34 +167,57 @@ export class LearnedCostModel {
     const W2 = Array.from({ length: H }, () => (rng() * 2 - 1) * r2);
     let b2 = 0;
 
-    const xs = this._trainingData.map(s => s.features.map((v, i) => (v - mean[i]) / std[i]));
-    const ys = this._trainingData.map(s => (s.score - yMean) / yStd);
-    const N = xs.length;
+    const norm = (v) => { const x = new Array(dim); for (let i = 0; i < dim; i++) x[i] = (v[i] - mean[i]) / std[i]; return x; };
+    const samples = this._trainingData.map(s => ({ xs: s.stmts.map(norm), y: (s.score - yMean) / yStd }));
+
+    const gW1 = Array.from({ length: H }, () => new Array(dim).fill(0));
+    const gW2 = new Array(H).fill(0);
+    const gb1 = new Array(H).fill(0);
 
     for (let epoch = 0; epoch < this.epochs; epoch++) {
-      for (let n = 0; n < N; n++) {
-        const x = xs[n];
-        const z = new Array(H);
-        const a = new Array(H);
-        for (let h = 0; h < H; h++) {
-          let acc = b1[h];
-          const w = W1[h];
-          for (let i = 0; i < dim; i++) acc += w[i] * x[i];
-          z[h] = acc;
-          a[h] = Math.tanh(acc);
+      for (let n = 0; n < samples.length; n++) {
+        const sample = samples[n];
+        const acts = [];
+        let pred = 0;
+        for (const x of sample.xs) {
+          const a = new Array(H);
+          for (let h = 0; h < H; h++) {
+            let acc = b1[h];
+            const w = W1[h];
+            for (let i = 0; i < dim; i++) acc += w[i] * x[i];
+            a[h] = Math.tanh(acc);
+          }
+          let p = b2;
+          for (let h = 0; h < H; h++) p += W2[h] * a[h];
+          pred += p;
+          acts.push({ x, a });
         }
-        let pred = b2;
-        for (let h = 0; h < H; h++) pred += W2[h] * a[h];
+        const dErr = pred - sample.y;
 
-        const dErr = pred - ys[n];
-        b2 -= this.lr * dErr;
+        let gb2 = 0;
         for (let h = 0; h < H; h++) {
-          const dA = dErr * W2[h];
-          const dZ = dA * (1 - a[h] * a[h]);
-          W2[h] -= this.lr * dErr * a[h];
+          gW2[h] = 0;
+          gb1[h] = 0;
+          const gw = gW1[h];
+          for (let i = 0; i < dim; i++) gw[i] = 0;
+        }
+        for (const { x, a } of acts) {
+          gb2 += dErr;
+          for (let h = 0; h < H; h++) {
+            const dZ = dErr * W2[h] * (1 - a[h] * a[h]);
+            gW2[h] += dErr * a[h];
+            const gw = gW1[h];
+            for (let i = 0; i < dim; i++) gw[i] += dZ * x[i];
+            gb1[h] += dZ;
+          }
+        }
+        b2 -= this.lr * gb2;
+        for (let h = 0; h < H; h++) {
+          W2[h] -= this.lr * gW2[h];
+          b1[h] -= this.lr * gb1[h];
           const w = W1[h];
-          for (let i = 0; i < dim; i++) w[i] -= this.lr * dZ * x[i];
-          b1[h] -= this.lr * dZ;
+          const gw = gW1[h];
+          for (let i = 0; i < dim; i++) w[i] -= this.lr * gw[i];
         }
       }
     }
@@ -197,20 +233,21 @@ export class LearnedCostModel {
     };
   }
 
-  predict(features) {
-    if (!this._net) return 0;
+  predict(stmtVecs) {
+    if (!this._net || !stmtVecs || stmtVecs.length === 0) return 0;
     const { dim, hidden, W1, b1, W2, b2, mean, std, yMean, yStd } = this._net;
-    const vec = features.toVector();
-    const x = new Array(dim);
-    for (let i = 0; i < dim; i++) x[i] = ((vec[i] || 0) - mean[i]) / std[i];
-    let pred = b2;
-    for (let h = 0; h < hidden; h++) {
-      let acc = b1[h];
-      const w = W1[h];
-      for (let i = 0; i < dim; i++) acc += w[i] * x[i];
-      pred += W2[h] * Math.tanh(acc);
+    let sum = 0;
+    for (const vec of stmtVecs) {
+      let p = b2;
+      for (let h = 0; h < hidden; h++) {
+        let acc = b1[h];
+        const w = W1[h];
+        for (let i = 0; i < dim; i++) acc += w[i] * (((vec[i] || 0) - mean[i]) / std[i]);
+        p += W2[h] * Math.tanh(acc);
+      }
+      sum += p;
     }
-    return pred * yStd + yMean;
+    return sum * yStd + yMean;
   }
 
   get trained() {
@@ -223,5 +260,19 @@ export class LearnedCostModel {
 
   static deserialize(data) {
     return new LearnedCostModel(data.net || data.weights || null);
+  }
+}
+
+export class GuidedCostModel {
+  constructor(analytical, learned) {
+    this.analytical = analytical;
+    this.learned = learned;
+  }
+
+  score(primFunc) {
+    if (this.learned && this.learned.trained) {
+      return this.learned.predict(FeatureExtractor.extractStatements(primFunc));
+    }
+    return this.analytical.score(primFunc);
   }
 }

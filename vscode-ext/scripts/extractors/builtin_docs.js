@@ -104,24 +104,25 @@ function parseParams(text) {
 
 function parseParam(text) {
   if (text.startsWith('...')) {
-    return { name: text.slice(3), optional: true, rest: true, defaultValue: null };
+    const { name, type } = splitType(text.slice(3));
+    return { name, type, optional: true, rest: true, defaultValue: null };
   }
   const eqIdx = findTopLevelEquals(text);
   if (eqIdx < 0) {
-    const optional = text.endsWith('?');
-    return {
-      name: optional ? text.slice(0, -1).trim() : text,
-      optional,
-      rest: false,
-      defaultValue: null,
-    };
+    let { name, type } = splitType(text);
+    const optional = name.endsWith('?');
+    if (optional) name = name.slice(0, -1).trim();
+    return { name, type, optional, rest: false, defaultValue: null };
   }
-  return {
-    name: text.slice(0, eqIdx).trim(),
-    optional: true,
-    rest: false,
-    defaultValue: text.slice(eqIdx + 1).trim(),
-  };
+  const { name, type } = splitType(text.slice(0, eqIdx));
+  return { name, type, optional: true, rest: false, defaultValue: text.slice(eqIdx + 1).trim() };
+}
+
+function splitType(text) {
+  const trimmed = text.trim();
+  const colon = trimmed.indexOf(':');
+  if (colon < 0) return { name: trimmed, type: null };
+  return { name: trimmed.slice(0, colon).trim(), type: trimmed.slice(colon + 1).trim() };
 }
 
 function findTopLevelEquals(text) {

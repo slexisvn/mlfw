@@ -1,9 +1,8 @@
 class SearchCandidate {
-  constructor(sketchName, params, score, features) {
+  constructor(sketchName, params, score) {
     this.sketchName = sketchName;
     this.params = params;
     this.score = score;
-    this.features = features;
   }
 }
 
@@ -34,13 +33,13 @@ export class RandomSearch {
         const params = sketch.sampleParams((max) => this._rng(max));
         const result = evaluator(sketch, params);
         if (result) {
-          candidates.push(new SearchCandidate(sketch.name, params, result.score, result.features));
+          candidates.push(new SearchCandidate(sketch.name, params, result.score));
         }
       }
     }
 
     candidates.sort((a, b) => b.score - a.score);
-    return candidates;
+    return { candidates, population: null };
   }
 }
 
@@ -69,8 +68,8 @@ export class EvolutionarySearch {
     return this.deadline ? this.deadline.expired : false;
   }
 
-  search(sketches, evaluator) {
-    let population = this._initPopulation(sketches);
+  search(sketches, evaluator, seedPopulation = null) {
+    let population = seedPopulation && seedPopulation.length ? seedPopulation : this._initPopulation(sketches);
 
     for (let gen = 0; gen < this.numGenerations; gen++) {
       if (this._expired()) break;
@@ -78,7 +77,7 @@ export class EvolutionarySearch {
       for (const individual of population) {
         const result = evaluator(individual.sketch, individual.params);
         if (result) {
-          scored.push({ ...individual, score: result.score, features: result.features });
+          scored.push({ ...individual, score: result.score });
         }
       }
 
@@ -91,10 +90,9 @@ export class EvolutionarySearch {
       const nextGen = elites.map(e => ({ sketch: e.sketch, params: { ...e.params } }));
 
       while (nextGen.length < this.populationSize) {
-        const parentIdx = this._rng(elites.length);
-        const parent = elites[parentIdx];
-        const child = this._mutate(parent.sketch, parent.params);
-        nextGen.push(child);
+        const parentA = elites[this._rng(elites.length)];
+        const parentB = elites[this._rng(elites.length)];
+        nextGen.push(this._mutate(parentA.sketch, this._crossover(parentA, parentB)));
       }
 
       population = nextGen;
@@ -104,12 +102,12 @@ export class EvolutionarySearch {
     for (const individual of population) {
       const result = evaluator(individual.sketch, individual.params);
       if (result) {
-        finalScored.push(new SearchCandidate(individual.sketch.name, individual.params, result.score, result.features));
+        finalScored.push(new SearchCandidate(individual.sketch.name, individual.params, result.score));
       }
     }
 
     finalScored.sort((a, b) => b.score - a.score);
-    return finalScored;
+    return { candidates: finalScored, population };
   }
 
   _initPopulation(sketches) {
@@ -122,6 +120,15 @@ export class EvolutionarySearch {
     return pop;
   }
 
+  _crossover(a, b) {
+    if (a.sketch !== b.sketch) return { ...a.params };
+    const params = {};
+    for (const v of a.sketch.variables) {
+      params[v.name] = this._rngFloat() < 0.5 ? a.params[v.name] : b.params[v.name];
+    }
+    return params;
+  }
+
   _mutate(sketch, params) {
     const newParams = { ...params };
     for (const v of sketch.variables) {
@@ -131,4 +138,18 @@ export class EvolutionarySearch {
     }
     return { sketch, params: newParams };
   }
+}
+
+export function createSearchStrategy(config = {}) {
+  if (config.strategy === 'random') {
+    return new RandomSearch({ numTrials: config.numTrials, seed: config.seed, deadline: config.deadline });
+  }
+  return new EvolutionarySearch({
+    populationSize: config.populationSize,
+    numGenerations: config.numGenerations,
+    mutationRate: config.mutationRate,
+    eliteRatio: config.eliteRatio,
+    seed: config.seed,
+    deadline: config.deadline
+  });
 }

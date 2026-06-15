@@ -8,6 +8,7 @@ import { extractBuiltinDocs } from './extractors/builtin_docs.js';
 import { buildGrammar } from './emitters/grammar.js';
 import { buildLanguageData } from './emitters/language_data.js';
 import { buildSnippets } from './emitters/snippets.js';
+import { TYPE_NAMES } from '../../src/cli/typechecker.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const EXT_ROOT = resolve(HERE, '..');
@@ -27,19 +28,22 @@ const OUTPUTS = {
   vendorDir: join(EXT_ROOT, 'server/vendor'),
 };
 
-const VENDORED_FILES = ['tokenizer.js', 'parser.js'];
+const VENDORED_FILES = ['tokenizer.js', 'parser.js', 'types.js', 'typechecker.js'];
 
 export function generate(sources = SOURCES, outputs = OUTPUTS) {
-  const keywords = extractKeywords(sources.parser);
-  const keywordGroups = classifyKeywords(keywords);
+  const baseKeywords = extractKeywords(sources.parser);
+  const keywordGroups = classifyKeywords(baseKeywords);
   const operators = extractOperators(sources.tokenizer);
   const builtins = extractBuiltins(sources.builtins);
   const docs = extractBuiltinDocs(sources.builtinDocs);
 
+  const runtimeNames = new Set(builtins.map(b => b.name));
+  keywordGroups.type = TYPE_NAMES.filter(n => !baseKeywords.includes(n) && !runtimeNames.has(n)).sort();
+  const keywords = [...new Set([...baseKeywords, ...keywordGroups.type])].sort();
+
   const enriched = builtins.map(b => mergeDoc(b, docs.builtins.get(b.name), docs.kindTemplates));
   const undocumented = enriched.filter(b => !b.documented).map(b => b.name);
 
-  const runtimeNames = new Set(builtins.map(b => b.name));
   const docOnly = [];
   for (const [name, doc] of docs.builtins) {
     if (runtimeNames.has(name)) continue;
@@ -69,6 +73,14 @@ const RETURNS_BY_KIND = {
   reduction: 'Tensor',
   shape: 'Tensor',
   autograd: 'Tensor',
+  module: 'Module',
+  sequential: 'Module',
+  optimizer: 'Optimizer',
+  scheduler: 'Scheduler',
+  trainer: 'Trainer',
+  metric: 'Metric',
+  callback: 'Callback',
+  logger: 'Logger',
 };
 
 const RETURNS_OVERRIDE = {

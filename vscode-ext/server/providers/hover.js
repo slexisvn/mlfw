@@ -57,15 +57,30 @@ function findMethodHover(doc, word, position, languageData) {
   const receiverType = typeOf(member.object, doc, languageData);
   const lookup = lookupMethod(receiverType, word.text, languageData)
     ?? findUniqueMethod(word.text, languageData);
-  if (!lookup) return null;
-  const lines = [
-    '```tera',
-    `${lookup.ownerName}.${lookup.method.signature.display}`,
-    '```',
-    '',
-    `_${lookup.method.isGetter ? 'property' : 'method'} of ${lookup.ownerName}_`,
-  ];
-  if (lookup.method.description) lines.push('', lookup.method.description);
+  if (lookup) {
+    const lines = [
+      '```tera',
+      `${lookup.ownerName}.${lookup.method.signature.display}`,
+      '```',
+      '',
+      `_${lookup.method.isGetter ? 'property' : 'method'} of ${lookup.ownerName}_`,
+    ];
+    if (lookup.method.description) lines.push('', lookup.method.description);
+    return { contents: { kind: 'markdown', value: lines.join('\n') }, range: word.range };
+  }
+  return fieldHover(doc, word, receiverType, languageData);
+}
+
+function fieldHover(doc, word, receiverType, languageData) {
+  const field = doc.symbols.resolveField?.(receiverType, word.text);
+  if (!field) return null;
+  const lines = [`\`${receiverType}.${field.name}\` — *field of ${receiverType}*`];
+  if (field.typeName) lines.push('', `type: \`${field.typeName}\``);
+  const builtin = field.typeName && languageData.builtins.find(b => b.name === field.typeName);
+  if (builtin) {
+    if (builtin.signature) lines.push('', '```tera', builtin.signature.display, '```');
+    if (builtin.description) lines.push('', builtin.description);
+  }
   return { contents: { kind: 'markdown', value: lines.join('\n') }, range: word.range };
 }
 

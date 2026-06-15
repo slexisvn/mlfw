@@ -80,7 +80,7 @@ describe('webgpu compilation output', () => {
       new Linear(8, 4),
     );
     const x = tensor([[1, 2, 3, 4, 5, 6, 7, 8]]);
-    const compiled = compileWebGPU(model, [x]);
+    const compiled = compileWebGPU(model, [x], { scheduling: { enabled: false } });
     const src = compiled.source();
 
     const usedVars = new Set();
@@ -161,11 +161,21 @@ describe('webgpu compilation output', () => {
   it('unscheduled kernel uses private var, not workgroup', () => {
     const model = new Sequential(new Linear(4, 8), new ReLU(), new Linear(8, 2));
     const x = tensor([[1, 2, 3, 4]]);
-    const compiled = compileWebGPU(model, [x]);
+    const compiled = compileWebGPU(model, [x], { scheduling: { enabled: false } });
     const src = compiled.source();
 
     expect(src).not.toContain('var<workgroup>');
     expect(src).not.toContain('workgroupBarrier()');
+  });
+
+  it('webgpu defaults to scheduled parallel kernels without explicit enableSchedule', () => {
+    const model = new Sequential(new Linear(4, 8), new ReLU(), new Linear(8, 2));
+    const x = tensor([[1, 2, 3, 4]]);
+    const compiled = compileWebGPU(model, [x]);
+    const src = compiled.source();
+
+    expect(src).toMatch(/@workgroup_size\((?:[2-9]|\d{2,})/);
+    expect(src).toMatch(/_invocation_id/);
   });
 
   it('scheduled single-layer has no barriers or workgroup promotion', () => {
@@ -513,14 +523,12 @@ describe('webgpu mixed-dtype buffer packing', () => {
 
 describe('webgpu multi-kernel split for large graphs', () => {
   const deep = () => new Sequential(
-    new Linear(8, 8), new ReLU(), new Linear(8, 8), new ReLU(),
-    new Linear(8, 8), new ReLU(), new Linear(8, 8), new ReLU(),
-    new Linear(8, 8), new ReLU(), new Linear(8, 8), new ReLU(),
-    new Linear(8, 8), new ReLU(), new Linear(8, 8), new ReLU(),
-    new Linear(8, 4),
+    new Linear(8, 512), new ReLU(), new Linear(512, 512), new ReLU(),
+    new Linear(512, 512), new ReLU(), new Linear(512, 512), new ReLU(),
+    new Linear(512, 512), new ReLU(), new Linear(512, 4),
   );
 
-  it('a large graph (>=8 boundary ops) splits into a device-resident plan', () => {
+  it('chained matmuls with large intermediates split into a device-resident plan', () => {
     const x = tensor([[1, 2, 3, 4, 5, 6, 7, 8]]);
     const compiled = compileWebGPU(deep(), [x]);
     const mod = compiled.result().module;

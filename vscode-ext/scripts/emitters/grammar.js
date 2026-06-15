@@ -3,6 +3,7 @@ const SCOPE_BY_KEYWORD_GROUP = {
   control: 'keyword.control.tera',
   operator: 'keyword.operator.logical.tera',
   constant: 'constant.language.tera',
+  type: 'storage.type.tera',
 };
 
 const SCOPE_BY_BUILTIN_KIND = {

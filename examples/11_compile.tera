@@ -2,7 +2,7 @@
 model MLP():
   fc1 = Linear(16, 64)
   fc2 = Linear(64, 16)
-  forward x:
+  forward (x: Tensor) -> Tensor:
     return fc2(fc1(x).relu())
 
 net = MLP()

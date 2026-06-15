@@ -315,9 +315,11 @@ export async function runWebGPUPlan(plan, slots, steps) {
     bufs[s] = buf;
   }
 
-  const encoder = device.createCommandEncoder();
+  const PLAN_SUBMIT_CHUNK = 32;
+  let encoder = device.createCommandEncoder();
   const uniformBufs = [];
   const scratchBufs = [];
+  let pending = 0;
   for (const st of steps) {
     const { pipeline, bindGroupLayout } = pipelineFor(device, st.kernel);
     const ordered = st.inputSlots.concat(st.outputSlots);
@@ -356,6 +358,7 @@ export async function runWebGPUPlan(plan, slots, steps) {
     pass.dispatchWorkgroups(ds[0], ds[1], ds[2]);
     pass.end();
     for (const wb of writebacks) encoder.copyBufferToBuffer(wb.src, wb.srcOff, bufs[wb.slot], 0, wb.bytes);
+    if (++pending >= PLAN_SUBMIT_CHUNK) { device.queue.submit([encoder.finish()]); encoder = device.createCommandEncoder(); pending = 0; }
   }
 
   const argSet = new Set(plan.argSlots);

@@ -1,12 +1,12 @@
 
-model SelfAttention(d):
+model SelfAttention(d: int):
   wq = Linear(d, d)
   wk = Linear(d, d)
   wv = Linear(d, d)
   wo = Linear(d, d)
   ln = LayerNorm([d])
 
-  forward x:
+  forward (x: Tensor) -> Tensor:
     q = wq(x)
     k = wk(x)
     v = wv(x)
@@ -14,19 +14,19 @@ model SelfAttention(d):
     attn = ((q @ k.transpose(0, 1)) / scale).softmax()
     return ln(x + wo(attn @ v))
 
-model FeedForward(d):
+model FeedForward(d: int):
   up = Linear(d, d * 4)
   down = Linear(d * 4, d)
   ln = LayerNorm([d])
 
-  forward x:
+  forward (x: Tensor) -> Tensor:
     return ln(x + down(up(x).gelu()))
 
-model EncoderBlock(d):
+model EncoderBlock(d: int):
   attn = SelfAttention(d)
   ffn = FeedForward(d)
 
-  forward x:
+  forward (x: Tensor) -> Tensor:
     return ffn(attn(x))
 
 d = 32
@@ -39,12 +39,12 @@ out = block(x)
 print("=== Transformer encoder ===")
 print("tokens:", tokens.shape, "-> embed:", x.shape, "-> out:", out.shape)
 
-model CrossAttention(d):
+model CrossAttention(d: int):
   wq = Linear(d, d)
   wk = Linear(d, d)
   wv = Linear(d, d)
 
-  forward query, context:
+  forward (query: Tensor, context: Tensor) -> Tensor:
     q = wq(query)
     k = wk(context)
     v = wv(context)

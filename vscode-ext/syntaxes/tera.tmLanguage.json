@@ -99,6 +99,10 @@
         {
           "name": "constant.language.tera",
           "match": "\\b(?:false|null|true)\\b"
+        },
+        {
+          "name": "storage.type.tera",
+          "match": "\\b(?:Tensor|dict|float|int|list|none|num|number|str|string)\\b"
         }
       ]
     },
@@ -106,11 +110,11 @@
       "patterns": [
         {
           "name": "keyword.operator.compound.tera",
-          "match": "\\*\\*=|\\*\\*|==|!=|<=|>=|\\+=|-=|\\*=|/=|@="
+          "match": "\\*\\*=|\\*\\*|==|!=|<=|>=|\\+=|-=|\\*=|/=|@=|->"
         },
         {
           "name": "keyword.operator.tera",
-          "match": "=|:|\\+|-|\\*|/|@|<|>|\\{|\\}"
+          "match": "=|:|\\+|-|\\*|/|@|<|>|\\{|\\}|\\|"
         },
         {
           "name": "punctuation.separator.tera",

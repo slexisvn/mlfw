@@ -46,8 +46,10 @@ String  →  '"' <chars> '"'
 | Length | Tokens |
 |--------|--------|
 | 3-char | `**=` |
-| 2-char | `**` `==` `!=` `<=` `>=` `+=` `-=` `*=` `/=` `@=` |
-| 1-char | `(` `)` `[` `]` `,` `.` `=` `:` `+` `-` `*` `/` `@` `<` `>` |
+| 2-char | `**` `==` `!=` `<=` `>=` `+=` `-=` `*=` `/=` `@=` `->` |
+| 1-char | `(` `)` `[` `]` `,` `.` `=` `:` `+` `-` `*` `/` `@` `<` `>` `\|` |
+
+`->` introduces a return-type annotation and `\|` separates members of a union type (see [Type Annotations](#type-annotations)).
 
 ### Indentation
 
@@ -82,7 +84,7 @@ Statement  →  Assignment
            |  'return' Expression?
            |  ExpressionStmt
 
-Assignment         →  IDENTIFIER '=' Expression
+Assignment         →  IDENTIFIER (':' Type)? '=' Expression
 CompoundAssign     →  IDENTIFIER CompoundOp Expression
 CompoundOp         →  '+=' | '-=' | '*=' | '/=' | '**=' | '@='
 DestructureAssign  →  IDENTIFIER ',' IDENTIFIER (',' IDENTIFIER)* '=' Expression
@@ -115,32 +117,35 @@ Block  →  ':' Statement                              (* one-line form *)
 ### Functions
 
 ```ebnf
-FnDecl     →  'fn' IDENTIFIER ParamList ':' Block
-ParamList  →  '(' (IDENTIFIER (',' IDENTIFIER)* ','?)? ')'
+FnDecl     →  'fn' IDENTIFIER ParamList ('->' Type)? ':' Block
+ParamList  →  '(' (Param (',' Param)* ','?)? ')'
+Param      →  IDENTIFIER (':' Type)?
 ```
 
-Functions capture their declaring scope (closures). The return value is the last evaluated expression, or an explicit `return`.
+Functions capture their declaring scope (closures). The return value is the last evaluated expression, or an explicit `return`. Parameter and return type annotations are optional syntactically, but **required** under type checking (see [Type Annotations](#type-annotations)).
 
 ### Models
 
 ```ebnf
 ModelDecl      →  'model' IDENTIFIER ParamList ':' ModelBody
 ModelBody      →  NEWLINE INDENT (Assignment | ForwardDecl | TrainDecl | ValidateDecl | OptimizerDecl)+ DEDENT
-ForwardDecl    →  'forward' ForwardParams? ':' Block
+ForwardDecl    →  'forward' ForwardParams? ('->' Type)? ':' Block
 TrainDecl      →  'train' ForwardParams? ':' Block
 ValidateDecl   →  'validate' ForwardParams? ':' Block
 OptimizerDecl  →  'optimizer' ':' Block
 ForwardParams  →  IDENTIFIER (',' IDENTIFIER)*
+               |  '(' (Param (',' Param)* ','?)? ')'
 ```
 
 A model must contain exactly one `forward` block. Assignments in the model body define submodule fields.
 
-Note: unlike `fn`, `forward`, `train`, `validate` do **not** use parentheses around their parameters. Parameters are listed directly, separated by commas:
+Note: unlike `fn`, `forward`, `train`, `validate` use bare parameters without parentheses. To annotate their parameters, wrap them in parentheses (`forward (x: Tensor) -> Tensor:`). Both forms are accepted:
 
 ```python
 forward x:           # single parameter
 forward x, y, z:     # multiple parameters
 forward:             # no parameters
+forward (x: Tensor) -> Tensor:   # annotated form
 train batch:         # training step receives batch
 validate batch:      # validation step receives batch
 optimizer:           # no parameters, configures optimizers
@@ -231,6 +236,59 @@ Slice  →  Expression? ':' Expression? (':' Expression?)?
 | Module | Neural network layer (callable via `forward`) |
 
 Scalars are automatically promoted to tensors when used with tensor operands.
+
+### Type Annotations
+
+Declarations may carry optional type annotations. They are inert at runtime (the
+interpreter ignores them) and are enforced by the type checker.
+
+```ebnf
+Type        →  UnionType
+UnionType   →  PrimaryType ('|' PrimaryType)*
+PrimaryType →  FnType
+            |  IDENTIFIER ('[' Type (',' Type)* ']')?
+FnType      →  'fn' '(' (Type (',' Type)*)? ')' '->' Type
+```
+
+```python
+x: int = 5
+names: list[str] = ["a", "b"]
+counts: dict[str, int] = {"a": 1}
+flag: int | str = 1
+
+fn scale(x: Tensor, k: int) -> Tensor:
+  return x * k
+
+fn adder(base: int) -> fn(int) -> int:
+  fn add(x: int) -> int:
+    return base + x
+  return add
+
+model Net(width: int):
+  forward (x: Tensor) -> Tensor:
+    return x
+```
+
+Built-in type names: `int`, `float`, `num`/`number` (all one numeric type — Tera
+has no int/float split at runtime), `str`/`string`, `bool`, `Tensor`, `list[T]`,
+`dict[K, V]`, function types `fn(T, ...) -> R`, and `none` (the absence of a
+value). Any other name (e.g. a model name or `Tokenizer`) is a nominal type.
+There is **no `any`** — the type system is strict and has no escape hatch.
+
+### Type Checking
+
+`mlfw check <file>` type-checks a file without running it, and `mlfw run <file>`
+type-checks before executing — a file with type errors will not run. Checking is
+strict:
+
+- every function/`forward` parameter and every `fn`/`forward` return type must be
+  annotated;
+- referencing an undefined name is an error;
+- annotated assignments, declared return types, argument counts, and operand types
+  are all enforced.
+
+Local variables without an annotation are inferred from their initializer. The
+interactive REPL and the embedded `TeraRuntime` API stay dynamic (ungated).
 
 ## Indexing and Slicing
 

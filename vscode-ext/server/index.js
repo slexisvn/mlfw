@@ -14,9 +14,9 @@ const LANGUAGE_DATA_PATH = join(HERE, '../language-data.json');
 
 export async function startServer(connection = createConnection(ProposedFeatures.all)) {
   const documents = new TextDocuments(TextDocument);
-  const analyzer = new DocumentAnalyzer();
-  const bus = new EventEmitter();
   const languageData = loadLanguageData();
+  const analyzer = new DocumentAnalyzer(languageData);
+  const bus = new EventEmitter();
   const providers = await loadProviders();
 
   const ctx = { analyzer, languageData, bus, documents };

@@ -1,4 +1,4 @@
-fn index_of(items, target):
+fn index_of(items: list[str], target: str) -> int:
   i = 0
   while i < items.length:
     if items[i] == target:
@@ -26,18 +26,18 @@ inputs = corpus[:, 0:seq_len - 1]
 targets = corpus[:, 1:seq_len]
 loader = DataLoader(TensorDataset(inputs, targets), batch_size=3, shuffle=true)
 
-model WordLM(vocab_size, embed_dim, hidden):
+model WordLM(vocab_size: int, embed_dim: int, hidden: int):
   embed = Embedding(vocab_size, embed_dim)
   lstm = LSTM(embed_dim, hidden, 1, true)
   head = Linear(hidden, vocab_size)
   loss_fn = CrossEntropyLoss()
 
-  forward ids:
+  forward (ids: Tensor) -> Tensor:
     embedded = embed(ids)
     encoded, state = lstm(embedded)
     return head(encoded)
 
-  train batch:
+  train (batch: list[Tensor]):
     inp, tgt = batch
     logits = WordLM(inp)
     shape = logits.shape
@@ -55,7 +55,7 @@ trainer.fit(net, loader)
 
 net.eval()
 
-fn generate(model, words, seed, steps):
+fn generate(model: WordLM, words: list[str], seed: str, steps: int) -> str:
   cell = model.lstm.cells[0]
   state = null
   last = index_of(words, seed)

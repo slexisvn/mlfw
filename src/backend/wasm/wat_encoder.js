@@ -9,8 +9,9 @@ function slebBig(v) { v = BigInt(v); const r = []; let more = true; while (more)
 function encStr(s) { const e = new TextEncoder().encode(s); return [...uleb(e.length), ...e]; }
 function encF32(v) { const b = new ArrayBuffer(4); new Float32Array(b)[0] = v; return [...new Uint8Array(b)]; }
 function encF64(v) { const b = new ArrayBuffer(8); new Float64Array(b)[0] = v; return [...new Uint8Array(b)]; }
-function section(id, data) { return [id, ...uleb(data.length), ...data]; }
-function vec(items) { const f = []; for (const i of items) f.push(...i); return [...uleb(items.length), ...f]; }
+function pushAll(dst, src) { for (let i = 0; i < src.length; i++) dst.push(src[i]); return dst; }
+function section(id, data) { const out = [id]; pushAll(out, uleb(data.length)); pushAll(out, data); return out; }
+function vec(items) { const out = []; pushAll(out, uleb(items.length)); for (const i of items) pushAll(out, i); return out; }
 
 const INSTR = new Map([
   ['i32.const', [0x41]], ['f32.const', [0x43]],
@@ -169,12 +170,15 @@ function encodeBody(bodyTokens, localMap, importMap) {
 
   const labelStack = [];
 
+  let maxLocal = -1;
+  for (const v of localMap.values()) if (v > maxLocal) maxLocal = v;
   function localIdx(name) {
     const clean = name.replace('$', '');
     if (localMap.has(clean)) return localMap.get(clean);
     const num = parseInt(clean, 10);
-    if (!isNaN(num)) return num;
-    const nextIdx = localMap.size > 0 ? Math.max(...localMap.values()) + 1 : 0;
+    if (!isNaN(num)) { if (num > maxLocal) maxLocal = num; return num; }
+    const nextIdx = maxLocal + 1;
+    maxLocal = nextIdx;
     localMap.set(clean, nextIdx);
     return nextIdx;
   }
@@ -339,14 +343,22 @@ export function encodeWat(wat) {
       else { groups.push([...uleb(cnt), cur]); cur = mod.funcLocals[i]; cnt = 1; }
     }
     groups.push([...uleb(cnt), cur]);
-    localDecls.push(...vec(groups));
+    pushAll(localDecls, vec(groups));
   } else {
     localDecls.push(0x00);
   }
 
   const body = encodeBody(mod.bodyTokens, localMap, importMap);
-  const codeBody = [...localDecls, ...body, 0x0b];
-  const codeSec = section(SEC_CODE, vec([[...uleb(codeBody.length), ...codeBody]]));
+  const codeBody = [];
+  pushAll(codeBody, localDecls);
+  pushAll(codeBody, body);
+  codeBody.push(0x0b);
+  const codeEntry = [];
+  pushAll(codeEntry, uleb(codeBody.length));
+  pushAll(codeEntry, codeBody);
+  const codeSec = section(SEC_CODE, vec([codeEntry]));
 
-  return new Uint8Array([...WASM_MAGIC, ...WASM_VERSION, ...typeSec, ...importSec, ...funcSec, ...memSec, ...exportSec, ...codeSec]);
+  const out = [];
+  for (const part of [WASM_MAGIC, WASM_VERSION, typeSec, importSec, funcSec, memSec, exportSec, codeSec]) pushAll(out, part);
+  return new Uint8Array(out);
 }

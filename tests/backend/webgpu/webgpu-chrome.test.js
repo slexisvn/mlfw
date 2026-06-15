@@ -97,7 +97,8 @@ describe.skipIf(!deps)('webgpu via Chrome (differential vs CPU)', () => {
           + "export { CPUTarget, WebGPUTarget } from './src/backend/target.js';\n"
           + "export { layer_norm } from './src/nn/functional/normalization.js';\n"
           + "export { conv2d } from './src/nn/functional/conv.js';\n"
-          + "export { max_pool2d, avg_pool2d } from './src/nn/functional/pooling.js';\n",
+          + "export { max_pool2d, avg_pool2d } from './src/nn/functional/pooling.js';\n"
+          + "export { split } from './src/tensor/view/view_ops.js';\n",
         resolveDir: PROJECT_ROOT,
         loader: 'js',
       },
@@ -267,6 +268,15 @@ describe.skipIf(!deps)('webgpu via Chrome (differential vs CPU)', () => {
     const w2 = { data: grid(64, 3, 3) };
     await caseClose("(M,x,w1,w2)=>M.matmul(M.relu(M.matmul(x,w1)),w2)", [x, w1, w2], SCHED);
     await caseClose("(M,x,w1,w2)=>M.matmul(M.relu(M.matmul(x,w1)),w2)", [x, w1, w2], AUTOTUNE);
+  });
+
+  it('matmul wider than one workgroup feeding offset-split matches CPU (cross-extent serialized)', async () => {
+    const x = { data: grid(1, 128, 1) };
+    const w = { data: grid(128, 1024, 2) };
+    const src = "(M,x,w)=>{const g=M.matmul(x,w);const p=M.split(g,256,-1);return M.add(M.add(M.sigmoid(p[0]),M.sigmoid(p[1])),M.add(M.tanh(p[2]),M.sigmoid(p[3])));}";
+    await caseClose(src, [x, w]);
+    await caseClose(src, [x, w], SCHED);
+    await caseClose(src, [x, w], AUTOTUNE);
   });
 
   it('autotuned matmul larger than one workgroup matches CPU (thread cap)', async () => {

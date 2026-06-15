@@ -320,10 +320,11 @@ export class WebGPUCodegen {
       }
     }
     const crossThread = this._threadBindings.size > 0 ? this._findCrossThreadBuffers(func) : new Set();
-    if (extents.size <= 1 && crossThread.size === 0) return;
+    const crossExtent = this._threadBindings.size > 0 ? this._findCrossExtentBuffers(func) : new Set();
+    if (extents.size <= 1 && crossThread.size === 0 && crossExtent.size === 0) return;
 
     const dispatchProduct = this._dispatchSize[0] * this._dispatchSize[1] * this._dispatchSize[2];
-    this._serializeThreads = crossThread.size > 0 && dispatchProduct > 1;
+    this._serializeThreads = (crossThread.size > 0 || crossExtent.size > 0) && dispatchProduct > 1;
     if (this._serializeThreads) {
       this._workgroupSize = [1, 1, 1];
       this._dispatchSize = [1, 1, 1];
@@ -439,6 +440,54 @@ export class WebGPUCodegen {
     };
 
     walk(func.body, []);
+    return result;
+  }
+
+  _findCrossExtentBuffers(func) {
+    const storageNames = new Set();
+    for (const [, buf] of func.bufferMap) storageNames.add(buf.name);
+    const stores = new Map();
+    const loads = new Map();
+    const threadVarying = new Set();
+    const isConst = (v) => v && (v.type === 'FloatImmNode' || v.type === 'IntImmNode');
+
+    const record = (map, name, extent) => {
+      if (storageNames.has(name)) return;
+      let s = map.get(name);
+      if (!s) { s = new Set(); map.set(name, s); }
+      s.add(extent);
+    };
+
+    const walk = (node, extent) => {
+      if (!node) return;
+      let inner = extent;
+      if (node.type === 'ForNode' && node.kind === ForKind.THREAD_BINDING) {
+        const e = node.extent && node.extent.type === 'IntImmNode' ? node.extent.value : 0;
+        if (e > 0) inner = extent * e;
+      }
+      if (node.type === 'BufferStoreNode' && node.buffer) { record(stores, node.buffer.name, inner); if (!isConst(node.value)) threadVarying.add(node.buffer.name); }
+      if (node.type === 'LIRFlatStoreNode' && node.buffer) { record(stores, node.buffer.name, inner); if (!isConst(node.value)) threadVarying.add(node.buffer.name); }
+      if (node.type === 'LIRAccumulatorNode' && node.flushStore && node.flushStore.buffer) { record(stores, node.flushStore.buffer.name, inner); threadVarying.add(node.flushStore.buffer.name); }
+      if (node.type === 'BufferLoadNode' && node.buffer) record(loads, node.buffer.name, inner);
+      if (node.type === 'LIRFlatLoadNode' && node.buffer) record(loads, node.buffer.name, inner);
+
+      for (const k of ['body', 'loopBody', 'condBody', 'initBody', 'thenBody', 'elseBody', 'value',
+        'a', 'b', 'condition', 'expr', 'offsetExpr']) if (node[k]) walk(node[k], inner);
+      if (node.stmts) for (const s of node.stmts) walk(s, inner);
+      if (node.indices) for (const i of node.indices) walk(i, inner);
+      if (node.args) for (const a of node.args) walk(a, inner);
+      if (node.initLoad) walk(node.initLoad, inner);
+      if (node.flushStore) walk(node.flushStore, inner);
+    };
+    walk(func.body, 1);
+
+    const result = new Set();
+    for (const [name, loadExtents] of loads) {
+      if (!threadVarying.has(name)) continue;
+      const storeExtents = stores.get(name);
+      if (!storeExtents) continue;
+      for (const le of loadExtents) if (!storeExtents.has(le)) { result.add(name); break; }
+    }
     return result;
   }
 

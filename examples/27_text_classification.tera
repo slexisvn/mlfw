@@ -40,7 +40,7 @@ y_val = cat([
 train_loader = DataLoader(TensorDataset(x_train, y_train), batch_size=4, shuffle=true)
 val_loader = DataLoader(TensorDataset(x_val, y_val), batch_size=4)
 
-model SentimentNet(vocab_size, embed_dim, hidden, num_classes):
+model SentimentNet(vocab_size: int, embed_dim: int, hidden: int, num_classes: int):
   embed = Embedding(vocab_size, embed_dim)
   gru = GRU(embed_dim, hidden, 1, true)
   attend = Linear(hidden, 1)
@@ -48,20 +48,20 @@ model SentimentNet(vocab_size, embed_dim, hidden, num_classes):
   loss_fn = CrossEntropyLoss()
   acc = Accuracy(task="multiclass", num_classes=num_classes)
 
-  forward ids:
+  forward (ids: Tensor) -> Tensor:
     embedded = embed(ids)
     encoded, last = gru(embedded)
     weights = attend(encoded).softmax(1)
     pooled = (encoded * weights).sum(1)
     return classify(pooled)
 
-  train batch:
+  train (batch: list[Tensor]):
     ids, labels = batch
     loss = loss_fn(SentimentNet(ids), labels)
     log("train_loss", loss, prog_bar=true)
     return loss
 
-  validate batch:
+  validate (batch: list[Tensor]):
     ids, labels = batch
     logits = SentimentNet(ids)
     log("val_loss", loss_fn(logits, labels), prog_bar=true)

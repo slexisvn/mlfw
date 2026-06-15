@@ -23,14 +23,14 @@ import {
 } from '../lightning/index.js';
 import { fs } from '#io/fs';
 
-const FACTORIES = [
+export const FACTORIES = [
   'tensor', 'zeros', 'ones', 'empty', 'full', 'randn', 'arange', 'eye', 'linspace', 'randperm',
   'zerosLike', 'onesLike', 'emptyLike', 'fullLike', 'randnLike',
 ];
 
-const FREE_TENSOR_FUNCTIONS = ['where', 'cat', 'stack'];
-const COLUMN_AGGREGATES = ['sum', 'min', 'max'];
-const MODULES = [
+export const FREE_TENSOR_FUNCTIONS = ['where', 'cat', 'stack'];
+export const COLUMN_AGGREGATES = ['sum', 'min', 'max'];
+export const MODULES = [
   'Linear', 'ReLU', 'GELU', 'SiLU', 'Sigmoid', 'Tanh', 'LeakyReLU', 'ELU',
   'Softmax', 'LogSoftmax', 'Flatten', 'Dropout', 'LayerNorm', 'BatchNorm1d',
   'BatchNorm2d', 'Conv1d', 'Conv2d', 'MaxPool2d', 'AvgPool2d',
@@ -487,7 +487,7 @@ function constructScheduler(Type, args, posNames) {
   return new Type(...positional);
 }
 
-const FACTORY_SIGNATURES = {
+export const FACTORY_SIGNATURES = {
   tensor: [{ name: 'data' }, { name: 'opts', isOptional: true }],
   zeros: [{ name: 'shape' }, { name: 'opts', isOptional: true }],
   ones: [{ name: 'shape' }, { name: 'opts', isOptional: true }],
@@ -504,7 +504,7 @@ const FACTORY_SIGNATURES = {
   randnLike: [{ name: 'tensor' }],
 };
 
-const MODULE_SIGNATURES = {
+export const MODULE_SIGNATURES = {
   Linear: [{ name: 'inFeatures' }, { name: 'outFeatures' }, { name: 'bias', defaultValue: 'true', isOptional: true }],
   Conv1d: [{ name: 'inChannels' }, { name: 'outChannels' }, { name: 'kernelSize' }, { name: 'stride', defaultValue: '1', isOptional: true }, { name: 'padding', defaultValue: '0', isOptional: true }],
   Conv2d: [{ name: 'inChannels' }, { name: 'outChannels' }, { name: 'kernelSize' }, { name: 'stride', defaultValue: '1', isOptional: true }, { name: 'padding', defaultValue: '0', isOptional: true }],
@@ -523,7 +523,7 @@ const MODULE_SIGNATURES = {
   Flatten: [{ name: 'startDim', defaultValue: '1', isOptional: true }, { name: 'endDim', defaultValue: '-1', isOptional: true }],
 };
 
-const TRAINING_SIGNATURES = {
+export const TRAINING_SIGNATURES = {
   TensorDataset: [{ name: '...tensors' }],
   DataLoader: [{ name: 'dataset' }, { name: 'batch_size', defaultValue: '1', isOptional: true }, { name: 'shuffle', defaultValue: 'false', isOptional: true }, { name: 'drop_last', defaultValue: 'false', isOptional: true }],
   SGD: [{ name: 'params' }, { name: 'lr', defaultValue: '0.01', isOptional: true }, { name: 'momentum', defaultValue: '0', isOptional: true }, { name: 'weight_decay', defaultValue: '0', isOptional: true }],
@@ -564,7 +564,7 @@ const TRAINING_SIGNATURES = {
   train_test_split: [{ name: 'data' }, { name: 'test_size', defaultValue: '0.2', isOptional: true }],
 };
 
-const BUILTIN_SIGNATURES = {
+export const BUILTIN_SIGNATURES = {
   reshape: [{ name: 'tensor' }, { name: 'shape' }],
   transpose: [{ name: 'tensor' }, { name: 'dim0' }, { name: 'dim1' }],
   permute: [{ name: 'tensor' }, { name: 'dims' }],

@@ -1,5 +1,5 @@
 
-model SmallCNN(num_classes):
+model SmallCNN(num_classes: int):
   conv1 = Conv2d(1, 8, 3, padding=1)
   bn1 = BatchNorm2d(8)
   conv2 = Conv2d(8, 16, 3, padding=1)
@@ -9,7 +9,7 @@ model SmallCNN(num_classes):
   flat = Flatten()
   head = Linear(16, num_classes)
 
-  forward x:
+  forward (x: Tensor) -> Tensor:
     h = pool(bn1(conv1(x)).relu())
     h = pool(bn2(conv2(h)).relu())
     h = flat(gap(h))

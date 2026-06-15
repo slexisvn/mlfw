@@ -6,7 +6,7 @@ const DECL_VISITORS = {
     ctx.visitAll(node.body, child);
   },
   FunctionDeclaration: (node, scope, ctx) => {
-    const namePos = addNamedDecl(scope, node, 'function', 'fn', ctx);
+    const namePos = addNamedDecl(scope, node, 'function', 'fn', ctx, renderType(node.returnType));
     const child = ctx.openScope(node.name, scope, node);
     addParamSymbols(child, ctx, node.params, namePos, node);
     ctx.visitAll(node.body, child);
@@ -19,7 +19,7 @@ const DECL_VISITORS = {
     ctx.visitAll(node.body, child);
   },
   Assign: (node, scope) => {
-    const typeName = inferType(node.value);
+    const typeName = renderType(node.annotation) ?? inferType(node.value);
     addSymbol(scope, node.name, 'variable', node, typeName);
   },
   DestructureAssign: (node, scope, ctx) => {
@@ -58,9 +58,17 @@ function addParamSymbols(scope, ctx, paramNames, afterPos, node) {
   const positions = findIdentifierPositions(ctx.sourceLines, { line: afterPos.line, column: afterPos.column + 1 }, paramNames);
   for (let i = 0; i < paramNames.length; i++) {
     const pos = positions[i] ?? { line: node.line, column: node.column };
-    scope.symbols.push({ name: paramNames[i], kind: 'parameter', line: pos.line, column: pos.column });
+    const typeName = renderType(node.paramTypes?.[i]);
+    scope.symbols.push({ name: paramNames[i], kind: 'parameter', line: pos.line, column: pos.column, typeName });
   }
   updateScopeRange(scope, node);
+}
+
+function renderType(node) {
+  if (!node) return null;
+  if (node.kind === 'UnionType') return node.members.map(renderType).join(' | ');
+  if (node.kind === 'GenericType') return `${node.name}[${node.args.map(renderType).join(', ')}]`;
+  return node.name ?? null;
 }
 
 export function buildSymbolTable(program, sourceText = '') {
@@ -98,6 +106,7 @@ export function buildSymbolTable(program, sourceText = '') {
     flat: scopes.flatMap(s => s.symbols),
     findScopeAt: position => findScopeAt(root, position),
     resolve: (name, position) => resolveSymbol(root, name, position),
+    resolveField: (typeName, fieldName) => resolveField(scopes, typeName, fieldName),
   };
 }
 
@@ -127,13 +136,14 @@ function inferType(value) {
   return null;
 }
 
-function addNamedDecl(scope, node, kind, keyword, ctx) {
+function addNamedDecl(scope, node, kind, keyword, ctx, typeName = null) {
   const position = findIdentifierAfterKeyword(ctx.sourceLines, node, keyword, node.name);
   scope.symbols.push({
     name: node.name,
     kind,
     line: position.line,
     column: position.column,
+    typeName,
   });
   updateScopeRange(scope, node);
   return position;
@@ -226,6 +236,13 @@ function findScopeAt(scope, position) {
     }
   }
   return scope;
+}
+
+function resolveField(scopes, typeName, fieldName) {
+  if (!typeName) return null;
+  const scope = scopes.find(s => s.name === typeName);
+  if (!scope) return null;
+  return scope.symbols.find(s => s.name === fieldName) ?? null;
 }
 
 function resolveSymbol(rootScope, name, position) {

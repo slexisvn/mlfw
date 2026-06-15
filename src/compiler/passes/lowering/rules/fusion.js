@@ -215,6 +215,10 @@ function canLowerAsElementwiseFusion(op) {
   if (!region) return false;
   for (const innerOp of region.entryBlock.ops()) {
     if (innerOp.opName === 'yield') continue;
+    if (CONSTANT_OPS.has(innerOp.opName)) {
+      if (typeof innerOp.getAttr('value') === 'number') continue;
+      return false;
+    }
     if (!INLINE_FUSION_BUILDERS.has(innerOp.opName)) return false;
   }
   if (op.numResults > 1) {

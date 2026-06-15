@@ -20,16 +20,16 @@ model HousePricer():
   net = Sequential(Linear(3, 32), ReLU(), Linear(32, 16), ReLU(), Linear(16, 1))
   loss_fn = MSELoss()
 
-  forward x:
+  forward (x: Tensor) -> Tensor:
     return net(x)
 
-  train batch:
+  train (batch: list[Tensor]):
     a, b = batch
     loss = loss_fn(HousePricer(a), b)
     log("train_loss", loss, prog_bar=true)
     return loss
 
-  validate batch:
+  validate (batch: list[Tensor]):
     a, b = batch
     log("val_loss", loss_fn(HousePricer(a), b), prog_bar=true)
 

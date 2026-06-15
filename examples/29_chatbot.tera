@@ -36,18 +36,18 @@ decoder_out = tensor(dout_rows, dtype=i32)
 
 loader = DataLoader(TensorDataset(questions, decoder_in, decoder_out), batch_size=216, shuffle=true)
 
-model ChatBot(vocab_size, embed_dim, hidden, pad_id):
+model ChatBot(vocab_size: int, embed_dim: int, hidden: int, pad_id: int):
   embed = Embedding(vocab_size, embed_dim)
   encoder = LSTM(embed_dim, hidden, 1, true)
   dec_cell = LSTMCell(embed_dim + hidden, hidden)
   head = Linear(hidden, vocab_size)
   loss_fn = CrossEntropyLoss("mean", pad_id)
 
-  forward q:
+  forward (q: Tensor) -> Tensor:
     encoded, state = encoder(embed(q))
     return head(encoded)
 
-  train batch:
+  train (batch: list[Tensor]):
     q, din, dout = batch
     enc, state = encoder(embed(q))
     batch_size = q.shape[0]
@@ -80,7 +80,7 @@ model ChatBot(vocab_size, embed_dim, hidden, pad_id):
   optimizer:
     return optim_config(Adam(ChatBot.parameters(), lr=0.01))
 
-fn reply(model, tok, query, max_len):
+fn reply(model: ChatBot, tok: Tokenizer, query: Tensor, max_len: int) -> str:
   enc, state = model.encoder(model.embed(query))
   hidden_dim = enc.shape[2]
   src_len = enc.shape[1]
@@ -103,7 +103,7 @@ fn reply(model, tok, query, max_len):
     out_ids[out_ids.length] = last
   return tok.decode(out_ids)
 
-fn accuracy(model, tok, qs, q_texts, answers, max_len):
+fn accuracy(model: ChatBot, tok: Tokenizer, qs: Tensor, q_texts: list[str], answers: list[str], max_len: int) -> int:
   correct = 0
   q_len = qs.shape[1]
   for i in range(q_texts.length):
@@ -112,7 +112,7 @@ fn accuracy(model, tok, qs, q_texts, answers, max_len):
       correct += 1
   return correct
 
-fn show_samples(model, tok, qs, q_texts, max_len, stride):
+fn show_samples(model: ChatBot, tok: Tokenizer, qs: Tensor, q_texts: list[str], max_len: int, stride: int) -> none:
   q_len = qs.shape[1]
   i = 0
   while i < q_texts.length:

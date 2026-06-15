@@ -1,6 +1,6 @@
 import fs from 'node:fs';
-import { parse } from './parser.js';
 import { TeraRuntime } from './runtime.js';
+import { checkSource } from './check.js';
 import { formatValue } from './format.js';
 import { formatDiagnostic } from './diagnostics.js';
 import { startRepl } from './repl.js';
@@ -9,8 +9,13 @@ export const CLI_USAGE = `Usage:
   mlfw                 Start the Tera REPL
   mlfw repl            Start the Tera REPL
   mlfw run <file>      Execute a Tera file (.tera)
-  mlfw check <file>    Parse a Tera file without executing
+  mlfw check <file>    Type-check a Tera file without executing
   mlfw <file>          Execute a Tera file`;
+
+function reportDiagnostics(diagnostics, source, filename, stderr) {
+  for (const diagnostic of diagnostics) stderr(formatDiagnostic(diagnostic, source, filename));
+  return diagnostics.length > 0;
+}
 
 export async function runCli(args, {
   stdout = console.log,
@@ -44,7 +49,8 @@ export async function runCli(args, {
   try {
     source = readFile(file);
     if (mode === 'check') {
-      parse(source);
+      const { diagnostics } = checkSource(source);
+      if (reportDiagnostics(diagnostics, source, file, stderr)) return 1;
       stdout(`${file}: OK`);
       return 0;
     }
@@ -63,6 +69,8 @@ export async function executeSource(source, {
 } = {}) {
   if (stripExit) source = source.replace(/(?:^|\n)\s*(?:exit|quit)\s*;?\s*$/u, '');
   try {
+    const { diagnostics } = checkSource(source);
+    if (reportDiagnostics(diagnostics, source, filename, stderr)) return 1;
     const result = await new TeraRuntime({ output: stdout }).execute(source);
     const text = formatValue(result);
     if (text) stdout(text);

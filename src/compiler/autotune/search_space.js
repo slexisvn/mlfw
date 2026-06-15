@@ -14,6 +14,24 @@ function gpuThreadCap(target) {
 }
 const REDUCE_TILE_CANDIDATES = [1, 2, 4, 8, 16, 32];
 
+function largestDivisorAtMost(extent, value) {
+  let best = 1;
+  for (let d = 1; d * d <= extent; d++) {
+    if (extent % d !== 0) continue;
+    if (d <= value && d > best) best = d;
+    const e = extent / d;
+    if (e <= value && e > best) best = e;
+  }
+  return best;
+}
+
+function tileFactorForExtent(extent, value) {
+  if (!Number.isFinite(extent) || extent <= 0) return value;
+  const clamped = Math.min(value, extent);
+  const divisor = largestDivisorAtMost(extent, clamped);
+  return divisor > 1 ? divisor : clamped;
+}
+
 export function createElementwiseCPUSketch() {
   return new ScheduleSketch('elementwise_cpu', [
     new SearchVariable('tile_size', TILE_CANDIDATES),
@@ -143,22 +161,25 @@ export function createMatmulGPUSketch() {
     const mExtent = mLoop.extent.type === 'IntImmNode' ? mLoop.extent.value : null;
     const nExtent = nLoop.extent.type === 'IntImmNode' ? nLoop.extent.value : null;
 
+    const bm = mExtent !== null ? tileFactorForExtent(mExtent, params.block_tile_m) : params.block_tile_m;
+    const bn = nExtent !== null ? tileFactorForExtent(nExtent, params.block_tile_n) : params.block_tile_n;
+
     const cap = gpuThreadCap(target);
     const threadsOf = (bt, tt) => Math.max(1, Math.ceil(bt / tt));
     let ttm = Math.max(1, params.thread_tile_m);
     let ttn = Math.max(1, params.thread_tile_n);
-    while (threadsOf(params.block_tile_m, ttm) * threadsOf(params.block_tile_n, ttn) > cap) {
-      if (threadsOf(params.block_tile_m, ttm) >= threadsOf(params.block_tile_n, ttn)) ttm *= 2;
+    while (threadsOf(bm, ttm) * threadsOf(bn, ttn) > cap) {
+      if (threadsOf(bm, ttm) >= threadsOf(bn, ttn)) ttm *= 2;
       else ttn *= 2;
-      if (ttm >= params.block_tile_m && ttn >= params.block_tile_n) break;
+      if (ttm >= bm && ttn >= bn) break;
     }
 
-    if (mExtent && mExtent >= params.block_tile_m) {
-      const [mBlock, mRem] = schedule.split(mLoop, params.block_tile_m);
+    if (mExtent && bm > 1 && mExtent > bm) {
+      const [mBlock, mRem] = schedule.split(mLoop, bm);
       schedule.bindThread(mBlock, 'blockIdx.y');
       const updated = schedule.getLoops(blockName);
       const cur = updated.find(l => l.loopVar.name === mRem.loopVar.name);
-      if (cur && ttm <= params.block_tile_m) {
+      if (cur && ttm <= bm) {
         const [mto] = schedule.split(cur, ttm);
         schedule.bindThread(mto, 'threadIdx.y');
       }
@@ -166,12 +187,12 @@ export function createMatmulGPUSketch() {
 
     const updated2 = schedule.getLoops(blockName);
     const currentN = updated2.find(l => l.loopVar.name === nLoop.loopVar.name);
-    if (currentN && nExtent && nExtent >= params.block_tile_n) {
-      const [nBlock, nRem] = schedule.split(currentN, params.block_tile_n);
+    if (currentN && nExtent && bn > 1 && nExtent > bn) {
+      const [nBlock, nRem] = schedule.split(currentN, bn);
       schedule.bindThread(nBlock, 'blockIdx.x');
       const updated3 = schedule.getLoops(blockName);
       const curN = updated3.find(l => l.loopVar.name === nRem.loopVar.name);
-      if (curN && ttn <= params.block_tile_n) {
+      if (curN && ttn <= bn) {
         const [nto] = schedule.split(curN, ttn);
         schedule.bindThread(nto, 'threadIdx.x');
       }
@@ -199,26 +220,33 @@ export function createMultiLevelTileCPUSketch() {
 
     const s0e = staticExtent(spatial[0]);
     let outer = spatial[0];
-    if (s0e !== null && params.tile_s0 > 1 && s0e >= params.tile_s0) {
-      const [s0o] = schedule.split(spatial[0], params.tile_s0);
-      outer = s0o;
+    if (s0e !== null) {
+      const f0 = tileFactorForExtent(s0e, params.tile_s0);
+      if (f0 > 1 && f0 < s0e) {
+        const [s0o] = schedule.split(spatial[0], f0);
+        outer = s0o;
+      }
     }
     schedule.parallelize(outer);
 
     if (spatial.length >= 2) {
       const s1 = findLoop(spatial[1].loopVar.name);
       const s1e = s1 ? staticExtent(s1) : null;
-      if (s1 && s1e !== null && params.tile_s1 > 1 && s1e >= params.tile_s1) {
-        const [, s1i] = schedule.split(s1, params.tile_s1);
-        schedule.vectorize(s1i);
+      if (s1 && s1e !== null) {
+        const f1 = tileFactorForExtent(s1e, params.tile_s1);
+        if (f1 > 1) {
+          const [, s1i] = schedule.split(s1, f1);
+          schedule.vectorize(s1i);
+        }
       }
     }
 
     if (reduction.length >= 1) {
       const k = findLoop(reduction[0].loopVar.name);
       const ke = k ? staticExtent(k) : null;
-      if (k && ke !== null && params.tile_k > 1 && ke >= params.tile_k) {
-        schedule.split(k, params.tile_k);
+      if (k && ke !== null) {
+        const fk = tileFactorForExtent(ke, params.tile_k);
+        if (fk > 1 && fk < ke) schedule.split(k, fk);
       }
     }
   });

@@ -60,6 +60,13 @@ class Parser {
         this.expectValue('=');
         return this.locate({ type: 'Assign', name, value: this.parseExpression() }, start);
       }
+      if (nextVal === ':') {
+        const name = this.next().value;
+        this.expectValue(':');
+        const annotation = this.parseTypeAnnotation();
+        this.expectValue('=');
+        return this.locate({ type: 'Assign', name, annotation, value: this.parseExpression() }, start);
+      }
       if (COMPOUND_OPS[nextVal] !== undefined) {
         const name = this.next().value;
         const opToken = this.next();
@@ -134,53 +141,45 @@ class Parser {
   parseFunctionDeclaration() {
     const start = this.expectIdentifier('fn');
     const name = this.expect('identifier').value;
-    const params = this.parseNameList();
+    const paramTypes = [];
+    const params = this.parseNameList(paramTypes);
+    const returnType = this.matchValue('->') ? this.parseTypeAnnotation() : null;
     const body = this.parseBlock();
-    return this.locate({ type: 'FunctionDeclaration', name, params, body }, start);
+    return this.locate({ type: 'FunctionDeclaration', name, params, paramTypes, returnType, body }, start);
   }
 
   parseModel() {
     const start = this.expectIdentifier('model');
     const name = this.expect('identifier').value;
-    const params = this.parseNameList();
+    const paramTypes = [];
+    const params = this.parseNameList(paramTypes);
     const body = this.parseBlock();
-    return this.locate({ type: 'ModelDeclaration', name, params, body }, start);
+    return this.locate({ type: 'ModelDeclaration', name, params, paramTypes, body }, start);
   }
 
   parseForward() {
     const start = this.expectIdentifier('forward');
-    const params = [];
-    while (!this.atValue(':')) {
-      params.push(this.expect('identifier').value);
-      if (!this.matchValue(',')) break;
-      if (this.atValue(':')) break;
-    }
+    const paramTypes = [];
+    const params = this.parseBlockParams(paramTypes);
+    const returnType = this.matchValue('->') ? this.parseTypeAnnotation() : null;
     const body = this.parseBlock();
-    return this.locate({ type: 'ForwardDeclaration', params, body }, start);
+    return this.locate({ type: 'ForwardDeclaration', params, paramTypes, returnType, body }, start);
   }
 
   parseTrain() {
     const start = this.expectIdentifier('train');
-    const params = [];
-    while (!this.atValue(':')) {
-      params.push(this.expect('identifier').value);
-      if (!this.matchValue(',')) break;
-      if (this.atValue(':')) break;
-    }
+    const paramTypes = [];
+    const params = this.parseBlockParams(paramTypes);
     const body = this.parseBlock();
-    return this.locate({ type: 'TrainDeclaration', params, body }, start);
+    return this.locate({ type: 'TrainDeclaration', params, paramTypes, body }, start);
   }
 
   parseValidate() {
     const start = this.expectIdentifier('validate');
-    const params = [];
-    while (!this.atValue(':')) {
-      params.push(this.expect('identifier').value);
-      if (!this.matchValue(',')) break;
-      if (this.atValue(':')) break;
-    }
+    const paramTypes = [];
+    const params = this.parseBlockParams(paramTypes);
     const body = this.parseBlock();
-    return this.locate({ type: 'ValidateDeclaration', params, body }, start);
+    return this.locate({ type: 'ValidateDeclaration', params, paramTypes, body }, start);
   }
 
   parseOptimizer() {
@@ -202,17 +201,69 @@ class Parser {
     return this.locate({ type: 'DestructureAssign', names, value: this.parseExpression() }, start);
   }
 
-  parseNameList() {
+  parseNameList(annotations = null) {
     if (!this.matchValue('(')) return [];
     const names = [];
     if (!this.atValue(')')) {
       do {
         names.push(this.expect('identifier').value);
+        const ann = this.matchValue(':') ? this.parseTypeAnnotation() : null;
+        if (annotations) annotations.push(ann);
         if (!this.matchValue(',')) break;
       } while (!this.atValue(')'));
     }
     this.expectValue(')');
     return names;
+  }
+
+  parseBlockParams(annotations) {
+    if (this.atValue('(')) return this.parseNameList(annotations);
+    const names = [];
+    while (!this.atValue(':') && !this.atValue('->')) {
+      names.push(this.expect('identifier').value);
+      annotations.push(null);
+      if (!this.matchValue(',')) break;
+      if (this.atValue(':') || this.atValue('->')) break;
+    }
+    return names;
+  }
+
+  parseTypeAnnotation() {
+    return this.parseUnionType();
+  }
+
+  parseUnionType() {
+    const start = this.current();
+    const first = this.parsePrimaryType();
+    if (!this.atValue('|')) return first;
+    const members = [first];
+    while (this.matchValue('|')) members.push(this.parsePrimaryType());
+    return this.locate({ kind: 'UnionType', members }, start);
+  }
+
+  parsePrimaryType() {
+    if (this.atIdentifier('fn')) return this.parseFunctionType();
+    const start = this.expect('identifier');
+    const name = start.value;
+    if (!this.matchValue('[')) return this.locate({ kind: 'NameType', name }, start);
+    const args = [this.parseTypeAnnotation()];
+    while (this.matchValue(',')) args.push(this.parseTypeAnnotation());
+    this.expectValue(']');
+    return this.locate({ kind: 'GenericType', name, args }, start);
+  }
+
+  parseFunctionType() {
+    const start = this.expectIdentifier('fn');
+    this.expectValue('(');
+    const params = [];
+    if (!this.atValue(')')) {
+      params.push(this.parseTypeAnnotation());
+      while (this.matchValue(',')) params.push(this.parseTypeAnnotation());
+    }
+    this.expectValue(')');
+    this.expectValue('->');
+    const ret = this.parseTypeAnnotation();
+    return this.locate({ kind: 'FunctionType', params, ret }, start);
   }
 
   parseExpression(minPrec = 0) {

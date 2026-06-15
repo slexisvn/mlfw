@@ -25,15 +25,13 @@ import { CalibrationCollector } from '../analysis/calibration.js';
 import { DecompositionPass } from '../passes/decompose/decomposition_pass.js';
 import { RematerializationPass } from '../passes/memory/rematerialization.js';
 import { GraphPartitionPass, PartitionMaterializationPass } from '../passes/partition/partition_pass.js';
-import { splitGraphForCublas, splitGraphForNative } from '../passes/partition/cublas_split.js';
+import { splitGraphForCublas, splitGraphForNative, hasDependentBoundaries } from '../passes/partition/cublas_split.js';
 
 import { TraceLog, TraceLevel, CompilationError } from './trace.js';
 import { IRPrinter } from '../ir/graph/printer.js';
 import { printTensorIR } from '../ir/tensor/printer.js';
 import { lowerToLIR } from '../passes/lowering/tensor_to_lir.js';
 import { verifyLIR } from '../ir/lir/verifier.js';
-
-const WEBGPU_SPLIT_MIN_BOUNDARIES = 8;
 
 function spread(obj) { return obj && typeof obj === 'object' ? obj : {}; }
 
@@ -62,8 +60,9 @@ export class CompilerConfig {
     };
 
     const s = opts.scheduling || {};
+    const isWebGPU = this.target && typeof this.target.isWebGPU === 'function' && this.target.isWebGPU();
     this.scheduling = {
-      enabled:  s.enabled  ?? opts.enableSchedule ?? false,
+      enabled:  s.enabled  ?? opts.enableSchedule ?? isWebGPU,
       autotune: s.autotune ?? opts.enableAutotune ?? false,
       ...spread(opts.autotuneConfig), ...omit(s, 'enabled', 'autotune'),
     };
@@ -188,8 +187,8 @@ export class Compiler {
       cublasSplit = splitGraphForCublas(graphModule);
     } else if (this._cudaMatmulChain) {
       nativeSplit = splitGraphForNative(graphModule);
-    } else if (isWebGPUTarget) {
-      nativeSplit = splitGraphForNative(graphModule, WEBGPU_SPLIT_MIN_BOUNDARIES);
+    } else if (isWebGPUTarget && hasDependentBoundaries(graphModule, this.config.target.maxThreadsPerBlock || 256)) {
+      nativeSplit = splitGraphForNative(graphModule, 2);
     }
 
     if (this.config.verify) {

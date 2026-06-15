@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { LearnedCostModel, AnalyticalCostModel } from '../../../src/compiler/autotune/cost_model.js';
 import { CPUTarget } from '../../../src/backend/target.js';
 
-const feat = (...v) => ({ toVector: () => v });
+const feat = (...v) => [v];
 
 describe('LearnedCostModel (MLP) captures non-linear interactions', () => {
   it('fits XOR, whose optimal linear regression provably has MSE 0.25', () => {

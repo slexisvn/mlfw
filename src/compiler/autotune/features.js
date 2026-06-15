@@ -1,5 +1,13 @@
 import { ForKind } from '../ir/tensor/nodes.js';
 
+export const STATEMENT_FEATURE_SCHEMA = [
+  'iterCount', 'depth',
+  'parallelLoops', 'vectorizedLoops', 'unrolledLoops', 'threadBoundLoops', 'serialLoops',
+  'threadBlockSize', 'gridSize', 'underReduction',
+  'numMathOps', 'numExternCalls', 'numReads', 'numWrites',
+  'stride1Accesses', 'stridedAccesses', 'reuseCount', 'touchedBytes'
+];
+
 class ScheduleFeatures {
   constructor(raw) {
     this.numLoops = raw.numLoops || 0;
@@ -25,35 +33,6 @@ class ScheduleFeatures {
     this.gridSize = raw.gridSize || 0;
     this.strideOneAccesses = raw.strideOneAccesses || 0;
     this.nonStrideOneAccesses = raw.nonStrideOneAccesses || 0;
-    this.tileFactors = raw.tileFactors || [];
-  }
-
-  toVector() {
-    return [
-      this.numLoops, this.numBlocks, this.totalIterations,
-      this.maxLoopDepth, this.numParallelLoops, this.numVectorizedLoops,
-      this.numUnrolledLoops, this.numThreadBound, this.numSerialLoops,
-      this.totalBufferBytes, this.numBufferReads, this.numBufferWrites,
-      this.numMathOps, this.numExternCalls, this.arithmeticIntensity,
-      this.innermostExtent, this.outermostExtent,
-      this.hasReduction ? 1 : 0, this.reductionDepth,
-      this.threadBlockSize, this.gridSize,
-      this.strideOneAccesses, this.nonStrideOneAccesses
-    ];
-  }
-
-  static featureNames() {
-    return [
-      'numLoops', 'numBlocks', 'totalIterations',
-      'maxLoopDepth', 'numParallelLoops', 'numVectorizedLoops',
-      'numUnrolledLoops', 'numThreadBound', 'numSerialLoops',
-      'totalBufferBytes', 'numBufferReads', 'numBufferWrites',
-      'numMathOps', 'numExternCalls', 'arithmeticIntensity',
-      'innermostExtent', 'outermostExtent',
-      'hasReduction', 'reductionDepth',
-      'threadBlockSize', 'gridSize',
-      'strideOneAccesses', 'nonStrideOneAccesses'
-    ];
   }
 }
 
@@ -71,8 +50,7 @@ export class FeatureExtractor {
       threadBlockSize: 1, gridSize: 1,
       innermostExtent: 0, outermostExtent: 0,
       loopExtents: [],
-      strideOneAccesses: 0, nonStrideOneAccesses: 0,
-      tileFactors: []
+      strideOneAccesses: 0, nonStrideOneAccesses: 0
     };
 
     FeatureExtractor._visitIterative(primFunc.body, ctx);
@@ -82,6 +60,134 @@ export class FeatureExtractor {
     ctx.arithmeticIntensity = bytes > 0 ? ops / bytes : 0;
 
     return new ScheduleFeatures(ctx);
+  }
+
+  static extractStatements(primFunc) {
+    const out = [];
+    const loopStack = [];
+    let reduction = 0;
+    const stack = [{ node: primFunc.body, action: 'enter' }];
+    while (stack.length > 0) {
+      const { node, action } = stack.pop();
+      if (!node) continue;
+      if (action === 'leaveFor') { loopStack.pop(); continue; }
+      if (action === 'leaveBlock') { reduction--; continue; }
+      switch (node.type) {
+        case 'ForNode':
+          loopStack.push(node);
+          stack.push({ node: null, action: 'leaveFor' });
+          stack.push({ node: node.body, action: 'enter' });
+          break;
+        case 'BlockNode':
+          if (node.initBody) {
+            reduction++;
+            stack.push({ node: null, action: 'leaveBlock' });
+            stack.push({ node: node.initBody, action: 'enter' });
+          }
+          stack.push({ node: node.body, action: 'enter' });
+          break;
+        case 'SeqNode':
+          for (let i = node.stmts.length - 1; i >= 0; i--) stack.push({ node: node.stmts[i], action: 'enter' });
+          break;
+        case 'AllocateNode':
+        case 'LetStmtNode':
+          stack.push({ node: node.body, action: 'enter' });
+          break;
+        case 'IfThenElseNode':
+          if (node.elseBody) stack.push({ node: node.elseBody, action: 'enter' });
+          stack.push({ node: node.thenBody, action: 'enter' });
+          break;
+        case 'BufferStoreNode':
+          out.push(FeatureExtractor._statementVector(node, loopStack, reduction));
+          break;
+      }
+    }
+    return out;
+  }
+
+  static _statementVector(store, loopStack, reduction) {
+    let iterCount = 1, par = 0, vec = 0, unr = 0, thr = 0, ser = 0, tbs = 1, grid = 1;
+    for (const f of loopStack) {
+      const ext = f.extent && f.extent.type === 'IntImmNode' ? f.extent.value : 1;
+      iterCount *= ext;
+      switch (f.kind) {
+        case ForKind.PARALLEL: par++; break;
+        case ForKind.VECTORIZED: vec++; break;
+        case ForKind.UNROLLED: unr++; break;
+        case ForKind.THREAD_BINDING:
+          thr++;
+          if (f.threadTag && f.threadTag.startsWith('threadIdx')) tbs *= ext;
+          else if (f.threadTag && f.threadTag.startsWith('blockIdx')) grid *= ext;
+          break;
+        default: ser++; break;
+      }
+    }
+    const arith = { math: 0, extern: 0 };
+    FeatureExtractor._countExpr(store.value, arith);
+    const loopVarNames = loopStack.map(f => f.loopVar.name);
+    const accesses = [{ buffer: store.buffer, indices: store.indices }];
+    FeatureExtractor._collectLoads(store.value, accesses);
+    let stride1 = 0, strided = 0, reuse = 0, touched = 0;
+    for (const acc of accesses) {
+      touched += acc.buffer && acc.buffer.sizeInBytes ? acc.buffer.sizeInBytes() : 0;
+      const last = acc.indices && acc.indices.length > 0 ? acc.indices[acc.indices.length - 1] : null;
+      if (last && last.type === 'VariableNode') stride1++;
+      else strided++;
+      const used = new Set();
+      if (acc.indices) for (const idx of acc.indices) FeatureExtractor._collectVars(idx, used);
+      for (const name of loopVarNames) if (!used.has(name)) reuse++;
+    }
+    const fields = {
+      iterCount, depth: loopStack.length,
+      parallelLoops: par, vectorizedLoops: vec, unrolledLoops: unr,
+      threadBoundLoops: thr, serialLoops: ser,
+      threadBlockSize: tbs, gridSize: grid,
+      underReduction: reduction > 0 ? 1 : 0,
+      numMathOps: arith.math, numExternCalls: arith.extern,
+      numReads: accesses.length - 1, numWrites: 1,
+      stride1Accesses: stride1, stridedAccesses: strided,
+      reuseCount: reuse, touchedBytes: touched
+    };
+    return STATEMENT_FEATURE_SCHEMA.map(n => fields[n] || 0);
+  }
+
+  static _countExpr(node, acc) {
+    if (!node || typeof node !== 'object') return;
+    switch (node.type) {
+      case 'MathOpNode':
+        acc.math++;
+        FeatureExtractor._countExpr(node.a, acc);
+        if (node.b) FeatureExtractor._countExpr(node.b, acc);
+        break;
+      case 'CompareNode':
+        acc.math++;
+        FeatureExtractor._countExpr(node.a, acc);
+        FeatureExtractor._countExpr(node.b, acc);
+        break;
+      case 'CallExternNode':
+        acc.extern++;
+        for (const a of node.args) FeatureExtractor._countExpr(a, acc);
+        break;
+      default:
+        break;
+    }
+  }
+
+  static _collectLoads(node, out) {
+    if (!node || typeof node !== 'object') return;
+    if (node.type === 'BufferLoadNode') { out.push({ buffer: node.buffer, indices: node.indices }); return; }
+    if (node.a) FeatureExtractor._collectLoads(node.a, out);
+    if (node.b) FeatureExtractor._collectLoads(node.b, out);
+    if (node.args) for (const a of node.args) FeatureExtractor._collectLoads(a, out);
+  }
+
+  static _collectVars(node, set) {
+    if (!node || typeof node !== 'object') return;
+    if (node.type === 'VariableNode') { set.add(node.name); return; }
+    if (node.a) FeatureExtractor._collectVars(node.a, set);
+    if (node.b) FeatureExtractor._collectVars(node.b, set);
+    if (node.args) for (const a of node.args) FeatureExtractor._collectVars(a, set);
+    if (node.indices) for (const i of node.indices) FeatureExtractor._collectVars(i, set);
   }
 
   static _visitIterative(root, ctx) {

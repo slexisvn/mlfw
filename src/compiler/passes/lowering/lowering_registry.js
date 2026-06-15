@@ -220,8 +220,19 @@ export function lowerPointwise(ctx, op, inputs, outputs, exprBuilder) {
 }
 
 export function lowerConstant(ctx, op) {
-  const outBuf = ctx.getOrAllocBuffer(op.getResult(0));
+  const result = op.getResult(0);
   const val = op.getAttr('value');
+  const fullShape = (result.type && result.type.shape) || [];
+  if (typeof val === 'number' && fullShape.length > 0 && !ctx.bufferMap.has(result)) {
+    const dtype = (result.type && result.type.dtype) || 'f32';
+    const scalarShape = new Array(fullShape.length).fill(1);
+    const buf = new Buffer(`buf_${ctx.varCounter++}`, scalarShape, dtype, MemoryScope.GLOBAL);
+    buf.broadcastDims = Array.from({ length: fullShape.length }, (_, i) => i);
+    ctx.bufferMap.set(result, buf);
+    const node = isDtypeInt(dtype) ? new IntImmNode(val) : new FloatImmNode(val);
+    return new BufferStoreNode(buf, scalarShape.map(() => new IntImmNode(0)), node);
+  }
+  const outBuf = ctx.getOrAllocBuffer(result);
   const isInt = isDtypeInt(outBuf.dtype);
   const imm = (x) => isInt ? new IntImmNode(x) : new FloatImmNode(x);
 

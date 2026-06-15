@@ -14,16 +14,16 @@ model Regressor():
   net = Sequential(Linear(2, 32), ReLU(), Linear(32, 1))
   loss_fn = MSELoss()
 
-  forward x:
+  forward (x: Tensor) -> Tensor:
     return net(x)
 
-  train batch:
+  train (batch: list[Tensor]):
     x, y = batch
     loss = loss_fn(Regressor(x), y)
     log("train_loss", loss, prog_bar=true)
     return loss
 
-  validate batch:
+  validate (batch: list[Tensor]):
     x, y = batch
     log("val_loss", loss_fn(Regressor(x), y), prog_bar=true)
 

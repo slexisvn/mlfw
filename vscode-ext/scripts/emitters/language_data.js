@@ -14,7 +14,7 @@ export function buildLanguageData({ keywords, keywordGroups, operators, builtins
       returns: b.returns ?? null,
       signature: b.signature ? {
         params: b.signature.params,
-        display: formatDisplay(b.name, b.signature.params, b.kind),
+        display: formatDisplay(b.name, b.signature.params, b.kind, b.returns),
       } : null,
       methods: (b.methods ?? []).map(m => ({
         name: m.name,
@@ -22,7 +22,7 @@ export function buildLanguageData({ keywords, keywordGroups, operators, builtins
         returns: m.returns ?? null,
         signature: {
           params: m.params,
-          display: formatDisplay(m.name, m.params, b.kind),
+          display: formatDisplay(m.name, m.params, b.kind, m.returns),
         },
       })),
     })),
@@ -39,20 +39,24 @@ function serializePseudoTypeMethods(types) {
       isGetter: m.isGetter ?? false,
       signature: {
         params: m.params,
-        display: m.isGetter ? m.name : formatDisplay(m.name, m.params, 'method'),
+        display: m.isGetter ? m.name : formatDisplay(m.name, m.params, 'method', m.returns),
       },
     }));
   }
   return out;
 }
 
-function formatDisplay(name, params, kind) {
+function formatDisplay(name, params, kind, returns = null) {
   if (!params.length && SCALAR_KINDS.has(kind)) return name;
   const parts = params.map(p => {
     const prefix = p.rest ? '...' : '';
-    if (p.defaultValue !== null && p.defaultValue !== undefined) return `${prefix}${p.name}=${p.defaultValue}`;
-    if (p.optional && !p.rest) return `${p.name}?`;
-    return `${prefix}${p.name}`;
+    const typed = p.type ? `${p.name}: ${p.type}` : p.name;
+    if (p.defaultValue !== null && p.defaultValue !== undefined) {
+      return `${prefix}${typed}${p.type ? ' = ' : '='}${p.defaultValue}`;
+    }
+    if (p.optional && !p.rest) return `${prefix}${p.name}?${p.type ? `: ${p.type}` : ''}`;
+    return `${prefix}${typed}`;
   });
-  return `${name}(${parts.join(', ')})`;
+  const arrow = returns ? ` -> ${returns}` : '';
+  return `${name}(${parts.join(', ')})${arrow}`;
 }

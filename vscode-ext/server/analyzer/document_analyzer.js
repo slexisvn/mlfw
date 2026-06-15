@@ -1,15 +1,18 @@
 import { tokenize, LangSyntaxError } from '../vendor/tokenizer.js';
 import { parse } from '../vendor/parser.js';
+import { typecheck } from '../vendor/typechecker.js';
 import { buildSymbolTable } from './symbol_table.js';
+import { buildBuiltinEnv } from './builtin_types.js';
 
 export class DocumentAnalyzer {
-  constructor() {
+  constructor(languageData = null) {
     this._cache = new Map();
+    this._builtinEnv = languageData ? buildBuiltinEnv(languageData) : null;
   }
 
   update(uri, text) {
     const prev = this._cache.get(uri);
-    const result = analyze(text);
+    const result = analyze(text, this._builtinEnv);
     if (!result.ast && prev?.symbols && prev.symbols.flat.length) {
       result.symbols = prev.symbols;
     }
@@ -26,7 +29,7 @@ export class DocumentAnalyzer {
   }
 }
 
-function analyze(text) {
+function analyze(text, builtinEnv) {
   const tokens = safeTokenize(text);
   const ast = safeParse(text);
   let symbols = ast.program ? buildSymbolTable(ast.program, text) : null;
@@ -38,7 +41,21 @@ function analyze(text) {
   const errors = [];
   if (tokens.error) errors.push(tokens.error);
   if (ast.error) errors.push(ast.error);
+  if (ast.program && builtinEnv) errors.push(...typeDiagnostics(ast.program, builtinEnv));
   return { tokens: tokens.value, ast: ast.program, symbols, errors };
+}
+
+function typeDiagnostics(program, builtinEnv) {
+  try {
+    return typecheck(program, builtinEnv).map(e => ({
+      message: (e.message ?? '').replace(/ at \d+:\d+$/, ''),
+      line: e.line ?? 1,
+      column: e.column ?? 1,
+      source: 'typecheck',
+    }));
+  } catch {
+    return [];
+  }
 }
 
 function parseTruncated(text) {

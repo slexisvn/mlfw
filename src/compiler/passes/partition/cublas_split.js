@@ -260,6 +260,44 @@ function containsBoundaryOp(op) {
   return false;
 }
 
+function maxBoundaryResultBytes(op) {
+  let m = 0;
+  for (let i = 0; i < op.numResults; i++) {
+    const t = op.getResult(i).type;
+    if (!t || !t.isFullyStatic) continue;
+    let n = 1;
+    for (const d of t.shape) n *= d;
+    if (n > m) m = n;
+  }
+  return m;
+}
+
+export function hasDependentBoundaries(graphModule, minIntermediate = 256) {
+  if (graphModule.functionCount !== 1) return false;
+  const func = graphModule.functions().next().value;
+  const memo = new Map();
+  const maxBoundaryInSubtree = (op) => {
+    if (!op) return 0;
+    const cached = memo.get(op);
+    if (cached !== undefined) return cached;
+    memo.set(op, 0);
+    let m = containsBoundaryOp(op) ? maxBoundaryResultBytes(op) : 0;
+    for (let i = 0; i < op.numOperands; i++) {
+      const u = maxBoundaryInSubtree(op.getOperand(i).definingOp);
+      if (u > m) m = u;
+    }
+    memo.set(op, m);
+    return m;
+  };
+  for (const op of func.ops()) {
+    if (TERMINATORS.has(op.opName) || !containsBoundaryOp(op)) continue;
+    for (let i = 0; i < op.numOperands; i++) {
+      if (maxBoundaryInSubtree(op.getOperand(i).definingOp) > minIntermediate) return true;
+    }
+  }
+  return false;
+}
+
 function buildExecutionPlan(func, retOp, built) {
   const slotOf = new Map();
   let nextSlot = 0;

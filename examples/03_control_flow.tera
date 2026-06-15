@@ -1,15 +1,15 @@
 
-fn square(n):
+fn square(n: int) -> int:
   return n * n
 
-fn factorial(n):
+fn factorial(n: int) -> int:
   acc = 1
   for i in range(1, n + 1):
     acc *= i
   return acc
 
-fn adder(base):
-  fn add(x):
+fn adder(base: int) -> fn(int) -> int:
+  fn add(x: int) -> int:
     return base + x
   return add
 
@@ -18,7 +18,7 @@ print("square(7)    =", square(7))
 print("factorial(5) =", factorial(5))
 print("add10(5)     =", add10(5))
 
-fn first_over(values, threshold):
+fn first_over(values: list[int], threshold: int) -> int | null:
   i = 0
   while i < values.length:
     v = values[i]
@@ -31,7 +31,7 @@ fn first_over(values, threshold):
 nums = [3, 1, 4, 1, 5, 9, 2, 6]
 print("first value > 4:", first_over(nums, 4))
 
-fn grade(score):
+fn grade(score: int) -> str:
   if score >= 90:
     return "A"
   else if score >= 75:
