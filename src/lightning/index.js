@@ -9,7 +9,8 @@ export { EvaluationLoop } from './core/loops/evaluation_loop.js';
 export { PredictionLoop } from './core/loops/prediction_loop.js';
 
 export { Callback } from './callbacks/callback.js';
-export { ModelCheckpoint } from './callbacks/checkpoint.js';
+export { ModelCheckpoint, loadCheckpoint, applyCheckpoint } from './callbacks/checkpoint.js';
+export { serializeCheckpoint, deserializeCheckpoint } from './io/checkpoint_format.js';
 export { EarlyStopping } from './callbacks/early_stopping.js';
 export { ProgressCallback } from './callbacks/progress.js';
 export { LearningRateMonitor } from './callbacks/lr_monitor.js';

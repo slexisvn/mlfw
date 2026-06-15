@@ -20,7 +20,7 @@ function resolveMeasurer(target) {
   return measurer;
 }
 
-export class AutotuneConfig {
+class AutotuneConfig {
   constructor(opts = {}) {
     this.strategy = opts.strategy || 'evolutionary';
     this.numTrials = opts.numTrials || 64;

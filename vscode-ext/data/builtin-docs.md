@@ -160,8 +160,20 @@ Batch normalization for 4-D `(N, C, H, W)` image-like inputs.
 ## Embedding(num, dim, padding_idx?)
 Lookup table mapping integer ids to dense vectors of size `dim`.
 
-## CrossEntropyLoss()
-Combined LogSoftmax + NLL loss — standard for multiclass classification.
+## GRU(input, hidden, num_layers=1, batch_first=false, bias=true)
+Multi-layer Gated Recurrent Unit. Call `out, h_n = gru(x, h0?)` — returns the output sequence and the final hidden state. Set `batch_first=true` for `(N, T, input)` inputs.
+
+## GRUCell(input, hidden, bias=true)
+Single GRU time-step. `h_next = cell(x, h)` — apply manually to step a sequence one element at a time.
+
+## LSTM(input, hidden, num_layers=1, batch_first=false, bias=true)
+Multi-layer Long Short-Term Memory. Call `out, state = lstm(x, [h0, c0]?)` — returns the output sequence and `state = [h_n, c_n]` (final hidden and cell states). Set `batch_first=true` for `(N, T, input)` inputs.
+
+## LSTMCell(input, hidden, bias=true)
+Single LSTM time-step. `h_next, c_next = cell(x, [h, c])` — carries both hidden and cell state for O(T) autoregressive stepping.
+
+## CrossEntropyLoss(reduction="mean", ignore_index?)
+Combined LogSoftmax + NLL loss — standard for multiclass classification. Pass `ignore_index` (e.g. a padding id) to exclude those target positions from the loss — useful for seq2seq with padded sequences.
 
 ## MSELoss()
 Mean squared error loss — standard for regression.
@@ -217,13 +229,37 @@ In-memory dataset zipping one or more tensors along their first dimension.
 ## DataLoader(dataset, batch_size=32, shuffle=true, drop_last=false)
 Iterate over a dataset in mini-batches with optional shuffling and `drop_last`.
 
-### len()
+### length
 Number of batches per epoch.
 
 ## load_csv(path, separator=",")
 Load a CSV file into a `DataFrame`. Numeric fields are parsed as numbers; use
 the `DataFrame` API (`select`, `filter`, `groupBy`, `to_tensor`, `encode`, …)
 to analyse it.
+
+## save(model, path)
+Save a trained model's weights to `path` (compact binary checkpoint). Mirrors PyTorch's `torch.save(model.state_dict(), path)`. Pair with `load`.
+
+## load(model, path)
+Load weights from a checkpoint `path` into an existing `model` (in place) and return it. Build the model with the same architecture first, then `load(model, path)` — mirrors `model.load_state_dict(torch.load(path))`.
+
+## Tokenizer(mode="word", vocab_size?, lowercase=false, num_merges=1000, special_tokens?)
+Build a text tokenizer. `mode` is `"word"`, `"char"`, or `"bpe"` (trainable subword). `tokenize(texts)` on a corpus first, then `encode`/`decode`/`encodeBatch`. Reserves special tokens (`<pad> <unk> <bos> <eos>`) at low ids exposed as `padId`/`unkId`/`bosId`/`eosId`.
+
+### tokenize(texts)
+Learn the vocabulary (and BPE merges) from a list of strings. Returns the tokenizer.
+
+### encode(text, add_bos?, add_eos?)
+Tokenize `text` to a list of integer ids. Optionally wrap with begin/end-of-sequence tokens.
+
+### decode(ids, skip_special?)
+Turn a list of ids back into a string (special tokens skipped by default).
+
+### encodeBatch(texts, max_len?, pad_id?, add_bos?, add_eos?)
+Encode a list of strings into a padded `[N, maxLen]` i32 tensor, ready for a model.
+
+### vocabSize
+Number of tokens in the learned vocabulary (property).
 
 ## encode(data)
 Encode categorical values to integer ids. Returns `[encoded_tensor, classes_array]`.

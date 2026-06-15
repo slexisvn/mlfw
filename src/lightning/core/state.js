@@ -98,7 +98,18 @@ export class SingleDeviceStrategy {
 
   setup(model, device) {
     this.device = device;
-    if (typeof model.to === 'function') model.to(device);
+    if (device.type === 'gpu' && typeof model.to === 'function') model.to(device);
+  }
+
+  toDevice(value) {
+    if (!this.device || this.device.type !== 'gpu') return value;
+    if (value && value.device && typeof value.to === 'function') return value.to(this.device);
+    if (Array.isArray(value)) {
+      const moved = new Array(value.length);
+      for (let i = 0; i < value.length; i++) moved[i] = this.toDevice(value[i]);
+      return moved;
+    }
+    return value;
   }
 
   backward(loss) {

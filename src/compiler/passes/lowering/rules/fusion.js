@@ -43,6 +43,10 @@ function initBuiltinFusionBuilders() {
   INLINE_FUSION_BUILDERS.set('broadcast_in_dim', (_innerOp, args) => args[0]);
   INLINE_FUSION_BUILDERS.set('broadcast', (_innerOp, args) => args[0]);
 
+  INLINE_FUSION_BUILDERS.set('iota', () => {
+    throw new Error('iota fusion must be handled by the index-aware path in lowerFusion');
+  });
+
   INLINE_FUSION_BUILDERS.set('quantize', (innerOp, args) => {
     const scale = innerOp.getAttr('scale');
     const zp = innerOp.getAttr('zero_point');
@@ -172,6 +176,12 @@ function lowerFusion(ctx, op) {
     if (CONSTANT_OPS.has(innerOp.opName)) {
       const val = innerOp.getAttr('value');
       exprMap.set(innerOp.getResult(0), new FloatImmNode(typeof val === 'number' ? val : 0));
+      continue;
+    }
+
+    if (innerOp.opName === 'iota') {
+      const dim = innerOp.getAttr('iota_dimension') ?? innerOp.getAttr('dimension') ?? 0;
+      exprMap.set(innerOp.getResult(0), outIndices[dim]);
       continue;
     }
 

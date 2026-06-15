@@ -114,6 +114,7 @@ export class TeraRuntime {
       if (node.type === 'ValidateDeclaration') throw new Error('validate can only appear inside model');
       if (node.type === 'OptimizerDeclaration') throw new Error('optimizer can only appear inside model');
       if (node.type === 'DestructureAssign') return await this.evaluateDestructure(node, env);
+      if (node.type === 'IndexAssign') return await this.evaluateIndexAssign(node, env);
       throw new Error(`Unsupported statement ${node.type}`);
     });
   }
@@ -127,6 +128,14 @@ export class TeraRuntime {
         for (const x of node.elements) elements.push(await this.evaluateExpression(x, env));
         return elements;
       }
+      if (node.type === 'Dict') {
+        const map = new Map();
+        for (const entry of node.entries) {
+          map.set(await this.evaluateExpression(entry.key, env), await this.evaluateExpression(entry.value, env));
+        }
+        return map;
+      }
+      if (node.type === 'ListComprehension') return await this.evaluateComprehension(node, env);
       if (node.type === 'Unary') {
         const value = await this.evaluateExpression(node.value, env);
         if (node.op === '-') return this.applyUnaryMinus(value);
@@ -194,6 +203,7 @@ export class TeraRuntime {
   applyBinary(op, left, right) {
     const tensor = isTensorValue(left) || isTensorValue(right);
     if (!tensor) {
+      if (op === '+' && Array.isArray(left) && Array.isArray(right)) return left.concat(right);
       if (op === '+') return left + right;
       if (op === '-') return left - right;
       if (op === '*') return left * right;
@@ -244,9 +254,10 @@ export class TeraRuntime {
 
   async evaluateFor(node, env) {
     const iterable = await this.evaluateExpression(node.iterable, env);
-    if (!Array.isArray(iterable)) throw new Error('for...in expects an array');
+    const items = Array.isArray(iterable) ? iterable : iterable instanceof Map ? [...iterable.keys()] : null;
+    if (!items) throw new Error('for...in expects an array or map');
     let value;
-    for (const item of iterable) {
+    for (const item of items) {
       env.define(node.variable, item);
       const result = await this.evaluateProgram({ type: 'Program', body: node.body }, env);
       if (result && result.__return) return result;
@@ -379,7 +390,9 @@ export class TeraRuntime {
   async evaluateIndex(node, env) {
     let value = await this.evaluateExpression(node.object, env);
     if (Array.isArray(value)) return this.indexArray(value, node.items, env);
-    if (!(value instanceof Tensor)) throw new Error('Indexing currently expects a Tensor or array');
+    if (value instanceof Map) return this.indexMap(value, node.items, env);
+    if (typeof value === 'string') return this.indexString(value, node.items, env);
+    if (!(value instanceof Tensor)) throw new Error('Indexing currently expects a Tensor, array, map, or string');
     let dim = 0;
     for (const item of node.items) {
       if (dim >= value.ndim) throw new Error(`Too many indices for tensor with ${value.ndim} dimensions`);
@@ -433,6 +446,99 @@ export class TeraRuntime {
       }
     }
     return current;
+  }
+
+  async indexMap(value, items, env) {
+    let current = value;
+    for (const item of items) {
+      if (!(current instanceof Map)) throw new Error('Too many indices for map');
+      if (item.type === 'Slice') throw new Error('Cannot slice a map');
+      const key = await this.evaluateExpression(item, env);
+      current = current.has(key) ? current.get(key) : null;
+    }
+    return current;
+  }
+
+  async indexString(value, items, env) {
+    let current = value;
+    for (const item of items) {
+      if (typeof current !== 'string') throw new Error('Too many indices for string');
+      if (item.type === 'Slice') {
+        const len = current.length;
+        let start = item.start ? await this.evaluateExpression(item.start, env) : 0;
+        let end = item.end ? await this.evaluateExpression(item.end, env) : len;
+        const step = item.step ? await this.evaluateExpression(item.step, env) : 1;
+        if (![start, end, step].every(Number.isInteger)) throw new Error('Slice bounds must be integers');
+        if (step <= 0) throw new Error('Slice step must be a positive integer');
+        if (start < 0) start += len;
+        if (end < 0) end += len;
+        let out = '';
+        for (let i = Math.max(0, start); i < Math.min(len, end); i += step) out += current[i];
+        current = out;
+      } else {
+        let index = await this.evaluateExpression(item, env);
+        if (!Number.isInteger(index)) throw new Error('String index must be an integer');
+        if (index < 0) index += current.length;
+        if (index < 0 || index >= current.length) {
+          throw new Error(`Index ${index} is out of bounds for string of length ${current.length}`);
+        }
+        current = current[index];
+      }
+    }
+    return current;
+  }
+
+  async evaluateComprehension(node, env) {
+    const iterable = await this.evaluateExpression(node.iterable, env);
+    const items = Array.isArray(iterable) ? iterable : iterable instanceof Map ? [...iterable.keys()] : null;
+    if (!items) throw new Error('Comprehension expects an array or map');
+    const scope = new Environment(env);
+    const result = [];
+    for (const item of items) {
+      scope.define(node.variable, item);
+      if (node.condition && !this.isTruthy(await this.evaluateExpression(node.condition, scope))) continue;
+      result.push(await this.evaluateExpression(node.expr, scope));
+    }
+    return result;
+  }
+
+  async evaluateIndexAssign(node, env) {
+    let container = await this.evaluateExpression(node.object, env);
+    const keys = [];
+    for (const item of node.items) {
+      if (item.type === 'Slice') throw new Error('Slice assignment is not supported');
+      keys.push(await this.evaluateExpression(item, env));
+    }
+    for (let d = 0; d < keys.length - 1; d++) container = this.readContainer(container, keys[d]);
+    const key = keys[keys.length - 1];
+    let value = await this.evaluateExpression(node.value, env);
+    if (node.op) value = this.applyBinary(node.op, this.readContainer(container, key), value);
+    this.writeContainer(container, key, value);
+    return value;
+  }
+
+  readContainer(container, key) {
+    if (container instanceof Map) return container.has(key) ? container.get(key) : null;
+    if (Array.isArray(container)) {
+      let i = Number.isInteger(key) ? (key < 0 ? key + container.length : key) : key;
+      if (!Number.isInteger(i)) throw new Error('Array index must be an integer');
+      return container[i];
+    }
+    throw new Error('Cannot index into this value');
+  }
+
+  writeContainer(container, key, value) {
+    if (container instanceof Map) { container.set(key, value); return; }
+    if (Array.isArray(container)) {
+      if (!Number.isInteger(key)) throw new Error('Array index must be an integer');
+      const i = key < 0 ? key + container.length : key;
+      if (i < 0 || i > container.length) {
+        throw new Error(`Index ${key} is out of bounds for assignment to array of length ${container.length}`);
+      }
+      container[i] = value;
+      return;
+    }
+    throw new Error('Cannot assign into this value');
   }
 
   async withNode(node, evaluate) {

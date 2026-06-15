@@ -1,7 +1,7 @@
 import { AutogradNode } from '../node.js';
 import * as ops from '../../tensor/ops/ops.js';
 import { zeros } from '../../tensor/factory/creation_ops.js';
-import { reshape, transpose, permute } from '../../tensor/view/view_ops.js';
+import { reshape, transpose, permute, unsqueeze } from '../../tensor/view/view_ops.js';
 
 export class ReshapeBackward extends AutogradNode {
   constructor() { super(1); }
@@ -36,14 +36,24 @@ export class SliceBackward extends AutogradNode {
   apply(gradOutputs) {
     const g = gradOutputs[0];
     const meta = this.inputMetadata(0);
-    const result = zeros(meta.shape, { dtype: g.dtype, device: g.device });
+    const dim = this._dim;
+    const size = meta.shape[dim];
+    const step = this._step || 1;
 
+    if (step === 1) {
+      const low = meta.shape.map(() => 0);
+      const high = meta.shape.map(() => 0);
+      low[dim] = this._start;
+      high[dim] = size - this._end;
+      return [ops.pad(g, low, high, 0)];
+    }
+
+    const result = zeros(meta.shape, { dtype: g.dtype, device: g.device });
     const outData = result._impl.storage.data;
     const gData = g._impl.storage.data;
     const gOff = g._impl.storageOffset;
     const gShape = g.shape;
     const gStrides = g.strides;
-
     const resultStrides = result.strides;
     const ndim = gShape.length;
     const indices = new Int32Array(ndim);
@@ -52,9 +62,7 @@ export class SliceBackward extends AutogradNode {
     for (let i = 0; i < g.numel; i++) {
       let oi = 0;
       for (let d = 0; d < ndim; d++) {
-        const idx = d === this._dim
-          ? this._start + indices[d] * (this._step || 1)
-          : indices[d];
+        const idx = d === dim ? this._start + indices[d] * step : indices[d];
         oi += idx * resultStrides[d];
       }
       outData[oi] += gData[gi];
@@ -81,36 +89,14 @@ export class SelectBackward extends AutogradNode {
   apply(gradOutputs) {
     const g = gradOutputs[0];
     const meta = this.inputMetadata(0);
-    const result = zeros(meta.shape, { dtype: g.dtype, device: g.device });
-
-    const outData = result._impl.storage.data;
-    const gData = g._impl.storage.data;
-    const gOff = g._impl.storageOffset;
-    const gShape = g.shape;
-    const gStrides = g.strides;
-    const resultStrides = result.strides;
-
-    const gndim = gShape.length;
-    const indices = new Int32Array(gndim);
-    let gi = gOff;
-
-    for (let i = 0; i < g.numel; i++) {
-      let oi = this._index * resultStrides[this._dim];
-      for (let d = 0; d < gndim; d++) {
-        const od = d < this._dim ? d : d + 1;
-        oi += indices[d] * resultStrides[od];
-      }
-      outData[oi] += gData[gi];
-
-      for (let d = gndim - 1; d >= 0; d--) {
-        indices[d]++;
-        if (indices[d] < gShape[d]) { gi += gStrides[d]; break; }
-        gi -= (gShape[d] - 1) * gStrides[d];
-        indices[d] = 0;
-      }
-    }
-
-    return [result];
+    const dim = this._dim;
+    const size = meta.shape[dim];
+    const expanded = unsqueeze(g, dim);
+    const low = meta.shape.map(() => 0);
+    const high = meta.shape.map(() => 0);
+    low[dim] = this._index;
+    high[dim] = size - 1 - this._index;
+    return [ops.pad(expanded, low, high, 0)];
   }
 }
 

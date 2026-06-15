@@ -18,7 +18,7 @@ export class TrainingLoop {
 
     let batchIdx = 0;
 
-    for (const batch of dataLoader) {
+    for (const rawBatch of dataLoader) {
       if (batchIdx >= limit) break;
       if (state.shouldStop) break;
       if (state.maxSteps > 0 && state.globalStep >= state.maxSteps) {
@@ -26,6 +26,7 @@ export class TrainingLoop {
         break;
       }
 
+      const batch = strategy.toDevice(rawBatch);
       callbacks.dispatch('onTrainBatchStart', trainer, model, batch, batchIdx);
 
       let output;

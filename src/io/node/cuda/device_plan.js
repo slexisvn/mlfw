@@ -76,7 +76,7 @@ export async function runCudaPlan(plan, slots, steps) {
       cublasMatmulDevice(M, N, K, dptr[ordered[aIdx]], dptr[ordered[bIdx]], dptr[ordered[cIdx]], transB);
     } else {
       const addrs = ordered.map(s => devAddr(dptr[s]));
-      launchOnPrimary(funcs.get(st.name), meta.gridDim, meta.blockDim, meta.sharedMemBytes || 0, addrs, st.shapeValues || []);
+      launchOnPrimary(funcs.get(st.name), meta.gridDim, meta.blockDim, 0, addrs, st.shapeValues || []);
     }
   }
   devSync();

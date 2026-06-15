@@ -162,6 +162,7 @@ export class Module {
   }
 
   to(device) {
+    this._autoDetect();
     for (const [name, p] of this._parameters) {
       if (p !== null && typeof p.to === 'function') {
         this._parameters.set(name, new Parameter(p.to(device), p.requiresGrad));

@@ -100,7 +100,7 @@ function tokenizeRaw(source) {
       push('symbol', two, l, c);
       continue;
     }
-    if ('()[],.=:+-*/@<>'.includes(ch)) {
+    if ('()[],.=:+-*/@<>{}'.includes(ch)) {
       advance();
       push('symbol', ch, l, c);
       continue;
@@ -132,8 +132,8 @@ function addIndentation(tokens) {
     }
 
     if (tok.type !== 'string') {
-      if (tok.value === '(' || tok.value === '[') bracketDepth++;
-      if (tok.value === ')' || tok.value === ']') bracketDepth--;
+      if (tok.value === '(' || tok.value === '[' || tok.value === '{') bracketDepth++;
+      if (tok.value === ')' || tok.value === ']' || tok.value === '}') bracketDepth--;
     }
 
     if (tok.type === 'newline') {

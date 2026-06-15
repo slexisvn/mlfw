@@ -110,7 +110,7 @@
         },
         {
           "name": "keyword.operator.tera",
-          "match": "=|:|\\+|-|\\*|/|@|<|>"
+          "match": "=|:|\\+|-|\\*|/|@|<|>|\\{|\\}"
         },
         {
           "name": "punctuation.separator.tera",
@@ -134,7 +134,7 @@
         },
         {
           "name": "support.class.nn-module.tera",
-          "match": "\\b(?:AdaptiveAvgPool2d|AvgPool2d|BatchNorm1d|BatchNorm2d|BCELoss|Conv1d|Conv2d|CrossEntropyLoss|Dropout|ELU|Embedding|Flatten|GELU|LayerNorm|LeakyReLU|Linear|LogSoftmax|MaxPool2d|MSELoss|NLLLoss|ReLU|Sigmoid|SiLU|Softmax|Tanh)\\b"
+          "match": "\\b(?:AdaptiveAvgPool2d|AvgPool2d|BatchNorm1d|BatchNorm2d|BCELoss|Conv1d|Conv2d|CrossEntropyLoss|Dropout|ELU|Embedding|Flatten|GELU|GRU|GRUCell|LayerNorm|LeakyReLU|Linear|LogSoftmax|LSTM|LSTMCell|MaxPool2d|MSELoss|NLLLoss|ReLU|Sigmoid|SiLU|Softmax|Tanh)\\b"
         },
         {
           "name": "support.function.factory.tera",
@@ -150,7 +150,7 @@
         },
         {
           "name": "support.function.tera",
-          "match": "\\b(?:cat|stack|where)\\b"
+          "match": "\\b(?:cat|load|save|stack|Tokenizer|where)\\b"
         },
         {
           "name": "support.function.utility.tera",

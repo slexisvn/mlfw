@@ -1,4 +1,4 @@
-export class SearchCandidate {
+class SearchCandidate {
   constructor(sketchName, params, score, features) {
     this.sketchName = sketchName;
     this.params = params;

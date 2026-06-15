@@ -71,6 +71,7 @@ Program  →  Statement*
 Statement  →  Assignment
            |  CompoundAssign
            |  DestructureAssign
+           |  IndexAssign
            |  IfStmt
            |  ForStmt
            |  WhileStmt
@@ -85,8 +86,13 @@ Assignment         →  IDENTIFIER '=' Expression
 CompoundAssign     →  IDENTIFIER CompoundOp Expression
 CompoundOp         →  '+=' | '-=' | '*=' | '/=' | '**=' | '@='
 DestructureAssign  →  IDENTIFIER ',' IDENTIFIER (',' IDENTIFIER)* '=' Expression
+IndexAssign        →  Index ('=' | CompoundOp) Expression
 ExpressionStmt     →  Expression
 ```
+
+`IndexAssign` writes into a list or map: `xs[i] = v`, `xs[i] += v`, `d[key] = v`.
+For lists, assigning at `index == length` appends (grows the list) — an O(1) way to
+build lists without a dedicated append.
 
 ### Control Flow
 
@@ -163,13 +169,23 @@ Expression  →  Prefix (BinaryOp Expression)*
 Prefix  →  Literal
         |  IDENTIFIER
         |  ArrayLiteral
+        |  ListComprehension
+        |  DictLiteral
         |  UnaryExpr
         |  '(' Expression ')'
 
-Literal       →  NUMBER | STRING | 'true' | 'false' | 'null'
-ArrayLiteral  →  '[' (Expression (',' Expression)* ','?)? ']'
-UnaryExpr     →  ('-' | '+' | 'not') Expression
+Literal            →  NUMBER | STRING | 'true' | 'false' | 'null'
+ArrayLiteral       →  '[' (Expression (',' Expression)* ','?)? ']'
+ListComprehension  →  '[' Expression 'for' IDENTIFIER 'in' Expression ('if' Expression)? ']'
+DictLiteral        →  '{' (Expression ':' Expression (',' Expression ':' Expression)* ','?)? '}'
+UnaryExpr          →  ('-' | '+' | 'not') Expression
 ```
+
+A `DictLiteral` builds a map (string/number keys → values); index a missing key
+returns `null`. `ListComprehension` builds a list by evaluating `Expression` for each
+item of an array or map (keys), optionally filtered by `if`. Strings support indexing
+and slicing (`s[i]`, `s[a:b]`) like lists, and `len(x)` returns the size of a list,
+string, or map.
 
 #### Postfix Operations
 

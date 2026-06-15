@@ -84,7 +84,9 @@
       "/",
       "@",
       "<",
-      ">"
+      ">",
+      "{",
+      "}"
     ]
   },
   "pseudoTypes": {
@@ -2917,11 +2919,24 @@
     {
       "name": "CrossEntropyLoss",
       "kind": "module",
-      "description": "Combined LogSoftmax + NLL loss — standard for multiclass classification.",
+      "description": "Combined LogSoftmax + NLL loss — standard for multiclass classification. Pass `ignore_index` (e.g. a padding id) to exclude those target positions from the loss — useful for seq2seq with padded sequences.",
       "returns": null,
       "signature": {
-        "params": [],
-        "display": "CrossEntropyLoss()"
+        "params": [
+          {
+            "name": "reduction",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "\"mean\""
+          },
+          {
+            "name": "ignore_index",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "CrossEntropyLoss(reduction=\"mean\", ignore_index?)"
       },
       "methods": [
         {
@@ -3085,12 +3100,12 @@
       },
       "methods": [
         {
-          "name": "len",
+          "name": "length",
           "description": "Number of batches per epoch.",
           "returns": null,
           "signature": {
             "params": [],
-            "display": "len()"
+            "display": "length()"
           }
         }
       ]
@@ -3950,6 +3965,166 @@
       "methods": []
     },
     {
+      "name": "GRU",
+      "kind": "module",
+      "description": "Multi-layer Gated Recurrent Unit. Call `out, h_n = gru(x, h0?)` — returns the output sequence and the final hidden state. Set `batch_first=true` for `(N, T, input)` inputs.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "input",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "hidden",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "num_layers",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "1"
+          },
+          {
+            "name": "batch_first",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "false"
+          },
+          {
+            "name": "bias",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "true"
+          }
+        ],
+        "display": "GRU(input, hidden, num_layers=1, batch_first=false, bias=true)"
+      },
+      "methods": [
+        {
+          "name": "forward",
+          "description": "Run the module's forward pass. Calling the module directly (`module(x)`) is equivalent to `module.forward(x)`.",
+          "returns": null,
+          "signature": {
+            "params": [
+              {
+                "name": "x",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "forward(x)"
+          }
+        },
+        {
+          "name": "parameters",
+          "description": "Return an array of the module's learnable parameter tensors.",
+          "returns": null,
+          "signature": {
+            "params": [],
+            "display": "parameters()"
+          }
+        },
+        {
+          "name": "train",
+          "description": "Set the module to training mode (enables Dropout, updates BatchNorm running stats).",
+          "returns": null,
+          "signature": {
+            "params": [],
+            "display": "train()"
+          }
+        },
+        {
+          "name": "eval",
+          "description": "Set the module to evaluation mode (disables Dropout, freezes BatchNorm stats).",
+          "returns": null,
+          "signature": {
+            "params": [],
+            "display": "eval()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "GRUCell",
+      "kind": "module",
+      "description": "Single GRU time-step. `h_next = cell(x, h)` — apply manually to step a sequence one element at a time.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "input",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "hidden",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "bias",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "true"
+          }
+        ],
+        "display": "GRUCell(input, hidden, bias=true)"
+      },
+      "methods": [
+        {
+          "name": "forward",
+          "description": "Run the module's forward pass. Calling the module directly (`module(x)`) is equivalent to `module.forward(x)`.",
+          "returns": null,
+          "signature": {
+            "params": [
+              {
+                "name": "x",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "forward(x)"
+          }
+        },
+        {
+          "name": "parameters",
+          "description": "Return an array of the module's learnable parameter tensors.",
+          "returns": null,
+          "signature": {
+            "params": [],
+            "display": "parameters()"
+          }
+        },
+        {
+          "name": "train",
+          "description": "Set the module to training mode (enables Dropout, updates BatchNorm running stats).",
+          "returns": null,
+          "signature": {
+            "params": [],
+            "display": "train()"
+          }
+        },
+        {
+          "name": "eval",
+          "description": "Set the module to evaluation mode (disables Dropout, freezes BatchNorm stats).",
+          "returns": null,
+          "signature": {
+            "params": [],
+            "display": "eval()"
+          }
+        }
+      ]
+    },
+    {
       "name": "i32",
       "kind": "dtype",
       "description": "32-bit signed integer dtype.",
@@ -4324,6 +4499,30 @@
       "methods": []
     },
     {
+      "name": "load",
+      "kind": "other",
+      "description": "Load weights from a checkpoint `path` into an existing `model` (in place) and return it. Build the model with the same architecture first, then `load(model, path)` — mirrors `model.load_state_dict(torch.load(path))`.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "model",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "path",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "load(model, path)"
+      },
+      "methods": []
+    },
+    {
       "name": "load_csv",
       "kind": "data",
       "description": "Load a CSV file into a `DataFrame`. Numeric fields are parsed as numbers; use\nthe `DataFrame` API (`select`, `filter`, `groupBy`, `to_tensor`, `encode`, …)\nto analyse it.",
@@ -4368,6 +4567,166 @@
           }
         ],
         "display": "LogSoftmax(dim=-1)"
+      },
+      "methods": [
+        {
+          "name": "forward",
+          "description": "Run the module's forward pass. Calling the module directly (`module(x)`) is equivalent to `module.forward(x)`.",
+          "returns": null,
+          "signature": {
+            "params": [
+              {
+                "name": "x",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "forward(x)"
+          }
+        },
+        {
+          "name": "parameters",
+          "description": "Return an array of the module's learnable parameter tensors.",
+          "returns": null,
+          "signature": {
+            "params": [],
+            "display": "parameters()"
+          }
+        },
+        {
+          "name": "train",
+          "description": "Set the module to training mode (enables Dropout, updates BatchNorm running stats).",
+          "returns": null,
+          "signature": {
+            "params": [],
+            "display": "train()"
+          }
+        },
+        {
+          "name": "eval",
+          "description": "Set the module to evaluation mode (disables Dropout, freezes BatchNorm stats).",
+          "returns": null,
+          "signature": {
+            "params": [],
+            "display": "eval()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "LSTM",
+      "kind": "module",
+      "description": "Multi-layer Long Short-Term Memory. Call `out, state = lstm(x, [h0, c0]?)` — returns the output sequence and `state = [h_n, c_n]` (final hidden and cell states). Set `batch_first=true` for `(N, T, input)` inputs.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "input",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "hidden",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "num_layers",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "1"
+          },
+          {
+            "name": "batch_first",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "false"
+          },
+          {
+            "name": "bias",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "true"
+          }
+        ],
+        "display": "LSTM(input, hidden, num_layers=1, batch_first=false, bias=true)"
+      },
+      "methods": [
+        {
+          "name": "forward",
+          "description": "Run the module's forward pass. Calling the module directly (`module(x)`) is equivalent to `module.forward(x)`.",
+          "returns": null,
+          "signature": {
+            "params": [
+              {
+                "name": "x",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "forward(x)"
+          }
+        },
+        {
+          "name": "parameters",
+          "description": "Return an array of the module's learnable parameter tensors.",
+          "returns": null,
+          "signature": {
+            "params": [],
+            "display": "parameters()"
+          }
+        },
+        {
+          "name": "train",
+          "description": "Set the module to training mode (enables Dropout, updates BatchNorm running stats).",
+          "returns": null,
+          "signature": {
+            "params": [],
+            "display": "train()"
+          }
+        },
+        {
+          "name": "eval",
+          "description": "Set the module to evaluation mode (disables Dropout, freezes BatchNorm stats).",
+          "returns": null,
+          "signature": {
+            "params": [],
+            "display": "eval()"
+          }
+        }
+      ]
+    },
+    {
+      "name": "LSTMCell",
+      "kind": "module",
+      "description": "Single LSTM time-step. `h_next, c_next = cell(x, [h, c])` — carries both hidden and cell state for O(T) autoregressive stepping.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "input",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "hidden",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "bias",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "true"
+          }
+        ],
+        "display": "LSTMCell(input, hidden, bias=true)"
       },
       "methods": [
         {
@@ -5383,6 +5742,30 @@
       ]
     },
     {
+      "name": "save",
+      "kind": "other",
+      "description": "Save a trained model's weights to `path` (compact binary checkpoint). Mirrors PyTorch's `torch.save(model.state_dict(), path)`. Pair with `load`.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "model",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "path",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "save(model, path)"
+      },
+      "methods": []
+    },
+    {
       "name": "Sequential",
       "kind": "sequential",
       "description": "Compose modules into a feed-forward pipeline. The output of each module is fed to the next.",
@@ -5971,6 +6354,164 @@
               }
             ],
             "display": "on_epoch_end(trainer, model)"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Tokenizer",
+      "kind": "other",
+      "description": "Build a text tokenizer. `mode` is `\"word\"`, `\"char\"`, or `\"bpe\"` (trainable subword). `tokenize(texts)` on a corpus first, then `encode`/`decode`/`encodeBatch`. Reserves special tokens (`<pad> <unk> <bos> <eos>`) at low ids exposed as `padId`/`unkId`/`bosId`/`eosId`.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "mode",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "\"word\""
+          },
+          {
+            "name": "vocab_size",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "lowercase",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "false"
+          },
+          {
+            "name": "num_merges",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "1000"
+          },
+          {
+            "name": "special_tokens",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "Tokenizer(mode=\"word\", vocab_size?, lowercase=false, num_merges=1000, special_tokens?)"
+      },
+      "methods": [
+        {
+          "name": "tokenize",
+          "description": "Learn the vocabulary (and BPE merges) from a list of strings. Returns the tokenizer.",
+          "returns": null,
+          "signature": {
+            "params": [
+              {
+                "name": "texts",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "tokenize(texts)"
+          }
+        },
+        {
+          "name": "encode",
+          "description": "Tokenize `text` to a list of integer ids. Optionally wrap with begin/end-of-sequence tokens.",
+          "returns": null,
+          "signature": {
+            "params": [
+              {
+                "name": "text",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "add_bos",
+                "optional": true,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "add_eos",
+                "optional": true,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "encode(text, add_bos?, add_eos?)"
+          }
+        },
+        {
+          "name": "decode",
+          "description": "Turn a list of ids back into a string (special tokens skipped by default).",
+          "returns": null,
+          "signature": {
+            "params": [
+              {
+                "name": "ids",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "skip_special",
+                "optional": true,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "decode(ids, skip_special?)"
+          }
+        },
+        {
+          "name": "encodeBatch",
+          "description": "Encode a list of strings into a padded `[N, maxLen]` i32 tensor, ready for a model.",
+          "returns": null,
+          "signature": {
+            "params": [
+              {
+                "name": "texts",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "max_len",
+                "optional": true,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "pad_id",
+                "optional": true,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "add_bos",
+                "optional": true,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "add_eos",
+                "optional": true,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "encodeBatch(texts, max_len?, pad_id?, add_bos?, add_eos?)"
+          }
+        },
+        {
+          "name": "vocabSize",
+          "description": "Number of tokens in the learned vocabulary (property).",
+          "returns": null,
+          "signature": {
+            "params": [],
+            "display": "vocabSize()"
           }
         }
       ]

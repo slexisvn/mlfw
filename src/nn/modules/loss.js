@@ -13,24 +13,26 @@ export class MSELoss extends Module {
 }
 
 export class CrossEntropyLoss extends Module {
-  constructor(reduction = 'mean') {
+  constructor(reduction = 'mean', ignoreIndex = -100) {
     super();
     this.reduction = reduction;
+    this.ignoreIndex = ignoreIndex;
   }
 
   forward(input, target) {
-    return Fl.cross_entropy(input, target, this.reduction);
+    return Fl.cross_entropy(input, target, this.reduction, this.ignoreIndex === -100 ? null : this.ignoreIndex);
   }
 }
 
 export class NLLLoss extends Module {
-  constructor(reduction = 'mean') {
+  constructor(reduction = 'mean', ignoreIndex = -100) {
     super();
     this.reduction = reduction;
+    this.ignoreIndex = ignoreIndex;
   }
 
   forward(input, target) {
-    return Fl.nll_loss(input, target, this.reduction);
+    return Fl.nll_loss(input, target, this.reduction, this.ignoreIndex === -100 ? null : this.ignoreIndex);
   }
 }
 

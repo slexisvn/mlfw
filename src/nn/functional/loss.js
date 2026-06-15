@@ -1,6 +1,7 @@
 import * as ops from '../../tensor/ops/ops.js';
 import { full } from '../../tensor/factory/creation_ops.js';
-import { tensor as fromArray } from '../../tensor/factory/from_ops.js';
+import { select } from '../../tensor/view/view_ops.js';
+import { computeNumel } from '../../tensor/utils/shape_utils.js';
 
 export function mse_loss(input, target, reduction = 'mean') {
   const diff = ops.sub(input, target);
@@ -28,33 +29,33 @@ function _dimSum(input, dim) {
   return ops.sum(input, actualDim, true);
 }
 
-function _buildOneHot(batchSize, numClasses, target, dtype, device) {
-  const targetData = target._impl.storage.data;
-  const targetOffset = target._impl.storageOffset;
-  const oneHotData = new Float32Array(batchSize * numClasses);
-  for (let i = 0; i < batchSize; i++) {
-    oneHotData[i * numClasses + (targetData[targetOffset + i] | 0)] = 1;
-  }
-  return fromArray(oneHotData, { shape: [batchSize, numClasses], dtype, device });
-}
+export function nll_loss(input, target, reduction = 'mean', ignoreIndex = null) {
+  const lastDim = input.ndim - 1;
+  const numClasses = input.shape[lastDim];
+  const oneHot = ops.one_hot(target, numClasses);
+  const perRow = ops.sum(ops.mul(input, oneHot), lastDim);
 
-export function nll_loss(input, target, reduction = 'mean') {
-  const batchSize = input.shape[0];
-  const numClasses = input.shape[1];
-  const oneHot = _buildOneHot(batchSize, numClasses, target, input.dtype, input.device);
-  const gathered = ops.mul(input, oneHot);
-  const totalNeg = ops.neg(ops.sum(gathered));
-  if (reduction === 'mean') {
-    const n = full(totalNeg.shape, batchSize, { dtype: input.dtype, device: input.device });
-    return ops.div(totalNeg, n);
+  let masked = perRow;
+  let denom = null;
+  if (ignoreIndex !== null) {
+    const ignored = select(oneHot, lastDim, ignoreIndex);
+    const maskF = ops.add(ops.neg(ignored), 1);
+    masked = ops.mul(perRow, maskF);
+    denom = ops.sum(maskF);
   }
+
+  const totalNeg = ops.neg(ops.sum(masked));
   if (reduction === 'sum') return totalNeg;
+  if (reduction === 'mean') {
+    if (denom !== null) return ops.div(totalNeg, denom);
+    return ops.div(totalNeg, computeNumel(target.shape));
+  }
   throw new Error(`nll_loss: unknown reduction '${reduction}'`);
 }
 
-export function cross_entropy(input, target, reduction = 'mean') {
+export function cross_entropy(input, target, reduction = 'mean', ignoreIndex = null) {
   const logProbs = _logSoftmaxAutograd(input, -1);
-  return nll_loss(logProbs, target, reduction);
+  return nll_loss(logProbs, target, reduction, ignoreIndex);
 }
 
 export function binary_cross_entropy(input, target, reduction = 'mean') {

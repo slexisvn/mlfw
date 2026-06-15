@@ -4,8 +4,9 @@ import {
   MathOpNode, CompareNode, SyncThreadsNode, mathOp,
 } from '../ir/tensor/nodes.js';
 import { Buffer } from '../ir/tensor/buffer.js';
-import { ScheduleSketch, SearchVariable } from './search_space.js';
 import { classifyBlock } from '../schedule/rules.js';
+import { ScheduleSketch, SearchVariable } from './sketch.js';
+import { findBlock, collectAllBlockNames, analyzeBlockStructure } from './block_analysis.js';
 
 const I = (v) => new IntImmNode(v);
 const FZERO = () => new FloatImmNode(0);
@@ -29,7 +30,7 @@ function pow2Range(min, max) {
   return out;
 }
 
-export function matmulTileDims(primFunc, blockName) {
+function matmulTileDims(primFunc, blockName) {
   const info = classifyBlock(primFunc, blockName);
   if (!info) return null;
   const block = findBlock(primFunc.body, blockName);
@@ -46,22 +47,7 @@ export function matmulTileDims(primFunc, blockName) {
   return { A, B, C, M, N, K };
 }
 
-function findBlock(root, name) {
-  const stack = [root];
-  while (stack.length > 0) {
-    const n = stack.pop();
-    if (!n) continue;
-    if (n.type === 'BlockNode' && n.name === name) return n;
-    if (n.body) stack.push(n.body);
-    if (n.stmts) for (const s of n.stmts) stack.push(s);
-    if (n.thenBody) stack.push(n.thenBody);
-    if (n.elseBody) stack.push(n.elseBody);
-    if (n.initBody) stack.push(n.initBody);
-  }
-  return null;
-}
-
-export function enumerateRegisterBlockConfigs(target, dims, maxCandidates = 32) {
+function enumerateRegisterBlockConfigs(target, dims, maxCandidates = 32) {
   const maxThreads = target.maxThreadsPerBlock || 1024;
   const warp = target.warpSize || 32;
   const smemBytes = target.sharedMemoryBytes || 49152;
@@ -116,7 +102,7 @@ function goodness(c, warp) {
   return occ * 100 + reuse * 4 + squareTile * 6 + squareBlock * 4 + shallowK;
 }
 
-export function buildRegisterBlockedMatmul(bufs, params) {
+function buildRegisterBlockedMatmul(bufs, params) {
   const { A, B, C, M, N, K } = bufs;
   const { BM, BN, BK, TM, TN } = params;
   const tX = BN / TN;
@@ -225,7 +211,7 @@ export function buildRegisterBlockedMatmul(bufs, params) {
   return new AllocateNode(As, 'shared', new AllocateNode(Bs, 'shared', threadsNest));
 }
 
-export function createMatmulRegisterBlockGPUSketch(configs) {
+function createMatmulRegisterBlockGPUSketch(configs) {
   const idxVar = new SearchVariable('config_index', configs.map((_, i) => i));
   const sketch = new ScheduleSketch('matmul_register_block_gpu', [idxVar],
     (schedule, blockName, target, params) => {
@@ -241,4 +227,44 @@ export function createMatmulRegisterBlockGPUSketch(configs) {
   sketch.configs = configs;
   sketch.enumerate = () => configs.map((_, i) => ({ config_index: i }));
   return sketch;
+}
+
+function analyzePureMatmul(primFunc) {
+  const names = collectAllBlockNames(primFunc.body);
+  let reductionBlock = null;
+  for (const name of names) {
+    const s = analyzeBlockStructure(primFunc, name);
+    if (s.hasReduction && s.spatial === 2 && s.reads >= 2) {
+      if (reductionBlock) return null;
+      reductionBlock = name;
+    }
+  }
+  if (!reductionBlock) return null;
+  const dims = matmulTileDims(primFunc, reductionBlock);
+  if (!dims) return null;
+  for (const name of names) {
+    if (name === reductionBlock) continue;
+    const info = classifyBlock(primFunc, name);
+    if (!info) return null;
+    if (info.hasReduction) return null;
+    if (info.readBuffers.length > 0) return null;
+    for (const w of info.writeBuffers) if (w !== dims.C.name) return null;
+  }
+  return { reductionBlock, dims };
+}
+
+const matmulSketchCache = new WeakMap();
+
+export function richMatmulSketches(primFunc, blockName, target) {
+  const plan = analyzePureMatmul(primFunc);
+  if (!plan) return null;
+  let sketch = matmulSketchCache.get(primFunc);
+  if (sketch === undefined) {
+    const configs = enumerateRegisterBlockConfigs(target, plan.dims);
+    sketch = configs.length > 0 ? createMatmulRegisterBlockGPUSketch(configs) : null;
+    matmulSketchCache.set(primFunc, sketch);
+  }
+  if (!sketch) return null;
+  if (blockName === plan.reductionBlock) return [sketch];
+  return [];
 }

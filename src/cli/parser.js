@@ -67,7 +67,16 @@ class Parser {
         return this.locate({ type: 'CompoundAssign', name, op, value: this.parseExpression() }, start);
       }
     }
-    return this.locate({ type: 'ExpressionStatement', expression: this.parseExpression() }, start);
+    const expr = this.parseExpression();
+    if (expr.type === 'Index' && this.atValue('=')) {
+      this.next();
+      return this.locate({ type: 'IndexAssign', object: expr.object, items: expr.items, op: null, value: this.parseExpression() }, start);
+    }
+    if (expr.type === 'Index' && COMPOUND_OPS[this.current().value] !== undefined) {
+      const op = COMPOUND_OPS[this.next().value];
+      return this.locate({ type: 'IndexAssign', object: expr.object, items: expr.items, op, value: this.parseExpression() }, start);
+    }
+    return this.locate({ type: 'ExpressionStatement', expression: expr }, start);
   }
 
   parseBlock() {
@@ -259,17 +268,49 @@ class Parser {
       return value;
     }
     if (this.matchValue('[')) {
-      const elements = [];
-      if (!this.atValue(']')) {
-        do {
-          this.skipLines();
-          if (this.atValue(']')) break;
-          elements.push(this.parseExpression());
-          this.skipLines();
-        } while (this.matchValue(','));
+      this.skipLines();
+      if (this.atValue(']')) { this.next(); return this.locate({ type: 'Array', elements: [] }, token); }
+      const first = this.parseExpression();
+      this.skipLines();
+      if (this.atIdentifier('for')) {
+        this.next();
+        const variable = this.expect('identifier').value;
+        this.expectIdentifier('in');
+        const iterable = this.parseExpression();
+        this.skipLines();
+        let condition = null;
+        if (this.atIdentifier('if')) { this.next(); condition = this.parseExpression(); this.skipLines(); }
+        this.expectValue(']');
+        return this.locate({ type: 'ListComprehension', expr: first, variable, iterable, condition }, token);
+      }
+      const elements = [first];
+      this.skipLines();
+      while (this.matchValue(',')) {
+        this.skipLines();
+        if (this.atValue(']')) break;
+        elements.push(this.parseExpression());
+        this.skipLines();
       }
       this.expectValue(']');
       return this.locate({ type: 'Array', elements }, token);
+    }
+    if (this.matchValue('{')) {
+      const entries = [];
+      this.skipLines();
+      if (!this.atValue('}')) {
+        do {
+          this.skipLines();
+          if (this.atValue('}')) break;
+          const key = this.parseExpression();
+          this.expectValue(':');
+          const value = this.parseExpression();
+          entries.push({ key, value });
+          this.skipLines();
+        } while (this.matchValue(','));
+      }
+      this.skipLines();
+      this.expectValue('}');
+      return this.locate({ type: 'Dict', entries }, token);
     }
     throw this.error(`Expected expression, got '${token.value ?? token.type}'`);
   }

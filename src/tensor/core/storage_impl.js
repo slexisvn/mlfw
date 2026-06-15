@@ -30,6 +30,8 @@ export function getAllocator(deviceType) {
 }
 
 export class StorageImpl {
+  static _hostReadHook = null;
+
   constructor(data, nbytes, device, allocator) {
     this._data = data;
     this._nbytes = nbytes;
@@ -72,6 +74,11 @@ export class StorageImpl {
   }
 
   get data() {
+    if (StorageImpl._hostReadHook && this._data) StorageImpl._hostReadHook(this._data);
+    return this._data;
+  }
+
+  get rawData() {
     return this._data;
   }
 
@@ -111,6 +118,7 @@ export class StorageImpl {
     const allocator = getAllocator(this._device.type);
     let newData = null;
     if (this._data) {
+      if (StorageImpl._hostReadHook) StorageImpl._hostReadHook(this._data);
       const Ctor = this._data.constructor;
       newData = new Ctor(this._data.length);
       newData.set(this._data);

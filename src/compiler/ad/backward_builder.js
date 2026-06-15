@@ -245,6 +245,35 @@ export class BackwardGraphBuilder {
       }
     }
 
+    // A non-saved op consumed by the backward is rematerialized, which recurses
+    // through its operands until it hits a saved value or a block-arg. Any forward
+    // INPUT block-arg reached this way (e.g. index_select's indices come from
+    // select(din)) would otherwise be referenced as a free variable that the graph
+    // partitioner cannot map. Save those inputs so the backward func declares them.
+    const savedIds = new Set(savedValueIndices.keys());
+    const inputById = new Map(forwardInputs.map(v => [v.id, v]));
+    const seen = new Set();
+    const collect = (val) => {
+      if (savedIds.has(val.id) || seen.has(val.id)) return;
+      seen.add(val.id);
+      const defOp = val.definingOp;
+      if (!defOp) {
+        if (inputIds.has(val.id) && !savedValueIndices.has(val.id)) {
+          savedValueIndices.set(val.id, savedValues.length);
+          savedValues.push(inputById.get(val.id));
+        }
+        return;
+      }
+      for (let o = 0; o < defOp.numOperands; o++) collect(defOp.getOperand(o));
+    };
+    for (const op of topoOrder) {
+      if (op.opName === 'return' || op.opName === 'constant') continue;
+      if (!getVJPRule(op.opName)) continue;
+      if (!op.results.some(r => needsGrad.has(r.id))) continue;
+      for (let o = 0; o < op.numOperands; o++) collect(op.getOperand(o));
+      for (let r = 0; r < op.numResults; r++) collect(op.getResult(r));
+    }
+
     return { savedValues, savedValueIndices };
   }
 

@@ -8,6 +8,32 @@ function isConstantOp(op) {
   return CONSTANT_OPS.has(op.opName);
 }
 
+const PARTITION_BUFFER_LIMIT = 32 * 1024;
+
+function maxResultBytes(op) {
+  let m = 0;
+  for (let i = 0; i < op.numResults; i++) {
+    const t = op.getResult(i).type;
+    if (!t || !t.isFullyStatic) continue;
+    const b = t.sizeInBytes();
+    if (b > m) m = b;
+  }
+  return m;
+}
+
+function constScalarOf(v) {
+  let op = v.definingOp;
+  if (op && op.opName === 'broadcast') {
+    const src = op.getOperand(0);
+    op = src && src.definingOp;
+  }
+  if (op && isConstantOp(op)) {
+    const val = op.getAttr('value');
+    if (typeof val === 'number') return val;
+  }
+  return 0;
+}
+
 function cublasDotInfo(op) {
   if (op.opName !== 'dot') return null;
   const lhsT = op.getOperand(0).type;
@@ -103,12 +129,15 @@ function buildPartitions(partitionOps, opTarget) {
 
   for (const op of topo) {
     const target = opTarget.get(op);
+    const opBytes = maxResultBytes(op);
     let merged = false;
     for (let i = 0; i < op.numOperands; i++) {
       const producer = op.getOperand(i).definingOp;
       if (!producer) continue;
       const pPart = opToPart.get(producer);
       if (!pPart || pPart.target !== target) continue;
+
+      if (Math.max(pPart.maxBuf || 0, opBytes) > PARTITION_BUFFER_LIMIT) continue;
 
       let createsCycle = false;
       for (const part of operandParts(op)) {
@@ -119,13 +148,14 @@ function buildPartitions(partitionOps, opTarget) {
 
       pPart.ops.push(op);
       pPart.opSet.add(op);
+      pPart.maxBuf = Math.max(pPart.maxBuf || 0, opBytes);
       opToPart.set(op, pPart);
       recordEdges(op, pPart);
       merged = true;
       break;
     }
     if (!merged) {
-      const part = { id: nextId++, target, ops: [op], opSet: new Set([op]) };
+      const part = { id: nextId++, target, ops: [op], opSet: new Set([op]), maxBuf: opBytes };
       partitions.push(part);
       opToPart.set(op, part);
       recordEdges(op, part);
@@ -214,7 +244,7 @@ function materializePartition(part, name, dotInfoMap) {
   return { part, subFunc, inputs, outputs, dotOp };
 }
 
-const BOUNDARY_OP_NAMES = new Set(['dot']);
+const BOUNDARY_OP_NAMES = new Set(['dot', 'reduce']);
 
 function containsBoundaryOp(op) {
   if (BOUNDARY_OP_NAMES.has(op.opName)) return true;
@@ -245,15 +275,39 @@ function buildExecutionPlan(func, retOp, built) {
   const argSlots = [];
   for (const arg of func.args) argSlots.push(getSlot(arg));
 
-  const seenRet = new Set();
+  const returnFixups = [];
+  const usedRetSlot = new Set();
   for (let i = 0; i < retOp.numOperands; i++) {
     const v = retOp.getOperand(i);
-    if (v.isBlockArgument && v.isBlockArgument()) return null;
-    if (v.definingOp && isConstantOp(v.definingOp)) return null;
-    if (!slotOf.has(v)) return null;
-    if (seenRet.has(v)) return null;
-    seenRet.add(v);
-    argSlots.push(slotOf.get(v));
+    const pos = argSlots.length;
+    const isBlockArg = v.isBlockArgument && v.isBlockArgument();
+    const isConst = v.definingOp && isConstantOp(v.definingOp);
+
+    if (!isBlockArg && !isConst && slotOf.has(v)) {
+      const s = slotOf.get(v);
+      if (!usedRetSlot.has(s)) {
+        usedRetSlot.add(s);
+        argSlots.push(s);
+        continue;
+      }
+      argSlots.push(nextSlot++);
+      returnFixups.push({ pos, kind: 'copy', srcSlot: s });
+      continue;
+    }
+
+    if (isBlockArg) {
+      argSlots.push(nextSlot++);
+      returnFixups.push({ pos, kind: 'copy', srcSlot: getSlot(v) });
+      continue;
+    }
+
+    if (isConst) {
+      argSlots.push(nextSlot++);
+      returnFixups.push({ pos, kind: 'const', value: constScalarOf(v) });
+      continue;
+    }
+
+    return null;
   }
 
   const steps = [];
@@ -278,7 +332,7 @@ function buildExecutionPlan(func, retOp, built) {
     intermediates.push({ slot: s, shape: [...v.type.shape], dtype: v.type.dtype });
   }
 
-  return { plan: { numSlots: nextSlot, argSlots, intermediates, steps } };
+  return { plan: { numSlots: nextSlot, argSlots, intermediates, steps, returnFixups } };
 }
 
 export function splitGraphForNative(graphModule) {

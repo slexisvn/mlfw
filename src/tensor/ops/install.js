@@ -1,9 +1,17 @@
 import * as ops from './ops.js';
 import * as composite from './composite.js';
 import { installViewOps } from '../view/view_ops.js';
+import { fromBuffer } from '../factory/from_ops.js';
 
 export function installOps(TensorClass) {
   const proto = TensorClass.prototype;
+
+  proto.to = function(device) {
+    if (this.device.equals(device)) return this;
+    const source = this.contiguous();
+    const data = source.data.slice(0, this.numel);
+    return fromBuffer(data, this.shape, this.dtype, { device });
+  };
 
   proto.add = function(other) { return ops.add(this, other); };
   proto.sub = function(other) { return ops.sub(this, other); };

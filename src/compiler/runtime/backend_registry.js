@@ -32,6 +32,15 @@ function getCudaRuntime() {
   return _cudaMod;
 }
 
+let _cudaSyncMod = null;
+export async function preloadCudaRuntime() {
+  if (_cudaSyncMod) return _cudaSyncMod;
+  const mod = await getCudaRuntime();
+  if (mod.preloadCublas) await mod.preloadCublas();
+  _cudaSyncMod = mod;
+  return mod;
+}
+
 const MATH_IMPORTS = {
   exp: Math.exp, log: Math.log, sin: Math.sin, cos: Math.cos,
   tan: Math.tan, tanh: Math.tanh, pow: Math.pow, fmod: (a, b) => a % b,
@@ -145,8 +154,9 @@ registerBackend('cuda', {
   instantiate(kernel) {
     return { kernel };
   },
-  runSync() {
-    throw new Error('CUDA kernel requires async execution — use runAsync()');
+  runSync(inst, tensorArgs, shapeValues) {
+    if (!_cudaSyncMod) throw new Error('CUDA sync runtime not preloaded — call preloadCudaRuntime() before synchronous execution');
+    _cudaSyncMod.runCudaKernelResident(inst.kernel, tensorArgs, shapeValues);
   },
   async runAsync(inst, tensorArgs, shapeValues) {
     const { runCudaKernel } = await getCudaRuntime();

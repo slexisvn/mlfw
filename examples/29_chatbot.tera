@@ -1,0 +1,143 @@
+mode = "bpe"
+
+rows = load_csv("examples/qa.csv").to_array()
+questions_text = [r.question for r in rows]
+answers_text = [r.answer for r in rows]
+
+tok = Tokenizer(mode=mode, lowercase=true, num_merges=200)
+tok.tokenize(questions_text + answers_text)
+
+questions = tok.encodeBatch(questions_text)
+
+ans_ids = [tok.encode(a) for a in answers_text]
+ans_len = 0
+for ids in ans_ids:
+  if ids.length + 1 > ans_len:
+    ans_len = ids.length + 1
+
+din_rows = []
+dout_rows = []
+for ids in ans_ids:
+  din = [tok.bosId]
+  dout = []
+  for id in ids:
+    din[din.length] = id
+    dout[dout.length] = id
+  dout[dout.length] = tok.eosId
+  while din.length < ans_len:
+    din[din.length] = tok.padId
+  while dout.length < ans_len:
+    dout[dout.length] = tok.padId
+  din_rows[din_rows.length] = din
+  dout_rows[dout_rows.length] = dout
+
+decoder_in = tensor(din_rows, dtype=i32)
+decoder_out = tensor(dout_rows, dtype=i32)
+
+loader = DataLoader(TensorDataset(questions, decoder_in, decoder_out), batch_size=216, shuffle=true)
+
+model ChatBot(vocab_size, embed_dim, hidden, pad_id):
+  embed = Embedding(vocab_size, embed_dim)
+  encoder = LSTM(embed_dim, hidden, 1, true)
+  dec_cell = LSTMCell(embed_dim + hidden, hidden)
+  head = Linear(hidden, vocab_size)
+  loss_fn = CrossEntropyLoss("mean", pad_id)
+
+  forward q:
+    encoded, state = encoder(embed(q))
+    return head(encoded)
+
+  train batch:
+    q, din, dout = batch
+    enc, state = encoder(embed(q))
+    batch_size = q.shape[0]
+    src_len = enc.shape[1]
+    hidden_dim = enc.shape[2]
+    out_len = din.shape[1]
+    h = state[0].reshape([batch_size, hidden_dim])
+    c = state[1].reshape([batch_size, hidden_dim])
+    total = null
+    started = false
+    for t in range(out_len):
+      emb_t = embed(din.select(1, t))
+      query = h.reshape([batch_size, 1, hidden_dim])
+      scores = (enc * query).sum(2)
+      weights = scores.softmax(1).reshape([batch_size, src_len, 1])
+      context = (enc * weights).sum(1)
+      step_in = cat([emb_t, context], 1)
+      h, c = dec_cell(step_in, [h, c])
+      logits = head(h)
+      step_loss = loss_fn(logits, dout.select(1, t))
+      if started:
+        total = total + step_loss
+      else:
+        total = step_loss
+        started = true
+    loss = total / out_len
+    log("train_loss", loss, prog_bar=true)
+    return loss
+
+  optimizer:
+    return optim_config(Adam(ChatBot.parameters(), lr=0.01))
+
+fn reply(model, tok, query, max_len):
+  enc, state = model.encoder(model.embed(query))
+  hidden_dim = enc.shape[2]
+  src_len = enc.shape[1]
+  h = state[0].reshape([1, hidden_dim])
+  c = state[1].reshape([1, hidden_dim])
+  last = tok.bosId
+  out_ids = []
+  for step in range(max_len):
+    emb_t = model.embed(tensor([last], dtype=i32))
+    query_vec = h.reshape([1, 1, hidden_dim])
+    scores = (enc * query_vec).sum(2)
+    weights = scores.softmax(1).reshape([1, src_len, 1])
+    context = (enc * weights).sum(1)
+    step_in = cat([emb_t, context], 1)
+    h, c = model.dec_cell(step_in, [h, c])
+    logits = model.head(h).reshape([tok.vocabSize])
+    last = logits.argmax().item()
+    if last == tok.eosId:
+      return tok.decode(out_ids)
+    out_ids[out_ids.length] = last
+  return tok.decode(out_ids)
+
+fn accuracy(model, tok, qs, q_texts, answers, max_len):
+  correct = 0
+  q_len = qs.shape[1]
+  for i in range(q_texts.length):
+    query = qs.select(0, i).reshape([1, q_len])
+    if reply(model, tok, query, max_len) == answers[i]:
+      correct += 1
+  return correct
+
+fn show_samples(model, tok, qs, q_texts, max_len, stride):
+  q_len = qs.shape[1]
+  i = 0
+  while i < q_texts.length:
+    query = qs.select(0, i).reshape([1, q_len])
+    print("  user:", q_texts[i], "-> bot:", reply(model, tok, query, max_len))
+    i += stride
+
+gen_len = ans_len + 2
+net = ChatBot(tok.vocabSize, 64, 96, tok.padId)
+trainer = Trainer(max_epochs=150, accelerator="gpu", logger=false, enable_progress=false)
+trainer.fit(net, loader)
+net.eval()
+
+total = questions_text.length
+print("=== ChatBot (seq2seq LSTM + attention, tokenizer=" + mode + ", trained on GPU) ===")
+print("vocab size:", tok.vocabSize, "| pairs:", total, "| answer len:", ans_len)
+print("[before save] sample replies:")
+show_samples(net, tok, questions, questions_text, gen_len, 24)
+
+save(net, "examples/chatbot.ckpt")
+print("saved -> examples/chatbot.ckpt")
+
+restored = ChatBot(tok.vocabSize, 64, 96, tok.padId)
+load(restored, "examples/chatbot.ckpt")
+restored.eval()
+print("[after load into a fresh model] exact match:", accuracy(restored, tok, questions, questions_text, answers_text, gen_len), "/", total)
+print("sample replies:")
+show_samples(restored, tok, questions, questions_text, gen_len, 24)

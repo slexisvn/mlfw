@@ -1,45 +1,12 @@
-
 import { TargetKind } from '../../backend/target.js';
 
 import { classifyBlock, isReductionLoop, primFuncHasReduction } from '../schedule/rules.js';
-import { matmulTileDims, enumerateRegisterBlockConfigs, createMatmulRegisterBlockGPUSketch } from './gpu_matmul_sketch.js';
-
-export class SearchVariable {
-  constructor(name, candidates) {
-    this.name = name;
-    this.candidates = candidates;
-  }
-
-  sample(rng) {
-    return this.candidates[rng(this.candidates.length)];
-  }
-}
-
-export class ScheduleSketch {
-  constructor(name, variables, apply) {
-    this.name = name;
-    this.variables = variables;
-    this._apply = apply;
-  }
-
-  instantiate(params) {
-    return (schedule, blockName, target) => {
-      this._apply(schedule, blockName, target, params);
-    };
-  }
-
-  sampleParams(rng) {
-    const params = {};
-    for (const v of this.variables) {
-      params[v.name] = v.sample(rng);
-    }
-    return params;
-  }
-}
+import { ScheduleSketch, SearchVariable } from './sketch.js';
+import { analyzeBlockStructure } from './block_analysis.js';
+import { richMatmulSketches } from './gpu_matmul_sketch.js';
 
 const TILE_CANDIDATES = [1, 2, 4, 8, 16, 32, 64, 128, 256];
 const BLOCK_SIZE_CANDIDATES = [32, 64, 128, 256, 512, 1024];
-const UNROLL_CANDIDATES = [1, 2, 4, 8, 16];
 const VECTOR_CANDIDATES = [1, 2, 4, 8, 16];
 
 function gpuThreadCap(target) {
@@ -161,34 +128,6 @@ export function createReductionGPUSketch() {
   });
 }
 
-export function createMatmulCPUSketch() {
-  return new ScheduleSketch('matmul_cpu', [
-    new SearchVariable('tile_m', TILE_CANDIDATES),
-    new SearchVariable('tile_n', TILE_CANDIDATES),
-    new SearchVariable('tile_k', [1, 2, 4, 8, 16, 32])
-  ], (schedule, blockName, target, params) => {
-    const loops = schedule.getLoops(blockName);
-    if (loops.length < 3) return;
-
-    const mLoop = loops[0];
-    const nLoop = loops[1];
-
-    const mExtent = mLoop.extent.type === 'IntImmNode' ? mLoop.extent.value : null;
-    const nExtent = nLoop.extent.type === 'IntImmNode' ? nLoop.extent.value : null;
-
-    if (mExtent && mExtent >= params.tile_m) {
-      const [mo, mi] = schedule.split(mLoop, params.tile_m);
-      schedule.parallelize(mo);
-    }
-
-    const updatedLoops = schedule.getLoops(blockName);
-    const currentN = updatedLoops.find(l => l.loopVar.name === nLoop.loopVar.name);
-    if (currentN && nExtent && nExtent >= params.tile_n) {
-      schedule.split(currentN, params.tile_n);
-    }
-  });
-}
-
 export function createMatmulGPUSketch() {
   return new ScheduleSketch('matmul_gpu', [
     new SearchVariable('block_tile_m', [32, 64, 128]),
@@ -285,18 +224,6 @@ export function createMultiLevelTileCPUSketch() {
   });
 }
 
-function analyzeBlockStructure(primFunc, blockName) {
-  const info = classifyBlock(primFunc, blockName);
-  if (!info) return { spatial: 0, reduction: 0, reads: 0, hasReduction: false };
-  let spatial = 0;
-  let reduction = 0;
-  for (const l of info.loops) {
-    if (info.reductionLoopVars.has(l.loopVar.name)) reduction++;
-    else spatial++;
-  }
-  return { spatial, reduction, reads: info.readBuffers.length, hasReduction: info.hasReduction };
-}
-
 const CPU_SKETCH_RULES = [
   { match: (s) => s.hasReduction && s.spatial >= 1 && s.reads >= 2,
     derive: () => [createMultiLevelTileCPUSketch(), createReductionCPUSketch()] },
@@ -314,62 +241,6 @@ const GPU_SKETCH_RULES = [
   { match: () => true,
     derive: () => [createElementwiseGPUSketch()] }
 ];
-
-function collectAllBlockNames(root) {
-  const names = [];
-  const stack = [root];
-  while (stack.length > 0) {
-    const node = stack.pop();
-    if (!node) continue;
-    if (node.type === 'BlockNode') names.push(node.name);
-    if (node.body) stack.push(node.body);
-    if (node.stmts) for (const s of node.stmts) stack.push(s);
-    if (node.thenBody) stack.push(node.thenBody);
-    if (node.elseBody) stack.push(node.elseBody);
-    if (node.initBody) stack.push(node.initBody);
-  }
-  return names;
-}
-
-export function analyzePureMatmul(primFunc, target) {
-  const names = collectAllBlockNames(primFunc.body);
-  let reductionBlock = null;
-  for (const name of names) {
-    const s = analyzeBlockStructure(primFunc, name);
-    if (s.hasReduction && s.spatial === 2 && s.reads >= 2) {
-      if (reductionBlock) return null;
-      reductionBlock = name;
-    }
-  }
-  if (!reductionBlock) return null;
-  const dims = matmulTileDims(primFunc, reductionBlock);
-  if (!dims) return null;
-  for (const name of names) {
-    if (name === reductionBlock) continue;
-    const info = classifyBlock(primFunc, name);
-    if (!info) return null;
-    if (info.hasReduction) return null;
-    if (info.readBuffers.length > 0) return null;
-    for (const w of info.writeBuffers) if (w !== dims.C.name) return null;
-  }
-  return { reductionBlock, dims };
-}
-
-let _matmulSketchCache = null;
-let _matmulSketchOwner = null;
-
-function richMatmulSketches(primFunc, blockName, target) {
-  const plan = analyzePureMatmul(primFunc, target);
-  if (!plan) return null;
-  if (_matmulSketchOwner !== primFunc) {
-    const configs = enumerateRegisterBlockConfigs(target, plan.dims);
-    _matmulSketchCache = configs.length > 0 ? createMatmulRegisterBlockGPUSketch(configs) : null;
-    _matmulSketchOwner = primFunc;
-  }
-  if (!_matmulSketchCache) return null;
-  if (blockName === plan.reductionBlock) return [_matmulSketchCache];
-  return [];
-}
 
 export function getSketchesForBlock(primFunc, blockName, target, blockMap, opts = {}) {
   if (opts.richGpu && target.isGPU()) {

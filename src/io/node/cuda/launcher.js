@@ -14,7 +14,7 @@ function scalarParam(value) {
   return b;
 }
 
-export function launch(func, gridDim, blockDim, sharedMemBytes, devicePtrs, scalars) {
+export function launch(func, gridDim, blockDim, sharedMemBytes, devicePtrs, scalars, sync = true) {
   const { stream } = getDevice();
   const params = [];
   for (const p of devicePtrs) params.push(devicePtrParam(p));
@@ -25,5 +25,5 @@ export function launch(func, gridDim, blockDim, sharedMemBytes, devicePtrs, scal
     blockDim[0], blockDim[1], blockDim[2],
     sharedMemBytes, stream, params, null,
   ));
-  checkCU('cuStreamSynchronize', cu.streamSynchronize(stream));
+  if (sync) checkCU('cuStreamSynchronize', cu.streamSynchronize(stream));
 }

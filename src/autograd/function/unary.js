@@ -1,6 +1,6 @@
 import { AutogradNode } from '../node.js';
 import * as ops from '../../tensor/ops/ops.js';
-import { ones, full, zeros } from '../../tensor/factory/creation_ops.js';
+import { ones, full } from '../../tensor/factory/creation_ops.js';
 
 export class ExpBackward extends AutogradNode {
   constructor() { super(1); }
@@ -81,14 +81,8 @@ export class ReluBackward extends AutogradNode {
   constructor() { super(1); }
   apply(gradOutputs) {
     const [input] = this.savedTensors();
-    const x = input.detach().contiguous();
-    const mask = zeros(x.shape, { dtype: x.dtype, device: x.device });
-    const maskData = mask._impl.storage.data;
-    const xData = x._impl.storage.data;
-    for (let i = 0; i < maskData.length; i++) {
-      maskData[i] = xData[i] > 0 ? 1 : 0;
-    }
-    return [ops.mul(gradOutputs[0], mask)];
+    const x = input.detach();
+    return [ops.mul(gradOutputs[0], ops.sign(ops.relu(x)))];
   }
 }
 

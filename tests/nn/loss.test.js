@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { tensor } from '../../src/index.js';
-import { mse_loss, binary_cross_entropy } from '../../src/nn/functional/loss.js';
-import { MSELoss, BCELoss } from '../../src/nn/modules/loss.js';
+import { mse_loss, binary_cross_entropy, cross_entropy } from '../../src/nn/functional/loss.js';
+import { MSELoss, BCELoss, CrossEntropyLoss } from '../../src/nn/modules/loss.js';
 
 describe('mse_loss', () => {
   it('computes mean squared error correctly', () => {
@@ -78,5 +78,41 @@ describe('BCELoss module', () => {
     const loss = criterion.forward(input, target);
     const expected = -(Math.log(0.5 + 1e-7) + Math.log(0.5 + 1e-7)) / 2;
     expect(loss.item()).toBeCloseTo(expected, 3);
+  });
+});
+
+describe('cross_entropy', () => {
+  const logits = tensor([[2, 1, 0, 1], [0, 3, 1, 0], [1, 0, 2, 1], [0, 1, 0, 3]]);
+  const target = tensor([0, 1, 2, 0], { dtype: 'i32' });
+
+  it('is invariant to row order in the batch', () => {
+    const ref = cross_entropy(logits, target, 'mean').item();
+    const perm = [3, 1, 0, 2];
+    const lp = tensor(perm.map(i => [...logits._impl.storage.data].slice(i * 4, i * 4 + 4)));
+    const tp = tensor(perm.map(i => [...target._impl.storage.data][i]), { dtype: 'i32' });
+    expect(cross_entropy(lp, tp, 'mean').item()).toBeCloseTo(ref, 6);
+  });
+
+  it('reads a strided (non-contiguous) target column correctly', () => {
+    const ref = cross_entropy(logits, target, 'mean').item();
+    const col = tensor([[0, 9], [1, 9], [2, 9], [0, 9]], { dtype: 'i32' }).select(1, 0);
+    expect(col.isContiguous).toBe(false);
+    expect(cross_entropy(logits, col, 'mean').item()).toBeCloseTo(ref, 6);
+  });
+
+  it('ignore_index excludes those targets and renormalizes the mean', () => {
+    const loss = new CrossEntropyLoss('mean', 0);
+    const tgt = tensor([0, 1, 0, 2], { dtype: 'i32' });
+    const masked = loss.forward(logits, tgt).item();
+    const onlyValid = cross_entropy(
+      tensor([[0, 3, 1, 0], [0, 1, 0, 3]]),
+      tensor([1, 2], { dtype: 'i32' }), 'mean',
+    ).item();
+    expect(masked).toBeCloseTo(onlyValid, 5);
+  });
+
+  it('default CrossEntropyLoss ignores nothing (back-compat)', () => {
+    const loss = new CrossEntropyLoss();
+    expect(loss.forward(logits, target).item()).toBeCloseTo(cross_entropy(logits, target, 'mean').item(), 6);
   });
 });

@@ -1,6 +1,9 @@
 import { fs } from '#io/fs';
 import { joinPath } from '../../io/path.js';
 import { Callback } from './callback.js';
+import { serializeCheckpoint, deserializeCheckpoint } from '../io/checkpoint_format.js';
+
+const CKPT_EXT = '.ckpt';
 
 export class ModelCheckpoint extends Callback {
   constructor({
@@ -40,13 +43,13 @@ export class ModelCheckpoint extends Callback {
     const filledName = this._fillTemplate(state);
 
     if (this._saveLast) {
-      const lastPath = joinPath(this._dirpath, 'last.ckpt.json');
+      const lastPath = joinPath(this._dirpath, 'last' + CKPT_EXT);
       this._saveCheckpoint(model, trainer, lastPath);
       this._lastModelPath = lastPath;
     }
 
     if (!this._monitor) {
-      const path = joinPath(this._dirpath, filledName + '.ckpt.json');
+      const path = joinPath(this._dirpath, filledName + CKPT_EXT);
       this._saveCheckpoint(model, trainer, path);
       return;
     }
@@ -55,7 +58,7 @@ export class ModelCheckpoint extends Callback {
     const current = metrics[this._monitor];
     if (current === undefined) return;
 
-    const path = joinPath(this._dirpath, filledName + '.ckpt.json');
+    const path = joinPath(this._dirpath, filledName + CKPT_EXT);
     const entry = { score: current, path };
 
     if (this._saveTopK < 0) {
@@ -101,19 +104,19 @@ export class ModelCheckpoint extends Callback {
     const checkpoint = {
       epoch: trainer.state.epoch,
       globalStep: trainer.state.globalStep,
-      modelState: serializeStateDict(model.stateDict()),
+      modelState: model.stateDict(),
     };
 
     const optimizers = model._currentOptimizers;
     if (optimizers && optimizers.length > 0) {
-      checkpoint.optimizerStates = [];
-      for (let i = 0; i < optimizers.length; i++) {
-        checkpoint.optimizerStates.push(serializeOptimizerState(optimizers[i].stateDict()));
-      }
+      checkpoint.optimizerStates = optimizers.map((opt) => opt.stateDict());
     }
 
     trainer.callbackConnector.dispatch('onSaveCheckpoint', trainer, model, checkpoint);
-    fs.writeFile(path, JSON.stringify(checkpoint));
+
+    const tmp = path + '.tmp';
+    fs.writeBinary(tmp, serializeCheckpoint(checkpoint));
+    fs.rename(tmp, path);
   }
 
   _fillTemplate(state) {
@@ -133,44 +136,15 @@ export class ModelCheckpoint extends Callback {
   }
 }
 
-function serializeStateDict(stateDict) {
-  const result = {};
-  for (const [key, tensor] of stateDict) {
-    const data = tensor._impl.storage.data;
-    result[key] = {
-      shape: tensor.shape,
-      dtype: tensor.dtype,
-      data: encodeTypedArray(data),
-    };
-  }
-  return result;
+export function loadCheckpoint(path) {
+  return deserializeCheckpoint(fs.readBinary(path));
 }
 
-function serializeOptimizerState(stateDict) {
-  const serialized = {
-    paramGroups: stateDict.paramGroups,
-    state: {},
-  };
-  for (const [id, s] of stateDict.state) {
-    const cloned = {};
-    for (const key of Object.keys(s)) {
-      const val = s[key];
-      if (ArrayBuffer.isView(val)) {
-        cloned[key] = { type: val.constructor.name, data: encodeTypedArray(val) };
-      } else {
-        cloned[key] = val;
-      }
-    }
-    serialized.state[id] = cloned;
+export function applyCheckpoint(checkpoint, model, optimizers = []) {
+  if (checkpoint.modelState) model.loadStateDict(checkpoint.modelState);
+  if (checkpoint.optimizerStates) {
+    const n = Math.min(optimizers.length, checkpoint.optimizerStates.length);
+    for (let i = 0; i < n; i++) optimizers[i].loadStateDict(checkpoint.optimizerStates[i]);
   }
-  return serialized;
-}
-
-function encodeTypedArray(arr) {
-  const bytes = new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength);
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
+  return checkpoint;
 }

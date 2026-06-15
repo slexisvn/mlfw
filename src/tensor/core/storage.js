@@ -21,6 +21,10 @@ export class Storage {
     return this._impl.data;
   }
 
+  get rawData() {
+    return this._impl.rawData;
+  }
+
   get nbytes() {
     return this._impl.nbytes;
   }

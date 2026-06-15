@@ -100,7 +100,7 @@
   "CrossEntropyLoss": {
     "prefix": "CrossEntropyLoss",
     "body": [
-      "CrossEntropyLoss()"
+      "CrossEntropyLoss($0)"
     ],
     "description": "module: CrossEntropyLoss"
   },
@@ -230,6 +230,20 @@
     ],
     "description": "callback: GradientAccumulationScheduler"
   },
+  "GRU": {
+    "prefix": "GRU",
+    "body": [
+      "GRU(${1:input}, ${2:hidden})$0"
+    ],
+    "description": "module: GRU"
+  },
+  "GRUCell": {
+    "prefix": "GRUCell",
+    "body": [
+      "GRUCell(${1:input}, ${2:hidden})$0"
+    ],
+    "description": "module: GRUCell"
+  },
   "LayerNorm": {
     "prefix": "LayerNorm",
     "body": [
@@ -278,6 +292,20 @@
       "LogSoftmax($0)"
     ],
     "description": "module: LogSoftmax"
+  },
+  "LSTM": {
+    "prefix": "LSTM",
+    "body": [
+      "LSTM(${1:input}, ${2:hidden})$0"
+    ],
+    "description": "module: LSTM"
+  },
+  "LSTMCell": {
+    "prefix": "LSTMCell",
+    "body": [
+      "LSTMCell(${1:input}, ${2:hidden})$0"
+    ],
+    "description": "module: LSTMCell"
   },
   "MaxPool2d": {
     "prefix": "MaxPool2d",

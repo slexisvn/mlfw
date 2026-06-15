@@ -65,6 +65,9 @@ export {
 } from './data/index.js';
 export * as data from './data/index.js';
 
+export { Tokenizer, Vocab } from './tokenizer/index.js';
+export * as tokenizer from './tokenizer/index.js';
+
 export {
   Optimizer, SGD, Adam, AdamW,
   LRScheduler, StepLR, CosineAnnealingLR, ReduceLROnPlateau,
@@ -78,7 +81,8 @@ export { CPUTarget, CUDATarget, WasmTarget, WebGPUTarget } from './backend/targe
 
 export {
   LightningModule, Trainer, Callback,
-  ModelCheckpoint, EarlyStopping, ProgressCallback,
+  ModelCheckpoint, loadCheckpoint, applyCheckpoint,
+  EarlyStopping, ProgressCallback,
   LearningRateMonitor, Timer, GradientAccumulationScheduler,
   Logger, ConsoleLogger, CSVLogger,
   Metric, MeanMetric, SumMetric, MetricCollection,

@@ -6,6 +6,7 @@ import { CPU_DEVICE, GPU_DEVICE, WASM_DEVICE } from '../tensor/types/device.js';
 import { CompiledProgramView, formatTrace, formatValue, formatValueCompact } from './format.js';
 import { printModule } from '../compiler/ir/graph/printer.js';
 import { DataLoader, TensorDataset } from '../data/index.js';
+import { Tokenizer } from '../tokenizer/index.js';
 import { loadCsvRows } from './csv.js';
 import {
   createEngine, DataFrame, Col, InMemoryRelation,
@@ -18,7 +19,9 @@ import {
   LearningRateMonitor, Timer, GradientAccumulationScheduler,
   ConsoleLogger, CSVLogger,
   Accuracy, Precision, Recall, F1Score, ConfusionMatrix, MetricCollection,
+  serializeCheckpoint, loadCheckpoint, applyCheckpoint,
 } from '../lightning/index.js';
+import { fs } from '#io/fs';
 
 const FACTORIES = [
   'tensor', 'zeros', 'ones', 'empty', 'full', 'randn', 'arange', 'eye', 'linspace', 'randperm',
@@ -216,6 +219,8 @@ export function installBuiltins(runtime, define) {
   define('webgpu', 'webgpu');
   for (const dtype of ['f16', 'f32', 'f64', 'i32', 'i64', 'bool']) define(dtype, dtype);
 
+  define('Tokenizer', (...args) => constructWithSnakeCase(Tokenizer, args));
+
   define('TensorDataset', (...args) => new TensorDataset(...args));
   define('DataLoader', (...args) => {
     const named = takeNamed(args);
@@ -257,6 +262,21 @@ export function installBuiltins(runtime, define) {
   define('F1Score', (...args) => constructWithSnakeCase(F1Score, args));
   define('ConfusionMatrix', (...args) => constructWithSnakeCase(ConfusionMatrix, args));
   define('MetricCollection', (...args) => constructWithSnakeCase(MetricCollection, args));
+
+  define('save', (model, path) => {
+    if (!model || typeof model.stateDict !== 'function') throw new Error('save() requires a model as the first argument');
+    if (typeof path !== 'string') throw new Error('save() requires a file path string');
+    const tmp = path + '.tmp';
+    fs.writeBinary(tmp, serializeCheckpoint({ modelState: model.stateDict() }));
+    fs.rename(tmp, path);
+  });
+
+  define('load', (model, path) => {
+    if (!model || typeof model.loadStateDict !== 'function') throw new Error('load() requires a model as the first argument');
+    if (typeof path !== 'string') throw new Error('load() requires a file path string');
+    applyCheckpoint(loadCheckpoint(path), model);
+    return model;
+  });
 
   define('optim_config', (...args) => {
     const named = takeNamed(args);
@@ -540,7 +560,6 @@ const BUILTIN_SIGNATURES = {
   grad: [{ name: 'tensor' }],
   backward: [{ name: 'tensor' }, { name: 'gradient', isOptional: true }],
   range: [{ name: 'start' }, { name: 'stop', isOptional: true }, { name: 'step', isOptional: true }],
-  len: [{ name: 'value' }],
   shape: [{ name: 'tensor' }],
   dtype: [{ name: 'tensor' }],
   print: [{ name: 'value' }],

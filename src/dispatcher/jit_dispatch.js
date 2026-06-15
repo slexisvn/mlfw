@@ -224,9 +224,68 @@ export function wrapResult(data, shape, dtype, device) {
   return new Tensor(impl);
 }
 
+function _prod(arr, from, to) {
+  let p = 1;
+  for (let i = from; i < to; i++) p *= arr[i];
+  return p;
+}
+
+function _hostStack(inputs, inShape, dim, outData) {
+  const rank = inShape.length;
+  const d = dim < 0 ? rank + 1 + dim : dim;
+  const outer = _prod(inShape, 0, d);
+  const inner = _prod(inShape, d, rank);
+  const n = inputs.length;
+  for (let o = 0; o < outer; o++) {
+    for (let i = 0; i < n; i++) {
+      outData.set(inputs[i].subarray(o * inner, (o + 1) * inner), (o * n + i) * inner);
+    }
+  }
+}
+
+function _hostCat(inputs, shapes, dim, outData) {
+  const rank = shapes[0].length;
+  const d = dim < 0 ? rank + dim : dim;
+  const outer = _prod(shapes[0], 0, d);
+  const tail = _prod(shapes[0], d + 1, rank);
+  let outDimTotal = 0;
+  for (const s of shapes) outDimTotal += s[d];
+  for (let o = 0; o < outer; o++) {
+    let outOff = o * outDimTotal * tail;
+    for (let k = 0; k < inputs.length; k++) {
+      const block = shapes[k][d] * tail;
+      outData.set(inputs[k].subarray(o * block, (o + 1) * block), outOff);
+      outOff += block;
+    }
+  }
+}
+
+function _runHostConcatLike(opName, tensors, scalars) {
+  const runtimeArgs = tensors.map(t => tensorToContiguous(t));
+  const outShape = _inferOutputShape(opName, tensors, scalars);
+  const outDtype = tensors[0].dtype;
+  const Ctor = typedArrayCtor(outDtype);
+  const outData = new Ctor(Math.max(computeNumel(outShape), 1));
+  const dim = scalars.dim ?? 0;
+  if (opName === 'stack') _hostStack(runtimeArgs, tensors[0].shape, dim, outData);
+  else _hostCat(runtimeArgs, tensors.map(t => t.shape), dim, outData);
+  return wrapResult(outData, outShape, outDtype, tensors[0].device);
+}
+
+function _gpuInputArray(t) {
+  if (t.isContiguous && t._impl.storageOffset === 0) {
+    const raw = t._impl.storage.rawData;
+    if (raw && raw.length === t.numel) return raw;
+  }
+  return tensorToContiguous(t);
+}
+
 function _wrapOpForJIT(opName, dispatchKey) {
   const getTarget = _TARGET_FOR_KEY[dispatchKey];
   if (!getTarget) return null;
+
+  const isGPU = dispatchKey === DispatchKey.GPU;
+  const hostConcatLike = isGPU && (opName === 'stack' || opName === 'cat');
 
   return (keySet, ...args) => {
     const { tensors, scalars } = _extractTensorsAndScalars(opName, args);
@@ -234,10 +293,12 @@ function _wrapOpForJIT(opName, dispatchKey) {
       throw new Error(`JIT dispatch: no tensor args for op '${opName}'`);
     }
 
+    if (hostConcatLike) return _runHostConcatLike(opName, tensors, scalars);
+
     const target = getTarget();
     const entry = jitCompile(opName, tensors, scalars, target);
 
-    const runtimeArgs = tensors.map(t => tensorToContiguous(t));
+    const runtimeArgs = tensors.map(t => isGPU ? _gpuInputArray(t) : tensorToContiguous(t));
 
     const outShape = _inferOutputShape(opName, tensors, scalars);
     const outDtype = entry.outDtype || resultDtype(tensors[0].dtype, tensors.length > 1 ? tensors[1].dtype : tensors[0].dtype);

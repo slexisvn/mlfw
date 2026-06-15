@@ -239,11 +239,10 @@ registerDecomposition('one_hot', (op, b) => {
   const resolvedAxis = axis < 0 ? indices.type.rank + 1 + axis : axis;
   const iotaType = new TensorType(resultShape, ScalarType.I32);
   const iotaOp = b._inferAndBuild('iota', [], { iota_dimension: resolvedAxis, tensor_type: iotaType });
-  const expandedShape = [...indices.type.shape];
-  expandedShape.splice(resolvedAxis, 0, 1);
-  const reshaped = b.reshape(indices, expandedShape);
-  const bcastDims = Array.from({length: expandedShape.length}, (_, i) => i);
-  const bcastIndices = b.broadcast(reshaped.getResult(0), resultShape, bcastDims);
+  const idxRank = indices.type.rank;
+  const bcastDims = [];
+  for (let i = 0; i < idxRank; i++) bcastDims.push(i < resolvedAxis ? i : i + 1);
+  const bcastIndices = b.broadcast(indices, resultShape, bcastDims);
   const converted = b.convert(bcastIndices.getResult(0), ScalarType.I32);
   const cmp = b.compare(converted.getResult(0), iotaOp.getResult(0), 'eq');
   const onBcast = b.broadcast(b.scalarConstant(onVal, dtype).getResult(0), resultShape, []);

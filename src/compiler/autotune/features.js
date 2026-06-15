@@ -1,6 +1,6 @@
 import { ForKind } from '../ir/tensor/nodes.js';
 
-export class ScheduleFeatures {
+class ScheduleFeatures {
   constructor(raw) {
     this.numLoops = raw.numLoops || 0;
     this.numBlocks = raw.numBlocks || 0;

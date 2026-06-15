@@ -1,6 +1,6 @@
 import { FeatureExtractor } from './features.js';
 
-export class CostEstimate {
+class CostEstimate {
   constructor(score, breakdown) {
     this.score = score;
     this.breakdown = breakdown;

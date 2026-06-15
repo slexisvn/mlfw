@@ -10,7 +10,7 @@ const BUILTINS = [
   'where', 'cat', 'stack',
   'sum', 'min', 'max', 'avg', 'count', 'countStar',
   'DataFrame', 'col', 'lit', 'expr',
-  'range', 'print', 'trace', 'graph', 'compile',
+  'range', 'print', 'trace', 'graph', 'compile', 'save', 'load',
 ];
 
 export const KEYWORD_SET = new Set(KEYWORDS);

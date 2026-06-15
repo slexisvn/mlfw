@@ -105,6 +105,7 @@ export class Trainer {
     model._trainer = this;
     const device = this._resolveDevice();
     model._device = device;
+    await this._prepareDevice(device);
     this._strategy.setup(model, device);
 
     const { optimizers, schedulerConfigs } = parseOptimizersConfig(
@@ -167,6 +168,12 @@ export class Trainer {
     if (this._accelerator === 'gpu') return GPU_DEVICE;
     if (this._accelerator === 'cpu') return CPU_DEVICE;
     return CPU_DEVICE;
+  }
+
+  async _prepareDevice(device) {
+    if (device.type !== 'gpu') return;
+    const { preloadCudaRuntime } = await import('../../compiler/runtime/backend_registry.js');
+    await preloadCudaRuntime();
   }
 
   _resolveLoggers(loggerConfig) {

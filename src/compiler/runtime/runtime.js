@@ -29,6 +29,20 @@ function dtypeOfTypedArray(a) {
   return 'f32';
 }
 
+function _applyReturnFixups(plan, slots) {
+  if (!plan.returnFixups || plan.returnFixups.length === 0) return;
+  for (const fx of plan.returnFixups) {
+    const dst = slots[plan.argSlots[fx.pos]];
+    if (!dst || !dst.data) continue;
+    if (fx.kind === 'copy') {
+      const src = slots[fx.srcSlot];
+      if (src && src.data) dst.data.set(src.data.subarray(0, dst.data.length));
+    } else if (fx.kind === 'const') {
+      dst.data.fill(fx.value);
+    }
+  }
+}
+
 export class RuntimeTensor {
   constructor(data, shape, dtype, strides = null) {
     this.data = data;
@@ -183,7 +197,9 @@ export class RuntimeModule {
         const { shapeValues } = this._prepareArgs(step.name, stepArgs);
         return { name: step.name, inputSlots: step.inputSlots, outputSlots: step.outputSlots, kernel: this.kernels.get(step.name), shapeValues };
       });
-      return planBackend.runPlan(plan, slots, steps);
+      await planBackend.runPlan(plan, slots, steps);
+      _applyReturnFixups(plan, slots);
+      return;
     }
 
     for (const step of plan.steps) {
@@ -192,6 +208,7 @@ export class RuntimeModule {
       for (const s of step.outputSlots) stepArgs.push(slots[s]);
       await this.runAsync(step.name, ...stepArgs);
     }
+    _applyReturnFixups(plan, slots);
   }
 
   _uniformPlanBackend(plan) {

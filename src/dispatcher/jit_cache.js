@@ -9,6 +9,9 @@ import { DecompositionPass } from '../compiler/passes/decompose/decomposition_pa
 import { CanonicalizePass } from '../compiler/passes/canonicalize/canonicalize.js';
 import { DCEPass } from '../compiler/passes/simplify/dce.js';
 import { reduceInitValue } from '../backend/dtype_map.js';
+import { Schedule } from '../compiler/schedule/schedule.js';
+import { SchedulePolicy } from '../compiler/schedule/rules.js';
+import { typedArrayCtor } from '../tensor/types/dtype.js';
 
 const _cache = new Map();
 const _runtimeModules = new Map();
@@ -91,6 +94,34 @@ const _BUILDER_ALIASES = {
   },
 };
 
+function _bufferNumel(buf) {
+  let n = 1;
+  for (const d of buf.shape) n *= (typeof d === 'number' && d > 0 ? d : 1);
+  return Math.max(n, 1);
+}
+
+function _trialLaunch(rt, compiled, primFunc) {
+  const args = [];
+  for (const [, buf] of primFunc.bufferMap) {
+    args.push(new (typedArrayCtor(buf.dtype))(_bufferNumel(buf)));
+  }
+  rt.run(compiled.name, ...args);
+}
+
+function _compileScheduledGPU(func, target, backend, rt) {
+  try {
+    const primFunc = lowerGraphToPrimFunc(func);
+    if (primFunc.shapeParams && primFunc.shapeParams.length > 0) return null;
+    new SchedulePolicy(target).applyToAllBlocks(new Schedule(primFunc));
+    const compiled = backend.compile(primFunc);
+    rt.addCompiledKernel(compiled);
+    _trialLaunch(rt, compiled, primFunc);
+    return compiled;
+  } catch {
+    return null;
+  }
+}
+
 let _nextFuncId = 0;
 
 function _buildGraphFunc(opName, tensorArgs, scalarArgs) {
@@ -154,12 +185,15 @@ export function jitCompile(opName, tensorArgs, scalarArgs, target) {
   pm.addPass(new DCEPass());
   pm.run(mod);
 
-  const primFunc = lowerGraphToPrimFunc(func);
-  const backend = new BackendPipeline(target);
-  const compiled = backend.compile(primFunc);
-
   const rt = _getRuntime(target.name);
-  rt.addCompiledKernel(compiled);
+  const backend = new BackendPipeline(target);
+  const isGPU = typeof target.isGPU === 'function' && target.isGPU();
+
+  let compiled = isGPU ? _compileScheduledGPU(func, target, backend, rt) : null;
+  if (!compiled) {
+    compiled = backend.compile(lowerGraphToPrimFunc(func));
+    rt.addCompiledKernel(compiled);
+  }
 
   const retOp = func.getReturnOp();
   const outDtype = retOp && retOp.operands.length > 0 ? retOp.operands[0].type.dtype : null;
