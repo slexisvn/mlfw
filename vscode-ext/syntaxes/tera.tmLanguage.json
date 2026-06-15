@@ -150,7 +150,7 @@
         },
         {
           "name": "support.function.tera",
-          "match": "\\b(?:cat|load|save|stack|Tokenizer|where)\\b"
+          "match": "\\b(?:cat|load|load_json|read_text|save|stack|Tokenizer|where)\\b"
         },
         {
           "name": "support.function.utility.tera",

@@ -2,6 +2,7 @@ import { DispatchKey } from './dispatch_key.js';
 import { KernelFunction } from './boxing.js';
 import { dispatcher } from './dispatcher.js';
 import { jitCompile } from './jit_cache.js';
+import { isEagerDeferred } from './eager_mode.js';
 import { CPUTarget, CUDATarget, WasmTarget } from '../backend/target.js';
 import { Tensor } from '../tensor/core/tensor.js';
 import { TensorImpl } from '../tensor/core/tensor_impl.js';
@@ -9,10 +10,11 @@ import { Storage } from '../tensor/core/storage.js';
 import { computeStrides, computeNumel, broadcastShapes, matmulOutputShape } from '../tensor/utils/shape_utils.js';
 import { resultDtype, typedArrayCtor } from '../tensor/types/dtype.js';
 
+let _cpuTarget, _cudaTarget, _wasmTarget;
 const _TARGET_FOR_KEY = {
-  [DispatchKey.CPU]: () => CPUTarget(),
-  [DispatchKey.GPU]: () => CUDATarget(),
-  [DispatchKey.WASM]: () => WasmTarget(),
+  [DispatchKey.CPU]: () => (_cpuTarget ??= CPUTarget()),
+  [DispatchKey.GPU]: () => (_cudaTarget ??= CUDATarget()),
+  [DispatchKey.WASM]: () => (_wasmTarget ??= WasmTarget()),
 };
 
 const _SCALAR_ARG_SPEC = {
@@ -261,21 +263,34 @@ function _hostCat(inputs, shapes, dim, outData) {
 }
 
 function _runHostConcatLike(opName, tensors, scalars) {
-  const runtimeArgs = tensors.map(t => tensorToContiguous(t));
   const outShape = _inferOutputShape(opName, tensors, scalars);
   const outDtype = tensors[0].dtype;
   const Ctor = typedArrayCtor(outDtype);
   const outData = new Ctor(Math.max(computeNumel(outShape), 1));
   const dim = scalars.dim ?? 0;
+  if (isEagerDeferred() && _gpuConcatFn) {
+    const inputArrays = tensors.map(t => _gpuInputArray(t));
+    _gpuConcatFn(opName, inputArrays, tensors.map(t => t.shape), dim, outShape, outData, outDtype);
+    return wrapResult(outData, outShape, outDtype, tensors[0].device);
+  }
+  const runtimeArgs = tensors.map(t => tensorToContiguous(t));
   if (opName === 'stack') _hostStack(runtimeArgs, tensors[0].shape, dim, outData);
   else _hostCat(runtimeArgs, tensors.map(t => t.shape), dim, outData);
   return wrapResult(outData, outShape, outDtype, tensors[0].device);
 }
 
+let _gpuContiguousFn = null;
+export function setGpuContiguousFn(fn) { _gpuContiguousFn = fn; }
+let _gpuConcatFn = null;
+export function setGpuConcatFn(fn) { _gpuConcatFn = fn; }
+
 function _gpuInputArray(t) {
   if (t.isContiguous && t._impl.storageOffset === 0) {
     const raw = t._impl.storage.rawData;
     if (raw && raw.length === t.numel) return raw;
+  }
+  if (isEagerDeferred() && _gpuContiguousFn) {
+    return _gpuContiguousFn(t._impl.storage.rawData, t.shape, t.strides, t._impl.storageOffset, t.dtype);
   }
   return tensorToContiguous(t);
 }

@@ -32,7 +32,7 @@ export class Tokenizer {
   get eosId() { return this._specialId('eos'); }
 
   _ensureFit() {
-    if (!this._vocab) throw new Error('Tokenizer must be tokenize()d on a corpus before use');
+    if (!this._vocab) throw new Error('Tokenizer must be fit() on a corpus before use');
   }
 
   _specialId(name) {
@@ -40,7 +40,7 @@ export class Tokenizer {
     return this._vocab.getId(this._specials[name]);
   }
 
-  tokenize(texts) {
+  fit(texts) {
     const corpus = Array.isArray(texts) ? texts : [texts];
     this._strategy.fit(corpus, { vocabSize: this._maxVocab });
     const vocab = new Vocab(Object.values(this._specials));

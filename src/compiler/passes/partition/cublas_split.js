@@ -335,7 +335,7 @@ function buildExecutionPlan(func, retOp, built) {
   return { plan: { numSlots: nextSlot, argSlots, intermediates, steps, returnFixups } };
 }
 
-export function splitGraphForNative(graphModule) {
+export function splitGraphForNative(graphModule, minBoundaries = 2) {
   if (graphModule.functionCount !== 1) return null;
   const func = graphModule.functions().next().value;
   const retOp = func.getReturnOp();
@@ -353,7 +353,7 @@ export function splitGraphForNative(graphModule) {
     partitionOps.push(op);
   }
 
-  if (boundaryCount < 2 || partitionOps.length === 0) return null;
+  if (boundaryCount < minBoundaries || partitionOps.length === 0) return null;
 
   const { partitions, preds } = buildPartitions(partitionOps, opTarget);
   if (partitions.length < 2) return null;

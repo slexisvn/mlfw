@@ -147,6 +147,10 @@ registerBackend('webgpu', {
     const { runWebGPUKernel } = await getWebGPURuntime();
     await runWebGPUKernel(inst, tensorArgs, shapeValues);
   },
+  async runPlan(plan, slots, steps) {
+    const { runWebGPUPlan } = await getWebGPURuntime();
+    await runWebGPUPlan(plan, slots, steps);
+  },
   isAsync() { return true; },
 });
 

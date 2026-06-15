@@ -7,7 +7,7 @@ import { parseOptimizersConfig } from './module.js';
 import { ConsoleLogger } from '../loggers/console.js';
 import { ProgressCallback } from '../callbacks/progress.js';
 import { ModelCheckpoint } from '../callbacks/checkpoint.js';
-import { CPU_DEVICE, GPU_DEVICE } from '../../tensor/types/device.js';
+import { CPU_DEVICE, GPU_DEVICE, WASM_DEVICE } from '../../tensor/types/device.js';
 
 export class Trainer {
   constructor({
@@ -17,7 +17,7 @@ export class Trainer {
     precision = 'f32',
     callbacks = [],
     logger = true,
-    enableCheckpointing = true,
+    enableCheckpointing = false,
     enableProgress = true,
     gradientClipVal = null,
     gradientClipAlgorithm = 'norm',
@@ -31,11 +31,15 @@ export class Trainer {
     deterministic = false,
     fastDevRun = false,
     defaultRootDir = './lightning_logs',
+    compile = false,
+    compileMode = 'separate',
   } = {}) {
     this._state = new TrainerState();
     this._state.maxEpochs = maxEpochs;
     this._state.maxSteps = maxSteps;
 
+    this._compile = compile;
+    this._compileMode = compileMode;
     this._accelerator = accelerator;
     this._precision = precision;
     this._gradientClipVal = gradientClipVal;
@@ -83,6 +87,8 @@ export class Trainer {
   get fitLoop() { return this._fitLoop; }
   get gradientClipVal() { return this._gradientClipVal; }
   get gradientClipAlgorithm() { return this._gradientClipAlgorithm; }
+  get compile() { return this._compile; }
+  get compileMode() { return this._compileMode; }
   get accumulateGradBatches() { return this._accumulateGradBatches; }
   set accumulateGradBatches(v) { this._accumulateGradBatches = v; }
   get limitTrainBatches() { return this._limitTrainBatches; }
@@ -166,6 +172,7 @@ export class Trainer {
 
   _resolveDevice() {
     if (this._accelerator === 'gpu') return GPU_DEVICE;
+    if (this._accelerator === 'wasm') return WASM_DEVICE;
     if (this._accelerator === 'cpu') return CPU_DEVICE;
     return CPU_DEVICE;
   }

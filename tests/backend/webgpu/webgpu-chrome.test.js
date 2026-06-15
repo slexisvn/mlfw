@@ -277,4 +277,23 @@ describe.skipIf(!deps)('webgpu via Chrome (differential vs CPU)', () => {
       await caseClose("(M,a,b)=>M.relu(M.matmul(a,b))", [a, b], AUTOTUNE);
     }
   });
+
+  it('large matmul chain splits into a multi-kernel plan and matches CPU', async () => {
+    const x = { data: grid(4, 8, 1) };
+    const ws = [];
+    for (let i = 0; i < 9; i++) ws.push({ data: grid(8, 8, 10 + i) });
+    const src = "(M,x,a,b,c,d,e,f,g,h,i)=>{let t=x;for(const w of [a,b,c,d,e,f,g,h,i])t=M.relu(M.matmul(t,w));return t;}";
+    await caseClose(src, [x, ...ws]);
+  });
+
+  it('mixed-dtype packed kernel (index_select + matmul + bias) matches CPU', async () => {
+    const idx = { data: [0, 2, 5], dtype: 'i32' };
+    const W = { data: grid(10, 8, 1) };
+    const a = { data: grid(8, 8, 2) };
+    const b = { data: grid(1, 8, 3) };
+    const c = { data: grid(8, 4, 4) };
+    const d = { data: grid(1, 4, 5) };
+    const src = "(M,idx,W,a,b,c,d)=>{const e=M.index_select(W,0,idx);const h=M.relu(M.add(M.matmul(e,a),b));return M.add(M.matmul(h,c),d);}";
+    await caseClose(src, [idx, W, a, b, c, d]);
+  });
 });

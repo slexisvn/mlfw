@@ -4553,6 +4553,24 @@
       "methods": []
     },
     {
+      "name": "load_json",
+      "kind": "other",
+      "description": "Read a JSON file and return it as nested dicts/lists.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "path",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "load_json(path)"
+      },
+      "methods": []
+    },
+    {
       "name": "LogSoftmax",
       "kind": "module",
       "description": "LogSoftmax module — numerically stable log of softmax.",
@@ -5554,6 +5572,24 @@
       "methods": []
     },
     {
+      "name": "read_text",
+      "kind": "other",
+      "description": "Read a text file and return its contents as a string.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "path",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "read_text(path)"
+      },
+      "methods": []
+    },
+    {
       "name": "Recall",
       "kind": "metric",
       "description": "Recall metric — fraction of actual positives that are predicted positive.",
@@ -6361,7 +6397,7 @@
     {
       "name": "Tokenizer",
       "kind": "other",
-      "description": "Build a text tokenizer. `mode` is `\"word\"`, `\"char\"`, or `\"bpe\"` (trainable subword). `tokenize(texts)` on a corpus first, then `encode`/`decode`/`encodeBatch`. Reserves special tokens (`<pad> <unk> <bos> <eos>`) at low ids exposed as `padId`/`unkId`/`bosId`/`eosId`.",
+      "description": "Build a text tokenizer. `mode` is `\"word\"`, `\"char\"`, or `\"bpe\"` (trainable subword). `fit(texts)` on a corpus first, then `encode`/`decode`/`encodeBatch`. Reserves special tokens (`<pad> <unk> <bos> <eos>`) at low ids exposed as `padId`/`unkId`/`bosId`/`eosId`.",
       "returns": null,
       "signature": {
         "params": [
@@ -6400,7 +6436,7 @@
       },
       "methods": [
         {
-          "name": "tokenize",
+          "name": "fit",
           "description": "Learn the vocabulary (and BPE merges) from a list of strings. Returns the tokenizer.",
           "returns": null,
           "signature": {
@@ -6412,7 +6448,7 @@
                 "defaultValue": null
               }
             ],
-            "display": "tokenize(texts)"
+            "display": "fit(texts)"
           }
         },
         {
@@ -6587,7 +6623,7 @@
             "name": "enable_checkpointing",
             "optional": true,
             "rest": false,
-            "defaultValue": "true"
+            "defaultValue": "false"
           },
           {
             "name": "enable_progress",
@@ -6620,7 +6656,7 @@
             "defaultValue": "50"
           }
         ],
-        "display": "Trainer(max_epochs=20, accelerator=\"cpu\", logger=true, enable_checkpointing=true, enable_progress=true, callbacks?, fast_dev_run=false, gradient_clip_val?, log_every_n_steps=50)"
+        "display": "Trainer(max_epochs=20, accelerator=\"cpu\", logger=true, enable_checkpointing=false, enable_progress=true, callbacks?, fast_dev_run=false, gradient_clip_val?, log_every_n_steps=50)"
       },
       "methods": [
         {

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   tensor, Linear, Sequential, ReLU, Sigmoid, Tanh,
-  GELU, SiLU, LeakyReLU, ELU,
+  GELU, SiLU, LeakyReLU, ELU, Embedding,
   compile, WebGPUTarget,
 } from '../../../src/index.js';
 
@@ -488,5 +488,61 @@ describe('webgpu compilation output', () => {
         expect(preceding.trim()).toBe('workgroupBarrier();');
       }
     }
+  });
+});
+
+describe('webgpu mixed-dtype buffer packing', () => {
+  it('packs read buffers per dtype when a kernel has many mixed-dtype buffers', () => {
+    const embed = new Embedding(40, 8);
+    const l1 = new Linear(8, 8);
+    const l2 = new Linear(8, 4);
+    const idx = tensor([[0, 1, 2, 3, 4]], { dtype: 'i32' });
+    const compiled = compileWebGPU({ forward: (i) => l2.forward(l1.forward(embed.forward(i))) }, [idx]);
+    const mod = compiled.result().module;
+    expect(mod.listKernels().length, 'mixed-dtype model stays single-kernel').toBe(1);
+    const meta = mod.kernels.get(mod.listKernels()[0]).metadata;
+    const names = meta.bindings.map((b) => b.name);
+    expect(names).toContain('_pr_f32');
+    expect(names).toContain('_pr_i32');
+    const storage = meta.bindings.filter((b) => b.name !== '_shapes');
+    expect(storage.length, 'packed binding count is small').toBeLessThanOrEqual(4);
+    const f32pack = meta.bindings.find((b) => b.name === '_pr_f32');
+    expect(f32pack.packed.length, 'multiple f32 buffers packed into one binding').toBeGreaterThan(1);
+  });
+});
+
+describe('webgpu multi-kernel split for large graphs', () => {
+  const deep = () => new Sequential(
+    new Linear(8, 8), new ReLU(), new Linear(8, 8), new ReLU(),
+    new Linear(8, 8), new ReLU(), new Linear(8, 8), new ReLU(),
+    new Linear(8, 8), new ReLU(), new Linear(8, 8), new ReLU(),
+    new Linear(8, 8), new ReLU(), new Linear(8, 8), new ReLU(),
+    new Linear(8, 4),
+  );
+
+  it('a large graph (>=8 boundary ops) splits into a device-resident plan', () => {
+    const x = tensor([[1, 2, 3, 4, 5, 6, 7, 8]]);
+    const compiled = compileWebGPU(deep(), [x]);
+    const mod = compiled.result().module;
+    expect(mod.executionPlan, 'large model produces an executionPlan').toBeTruthy();
+    expect(mod.listKernels().length, 'large model splits into multiple kernels').toBeGreaterThan(1);
+    expect(mod.executionPlan.steps.length).toBe(mod.listKernels().length);
+  });
+
+  it('every split kernel stays within the portable 8-storage-buffer limit', () => {
+    const x = tensor([[1, 2, 3, 4, 5, 6, 7, 8]]);
+    const mod = compileWebGPU(deep(), [x]).result().module;
+    for (const name of mod.listKernels()) {
+      const storage = mod.kernels.get(name).metadata.bindings.filter((b) => b.name !== '_shapes');
+      expect(storage.length, `${name} storage bindings`).toBeLessThanOrEqual(8);
+    }
+  });
+
+  it('a small model stays monolithic (single scheduled kernel, no plan)', () => {
+    const model = new Sequential(new Linear(8, 8), new ReLU(), new Linear(8, 4));
+    const x = tensor([[1, 2, 3, 4, 5, 6, 7, 8]]);
+    const mod = compileWebGPU(model, [x]).result().module;
+    expect(mod.executionPlan).toBeFalsy();
+    expect(mod.listKernels().length).toBe(1);
   });
 });

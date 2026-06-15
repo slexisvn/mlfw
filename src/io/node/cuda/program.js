@@ -52,6 +52,16 @@ export function compileToPTX(source, kernelName) {
   return ptx;
 }
 
+const _byKernel = new WeakMap();
+
+export function getProgramFor(compiledKernel) {
+  let r = _byKernel.get(compiledKernel);
+  if (r) return r;
+  r = getProgram(compiledKernel.source, compiledKernel.name);
+  _byKernel.set(compiledKernel, r);
+  return r;
+}
+
 export function getProgram(source, kernelName) {
   const key = hashSource(source) + ':' + kernelName;
   const cached = _cache.get(key);

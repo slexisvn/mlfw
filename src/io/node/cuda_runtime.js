@@ -1,15 +1,17 @@
 import { getDevice } from './cuda/device.js';
-import { getProgram } from './cuda/program.js';
+import { getProgram, getProgramFor } from './cuda/program.js';
 import { acquire, copyHostToDevice, copyDeviceToHost, release } from './cuda/memory.js';
 import { launch } from './cuda/launcher.js';
-import { runCudaPlan } from './cuda/device_plan.js';
-import { uploadIfStale, downloadAndValidate, invalidate } from './cuda/resident.js';
+import { runCudaPlan, setCudaGraphEnabled, isCudaGraphEnabled } from './cuda/device_plan.js';
+import { uploadIfStale, downloadAndValidate, deviceBufferForInput, deviceBufferForOutput, isEagerDeferred, hostReadHook } from './cuda/resident.js';
 import { StorageImpl } from '../../tensor/core/storage_impl.js';
 import { registerMeasurer } from '../../compiler/runtime/measurer_registry.js';
+import { setGpuContiguousFn, setGpuConcatFn } from '../../dispatcher/jit_dispatch.js';
+import { typedArrayCtor } from '../../tensor/types/dtype.js';
 
-export { runCudaPlan };
+export { runCudaPlan, setCudaGraphEnabled, isCudaGraphEnabled };
 
-StorageImpl._hostReadHook = invalidate;
+StorageImpl._hostReadHook = hostReadHook;
 
 export function measureCudaKernel(compiledKernel, bufferByteSizes, shapeValues = [], opts = {}) {
   getDevice();
@@ -59,7 +61,7 @@ export function runCudaKernelSync(compiledKernel, tensorArgs, shapeValues) {
     return;
   }
   getDevice();
-  const { func } = getProgram(compiledKernel.source, compiledKernel.name);
+  const { func } = getProgramFor(compiledKernel);
 
   const buffers = [];
   const scalars = [];
@@ -90,7 +92,7 @@ export function runCudaKernelResident(compiledKernel, tensorArgs, shapeValues) {
   const meta = compiledKernel.metadata;
   if (meta.cublas) throw new Error('cuBLAS kernels are not supported on the eager device-resident path');
   getDevice();
-  const { func } = getProgram(compiledKernel.source, compiledKernel.name);
+  const { func } = getProgramFor(compiledKernel);
 
   const buffers = [];
   const scalars = [];
@@ -100,12 +102,19 @@ export function runCudaKernelResident(compiledKernel, tensorArgs, shapeValues) {
   }
   if (shapeValues) for (const v of shapeValues) scalars.push(v);
 
-  const outputSet = new Set(meta.outputIndices || buffers.map((_, i) => i));
+  const outputSet = meta._outputSet || (meta._outputSet = new Set(meta.outputIndices || buffers.map((_, i) => i)));
   const ptrs = new Array(buffers.length);
+
+  if (isEagerDeferred()) {
+    for (let i = 0; i < buffers.length; i++) {
+      ptrs[i] = outputSet.has(i) ? deviceBufferForOutput(buffers[i]) : deviceBufferForInput(buffers[i]);
+    }
+    launch(func, meta.gridDim, meta.blockDim, meta.sharedMemBytes || 0, ptrs, scalars, false);
+    return;
+  }
+
   for (let i = 0; i < buffers.length; i++) ptrs[i] = uploadIfStale(buffers[i]);
-
   launch(func, meta.gridDim, meta.blockDim, meta.sharedMemBytes || 0, ptrs, scalars, false);
-
   for (let i = 0; i < buffers.length; i++) {
     if (outputSet.has(i)) downloadAndValidate(buffers[i], ptrs[i]);
   }
@@ -115,5 +124,67 @@ export async function runCudaKernel(compiledKernel, tensorArgs, shapeValues) {
   if (compiledKernel.metadata.cublas) await preloadCublas();
   runCudaKernelSync(compiledKernel, tensorArgs, shapeValues);
 }
+
+const _CTYPE = { f32: 'float', f64: 'double', i64: 'long long', i32: 'int', i16: 'short', i8: 'signed char', u8: 'unsigned char', bool: 'unsigned char' };
+function _ctype(dtype) { return _CTYPE[dtype] || 'float'; }
+
+const _kernSrc = new Map();
+function _meta(n, outIdx) { return { gridDim: [Math.max(Math.ceil(n / 256), 1), 1, 1], blockDim: [256, 1, 1], sharedMemBytes: 0, outputIndices: outIdx }; }
+
+function _gatherKernel(ct, name) {
+  return `extern "C" __global__ void ${name}(const ${ct}* in, ${ct}* out, int n, int rank,
+  int s0,int s1,int s2,int s3,int s4,int s5,int s6,int s7,
+  int t0,int t1,int t2,int t3,int t4,int t5,int t6,int t7, int off) {
+  int i = blockIdx.x*blockDim.x + threadIdx.x; if (i >= n) return;
+  int shp[8] = {s0,s1,s2,s3,s4,s5,s6,s7};
+  int strd[8] = {t0,t1,t2,t3,t4,t5,t6,t7};
+  long long src = off; int rem = i;
+  for (int d = rank-1; d >= 0; d--) { int x = rem % shp[d]; rem /= shp[d]; src += (long long)x*strd[d]; }
+  out[i] = in[src];
+}`;
+}
+
+export function deviceContiguous(rawData, shape, strides, offset, dtype) {
+  const ct = _ctype(dtype);
+  const name = `gather_${dtype}`;
+  let src = _kernSrc.get(name); if (!src) { src = _gatherKernel(ct, name); _kernSrc.set(name, src); }
+  const rank = shape.length;
+  let n = 1; for (let i = 0; i < rank; i++) n *= shape[i];
+  const out = new (typedArrayCtor(dtype))(Math.max(n, 1));
+  const shp = new Array(8).fill(1), strd = new Array(8).fill(0);
+  for (let i = 0; i < rank; i++) { shp[i] = shape[i]; strd[i] = strides[i]; }
+  runCudaKernelResident({ source: src, name, metadata: _meta(n, [1]) }, [rawData, out, n, rank, ...shp, ...strd, offset | 0], null);
+  return out;
+}
+
+function _catKernel(ct, name) {
+  return `extern "C" __global__ void ${name}(const ${ct}* in, ${ct}* out, int pre, int dk, int tail, int total, int offset) {
+  int i = blockIdx.x*blockDim.x + threadIdx.x; int n = pre*dk*tail; if (i >= n) return;
+  int t = i % tail; int r = i / tail; int j = r % dk; int p = r / dk;
+  out[(long long)p*total*tail + (long long)(offset+j)*tail + t] = in[i];
+}`;
+}
+
+export function deviceConcat(opName, inputArrays, inputShapes, dim, outShape, outData, dtype) {
+  const ct = _ctype(dtype);
+  const name = `catcopy_${dtype}`;
+  let src = _kernSrc.get(name); if (!src) { src = _catKernel(ct, name); _kernSrc.set(name, src); }
+  const isStack = opName === 'stack';
+  const rank = outShape.length;
+  const d = dim < 0 ? rank + dim : dim;
+  let pre = 1; for (let i = 0; i < d; i++) pre *= outShape[i];
+  let tail = 1; for (let i = d + 1; i < rank; i++) tail *= outShape[i];
+  const total = outShape[d];
+  let offset = 0;
+  for (let k = 0; k < inputArrays.length; k++) {
+    const dk = isStack ? 1 : inputShapes[k][d];
+    const n = pre * dk * tail;
+    runCudaKernelResident({ source: src, name, metadata: _meta(n, [1]) }, [inputArrays[k], outData, pre, dk, tail, total, offset], null);
+    offset += dk;
+  }
+}
+
+setGpuContiguousFn(deviceContiguous);
+setGpuConcatFn(deviceConcat);
 
 registerMeasurer('cuda', measureCudaKernel);

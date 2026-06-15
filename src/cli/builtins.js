@@ -278,6 +278,24 @@ export function installBuiltins(runtime, define) {
     return model;
   });
 
+  define('read_text', (path) => {
+    if (typeof path !== 'string') throw new Error('read_text() requires a file path string');
+    const data = fs.readFile(path);
+    return typeof data === 'string' ? data : new TextDecoder().decode(data);
+  });
+
+  define('load_json', (path) => {
+    if (typeof path !== 'string') throw new Error('load_json() requires a file path string');
+    const data = fs.readFile(path);
+    const text = typeof data === 'string' ? data : new TextDecoder().decode(data);
+    const toTera = (v) => {
+      if (Array.isArray(v)) return v.map(toTera);
+      if (v && typeof v === 'object') { const m = new Map(); for (const k of Object.keys(v)) m.set(k, toTera(v[k])); return m; }
+      return v;
+    };
+    return toTera(JSON.parse(text));
+  });
+
   define('optim_config', (...args) => {
     const named = takeNamed(args);
     delete named.__named;
@@ -514,7 +532,7 @@ const TRAINING_SIGNATURES = {
   StepLR: [{ name: 'optimizer' }, { name: 'step_size' }, { name: 'gamma', defaultValue: '0.1', isOptional: true }],
   CosineAnnealingLR: [{ name: 'optimizer' }, { name: 't_max' }, { name: 'eta_min', defaultValue: '0', isOptional: true }],
   ReduceLROnPlateau: [{ name: 'optimizer' }, { name: 'mode', defaultValue: '"min"', isOptional: true }, { name: 'patience', defaultValue: '10', isOptional: true }, { name: 'factor', defaultValue: '0.1', isOptional: true }],
-  Trainer: [{ name: 'max_epochs', defaultValue: '10', isOptional: true }, { name: 'accelerator', defaultValue: '"auto"', isOptional: true }, { name: 'callbacks', isOptional: true }, { name: 'logger', defaultValue: 'true', isOptional: true }],
+  Trainer: [{ name: 'max_epochs', defaultValue: '10', isOptional: true }, { name: 'accelerator', defaultValue: '"auto"', isOptional: true }, { name: 'callbacks', isOptional: true }, { name: 'logger', defaultValue: 'true', isOptional: true }, { name: 'compile', defaultValue: 'false', isOptional: true }, { name: 'compile_mode', defaultValue: '"separate"', isOptional: true }],
   EarlyStopping: [{ name: 'monitor' }, { name: 'patience', defaultValue: '3', isOptional: true }, { name: 'mode', defaultValue: '"min"', isOptional: true }],
   ModelCheckpoint: [{ name: 'monitor', isOptional: true }, { name: 'save_top_k', defaultValue: '1', isOptional: true }, { name: 'mode', defaultValue: '"min"', isOptional: true }],
   ProgressCallback: [],
@@ -531,6 +549,8 @@ const TRAINING_SIGNATURES = {
   MetricCollection: [{ name: '...metrics' }],
   optim_config: [{ name: 'optimizer' }, { name: 'lr_scheduler', isOptional: true }],
   load_csv: [{ name: 'path' }, { name: 'separator', defaultValue: '","', isOptional: true }],
+  read_text: [{ name: 'path' }],
+  load_json: [{ name: 'path' }],
   DataFrame: [{ name: 'columns' }],
   col: [{ name: 'name' }],
   lit: [{ name: 'value' }],

@@ -162,10 +162,10 @@ function buildParamIndex(bindings) {
     if (b.name === '_shapes') continue;
     if (b.packed) {
       for (const entry of b.packed) {
-        map.set(entry.name, idx++);
+        map.set(entry.name, entry.argIndex !== undefined ? entry.argIndex : idx++);
       }
     } else {
-      map.set(b.name, idx++);
+      map.set(b.name, b.argIndex !== undefined ? b.argIndex : idx++);
     }
   }
   return map;
@@ -283,4 +283,101 @@ export async function runWebGPUKernel(instance, tensorArgs, shapeValues) {
   }
 
   for (const buf of gpuBuffers) buf.destroy();
+}
+
+const _planPipelines = new WeakMap();
+function pipelineFor(device, kernel) {
+  let p = _planPipelines.get(kernel);
+  if (!p) { p = createPipeline(device, kernel); _planPipelines.set(kernel, p); }
+  return p;
+}
+
+export async function runWebGPUPlan(plan, slots, steps) {
+  const device = await ensureDevice();
+  const BU = bufUsage();
+  const written = new Set();
+  for (const st of steps) for (const s of st.outputSlots) written.add(s);
+
+  const bufs = new Array(plan.numSlots).fill(null);
+  const dtypes = new Array(plan.numSlots).fill('f32');
+  for (let s = 0; s < plan.numSlots; s++) {
+    const t = slots[s];
+    if (!t) continue;
+    const dtype = t.dtype || 'f32';
+    dtypes[s] = dtype;
+    const bytes = Math.max(align4(t.data.length * wgslBytes(dtype)), 4);
+    const isInput = !written.has(s);
+    const buf = device.createBuffer({ size: bytes, usage: BU.STORAGE | BU.COPY_DST | BU.COPY_SRC, mappedAtCreation: isInput });
+    if (isInput) {
+      packTensorInto(new (wgslViewCtor(dtype))(buf.getMappedRange()), t.data, dtype, 0);
+      buf.unmap();
+    }
+    bufs[s] = buf;
+  }
+
+  const encoder = device.createCommandEncoder();
+  const uniformBufs = [];
+  const scratchBufs = [];
+  for (const st of steps) {
+    const { pipeline, bindGroupLayout } = pipelineFor(device, st.kernel);
+    const ordered = st.inputSlots.concat(st.outputSlots);
+    const entries = [];
+    const writebacks = [];
+    let argi = 0;
+    for (const b of st.kernel.metadata.bindings) {
+      if (b.name === '_shapes') {
+        const shapeData = new Uint32Array(st.shapeValues || []);
+        const sz = Math.max(Math.ceil(shapeData.byteLength / 16) * 16, 16);
+        const ub = device.createBuffer({ size: sz, usage: BU.UNIFORM | BU.COPY_DST });
+        device.queue.writeBuffer(ub, 0, shapeData);
+        uniformBufs.push(ub);
+        entries.push({ binding: b.index, resource: { buffer: ub } });
+      } else if (b.packed) {
+        const elemBytes = wgslBytes(b.dtype);
+        const pbuf = device.createBuffer({ size: Math.max(align4(b.packedSize * elemBytes), 4), usage: BU.STORAGE | BU.COPY_DST | BU.COPY_SRC });
+        scratchBufs.push(pbuf);
+        const isWrite = b.mode === 'read_write';
+        for (const e of b.packed) {
+          const slot = ordered[e.argIndex];
+          const bytes = align4(e.size * elemBytes);
+          if (isWrite) writebacks.push({ slot, src: pbuf, srcOff: e.offset * elemBytes, bytes });
+          else encoder.copyBufferToBuffer(bufs[slot], 0, pbuf, e.offset * elemBytes, bytes);
+        }
+        entries.push({ binding: b.index, resource: { buffer: pbuf } });
+      } else {
+        entries.push({ binding: b.index, resource: { buffer: bufs[ordered[argi++]] } });
+      }
+    }
+    const bindGroup = device.createBindGroup({ layout: bindGroupLayout, entries });
+    const pass = encoder.beginComputePass();
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, bindGroup);
+    const ds = st.kernel.metadata.dispatchSize;
+    pass.dispatchWorkgroups(ds[0], ds[1], ds[2]);
+    pass.end();
+    for (const wb of writebacks) encoder.copyBufferToBuffer(wb.src, wb.srcOff, bufs[wb.slot], 0, wb.bytes);
+  }
+
+  const argSet = new Set(plan.argSlots);
+  const reads = [];
+  for (let s = 0; s < plan.numSlots; s++) {
+    if (!bufs[s] || !written.has(s) || !argSet.has(s)) continue;
+    const t = slots[s];
+    const byteLen = Math.max(align4(t.data.length * wgslBytes(dtypes[s])), 4);
+    const rb = device.createBuffer({ size: byteLen, usage: BU.MAP_READ | BU.COPY_DST });
+    encoder.copyBufferToBuffer(bufs[s], 0, rb, 0, byteLen);
+    reads.push({ rb, dtype: dtypes[s], size: t.data.length, dst: t.data });
+  }
+
+  device.queue.submit([encoder.finish()]);
+
+  for (const r of reads) {
+    await r.rb.mapAsync(mapModeRead());
+    unpackTensorFrom(r.dst, new (wgslViewCtor(r.dtype))(r.rb.getMappedRange()), r.dtype, 0, r.size);
+    r.rb.unmap();
+    r.rb.destroy();
+  }
+  for (const b of bufs) if (b) b.destroy();
+  for (const u of uniformBufs) u.destroy();
+  for (const sb of scratchBufs) sb.destroy();
 }

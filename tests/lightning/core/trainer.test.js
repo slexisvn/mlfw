@@ -34,9 +34,14 @@ describe('Trainer construction', () => {
     expect(new Trainer({ logger: custom, enableProgress: false, enableCheckpointing: false }).loggers[0]).toBe(custom);
   });
 
-  it('auto-adds ProgressCallback and ModelCheckpoint unless disabled', () => {
+  it('auto-adds ProgressCallback by default but not ModelCheckpoint', () => {
     const t = new Trainer({ logger: false });
     expect(t.callbacks.some(c => c instanceof ProgressCallback)).toBe(true);
+    expect(t.callbacks.some(c => c instanceof ModelCheckpoint)).toBe(false);
+  });
+
+  it('auto-adds ModelCheckpoint when enableCheckpointing is true', () => {
+    const t = new Trainer({ logger: false, enableCheckpointing: true });
     expect(t.callbacks.some(c => c instanceof ModelCheckpoint)).toBe(true);
   });
 

@@ -5,6 +5,7 @@ import { registry } from '../../ir/graph/ops.js';
 
 import { TraceLevel } from '../../pipeline/trace.js';
 import { UseDefAnalysis } from '../../analysis/use_def.js';
+import { LivenessAnalysis } from '../../analysis/liveness.js';
 
 const NEVER_REMAT = new Set(['return', 'yield', 'constant', 'scalar_constant']);
 
@@ -60,27 +61,7 @@ export class RematerializationPass extends FunctionPass {
 
   _analyzeIntervalPressure(func, useDef) {
     const topo = useDef.topologicalOrder;
-    const intervals = new Map();
-
-    for (const arg of func.args) {
-      intervals.set(arg, { start: -1, end: -1 });
-    }
-
-    for (let i = 0; i < topo.length; i++) {
-      const op = topo[i];
-      for (let j = 0; j < op.numResults; j++) {
-        intervals.set(op.getResult(j), { start: i, end: i });
-      }
-    }
-
-    for (let i = 0; i < topo.length; i++) {
-      const op = topo[i];
-      for (let j = 0; j < op.numOperands; j++) {
-        const val = op.getOperand(j);
-        const intv = intervals.get(val);
-        if (intv && intv.end < i) intv.end = i;
-      }
-    }
+    const { intervals } = LivenessAnalysis.buildIntervals(func, topo);
 
     const events = [];
     for (const [value, intv] of intervals) {

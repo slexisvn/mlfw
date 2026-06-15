@@ -202,7 +202,7 @@ Cosine schedule decaying the learning rate to `eta_min` over `t_max` epochs.
 ## ReduceLROnPlateau(optimizer, mode="min", patience=10, factor=0.1)
 Reduce learning rate when a monitored metric stops improving.
 
-## Trainer(max_epochs=20, accelerator="cpu", logger=true, enable_checkpointing=true, enable_progress=true, callbacks?, fast_dev_run=false, gradient_clip_val?, log_every_n_steps=50)
+## Trainer(max_epochs=20, accelerator="cpu", logger=true, enable_checkpointing=false, enable_progress=true, callbacks?, fast_dev_run=false, gradient_clip_val?, log_every_n_steps=50)
 Drives the training loop: epochs, validation, callbacks, logging, checkpointing.
 
 ### fit(model, train_loader, val_loader?)
@@ -237,6 +237,12 @@ Load a CSV file into a `DataFrame`. Numeric fields are parsed as numbers; use
 the `DataFrame` API (`select`, `filter`, `groupBy`, `to_tensor`, `encode`, …)
 to analyse it.
 
+## read_text(path)
+Read a text file and return its contents as a string.
+
+## load_json(path)
+Read a JSON file and return it as nested dicts/lists.
+
 ## save(model, path)
 Save a trained model's weights to `path` (compact binary checkpoint). Mirrors PyTorch's `torch.save(model.state_dict(), path)`. Pair with `load`.
 
@@ -244,9 +250,9 @@ Save a trained model's weights to `path` (compact binary checkpoint). Mirrors Py
 Load weights from a checkpoint `path` into an existing `model` (in place) and return it. Build the model with the same architecture first, then `load(model, path)` — mirrors `model.load_state_dict(torch.load(path))`.
 
 ## Tokenizer(mode="word", vocab_size?, lowercase=false, num_merges=1000, special_tokens?)
-Build a text tokenizer. `mode` is `"word"`, `"char"`, or `"bpe"` (trainable subword). `tokenize(texts)` on a corpus first, then `encode`/`decode`/`encodeBatch`. Reserves special tokens (`<pad> <unk> <bos> <eos>`) at low ids exposed as `padId`/`unkId`/`bosId`/`eosId`.
+Build a text tokenizer. `mode` is `"word"`, `"char"`, or `"bpe"` (trainable subword). `fit(texts)` on a corpus first, then `encode`/`decode`/`encodeBatch`. Reserves special tokens (`<pad> <unk> <bos> <eos>`) at low ids exposed as `padId`/`unkId`/`bosId`/`eosId`.
 
-### tokenize(texts)
+### fit(texts)
 Learn the vocabulary (and BPE merges) from a list of strings. Returns the tokenizer.
 
 ### encode(text, add_bos?, add_eos?)

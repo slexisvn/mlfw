@@ -26,11 +26,44 @@ const cudaMalloc = rt.func('int cudaMalloc(_Out_ void **p, size_t s)');
 const cudaMemcpy = rt.func('int cudaMemcpy(void *dst, void *src, size_t n, int kind)');
 const cudaFree = rt.func('int cudaFree(void *p)');
 const cudaDeviceSynchronize = rt.func('int cudaDeviceSynchronize()');
+const cudaStreamCreate = rt.func('int cudaStreamCreate(_Out_ void **s)');
+const cudaStreamBeginCapture = rt.func('int cudaStreamBeginCapture(void *s, int mode)');
+const cudaStreamEndCapture = rt.func('int cudaStreamEndCapture(void *s, _Out_ void **g)');
+const cudaGraphInstantiate = rt.func('int cudaGraphInstantiate(_Out_ void **e, void *g, uint64 flags)');
+const cudaGraphLaunch = rt.func('int cudaGraphLaunch(void *e, void *s)');
+const cudaStreamSynchronize = rt.func('int cudaStreamSynchronize(void *s)');
 
 const H2D = 1, D2H = 2;
 
 export function setDevice() {
   cudaSetDevice(0);
+}
+
+let _captureStream = null;
+export function getCaptureStream() {
+  if (!_captureStream) { const s = [null]; if (cudaStreamCreate(s) !== 0) throw new Error('cudaStreamCreate failed'); _captureStream = s[0]; }
+  return _captureStream;
+}
+export function beginCapture(stream) {
+  const r = cudaStreamBeginCapture(stream, 0);
+  if (r !== 0) throw new Error('cudaStreamBeginCapture failed: ' + r);
+}
+export function endCaptureInstantiate(stream) {
+  const g = [null];
+  let r = cudaStreamEndCapture(stream, g);
+  if (r !== 0) throw new Error('cudaStreamEndCapture failed: ' + r);
+  const e = [null];
+  r = cudaGraphInstantiate(e, g[0], 0n);
+  if (r !== 0) throw new Error('cudaGraphInstantiate failed: ' + r);
+  return e[0];
+}
+export function graphLaunch(exec, stream) {
+  const r = cudaGraphLaunch(exec, stream);
+  if (r !== 0) throw new Error('cudaGraphLaunch failed: ' + r);
+}
+export function streamSync(stream) {
+  const r = cudaStreamSynchronize(stream);
+  if (r !== 0) throw new Error('cudaStreamSynchronize failed: ' + r);
 }
 
 export function devSync() {

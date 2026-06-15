@@ -21,6 +21,7 @@ export function compileWithBackward(model, exampleInputs, opts = {}) {
   const _cacheEntries = [];
   let _savedValues = null;
   let _activeMeta = null;
+  let _pendingCompile = null;
 
   function _compile(inputs) {
     const traced = _traceCore(
@@ -29,16 +30,17 @@ export function compileWithBackward(model, exampleInputs, opts = {}) {
       { name: model.constructor.name || 'compiled', dynamicShapes }
     );
 
-    const graph = traced.graph;
-    const func = graph.functions().next().value;
+    const finish = (t) => {
+      const func = t.graph.functions().next().value;
+      const compiled = mode === 'joint'
+        ? _compileJoint(func, t, rematPolicy)
+        : _compileSeparate(func, t, rematPolicy);
+      compiled.shapeEnv = t.shapeEnv;
+      compiled.outputSymShapes = t.outputSymShapes;
+      return compiled;
+    };
 
-    const compiled = mode === 'joint'
-      ? _compileJoint(func, traced, rematPolicy)
-      : _compileSeparate(func, traced, rematPolicy);
-
-    compiled.shapeEnv = traced.shapeEnv;
-    compiled.outputSymShapes = traced.outputSymShapes;
-    return compiled;
+    return traced && typeof traced.then === 'function' ? traced.then(finish) : finish(traced);
   }
 
   function _compileSeparate(forwardFunc, traced, policy) {
@@ -214,23 +216,37 @@ export function compileWithBackward(model, exampleInputs, opts = {}) {
     return null;
   }
 
-  function compiledForward(...inputs) {
-    let meta = _findCachedEntry(inputs);
-    if (!meta) {
-      meta = _compile(inputs);
-      _cacheEntries.push(meta);
-      meta.shapeEnv.bindInputShapes(inputs);
-    }
+  function _forwardWith(meta, inputs) {
     _activeMeta = meta;
-
     if (meta.mode === 'joint') {
       return _executeJointForward(meta, inputs);
     }
-
     const ctx = _executeSeparateForward(meta, inputs);
     if (ctx && ctx.then) return ctx.then((c) => { _savedValues = c; return c.results; });
     _savedValues = ctx;
     return ctx.results;
+  }
+
+  function _runForward(inputs) {
+    const cached = _findCachedEntry(inputs);
+    if (cached) return _forwardWith(cached, inputs);
+
+    const compiledOrPromise = _compile(inputs);
+    if (compiledOrPromise && typeof compiledOrPromise.then === 'function') {
+      return compiledOrPromise.then((meta) => {
+        _cacheEntries.push(meta);
+        meta.shapeEnv.bindInputShapes(inputs);
+        return _forwardWith(meta, inputs);
+      });
+    }
+    _cacheEntries.push(compiledOrPromise);
+    compiledOrPromise.shapeEnv.bindInputShapes(inputs);
+    return _forwardWith(compiledOrPromise, inputs);
+  }
+
+  function compiledForward(...inputs) {
+    if (_pendingCompile) return _pendingCompile.then(() => _runForward(inputs));
+    return _runForward(inputs);
   }
 
   function _executeJointForward(compiled, inputs) {
@@ -343,9 +359,15 @@ export function compileWithBackward(model, exampleInputs, opts = {}) {
     return meta.forwardFunc;
   };
 
+  compiledForward.capturedParams = () => (_cacheEntries.length ? _cacheEntries[0].capturedParams : []);
+
   if (exampleInputs) {
     const compiled = _compile(exampleInputs);
-    _cacheEntries.push(compiled);
+    if (compiled && typeof compiled.then === 'function') {
+      _pendingCompile = compiled.then((meta) => { _cacheEntries.push(meta); _pendingCompile = null; return meta; });
+    } else {
+      _cacheEntries.push(compiled);
+    }
   }
 
   return compiledForward;

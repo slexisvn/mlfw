@@ -188,6 +188,11 @@ export class RuntimeModule {
       slots[it.slot] = new RuntimeTensor(new (typedArrayCtor(it.dtype))(Math.max(numel, 1)), it.shape, it.dtype);
     }
 
+    for (const step of plan.steps) {
+      const entry = this._instances.get(step.name);
+      if (entry && entry.instance instanceof Promise) entry.instance = await entry.instance;
+    }
+
     const planBackend = this._uniformPlanBackend(plan);
     if (planBackend && planBackend.runPlan) {
       const steps = plan.steps.map(step => {

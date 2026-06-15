@@ -1,4 +1,4 @@
-import { TeraRuntime, formatValue, CsvStreamParser } from './dist/mlfw-lang.esm.js';
+import { TeraRuntime, formatValue, CsvStreamParser, memfs } from './dist/mlfw-lang.esm.js';
 import { createChartApi, isChartSpec, renderChart } from './chart/index.js';
 import { CHART_METHOD_DOCS, chartMethodOwner } from './chart/docs.js';
 import { highlightHtml } from './highlight.js';
@@ -54,6 +54,22 @@ function csvVarName(filename) {
   let base = filename.replace(/\.[^.]+$/, '').replace(/[^A-Za-z0-9_]/g, '_');
   if (!/^[A-Za-z_]/.test(base)) base = '_' + base;
   return base || 'data';
+}
+
+function fileExt(name) {
+  const i = name.lastIndexOf('.');
+  return i >= 0 ? name.slice(i + 1).toLowerCase() : '';
+}
+
+const BINARY_EXTS = new Set(['ckpt', 'safetensors', 'bin', 'npy', 'png', 'jpg', 'jpeg', 'gif', 'webp']);
+
+function loadCommandFor(name) {
+  const ext = fileExt(name);
+  const v = csvVarName(name);
+  if (ext === 'csv' || ext === 'tsv') return `${v} = load_csv("${name}")`;
+  if (ext === 'json') return `${v} = load_json("${name}")`;
+  if (ext === 'ckpt' || ext === 'safetensors') return `load(model, "${name}")`;
+  return `${v} = read_text("${name}")`;
 }
 
 function fmtSize(bytes) {
@@ -121,14 +137,27 @@ async function uploadCsv(file) {
     result = await parseCsvOnMainThread(file, onBatch, onProgress);
   }
   handle.finish();
-  uploadedFiles.set(file.name, { rowCount: result.rowCount, size: file.size });
+  uploadedFiles.set(file.name, { kind: 'csv', rowCount: result.rowCount, size: file.size });
   renderFiles();
 }
 
-async function uploadCsvFiles(fileList) {
+async function uploadGenericFile(file) {
+  setKernel(`loading ${file.name}…`, true);
+  const ext = fileExt(file.name);
+  if (BINARY_EXTS.has(ext)) {
+    memfs.writeBinary(file.name, new Uint8Array(await file.arrayBuffer()));
+  } else {
+    memfs.writeFile(file.name, await file.text());
+  }
+  uploadedFiles.set(file.name, { kind: 'file', ext, size: file.size });
+  renderFiles();
+}
+
+async function uploadFiles(fileList) {
   for (const file of fileList) {
     try {
-      await uploadCsv(file);
+      if (fileExt(file.name) === 'csv') await uploadCsv(file);
+      else await uploadGenericFile(file);
     } catch (err) {
       setKernel(`error in ${file.name}: ${err.message || err}`);
       return;
@@ -138,8 +167,10 @@ async function uploadCsvFiles(fileList) {
 }
 
 function removeFile(name) {
+  const meta = uploadedFiles.get(name);
   uploadedFiles.delete(name);
-  runtime.removeUploadedCsv(name);
+  if (meta && meta.kind === 'file') { try { memfs.remove(name); } catch (_) { setKernel('ready'); } }
+  else runtime.removeUploadedCsv(name);
   renderFiles();
 }
 
@@ -151,17 +182,18 @@ function renderFiles() {
   for (const [name, meta] of uploadedFiles) {
     const li = document.createElement('li');
     li.className = 'file-item';
+    const cmd = loadCommandFor(name);
     const open = document.createElement('button');
     open.className = 'file-open';
-    open.title = `Insert load_csv("${name}") cell`;
+    open.title = `Insert: ${cmd}`;
     const nameEl = document.createElement('span');
     nameEl.className = 'file-name';
     nameEl.textContent = name;
     const metaEl = document.createElement('span');
     metaEl.className = 'file-meta';
-    metaEl.textContent = `${meta.rowCount} rows · ${fmtSize(meta.size)}`;
+    metaEl.textContent = meta.kind === 'csv' ? `${meta.rowCount} rows · ${fmtSize(meta.size)}` : `${(meta.ext || 'file').toUpperCase()} · ${fmtSize(meta.size)}`;
     open.append(nameEl, metaEl);
-    open.addEventListener('click', () => createCell(`${csvVarName(name)} = load_csv("${name}")`, { focus: true }));
+    open.addEventListener('click', () => createCell(cmd, { focus: true }));
     const del = document.createElement('button');
     del.className = 'file-del';
     del.textContent = '×';
@@ -838,7 +870,7 @@ document.getElementById('restart').addEventListener('click', restart);
 document.getElementById('clear-out').addEventListener('click', clearOutputs);
 const csvInput = document.getElementById('csv-file');
 document.getElementById('upload-csv').addEventListener('click', () => csvInput.click());
-csvInput.addEventListener('change', () => { uploadCsvFiles([...csvInput.files]); csvInput.value = ''; });
+csvInput.addEventListener('change', () => { uploadFiles([...csvInput.files]); csvInput.value = ''; });
 
 const sidebarEl = document.querySelector('.sidebar');
 const hasFiles = (e) => e.dataTransfer && [...e.dataTransfer.types].includes('Files');
@@ -848,8 +880,8 @@ window.addEventListener('drop', (e) => {
   if (!hasFiles(e)) return;
   e.preventDefault();
   sidebarEl.classList.remove('drag-over');
-  const files = [...e.dataTransfer.files].filter((f) => /\.csv$/i.test(f.name) || f.type === 'text/csv');
-  if (files.length) uploadCsvFiles(files);
+  const files = [...e.dataTransfer.files];
+  if (files.length) uploadFiles(files);
 });
 document.addEventListener('click', (e) => { if (ac.el && !ac.el.contains(e.target)) closeAutocomplete(); });
 document.addEventListener('scroll', hideHover, true);

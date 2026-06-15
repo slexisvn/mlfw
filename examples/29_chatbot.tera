@@ -5,7 +5,7 @@ questions_text = [r.question for r in rows]
 answers_text = [r.answer for r in rows]
 
 tok = Tokenizer(mode=mode, lowercase=true, num_merges=200)
-tok.tokenize(questions_text + answers_text)
+tok.fit(questions_text + answers_text)
 
 questions = tok.encodeBatch(questions_text)
 

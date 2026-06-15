@@ -24,6 +24,7 @@ export class ModelCheckpoint extends Callback {
     this._saveLast = saveLast;
     this._everyNEpochs = everyNEpochs;
     this._bestK = [];
+    this._recent = [];
     this._compareFn = mode === 'min'
       ? (a, b) => a - b
       : (a, b) => b - a;
@@ -51,6 +52,10 @@ export class ModelCheckpoint extends Callback {
     if (!this._monitor) {
       const path = joinPath(this._dirpath, filledName + CKPT_EXT);
       this._saveCheckpoint(model, trainer, path);
+      if (this._saveTopK >= 0) {
+        this._recent.push(path);
+        while (this._recent.length > this._saveTopK) this._tryDelete(this._recent.shift());
+      }
       return;
     }
 

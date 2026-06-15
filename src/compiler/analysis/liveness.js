@@ -36,10 +36,7 @@ export class LivenessAnalysis {
   static get depKey() { return 'liveness'; }
   static get dependencies() { return [UseDefAnalysis]; }
 
-  static compute(func, deps = {}) {
-    const useDef = deps.useDef || UseDefAnalysis.compute(func);
-    const topo = useDef.topologicalOrder;
-
+  static buildIntervals(func, topo) {
     const opIndex = new Map();
     for (let i = 0; i < topo.length; i++) {
       opIndex.set(topo[i], i);
@@ -66,6 +63,15 @@ export class LivenessAnalysis {
         if (intv && intv.end < i) intv.end = i;
       }
     }
+
+    return { intervals, opIndex };
+  }
+
+  static compute(func, deps = {}) {
+    const useDef = deps.useDef || UseDefAnalysis.compute(func);
+    const topo = useDef.topologicalOrder;
+
+    const { intervals, opIndex } = LivenessAnalysis.buildIntervals(func, topo);
 
     const liveIn = new Map();
     const liveOut = new Map();

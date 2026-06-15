@@ -40,6 +40,7 @@ export const cu = {
   ctxSynchronize: drv.func('int cuCtxSynchronize()'),
   moduleLoadData: drv.func('int cuModuleLoadData(_Out_ void **mod, void *image)'),
   moduleGetFunction: drv.func('int cuModuleGetFunction(_Out_ void **func, void *mod, str name)'),
+  memGetInfo: drv.func('int cuMemGetInfo(_Out_ uint64 *free, _Out_ uint64 *total)'),
   memAlloc: drv.func('int cuMemAlloc(_Out_ uint64 *dptr, size_t bytes)'),
   memFree: drv.func('int cuMemFree(uint64 dptr)'),
   memcpyHtoD: drv.func('int cuMemcpyHtoD(uint64 dst, void *src, size_t n)'),
@@ -48,6 +49,12 @@ export const cu = {
   streamCreate: drv.func('int cuStreamCreate(_Out_ void **stream, uint flags)'),
   streamSynchronize: drv.func('int cuStreamSynchronize(void *stream)'),
   ctxSetCurrent: drv.func('int cuCtxSetCurrent(void *ctx)'),
+  streamBeginCapture: drv.func('int cuStreamBeginCapture_v2(void *stream, int mode)'),
+  streamEndCapture: drv.func('int cuStreamEndCapture(void *stream, _Out_ void **graph)'),
+  graphInstantiate: drv.func('int cuGraphInstantiateWithFlags(_Out_ void **exec, void *graph, uint64 flags)'),
+  graphLaunch: drv.func('int cuGraphLaunch(void *exec, void *stream)'),
+  graphExecDestroy: drv.func('int cuGraphExecDestroy(void *exec)'),
+  graphDestroy: drv.func('int cuGraphDestroy(void *graph)'),
 };
 
 export const nv = {

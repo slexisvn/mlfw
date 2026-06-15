@@ -33,6 +33,8 @@ import { printTensorIR } from '../ir/tensor/printer.js';
 import { lowerToLIR } from '../passes/lowering/tensor_to_lir.js';
 import { verifyLIR } from '../ir/lir/verifier.js';
 
+const WEBGPU_SPLIT_MIN_BOUNDARIES = 8;
+
 function spread(obj) { return obj && typeof obj === 'object' ? obj : {}; }
 
 function omit(obj, ...keys) {
@@ -181,10 +183,13 @@ export class Compiler {
 
     let cublasSplit = null;
     let nativeSplit = null;
+    const isWebGPUTarget = typeof this.config.target.isWebGPU === 'function' && this.config.target.isWebGPU();
     if (this.config.matmulBackend === 'cublas') {
       cublasSplit = splitGraphForCublas(graphModule);
     } else if (this._cudaMatmulChain) {
       nativeSplit = splitGraphForNative(graphModule);
+    } else if (isWebGPUTarget) {
+      nativeSplit = splitGraphForNative(graphModule, WEBGPU_SPLIT_MIN_BOUNDARIES);
     }
 
     if (this.config.verify) {

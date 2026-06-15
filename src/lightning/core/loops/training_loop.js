@@ -1,6 +1,7 @@
 import { Stage } from '../state.js';
 import { clipGradNorm_, clipGradValue_ } from '../../../optim/utils.js';
 import { div } from '../../../tensor/ops/ops.js';
+import { eagerFlush } from '../../../dispatcher/eager_mode.js';
 
 export class TrainingLoop {
   async run(model, dataLoader, trainer, optimizers, schedulerConfigs) {
@@ -46,9 +47,12 @@ export class TrainingLoop {
       }
 
       callbacks.dispatch('onTrainBatchEnd', trainer, model, output, batch, batchIdx);
+      eagerFlush();
       state.globalStep++;
       batchIdx++;
     }
+
+    eagerFlush();
 
     const epochMetrics = loggerConnector.flushEpochMetrics(state.globalStep);
     this._stepEpochSchedulers(schedulerConfigs, state.epoch);
@@ -58,6 +62,9 @@ export class TrainingLoop {
   }
 
   async _automaticStep(model, batch, batchIdx, trainer, optimizers, schedulerConfigs, strategy, accumGrad, callbacks) {
+    if (trainer.compile) {
+      return this._compiledStep(model, batch, batchIdx, trainer, optimizers, schedulerConfigs, accumGrad);
+    }
     const result = await Promise.resolve(model.trainingStep(batch, batchIdx));
     let loss = result;
     let output = result;
@@ -87,6 +94,43 @@ export class TrainingLoop {
     }
 
     return output;
+  }
+
+  async _compiledStep(model, batch, batchIdx, trainer, optimizers, schedulerConfigs, accumGrad) {
+    const elems = Array.isArray(batch) ? batch : [batch];
+    const callForward = (...xs) => model.trainingStep(Array.isArray(batch) ? xs : xs[0], 0);
+    let loss;
+    if (!model.__compiledTrainStep) {
+      const { compileWithBackward } = await import('../../../tracing/compile_backward.js');
+      const { CPUTarget, CUDATarget } = await import('../../../backend/target.js');
+      const target = model._device && model._device.type === 'gpu' ? CUDATarget() : CPUTarget();
+      model.__compiledTrainStep = compileWithBackward({ forward: callForward }, elems, { target, mode: trainer.compileMode });
+      const origLog = model.log;
+      model.log = () => {};
+      try { loss = model.__compiledTrainStep(...elems); if (loss && loss.then) loss = await loss; }
+      finally { model.log = origLog; }
+    } else {
+      loss = model.__compiledTrainStep(...elems); if (loss && loss.then) loss = await loss;
+    }
+
+    const step = model.__compiledTrainStep;
+    const params = step.capturedParams();
+    const { ones } = await import('../../../tensor/factory/creation_ops.js');
+    let grads = step.backward(ones(loss.shape)); if (grads && grads.then) grads = await grads;
+    const off = grads.length - params.length;
+    for (let i = 0; i < params.length; i++) { const g = grads[off + i]; if (g) params[i].grad = g; }
+
+    if ((batchIdx + 1) % accumGrad === 0) {
+      for (let i = 0; i < optimizers.length; i++) {
+        this._clipGradients(model, trainer);
+        optimizers[i].step();
+        optimizers[i].zeroGrad();
+      }
+      this._stepStepSchedulers(schedulerConfigs, trainer.state.globalStep);
+    }
+
+    if (model.log) model.log('train_loss', loss);
+    return loss;
   }
 
   _clipGradients(model, trainer) {

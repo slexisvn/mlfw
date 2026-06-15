@@ -7,6 +7,8 @@ import { GradAccumulator } from './accumulator.js';
 import { AutogradMeta } from '../tensor/core/autograd_meta.js';
 import { TensorImpl } from '../tensor/core/tensor_impl.js';
 import { Tensor } from '../tensor/core/tensor.js';
+import { DeviceType } from '../tensor/types/device.js';
+import { isEagerDeferred } from '../dispatcher/eager_mode.js';
 import { setAutogradEngine } from '../tensor/core/tensor.js';
 import { backward } from './engine.js';
 import { _initViewAutograd } from '../tensor/view/view_ops.js';
@@ -20,6 +22,18 @@ _initViewAutograd({
 
 function _snapshotTensor(t) {
   const impl = t._impl;
+  if (isEagerDeferred() && impl.device && impl.device.type === DeviceType.GPU) {
+    impl.storage.retain();
+    const aliasImpl = new TensorImpl(
+      impl.storage,
+      impl.storageOffset,
+      impl.sizes(),
+      impl.strides(),
+      impl.dtype,
+      impl.device
+    );
+    return new Tensor(aliasImpl);
+  }
   const clonedStorage = impl.storage.clone();
   const newImpl = new TensorImpl(
     clonedStorage,

@@ -83,50 +83,50 @@ export class WebGPUCodegen {
 
     const bufCount = func.bufferMap.size + (func.shapeParams.length > 0 ? 1 : 0);
     const bufList = [...func.bufferMap.values()];
-    const sameWgslType = bufList.every(b => wgslType(b.dtype) === wgslType(bufList[0].dtype));
-    const canPack = bufCount > 6 && bufList.every(b => b.numel() > 0) && sameWgslType;
+    const canPack = bufCount > 6 && bufList.every(b => b.numel() > 0);
     this._packedMode = canPack;
     this._packedOffsets = null;
 
+    const argIndexOf = new Map();
+    { let ai = 0; for (const [, buf] of func.bufferMap) argIndexOf.set(buf.name, ai++); }
+    {
+      let dd = null;
+      for (const [, buf] of func.bufferMap) if (this._storeBuffers.has(buf.name)) { dd = buf.dtype; break; }
+      this._defaultDtype = dd || (bufList.length ? bufList[0].dtype : 'f32');
+    }
+    const WT_DTYPE = { f32: 'f32', i32: 'i32', u32: 'u32', f16: 'f16' };
+
     if (canPack) {
       this._packedOffsets = new Map();
-      const readBufs = [], writeBufs = [];
-      let readOff = 0, writeOff = 0;
       const align4 = n => Math.ceil(n / 4) * 4;
-
+      const groups = new Map();
       for (const [, buf] of func.bufferMap) {
         paramNames.push(buf.name);
-        this._defaultDtype = buf.dtype;
+        const isWrite = this._storeBuffers.has(buf.name);
+        const wt = wgslType(buf.dtype);
+        const key = (isWrite ? 'w:' : 'r:') + wt;
+        let g = groups.get(key);
+        if (!g) { g = { isWrite, wt, dtype: WT_DTYPE[wt] || buf.dtype, bufs: [], off: 0 }; groups.set(key, g); }
         const numel = buf.numel();
-        const aligned = align4(numel);
-        if (this._storeBuffers.has(buf.name)) {
-          this._packedOffsets.set(buf.name, { storage: '_pw', offset: writeOff });
-          writeBufs.push({ name: buf.name, offset: writeOff, size: numel, dtype: buf.dtype });
-          writeOff += aligned;
-        } else {
-          this._packedOffsets.set(buf.name, { storage: '_pr', offset: readOff });
-          readBufs.push({ name: buf.name, offset: readOff, size: numel, dtype: buf.dtype });
-          readOff += aligned;
-        }
+        const storage = (isWrite ? '_pw_' : '_pr_') + wt;
+        this._packedOffsets.set(buf.name, { storage, offset: g.off });
+        g.bufs.push({ name: buf.name, offset: g.off, size: numel, dtype: buf.dtype, argIndex: argIndexOf.get(buf.name) });
+        g.off += align4(numel);
       }
-
-      if (readBufs.length > 0) {
-        bindings.push({ index: bindIdx, name: '_pr', mode: 'read', packed: readBufs, packedSize: readOff, dtype: this._defaultDtype });
-        this._emit(`@group(0) @binding(${bindIdx}) var<storage, read> _pr: array<${wgslType(this._defaultDtype)}>;`);
-        bindIdx++;
-      }
-      if (writeBufs.length > 0) {
-        bindings.push({ index: bindIdx, name: '_pw', mode: 'read_write', packed: writeBufs, packedSize: writeOff, dtype: this._defaultDtype });
-        this._emit(`@group(0) @binding(${bindIdx}) var<storage, read_write> _pw: array<${wgslType(this._defaultDtype)}>;`);
+      const ordered = [...groups.values()].sort((a, b) => (a.isWrite === b.isWrite ? a.wt.localeCompare(b.wt) : (a.isWrite ? 1 : -1)));
+      for (const g of ordered) {
+        const storage = (g.isWrite ? '_pw_' : '_pr_') + g.wt;
+        const accessMode = g.isWrite ? 'storage, read_write' : 'storage, read';
+        bindings.push({ index: bindIdx, name: storage, mode: g.isWrite ? 'read_write' : 'read', packed: g.bufs, packedSize: g.off, dtype: g.dtype });
+        this._emit(`@group(0) @binding(${bindIdx}) var<${accessMode}> ${storage}: array<${g.wt}>;`);
         bindIdx++;
       }
     } else {
       for (const [, buf] of func.bufferMap) {
         paramNames.push(buf.name);
-        this._defaultDtype = buf.dtype;
         const mode = this._storeBuffers.has(buf.name) ? 'read_write' : 'read';
         const accessMode = mode === 'read_write' ? 'storage, read_write' : 'storage, read';
-        bindings.push({ index: bindIdx, name: buf.name, mode, dtype: buf.dtype });
+        bindings.push({ index: bindIdx, name: buf.name, mode, dtype: buf.dtype, argIndex: argIndexOf.get(buf.name) });
         this._emit(`@group(0) @binding(${bindIdx}) var<${accessMode}> ${buf.name}: array<${wgslType(buf.dtype)}>;`);
         bindIdx++;
       }
