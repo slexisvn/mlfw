@@ -1,5 +1,0 @@
-batch | so kernel | buffer trung gian lon nhat | so buffer > 32KB (chan gop)
-1     |      161  |       14.0 KB        | 0
-8     |      197  |      112.0 KB        | 21
-16    |      307  |      224.0 KB        | 147
-=> 32KB la gioi han gop cua partitioner (PARTITION_BUFFER_LIMIT). batch lon -> buffer > 32KB -> khong gop -> kernel no.
