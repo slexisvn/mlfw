@@ -344,6 +344,26 @@ export class IRBuilder {
     return op;
   }
 
+  scanOp(xsValues, initCarryValues, bodyFn) {
+    const xtTypes = xsValues.map(v => v.type.withShape(v.type.shape.slice(1)));
+    const carryTypes = initCarryValues.map(v => v.type);
+    const bodyRegion = new Region();
+    const bodyBlock = new Block([...xtTypes, ...carryTypes]);
+    bodyRegion.addBlock(bodyBlock);
+    const bb = new IRBuilder(Object.create(this.func, {}));
+    bb.block = bodyBlock;
+    const xtArgs = bodyBlock.arguments.slice(0, xtTypes.length);
+    const carryArgs = bodyBlock.arguments.slice(xtTypes.length);
+    const [newCarry, ys] = bodyFn(bb, xtArgs, carryArgs);
+    bb.yieldOp([...newCarry, ...ys]);
+    const length = xsValues[0].type.shape[0];
+    const yTypes = ys.map(v => v.type.withShape([length, ...v.type.shape]));
+    return this._buildOp('scan', [...xsValues, ...initCarryValues],
+      [...carryTypes, ...yTypes],
+      { num_carry: initCarryValues.length, num_xs: xsValues.length },
+      [bodyRegion]);
+  }
+
   returnOp(values) {
     return this._buildOp('return', values, []);
   }

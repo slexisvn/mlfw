@@ -51,10 +51,15 @@ export class WebGPUCodegen {
     this._storeBuffers = new Set();
     this._promotedBuffers = new Set();
     this._promotedBufferDecls = [];
+    this._wgPoolOffsets = null;
+    this._wgPoolDecls = [];
     this._needsBarriers = false;
     this._serializeThreads = false;
     this._localSlots = null;
     this._slotDecls = [];
+    this._scalarSlotNames = new Set();
+    this._crossThread = null;
+    this._crossExtent = null;
 
     const isLIR = func.type === 'LIRFunc';
 
@@ -156,7 +161,10 @@ export class WebGPUCodegen {
     for (const d of this._promotedBufferDecls) {
       this._emit(`var<workgroup> ${d.name}: array<${wgslType(d.dtype)}, ${d.size}>;`);
     }
-    if (this._sharedBuffers.length > 0 || this._promotedBufferDecls.length > 0) this._emit('');
+    for (const d of this._wgPoolDecls) {
+      this._emit(`var<workgroup> ${d.pool}: array<${wgslType(d.dtype)}, ${d.size > 0 ? d.size : 1}>;`);
+    }
+    if (this._sharedBuffers.length > 0 || this._promotedBufferDecls.length > 0 || this._wgPoolDecls.length > 0) this._emit('');
 
     const builtins = [];
     const hasLocal = !this._serializeThreads && this._hasBindingPrefix('threadIdx');
@@ -312,6 +320,18 @@ export class WebGPUCodegen {
     return max;
   }
 
+  _hasRecurrence(func) {
+    const stack = [func.body];
+    while (stack.length > 0) {
+      const n = stack.pop();
+      if (!n || typeof n !== 'object') continue;
+      if (n.type === 'SyncThreadsNode') return true;
+      for (const k of ['body', 'loopBody', 'condBody', 'initBody', 'thenBody', 'elseBody']) if (n[k]) stack.push(n[k]);
+      if (n.stmts) for (const s of n.stmts) stack.push(s);
+    }
+    return false;
+  }
+
   _analyzeSharing(func) {
     const extents = new Set();
     for (const [, entries] of this._threadBindings) {
@@ -321,15 +341,10 @@ export class WebGPUCodegen {
     }
     const crossThread = this._threadBindings.size > 0 ? this._findCrossThreadBuffers(func) : new Set();
     const crossExtent = this._threadBindings.size > 0 ? this._findCrossExtentBuffers(func) : new Set();
-    if (extents.size <= 1 && crossThread.size === 0 && crossExtent.size === 0) return;
-
-    const dispatchProduct = this._dispatchSize[0] * this._dispatchSize[1] * this._dispatchSize[2];
-    this._serializeThreads = (crossThread.size > 0 || crossExtent.size > 0) && dispatchProduct > 1;
-    if (this._serializeThreads) {
-      this._workgroupSize = [1, 1, 1];
-      this._dispatchSize = [1, 1, 1];
-    }
-    this._needsBarriers = !this._serializeThreads;
+    this._crossThread = crossThread;
+    this._crossExtent = crossExtent;
+    const hasRecurrence = this._hasRecurrence(func);
+    if (!hasRecurrence && extents.size <= 1 && crossThread.size === 0 && crossExtent.size === 0) return;
 
     const smemLimit = this.target.sharedMemoryBytes || 16384;
     let smemUsed = this._sharedBuffers.reduce((sum, b) => sum + Math.max(b.sizeInBytes(), 0), 0);
@@ -337,8 +352,47 @@ export class WebGPUCodegen {
     const storageNames = new Set();
     for (const [, buf] of func.bufferMap) storageNames.add(buf.name);
 
-    const candidates = [];
+    const candidates = this._collectPromotionCandidates(func, storageNames);
+    candidates.sort((a, b) => (crossThread.has(b.name) ? 1 : 0) - (crossThread.has(a.name) ? 1 : 0));
 
+    const dispatchProduct = this._dispatchSize[0] * this._dispatchSize[1] * this._dispatchSize[2];
+    if (hasRecurrence) {
+      const maxTotal = this.target.maxThreadsPerBlock || 256;
+      const wgProduct = this._workgroupSize[0] * this._workgroupSize[1] * this._workgroupSize[2];
+      const pool = this._packWorkgroupPool(func, candidates);
+      const poolFits = smemUsed + pool.bytes <= smemLimit;
+      if (dispatchProduct === 1 && wgProduct <= maxTotal && poolFits) {
+        this._needsBarriers = true;
+        this._wgPoolOffsets = pool.offsets;
+        this._wgPoolDecls = pool.decls;
+        for (const c of candidates) this._promotedBuffers.add(c.name);
+        return;
+      }
+      this._serializeThreads = true;
+      this._workgroupSize = [1, 1, 1];
+      this._dispatchSize = [1, 1, 1];
+      this._needsBarriers = false;
+    } else {
+      this._serializeThreads = (crossThread.size > 0 || crossExtent.size > 0) && dispatchProduct > 1;
+      if (this._serializeThreads) {
+        this._workgroupSize = [1, 1, 1];
+        this._dispatchSize = [1, 1, 1];
+      }
+      this._needsBarriers = !this._serializeThreads;
+    }
+
+    for (const c of candidates) {
+      const bytes = c.size * (wgslBytes(c.dtype) || 4);
+      if (smemUsed + bytes <= smemLimit) {
+        this._promotedBuffers.add(c.name);
+        this._promotedBufferDecls.push(c);
+        smemUsed += bytes;
+      }
+    }
+  }
+
+  _collectPromotionCandidates(func, storageNames) {
+    const candidates = [];
     const stack = [func.body];
     while (stack.length > 0) {
       const node = stack.pop();
@@ -370,17 +424,84 @@ export class WebGPUCodegen {
       const size = numel > 0 ? numel : this._estimateBufferSize(buf);
       if (size > 0) { candidates.push({ name, dtype: buf.dtype, size }); candidateNames.add(name); }
     }
+    return candidates;
+  }
 
-    candidates.sort((a, b) => (crossThread.has(b.name) ? 1 : 0) - (crossThread.has(a.name) ? 1 : 0));
-
-    for (const c of candidates) {
-      const bytes = c.size * (wgslBytes(c.dtype) || 4);
-      if (smemUsed + bytes <= smemLimit) {
-        this._promotedBuffers.add(c.name);
-        this._promotedBufferDecls.push(c);
-        smemUsed += bytes;
-      }
+  _findRecurrenceBody(root) {
+    const stack = [root];
+    while (stack.length > 0) {
+      const node = stack.pop();
+      if (!node) continue;
+      if (node.type === 'ForNode' && node.kind === ForKind.RECURRENCE) return node.body;
+      if (node.body) stack.push(node.body);
+      if (node.stmts) for (const s of node.stmts) stack.push(s);
+      if (node.thenBody) stack.push(node.thenBody);
+      if (node.elseBody) stack.push(node.elseBody);
     }
+    return null;
+  }
+
+  _namesTouchedOutside(root, skip, names) {
+    const result = new Set();
+    const walk = (node) => {
+      if (!node || node === skip) return;
+      if ((node.type === 'BufferLoadNode' || node.type === 'BufferStoreNode' ||
+           node.type === 'LIRFlatLoadNode' || node.type === 'LIRFlatStoreNode') && node.buffer
+        && names.has(node.buffer.name)) result.add(node.buffer.name);
+      if (node.type === 'LIRAccumulatorNode') {
+        if (node.flushStore && node.flushStore.buffer && names.has(node.flushStore.buffer.name)) result.add(node.flushStore.buffer.name);
+        if (node.initLoad && node.initLoad.buffer && names.has(node.initLoad.buffer.name)) result.add(node.initLoad.buffer.name);
+      }
+      for (const f of ['stmts', 'body', 'initBody', 'condBody', 'loopBody', 'thenBody', 'elseBody', 'value', 'a', 'b', 'condition', 'expr', 'offsetExpr', 'extent', 'indices', 'args']) {
+        const c = node[f];
+        if (!c) continue;
+        if (Array.isArray(c)) { for (const e of c) walk(e); }
+        else if (typeof c === 'object') walk(c);
+      }
+    };
+    walk(root);
+    return result;
+  }
+
+  _packWorkgroupPool(func, candidates) {
+    const candNames = new Set(candidates.map(c => c.name));
+    const recBody = this._findRecurrenceBody(func.body);
+    const { minPos, maxPos } = recBody ? this._livenessWalk(recBody, candNames) : { minPos: new Map(), maxPos: new Map() };
+    const persistent = recBody ? this._namesTouchedOutside(func.body, recBody, candNames) : candNames;
+    const byDtype = new Map();
+    for (const c of candidates) {
+      if (!byDtype.has(c.dtype)) byDtype.set(c.dtype, []);
+      const carried = persistent.has(c.name) || !minPos.has(c.name);
+      const fb = carried ? 0 : minPos.get(c.name);
+      const lb = carried ? Number.MAX_SAFE_INTEGER : maxPos.get(c.name);
+      byDtype.get(c.dtype).push({ name: c.name, size: c.size, first: fb, last: lb });
+    }
+    const offsets = new Map();
+    const decls = [];
+    let bytes = 0;
+    for (const [dtype, list] of byDtype) {
+      list.sort((a, b) => a.first - b.first || b.size - a.size);
+      const placed = [];
+      const pool = `_wg_${wgslType(dtype)}`;
+      let peak = 0;
+      for (const it of list) {
+        const blocked = placed
+          .filter(p => p.first <= it.last && it.first <= p.last)
+          .map(p => [p.offset, p.offset + p.size])
+          .sort((a, b) => a[0] - b[0]);
+        let off = 0;
+        for (const [lo, hi] of blocked) {
+          if (off + it.size <= lo) break;
+          if (off < hi) off = hi;
+        }
+        placed.push({ offset: off, size: it.size, first: it.first, last: it.last });
+        offsets.set(it.name, { pool, offset: off });
+        if (off + it.size > peak) peak = off + it.size;
+      }
+      decls.push({ pool, dtype, size: peak });
+      bytes += peak * (wgslBytes(dtype) || 4);
+    }
+    return { offsets, decls, bytes };
   }
 
   _findCrossThreadBuffers(func) {
@@ -531,6 +652,12 @@ export class WebGPUCodegen {
         case 'LIRBindingsNode': this._visitLIRBindings(cur); continue;
         case 'LIRAccumulatorNode': this._visitLIRAccumulator(cur); continue;
         case 'WhileNode': this._visitWhileNode(cur); continue;
+        case 'SyncThreadsNode':
+          if (this._needsBarriers) {
+            this._emit('storageBarrier();');
+            this._emit('workgroupBarrier();');
+          }
+          continue;
         case 'EvaluateNode': continue;
         default: continue;
       }
@@ -588,7 +715,8 @@ export class WebGPUCodegen {
 
   _emitMissingLocalDecls() {
     for (const d of this._slotDecls) {
-      this._emit(`var ${d.name}: array<${wgslType(d.dtype)}, ${d.size}>;`);
+      if (d.scalar) this._emit(`var ${d.name}: ${wgslType(d.dtype)};`);
+      else this._emit(`var ${d.name}: array<${wgslType(d.dtype)}, ${d.size}>;`);
     }
   }
 
@@ -638,6 +766,14 @@ export class WebGPUCodegen {
     this._localSlots = new Map();
     const freeByDtype = new Map();
     let slotCounter = 0;
+    let scalarCounter = 0;
+
+    const totalThreads = (this._workgroupSize[0] * this._workgroupSize[1] * this._workgroupSize[2])
+      * (this._dispatchSize[0] * this._dispatchSize[1] * this._dispatchSize[2]);
+    const ct = this._crossThread || new Set();
+    const ce = this._crossExtent || new Set();
+    const scalarEligible = (name, buf) => !this._serializeThreads && this._threadBindings.size > 0
+      && !ct.has(name) && !ce.has(name) && buf.numel() > 1 && buf.numel() <= totalThreads;
 
     for (const name of order) {
       const buf = locals.get(name);
@@ -645,6 +781,14 @@ export class WebGPUCodegen {
       const size = Math.max(numel, 1);
       const mn = minPos.get(name);
       const mx = maxPos.get(name);
+
+      if (scalarEligible(name, buf)) {
+        const sname = `_s${scalarCounter++}`;
+        this._slotDecls.push({ name: sname, dtype: buf.dtype, size: 1, scalar: true });
+        this._localSlots.set(name, sname);
+        this._scalarSlotNames.add(sname);
+        continue;
+      }
 
       let heap = freeByDtype.get(buf.dtype);
       if (!heap) { heap = new MinHeap((a, b) => a.freeAt - b.freeAt); freeByDtype.set(buf.dtype, heap); }
@@ -667,6 +811,10 @@ export class WebGPUCodegen {
   }
 
   _computeBufferLiveness(func, locals) {
+    return this._livenessWalk(func.body, locals);
+  }
+
+  _livenessWalk(root, locals) {
     const minPos = new Map();
     const maxPos = new Map();
     const LOOP_TYPES = new Set(['ForNode', 'WhileNode', 'LIRAccumulatorNode']);
@@ -721,7 +869,7 @@ export class WebGPUCodegen {
       }
     };
 
-    walk(func.body);
+    walk(root);
     return { minPos, maxPos };
   }
 
@@ -957,13 +1105,20 @@ export class WebGPUCodegen {
   }
 
   _packedBufAccess(bufName, indexExpr) {
+    if (this._wgPoolOffsets && this._wgPoolOffsets.has(bufName)) {
+      const info = this._wgPoolOffsets.get(bufName);
+      if (info.offset === 0) return `${info.pool}[${indexExpr}]`;
+      return `${info.pool}[${info.offset}u + u32(${indexExpr})]`;
+    }
     if (this._packedMode && this._packedOffsets && this._packedOffsets.has(bufName)) {
       const info = this._packedOffsets.get(bufName);
       if (info.offset === 0) return `${info.storage}[${indexExpr}]`;
       return `${info.storage}[${info.offset}u + u32(${indexExpr})]`;
     }
     if (this._localSlots && this._localSlots.has(bufName)) {
-      return `${this._localSlots.get(bufName)}[${indexExpr}]`;
+      const sn = this._localSlots.get(bufName);
+      if (this._scalarSlotNames.has(sn)) return sn;
+      return `${sn}[${indexExpr}]`;
     }
     return `${bufName}[${indexExpr}]`;
   }

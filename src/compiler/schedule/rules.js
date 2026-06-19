@@ -1,5 +1,6 @@
 
 import { TargetKind } from '../../backend/target.js';
+import { ForKind } from '../ir/tensor/nodes.js';
 
 export class ScheduleRule {
   constructor(name) {
@@ -180,6 +181,33 @@ export function primFuncHasReduction(primFunc) {
   return false;
 }
 
+export function primFuncHasRecurrence(primFunc) {
+  const stack = [primFunc.body];
+  while (stack.length > 0) {
+    const n = stack.pop();
+    if (!n) continue;
+    if (n.type === 'ForNode' && n.kind === ForKind.RECURRENCE) return true;
+    if (n.body) stack.push(n.body);
+    if (n.stmts) for (const s of n.stmts) stack.push(s);
+    if (n.thenBody) stack.push(n.thenBody);
+    if (n.elseBody) stack.push(n.elseBody);
+    if (n.initBody) stack.push(n.initBody);
+  }
+  return false;
+}
+
+function bindFusedSpatialGPU(schedule, fused, target) {
+  const blockSize = Math.min(target.maxThreadsPerBlock, 256);
+  const extent = fused.extent;
+  if (extent.type === 'IntImmNode' && extent.value > blockSize) {
+    const [outer, tx] = schedule.split(fused, blockSize);
+    schedule.bindThread(tx, 'threadIdx.x');
+    if (!primFuncHasRecurrence(schedule.func)) schedule.bindThread(outer, 'blockIdx.x');
+  } else {
+    schedule.bindThread(fused, 'threadIdx.x');
+  }
+}
+
 export class ElementwiseGPURule extends ScheduleRule {
   constructor() {
     super('elementwise_gpu');
@@ -218,16 +246,7 @@ export class ElementwiseGPURule extends ScheduleRule {
       return;
     }
 
-    const blockSize = Math.min(target.maxThreadsPerBlock, 256);
-    const numBlocks = Math.ceil(totalElements / blockSize);
-
-    if (numBlocks > 1) {
-      const [bx, tx] = schedule.split(fusedLoop, blockSize);
-      schedule.bindThread(bx, 'blockIdx.x');
-      schedule.bindThread(tx, 'threadIdx.x');
-    } else {
-      schedule.bindThread(fusedLoop, 'threadIdx.x');
-    }
+    bindFusedSpatialGPU(schedule, fusedLoop, target);
   }
 }
 
@@ -300,15 +319,7 @@ export class ReductionGPURule extends ScheduleRule {
       }
     }
 
-    const blockSize = Math.min(target.maxThreadsPerBlock, 256);
-    const extent = fusedSpatial.extent;
-    if (extent.type === 'IntImmNode' && extent.value > blockSize) {
-      const [bx, tx] = schedule.split(fusedSpatial, blockSize);
-      schedule.bindThread(bx, 'blockIdx.x');
-      schedule.bindThread(tx, 'threadIdx.x');
-    } else {
-      schedule.bindThread(fusedSpatial, 'threadIdx.x');
-    }
+    bindFusedSpatialGPU(schedule, fusedSpatial, target);
   }
 }
 
@@ -392,15 +403,7 @@ export class MatmulTiledGPURule extends ScheduleRule {
       if (next && findDirectChild(fused, next)) fused = schedule.fuseLoops(fused, next);
     }
 
-    const extent = fused.extent;
-    const blockSize = Math.min(target.maxThreadsPerBlock, 256);
-    if (extent.type === 'IntImmNode' && extent.value > blockSize) {
-      const [bx, tx] = schedule.split(fused, blockSize);
-      schedule.bindThread(bx, 'blockIdx.x');
-      schedule.bindThread(tx, 'threadIdx.x');
-    } else {
-      schedule.bindThread(fused, 'threadIdx.x');
-    }
+    bindFusedSpatialGPU(schedule, fused, target);
   }
 }
 

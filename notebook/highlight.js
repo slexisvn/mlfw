@@ -15,6 +15,7 @@ const BUILTINS = [
 
 export const KEYWORD_SET = new Set(KEYWORDS);
 export const BUILTIN_SET = new Set(BUILTINS);
+export const TYPE_SET = new Set();
 export const TOKEN_RE = /#[^\n]*|"(?:\\.|[^"\n])*"|'(?:\\.|[^'\n])*'|\b\d+(?:\.\d+)?\b|[A-Za-z_]\w*/g;
 
 export function highlightHtml(code) {
@@ -41,6 +42,7 @@ export function tokenClass(token, code, index) {
     return nonSpaceAfter(code, index + token.length) === '(' ? 'tok-method' : 'tok-prop';
   }
   if (KEYWORD_SET.has(token)) return 'tok-kw';
+  if (TYPE_SET.has(token)) return 'tok-type';
   if (BUILTIN_SET.has(token)) return 'tok-builtin';
   if (token[0] >= 'A' && token[0] <= 'Z') return 'tok-type';
   return null;

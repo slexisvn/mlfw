@@ -233,6 +233,10 @@ body {
 .output .error { color: var(--error); background: var(--error-bg); padding: 8px 10px; border-radius: 6px; }
 .output .meta { color: var(--muted); font-size: 11px; margin-bottom: 4px; }
 
+.diagnostics:empty { display: none; }
+.diagnostics { border-top: 1px dashed var(--border); padding: 6px 14px; font-family: var(--code-font); font-size: 12px; }
+.diagnostics .diag { color: #b58900; }
+
 .df-view { white-space: normal; }
 .df-view.df-loading { opacity: 0.55; }
 .df-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 7px; }

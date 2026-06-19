@@ -1,6 +1,6 @@
 import {
   BufferStoreNode, BufferLoadNode, SeqNode, BlockNode,
-  IfThenElseNode, WhileNode
+  IfThenElseNode, WhileNode, ForNode, ForKind, IntImmNode, SyncThreadsNode
 } from '../../../ir/tensor/nodes.js';
 import { Buffer } from '../../../ir/tensor/buffer.js';
 import { MemoryScope } from '../../../ir/tensor/tensor_types.js';
@@ -14,6 +14,20 @@ function copyBuffer(ctx, srcBuf, dstBuf) {
   const store = new BufferStoreNode(dstBuf, indices, new BufferLoadNode(srcBuf, indices));
   const block = new BlockNode(ctx.blockName('cf_copy'), loopBinds, [{ buffer: srcBuf }], [{ buffer: dstBuf }], store);
   return wrapInLoops(block, loopVars, dstBuf.shape, extentNodes);
+}
+
+function sliceCopyIn(ctx, seqBuf, stepBuf, counterVar) {
+  const { loopVars, loopBinds, indices, extentNodes } = makeLoopNest(ctx, stepBuf.shape, stepBuf);
+  const store = new BufferStoreNode(stepBuf, indices, new BufferLoadNode(seqBuf, [counterVar, ...indices]));
+  const block = new BlockNode(ctx.blockName('scan_in'), loopBinds, [{ buffer: seqBuf }], [{ buffer: stepBuf }], store);
+  return wrapInLoops(block, loopVars, stepBuf.shape, extentNodes);
+}
+
+function sliceCopyOut(ctx, stepBuf, seqBuf, counterVar) {
+  const { loopVars, loopBinds, indices, extentNodes } = makeLoopNest(ctx, stepBuf.shape, stepBuf);
+  const store = new BufferStoreNode(seqBuf, [counterVar, ...indices], new BufferLoadNode(stepBuf, indices));
+  const block = new BlockNode(ctx.blockName('scan_out'), loopBinds, [{ buffer: stepBuf }], [{ buffer: seqBuf }], store);
+  return wrapInLoops(block, loopVars, stepBuf.shape, extentNodes);
 }
 
 function lowerRegionBody(ctx, region, argBuffers) {
@@ -129,5 +143,53 @@ export function register() {
     const loopBody = bodyStmts.length === 1 ? bodyStmts[0] : new SeqNode(bodyStmts);
 
     return new SeqNode([...initStmts, new WhileNode(condVar, condBody, loopBody)]);
+  });
+
+  registerLoweringRule('scan', (ctx, op, inputs, outputs) => {
+    const numXs = op.getAttr('num_xs');
+    const numCarry = op.getAttr('num_carry');
+    const xsBufs = inputs.slice(0, numXs);
+    const carryInitBufs = inputs.slice(numXs);
+
+    const carryBufs = new Array(numCarry);
+    const initStmts = [];
+    for (let i = 0; i < numCarry; i++) {
+      const stateBuf = outputs[i] || ctx.getOrAllocBuffer({ type: op.getResult(i).type });
+      carryBufs[i] = stateBuf;
+      initStmts.push(copyBuffer(ctx, carryInitBufs[i], stateBuf));
+      ctx.bufferMap.set(op.getResult(i), stateBuf);
+    }
+    const numYs = outputs.length - numCarry;
+    const ysBufs = new Array(numYs);
+    for (let i = 0; i < numYs; i++) {
+      const yBuf = outputs[numCarry + i] || ctx.getOrAllocBuffer({ type: op.getResult(numCarry + i).type });
+      ysBufs[i] = yBuf;
+      ctx.bufferMap.set(op.getResult(numCarry + i), yBuf);
+    }
+
+    const counter = ctx.allocVar('t');
+    const extentT = ctx.extentNode(xsBufs[0].shape[0], xsBufs[0], 0);
+
+    const bodyStmts = [];
+    const xtBufs = new Array(numXs);
+    for (let i = 0; i < numXs; i++) {
+      const xt = ctx.getOrAllocBuffer({ type: { shape: xsBufs[i].shape.slice(1), dtype: xsBufs[i].dtype } });
+      xtBufs[i] = xt;
+      bodyStmts.push(sliceCopyIn(ctx, xsBufs[i], xt, counter));
+    }
+
+    const bodyResult = lowerRegionBody(ctx, op.regions[0], [...xtBufs, ...carryBufs]);
+    for (const s of bodyResult.stmts) bodyStmts.push(s);
+    for (let i = 0; i < numCarry; i++) {
+      const src = bodyResult.yieldBuffers[i];
+      if (src && src !== carryBufs[i]) bodyStmts.push(copyBuffer(ctx, src, carryBufs[i]));
+    }
+    for (let i = 0; i < numYs; i++) {
+      bodyStmts.push(sliceCopyOut(ctx, bodyResult.yieldBuffers[numCarry + i], ysBufs[i], counter));
+    }
+    bodyStmts.push(new SyncThreadsNode());
+
+    const loopBody = bodyStmts.length === 1 ? bodyStmts[0] : new SeqNode(bodyStmts);
+    return new SeqNode([...initStmts, new ForNode(counter, new IntImmNode(0), extentT, ForKind.RECURRENCE, loopBody)]);
   });
 }

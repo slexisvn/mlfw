@@ -4,7 +4,9 @@ import { Operation } from '../../ir/graph/operation.js';
 const CONSTANT_OPS = new Set(['constant', 'scalar_constant']);
 const TERMINATORS = new Set(['return', 'yield']);
 
-function isConstantOp(op) {
+export { TERMINATORS, CONSTANT_OPS };
+
+export function isConstantOp(op) {
   return CONSTANT_OPS.has(op.opName);
 }
 
@@ -66,7 +68,7 @@ function cublasDotInfo(op) {
   return { M, N, K, transB };
 }
 
-function topoSortOps(ops) {
+export function topoSortOps(ops) {
   const opSet = new Set(ops);
   const ordered = [];
   const state = new Map();
@@ -193,7 +195,7 @@ function topoSortPartitions(partitions, preds) {
   return out.length === partitions.length ? out : null;
 }
 
-function materializePartition(part, name, dotInfoMap) {
+export function materializePartition(part, name, dotInfoMap) {
   const opSet = part.opSet;
   const sorted = topoSortOps(part.ops);
   const inputs = [], inputSet = new Set();

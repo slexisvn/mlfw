@@ -1,3 +1,5 @@
+import { ForKind } from '../ir/tensor/nodes.js';
+
 export class SRef {
   constructor(node, parent = null) {
     this.node = node;
@@ -125,7 +127,7 @@ export class SRefTree {
   loopsOf(blockName) {
     const blockSRef = this._blockNameToSRef.get(blockName);
     if (!blockSRef) return [];
-    return blockSRef.loopAncestors().reverse();
+    return blockSRef.loopAncestors().filter(s => s.node.kind !== ForKind.RECURRENCE).reverse();
   }
 
   replaceLoop(oldLoop, outerLoop, innerLoop) {

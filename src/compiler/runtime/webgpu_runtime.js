@@ -292,9 +292,37 @@ function pipelineFor(device, kernel) {
   return p;
 }
 
+async function createPipelineAsync(device, kernel) {
+  const shaderModule = device.createShaderModule({ code: kernel.source });
+  const layoutEntries = [];
+  for (const binding of kernel.metadata.bindings) {
+    layoutEntries.push({ binding: binding.index, visibility: _shaderStage.COMPUTE, buffer: { type: bindingBufferType(binding) } });
+  }
+  const bindGroupLayout = device.createBindGroupLayout({ entries: layoutEntries });
+  const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] });
+  const pipeline = await device.createComputePipelineAsync({
+    layout: pipelineLayout,
+    compute: { module: shaderModule, entryPoint: kernel.name }
+  });
+  return { pipeline, shaderModule, bindGroupLayout };
+}
+
+export async function prewarmPipelines(device, kernels) {
+  if (typeof device.createComputePipelineAsync !== 'function') return;
+  const pending = [];
+  const seen = new Set();
+  for (const kernel of kernels) {
+    if (!kernel || seen.has(kernel) || _planPipelines.has(kernel)) continue;
+    seen.add(kernel);
+    pending.push(createPipelineAsync(device, kernel).then(p => _planPipelines.set(kernel, p), () => {}));
+  }
+  if (pending.length > 0) await Promise.all(pending);
+}
+
 export async function runWebGPUPlan(plan, slots, steps) {
   const device = await ensureDevice();
   const BU = bufUsage();
+  await prewarmPipelines(device, steps.map(st => st.kernel));
   const written = new Set();
   for (const st of steps) for (const s of st.outputSlots) written.add(s);
 
@@ -316,11 +344,13 @@ export async function runWebGPUPlan(plan, slots, steps) {
   }
 
   const PLAN_SUBMIT_CHUNK = 32;
-  let encoder = device.createCommandEncoder();
   const uniformBufs = [];
   const scratchBufs = [];
-  let pending = 0;
-  for (const st of steps) {
+  const ctx = { encoder: device.createCommandEncoder(), pending: 0 };
+  const maybeFlush = () => { if (++ctx.pending >= PLAN_SUBMIT_CHUNK) { device.queue.submit([ctx.encoder.finish()]); ctx.encoder = device.createCommandEncoder(); ctx.pending = 0; } };
+
+  const encodeStep = (st) => {
+    const encoder = ctx.encoder;
     const { pipeline, bindGroupLayout } = pipelineFor(device, st.kernel);
     const ordered = st.inputSlots.concat(st.outputSlots);
     const entries = [];
@@ -358,8 +388,25 @@ export async function runWebGPUPlan(plan, slots, steps) {
     pass.dispatchWorkgroups(ds[0], ds[1], ds[2]);
     pass.end();
     for (const wb of writebacks) encoder.copyBufferToBuffer(wb.src, wb.srcOff, bufs[wb.slot], 0, wb.bytes);
-    if (++pending >= PLAN_SUBMIT_CHUNK) { device.queue.submit([encoder.finish()]); encoder = device.createCommandEncoder(); pending = 0; }
+    maybeFlush();
+  };
+
+  const sl = plan.scanLoop;
+  if (sl) {
+    for (const c of sl.carry) ctx.encoder.copyBufferToBuffer(bufs[c.initSlot], 0, bufs[c.a], 0, c.bytes);
+    for (let i = 0; i < sl.loopStart; i++) encodeStep(steps[i]);
+    for (let t = 0; t < sl.T; t++) {
+      for (const xs of sl.xs) ctx.encoder.copyBufferToBuffer(bufs[xs.xsSlot], t * xs.stepBytes, bufs[xs.xtSlot], 0, xs.stepBytes);
+      for (let i = sl.loopStart; i < sl.loopEnd; i++) encodeStep(steps[i]);
+      for (const ys of sl.ys) ctx.encoder.copyBufferToBuffer(bufs[ys.ytSlot], 0, bufs[ys.ysSlot], t * ys.stepBytes, ys.stepBytes);
+      for (const c of sl.carry) { const tmp = bufs[c.a]; bufs[c.a] = bufs[c.b]; bufs[c.b] = tmp; }
+    }
+    for (const c of sl.carry) ctx.encoder.copyBufferToBuffer(bufs[c.a], 0, bufs[c.finalSlot], 0, c.bytes);
+    for (let i = sl.loopEnd; i < steps.length; i++) encodeStep(steps[i]);
+  } else {
+    for (const st of steps) encodeStep(st);
   }
+  let encoder = ctx.encoder;
 
   const argSet = new Set(plan.argSlots);
   const reads = [];

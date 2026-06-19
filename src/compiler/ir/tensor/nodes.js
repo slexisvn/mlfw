@@ -3,7 +3,8 @@ export const ForKind = Object.freeze({
   PARALLEL: 'parallel',
   VECTORIZED: 'vectorized',
   UNROLLED: 'unrolled',
-  THREAD_BINDING: 'thread_binding'
+  THREAD_BINDING: 'thread_binding',
+  RECURRENCE: 'recurrence'
 });
 
 export class TensorNode {

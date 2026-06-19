@@ -76,6 +76,7 @@ export {
 export * as optim from './optim/index.js';
 
 export { trace, compile } from './tracing/compile.js';
+export { scan } from './tracing/scan.js';
 export { compileWithBackward } from './tracing/compile_backward.js';
 export { CPUTarget, CUDATarget, WasmTarget, WebGPUTarget } from './backend/target.js';
 

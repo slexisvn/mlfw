@@ -40,6 +40,22 @@ export function register(registry) {
   }));
 
   registry.register(new OpDef({
+    name: 'scan',
+    numOperands: -1,
+    numResults: -1,
+    hasRegions: true,
+    numRegions: 1,
+    sideEffects: SideEffectKind.CONTROL,
+    attrs: [
+      { name: 'num_carry', type: 'number', required: true },
+      { name: 'num_xs', type: 'number', required: true }
+    ],
+    inferResultTypes(operandTypes, attrs, resultTypes) {
+      return resultTypes || null;
+    }
+  }));
+
+  registry.register(new OpDef({
     name: 'custom_call',
     numOperands: -1,
     numResults: -1,

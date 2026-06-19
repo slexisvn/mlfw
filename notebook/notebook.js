@@ -1,7 +1,7 @@
-import { TeraRuntime, formatValue, CsvStreamParser, memfs } from './dist/mlfw-lang.esm.js';
+import { TeraRuntime, formatValue, CsvStreamParser, memfs, checkSource } from './dist/mlfw-lang.esm.js';
 import { createChartApi, isChartSpec, renderChart } from './chart/index.js';
 import { CHART_METHOD_DOCS, chartMethodOwner } from './chart/docs.js';
-import { highlightHtml } from './highlight.js';
+import { highlightHtml, TYPE_SET } from './highlight.js';
 
 const STORAGE_KEY = 'mlfw-notebook-v1';
 const THEME_KEY = 'mlfw-notebook-theme';
@@ -24,8 +24,8 @@ const SEED = [
   `a = tensor([[1, 2], [3, 4]])\nb = tensor([[5, 6], [7, 8]])\na @ b`,
   `x = randn([3, 4])\nprint(x.shape)\nx.relu().mean()`,
   `metrics = DataFrame(epoch=[1, 2, 3, 4], loss=[1.0, 0.72, 0.48, 0.31], val_loss=[1.1, 0.81, 0.6, 0.44])\nchart.line(metrics, x="epoch", y=["loss", "val_loss"], title="Training")`,
-  `model MLP(input, hidden, output):\n  fc1 = Linear(input, hidden)\n  fc2 = Linear(hidden, output)\n\n  forward x:\n    x = fc1(x).relu()\n    return fc2(x)\n\nnet = MLP(2, 4, 1)\nnet(randn([8, 2]))`,
-  `fn fib(n):\n  if n < 2:\n    return n\n  return fib(n - 1) + fib(n - 2)\n\nfib(12)`,
+  `model MLP(input: int, hidden: int, output: int):\n  fc1 = Linear(input, hidden)\n  fc2 = Linear(hidden, output)\n\n  forward (x: Tensor) -> Tensor:\n    x = fc1(x).relu()\n    return fc2(x)\n\nnet = MLP(2, 4, 1)\nnet(randn([8, 2]))`,
+  `fn fib(n: int) -> int:\n  if n < 2:\n    return n\n  return fib(n - 1) + fib(n - 2)\n\nfib(12)`,
 ];
 
 const listEl = document.getElementById('cells');
@@ -206,6 +206,51 @@ function renderFiles() {
 
 function save() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(cells.map((c) => c.editor.value)));
+  scheduleTypecheck();
+}
+
+let typecheckTimer = null;
+function scheduleTypecheck() {
+  if (typecheckTimer) clearTimeout(typecheckTimer);
+  typecheckTimer = setTimeout(typecheckAll, 400);
+}
+
+function typecheckAll() {
+  if (!cells.length) return;
+  const ranges = [];
+  let start = 1;
+  for (const cell of cells) {
+    const lineCount = cell.editor.value.split('\n').length;
+    ranges.push({ cell, start, end: start + lineCount - 1 });
+    start += lineCount;
+  }
+  const combined = cells.map((c) => c.editor.value).join('\n');
+  let diagnostics;
+  try {
+    diagnostics = checkSource(combined).diagnostics;
+  } catch {
+    for (const cell of cells) renderDiagnostics(cell, []);
+    return;
+  }
+  const byCell = new Map();
+  for (const d of diagnostics) {
+    const range = ranges.find((r) => d.line >= r.start && d.line <= r.end);
+    if (!range) continue;
+    if (!byCell.has(range.cell)) byCell.set(range.cell, []);
+    byCell.get(range.cell).push({ line: d.line - range.start + 1, message: (d.message || '').replace(/ at \d+:\d+$/, '') });
+  }
+  for (const cell of cells) renderDiagnostics(cell, byCell.get(cell) ?? []);
+}
+
+function renderDiagnostics(cell, diags) {
+  if (!cell.diag) return;
+  cell.diag.innerHTML = '';
+  for (const d of diags) {
+    const el = document.createElement('div');
+    el.className = 'diag';
+    el.textContent = `type · line ${d.line}: ${d.message}`;
+    cell.diag.append(el);
+  }
 }
 
 function autoSize(ta) {
@@ -243,7 +288,9 @@ function createCell(code = '', { focus = false, before = null } = {}) {
   wrap.append(pre, editor);
   const output = document.createElement('div');
   output.className = 'output';
-  main.append(wrap, output);
+  const diag = document.createElement('div');
+  diag.className = 'diagnostics';
+  main.append(wrap, diag, output);
 
   const tools = document.createElement('div');
   tools.className = 'cell-tools';
@@ -261,7 +308,7 @@ function createCell(code = '', { focus = false, before = null } = {}) {
 
   root.append(gutter, main, tools);
 
-  const cell = { root, editor, output, count, pre, chartCleanup: null };
+  const cell = { root, editor, output, count, pre, diag, chartCleanup: null };
 
   runBtn.addEventListener('click', () => runCell(cell));
   addBtn.addEventListener('click', () => {
@@ -789,6 +836,8 @@ async function loadDocs() {
         if (!docs.has(name)) docs.set(name, { display: name, kind: group + ' keyword', description: null });
       }
     }
+    for (const name of (data.keywordGroups && data.keywordGroups.type) || []) TYPE_SET.add(name);
+    for (const cell of cells) highlight(cell);
     for (const [typeName, methods] of Object.entries(data.pseudoTypes || {})) {
       for (const m of methods) {
         if (memberDocs.has(m.name)) continue;

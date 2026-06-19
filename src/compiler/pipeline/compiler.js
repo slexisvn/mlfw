@@ -26,6 +26,7 @@ import { DecompositionPass } from '../passes/decompose/decomposition_pass.js';
 import { RematerializationPass } from '../passes/memory/rematerialization.js';
 import { GraphPartitionPass, PartitionMaterializationPass } from '../passes/partition/partition_pass.js';
 import { splitGraphForCublas, splitGraphForNative, hasDependentBoundaries } from '../passes/partition/cublas_split.js';
+import { splitGraphForScan } from '../passes/partition/scan_split.js';
 
 import { TraceLog, TraceLevel, CompilationError } from './trace.js';
 import { IRPrinter } from '../ir/graph/printer.js';
@@ -182,13 +183,17 @@ export class Compiler {
 
     let cublasSplit = null;
     let nativeSplit = null;
+    let scanSplit = null;
     const isWebGPUTarget = typeof this.config.target.isWebGPU === 'function' && this.config.target.isWebGPU();
     if (this.config.matmulBackend === 'cublas') {
       cublasSplit = splitGraphForCublas(graphModule);
     } else if (this._cudaMatmulChain) {
       nativeSplit = splitGraphForNative(graphModule);
-    } else if (isWebGPUTarget && hasDependentBoundaries(graphModule, this.config.target.maxThreadsPerBlock || 256)) {
-      nativeSplit = splitGraphForNative(graphModule, 2);
+    } else if (isWebGPUTarget) {
+      scanSplit = splitGraphForScan(graphModule, this.config.target);
+      if (!scanSplit && hasDependentBoundaries(graphModule, this.config.target.maxThreadsPerBlock || 256)) {
+        nativeSplit = splitGraphForNative(graphModule, 2);
+      }
     }
 
     if (this.config.verify) {
@@ -221,6 +226,7 @@ export class Compiler {
 
     if (cublasSplit) runtimeModule.executionPlan = cublasSplit.plan;
     else if (nativeSplit) runtimeModule.executionPlan = nativeSplit.plan;
+    else if (scanSplit) runtimeModule.executionPlan = scanSplit.plan;
 
     trace.phaseEnd('compile', performance.now() - t0);
 

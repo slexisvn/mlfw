@@ -219,6 +219,32 @@ export class Tracer {
     return outSym;
   }
 
+  scan(xsValues, carryValues, stepFn) {
+    const toIr = (s) => s instanceof SymbolicTensor ? s.irValue : this.captureConstant(s).irValue;
+    const xsIr = xsValues.map(toIr);
+    const carryIr = carryValues.map(toIr);
+    const op = this._builder.scanOp(xsIr, carryIr, (bb, xtArgs, carryArgs) => {
+      const saved = this._builder;
+      this._builder = bb;
+      try {
+        const wrap = (v) => new SymbolicTensor(v, v.type.shape, v.type.dtype, this, [...v.type.shape]);
+        const [newCarry, ys] = stepFn(carryArgs.map(wrap), xtArgs.map(wrap));
+        return [newCarry.map(s => s.irValue), ys.map(s => s.irValue)];
+      } finally {
+        this._builder = saved;
+      }
+    });
+    const numCarry = carryValues.length;
+    const carryOut = [];
+    const ysOut = [];
+    for (let i = 0; i < op.numResults; i++) {
+      const rv = op.getResult(i);
+      const sym = new SymbolicTensor(rv, rv.type.shape, rv.type.dtype, this, [...rv.type.shape]);
+      if (i < numCarry) carryOut.push(sym); else ysOut.push(sym);
+    }
+    return [carryOut, ysOut];
+  }
+
   captureConstant(tensor) {
     let cached = this._capturedParams.get(tensor);
     if (cached) return cached;

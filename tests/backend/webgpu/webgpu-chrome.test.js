@@ -71,6 +71,21 @@ window.runCase = async (src, inputs, config) => {
   try { const g = compile({forward:(...a)=>fn(M,...a)}, xs, {target:WebGPUTarget(), ...(config || {})}); out.gpu = arr(await g(...xs)); } catch(e){ out.gpuErr = String(e && e.message || e); }
   return out;
 };
+window.runRNN = async (kind, E, H, T, B, seed) => {
+  let a = seed >>> 0;
+  const r = () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const numel = s => s.reduce((x, y) => x * y, 1);
+  const nest = (f, s) => { if (s.length === 1) return f.slice(0, s[0]); const sub = numel(s.slice(1)); const o = []; for (let i = 0; i < s[0]; i++) o.push(nest(f.slice(i * sub, (i + 1) * sub), s.slice(1))); return o; };
+  const Mod = kind === 'gru' ? M.GRU : M.LSTM;
+  const m = new Mod(E, H, 1, true);
+  const f = []; for (let i = 0; i < B * T * E; i++) f.push(r() * 2 - 1);
+  const inp = tensor(nest(f, [B, T, E]));
+  const wrap = { forward: (...a) => m.forward(...a)[0] };
+  const out = {};
+  try { const c = compile(wrap, [inp], { target: CPUTarget() }); out.cpu = flat(await c(inp)); } catch (e) { out.cpuErr = String(e && e.message || e); }
+  try { const g = compile(wrap, [inp], { target: WebGPUTarget() }); out.gpu = flat(await g(inp)); } catch (e) { out.gpuErr = String(e && e.message || e); }
+  return out;
+};
 window.__gpu = !!navigator.gpu;
 window.__ready = true;
 `;
@@ -189,6 +204,18 @@ describe.skipIf(!deps)('webgpu via Chrome (differential vs CPU)', () => {
     expect(maxErr, `maxErr=${maxErr}`).toBeLessThan(tol);
     return res;
   }
+
+  it('large RNN per-step dispatch matches CPU (carry ping-pong + scalar-replaced fused kernels)', async () => {
+    for (const [kind, E, H, T, B] of [['lstm', 32, 64, 8, 32], ['gru', 32, 64, 6, 32]]) {
+      const res = await page.evaluate((k, e, h, t, b) => window.runRNN(k, e, h, t, b, 123), kind, E, H, T, B);
+      expect(res.cpuErr, `${kind} cpu error: ${res.cpuErr}`).toBeUndefined();
+      expect(res.gpuErr, `${kind} gpu error: ${res.gpuErr}`).toBeUndefined();
+      expect(res.gpu.length).toBe(res.cpu.length);
+      let maxErr = 0;
+      for (let i = 0; i < res.cpu.length; i++) maxErr = Math.max(maxErr, Math.abs(res.cpu[i] - res.gpu[i]) / (1 + Math.abs(res.cpu[i])));
+      expect(maxErr, `${kind} maxErr=${maxErr}`).toBeLessThan(3e-3);
+    }
+  }, 60000);
 
   it('i32 reduce and elementwise', async () => {
     const r = await caseEq("(M,x)=>M.sum(x,1)", [{ data: [[1, 2, 3], [4, 5, 6]], dtype: 'i32' }]);

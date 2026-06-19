@@ -3,6 +3,7 @@ import { Linear } from './linear.js';
 import { zeros } from '../../tensor/factory/creation_ops.js';
 import { add, sub, mul, sigmoid, tanh, stack } from '../../tensor/ops/ops.js';
 import { select, split } from '../../tensor/view/view_ops.js';
+import { scan } from '../../tracing/scan.js';
 
 export class GRUCell extends Module {
   constructor(inputSize, hiddenSize, bias = true) {
@@ -43,23 +44,21 @@ export class GRU extends Module {
 
   forward(input, h0 = null) {
     const x = this.batchFirst ? input.transpose(0, 1) : input;
-    const seqLen = x.shape[0];
     const batch = x.shape[1];
-    const hs = [];
+    let layerIn = x;
+    const finalHs = [];
     for (let l = 0; l < this.numLayers; l++) {
-      hs.push(h0 !== null ? select(h0, 0, l) : zeros([batch, this.hiddenSize]));
+      const hInit = h0 !== null ? select(h0, 0, l) : zeros([batch, this.hiddenSize]);
+      const cell = this.cells[l];
+      const [hN, ys] = scan((h, xt) => {
+        const h2 = cell.forward(xt, h);
+        return [h2, h2];
+      }, hInit, layerIn);
+      finalHs.push(hN);
+      layerIn = ys;
     }
-    const outputs = [];
-    for (let t = 0; t < seqLen; t++) {
-      let inp = select(x, 0, t);
-      for (let l = 0; l < this.numLayers; l++) {
-        hs[l] = this.cells[l].forward(inp, hs[l]);
-        inp = hs[l];
-      }
-      outputs.push(inp);
-    }
-    let output = stack(outputs, 0);
+    let output = layerIn;
     if (this.batchFirst) output = output.transpose(0, 1);
-    return [output, stack(hs, 0)];
+    return [output, stack(finalHs, 0)];
   }
 }
