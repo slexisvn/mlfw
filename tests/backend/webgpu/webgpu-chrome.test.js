@@ -86,6 +86,105 @@ window.runRNN = async (kind, E, H, T, B, seed) => {
   try { const g = compile(wrap, [inp], { target: WebGPUTarget() }); out.gpu = flat(await g(inp)); } catch (e) { out.gpuErr = String(e && e.message || e); }
   return out;
 };
+window.runRNNLinear = async (kind, E, H, V, T, B, seed) => {
+  let a = seed >>> 0;
+  const r = () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const numel = s => s.reduce((x, y) => x * y, 1);
+  const nest = (f, s) => { if (s.length === 1) return f.slice(0, s[0]); const sub = numel(s.slice(1)); const o = []; for (let i = 0; i < s[0]; i++) o.push(nest(f.slice(i * sub, (i + 1) * sub), s.slice(1))); return o; };
+  const m = new (kind === 'gru' ? M.GRU : M.LSTM)(E, H, 1, true);
+  const lin = new M.Linear(H, V);
+  const f = []; for (let i = 0; i < B * T * E; i++) f.push(r() * 2 - 1);
+  const inp = tensor(nest(f, [B, T, E]));
+  const wrap = { forward: (xx) => lin.forward(m.forward(xx)[0]) };
+  const out = {};
+  try { const c = compile(wrap, [inp], { target: CPUTarget() }); out.cpu = flat(await c(inp)); } catch (e) { out.cpuErr = String(e && e.message || e); }
+  try { const g = compile(wrap, [inp], { target: WebGPUTarget() }); out.gpu = flat(await g(inp)); } catch (e) { out.gpuErr = String(e && e.message || e); }
+  return out;
+};
+const seededRng = (seed) => { let a = seed >>> 0; return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
+const nestArr = (f, s) => { if (s.length === 1) return f.slice(0, s[0]); const sub = s.slice(1).reduce((x, y) => x * y, 1); const o = []; for (let i = 0; i < s[0]; i++) o.push(nestArr(f.slice(i * sub, (i + 1) * sub), s.slice(1))); return o; };
+const readDevice = (t) => Array.from(t._impl.storage.rawData.subarray(0, t.numel));
+window.runEagerLinear = async (inF, outF, B, seed) => {
+  await M.preloadWebGPU();
+  const r = seededRng(seed);
+  const xf = []; for (let i = 0; i < B * inF; i++) xf.push(r() * 2 - 1);
+  const x = tensor(nestArr(xf, [B, inF]));
+  const lin = new M.Linear(inF, outF);
+  const cpu = flat(lin.forward(x));
+  lin.to(M.WEBGPU_DEVICE);
+  const og = lin.forward(x.to(M.WEBGPU_DEVICE));
+  await M.flushWebGPUEager();
+  return { cpu, gpu: readDevice(og) };
+};
+window.runEagerLSTM = async (kind, E, H, T, B, seed) => {
+  await M.preloadWebGPU();
+  const r = seededRng(seed);
+  const f = []; for (let i = 0; i < B * T * E; i++) f.push(r() * 2 - 1);
+  const inp = tensor(nestArr(f, [B, T, E]));
+  const m = new (kind === 'gru' ? M.GRU : M.LSTM)(E, H, 1, true);
+  const cpu = flat(sum(m.forward(inp)[0], 2));
+  m.to(M.WEBGPU_DEVICE);
+  const red = sum(m.forward(inp.to(M.WEBGPU_DEVICE))[0], 2);
+  await M.flushWebGPUEager();
+  return { cpu, gpu: readDevice(red) };
+};
+window.runFusedLSTM = async (E, H, T, seed) => {
+  await M.preloadWebGPU();
+  const r = seededRng(seed);
+  const f = []; for (let i = 0; i < T * E; i++) f.push(r() * 2 - 1);
+  const inp = tensor(nestArr(f, [1, T, E]));
+  const m = new M.LSTM(E, H, 1, true);
+  const cpu = flat(m.forward(inp)[0]);
+  m.to(M.WEBGPU_DEVICE);
+  const og = m.forward(inp.to(M.WEBGPU_DEVICE))[0];
+  await M.flushWebGPUEager();
+  return { cpu, gpu: readDevice(og) };
+};
+window.runTrainerPredict = async (arch, inF, outF, B, nb, seed) => {
+  await M.preloadWebGPU();
+  const r = seededRng(seed);
+  class Net extends M.lightning.LightningModule {
+    constructor() {
+      super();
+      if (arch === 'lstm') { this.rnn = new M.LSTM(inF, 16, 1, true); this.head = new M.Linear(16, outF); }
+      else { this.body = new M.Linear(inF, 16); this.head = new M.Linear(16, outF); }
+    }
+    forward(x) {
+      if (arch === 'lstm') return this.head.forward(sum(this.rnn.forward(x)[0], 1));
+      return this.head.forward(M.relu(this.body.forward(x)));
+    }
+    configureOptimizers() { return null; }
+  }
+  const net = new Net();
+  const shape = arch === 'lstm' ? [B, 4, inF] : [B, inF];
+  const per = shape.reduce((a, b) => a * b, 1);
+  const batches = [];
+  for (let bi = 0; bi < nb; bi++) { const xf = []; for (let i = 0; i < per; i++) xf.push(r() * 2 - 1); batches.push(tensor(nestArr(xf, shape))); }
+  const cpu = batches.map(x => flat(net.forward(x)));
+  const loader = { length: batches.length, [Symbol.iterator]() { let i = 0; return { next: () => i < batches.length ? { value: batches[i++], done: false } : { value: undefined, done: true } }; } };
+  const trainer = new M.lightning.Trainer({ accelerator: 'webgpu', logger: false, enableProgress: false });
+  const preds = await trainer.predict(net, loader);
+  return { cpu, gpu: preds.map(readDevice) };
+};
+window.runSeq2Seq = async (V, E, H, Lay, T, A, seed) => {
+  const r = seededRng(seed);
+  const emb = new M.Embedding(V, E), enc = new M.LSTM(E, H, Lay, true), dec = new M.LSTM(E, H, Lay, true), head = new M.Linear(2 * H, V);
+  const qd = []; for (let i = 0; i < T; i++) qd.push(Math.floor(r() * V));
+  const dd = []; for (let i = 0; i < A; i++) dd.push(Math.floor(r() * V));
+  const q = tensor([qd], { dtype: 'i32' }), din = tensor([dd], { dtype: 'i32' });
+  const fwd = (qq, d2) => {
+    const e = enc.forward(emb.forward(qq))[0];
+    const d = dec.forward(emb.forward(d2))[0];
+    const w = softmax(matmul(d, e.transpose(1, 2)), 2);
+    const cm = M.cat([d, matmul(w, e)], 2);
+    return head.forward(cm.reshape([A, 2 * H]));
+  };
+  const wrap = { forward: (qq, d2) => fwd(qq, d2) };
+  const out = {};
+  try { const c = compile(wrap, [q, din], { target: CPUTarget() }); out.cpu = flat(await c(q, din)); } catch (e) { out.cpuErr = String(e && e.message || e); }
+  try { const g = compile(wrap, [q, din], { target: WebGPUTarget() }); out.gpu = flat(await g(q, din)); } catch (e) { out.gpuErr = String(e && e.message || e); }
+  return out;
+};
 window.__gpu = !!navigator.gpu;
 window.__ready = true;
 `;
@@ -113,7 +212,10 @@ describe.skipIf(!deps)('webgpu via Chrome (differential vs CPU)', () => {
           + "export { layer_norm } from './src/nn/functional/normalization.js';\n"
           + "export { conv2d } from './src/nn/functional/conv.js';\n"
           + "export { max_pool2d, avg_pool2d } from './src/nn/functional/pooling.js';\n"
-          + "export { split } from './src/tensor/view/view_ops.js';\n",
+          + "export { split } from './src/tensor/view/view_ops.js';\n"
+          + "export { WEBGPU_DEVICE } from './src/tensor/types/device.js';\n"
+          + "export { preloadWebGPU } from './src/runtime/backend_registry.js';\n"
+          + "export { flushWebGPUEager } from './src/runtime/webgpu.js';\n",
         resolveDir: PROJECT_ROOT,
         loader: 'js',
       },
@@ -216,6 +318,44 @@ describe.skipIf(!deps)('webgpu via Chrome (differential vs CPU)', () => {
       expect(maxErr, `${kind} maxErr=${maxErr}`).toBeLessThan(3e-3);
     }
   }, 60000);
+
+  it('compiled RNN -> Linear matches CPU at B=1 (scan->matmul split preserves recurrence)', async () => {
+    for (const kind of ['lstm', 'gru']) {
+      const res = await page.evaluate((k) => window.runRNNLinear(k, 64, 128, 500, 20, 1, 99), kind);
+      expect(res.cpuErr, `${kind} cpu error: ${res.cpuErr}`).toBeUndefined();
+      expect(res.gpuErr, `${kind} gpu error: ${res.gpuErr}`).toBeUndefined();
+      expect(res.gpu.length).toBe(res.cpu.length);
+      let maxErr = 0;
+      for (let i = 0; i < res.cpu.length; i++) maxErr = Math.max(maxErr, Math.abs(res.cpu[i] - res.gpu[i]) / (1 + Math.abs(res.cpu[i])));
+      expect(maxErr, `${kind} maxErr=${maxErr}`).toBeLessThan(3e-3);
+    }
+  }, 60000);
+
+  it('compiled RNN -> Linear matches CPU across batch (scan->matmul split, recurrence + no private-mem overflow)', async () => {
+    for (const [kind, B] of [['lstm', 1], ['lstm', 16], ['lstm', 64], ['gru', 1], ['gru', 16], ['gru', 64]]) {
+      const res = await page.evaluate((k, b) => window.runRNNLinear(k, 64, 128, 500, 20, b, 99), kind, B);
+      expect(res.cpuErr, `${kind} B${B} cpu error: ${res.cpuErr}`).toBeUndefined();
+      expect(res.gpuErr, `${kind} B${B} gpu error: ${res.gpuErr}`).toBeUndefined();
+      expect(res.gpu.length).toBe(res.cpu.length);
+      let maxErr = 0;
+      for (let i = 0; i < res.cpu.length; i++) maxErr = Math.max(maxErr, Math.abs(res.cpu[i] - res.gpu[i]) / (1 + Math.abs(res.cpu[i])));
+      expect(maxErr, `${kind} B${B} maxErr=${maxErr}`).toBeLessThan(3e-3);
+    }
+  }, 120000);
+
+  it('multi-scan seq2seq (2L encoder + decoder + attention) compile matches CPU (N-scan per-step plan, the chatbot bug)', async () => {
+    if (!hasGpu) return;
+    const res = await page.evaluate(() => window.runSeq2Seq(40, 16, 300, 2, 4, 3, 7));
+    expect(res.cpuErr, `cpu error: ${res.cpuErr}`).toBeUndefined();
+    expect(res.gpuErr, `gpu error: ${res.gpuErr}`).toBeUndefined();
+    expect(res.gpu.length).toBe(res.cpu.length);
+    let maxErr = 0, bad = -1;
+    for (let i = 0; i < res.cpu.length; i++) {
+      const e = Math.abs(res.cpu[i] - res.gpu[i]) / (1 + Math.abs(res.cpu[i]));
+      if (e > maxErr) { maxErr = e; bad = i; }
+    }
+    expect(maxErr, `seq2seq idx ${bad}: cpu=${res.cpu[bad]} gpu=${res.gpu[bad]}`).toBeLessThan(3e-3);
+  }, 120000);
 
   it('i32 reduce and elementwise', async () => {
     const r = await caseEq("(M,x)=>M.sum(x,1)", [{ data: [[1, 2, 3], [4, 5, 6]], dtype: 'i32' }]);
@@ -333,4 +473,56 @@ describe.skipIf(!deps)('webgpu via Chrome (differential vs CPU)', () => {
     const src = "(M,idx,W,a,b,c,d)=>{const e=M.index_select(W,0,idx);const h=M.relu(M.add(M.matmul(e,a),b));return M.add(M.matmul(h,c),d);}";
     await caseClose(src, [idx, W, a, b, c, d]);
   });
+
+  async function cmpEager(res, tol, name) {
+    expect(res.cpu, `${name}: no cpu result`).toBeDefined();
+    expect(res.gpu, `${name}: no gpu result`).toBeDefined();
+    expect(res.gpu.length, `${name}: length`).toBe(res.cpu.length);
+    let maxErr = 0, bad = -1;
+    for (let i = 0; i < res.cpu.length; i++) {
+      const e = Math.abs(res.cpu[i] - res.gpu[i]) / (1 + Math.abs(res.cpu[i]));
+      if (e > maxErr) { maxErr = e; bad = i; }
+    }
+    expect(maxErr, `${name} idx ${bad}: cpu=${res.cpu[bad]} gpu=${res.gpu[bad]}`).toBeLessThan(tol);
+  }
+
+  it('eager Linear forward (W^T transpose view → device contiguous) matches CPU', async () => {
+    if (!hasGpu) return;
+    for (const [inF, outF, B] of [[16, 24, 4], [32, 16, 8], [8, 32, 1]]) {
+      const res = await page.evaluate((a, b, c) => window.runEagerLinear(a, b, c, 7), inF, outF, B);
+      await cmpEager(res, 3e-3, `Linear ${inF}x${outF} B${B}`);
+    }
+  }, 60000);
+
+  it('eager LSTM forward (batchFirst transpose views) matches CPU', async () => {
+    if (!hasGpu) return;
+    const res = await page.evaluate(() => window.runEagerLSTM('lstm', 8, 12, 5, 3, 11));
+    await cmpEager(res, 3e-3, 'LSTM');
+  }, 60000);
+
+  it('eager GRU forward (batchFirst transpose views) matches CPU', async () => {
+    if (!hasGpu) return;
+    const res = await page.evaluate(() => window.runEagerLSTM('gru', 8, 12, 5, 3, 13));
+    await cmpEager(res, 3e-3, 'GRU');
+  }, 60000);
+
+  it('fused eager LSTM (B=1 persistent-RNN kernel, the webgpu cuDNN-equivalent) matches CPU', async () => {
+    if (!hasGpu) return;
+    for (const [E, H, T] of [[8, 12, 5], [64, 128, 20], [16, 256, 4]]) {
+      const res = await page.evaluate((e, h, t) => window.runFusedLSTM(e, h, t, 31), E, H, T);
+      await cmpEager(res, 3e-3, `fused LSTM ${E}x${H} T${T}`);
+    }
+  }, 60000);
+
+  it('Trainer(accelerator="webgpu").predict eager inference matches CPU (the Tera webgpu path)', async () => {
+    if (!hasGpu) return;
+    for (const [arch, inF, outF, B, nb] of [['mlp', 12, 5, 4, 3], ['lstm', 8, 6, 3, 2]]) {
+      const res = await page.evaluate((a, i, o, b, n) => window.runTrainerPredict(a, i, o, b, n, 21), arch, inF, outF, B, nb);
+      expect(res.gpu.length, `${arch}: batch count`).toBe(res.cpu.length);
+      for (let k = 0; k < res.cpu.length; k++) {
+        await cmpEager({ cpu: res.cpu[k], gpu: res.gpu[k] }, 3e-3, `${arch} predict batch ${k}`);
+      }
+    }
+  }, 60000);
+
 });

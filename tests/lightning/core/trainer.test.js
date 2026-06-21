@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   Trainer, ProgressCallback, ModelCheckpoint, ConsoleLogger,
 } from '../../../src/lightning/index.js';
-import { quietTrainerOpts } from '../_fixtures.js';
+import { SimpleModel, makeData, quietTrainerOpts } from '../_fixtures.js';
 
 describe('Trainer construction', () => {
   it('fastDevRun=true limits all splits to 1 batch and 1 epoch', () => {
@@ -54,5 +54,24 @@ describe('Trainer construction', () => {
     const t = new Trainer(quietTrainerOpts);
     expect(t.callbacks.some(c => c instanceof ProgressCallback)).toBe(false);
     expect(t.callbacks.some(c => c instanceof ModelCheckpoint)).toBe(false);
+  });
+});
+
+describe('Trainer accelerator="webgpu" eager boundary (inference-only)', () => {
+  const webgpuOpts = { accelerator: 'webgpu', ...quietTrainerOpts };
+
+  it('rejects eager training (fit without compile has no autograd)', async () => {
+    await expect(new Trainer(webgpuOpts).fit(new SimpleModel(), makeData(20, 10)))
+      .rejects.toThrow(/webgpu/i);
+  });
+
+  it('rejects in-fit validation even with compile=true (no flushed eager validation path)', async () => {
+    await expect(new Trainer({ ...webgpuOpts, compile: true }).fit(new SimpleModel(), makeData(20, 10), makeData(20, 10)))
+      .rejects.toThrow(/validation/i);
+  });
+
+  it('rejects validate() and test() (sync metric .item vs async readback)', async () => {
+    await expect(new Trainer(webgpuOpts).validate(new SimpleModel(), makeData(20, 10))).rejects.toThrow(/webgpu/i);
+    await expect(new Trainer(webgpuOpts).test(new SimpleModel(), makeData(20, 10))).rejects.toThrow(/webgpu/i);
   });
 });

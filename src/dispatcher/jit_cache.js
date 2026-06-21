@@ -3,7 +3,7 @@ import { GraphModule } from '../compiler/ir/graph/module.js';
 import { TensorType, ScalarType } from '../compiler/ir/graph/types.js';
 import { lowerGraphToPrimFunc } from '../compiler/passes/lowering/graph_to_tensor.js';
 import { BackendPipeline } from '../backend/pipeline.js';
-import { RuntimeModule } from '../compiler/runtime/runtime.js';
+import { RuntimeModule } from '../runtime/runtime.js';
 import { PassManager } from '../compiler/passes/pass_manager.js';
 import { DecompositionPass } from '../compiler/passes/decompose/decomposition_pass.js';
 import { CanonicalizePass } from '../compiler/passes/canonicalize/canonicalize.js';
@@ -115,7 +115,7 @@ function _compileScheduledGPU(func, target, backend, rt) {
     new SchedulePolicy(target).applyToAllBlocks(new Schedule(primFunc));
     const compiled = backend.compile(primFunc);
     rt.addCompiledKernel(compiled);
-    _trialLaunch(rt, compiled, primFunc);
+    if (!target.isWebGPU()) _trialLaunch(rt, compiled, primFunc);
     return compiled;
   } catch {
     return null;
@@ -197,7 +197,7 @@ export function jitCompile(opName, tensorArgs, scalarArgs, target) {
 
   const retOp = func.getReturnOp();
   const outDtype = retOp && retOp.operands.length > 0 ? retOp.operands[0].type.dtype : null;
-  entry = { funcName: compiled.name, runtime: rt, numInputs: tensorArgs.length, outDtype };
+  entry = { funcName: compiled.name, runtime: rt, numInputs: tensorArgs.length, outDtype, compiled };
   _cache.set(key, entry);
   return entry;
 }

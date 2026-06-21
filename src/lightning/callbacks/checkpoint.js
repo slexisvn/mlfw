@@ -1,5 +1,5 @@
 import { fs } from '#io/fs';
-import { joinPath } from '../../io/path.js';
+import { joinPath } from '../../runtime/path.js';
 import { Callback } from './callback.js';
 import { serializeCheckpoint, deserializeCheckpoint } from '../io/checkpoint_format.js';
 

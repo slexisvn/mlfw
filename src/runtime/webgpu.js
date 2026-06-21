@@ -1,5 +1,9 @@
-import { wgslType, wgslBytes } from '../../backend/dtype_map.js';
-import { bf16ToF32, f32ToBf16 } from '../../tensor/utils/half.js';
+import { wgslType, wgslBytes } from '../backend/dtype_map.js';
+import { bf16ToF32, f32ToBf16 } from '../tensor/utils/half.js';
+import { wrapResult } from '../dispatcher/jit_dispatch.js';
+import { WEBGPU_DEVICE } from '../tensor/types/device.js';
+import { stack } from '../tensor/ops/ops.js';
+import { select } from '../tensor/view/view_ops.js';
 
 let _gpuDevice = null;
 let _gpuInitPromise = null;
@@ -122,7 +126,7 @@ function bindingBufferType(binding) {
   return 'read-only-storage';
 }
 
-function createPipeline(device, kernel) {
+function pipelineParts(device, kernel) {
   const shaderModule = device.createShaderModule({ code: kernel.source });
   const layoutEntries = [];
   for (const binding of kernel.metadata.bindings) {
@@ -134,11 +138,20 @@ function createPipeline(device, kernel) {
   }
   const bindGroupLayout = device.createBindGroupLayout({ entries: layoutEntries });
   const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] });
-  const pipeline = device.createComputePipeline({
-    layout: pipelineLayout,
-    compute: { module: shaderModule, entryPoint: kernel.name }
-  });
-  return { pipeline, shaderModule, bindGroupLayout };
+  return { shaderModule, bindGroupLayout, pipelineLayout };
+}
+
+function createPipeline(device, kernel) {
+  const { shaderModule, bindGroupLayout, pipelineLayout } = pipelineParts(device, kernel);
+  const pipeline = device.createComputePipeline({ layout: pipelineLayout, compute: { module: shaderModule, entryPoint: kernel.name } });
+  return { pipeline, bindGroupLayout };
+}
+
+const _pipelines = new WeakMap();
+function pipelineFor(device, kernel) {
+  let p = _pipelines.get(kernel);
+  if (!p) { p = createPipeline(device, kernel); _pipelines.set(kernel, p); }
+  return p;
 }
 
 export async function instantiateWebGPU(kernel) {
@@ -285,36 +298,16 @@ export async function runWebGPUKernel(instance, tensorArgs, shapeValues) {
   for (const buf of gpuBuffers) buf.destroy();
 }
 
-const _planPipelines = new WeakMap();
-function pipelineFor(device, kernel) {
-  let p = _planPipelines.get(kernel);
-  if (!p) { p = createPipeline(device, kernel); _planPipelines.set(kernel, p); }
-  return p;
-}
-
-async function createPipelineAsync(device, kernel) {
-  const shaderModule = device.createShaderModule({ code: kernel.source });
-  const layoutEntries = [];
-  for (const binding of kernel.metadata.bindings) {
-    layoutEntries.push({ binding: binding.index, visibility: _shaderStage.COMPUTE, buffer: { type: bindingBufferType(binding) } });
-  }
-  const bindGroupLayout = device.createBindGroupLayout({ entries: layoutEntries });
-  const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] });
-  const pipeline = await device.createComputePipelineAsync({
-    layout: pipelineLayout,
-    compute: { module: shaderModule, entryPoint: kernel.name }
-  });
-  return { pipeline, shaderModule, bindGroupLayout };
-}
-
 export async function prewarmPipelines(device, kernels) {
   if (typeof device.createComputePipelineAsync !== 'function') return;
   const pending = [];
   const seen = new Set();
   for (const kernel of kernels) {
-    if (!kernel || seen.has(kernel) || _planPipelines.has(kernel)) continue;
+    if (!kernel || seen.has(kernel) || _pipelines.has(kernel)) continue;
     seen.add(kernel);
-    pending.push(createPipelineAsync(device, kernel).then(p => _planPipelines.set(kernel, p), () => {}));
+    const { shaderModule, bindGroupLayout, pipelineLayout } = pipelineParts(device, kernel);
+    pending.push(device.createComputePipelineAsync({ layout: pipelineLayout, compute: { module: shaderModule, entryPoint: kernel.name } })
+      .then(pipeline => _pipelines.set(kernel, { pipeline, bindGroupLayout }), () => {}));
   }
   if (pending.length > 0) await Promise.all(pending);
 }
@@ -391,18 +384,22 @@ export async function runWebGPUPlan(plan, slots, steps) {
     maybeFlush();
   };
 
-  const sl = plan.scanLoop;
-  if (sl) {
-    for (const c of sl.carry) ctx.encoder.copyBufferToBuffer(bufs[c.initSlot], 0, bufs[c.a], 0, c.bytes);
-    for (let i = 0; i < sl.loopStart; i++) encodeStep(steps[i]);
-    for (let t = 0; t < sl.T; t++) {
-      for (const xs of sl.xs) ctx.encoder.copyBufferToBuffer(bufs[xs.xsSlot], t * xs.stepBytes, bufs[xs.xtSlot], 0, xs.stepBytes);
-      for (let i = sl.loopStart; i < sl.loopEnd; i++) encodeStep(steps[i]);
-      for (const ys of sl.ys) ctx.encoder.copyBufferToBuffer(bufs[ys.ytSlot], 0, bufs[ys.ysSlot], t * ys.stepBytes, ys.stepBytes);
-      for (const c of sl.carry) { const tmp = bufs[c.a]; bufs[c.a] = bufs[c.b]; bufs[c.b] = tmp; }
+  const scanLoops = plan.scanLoops ? [...plan.scanLoops].sort((a, b) => a.loopStart - b.loopStart) : (plan.scanLoop ? [plan.scanLoop] : null);
+  if (scanLoops && scanLoops.length) {
+    let cursor = 0;
+    for (const sl of scanLoops) {
+      for (; cursor < sl.loopStart; cursor++) encodeStep(steps[cursor]);
+      for (const c of sl.carry) ctx.encoder.copyBufferToBuffer(bufs[c.initSlot], 0, bufs[c.a], 0, c.bytes);
+      for (let t = 0; t < sl.T; t++) {
+        for (const xs of sl.xs) ctx.encoder.copyBufferToBuffer(bufs[xs.xsSlot], t * xs.stepBytes, bufs[xs.xtSlot], 0, xs.stepBytes);
+        for (let i = sl.loopStart; i < sl.loopEnd; i++) encodeStep(steps[i]);
+        for (const ys of sl.ys) ctx.encoder.copyBufferToBuffer(bufs[ys.ytSlot], 0, bufs[ys.ysSlot], t * ys.stepBytes, ys.stepBytes);
+        for (const c of sl.carry) { const tmp = bufs[c.a]; bufs[c.a] = bufs[c.b]; bufs[c.b] = tmp; }
+      }
+      for (const c of sl.carry) ctx.encoder.copyBufferToBuffer(bufs[c.a], 0, bufs[c.finalSlot], 0, c.bytes);
+      cursor = sl.loopEnd;
     }
-    for (const c of sl.carry) ctx.encoder.copyBufferToBuffer(bufs[c.a], 0, bufs[c.finalSlot], 0, c.bytes);
-    for (let i = sl.loopEnd; i < steps.length; i++) encodeStep(steps[i]);
+    for (; cursor < steps.length; cursor++) encodeStep(steps[cursor]);
   } else {
     for (const st of steps) encodeStep(st);
   }
@@ -430,4 +427,278 @@ export async function runWebGPUPlan(plan, slots, steps) {
   for (const b of bufs) if (b) b.destroy();
   for (const u of uniformBufs) u.destroy();
   for (const sb of scratchBufs) sb.destroy();
+}
+
+let _eagerEncoder = null;
+let _eagerPending = 0;
+const EAGER_SUBMIT_CHUNK = 64;
+const _eagerBuffers = new Map();
+const _eagerTransient = [];
+const _eagerScratch = [];
+const _eagerPool = new Map();
+
+function acquireStorage(bytes) {
+  const free = _eagerPool.get(bytes);
+  if (free && free.length) return free.pop();
+  const BU = bufUsage();
+  return _gpuDevice.createBuffer({ size: bytes, usage: BU.STORAGE | BU.COPY_SRC | BU.COPY_DST });
+}
+function releaseStorage(buf, bytes) {
+  let free = _eagerPool.get(bytes);
+  if (!free) { free = []; _eagerPool.set(bytes, free); }
+  free.push(buf);
+}
+
+export async function ensureWebGPUEager() {
+  await ensureDevice();
+  if (!_eagerEncoder) _eagerEncoder = _gpuDevice.createCommandEncoder();
+  return _gpuDevice;
+}
+
+export function webgpuEagerReady() { return !!_gpuDevice && !!_eagerEncoder; }
+
+function eagerBufferFor(hostArray, dtype, asInput) {
+  const e = _eagerBuffers.get(hostArray);
+  if (e) return e.buf;
+  const BU = bufUsage();
+  const bytes = Math.max(align4(hostArray.length * wgslBytes(dtype)), 4);
+  if (asInput) {
+    const buf = _gpuDevice.createBuffer({ size: bytes, usage: BU.STORAGE | BU.COPY_SRC | BU.COPY_DST, mappedAtCreation: true });
+    packTensorInto(new (wgslViewCtor(dtype))(buf.getMappedRange()), hostArray, dtype, 0);
+    buf.unmap();
+    _eagerBuffers.set(hostArray, { buf, bytes, dtype, persistent: asInput });
+    return buf;
+  }
+  const buf = acquireStorage(bytes);
+  _eagerBuffers.set(hostArray, { buf, bytes, dtype, persistent: false });
+  return buf;
+}
+
+export function recordWebGPUEager(compiled, hostArgs, shapeValues) {
+  const { pipeline, bindGroupLayout } = pipelineFor(_gpuDevice, compiled);
+  const { bindings, dispatchSize } = compiled.metadata;
+  const paramIdx = buildParamIndex(bindings);
+  const BU = bufUsage();
+  const entries = [];
+  const writebacks = [];
+  for (const binding of bindings) {
+    if (binding.name === '_shapes') {
+      const shapeData = new Uint32Array(shapeValues || []);
+      const sz = Math.max(Math.ceil(shapeData.byteLength / 16) * 16, 16);
+      const ub = _gpuDevice.createBuffer({ size: sz, usage: BU.UNIFORM | BU.COPY_DST });
+      _gpuDevice.queue.writeBuffer(ub, 0, shapeData);
+      _eagerTransient.push(ub);
+      entries.push({ binding: binding.index, resource: { buffer: ub } });
+      continue;
+    }
+    if (binding.packed) {
+      const elemBytes = wgslBytes(binding.dtype);
+      const pbytes = Math.max(align4(binding.packedSize * elemBytes), 4);
+      const pbuf = acquireStorage(pbytes);
+      _eagerScratch.push({ buf: pbuf, bytes: pbytes });
+      const isWrite = binding.mode === 'read_write';
+      for (const e of binding.packed) {
+        const sub = eagerBufferFor(hostArgs[paramIdx.get(e.name)], e.dtype, !isWrite);
+        const bytes = align4(e.size * elemBytes);
+        if (isWrite) writebacks.push({ pbuf, off: e.offset * elemBytes, sub, bytes });
+        else _eagerEncoder.copyBufferToBuffer(sub, 0, pbuf, e.offset * elemBytes, bytes);
+      }
+      entries.push({ binding: binding.index, resource: { buffer: pbuf } });
+      continue;
+    }
+    const host = hostArgs[paramIdx.get(binding.name)];
+    const buf = eagerBufferFor(host, binding.dtype, binding.mode !== 'read_write');
+    entries.push({ binding: binding.index, resource: { buffer: buf } });
+  }
+  const bindGroup = _gpuDevice.createBindGroup({ layout: bindGroupLayout, entries });
+  const pass = _eagerEncoder.beginComputePass();
+  pass.setPipeline(pipeline);
+  pass.setBindGroup(0, bindGroup);
+  pass.dispatchWorkgroups(dispatchSize[0], dispatchSize[1], dispatchSize[2]);
+  pass.end();
+  for (const wb of writebacks) _eagerEncoder.copyBufferToBuffer(wb.pbuf, wb.off, wb.sub, 0, wb.bytes);
+  if (++_eagerPending >= EAGER_SUBMIT_CHUNK) {
+    _gpuDevice.queue.submit([_eagerEncoder.finish()]);
+    _eagerEncoder = _gpuDevice.createCommandEncoder();
+    _eagerPending = 0;
+  }
+}
+
+export async function flushWebGPUEager() {
+  if (!_gpuDevice) return;
+  const BU = bufUsage();
+  const reads = [];
+  for (const [ha, e] of _eagerBuffers) {
+    if (e.persistent) continue;
+    const rb = _gpuDevice.createBuffer({ size: e.bytes, usage: BU.MAP_READ | BU.COPY_DST });
+    _eagerEncoder.copyBufferToBuffer(e.buf, 0, rb, 0, e.bytes);
+    reads.push({ rb, ha, buf: e.buf, bytes: e.bytes, dtype: e.dtype });
+  }
+  _gpuDevice.queue.submit([_eagerEncoder.finish()]);
+  _eagerEncoder = _gpuDevice.createCommandEncoder();
+  _eagerPending = 0;
+  for (const u of _eagerTransient) u.destroy();
+  _eagerTransient.length = 0;
+  await Promise.all(reads.map(r => r.rb.mapAsync(mapModeRead())));
+  for (const r of reads) {
+    unpackTensorFrom(r.ha, new (wgslViewCtor(r.dtype))(r.rb.getMappedRange()), r.dtype, 0, r.ha.length);
+    r.rb.unmap();
+    r.rb.destroy();
+  }
+  for (const s of _eagerScratch) releaseStorage(s.buf, s.bytes);
+  _eagerScratch.length = 0;
+  for (const r of reads) { releaseStorage(r.buf, r.bytes); _eagerBuffers.delete(r.ha); }
+}
+
+const _contigKernels = new Map();
+function contigKernel(shape, strides, offset, dtype, numel) {
+  const key = `${shape.join(',')}|${strides.join(',')}|${offset}|${dtype}`;
+  let k = _contigKernels.get(key);
+  if (k) return k;
+  const wt = wgslType(dtype);
+  let perDim = '';
+  for (let d = shape.length - 1; d >= 0; d--) {
+    perDim += `  let idx${d} = rem % ${shape[d]}u; rem = rem / ${shape[d]}u; src = src + idx${d} * ${strides[d]}u;\n`;
+  }
+  const source = `@group(0) @binding(0) var<storage, read> inp : array<${wt}>;\n`
+    + `@group(0) @binding(1) var<storage, read_write> outp : array<${wt}>;\n`
+    + `@compute @workgroup_size(64)\n`
+    + `fn contig(@builtin(global_invocation_id) gid : vec3<u32>) {\n`
+    + `  let i = gid.x;\n  if (i >= ${numel}u) { return; }\n  var rem = i;\n  var src = ${offset}u;\n`
+    + perDim
+    + `  outp[i] = inp[src];\n}`;
+  k = { name: 'contig', source, metadata: { bindings: [{ index: 0, name: 'inp', dtype, mode: 'read' }, { index: 1, name: 'outp', dtype, mode: 'read_write' }], dispatchSize: [Math.ceil(numel / 64), 1, 1] } };
+  _contigKernels.set(key, k);
+  return k;
+}
+
+function webgpuEagerInput(t) {
+  const raw = t._impl.storage.rawData;
+  if (t.isContiguous && t._impl.storageOffset === 0 && raw.length === t.numel) return raw;
+  const out = new raw.constructor(t.numel);
+  recordWebGPUEager(contigKernel(t.shape, t.strides, t._impl.storageOffset, t.dtype, t.numel), [raw, out], undefined);
+  return out;
+}
+
+export function webgpuEagerOp(compiled, tensors, outData) {
+  const hostArgs = tensors.map(webgpuEagerInput);
+  hostArgs.push(outData);
+  recordWebGPUEager(compiled, hostArgs, undefined);
+}
+
+const RNN_WG = 256;
+const _rnnKernels = new Map();
+
+function lstmKernelWGSL(E, H, T) {
+  const key = `lstm|${E}|${H}|${T}`;
+  let k = _rnnKernels.get(key);
+  if (k) return k;
+  const G = 4 * H;
+  const offWh = G * E, offBx = G * E + G * H, offBh = offBx + G;
+  const src =
+`fn sig(x: f32) -> f32 { return 1.0 / (1.0 + exp(-x)); }
+@group(0) @binding(0) var<storage, read> xin : array<f32>;
+@group(0) @binding(1) var<storage, read> w : array<f32>;
+@group(0) @binding(2) var<storage, read> h0 : array<f32>;
+@group(0) @binding(3) var<storage, read> c0 : array<f32>;
+@group(0) @binding(4) var<storage, read_write> ys : array<f32>;
+@group(0) @binding(5) var<storage, read_write> hn : array<f32>;
+@group(0) @binding(6) var<storage, read_write> cn : array<f32>;
+var<workgroup> wh : array<f32, ${H}>;
+var<workgroup> wc : array<f32, ${H}>;
+var<workgroup> wg : array<f32, ${G}>;
+@compute @workgroup_size(${RNN_WG})
+fn rnn(@builtin(local_invocation_id) lid : vec3<u32>) {
+  let tid = lid.x;
+  for (var p = tid; p < ${H}u; p = p + ${RNN_WG}u) { wh[p] = h0[p]; wc[p] = c0[p]; }
+  workgroupBarrier();
+  for (var t = 0u; t < ${T}u; t = t + 1u) {
+    for (var j = tid; j < ${G}u; j = j + ${RNN_WG}u) {
+      var acc = w[${offBx}u + j] + w[${offBh}u + j];
+      let xb = t * ${E}u;
+      let wxb = j * ${E}u;
+      for (var e = 0u; e < ${E}u; e = e + 1u) { acc = acc + xin[xb + e] * w[wxb + e]; }
+      let whb = ${offWh}u + j * ${H}u;
+      for (var q = 0u; q < ${H}u; q = q + 1u) { acc = acc + wh[q] * w[whb + q]; }
+      wg[j] = acc;
+    }
+    workgroupBarrier();
+    for (var j = tid; j < ${H}u; j = j + ${RNN_WG}u) {
+      let ii = sig(wg[j]);
+      let ff = sig(wg[${H}u + j]);
+      let gg = tanh(wg[${2 * H}u + j]);
+      let oo = sig(wg[${3 * H}u + j]);
+      let cv = ff * wc[j] + ii * gg;
+      wc[j] = cv;
+      let nh = oo * tanh(cv);
+      wh[j] = nh;
+      ys[t * ${H}u + j] = nh;
+    }
+    workgroupBarrier();
+  }
+  for (var p = tid; p < ${H}u; p = p + ${RNN_WG}u) { hn[p] = wh[p]; cn[p] = wc[p]; }
+}`;
+  k = {
+    name: 'rnn', source: src, metadata: {
+      bindings: [
+        { index: 0, name: 'xin', dtype: 'f32', mode: 'read' },
+        { index: 1, name: 'w', dtype: 'f32', mode: 'read' },
+        { index: 2, name: 'h0', dtype: 'f32', mode: 'read' },
+        { index: 3, name: 'c0', dtype: 'f32', mode: 'read' },
+        { index: 4, name: 'ys', dtype: 'f32', mode: 'read_write' },
+        { index: 5, name: 'hn', dtype: 'f32', mode: 'read_write' },
+        { index: 6, name: 'cn', dtype: 'f32', mode: 'read_write' },
+      ],
+      dispatchSize: [1, 1, 1],
+    },
+  };
+  _rnnKernels.set(key, k);
+  return k;
+}
+
+function lstmPackedWeights(cell, E, H) {
+  const tag = `${E}|${H}`;
+  if (cell._webgpuPacked && cell._webgpuPackedTag === tag) return cell._webgpuPacked;
+  const G = 4 * H;
+  const raw = t => t.contiguous()._impl.storage.rawData;
+  const Wx = raw(cell.x2h.weight), Wh = raw(cell.h2h.weight);
+  const bx = cell.x2h.bias ? raw(cell.x2h.bias) : new Float32Array(G);
+  const bh = cell.h2h.bias ? raw(cell.h2h.bias) : new Float32Array(G);
+  const packed = new Float32Array(G * E + G * H + G + G);
+  packed.set(Wx, 0);
+  packed.set(Wh, G * E);
+  packed.set(bx, G * E + G * H);
+  packed.set(bh, G * E + G * H + G);
+  cell._webgpuPacked = packed;
+  cell._webgpuPackedTag = tag;
+  return packed;
+}
+
+export function webgpuRNN(xs, cells, opts, h0, c0) {
+  if (opts.batch !== 1) return null;
+  const H = opts.hiddenSize, T = opts.seqLen, L = cells.length;
+  let layerRaw = webgpuEagerInput(xs);
+  const hns = [], cns = [];
+  for (let l = 0; l < L; l++) {
+    const E = l === 0 ? opts.inputSize : H;
+    const packed = lstmPackedWeights(cells[l], E, H);
+    let h0Raw, c0Raw;
+    if (h0 != null && c0 != null) {
+      h0Raw = webgpuEagerInput(select(h0, 0, l));
+      c0Raw = webgpuEagerInput(select(c0, 0, l));
+    } else {
+      h0Raw = new Float32Array(H);
+      c0Raw = new Float32Array(H);
+    }
+    const ys = new Float32Array(T * H), hnA = new Float32Array(H), cnA = new Float32Array(H);
+    recordWebGPUEager(lstmKernelWGSL(E, H, T), [layerRaw, packed, h0Raw, c0Raw, ys, hnA, cnA], undefined);
+    layerRaw = ys;
+    hns.push(hnA);
+    cns.push(cnA);
+  }
+  const out = wrapResult(layerRaw, [T, 1, H], 'f32', WEBGPU_DEVICE);
+  const wrapState = arrs => L === 1
+    ? wrapResult(arrs[0], [1, 1, H], 'f32', WEBGPU_DEVICE)
+    : stack(arrs.map(a => wrapResult(a, [1, H], 'f32', WEBGPU_DEVICE)), 0);
+  return [out, wrapState(hns), wrapState(cns)];
 }

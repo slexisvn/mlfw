@@ -7,16 +7,16 @@
   },
   "imports": {
     "#io/fs": {
-      "browser": "./src/io/browser/fs.js",
-      "default": "./src/io/node/fs.js"
+      "browser": "./src/runtime/browser/fs.js",
+      "default": "./src/runtime/node/fs.js"
     },
     "#io/wasm_pool": {
-      "browser": "./src/io/browser/wasm_pool.js",
-      "default": "./src/io/node/wasm_pool.js"
+      "browser": "./src/runtime/browser/wasm_pool.js",
+      "default": "./src/runtime/node/wasm_pool.js"
     },
     "#io/cuda_runtime": {
-      "browser": "./src/io/browser/cuda_runtime.js",
-      "default": "./src/io/node/cuda_runtime.js"
+      "browser": "./src/runtime/browser/cuda_runtime.js",
+      "default": "./src/runtime/node/cuda_runtime.js"
     },
     "#plugins/query-engine": {
       "browser": "./plugins/query-engine/query-engine.browser.js",

@@ -4,6 +4,7 @@ export class PredictionLoop {
   async run(model, dataLoader, trainer) {
     const state = trainer.state;
     const callbacks = trainer.callbackConnector;
+    const strategy = trainer.strategy;
     const prevStage = state.stage;
     state.stage = Stage.PREDICTING;
 
@@ -15,10 +16,12 @@ export class PredictionLoop {
     let batchIdx = 0;
 
     await noGradAsync(async () => {
-      for (const batch of dataLoader) {
+      for (const rawBatch of dataLoader) {
         if (batchIdx >= limit) break;
+        const batch = strategy.toDevice(rawBatch);
         callbacks.dispatch('onPredictBatchStart', trainer, model, batch, batchIdx);
         const output = await Promise.resolve(model.predictStep(batch, batchIdx));
+        await trainer._flushEagerInference();
         predictions.push(output);
         callbacks.dispatch('onPredictBatchEnd', trainer, model, output, batch, batchIdx);
         batchIdx++;

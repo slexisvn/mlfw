@@ -7,7 +7,7 @@ import { parseOptimizersConfig } from './module.js';
 import { ConsoleLogger } from '../loggers/console.js';
 import { ProgressCallback } from '../callbacks/progress.js';
 import { ModelCheckpoint } from '../callbacks/checkpoint.js';
-import { CPU_DEVICE, GPU_DEVICE, WASM_DEVICE } from '../../tensor/types/device.js';
+import { CPU_DEVICE, GPU_DEVICE, WASM_DEVICE, WEBGPU_DEVICE } from '../../tensor/types/device.js';
 
 export class Trainer {
   constructor({
@@ -78,6 +78,7 @@ export class Trainer {
     this._callbackConnector = new CallbackConnector(userCallbacks);
     this._loggerConnector = new LoggerConnector(this._loggers, this._state);
     this._model = null;
+    this._webgpuMod = null;
   }
 
   get state() { return this._state; }
@@ -110,6 +111,7 @@ export class Trainer {
     this._model = model;
     model._trainer = this;
     const device = this._resolveDevice();
+    this._guardEagerWebGPU(device, 'fit', valLoader != null);
     model._device = device;
     await this._prepareDevice(device);
     this._strategy.setup(model, device);
@@ -139,7 +141,9 @@ export class Trainer {
     model._trainer = this;
     this._model = model;
     const device = this._resolveDevice();
+    this._guardEagerWebGPU(device, 'validate');
     model._device = device;
+    await this._prepareDevice(device);
     this._strategy.setup(model, device);
     this._callbackConnector.dispatch('setup', this, model, Stage.VALIDATING);
     const metrics = await this._fitLoop.validationLoop.run(model, dataLoader, this, null);
@@ -152,7 +156,9 @@ export class Trainer {
     model._trainer = this;
     this._model = model;
     const device = this._resolveDevice();
+    this._guardEagerWebGPU(device, 'test');
     model._device = device;
+    await this._prepareDevice(device);
     this._strategy.setup(model, device);
     this._callbackConnector.dispatch('setup', this, model, Stage.TESTING);
     const metrics = await this._evaluationLoop.run(model, dataLoader, this);
@@ -166,6 +172,7 @@ export class Trainer {
     this._model = model;
     const device = this._resolveDevice();
     model._device = device;
+    await this._prepareDevice(device);
     this._strategy.setup(model, device);
     return await this._predictionLoop.run(model, dataLoader, this);
   }
@@ -173,14 +180,37 @@ export class Trainer {
   _resolveDevice() {
     if (this._accelerator === 'gpu') return GPU_DEVICE;
     if (this._accelerator === 'wasm') return WASM_DEVICE;
+    if (this._accelerator === 'webgpu') return WEBGPU_DEVICE;
     if (this._accelerator === 'cpu') return CPU_DEVICE;
     return CPU_DEVICE;
   }
 
+  _guardEagerWebGPU(device, stage, hasValidation = false) {
+    if (device.type !== 'webgpu') return;
+    if (stage === 'fit') {
+      if (!this._compile) {
+        throw new Error('Trainer(accelerator="webgpu"): eager WebGPU is inference-only (CUSTOM_0 dispatch has no autograd key). Pass compile=true to train on WebGPU, or use predict() for eager inference.');
+      }
+      if (hasValidation) {
+        throw new Error('Trainer(accelerator="webgpu"): in-fit validation is unsupported — validationStep runs eagerly and reads scalar metrics via .item(), which WebGPU\'s asynchronous readback cannot serve, and there is no compiled validation path. Call fit() without a valLoader on WebGPU.');
+      }
+      return;
+    }
+    throw new Error(`Trainer(accelerator="webgpu"): ${stage}() reads scalar metrics synchronously via .item(), which WebGPU's asynchronous readback cannot serve eagerly. Use predict() for eager WebGPU inference, or train via compile=true.`);
+  }
+
   async _prepareDevice(device) {
-    if (device.type !== 'gpu') return;
-    const { preloadCudaRuntime } = await import('../../compiler/runtime/backend_registry.js');
-    await preloadCudaRuntime();
+    if (device.type === 'gpu') {
+      const { preloadCudaRuntime } = await import('../../runtime/backend_registry.js');
+      await preloadCudaRuntime();
+    } else if (device.type === 'webgpu') {
+      const { preloadWebGPU } = await import('../../runtime/backend_registry.js');
+      this._webgpuMod = await preloadWebGPU();
+    }
+  }
+
+  async _flushEagerInference() {
+    if (this._webgpuMod) await this._webgpuMod.flushWebGPUEager();
   }
 
   _resolveLoggers(loggerConfig) {

@@ -8,7 +8,7 @@ import {
   PrimFunc, BlockNode, BufferStoreNode, ForNode, VariableNode, IntImmNode, ForKind
 } from '../../../src/compiler/ir/tensor/nodes.js';
 import { f32ToF16 } from '../../../src/tensor/utils/half.js';
-import { RuntimeModule } from '../../../src/compiler/runtime/runtime.js';
+import { RuntimeModule } from '../../../src/runtime/runtime.js';
 import { BackendPipeline } from '../../../src/backend/pipeline.js';
 import { cudaDeps } from './cuda-setup.js';
 

@@ -6,7 +6,7 @@ import { runCudaPlan, setCudaGraphEnabled, isCudaGraphEnabled } from './cuda/dev
 import { uploadIfStale, downloadAndValidate, deviceBufferForInput, deviceBufferForOutput, deviceBufferForInplace, isEagerDeferred, hostReadHook, pinResident } from './cuda/resident.js';
 import { cu } from './cuda/ffi.js';
 import { StorageImpl } from '../../tensor/core/storage_impl.js';
-import { registerMeasurer } from '../../compiler/runtime/measurer_registry.js';
+import { registerMeasurer } from '../measurer_registry.js';
 import { setGpuContiguousFn, setGpuConcatFn, setCudnnLSTM, setGpuAdamFn, setGpuMatmul } from '../../dispatcher/jit_dispatch.js';
 import { typedArrayCtor } from '../../tensor/types/dtype.js';
 import { cudnnAvailable } from './cuda/cudnn.js';

@@ -267,7 +267,7 @@ describe('hardwareMeasure resolves the measurer from the target kind', () => {
   it('throws a clear error when no measurer is registered for the target', async () => {
     const { Autotuner } = await import('../../../src/compiler/autotune/autotuner.js');
     const { WebGPUTarget } = await import('../../../src/backend/target.js');
-    const { registerMeasurer } = await import('../../../src/compiler/runtime/measurer_registry.js');
+    const { registerMeasurer } = await import('../../../src/runtime/measurer_registry.js');
     registerMeasurer('webgpu', null);
     expect(() => new Autotuner(WebGPUTarget(), { hardwareMeasure: true }))
       .toThrow(/no measurer is registered/);
@@ -276,7 +276,7 @@ describe('hardwareMeasure resolves the measurer from the target kind', () => {
   it('resolves the in-process WASM measurer so WASM tunes with hardware measurement', async () => {
     const { Autotuner } = await import('../../../src/compiler/autotune/autotuner.js');
     const { WasmTarget } = await import('../../../src/backend/target.js');
-    await import('../../../src/compiler/runtime/backend_registry.js');
+    await import('../../../src/runtime/backend_registry.js');
     const tuner = new Autotuner(WasmTarget(), { hardwareMeasure: true });
     expect(typeof tuner.config.measurer).toBe('function');
     expect(!!tuner.benchmarkRunner).toBe(true);
@@ -311,7 +311,7 @@ describe('hardwareMeasure resolves the measurer from the target kind', () => {
   it('resolves the registered measurer for the matching target kind', async () => {
     const { Autotuner } = await import('../../../src/compiler/autotune/autotuner.js');
     const { WebGPUTarget } = await import('../../../src/backend/target.js');
-    const { registerMeasurer } = await import('../../../src/compiler/runtime/measurer_registry.js');
+    const { registerMeasurer } = await import('../../../src/runtime/measurer_registry.js');
     const probe = (compiled, byteSizes) => [byteSizes.length];
     registerMeasurer('webgpu', probe);
     const tuner = new Autotuner(WebGPUTarget(), { hardwareMeasure: true });

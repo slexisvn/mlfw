@@ -3,19 +3,23 @@ import { KernelFunction } from './boxing.js';
 import { dispatcher } from './dispatcher.js';
 import { jitCompile } from './jit_cache.js';
 import { isEagerDeferred } from './eager_mode.js';
-import { CPUTarget, CUDATarget, WasmTarget } from '../backend/target.js';
+import { CPUTarget, CUDATarget, WasmTarget, WebGPUTarget } from '../backend/target.js';
 import { Tensor } from '../tensor/core/tensor.js';
 import { TensorImpl } from '../tensor/core/tensor_impl.js';
 import { Storage } from '../tensor/core/storage.js';
 import { computeStrides, computeNumel, broadcastShapes, matmulOutputShape } from '../tensor/utils/shape_utils.js';
 import { resultDtype, typedArrayCtor } from '../tensor/types/dtype.js';
 
-let _cpuTarget, _cudaTarget, _wasmTarget;
+let _cpuTarget, _cudaTarget, _wasmTarget, _webgpuTarget;
 const _TARGET_FOR_KEY = {
   [DispatchKey.CPU]: () => (_cpuTarget ??= CPUTarget()),
   [DispatchKey.GPU]: () => (_cudaTarget ??= CUDATarget()),
   [DispatchKey.WASM]: () => (_wasmTarget ??= WasmTarget()),
+  [DispatchKey.CUSTOM_0]: () => (_webgpuTarget ??= WebGPUTarget()),
 };
+
+let _webgpuEagerFn = null;
+export function setWebGPUEagerFn(fn) { _webgpuEagerFn = fn; }
 
 const _SCALAR_ARG_SPEC = {
   sum: ['dim', 'keepdim'],
@@ -286,6 +290,9 @@ export function setGpuConcatFn(fn) { _gpuConcatFn = fn; }
 let _cudnnLSTM = null;
 export function setCudnnLSTM(fn) { _cudnnLSTM = fn; }
 export function getCudnnLSTM() { return _cudnnLSTM; }
+let _webgpuRNN = null;
+export function setWebgpuRNN(fn) { _webgpuRNN = fn; }
+export function getWebgpuRNN() { return _webgpuRNN; }
 let _gpuAdam = null;
 export function setGpuAdamFn(fn) { _gpuAdam = fn; }
 export function getGpuAdamFn() { return _gpuAdam; }
@@ -309,6 +316,7 @@ function _wrapOpForJIT(opName, dispatchKey) {
   if (!getTarget) return null;
 
   const isGPU = dispatchKey === DispatchKey.GPU;
+  const isWebGPU = dispatchKey === DispatchKey.CUSTOM_0;
   const hostConcatLike = isGPU && (opName === 'stack' || opName === 'cat');
 
   return (keySet, ...args) => {
@@ -322,15 +330,19 @@ function _wrapOpForJIT(opName, dispatchKey) {
     const target = getTarget();
     const entry = jitCompile(opName, tensors, scalars, target);
 
-    const runtimeArgs = tensors.map(t => isGPU ? _gpuInputArray(t) : tensorToContiguous(t));
-
     const outShape = _inferOutputShape(opName, tensors, scalars);
     const outDtype = entry.outDtype || resultDtype(tensors[0].dtype, tensors.length > 1 ? tensors[1].dtype : tensors[0].dtype);
     const outNumel = computeNumel(outShape);
     const Ctor = typedArrayCtor(outDtype);
     const outData = new Ctor(Math.max(outNumel, 1));
-    runtimeArgs.push(outData);
 
+    if (isWebGPU) {
+      _webgpuEagerFn(entry.compiled, tensors, outData);
+      return wrapResult(outData, outShape, outDtype, tensors[0].device);
+    }
+
+    const runtimeArgs = tensors.map(t => isGPU ? _gpuInputArray(t) : tensorToContiguous(t));
+    runtimeArgs.push(outData);
     entry.runtime.run(entry.funcName, ...runtimeArgs);
 
     return wrapResult(outData, outShape, outDtype, tensors[0].device);
@@ -339,7 +351,7 @@ function _wrapOpForJIT(opName, dispatchKey) {
 
 export function registerJITKernels() {
   const ops = dispatcher.listOps();
-  const backendKeys = [DispatchKey.CPU, DispatchKey.GPU, DispatchKey.WASM];
+  const backendKeys = [DispatchKey.CPU, DispatchKey.GPU, DispatchKey.WASM, DispatchKey.CUSTOM_0];
 
   for (const opKey of ops) {
     const handle = dispatcher.findOp(opKey);

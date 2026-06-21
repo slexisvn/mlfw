@@ -4,6 +4,7 @@ export const DeviceType = Object.freeze({
   CPU: 'cpu',
   GPU: 'gpu',
   WASM: 'wasm',
+  WEBGPU: 'webgpu',
   META: 'meta',
   LAZY: 'lazy',
 });
@@ -40,6 +41,7 @@ export class Device {
 export const CPU_DEVICE = new Device(DeviceType.CPU);
 export const GPU_DEVICE = new Device(DeviceType.GPU);
 export const WASM_DEVICE = new Device(DeviceType.WASM);
+export const WEBGPU_DEVICE = new Device(DeviceType.WEBGPU);
 export const META_DEVICE = new Device(DeviceType.META);
 
 let _defaultDevice = CPU_DEVICE;

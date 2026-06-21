@@ -5,8 +5,8 @@ import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
 import { CPUTarget, CUDATarget } from '../../../src/backend/target.js';
 import { measureCudaKernel } from '#io/cuda_runtime';
 import { cudaDeps } from './cuda-setup.js';
-import { cu, checkCU } from '../../../src/io/node/cuda/ffi.js';
-import { getDevice } from '../../../src/io/node/cuda/device.js';
+import { cu, checkCU } from '../../../src/runtime/node/cuda/ffi.js';
+import { getDevice } from '../../../src/runtime/node/cuda/device.js';
 
 const F32 = ScalarType.F32;
 

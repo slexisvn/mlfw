@@ -7,7 +7,7 @@ import { tensor } from '../../../src/index.js';
 import * as nn from '../../../src/nn/index.js';
 import { compile } from '../../../src/tracing/compile.js';
 import { buildGpt2 } from '../../shared/gpt2_model.js';
-import { getBackend } from '../../../src/compiler/runtime/backend_registry.js';
+import { getBackend } from '../../../src/runtime/backend_registry.js';
 import { cudaDeps } from './cuda-setup.js';
 
 const flat = (v) => Array.from(v && typeof v.contiguous === 'function' ? v.contiguous().data : v.data);

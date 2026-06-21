@@ -1,5 +1,5 @@
 import { fs } from '#io/fs';
-import { joinPath } from '../../io/path.js';
+import { joinPath } from '../../runtime/path.js';
 import { Logger } from './logger.js';
 
 export class CSVLogger extends Logger {

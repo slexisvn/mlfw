@@ -55,7 +55,7 @@ export class LightningModule extends Module {
   testStep(_batch, _batchIdx) {}
 
   predictStep(batch, _batchIdx) {
-    return this.forward(batch);
+    return this.forward(Array.isArray(batch) && batch.length === 1 ? batch[0] : batch);
   }
 
   configureOptimizers() {

@@ -98,11 +98,11 @@ export class SingleDeviceStrategy {
 
   setup(model, device) {
     this.device = device;
-    if (device.type === 'gpu' && typeof model.to === 'function') model.to(device);
+    if ((device.type === 'gpu' || device.type === 'webgpu') && typeof model.to === 'function') model.to(device);
   }
 
   toDevice(value) {
-    if (!this.device || this.device.type !== 'gpu') return value;
+    if (!this.device || (this.device.type !== 'gpu' && this.device.type !== 'webgpu')) return value;
     if (value && value.device && typeof value.to === 'function') return value.to(this.device);
     if (Array.isArray(value)) {
       const moved = new Array(value.length);

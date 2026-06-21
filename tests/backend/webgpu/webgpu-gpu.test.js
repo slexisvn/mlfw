@@ -16,7 +16,7 @@ function toFileURL(p) {
 function runGPUTest(testBody) {
   const tmpFile = join(tmpdir(), `_webgpu_test_${Date.now()}_${_tmpCounter++}.mjs`);
   const indexURL = toFileURL(resolve(PROJECT_ROOT, 'src/index.js'));
-  const runtimeURL = toFileURL(resolve(PROJECT_ROOT, 'src/compiler/runtime/webgpu_runtime.js'));
+  const runtimeURL = toFileURL(resolve(PROJECT_ROOT, 'src/runtime/webgpu.js'));
   const convURL = toFileURL(resolve(PROJECT_ROOT, 'src/nn/functional/conv.js'));
   const poolURL = toFileURL(resolve(PROJECT_ROOT, 'src/nn/functional/pooling.js'));
   const targetURL = toFileURL(resolve(PROJECT_ROOT, 'src/backend/target.js'));

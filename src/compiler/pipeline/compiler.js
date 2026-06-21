@@ -17,7 +17,7 @@ import { Schedule } from '../schedule/schedule.js';
 import { SchedulePolicy } from '../schedule/rules.js';
 import { MemoryPlanner } from '../passes/memory/memory_planning.js';
 import { BackendPipeline, detectPureMatmul } from '../../backend/pipeline.js';
-import { RuntimeModule } from '../runtime/runtime.js';
+import { RuntimeModule } from '../../runtime/runtime.js';
 import { Autotuner } from '../autotune/autotuner.js';
 import { TensorVerifier } from '../ir/tensor/verifier.js';
 import { verifyModule, verifyFunction } from '../ir/graph/verifier.js';
@@ -192,7 +192,8 @@ export class Compiler {
     } else if (isWebGPUTarget) {
       scanSplit = splitGraphForScan(graphModule, this.config.target);
       if (!scanSplit && hasDependentBoundaries(graphModule, this.config.target.maxThreadsPerBlock || 256)) {
-        nativeSplit = splitGraphForNative(graphModule, 2);
+        scanSplit = splitGraphForScan(graphModule, this.config.target, true);
+        if (!scanSplit) nativeSplit = splitGraphForNative(graphModule, 2);
       }
     }
 

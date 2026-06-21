@@ -3,7 +3,7 @@ import { tensor, sum, add } from '../../../src/index.js';
 import * as nn from '../../../src/nn/index.js';
 import { GPU_DEVICE } from '../../../src/tensor/types/device.js';
 import { getCudnnLSTM } from '../../../src/dispatcher/jit_dispatch.js';
-import { preloadCudaRuntime } from '../../../src/compiler/runtime/backend_registry.js';
+import { preloadCudaRuntime } from '../../../src/runtime/backend_registry.js';
 import { cudaDeps } from './cuda-setup.js';
 
 const haveCudnn = cudaDeps && !!getCudnnLSTM();

@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { RuntimeModule } from '../../../src/compiler/runtime/runtime.js';
-import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
-import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
-import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
-import { CPUTarget } from '../../../src/backend/target.js';
+import { RuntimeModule } from '../../src/runtime/runtime.js';
+import { buildFunction } from '../../src/compiler/ir/graph/builder.js';
+import { TensorType, ScalarType } from '../../src/compiler/ir/graph/types.js';
+import { compileGraph } from '../../src/compiler/pipeline/compiler.js';
+import { CPUTarget } from '../../src/backend/target.js';
 
 describe('RuntimeModule AOT serialize/deserialize (no recompile)', () => {
   it('reconstructs a runnable module from serialized kernels and runs identically', () => {

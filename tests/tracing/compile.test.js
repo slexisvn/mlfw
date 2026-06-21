@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  tensor, Linear, Sequential, ReLU, add, relu, sum,
+  tensor, Linear, Sequential, ReLU, add, relu, sum, LSTM, GRU,
 } from '../../src/index.js';
 import { compile, _traceCore } from '../../src/tracing/compile.js';
 import { foldWeightParams } from '../../src/tracing/fold_params.js';
@@ -283,4 +283,22 @@ describe('per-channel int8 quantization preserves top-1 on a real traced classif
     expect(qAcc).toBe(NTEST);
     expect(agree).toBe(NTEST);
   });
+});
+
+describe('RNN modules compile without an explicit initial state', () => {
+  const mkInput = (B, T, E) => tensor(Array.from({ length: B * T * E }, (_, i) => Math.sin(i * 0.01) * 0.3), { shape: [B, T, E] });
+  for (const [name, Mod] of [['LSTM', LSTM], ['GRU', GRU]]) {
+    for (const Target of [CPUTarget, WasmTarget]) {
+      it(`${name} on ${Target.name} matches eager forward`, async () => {
+        const m = new Mod(8, 12, 2, true);
+        const x = mkInput(2, 5, 8);
+        const eager = m.forward(x)[0];
+        const cf = compile({ forward: (i) => m.forward(i)[0] }, [x], { target: Target() });
+        const out = await cf(x);
+        expect(out.shape).toEqual(eager.shape);
+        const e = Array.from(eager.contiguous().data), o = Array.from(out.contiguous().data);
+        for (let i = 0; i < e.length; i++) expect(o[i]).toBeCloseTo(e[i], 4);
+      });
+    }
+  }
 });

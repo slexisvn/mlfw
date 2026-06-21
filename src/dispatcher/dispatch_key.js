@@ -35,6 +35,7 @@ const _BACKEND_KEY_FOR_DEVICE = Object.freeze({
   cpu: DispatchKey.CPU,
   gpu: DispatchKey.GPU,
   wasm: DispatchKey.WASM,
+  webgpu: DispatchKey.CUSTOM_0,
   meta: DispatchKey.META,
   lazy: DispatchKey.LAZY,
 });

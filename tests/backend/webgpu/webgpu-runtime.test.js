@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { prewarmPipelines } from '../../../src/compiler/runtime/webgpu_runtime.js';
+import { prewarmPipelines } from '../../../src/runtime/webgpu.js';
 
 function mockKernel(name) {
   return { name, source: '@compute @workgroup_size(1,1,1) fn ' + name + '(){}', metadata: { bindings: [] } };

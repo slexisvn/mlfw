@@ -1,7 +1,7 @@
 import { Operation } from '../../ir/graph/operation.js';
 import { GraphFunction } from '../../ir/graph/function.js';
 import { GraphModule } from '../../ir/graph/module.js';
-import { materializePartition, isConstantOp, TERMINATORS, splitGraphForNative } from './cublas_split.js';
+import { materializePartition, isConstantOp, TERMINATORS, splitGraphForNative, topoSortOps } from './cublas_split.js';
 
 function numel(shape) {
   let n = 1;
@@ -85,62 +85,58 @@ function buildScanBodyFunction(scanOp, name) {
   return { bodyFunc, captured, numCarry, numYs: outValues.length - numCarry };
 }
 
-export function splitGraphForScan(graphModule, target) {
-  if (!target || typeof target.isWebGPU !== 'function' || !target.isWebGPU()) return null;
-  if (graphModule.functionCount !== 1) return null;
-  const func = graphModule.functions().next().value;
-  const retOp = func.getReturnOp();
-  if (!retOp) return null;
-
-  let scanOp = null;
-  for (const op of func.ops()) {
-    if (op.opName === 'scan') { if (scanOp) return null; scanOp = op; }
+function inlineNativeSplit(subFunc, inputs, outputs, ctx, minBoundaries) {
+  const { getSlot, newSlot, steps, addedFuncs } = ctx;
+  const mod = new GraphModule(subFunc.name + '_mod');
+  mod.addFunction(subFunc);
+  const split = splitGraphForNative(mod, minBoundaries);
+  if (split) {
+    const pp = split.plan;
+    const nin = inputs.length;
+    const fixMap = new Map();
+    let fixOk = true;
+    for (const fx of (pp.returnFixups || [])) { if (fx.kind !== 'copy') { fixOk = false; break; } fixMap.set(fx.pos, fx.srcSlot); }
+    if (fixOk) {
+      const retSlot = (j) => { const pos = nin + j; return fixMap.has(pos) ? fixMap.get(pos) : pp.argSlots[pos]; };
+      const remap = new Map();
+      for (let i = 0; i < nin; i++) remap.set(pp.argSlots[i], getSlot(inputs[i]));
+      for (const it of pp.intermediates) remap.set(it.slot, newSlot(it.shape, it.dtype));
+      for (let j = 0; j < outputs.length; j++) { const rs = retSlot(j); if (!remap.has(rs)) remap.set(rs, getSlot(outputs[j])); }
+      const mapSlot = (s) => { const m = remap.get(s); return m === undefined ? null : m; };
+      const newSteps = [];
+      let ok = true;
+      for (const st of pp.steps) {
+        const inS = st.inputSlots.map(mapSlot), outS = st.outputSlots.map(mapSlot);
+        if (inS.includes(null) || outS.includes(null)) { ok = false; break; }
+        newSteps.push({ name: st.name, inputSlots: inS, outputSlots: outS });
+      }
+      if (ok) { for (const s of newSteps) steps.push(s); for (const f of mod.functions()) addedFuncs.push(f); return true; }
+    }
   }
-  if (!scanOp) return null;
+  steps.push({ name: subFunc.name, inputSlots: inputs.map(getSlot), outputSlots: outputs.map(getSlot) });
+  addedFuncs.push(subFunc);
+  return true;
+}
+
+function emitSegment(segOps, name, ctx) {
+  const mat = materializePartition({ ops: segOps, opSet: new Set(segOps) }, name, new Map());
+  if (!mat) return false;
+  return inlineNativeSplit(mat.subFunc, mat.inputs, mat.outputs, ctx, 1);
+}
+
+function emitScanLoop(scanOp, name, ctx) {
+  const { getSlot, newSlot, steps, scanLoops, addedFuncs } = ctx;
   const region = scanOp.regions[0];
-  if (!region || !region.entryBlock) return null;
-  if (!isScanOversized(scanOp, region, target)) return null;
-
-  const reach = new Set();
-  const visit = (op) => { if (!op || reach.has(op)) return; reach.add(op); for (let i = 0; i < op.numOperands; i++) visit(op.getOperand(i).definingOp); };
-  for (let i = 0; i < retOp.numOperands; i++) visit(retOp.getOperand(i).definingOp);
-  if (!reach.has(scanOp)) return null;
-
-  const anc = new Set();
-  const visitAnc = (op) => { if (!op || anc.has(op)) return; anc.add(op); for (let i = 0; i < op.numOperands; i++) visitAnc(op.getOperand(i).definingOp); };
-  for (let i = 0; i < scanOp.numOperands; i++) visitAnc(scanOp.getOperand(i).definingOp);
-
-  const preOps = [], postOps = [];
-  for (const op of reach) {
-    if (op === scanOp || isConstantOp(op) || TERMINATORS.has(op.opName)) continue;
-    if (anc.has(op)) preOps.push(op); else postOps.push(op);
-  }
-
-  const built = buildScanBodyFunction(scanOp, func.name + '_scanbody');
-  if (!built) return null;
+  if (!region || !region.entryBlock) return false;
+  const built = buildScanBodyFunction(scanOp, name);
+  if (!built) return false;
   const { bodyFunc, captured, numCarry, numYs } = built;
   const numXs = scanOp.getAttr('num_xs');
 
-  const bodyModule = new GraphModule(func.name + '_bodymod');
+  const bodyModule = new GraphModule(name + '_mod');
   bodyModule.addFunction(bodyFunc);
   const bodySplit = splitGraphForNative(bodyModule, 2);
   const bodyPlan = bodySplit ? bodySplit.plan : null;
-
-  const preMat = preOps.length ? materializePartition({ ops: preOps, opSet: new Set(preOps) }, func.name + '_scanpre', new Map()) : null;
-  if (preOps.length && !preMat) return null;
-  const postMat = postOps.length ? materializePartition({ ops: postOps, opSet: new Set(postOps) }, func.name + '_scanpost', new Map()) : null;
-  if (postOps.length && !postMat) return null;
-
-  const slotOf = new Map();
-  let nextSlot = 0;
-  const getSlot = (v) => { let s = slotOf.get(v); if (s === undefined) { s = nextSlot++; slotOf.set(v, s); } return s; };
-  for (const arg of func.args) getSlot(arg);
-
-  const intermediates = [];
-  const newSlot = (shape, dtype) => { const s = nextSlot++; intermediates.push({ slot: s, shape: [...shape], dtype }); return s; };
-
-  const steps = [];
-  if (preMat) steps.push({ name: preMat.subFunc.name, inputSlots: preMat.inputs.map(getSlot), outputSlots: preMat.outputs.map(getSlot) });
 
   const carryShapes = [], carryDtypes = [];
   for (let i = 0; i < numCarry; i++) { const t = scanOp.getOperand(numXs + i).type; carryShapes.push(t.shape); carryDtypes.push(t.dtype); }
@@ -166,14 +162,11 @@ export function splitGraphForScan(graphModule, target) {
   if (!bodyPlan) {
     ytSlots = ytShapes.map((sh, i) => newSlot(sh, ytDtypes[i]));
     steps.push({ name: bodyFunc.name, inputSlots: [...xtSlots, ...carryA, ...invariantSlots], outputSlots: [...carryB, ...ytSlots] });
-    graphModule.addFunction(bodyFunc);
+    addedFuncs.push(bodyFunc);
   } else {
     const nargs = numXs + numCarry + captured.length;
     const fixMap = new Map();
-    for (const fx of (bodyPlan.returnFixups || [])) {
-      if (fx.kind !== 'copy') return null;
-      fixMap.set(fx.pos, fx.srcSlot);
-    }
+    for (const fx of (bodyPlan.returnFixups || [])) { if (fx.kind !== 'copy') return false; fixMap.set(fx.pos, fx.srcSlot); }
     const bodyReturnSlot = (retIdx) => { const pos = nargs + retIdx; return fixMap.has(pos) ? fixMap.get(pos) : bodyPlan.argSlots[pos]; };
     const remap = new Map();
     for (let i = 0; i < numXs; i++) remap.set(bodyPlan.argSlots[i], xtSlots[i]);
@@ -190,14 +183,79 @@ export function splitGraphForScan(graphModule, target) {
     const mapSlot = (s) => { const m = remap.get(s); if (m === undefined) return null; return m; };
     for (const st of bodyPlan.steps) {
       const inS = st.inputSlots.map(mapSlot), outS = st.outputSlots.map(mapSlot);
-      if (inS.includes(null) || outS.includes(null)) return null;
+      if (inS.includes(null) || outS.includes(null)) return false;
       steps.push({ name: st.name, inputSlots: inS, outputSlots: outS });
     }
-    for (const f of bodyModule.functions()) graphModule.addFunction(f);
+    for (const f of bodyModule.functions()) addedFuncs.push(f);
   }
   const loopEnd = steps.length;
 
-  if (postMat) steps.push({ name: postMat.subFunc.name, inputSlots: postMat.inputs.map(getSlot), outputSlots: postMat.outputs.map(getSlot) });
+  const T = scanOp.getOperand(0).type.shape[0];
+  if (typeof T !== 'number' || T < 0) return false;
+
+  scanLoops.push({
+    T, loopStart, loopEnd,
+    carry: carryShapes.map((sh, i) => ({ a: carryA[i], b: carryB[i], initSlot: carryInitSlots[i], finalSlot: carryFinalSlots[i], bytes: numel(sh) * dtypeBytes(carryDtypes[i]) })),
+    xs: xtSlots.map((s, i) => ({ xtSlot: s, xsSlot: xsSlots[i], stepBytes: numel(xtShapes[i]) * dtypeBytes(xtDtypes[i]) })),
+    ys: ytSlots.map((s, i) => ({ ytSlot: s, ysSlot: ysSlots[i], stepBytes: numel(ytShapes[i]) * dtypeBytes(ytDtypes[i]) })),
+  });
+  return true;
+}
+
+export function splitGraphForScan(graphModule, target, force = false) {
+  if (!target || typeof target.isWebGPU !== 'function' || !target.isWebGPU()) return null;
+  if (graphModule.functionCount !== 1) return null;
+  const func = graphModule.functions().next().value;
+  const retOp = func.getReturnOp();
+  if (!retOp) return null;
+
+  const scans = [];
+  for (const op of func.ops()) if (op.opName === 'scan') scans.push(op);
+  if (scans.length === 0) return null;
+
+  const reach = new Set();
+  const visit = (op) => { if (!op || reach.has(op)) return; reach.add(op); for (let i = 0; i < op.numOperands; i++) visit(op.getOperand(i).definingOp); };
+  for (let i = 0; i < retOp.numOperands; i++) visit(retOp.getOperand(i).definingOp);
+  for (const s of scans) if (!reach.has(s)) return null;
+
+  if (!force) {
+    let anyOversized = false;
+    for (const s of scans) { const r = s.regions[0]; if (r && r.entryBlock && isScanOversized(s, r, target)) { anyOversized = true; break; } }
+    if (!anyOversized) return null;
+  }
+
+  const reachList = [];
+  for (const op of reach) {
+    if (isConstantOp(op) || TERMINATORS.has(op.opName)) continue;
+    reachList.push(op);
+  }
+  const ordered = topoSortOps(reachList);
+
+  const slotOf = new Map();
+  let nextSlot = 0;
+  const getSlot = (v) => { let s = slotOf.get(v); if (s === undefined) { s = nextSlot++; slotOf.set(v, s); } return s; };
+  for (const arg of func.args) getSlot(arg);
+  const intermediates = [];
+  const newSlot = (shape, dtype) => { const s = nextSlot++; intermediates.push({ slot: s, shape: [...shape], dtype }); return s; };
+
+  const steps = [];
+  const scanLoops = [];
+  const addedFuncs = [];
+  const ctx = { getSlot, newSlot, steps, scanLoops, addedFuncs };
+  const scanSet = new Set(scans);
+
+  let segOps = [];
+  let segIdx = 0, scanIdx = 0;
+  for (const op of ordered) {
+    if (scanSet.has(op)) {
+      if (segOps.length && !emitSegment(segOps, func.name + '_seg' + (segIdx++), ctx)) return null;
+      segOps = [];
+      if (!emitScanLoop(op, func.name + '_scan' + (scanIdx++), ctx)) return null;
+    } else {
+      segOps.push(op);
+    }
+  }
+  if (segOps.length && !emitSegment(segOps, func.name + '_seg' + (segIdx++), ctx)) return null;
 
   const argSlots = func.args.map(getSlot);
   const returnFixups = [];
@@ -214,16 +272,6 @@ export function splitGraphForScan(graphModule, target) {
     } else return null;
   }
 
-  const T = scanOp.getOperand(0).type.shape[0];
-  if (typeof T !== 'number' || T < 0) return null;
-
-  const scanLoop = {
-    T, loopStart, loopEnd,
-    carry: carryShapes.map((sh, i) => ({ a: carryA[i], b: carryB[i], initSlot: carryInitSlots[i], finalSlot: carryFinalSlots[i], bytes: numel(sh) * dtypeBytes(carryDtypes[i]) })),
-    xs: xtSlots.map((s, i) => ({ xtSlot: s, xsSlot: xsSlots[i], stepBytes: numel(xtShapes[i]) * dtypeBytes(xtDtypes[i]) })),
-    ys: ytSlots.map((s, i) => ({ ytSlot: s, ysSlot: ysSlots[i], stepBytes: numel(ytShapes[i]) * dtypeBytes(ytDtypes[i]) })),
-  };
-
   const argSlotSet = new Set(argSlots);
   const seen = new Set();
   for (const [v, s] of slotOf) {
@@ -234,8 +282,7 @@ export function splitGraphForScan(graphModule, target) {
   }
 
   graphModule.removeFunction(func.name);
-  if (preMat) graphModule.addFunction(preMat.subFunc);
-  if (postMat) graphModule.addFunction(postMat.subFunc);
+  for (const f of addedFuncs) graphModule.addFunction(f);
 
-  return { plan: { numSlots: nextSlot, argSlots, intermediates, steps, returnFixups, scanLoop } };
+  return { plan: { numSlots: nextSlot, argSlots, intermediates, steps, returnFixups, scanLoops } };
 }

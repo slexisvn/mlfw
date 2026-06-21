@@ -5,7 +5,7 @@ import { add, mul, sigmoid, tanh, stack } from '../../tensor/ops/ops.js';
 import { select, split } from '../../tensor/view/view_ops.js';
 import { scan } from '../../tracing/scan.js';
 import { getActiveTracer } from '../../tracing/tracer.js';
-import { getCudnnLSTM } from '../../dispatcher/jit_dispatch.js';
+import { getCudnnLSTM, getWebgpuRNN } from '../../dispatcher/jit_dispatch.js';
 import { DeviceType } from '../../tensor/types/device.js';
 
 export class LSTMCell extends Module {
@@ -54,6 +54,16 @@ export class LSTM extends Module {
       const opts = { inputSize: this.inputSize, hiddenSize: this.hiddenSize, seqLen: xs.shape[0], batch: xs.shape[1] };
       const [out, hy, cy] = cudnn(xs, this.cells, opts, state ? state[0] : null, state ? state[1] : null);
       return [this.batchFirst ? out.transpose(0, 1) : out, [hy, cy]];
+    }
+    const webgpuRnn = getWebgpuRNN();
+    if (webgpuRnn && input.device.type === DeviceType.WEBGPU && !getActiveTracer()) {
+      const xs = this.batchFirst ? input.transpose(0, 1) : input;
+      const opts = { inputSize: this.inputSize, hiddenSize: this.hiddenSize, seqLen: xs.shape[0], batch: xs.shape[1] };
+      const fused = webgpuRnn(xs, this.cells, opts, state ? state[0] : null, state ? state[1] : null);
+      if (fused) {
+        const [out, hy, cy] = fused;
+        return [this.batchFirst ? out.transpose(0, 1) : out, [hy, cy]];
+      }
     }
     const x = this.batchFirst ? input.transpose(0, 1) : input;
     const batch = x.shape[1];

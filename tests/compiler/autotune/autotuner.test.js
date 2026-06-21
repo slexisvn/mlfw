@@ -26,7 +26,7 @@ import { TuningDatabase, TuningRecord, CODEGEN_VERSION } from '../../../src/comp
 import { RandomSearch, EvolutionarySearch } from '../../../src/compiler/autotune/search.js';
 import { Deadline } from '../../../src/compiler/autotune/budget.js';
 import { TraceLevel } from '../../../src/compiler/pipeline/trace.js';
-import { fs } from '../../../src/io/node/fs.js';
+import { fs } from '../../../src/runtime/node/fs.js';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 

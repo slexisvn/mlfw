@@ -1,5 +1,5 @@
 import { getBackend } from './backend_registry.js';
-import { CompiledKernel } from '../../backend/pipeline.js';
+import { CompiledKernel } from '../backend/pipeline.js';
 
 const TYPED_ARRAY_CTORS = {
   'f16':  Uint16Array,

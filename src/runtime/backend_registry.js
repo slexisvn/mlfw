@@ -1,4 +1,4 @@
-import { encodeWat } from '../../backend/wasm/wat_encoder.js';
+import { encodeWat } from '../backend/wasm/wat_encoder.js';
 import { registerMeasurer } from './measurer_registry.js';
 
 const _registry = new Map();
@@ -13,12 +13,6 @@ export function getBackend(kind) {
 
 export function hasBackend(kind) {
   return _registry.has(kind);
-}
-
-let _webgpuMod = null;
-function getWebGPURuntime() {
-  if (!_webgpuMod) _webgpuMod = import('./webgpu_runtime.js');
-  return _webgpuMod;
 }
 
 let _wasmPoolMod = null;
@@ -39,6 +33,18 @@ export async function preloadCudaRuntime() {
   const mod = await getCudaRuntime();
   if (mod.preloadCublas) await mod.preloadCublas();
   _cudaSyncMod = mod;
+  return mod;
+}
+
+let _webgpuMod = null;
+export async function preloadWebGPU() {
+  if (_webgpuMod) return _webgpuMod;
+  const mod = await import('./webgpu.js');
+  const { setWebGPUEagerFn, setWebgpuRNN } = await import('../dispatcher/jit_dispatch.js');
+  await mod.ensureWebGPUEager();
+  setWebGPUEagerFn(mod.webgpuEagerOp);
+  setWebgpuRNN(mod.webgpuRNN);
+  _webgpuMod = mod;
   return mod;
 }
 
@@ -161,17 +167,17 @@ registerMeasurer('wasm', measureWasm);
 
 registerBackend('webgpu', {
   instantiate(kernel) {
-    return getWebGPURuntime().then(m => m.instantiateWebGPU(kernel));
+    return preloadWebGPU().then(m => m.instantiateWebGPU(kernel));
   },
   runSync() {
     throw new Error('WebGPU kernel requires async execution — use runAsync()');
   },
   async runAsync(inst, tensorArgs, shapeValues) {
-    const { runWebGPUKernel } = await getWebGPURuntime();
+    const { runWebGPUKernel } = await preloadWebGPU();
     await runWebGPUKernel(inst, tensorArgs, shapeValues);
   },
   async runPlan(plan, slots, steps) {
-    const { runWebGPUPlan } = await getWebGPURuntime();
+    const { runWebGPUPlan } = await preloadWebGPU();
     await runWebGPUPlan(plan, slots, steps);
   },
   isAsync() { return true; },

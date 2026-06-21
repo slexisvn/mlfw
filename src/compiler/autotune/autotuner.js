@@ -11,7 +11,7 @@ import { classifyBlock } from '../schedule/rules.js';
 import { BlockTuningSession, gpuThreadBlockSize } from './session.js';
 import { clonePrimFunc } from './tune_ir.js';
 import { TaskScheduler } from './task_scheduler.js';
-import { getMeasurer } from '../runtime/measurer_registry.js';
+import { getMeasurer } from '../../runtime/measurer_registry.js';
 
 function resolveMeasurer(target) {
   if (target.isCPU()) return null;

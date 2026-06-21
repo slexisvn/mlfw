@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { tensor, sum, mean, mul, Adam, log_softmax, softmax, CrossEntropyLoss, Linear, relu, cat } from '../../../src/index.js';
 import { GPU_DEVICE } from '../../../src/tensor/types/device.js';
 import { noGrad } from '../../../src/autograd/grad_mode.js';
-import { preloadCudaRuntime } from '../../../src/compiler/runtime/backend_registry.js';
+import { preloadCudaRuntime } from '../../../src/runtime/backend_registry.js';
 import { cudaDeps } from './cuda-setup.js';
 
 const flat = (v) => Array.from(v && v.contiguous ? v.contiguous().data : v.data);
@@ -16,7 +16,7 @@ describe.skipIf(!cudaDeps)('CUDA eager device-resident ops match CPU', () => {
   let resident;
   beforeAll(async () => {
     await preloadCudaRuntime();
-    resident = await import('../../../src/io/node/cuda/resident.js');
+    resident = await import('../../../src/runtime/node/cuda/resident.js');
   });
   afterAll(() => { if (resident) resident.setEagerDeferred(false); });
 

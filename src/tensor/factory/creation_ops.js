@@ -30,26 +30,23 @@ export function empty(shape, opts) {
   return _makeTensor(shape, dtype, device, requiresGrad);
 }
 
-export function zeros(shape, opts) {
+function _filled(shape, opts, value) {
   const t = empty(shape, opts);
   const data = t.data;
-  if (data) data.fill(0);
+  if (data) { data.fill(value); return t; }
+  if (t.device && t.device.type === 'meta') {
+    const r = empty(shape, { dtype: opts?.dtype });
+    r.data.fill(value);
+    return r;
+  }
   return t;
 }
 
-export function ones(shape, opts) {
-  const t = empty(shape, opts);
-  const data = t.data;
-  if (data) data.fill(1);
-  return t;
-}
+export function zeros(shape, opts) { return _filled(shape, opts, 0); }
 
-export function full(shape, value, opts) {
-  const t = empty(shape, opts);
-  const data = t.data;
-  if (data) data.fill(value);
-  return t;
-}
+export function ones(shape, opts) { return _filled(shape, opts, 1); }
+
+export function full(shape, value, opts) { return _filled(shape, opts, value); }
 
 export function randn(shape, opts) {
   const t = empty(shape, opts);

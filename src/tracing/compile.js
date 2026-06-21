@@ -5,7 +5,7 @@ import { withIncludedKeys } from '../dispatcher/guard.js';
 import { Compiler } from '../compiler/pipeline/compiler.js';
 import { CPUTarget } from '../backend/target.js';
 import { tensorToContiguous, wrapResult } from '../dispatcher/jit_dispatch.js';
-import { RuntimeTensor } from '../compiler/runtime/runtime.js';
+import { RuntimeTensor } from '../runtime/runtime.js';
 import { typedArrayCtor } from '../tensor/types/dtype.js';
 import { computeNumel } from '../tensor/utils/shape_utils.js';
 

@@ -70,21 +70,68 @@ describe('parallel persistent-RNN kernel (single-workgroup)', () => {
   it('switches to per-step host-loop dispatch when the scan exceeds the smem budget', () => {
     const { plan, result } = lstmSource(32, 64, 4, 8);
     expect(plan).toBeTruthy();
-    expect(plan.scanLoop).toBeTruthy();
-    expect(plan.scanLoop.T).toBe(4);
-    expect(plan.scanLoop.carry.length).toBe(2);
-    expect(plan.scanLoop.carry.every(c => c.a !== c.b)).toBe(true);
-    expect(plan.scanLoop.loopEnd).toBeGreaterThan(plan.scanLoop.loopStart);
+    expect(plan.scanLoops).toBeTruthy();
+    expect(plan.scanLoops.length).toBe(1);
+    const sl = plan.scanLoops[0];
+    expect(sl.T).toBe(4);
+    expect(sl.carry.length).toBe(2);
+    expect(sl.carry.every(c => c.a !== c.b)).toBe(true);
+    expect(sl.loopEnd).toBeGreaterThan(sl.loopStart);
     expect(result.listKernels().length).toBeGreaterThan(1);
     const parallel = result.listKernels().filter(n => workgroupSize(result.getSource(n))[0] > 1);
     expect(parallel.length).toBeGreaterThan(0);
   });
 });
 
+function multiScanPlan(buildFn, inputs, name) {
+  const mod = trace(buildFn, inputs, { name });
+  const func = mod.functions().next().value;
+  const result = compileGraph(func, WebGPUTarget(), { scheduling: { enabled: true } });
+  return result.module.executionPlan;
+}
+
+describe('multi-scan models compile to N per-step scan loops (regression: single-scan bail)', () => {
+  it('a stacked 2-layer LSTM emits 2 scan loops, not a monolithic/single-scan fallback', () => {
+    const m = new nn.LSTM(8, 300, 2, false);
+    const lin = new nn.Linear(300, 12);
+    const inp = nn.tensor(Array.from({ length: 4 }, () =>
+      Array.from({ length: 1 }, () => Array.from({ length: 8 }, (_, k) => 0.05 * (k + 1)))));
+    const plan = multiScanPlan((x) => lin.forward(m.forward(x)[0].reshape([4, 300])), [inp], 'stack2');
+    expect(plan).toBeTruthy();
+    expect(plan.scanLoops).toBeTruthy();
+    expect(plan.scanLoops.length).toBe(2);
+  });
+
+  it('a seq2seq (2-layer encoder + 2-layer decoder + attention) emits 4 scan loops with interleaved segments', () => {
+    const V = 40, E = 16, H = 300, T = 4, A = 3;
+    const emb = new nn.Embedding(V, E), enc = new nn.LSTM(E, H, 2, true), dec = new nn.LSTM(E, H, 2, true), head = new nn.Linear(2 * H, V);
+    const q = nn.tensor([Array.from({ length: T }, (_, i) => i % V)], { dtype: 'i32' });
+    const din = nn.tensor([Array.from({ length: A }, (_, i) => i % V)], { dtype: 'i32' });
+    const fwd = (qq, d2) => {
+      const e = enc.forward(emb.forward(qq))[0];
+      const d = dec.forward(emb.forward(d2))[0];
+      const w = nn.softmax(nn.matmul(d, e.transpose(1, 2)), 2);
+      const cm = nn.cat([d, nn.matmul(w, e)], 2);
+      return head.forward(cm.reshape([A, 2 * H]));
+    };
+    const plan = multiScanPlan(fwd, [q, din], 's2s');
+    expect(plan).toBeTruthy();
+    expect(plan.scanLoops).toBeTruthy();
+    expect(plan.scanLoops.length).toBe(4);
+    expect(plan.steps.length).toBeGreaterThan(plan.scanLoops.length);
+    for (const sl of plan.scanLoops) {
+      expect(sl.T).toBeGreaterThan(0);
+      expect(sl.loopEnd).toBeGreaterThan(sl.loopStart);
+      expect(sl.carry.length).toBe(2);
+      expect(sl.carry.every(c => c.a !== c.b)).toBe(true);
+    }
+  });
+});
+
 describe('thread-distributed local intermediates are scalar-replaced (no huge private arrays)', () => {
   it('fused elementwise kernels use scalar registers, not full-size per-thread arrays', () => {
     const { plan, result } = lstmSource(64, 96, 4, 64);
-    expect(plan.scanLoop).toBeTruthy();
+    expect(plan.scanLoops).toBeTruthy();
     for (const name of result.listKernels()) {
       const src = result.getSource(name);
       const bigPrivate = [...src.matchAll(/var (_lt\d+): array<\w+, (\d+)>/g)].filter(m => Number(m[2]) > 256);
