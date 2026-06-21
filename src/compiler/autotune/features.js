@@ -5,7 +5,8 @@ export const STATEMENT_FEATURE_SCHEMA = [
   'parallelLoops', 'vectorizedLoops', 'unrolledLoops', 'threadBoundLoops', 'serialLoops',
   'threadBlockSize', 'gridSize', 'underReduction',
   'numMathOps', 'numExternCalls', 'numReads', 'numWrites',
-  'stride1Accesses', 'stridedAccesses', 'reuseCount', 'touchedBytes'
+  'stride1Accesses', 'stridedAccesses', 'reuseCount', 'touchedBytes',
+  'arithmeticIntensity', 'vectorized', 'parallelized', 'innermostExtent'
 ];
 
 class ScheduleFeatures {
@@ -137,6 +138,8 @@ export class FeatureExtractor {
       if (acc.indices) for (const idx of acc.indices) FeatureExtractor._collectVars(idx, used);
       for (const name of loopVarNames) if (!used.has(name)) reuse++;
     }
+    const innermost = loopStack.length > 0 ? loopStack[loopStack.length - 1] : null;
+    const innermostExtent = innermost && innermost.extent && innermost.extent.type === 'IntImmNode' ? innermost.extent.value : 0;
     const fields = {
       iterCount, depth: loopStack.length,
       parallelLoops: par, vectorizedLoops: vec, unrolledLoops: unr,
@@ -146,7 +149,11 @@ export class FeatureExtractor {
       numMathOps: arith.math, numExternCalls: arith.extern,
       numReads: accesses.length - 1, numWrites: 1,
       stride1Accesses: stride1, stridedAccesses: strided,
-      reuseCount: reuse, touchedBytes: touched
+      reuseCount: reuse, touchedBytes: touched,
+      arithmeticIntensity: touched > 0 ? (arith.math + arith.extern) / touched : 0,
+      vectorized: vec > 0 ? 1 : 0,
+      parallelized: (par + thr) > 0 ? 1 : 0,
+      innermostExtent
     };
     return STATEMENT_FEATURE_SCHEMA.map(n => fields[n] || 0);
   }

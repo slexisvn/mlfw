@@ -22,6 +22,22 @@ export function register() {
     return wrapInLoops(block, loopVars, outBuf.shape, extentNodes);
   });
 
+  registerLoweringRule('reverse', (ctx, op, inputs, outputs) => {
+    const dims = new Set(op.getAttr('dimensions'));
+    const inBuf = inputs[0];
+    const outBuf = outputs[0];
+    const { loopVars, loopBinds, indices: outIndices, extentNodes } = makeLoopNest(ctx, outBuf.shape, outBuf);
+    const inIndices = new Array(inBuf.shape.length);
+    for (let i = 0; i < inBuf.shape.length; i++) {
+      inIndices[i] = dims.has(i)
+        ? new MathOpNode('-', new MathOpNode('-', extentNodes[i], new IntImmNode(1)), outIndices[i])
+        : outIndices[i];
+    }
+    const store = new BufferStoreNode(outBuf, outIndices, new BufferLoadNode(inBuf, inIndices));
+    const block = new BlockNode(ctx.blockName('reverse_block'), loopBinds, [{ buffer: inBuf }], [{ buffer: outBuf }], store);
+    return wrapInLoops(block, loopVars, outBuf.shape, extentNodes);
+  });
+
   registerLoweringRule('reshape', (ctx, op, inputs, outputs) => {
     const inBuf = inputs[0];
     const outBuf = outputs[0];

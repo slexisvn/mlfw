@@ -79,3 +79,39 @@ registerVJPRule('matmul', (ctx) => {
 
   return [gradLhs, gradRhs];
 });
+
+registerVJPRule('conv', (ctx) => {
+  const grad = ctx.gradOutputs[0];
+  const [input, kernel] = ctx.operands;
+  const b = ctx.builder;
+  const strides = ctx.op.getAttr('strides');
+  const padding = ctx.op.getAttr('padding');
+  const dilation = ctx.op.getAttr('dilation') || strides.map(() => 1);
+  const groups = ctx.op.getAttr('groups') || 1;
+  const inLayout = ctx.op.getAttr('input_layout');
+  const kLayout = ctx.op.getAttr('kernel_layout');
+
+  const supported = strides.length === 2 && strides.every(s => s === 1) &&
+    dilation.every(d => d === 1) && groups === 1 && inLayout === 'NCHW' && kLayout === 'OIHW';
+  if (!supported) {
+    throw new Error('conv VJP supports only 2D stride-1 dilation-1 groups-1 NCHW/OIHW conv');
+  }
+
+  const kShape = kernel.type.shape;
+  const KH = kShape[2], KW = kShape[3];
+  const [padH, padW] = padding;
+
+  const wFlip = b.reverse(b.transpose(kernel, [1, 0, 2, 3]).getResult(0), [2, 3]).getResult(0);
+  const fullPad = [
+    [KH - 1 - padH[0], KH - 1 - padH[1]],
+    [KW - 1 - padW[0], KW - 1 - padW[1]]
+  ];
+  const dInput = b.conv(grad, wFlip, [1, 1], fullPad).getResult(0);
+
+  const xSwap = b.transpose(input, [1, 0, 2, 3]).getResult(0);
+  const gSwap = b.transpose(grad, [1, 0, 2, 3]).getResult(0);
+  const dWconv = b.conv(xSwap, gSwap, [1, 1], [padH, padW]).getResult(0);
+  const dWeight = b.transpose(dWconv, [1, 0, 2, 3]).getResult(0);
+
+  return [dInput, dWeight];
+});

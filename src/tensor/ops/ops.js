@@ -1,10 +1,11 @@
 import { dispatcher, computeKeySet } from '../../dispatcher/dispatcher.js';
 import { getHandle } from './registry.js';
 import { scalar } from '../factory/from_ops.js';
+import { getGpuMatmul } from '../../dispatcher/jit_dispatch.js';
 
 function _asTensor(value, ref) {
   if (value && value._impl) return value;
-  return scalar(value, { dtype: ref.dtype });
+  return scalar(value, { dtype: ref.dtype, device: ref.device });
 }
 
 function _dispatch(name, ...args) {
@@ -62,7 +63,11 @@ export function argmax(self, dim, keepdim) { return _dispatch('argmax', self, di
 export function argmin(self, dim, keepdim) { return _dispatch('argmin', self, dim, keepdim); }
 export function prod(self, dim, keepdim) { return _dispatch('prod', self, dim, keepdim); }
 
-export function matmul(self, other) { return _dispatch('matmul', self, other); }
+export function matmul(self, other) {
+  const h = getGpuMatmul();
+  if (h) { const r = h(self, other); if (r !== null) return r; }
+  return _dispatch('matmul', self, other);
+}
 export function dot(self, other) { return _dispatch('dot', self, other); }
 
 export function cat(tensors, dim) { return _dispatch('cat', tensors, dim); }

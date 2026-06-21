@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { getSketchesForBlock, createMultiLevelTileCPUSketch } from '../../../src/compiler/autotune/search_space.js';
+import { getSketchesForBlock } from '../../../src/compiler/autotune/search_space.js';
+import { createMultiLevelTilingSketch } from '../../../src/compiler/autotune/tiling.js';
+import { getTileStructure } from '../../../src/compiler/autotune/tile_structure.js';
+import { classifyBlock } from '../../../src/compiler/schedule/rules.js';
 import { buildBlockMap } from '../../../src/compiler/autotune/workload_key.js';
 import { Buffer } from '../../../src/compiler/ir/tensor/buffer.js';
 import {
@@ -94,8 +97,8 @@ describe('Ansor-style sketch auto-generation derives sketches from block structu
 
   it('derives multi-level-tiling + reduction sketches for a compute-intensive (reduction+spatial+2-read) block', () => {
     const pf = matmulPrimFunc('gemm');
-    expect(getSketchesForBlock(pf, 'gemm', CPUTarget()).map(s => s.name)).toEqual(['mlt_cpu', 'reduction_cpu']);
-    expect(getSketchesForBlock(pf, 'gemm', WebGPUTarget()).map(s => s.name)).toEqual(['matmul_gpu', 'reduction_gpu']);
+    expect(getSketchesForBlock(pf, 'gemm', CPUTarget()).map(s => s.name)).toEqual(['mlt_cpu', 'ssrsrs_cpu', 'rfactor', 'reduction_cpu']);
+    expect(getSketchesForBlock(pf, 'gemm', WebGPUTarget()).map(s => s.name)).toEqual(['mlt_gpu', 'reduction_gpu']);
   });
 
   it('selection is structural, not by block name: a matmul-NAMED elementwise block gets the elementwise sketch', () => {
@@ -105,19 +108,54 @@ describe('Ansor-style sketch auto-generation derives sketches from block structu
   });
 
   it('the generated multi-level-tiling sketch produces only valid schedules across its parameter space', () => {
-    const sketch = createMultiLevelTileCPUSketch();
-    const paramSets = [
-      { tile_s0: 4, tile_s1: 4, tile_k: 2 },
-      { tile_s0: 2, tile_s1: 1, tile_k: 4 },
-      { tile_s0: 8, tile_s1: 8, tile_k: 8 },
-      { tile_s0: 1, tile_s1: 1, tile_k: 1 },
-      { tile_s0: 256, tile_s1: 128, tile_k: 32 },
-    ];
-    for (const params of paramSets) {
-      const sch = new Schedule(matmulPrimFunc('g'));
+    const info = classifyBlock(matmulPrimFunc('g', 8, 8, 8), 'g');
+    const sketch = createMultiLevelTilingSketch(info, getTileStructure(CPUTarget()));
+    expect(sketch).not.toBeNull();
+    const pick = (i) => {
+      const params = {};
+      for (const v of sketch.variables) params[v.name] = v.candidates[i % v.candidates.length];
+      return params;
+    };
+    for (let i = 0; i < 12; i++) {
+      const params = pick(i);
+      const sch = new Schedule(matmulPrimFunc('g', 8, 8, 8));
       sketch.instantiate(params)(sch, 'g', CPUTarget());
       expect(ScheduleValidator.validate(sch.func), JSON.stringify(params)).toHaveLength(0);
     }
+  });
+
+  it('keeps a reduction loop innermost across the whole tiling parameter space (codegen init contract)', () => {
+    const reductionVars = classifyBlock(matmulPrimFunc('g', 8, 8, 8), 'g').reductionLoopVars;
+    const sketch = createMultiLevelTilingSketch(classifyBlock(matmulPrimFunc('g', 8, 8, 8), 'g'), getTileStructure(CPUTarget()));
+    const pick = (i) => {
+      const params = {};
+      for (const v of sketch.variables) params[v.name] = v.candidates[i % v.candidates.length];
+      return params;
+    };
+    for (let i = 0; i < 12; i++) {
+      const params = pick(i);
+      const sch = new Schedule(matmulPrimFunc('g', 8, 8, 8));
+      sketch.instantiate(params)(sch, 'g', CPUTarget());
+      const loops = sch.getLoops('g');
+      const innermost = loops[loops.length - 1];
+      expect(reductionVars.has(innermost.loopVar.name), JSON.stringify(params)).toBe(true);
+    }
+  });
+
+  it('ScheduleValidator rejects a reduction block whose innermost loop is spatial (the init re-zero bug class)', () => {
+    const sch = new Schedule(matmulPrimFunc('g', 4, 4, 4));
+    const [m, n, k] = sch.getLoops('g');
+    sch.reorder(m, k, n);
+    const errors = ScheduleValidator.validate(sch.func);
+    expect(errors.some(e => /reduction/i.test(e))).toBe(true);
+  });
+
+  it('ScheduleValidator rejects an init-bearing block with two nested reduction loops (split-K re-zero bug class)', () => {
+    const sch = new Schedule(matmulPrimFunc('g', 4, 4, 8));
+    const [, , k] = sch.getLoops('g');
+    sch.split(k, 2);
+    const errors = ScheduleValidator.validate(sch.func);
+    expect(errors.some(e => /reduction/i.test(e))).toBe(true);
   });
 });
 
@@ -127,6 +165,7 @@ describe('autotune end-to-end: tuned output matches baseline on non-power-of-2 s
   const CASES = [
     { name: 'mm_5x7x3', inTypes: [T([5, 7]), T([7, 3])], build: (b, a) => b.matmul(a[0], a[1]), outShape: [5, 3] },
     { name: 'mm_relu_13x5x11', inTypes: [T([13, 5]), T([5, 11])], build: (b, a) => b.relu(b.matmul(a[0], a[1]).getResult(0)), outShape: [13, 11] },
+    { name: 'mm_batched_3x5x7x4', inTypes: [T([3, 5, 7]), T([3, 7, 4])], build: (b, a) => b.matmul(a[0], a[1]), outShape: [3, 5, 4] },
     { name: 'mm_reduce_7x5', inTypes: [T([7, 5]), T([5, 7])], build: (b, a) => b.reduce(b.matmul(a[0], a[1]).getResult(0), b.scalarConstant(0, F).getResult(0), [1], 'sum'), outShape: [7] },
     { name: 'ew_reduce_9x7', inTypes: [T([9, 7]), T([9, 7])], build: (b, a) => b.reduce(b.tanh(b.mul(a[0], a[1]).getResult(0)).getResult(0), b.scalarConstant(0, F).getResult(0), [0], 'sum'), outShape: [7] },
   ];
@@ -259,7 +298,7 @@ describe('shared TuningDatabase reproduces tuned schedules across sessions', () 
     const db = new TuningDatabase();
     const sched = { enabled: true, autotune: true, strategy: 'random', numTrials: 8, seed: 1, tuningDB: db };
 
-    const normalize = (src) => src.replace(/_\d+\b/g, '_N');
+    const normalize = (src) => src.replace(/_\d+/g, '_N');
     const first = compileGraph(mk(), CPUTarget(), { scheduling: { ...sched } });
     expect(db.size).toBeGreaterThan(0);
     const tunedSource = normalize(first.getSource('mm_xsess'));

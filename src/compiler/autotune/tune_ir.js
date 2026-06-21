@@ -83,7 +83,7 @@ export function clonePrimFunc(primFunc) {
   return cloneNode(primFunc);
 }
 
-export function cloneBlockSubtree(block) {
+function cloneBlockSubtree(block) {
   const cloneNode = (node) => {
     if (!node || typeof node !== 'object') return node;
     if (Array.isArray(node)) return node.map(cloneNode);

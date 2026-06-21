@@ -27,6 +27,54 @@ function verifyUnaryFloat(op) {
 
 export function register(registry) {
   registry.register(new OpDef({
+    name: 'all_reduce',
+    numOperands: 1,
+    numResults: 1,
+    traits: [OpTrait.OPAQUE],
+    attrs: [
+      { name: 'reduce_op', type: 'string', required: false },
+      { name: 'mesh_axis', type: 'number', required: false }
+    ],
+    inferResultTypes: inferSameAsInput
+  }));
+
+  registry.register(new OpDef({
+    name: 'all_gather',
+    numOperands: 1,
+    numResults: 1,
+    traits: [OpTrait.OPAQUE],
+    attrs: [
+      { name: 'mesh_axis', type: 'number', required: false },
+      { name: 'gather_dim', type: 'number', required: false }
+    ],
+    inferResultTypes(operandTypes) {
+      const x = operandTypes[0];
+      if (!(x instanceof TensorType)) return null;
+      const axis = 0;
+      const gatherDim = 1;
+      const shape = [...x.shape];
+      shape[gatherDim] = shape[gatherDim] * shape[axis];
+      return [new TensorType(shape, x.dtype)];
+    }
+  }));
+
+  registry.register(new OpDef({
+    name: 'scaled_dot_product_attention',
+    numOperands: 3,
+    numResults: 1,
+    traits: [OpTrait.OPAQUE],
+    attrs: [
+      { name: 'scale', type: 'number', required: true },
+      { name: 'causal', type: 'boolean', required: false }
+    ],
+    inferResultTypes(operandTypes) {
+      const q = operandTypes[0], v = operandTypes[2];
+      if (!(q instanceof TensorType) || !(v instanceof TensorType)) return null;
+      return [new TensorType([...q.shape.slice(0, q.rank - 1), v.shape[v.rank - 1]], q.dtype)];
+    }
+  }));
+
+  registry.register(new OpDef({
     name: 'softmax',
     numOperands: 1,
     numResults: 1,

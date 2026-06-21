@@ -201,3 +201,35 @@ describe('QuantizationParams per-channel from constant array', () => {
     expect(ptErr / pcErr).toBeGreaterThan(1.5);
   });
 });
+
+describe('INT4 group-wise quantization (GPTQ/AWQ-style)', () => {
+  const N = 64, G = 16;
+  const data = Array.from({ length: N }, (_, i) => Math.sin(i * 0.9) * (1 + (i % G) * 0.1));
+
+  it('produces one scale per group at 4 bits with values in the INT4 range', () => {
+    const qp = QuantizationParams.fromConstantArrayPerGroup(data, G, ScalarType.I8, 4);
+    expect(qp.isPerGroup()).toBe(true);
+    expect(qp.numBits).toBe(4);
+    expect(qp.scale.length).toBe(Math.ceil(N / G));
+    const q = qp.quantizeArrayPerGroup(data);
+    expect(q.every(v => Number.isInteger(v) && v >= -7 && v <= 7)).toBe(true);
+  });
+
+  it('round-trips within the per-group quantization step', () => {
+    const qp = QuantizationParams.fromConstantArrayPerGroup(data, G, ScalarType.I8, 4);
+    const deq = qp.dequantizeArrayPerGroup(qp.quantizeArrayPerGroup(data));
+    let e = 0;
+    for (let i = 0; i < N; i++) e = Math.max(e, Math.abs(deq[i] - data[i]));
+    expect(e).toBeLessThanOrEqual(Math.max(...qp.scale) / 2 + 1e-9);
+  });
+
+  it('beats per-tensor INT4 accuracy and serializes', () => {
+    const grp = QuantizationParams.fromConstantArrayPerGroup(data, G, ScalarType.I8, 4);
+    const pt = QuantizationParams.fromConstantArray(data, QuantizationScheme.PER_TENSOR_SYMMETRIC, ScalarType.I8, 4);
+    const err = (deq) => { let e = 0; for (let i = 0; i < N; i++) e = Math.max(e, Math.abs(deq[i] - data[i])); return e; };
+    const grpErr = err(grp.dequantizeArrayPerGroup(grp.quantizeArrayPerGroup(data)));
+    const ptErr = err(pt.dequantizeArray(pt.quantizeArray(data)));
+    expect(grpErr).toBeLessThan(ptErr);
+    expect(QuantizationParams.deserialize(grp.serialize()).equals(grp)).toBe(true);
+  });
+});

@@ -51,6 +51,39 @@ export class DecompositionPass extends FunctionPass {
   }
 }
 
+registerDecomposition('stop_gradient', (op) => {
+  op.replaceAllResultsWith([op.getOperand(0)]);
+  op.erase();
+});
+
+registerDecomposition('all_reduce', (op, b) => {
+  const x = op.getOperand(0);
+  const axis = op.getAttr('mesh_axis') ?? 0;
+  const reduceOp = op.getAttr('reduce_op') || 'sum';
+  const shape = x.type.shape;
+  const dtype = x.type.dtype;
+  const init = reduceOp === 'max' ? -Infinity : (reduceOp === 'min' ? Infinity : 0);
+  const red = b.reduce(x, b.scalarConstant(init, dtype).getResult(0), [axis], reduceOp).getResult(0);
+  const bcastDims = [];
+  for (let i = 0; i < shape.length; i++) if (i !== axis) bcastDims.push(i);
+  const out = b.broadcast(red, shape, bcastDims).getResult(0);
+  op.replaceAllResultsWith([out]);
+  op.erase();
+});
+
+registerDecomposition('all_gather', (op, b) => {
+  const x = op.getOperand(0);
+  const shape = x.type.shape;
+  const Ndev = shape[0], S = shape[1], rest = shape.slice(2);
+  const flat = b.reshape(x, [Ndev * S, ...rest]).getResult(0);
+  const outShape = [Ndev, Ndev * S, ...rest];
+  const bcastDims = [];
+  for (let i = 1; i < outShape.length; i++) bcastDims.push(i);
+  const out = b.broadcast(flat, outShape, bcastDims).getResult(0);
+  op.replaceAllResultsWith([out]);
+  op.erase();
+});
+
 registerDecomposition('softmax', (op, b) => {
   const input = op.getOperand(0);
   const axis = op.getAttr('axis');

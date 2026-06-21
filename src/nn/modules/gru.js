@@ -15,7 +15,7 @@ export class GRUCell extends Module {
   }
 
   forward(input, hidden = null) {
-    const h = hidden !== null ? hidden : zeros([input.shape[0], this.hiddenSize]);
+    const h = hidden !== null ? hidden : zeros([input.shape[0], this.hiddenSize], { device: input.device });
     const gx = this.x2h.forward(input);
     const gh = this.h2h.forward(h);
     const [xr, xz, xn] = split(gx, this.hiddenSize, -1);
@@ -48,7 +48,7 @@ export class GRU extends Module {
     let layerIn = x;
     const finalHs = [];
     for (let l = 0; l < this.numLayers; l++) {
-      const hInit = h0 !== null ? select(h0, 0, l) : zeros([batch, this.hiddenSize]);
+      const hInit = h0 !== null ? select(h0, 0, l) : zeros([batch, this.hiddenSize], { device: x.device });
       const cell = this.cells[l];
       const [hN, ys] = scan((h, xt) => {
         const h2 = cell.forward(xt, h);

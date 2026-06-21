@@ -639,6 +639,7 @@ describe('CPUCodegen.generate — unrolled loops', () => {
     expect(src).toMatch(/const i = 1/);
     expect(src).toMatch(/const i = 2/);
   });
+
 });
 
 describe('CPUCodegen.generate — zero-fill skip', () => {

@@ -32,6 +32,8 @@ export function compileToPTX(source, kernelName) {
   if (source.includes('__half')) includes += '#include <cuda_fp16.h>\n';
   if (source.includes('__nv_bfloat16')) includes += '#include <cuda_bf16.h>\n';
   if (/u?int(8|16|64)_t/.test(source)) includes += STDINT_TYPEDEFS;
+  if (/mma_sync|wmma::|fragment</.test(source)) includes += '#include <mma.h>\nusing namespace nvcuda::wmma;\n';
+  if (source.includes('__pipeline_memcpy_async')) includes += '#include <cuda_pipeline.h>\n';
   const wrapped = includes + PREAMBLE + 'extern "C" {\n' + source + '\n}\n';
   const prog = [null];
   checkCU('nvrtcCreateProgram', nv.createProgram(prog, wrapped, kernelName + '.cu', 0, null, null));

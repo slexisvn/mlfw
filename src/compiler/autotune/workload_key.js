@@ -29,6 +29,24 @@ export function computeWorkloadKey(primFunc, blockName, target, blockMap = null)
     collectBlockOps(block.body, ops);
     if (block.initBody) collectBlockOps(block.initBody, ops);
     parts.push(ops.join(';'));
+
+    if (block.writes.length === 1) {
+      const outName = block.writes[0].buffer.name;
+      const consumers = [];
+      for (const other of map.values()) {
+        if (other === block || !other.reads) continue;
+        if (other.reads.some(r => r.buffer && r.buffer.name === outName)) {
+          const cops = [];
+          collectBlockOps(other.body, cops);
+          if (other.initBody) collectBlockOps(other.initBody, cops);
+          consumers.push(`${other.name}#${cops.join(';')}`);
+        }
+      }
+      if (consumers.length > 0) {
+        consumers.sort();
+        parts.push(`consumers:${consumers.join('|')}`);
+      }
+    }
   }
 
   parts.push(target.name);

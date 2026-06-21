@@ -1,5 +1,32 @@
 import { describe, it, expect } from 'vitest';
 import { RuntimeModule } from '../../../src/compiler/runtime/runtime.js';
+import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
+import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
+import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
+import { CPUTarget } from '../../../src/backend/target.js';
+
+describe('RuntimeModule AOT serialize/deserialize (no recompile)', () => {
+  it('reconstructs a runnable module from serialized kernels and runs identically', () => {
+    const t = (s) => new TensorType(s, ScalarType.F32);
+    const fn = buildFunction('addmul', [t([4]), t([4])], [t([4])], (b, [x, y]) => {
+      b.returnOp([b.mul(b.add(x, y).getResult(0), x).getResult(0)]);
+    });
+    const rm = compileGraph(fn, CPUTarget()).module;
+    const k = rm.listKernels()[0];
+    const a = new Float32Array([1, 2, 3, 4]);
+    const bb = new Float32Array([5, 6, 7, 8]);
+    const o1 = new Float32Array(4);
+    rm.run(k, a, bb, o1);
+
+    const blob = JSON.parse(JSON.stringify(rm.serialize()));
+    const restored = RuntimeModule.deserialize(blob);
+    const o2 = new Float32Array(4);
+    restored.run(restored.listKernels()[0], a, bb, o2);
+
+    expect([...o2]).toEqual([...o1]);
+    expect(JSON.stringify(restored.serialize())).toBe(JSON.stringify(blob));
+  });
+});
 
 describe('RuntimeModule._extractShapeParams tensor identity', () => {
   it('resolves each shape param from its own named buffer', () => {

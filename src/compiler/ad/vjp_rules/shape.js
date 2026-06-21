@@ -7,6 +7,10 @@ registerVJPRule('reshape', (ctx) => {
   return [ctx.builder.reshape(grad, inputShape).getResult(0)];
 });
 
+registerVJPRule('reverse', (ctx) => {
+  return [ctx.builder.reverse(ctx.gradOutputs[0], ctx.op.getAttr('dimensions')).getResult(0)];
+});
+
 registerVJPRule('transpose', (ctx) => {
   const grad = ctx.gradOutputs[0];
   const permutation = ctx.op.getAttr('permutation');

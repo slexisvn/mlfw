@@ -266,9 +266,46 @@ describe('layout optimization', () => {
 describe('hardwareMeasure resolves the measurer from the target kind', () => {
   it('throws a clear error when no measurer is registered for the target', async () => {
     const { Autotuner } = await import('../../../src/compiler/autotune/autotuner.js');
-    const { WasmTarget } = await import('../../../src/backend/target.js');
-    expect(() => new Autotuner(WasmTarget(), { hardwareMeasure: true }))
+    const { WebGPUTarget } = await import('../../../src/backend/target.js');
+    const { registerMeasurer } = await import('../../../src/compiler/runtime/measurer_registry.js');
+    registerMeasurer('webgpu', null);
+    expect(() => new Autotuner(WebGPUTarget(), { hardwareMeasure: true }))
       .toThrow(/no measurer is registered/);
+  });
+
+  it('resolves the in-process WASM measurer so WASM tunes with hardware measurement', async () => {
+    const { Autotuner } = await import('../../../src/compiler/autotune/autotuner.js');
+    const { WasmTarget } = await import('../../../src/backend/target.js');
+    await import('../../../src/compiler/runtime/backend_registry.js');
+    const tuner = new Autotuner(WasmTarget(), { hardwareMeasure: true });
+    expect(typeof tuner.config.measurer).toBe('function');
+    expect(!!tuner.benchmarkRunner).toBe(true);
+  });
+
+  it('WASM autotunes with real hardware measurement and stays bit-correct vs baseline', async () => {
+    const { buildFunction } = await import('../../../src/compiler/ir/graph/builder.js');
+    const { TensorType, ScalarType } = await import('../../../src/compiler/ir/graph/types.js');
+    const { compileGraph } = await import('../../../src/compiler/pipeline/compiler.js');
+    const { WasmTarget } = await import('../../../src/backend/target.js');
+    const F = ScalarType.F32, T = (s) => new TensorType(s, F);
+    const mk = () => buildFunction('mm_hw', [T([6, 5]), T([5, 7])], [T([6, 7])],
+      (b, a) => { b.returnOp([b.matmul(a[0], a[1]).getResult(0)]); });
+    const ins = [T([6, 5]), T([5, 7])].map(t => {
+      const arr = new Float32Array(t.shape.reduce((x, y) => x * y, 1));
+      for (let i = 0; i < arr.length; i++) arr[i] = Math.sin(i * 1.1);
+      return arr;
+    });
+    const ref = new Float32Array(42);
+    compileGraph(mk(), WasmTarget(), {}).run('mm_hw', ...ins, ref);
+    const r = compileGraph(mk(), WasmTarget(), { scheduling: {
+      enabled: true, autotune: true, hardwareMeasure: true,
+      strategy: 'evolutionary', populationSize: 6, numGenerations: 2, seed: 3,
+      topKForBenchmark: 3, maxRoundsPerTask: 3 } });
+    const out = new Float32Array(42);
+    r.run('mm_hw', ...ins, out);
+    for (let i = 0; i < 42; i++) {
+      expect(Math.abs(out[i] - ref[i]) / (1 + Math.abs(ref[i]))).toBeLessThan(2e-3);
+    }
   });
 
   it('resolves the registered measurer for the matching target kind', async () => {

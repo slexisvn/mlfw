@@ -1,4 +1,13 @@
 import { FeatureExtractor } from './features.js';
+import { GradientBoostedTrees } from './gbt.js';
+
+function aggregateStatements(stmtVecs) {
+  const dim = stmtVecs[0].length;
+  const out = new Array(dim + 1).fill(0);
+  for (const v of stmtVecs) for (let i = 0; i < dim; i++) out[i] += v[i] || 0;
+  out[dim] = stmtVecs.length;
+  return out;
+}
 
 class CostEstimate {
   constructor(score, breakdown) {
@@ -114,152 +123,46 @@ export class AnalyticalCostModel {
 
 export class LearnedCostModel {
   constructor(state = null, opts = {}) {
-    this.hidden = opts.hidden ?? 8;
-    this.lr = opts.lr ?? 0.05;
-    this.epochs = opts.epochs ?? 2000;
-    this.seed = opts.seed ?? 1;
-    this._net = state || null;
-    this._trainingData = [];
+    this.opts = {
+      numTrees: opts.numTrees ?? 60,
+      maxDepth: opts.maxDepth ?? 3,
+      lr: opts.lr ?? 0.1,
+      minSamples: opts.minSamples ?? 1
+    };
+    this._gbt = state ? GradientBoostedTrees.deserialize(state) : null;
+    this._X = [];
+    this._Y = [];
   }
 
   addSample(stmtVecs, measuredScore) {
     if (!stmtVecs || stmtVecs.length === 0) return;
-    this._trainingData.push({ stmts: stmtVecs, score: measuredScore });
-  }
-
-  _flatten() {
-    const flat = [];
-    for (const s of this._trainingData) for (const v of s.stmts) flat.push(v);
-    return flat;
-  }
-
-  _normalizers(flat) {
-    const dim = flat[0].length;
-    const mean = new Array(dim).fill(0);
-    for (const v of flat) for (let i = 0; i < dim; i++) mean[i] += v[i];
-    for (let i = 0; i < dim; i++) mean[i] /= flat.length;
-    const std = new Array(dim).fill(0);
-    for (const v of flat) for (let i = 0; i < dim; i++) { const d = v[i] - mean[i]; std[i] += d * d; }
-    for (let i = 0; i < dim; i++) std[i] = Math.sqrt(std[i] / flat.length) || 1;
-
-    let yMean = 0;
-    for (const s of this._trainingData) yMean += s.score;
-    yMean /= this._trainingData.length;
-    let yVar = 0;
-    for (const s of this._trainingData) { const d = s.score - yMean; yVar += d * d; }
-    const yStd = Math.sqrt(yVar / this._trainingData.length) || 1;
-    return { mean, std, yMean, yStd };
+    if (!Number.isFinite(measuredScore)) return;
+    this._X.push(aggregateStatements(stmtVecs));
+    this._Y.push(measuredScore);
   }
 
   train() {
-    if (this._trainingData.length === 0) return;
-    const flat = this._flatten();
-    if (flat.length === 0) return;
-    const dim = flat[0].length;
-    const H = this.hidden;
-    const { mean, std, yMean, yStd } = this._normalizers(flat);
-
-    const rng = this._rng();
-    const r1 = 1 / Math.sqrt(dim);
-    const r2 = 1 / Math.sqrt(H);
-    const W1 = Array.from({ length: H }, () => Array.from({ length: dim }, () => (rng() * 2 - 1) * r1));
-    const b1 = new Array(H).fill(0);
-    const W2 = Array.from({ length: H }, () => (rng() * 2 - 1) * r2);
-    let b2 = 0;
-
-    const norm = (v) => { const x = new Array(dim); for (let i = 0; i < dim; i++) x[i] = (v[i] - mean[i]) / std[i]; return x; };
-    const samples = this._trainingData.map(s => ({ xs: s.stmts.map(norm), y: (s.score - yMean) / yStd }));
-
-    const gW1 = Array.from({ length: H }, () => new Array(dim).fill(0));
-    const gW2 = new Array(H).fill(0);
-    const gb1 = new Array(H).fill(0);
-
-    for (let epoch = 0; epoch < this.epochs; epoch++) {
-      for (let n = 0; n < samples.length; n++) {
-        const sample = samples[n];
-        const acts = [];
-        let pred = 0;
-        for (const x of sample.xs) {
-          const a = new Array(H);
-          for (let h = 0; h < H; h++) {
-            let acc = b1[h];
-            const w = W1[h];
-            for (let i = 0; i < dim; i++) acc += w[i] * x[i];
-            a[h] = Math.tanh(acc);
-          }
-          let p = b2;
-          for (let h = 0; h < H; h++) p += W2[h] * a[h];
-          pred += p;
-          acts.push({ x, a });
-        }
-        const dErr = pred - sample.y;
-
-        let gb2 = 0;
-        for (let h = 0; h < H; h++) {
-          gW2[h] = 0;
-          gb1[h] = 0;
-          const gw = gW1[h];
-          for (let i = 0; i < dim; i++) gw[i] = 0;
-        }
-        for (const { x, a } of acts) {
-          gb2 += dErr;
-          for (let h = 0; h < H; h++) {
-            const dZ = dErr * W2[h] * (1 - a[h] * a[h]);
-            gW2[h] += dErr * a[h];
-            const gw = gW1[h];
-            for (let i = 0; i < dim; i++) gw[i] += dZ * x[i];
-            gb1[h] += dZ;
-          }
-        }
-        b2 -= this.lr * gb2;
-        for (let h = 0; h < H; h++) {
-          W2[h] -= this.lr * gW2[h];
-          b1[h] -= this.lr * gb1[h];
-          const w = W1[h];
-          const gw = gW1[h];
-          for (let i = 0; i < dim; i++) w[i] -= this.lr * gw[i];
-        }
-      }
-    }
-
-    this._net = { dim, hidden: H, W1, b1, W2, b2, mean, std, yMean, yStd };
-  }
-
-  _rng() {
-    let s = (this.seed >>> 0) || 1;
-    return () => {
-      s = (s * 1664525 + 1013904223) >>> 0;
-      return s / 0x100000000;
-    };
+    if (this._X.length === 0) return;
+    const gbt = new GradientBoostedTrees(this.opts);
+    gbt.fit(this._X, this._Y);
+    this._gbt = gbt;
   }
 
   predict(stmtVecs) {
-    if (!this._net || !stmtVecs || stmtVecs.length === 0) return 0;
-    const { dim, hidden, W1, b1, W2, b2, mean, std, yMean, yStd } = this._net;
-    let sum = 0;
-    for (const vec of stmtVecs) {
-      let p = b2;
-      for (let h = 0; h < hidden; h++) {
-        let acc = b1[h];
-        const w = W1[h];
-        for (let i = 0; i < dim; i++) acc += w[i] * (((vec[i] || 0) - mean[i]) / std[i]);
-        p += W2[h] * Math.tanh(acc);
-      }
-      sum += p;
-    }
-    return sum * yStd + yMean;
+    if (!this._gbt || !stmtVecs || stmtVecs.length === 0) return 0;
+    return this._gbt.predict(aggregateStatements(stmtVecs));
   }
 
   get trained() {
-    return this._net !== null;
+    return this._gbt !== null;
   }
 
   serialize() {
-    return { net: this._net, numSamples: this._trainingData.length };
+    return { gbt: this._gbt ? this._gbt.serialize() : null, numSamples: this._X.length };
   }
 
   static deserialize(data) {
-    return new LearnedCostModel(data.net || data.weights || null);
+    return new LearnedCostModel(data && data.gbt ? data.gbt : null);
   }
 }
 

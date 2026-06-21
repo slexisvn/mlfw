@@ -94,6 +94,107 @@ registerVJPRule('layer_norm', (ctx) => {
   return [gradInput, gradGamma, gradBeta];
 });
 
+registerVJPRule('scaled_dot_product_attention', (ctx) => {
+  const dO = ctx.gradOutputs[0];
+  const [Q, K, V] = ctx.operands;
+  const scale = ctx.op.getAttr('scale');
+  if (ctx.op.getAttr('causal')) throw new Error('causal scaled_dot_product_attention VJP not supported');
+  const b = ctx.builder;
+  const dtype = Q.type.dtype;
+  const rank = Q.type.rank;
+  const perm = [];
+  for (let i = 0; i < rank; i++) perm.push(i);
+  perm[rank - 2] = rank - 1; perm[rank - 1] = rank - 2;
+  const lastT = (x) => b.transpose(x, perm).getResult(0);
+
+  const scaleBrTo = (shape) => b.broadcast(b.scalarConstant(scale, dtype).getResult(0), shape, []).getResult(0);
+  const s = b.matmul(Q, lastT(K)).getResult(0);
+  const ss = b.mul(s, scaleBrTo(s.type.shape)).getResult(0);
+  const p = b.softmax(ss, rank - 1).getResult(0);
+
+  const dV = b.matmul(lastT(p), dO).getResult(0);
+  const dP = b.matmul(dO, lastT(V)).getResult(0);
+
+  const init = b.scalarConstant(0, dtype).getResult(0);
+  const dPP = b.mul(dP, p).getResult(0);
+  const sumDPP = b.reduce(dPP, init, [rank - 1], 'sum').getResult(0);
+  const bcastDims = [];
+  for (let i = 0; i < rank - 1; i++) bcastDims.push(i);
+  const sumBr = b.broadcast(sumDPP, p.type.shape, bcastDims).getResult(0);
+  const dS = b.mul(p, b.sub(dP, sumBr).getResult(0)).getResult(0);
+  const dSraw = b.mul(dS, scaleBrTo(dS.type.shape)).getResult(0);
+
+  const dQ = b.matmul(dSraw, K).getResult(0);
+  const dK = b.matmul(lastT(dSraw), Q).getResult(0);
+  return [dQ, dK, dV];
+});
+
+registerVJPRule('pool2d', (ctx) => {
+  const grad = ctx.gradOutputs[0];
+  const [input] = ctx.operands;
+  const b = ctx.builder;
+  const poolType = ctx.op.getAttr('pool_type');
+  const ks = ctx.op.getAttr('kernel_size');
+  const strides = ctx.op.getAttr('strides');
+  const padding = ctx.op.getAttr('padding');
+  const layout = ctx.op.getAttr('layout') || 'NCHW';
+  const noPad = padding.every(p => p[0] === 0 && p[1] === 0);
+  const strideEqKernel = strides[0] === ks[0] && strides[1] === ks[1];
+  if (layout !== 'NCHW' || !noPad || !strideEqKernel || (poolType !== 'avg' && poolType !== 'max')) {
+    throw new Error('pool2d VJP supports only non-overlapping (stride=kernel) avg/max pooling without padding, NCHW');
+  }
+
+  const [N, C, OH, OW] = grad.type.shape;
+  const [kh, kw] = ks;
+  const fullShape = input.type.shape;
+  const upsample = (v) => b.reshape(b.broadcast(v, [N, C, OH, kh, OW, kw], [0, 1, 2, 4]).getResult(0), fullShape).getResult(0);
+  const upGrad = upsample(grad);
+
+  if (poolType === 'avg') {
+    const cBr = b.broadcast(b.scalarConstant(kh * kw, input.type.dtype).getResult(0), fullShape, []).getResult(0);
+    return [b.div(upGrad, cBr).getResult(0)];
+  }
+  const upOut = upsample(ctx.results[0]);
+  const mask = b.compare(input, upOut, 'eq').getResult(0);
+  const zero = b.broadcast(b.scalarConstant(0, input.type.dtype).getResult(0), fullShape, []).getResult(0);
+  return [b.select(mask, upGrad, zero).getResult(0)];
+});
+
+registerVJPRule('batch_norm', (ctx) => {
+  const grad = ctx.gradOutputs[0];
+  const [input, gamma, , mean, variance] = ctx.operands;
+  const axis = ctx.op.getAttr('axis');
+  const eps = ctx.op.getAttr('epsilon');
+  const dtype = input.type.dtype;
+  const shape = input.type.shape;
+  const b = ctx.builder;
+
+  const batchDims = [];
+  for (let i = 0; i < shape.length; i++) if (i !== axis) batchDims.push(i);
+
+  const init = b.scalarConstant(0, dtype).getResult(0);
+  const epsConst = b.broadcast(b.scalarConstant(eps, dtype).getResult(0), variance.type.shape, []).getResult(0);
+  const rstd = b.rsqrt(b.add(variance, epsConst).getResult(0)).getResult(0);
+  const rstdBr = b.broadcast(rstd, shape, [axis]).getResult(0);
+  const meanBr = b.broadcast(mean, shape, [axis]).getResult(0);
+  const gammaBr = b.broadcast(gamma, shape, [axis]).getResult(0);
+  const centered = b.sub(input, meanBr).getResult(0);
+  const normalized = b.mul(centered, rstdBr).getResult(0);
+  const gradGammaBr = b.mul(grad, gammaBr).getResult(0);
+
+  const gradInput = b.mul(gradGammaBr, rstdBr).getResult(0);
+  const gradGamma = b.reduce(b.mul(grad, normalized).getResult(0), init, batchDims, 'sum').getResult(0);
+  const gradBeta = b.reduce(grad, init, batchDims, 'sum').getResult(0);
+  const gradMean = b.neg(b.reduce(gradInput, init, batchDims, 'sum').getResult(0)).getResult(0);
+
+  const rstd3 = b.mul(b.mul(rstdBr, rstdBr).getResult(0), rstdBr).getResult(0);
+  const negHalf = b.broadcast(b.scalarConstant(-0.5, dtype).getResult(0), shape, []).getResult(0);
+  const gradVarFull = b.mul(b.mul(b.mul(gradGammaBr, centered).getResult(0), rstd3).getResult(0), negHalf).getResult(0);
+  const gradVar = b.reduce(gradVarFull, init, batchDims, 'sum').getResult(0);
+
+  return [gradInput, gradGamma, gradBeta, gradMean, gradVar];
+});
+
 registerVJPRule('elu', (ctx) => {
   const grad = ctx.gradOutputs[0];
   const [x] = ctx.operands;

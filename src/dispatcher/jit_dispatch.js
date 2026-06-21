@@ -283,6 +283,15 @@ let _gpuContiguousFn = null;
 export function setGpuContiguousFn(fn) { _gpuContiguousFn = fn; }
 let _gpuConcatFn = null;
 export function setGpuConcatFn(fn) { _gpuConcatFn = fn; }
+let _cudnnLSTM = null;
+export function setCudnnLSTM(fn) { _cudnnLSTM = fn; }
+export function getCudnnLSTM() { return _cudnnLSTM; }
+let _gpuAdam = null;
+export function setGpuAdamFn(fn) { _gpuAdam = fn; }
+export function getGpuAdamFn() { return _gpuAdam; }
+let _gpuMatmul = null;
+export function setGpuMatmul(fn) { _gpuMatmul = fn; }
+export function getGpuMatmul() { return _gpuMatmul; }
 
 function _gpuInputArray(t) {
   if (t.isContiguous && t._impl.storageOffset === 0) {

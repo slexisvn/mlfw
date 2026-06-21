@@ -137,7 +137,8 @@ export class BackendPipeline {
       gridDim: kernel.gridDim,
       sharedMemBytes: kernel.sharedMemBytes,
       params: kernel.params,
-      outputIndices: kernel.outputIndices
+      outputIndices: kernel.outputIndices,
+      scratch: kernel.scratch
     });
   }
 }

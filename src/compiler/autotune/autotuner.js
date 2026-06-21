@@ -6,7 +6,10 @@ import { BenchmarkRunner } from './benchmark.js';
 import { Deadline } from './budget.js';
 import { buildBlockMap, computeWorkloadKey } from './workload_key.js';
 import { collectAllBlockNames } from './block_analysis.js';
-import { BlockTuningSession } from './session.js';
+import { buildBlockDAG, findFusibleConsumer } from './block_dag.js';
+import { classifyBlock } from '../schedule/rules.js';
+import { BlockTuningSession, gpuThreadBlockSize } from './session.js';
+import { clonePrimFunc } from './tune_ir.js';
 import { TaskScheduler } from './task_scheduler.js';
 import { getMeasurer } from '../runtime/measurer_registry.js';
 
@@ -140,21 +143,50 @@ export class Autotuner {
     try {
       const sch = new Schedule(primFunc);
       const blockMap = buildBlockMap(primFunc.body);
+      const dag = buildBlockDAG(primFunc);
+
+      const fusedAway = new Set();
+      const ordered = [];
+      for (const entry of tuneResults) {
+        if (entry[1].sketchName === 'fused') {
+          const consumer = findFusibleConsumer(primFunc, dag, entry[0], classifyBlock);
+          if (consumer) fusedAway.add(consumer);
+          ordered.unshift(entry);
+        } else {
+          ordered.push(entry);
+        }
+      }
+
       const applied = new Set();
-      for (const [blockName, result] of tuneResults) {
-        if (applied.has(result)) continue;
+      for (const [blockName, result] of ordered) {
+        if (fusedAway.has(blockName) || applied.has(result)) continue;
         applied.add(result);
         if (!result.sketchName || !result.params) continue;
-        const sketches = getSketchesForBlock(primFunc, blockName, this.target, blockMap, { richGpu: !!this.config.measurer });
-        const sketch = sketches.find(s => s.name === result.sketchName);
-        if (sketch) {
-          const apply = sketch.instantiate(result.params);
-          apply(sch, blockName, this.target);
+        try {
+          const sketches = getSketchesForBlock(primFunc, blockName, this.target, blockMap, { richGpu: !!this.config.measurer });
+          const sketch = sketches.find(s => s.name === result.sketchName);
+          if (sketch && this._fitsThreadBlock(primFunc, blockName, sketch, result.params)) {
+            const apply = sketch.instantiate(result.params);
+            apply(sch, blockName, this.target);
+          }
+        } catch (e) {
+          continue;
         }
       }
       return { func: primFunc };
     } catch (e) {
       return null;
+    }
+  }
+
+  _fitsThreadBlock(primFunc, blockName, sketch, params) {
+    if (!this.target.isGPU || !this.target.isGPU() || !this.target.maxThreadsPerBlock) return true;
+    try {
+      const trial = clonePrimFunc(primFunc);
+      sketch.instantiate(params)(new Schedule(trial), blockName, this.target);
+      return gpuThreadBlockSize(trial) <= this.target.maxThreadsPerBlock;
+    } catch (e) {
+      return false;
     }
   }
 }

@@ -1,4 +1,5 @@
 import { getBackend } from './backend_registry.js';
+import { CompiledKernel } from '../../backend/pipeline.js';
 
 const TYPED_ARRAY_CTORS = {
   'f16':  Uint16Array,
@@ -286,5 +287,13 @@ export class RuntimeModule {
       entries.push({ name: k.name, source: k.source, target: k.target.name, metadata: k.metadata });
     }
     return { name: this.name, kernels: entries };
+  }
+
+  static deserialize(data) {
+    const mod = new RuntimeModule(data.name);
+    for (const e of data.kernels) {
+      mod.addCompiledKernel(new CompiledKernel(e.name, e.source, { name: e.target }, e.metadata));
+    }
+    return mod;
   }
 }

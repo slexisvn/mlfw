@@ -11,6 +11,7 @@ import { register as registerQuantization } from './rules/quantization.js';
 import { register as registerFusion, canInlineFuse, lowerFusion, canLowerAsElementwiseFusion, lowerFusionAsIndividualOps, registerInlineFusionBuilder } from './rules/fusion.js';
 import { register as registerPooling } from './rules/pooling.js';
 import { register as registerResize } from './rules/resize.js';
+import { register as registerAttention } from './rules/attention.js';
 import { ELEMENTWISE_OPS } from './rules/elementwise.js';
 
 const BROADCAST_VIEW_SAFE = new Set([
@@ -44,6 +45,7 @@ registerQuantization();
 registerFusion();
 registerPooling();
 registerResize();
+registerAttention();
 
 export { LoweringContext, hasLoweringRule, registerLoweringRule, canInlineFuse, registerInlineFusionBuilder };
 

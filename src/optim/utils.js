@@ -1,54 +1,47 @@
-export function clipGradNorm_(parameters, maxNorm, normType = 2) {
-  const params = Array.isArray(parameters) ? parameters : [...parameters];
-  let totalNorm = 0;
+import * as ops from '../tensor/ops/ops.js';
 
-  if (normType === Infinity) {
+function _gradParams(parameters) {
+  const params = Array.isArray(parameters) ? parameters : [...parameters];
+  return params.filter(p => p.grad !== null);
+}
+
+export function clipGradNorm_(parameters, maxNorm, normType = 2) {
+  const params = _gradParams(parameters);
+  if (params.length === 0) return 0;
+
+  let totalNorm;
+  if (normType === 2) {
+    let acc = null;
     for (const p of params) {
-      if (p.grad === null) continue;
-      const d = p.grad._impl.storage.data;
-      for (let i = 0; i < d.length; i++) {
-        const a = Math.abs(d[i]);
-        if (a > totalNorm) totalNorm = a;
-      }
+      const sq = ops.sum(ops.mul(p.grad, p.grad));
+      acc = acc === null ? sq : ops.add(acc, sq);
     }
-  } else if (normType === 2) {
+    totalNorm = Math.sqrt(acc.item());
+  } else if (normType === Infinity) {
+    let acc = null;
     for (const p of params) {
-      if (p.grad === null) continue;
-      const d = p.grad._impl.storage.data;
-      for (let i = 0; i < d.length; i++) totalNorm += d[i] * d[i];
+      const m = ops.max(ops.abs(p.grad));
+      acc = acc === null ? m : ops.maximum(acc, m);
     }
-    totalNorm = Math.sqrt(totalNorm);
+    totalNorm = acc.item();
   } else {
+    let acc = null;
     for (const p of params) {
-      if (p.grad === null) continue;
-      const d = p.grad._impl.storage.data;
-      for (let i = 0; i < d.length; i++) totalNorm += Math.pow(Math.abs(d[i]), normType);
+      const s = ops.sum(ops.pow(ops.abs(p.grad), normType));
+      acc = acc === null ? s : ops.add(acc, s);
     }
-    totalNorm = Math.pow(totalNorm, 1 / normType);
+    totalNorm = Math.pow(acc.item(), 1 / normType);
   }
 
   const clipCoef = maxNorm / (totalNorm + 1e-6);
   if (clipCoef < 1) {
-    for (const p of params) {
-      if (p.grad === null) continue;
-      const d = p.grad._impl.storage.data;
-      for (let i = 0; i < d.length; i++) d[i] *= clipCoef;
-      p.grad._impl.bumpVersion();
-    }
+    for (const p of params) p.grad = ops.mul(p.grad, clipCoef);
   }
-
   return totalNorm;
 }
 
 export function clipGradValue_(parameters, clipValue) {
-  const params = Array.isArray(parameters) ? parameters : [...parameters];
-  for (const p of params) {
-    if (p.grad === null) continue;
-    const d = p.grad._impl.storage.data;
-    for (let i = 0; i < d.length; i++) {
-      if (d[i] > clipValue) d[i] = clipValue;
-      else if (d[i] < -clipValue) d[i] = -clipValue;
-    }
-    p.grad._impl.bumpVersion();
+  for (const p of _gradParams(parameters)) {
+    p.grad = ops.clamp(p.grad, -clipValue, clipValue);
   }
 }

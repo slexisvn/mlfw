@@ -123,6 +123,17 @@ export class IRBuilder {
   minimum(lhs, rhs) { return this._inferAndBuild('minimum', [lhs, rhs]); }
 
   neg(x) { return this._inferAndBuild('neg', [x]); }
+  stopGradient(x) { return this._inferAndBuild('stop_gradient', [x]); }
+  reverse(x, dimensions) { return this._inferAndBuild('reverse', [x], { dimensions }); }
+  scaledDotProductAttention(q, k, v, scale, causal = false) {
+    return this._inferAndBuild('scaled_dot_product_attention', [q, k, v], { scale, causal });
+  }
+  allReduce(x, opts = {}) {
+    return this._inferAndBuild('all_reduce', [x], { reduce_op: opts.reduceOp || 'sum', mesh_axis: opts.meshAxis ?? 0 });
+  }
+  allGather(x, opts = {}) {
+    return this._inferAndBuild('all_gather', [x], { mesh_axis: opts.meshAxis ?? 0, gather_dim: opts.gatherDim ?? 1 });
+  }
   abs(x) { return this._inferAndBuild('abs', [x]); }
   exp(x) { return this._inferAndBuild('exp', [x]); }
   log(x) { return this._inferAndBuild('log', [x]); }

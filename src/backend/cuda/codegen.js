@@ -3,7 +3,7 @@ import { cType, cPtrType, cLiteralSuffix, cMathFunc, isDtypeInt, dtypeBytes } fr
 
 
 export class CUDAKernel {
-  constructor(name, source, blockDim, gridDim, sharedMemBytes, params, outputIndices) {
+  constructor(name, source, blockDim, gridDim, sharedMemBytes, params, outputIndices, scratch) {
     this.name = name;
     this.source = source;
     this.blockDim = blockDim;
@@ -11,6 +11,7 @@ export class CUDAKernel {
     this.sharedMemBytes = sharedMemBytes;
     this.params = params;
     this.outputIndices = outputIndices;
+    this.scratch = scratch || [];
   }
 }
 
@@ -27,7 +28,10 @@ export class CUDACodegen {
     this._storeBuffers = new Set();
     this._promotedBuffers = new Set();
     this._promotedBufferDecls = [];
+    this._declaredLocals = new Set();
     this._needsBarriers = false;
+    this._globalScratch = [];
+    this._scratchNames = new Set();
   }
 
   generate(func) {
@@ -37,11 +41,15 @@ export class CUDACodegen {
     this._sharedBuffers = [];
     this._blockDim = [1, 1, 1];
     this._gridDim = [1, 1, 1];
+    this._didParallelReduce = false;
     this._primFunc = func;
     this._storeBuffers = new Set();
     this._promotedBuffers = new Set();
     this._promotedBufferDecls = [];
+    this._declaredLocals = new Set();
     this._needsBarriers = false;
+    this._globalScratch = [];
+    this._scratchNames = new Set();
 
     const isLIR = func.type === 'LIRFunc';
 
@@ -59,6 +67,7 @@ export class CUDACodegen {
 
     this._scanStoreTargets(func.body);
     this._analyzeSharing(func);
+    this._collectGlobalScratch(func);
 
     const paramParts = [];
     const paramNames = [];
@@ -70,6 +79,10 @@ export class CUDACodegen {
       this._defaultDtype = buf.dtype;
       if (this._storeBuffers.has(buf.name)) outputIndices.push(bufferIdx);
       bufferIdx++;
+    }
+    for (const s of this._globalScratch) {
+      paramNames.push(s.name);
+      paramParts.push(`${cPtrType(s.dtype)} ${s.name}`);
     }
     for (const sp of func.shapeParams) {
       paramNames.push(sp.name);
@@ -98,7 +111,9 @@ export class CUDACodegen {
     }
 
     this._emitMissingLocalDecls(func);
-    this._visitNode(func.body);
+    if (func.gpuWmma) this._emitWmmaBody(func.gpuWmma);
+    else if (func.gpuPipelined) this._emitPipelinedBody(func.gpuPipelined);
+    else this._visitNode(func.body);
     this._indent--;
     this._emit('}');
 
@@ -131,7 +146,8 @@ export class CUDACodegen {
       blockDim, gridDim,
       sharedBytes,
       paramNames,
-      outputIndices
+      outputIndices,
+      this._globalScratch
     );
   }
 
@@ -204,6 +220,68 @@ export class CUDACodegen {
     }
   }
 
+  _matchFullReduction(node) {
+    const loops = [];
+    let cur = node;
+    while (cur && cur.type === 'ForNode') {
+      if (cur.kind !== ForKind.SERIAL) return null;
+      const ev = cur.extent.type === 'IntImmNode' ? cur.extent.value : 0;
+      if (ev <= 0) return null;
+      loops.push({ extC: this._exprToC(cur.extent), extVal: ev, varName: cur.loopVar.name });
+      cur = cur.body;
+    }
+    if (!cur || cur.type !== 'BlockNode') return null;
+    const block = cur, store = block.body;
+    if (!store || store.type !== 'BufferStoreNode') return null;
+    if (block.iterVars && block.iterVars.length !== loops.length) return null;
+    if (typeof store.buffer.numel !== 'function' || store.buffer.numel() !== 1) return null;
+    const val = store.value;
+    if (!val || val.type !== 'MathOpNode' || val.op !== '+') return null;
+    const idxStr = store.indices.map(i => this._exprToC(i)).join(',');
+    const isOutLoad = (n) => n && n.type === 'BufferLoadNode' && n.buffer === store.buffer
+      && n.indices.map(i => this._exprToC(i)).join(',') === idxStr;
+    let valExpr = null;
+    if (isOutLoad(val.a)) valExpr = val.b;
+    else if (isOutLoad(val.b)) valExpr = val.a;
+    else return null;
+    const loopVars = new Set(loops.map(l => l.varName));
+    if (idxStr.split(/[^A-Za-z0-9_]/).some(t => loopVars.has(t))) return null;
+    const total = loops.reduce((a, l) => a * l.extVal, 1);
+    if (total < 2048) return null;
+    return { loops, block, store, valExpr, total };
+  }
+
+  _emitParallelReduction(node, red) {
+    const T = 256;
+    this._blockDim = [T, 1, 1];
+    this._didParallelReduce = true;
+    const ct = cType(red.store.buffer.dtype);
+    const outIdx = this._flatIndex(red.store.buffer, red.store.indices);
+    this._emit(`__shared__ ${ct} _redsh[${T}];`);
+    this._emit(`${ct} _racc = 0;`);
+    this._emit(`for (int _rf = threadIdx.x; _rf < ${red.total}; _rf += ${T}) {`);
+    this._indent++;
+    this._emit('int _rem = _rf;');
+    for (let i = red.loops.length - 1; i >= 0; i--) {
+      this._emit(`const int ${red.loops[i].varName} = _rem % ${red.loops[i].extC}; _rem /= ${red.loops[i].extC};`);
+    }
+    for (const bind of red.block.iterVars) {
+      if (bind.iterVar && bind.binding) this._emit(`const int ${bind.iterVar.name} = ${this._exprToC(bind.binding)};`);
+    }
+    this._emit(`_racc = _racc + ${this._exprToC(red.valExpr)};`);
+    this._indent--;
+    this._emit('}');
+    this._emit('_redsh[threadIdx.x] = _racc;');
+    this._emit('__syncthreads();');
+    this._emit(`for (int _rs = ${T} / 2; _rs > 0; _rs >>= 1) {`);
+    this._indent++;
+    this._emit('if (threadIdx.x < _rs) _redsh[threadIdx.x] = _redsh[threadIdx.x] + _redsh[threadIdx.x + _rs];');
+    this._emit('__syncthreads();');
+    this._indent--;
+    this._emit('}');
+    this._emit(`if (threadIdx.x == 0) ${red.store.buffer.name}[${outIdx}] = _redsh[0];`);
+  }
+
   _visitForNode(node) {
     if (node.kind === ForKind.THREAD_BINDING) {
       const extent = node.extent.type === 'IntImmNode' ? node.extent.value : 0;
@@ -223,9 +301,13 @@ export class CUDACodegen {
       }
       return;
     }
+    if (this._threadBindings.size === 0 && !this._didParallelReduce) {
+      const red = this._matchFullReduction(node);
+      if (red) { this._emitParallelReduction(node, red); return; }
+    }
     const varName = node.loopVar.name;
     const extent = this._exprToC(node.extent);
-    if (node.kind === ForKind.UNROLLED) this._emit(`#pragma unroll`);
+    if (node.kind === ForKind.UNROLLED || node.kind === ForKind.VECTORIZED) this._emit(`#pragma unroll`);
     this._emit(`for (int ${varName} = 0; ${varName} < ${extent}; ${varName}++) {`);
     this._indent++;
     this._visitNode(node.body);
@@ -246,6 +328,9 @@ export class CUDACodegen {
   _visitAllocateNode(node) {
     if (node.scope !== 'shared') {
       if (this._promotedBuffers.has(node.buffer.name)) return;
+      if (this._scratchNames.has(node.buffer.name)) return;
+      if (this._declaredLocals.has(node.buffer.name)) return;
+      this._declaredLocals.add(node.buffer.name);
       const numel = node.buffer.numel();
       if (numel > 0) {
         this._emit(`${cType(node.buffer.dtype)} ${node.buffer.name}[${numel}];`);
@@ -444,7 +529,61 @@ export class CUDACodegen {
     }
   }
 
+  _emitWmmaBody(info) {
+    const { M, N, K, a, b, c } = info;
+    this._blockDim = [32, 1, 1];
+    this._gridDim = [Math.ceil(M / 16), Math.ceil(N / 16), 1];
+    this._emit('const int warpM = blockIdx.x;');
+    this._emit('const int warpN = blockIdx.y;');
+    this._emit('fragment<accumulator, 16, 16, 16, float> cf;');
+    this._emit('fill_fragment(cf, 0.0f);');
+    this._emit(`for (int kk = 0; kk < ${K}; kk += 16) {`);
+    this._indent++;
+    this._emit('fragment<matrix_a, 16, 16, 16, half, row_major> af;');
+    this._emit('fragment<matrix_b, 16, 16, 16, half, row_major> bf;');
+    this._emit(`load_matrix_sync(af, ${a} + warpM * 16 * ${K} + kk, ${K});`);
+    this._emit(`load_matrix_sync(bf, ${b} + kk * ${N} + warpN * 16, ${N});`);
+    this._emit('mma_sync(cf, af, bf, cf);');
+    this._indent--;
+    this._emit('}');
+    this._emit(`store_matrix_sync(${c} + warpM * 16 * ${N} + warpN * 16, cf, ${N}, mem_row_major);`);
+  }
+
+  _emitPipelinedBody(info) {
+    const { M, N, K, a, b, c, tile = 16 } = info;
+    this._blockDim = [tile, tile, 1];
+    this._gridDim = [Math.ceil(N / tile), Math.ceil(M / tile), 1];
+    const T = tile;
+    this._emit(`__shared__ float As[2][${T}][${T}];`);
+    this._emit(`__shared__ float Bs[2][${T}][${T}];`);
+    this._emit(`const int row = blockIdx.y * ${T} + threadIdx.y;`);
+    this._emit(`const int col = blockIdx.x * ${T} + threadIdx.x;`);
+    this._emit('float acc = 0.0f;');
+    this._emit(`const int nTiles = ${K} / ${T};`);
+    this._emit(`__pipeline_memcpy_async(&As[0][threadIdx.y][threadIdx.x], &${a}[row * ${K} + threadIdx.x], sizeof(float));`);
+    this._emit(`__pipeline_memcpy_async(&Bs[0][threadIdx.y][threadIdx.x], &${b}[threadIdx.y * ${N} + col], sizeof(float));`);
+    this._emit('__pipeline_commit();');
+    this._emit('for (int t = 0; t < nTiles; t++) {');
+    this._indent++;
+    this._emit('const int cur = t & 1, nxt = (t + 1) & 1;');
+    this._emit('if (t + 1 < nTiles) {');
+    this._indent++;
+    this._emit(`__pipeline_memcpy_async(&As[nxt][threadIdx.y][threadIdx.x], &${a}[row * ${K} + (t + 1) * ${T} + threadIdx.x], sizeof(float));`);
+    this._emit(`__pipeline_memcpy_async(&Bs[nxt][threadIdx.y][threadIdx.x], &${b}[((t + 1) * ${T} + threadIdx.y) * ${N} + col], sizeof(float));`);
+    this._emit('__pipeline_commit();');
+    this._indent--;
+    this._emit('}');
+    this._emit('__pipeline_wait_prior(t + 1 < nTiles ? 1 : 0);');
+    this._emit('__syncthreads();');
+    this._emit(`for (int kk = 0; kk < ${T}; kk++) acc += As[cur][threadIdx.y][kk] * Bs[cur][kk][threadIdx.x];`);
+    this._emit('__syncthreads();');
+    this._indent--;
+    this._emit('}');
+    this._emit(`${c}[row * ${N} + col] = acc;`);
+  }
+
   _analyzeSharing(func) {
+    if (func.gpuWmma || func.gpuPipelined) { this._needsBarriers = false; return; }
     if (func.gpuRegisterBlocked) {
       this._needsBarriers = false;
       return;
@@ -515,12 +654,44 @@ export class CUDACodegen {
     for (const [name, buf] of refBuffers) {
       if (storageNames.has(name) || allocatedNames.has(name)) continue;
       if (this._promotedBuffers.has(name)) continue;
+      if (this._scratchNames.has(name)) continue;
+      if (this._declaredLocals.has(name)) continue;
       const numel = buf.numel();
       const size = numel > 0 ? numel : this._estimateBufferSize(buf);
       if (size > 0) {
+        this._declaredLocals.add(name);
         this._emit(`${cType(buf.dtype)} ${name}[${size}];`);
       }
     }
+  }
+
+  _collectGlobalScratch(func) {
+    if (this._threadBindings.size > 0) return;
+    const THRESHOLD = 32768;
+    const storageNames = new Set();
+    for (const [, buf] of func.bufferMap) storageNames.add(buf.name);
+    const consider = (name, buf) => {
+      if (!buf || storageNames.has(name) || this._promotedBuffers.has(name) || this._scratchNames.has(name)) return;
+      const numel = typeof buf.numel === 'function' ? buf.numel() : 0;
+      const size = numel > 0 ? numel : this._estimateBufferSize(buf);
+      if (size > THRESHOLD) { this._scratchNames.add(name); this._globalScratch.push({ name, dtype: buf.dtype, size }); }
+    };
+    const stack = [func.body];
+    while (stack.length > 0) {
+      const n = stack.pop();
+      if (!n) continue;
+      if (n.type === 'AllocateNode' && n.scope !== 'shared') consider(n.buffer.name, n.buffer);
+      if (n.body) stack.push(n.body);
+      if (n.stmts) for (const s of n.stmts) stack.push(s);
+      if (n.thenBody) stack.push(n.thenBody);
+      if (n.elseBody) stack.push(n.elseBody);
+      if (n.loopBody) stack.push(n.loopBody);
+      if (n.condBody) stack.push(n.condBody);
+      if (n.initBody) stack.push(n.initBody);
+    }
+    const refBuffers = new Map();
+    this._scanBufferRefs(func.body, refBuffers);
+    for (const [name, buf] of refBuffers) consider(name, buf);
   }
 
   _scanAllocateNodes(root, names) {

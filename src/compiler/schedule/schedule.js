@@ -1,13 +1,15 @@
 import {
   ForNode, BlockNode, SeqNode, BufferStoreNode, BufferLoadNode,
-  VariableNode, IntImmNode, MathOpNode, ForKind, IfThenElseNode
+  VariableNode, IntImmNode, MathOpNode, ForKind, IfThenElseNode, AllocateNode
 } from '../ir/tensor/nodes.js';
 import { Buffer } from '../ir/tensor/buffer.js';
 import { ScheduleTrace } from './trace.js';
 import { ScheduleValidator } from './validator.js';
 import { ScheduleState } from './schedule_state.js';
 import { SRefTree } from './sref.js';
-import { loopCarriesReduction } from './legality.js';
+import { loopCarriesReduction, collectVarsUsed } from './legality.js';
+
+const RFACTOR_ASSOCIATIVE_OPS = new Set(['+', '*', 'min', 'max']);
 
 function substituteVar(node, oldName, exprFactory) {
   if (!node || typeof node !== 'object') return node;
@@ -437,124 +439,240 @@ export class Schedule {
     }
   }
 
-  cacheRead(blockName, bufferName, cacheScope) {
+  rfactor(blockName, reductionVarName, factor) {
     const block = this.getBlock(blockName);
-    const readEntry = block.reads.find(r => r.buffer.name === bufferName);
-    if (!readEntry) {
-      throw new Error(`Block '${blockName}' does not read buffer '${bufferName}'`);
-    }
-
-    const origBuf = readEntry.buffer;
-    const cacheBuf = new Buffer(
-      `${origBuf.name}_${cacheScope}`,
-      [...origBuf.shape],
-      origBuf.dtype,
-      cacheScope
-    );
-
     const loops = this.getLoops(blockName);
-    const loopVars = [];
-    for (let i = 0; i < origBuf.shape.length; i++) {
-      loopVars.push(freshVar(`cache_i${i}`));
+    const kLoop = loops.find(l => l.loopVar.name === reductionVarName);
+    if (!kLoop) throw new Error(`rfactor: reduction loop '${reductionVarName}' not found for block '${blockName}'`);
+    const K = getConstExtent(kLoop.extent);
+    if (K === null) throw new Error(`rfactor: reduction loop '${reductionVarName}' has non-constant extent`);
+    if (!Number.isInteger(factor) || factor <= 1 || factor >= K || K % factor !== 0) {
+      throw new Error(`rfactor: factor ${factor} must divide reduction extent ${K} with 1 < factor < ${K}`);
     }
 
-    const indices = loopVars.map(v => v);
-    const load = new BufferLoadNode(origBuf, indices);
-    const store = new BufferStoreNode(cacheBuf, indices, load);
-    const cacheBlock = new BlockNode(
-      `${bufferName}_${cacheScope}_cache`,
-      [],
-      [{ buffer: origBuf }],
-      [{ buffer: cacheBuf }],
-      store
-    );
+    const store = block.body;
+    if (!store || store.type !== 'BufferStoreNode' || !store.value || store.value.type !== 'MathOpNode') {
+      throw new Error(`rfactor: block '${blockName}' body is not a single accumulating store`);
+    }
+    const acc = store.buffer;
+    const spatialIdx = store.indices;
+    const op = store.value.op;
+    const isAccLoad = (node) => node && node.type === 'BufferLoadNode' && node.buffer === acc;
+    let update;
+    if (isAccLoad(store.value.a)) update = store.value.b;
+    else if (isAccLoad(store.value.b)) update = store.value.a;
+    else throw new Error(`rfactor: accumulator load not found in block '${blockName}' body`);
+    if (!RFACTOR_ASSOCIATIVE_OPS.has(op)) {
+      throw new Error(`rfactor: op '${op}' is not associative+commutative; cannot factor reduction`);
+    }
+    const initVal = (block.initBody && block.initBody.type === 'BufferStoreNode' && block.initBody.value)
+      ? block.initBody.value : new IntImmNode(0);
 
-    let cacheBody = cacheBlock;
-    for (let i = origBuf.shape.length - 1; i >= 0; i--) {
-      cacheBody = new ForNode(
-        loopVars[i],
-        new IntImmNode(0),
-        new IntImmNode(origBuf.shape[i]),
-        ForKind.SERIAL,
-        cacheBody
-      );
+    const spatialLoops = loops.filter(l => l.loopVar.name !== reductionVarName);
+    const KO = K / factor;
+    const partialBuf = new Buffer(`${acc.name}_rf`, [factor, ...acc.shape], acc.dtype, acc.scope);
+
+    const kiVar = freshVar(`${reductionVarName}_rfi`);
+    const koVar = freshVar(`${reductionVarName}_rfo`);
+    const piVar = freshVar(`${reductionVarName}_rfp`);
+
+    const cfIdx = (kvar) => [kvar, ...spatialIdx.map(cloneExprTree)];
+    const partialUpdate = substituteVar(cloneExprTree(update), reductionVarName,
+      () => new MathOpNode('+', new MathOpNode('*', koVar, new IntImmNode(factor)), kiVar));
+
+    const partialStore = new BufferStoreNode(partialBuf, cfIdx(kiVar),
+      new MathOpNode(op, new BufferLoadNode(partialBuf, cfIdx(kiVar)), partialUpdate));
+    const partialInit = new BufferStoreNode(partialBuf, cfIdx(kiVar), cloneExprTree(initVal));
+    const partialBlock = new BlockNode(`${blockName}_rf_p`, [],
+      block.reads.map(r => ({ buffer: r.buffer })), [{ buffer: partialBuf }], partialStore, partialInit);
+
+    let partialNest = new ForNode(koVar, new IntImmNode(0), new IntImmNode(KO), ForKind.SERIAL, partialBlock);
+    partialNest = new ForNode(kiVar, new IntImmNode(0), new IntImmNode(factor), ForKind.SERIAL, partialNest);
+    for (let i = spatialLoops.length - 1; i >= 0; i--) {
+      partialNest = new ForNode(spatialLoops[i].loopVar, new IntImmNode(0),
+        cloneExprTree(spatialLoops[i].extent), ForKind.SERIAL, partialNest);
     }
 
-    substituteBufferInBlock(block, origBuf, cacheBuf);
-    readEntry.buffer = cacheBuf;
+    const combineStore = new BufferStoreNode(acc, spatialIdx.map(cloneExprTree),
+      new MathOpNode(op, new BufferLoadNode(acc, spatialIdx.map(cloneExprTree)),
+        new BufferLoadNode(partialBuf, cfIdx(piVar))));
+    const combineInit = new BufferStoreNode(acc, spatialIdx.map(cloneExprTree), cloneExprTree(initVal));
+    const combineBlock = new BlockNode(`${blockName}_rf_c`, [],
+      [{ buffer: partialBuf }], [{ buffer: acc }], combineStore, combineInit);
 
-    const outerLoop = loops.length > 0 ? loops[0] : null;
-    if (outerLoop) {
-      const seq = new SeqNode([cacheBody, outerLoop]);
-      this._replaceNode(outerLoop, seq);
+    let combineNest = new ForNode(piVar, new IntImmNode(0), new IntImmNode(factor), ForKind.SERIAL, combineBlock);
+    for (let i = spatialLoops.length - 1; i >= 0; i--) {
+      combineNest = new ForNode(spatialLoops[i].loopVar, new IntImmNode(0),
+        cloneExprTree(spatialLoops[i].extent), ForKind.SERIAL, combineNest);
     }
 
+    this._replaceNode(loops[0], new SeqNode([partialNest, combineNest]));
     this._rebuildSRefTree();
     if (!this._replaying) {
-      this.trace.record('cacheRead', [blockName, bufferName, cacheScope]);
+      this.trace.record('rfactor', [blockName, reductionVarName, factor]);
     }
-
-    return cacheBuf;
+    return partialBuf;
   }
 
-  cacheWrite(blockName, bufferName, cacheScope) {
+  decomposeReduction(blockName) {
     const block = this.getBlock(blockName);
-    const writeEntry = block.writes.find(r => r.buffer.name === bufferName);
-    if (!writeEntry) {
-      throw new Error(`Block '${blockName}' does not write buffer '${bufferName}'`);
-    }
-
-    const origBuf = writeEntry.buffer;
-    const cacheBuf = new Buffer(
-      `${origBuf.name}_${cacheScope}`,
-      [...origBuf.shape],
-      origBuf.dtype,
-      cacheScope
-    );
-
+    if (!block.initBody) throw new Error(`decomposeReduction: block '${blockName}' has no initBody`);
     const loops = this.getLoops(blockName);
-    const loopVars = [];
-    for (let i = 0; i < origBuf.shape.length; i++) {
-      loopVars.push(freshVar(`wb_i${i}`));
+    const store = block.body;
+    if (!store || store.type !== 'BufferStoreNode') throw new Error(`decomposeReduction: block '${blockName}' body is not a store`);
+    const acc = store.buffer;
+
+    const spatialVars = new Set();
+    for (const idx of store.indices) collectVarsUsed(idx, spatialVars);
+    const spatialLoops = loops.filter(l => spatialVars.has(l.loopVar.name));
+    const reductionLoops = loops.filter(l => !spatialVars.has(l.loopVar.name));
+    if (reductionLoops.length === 0) throw new Error(`decomposeReduction: block '${blockName}' has no reduction loop`);
+
+    const initStore = new BufferStoreNode(acc, store.indices.map(cloneExprTree), cloneExprTree(block.initBody.value));
+    const initBlock = new BlockNode(`${blockName}_init`, [], [], [{ buffer: acc }], initStore);
+    let initNest = initBlock;
+    for (let i = spatialLoops.length - 1; i >= 0; i--) {
+      initNest = new ForNode(spatialLoops[i].loopVar, new IntImmNode(0), cloneExprTree(spatialLoops[i].extent), ForKind.SERIAL, initNest);
     }
 
-    const indices = loopVars.map(v => v);
-    const load = new BufferLoadNode(cacheBuf, indices);
-    const store = new BufferStoreNode(origBuf, indices, load);
-    const writebackBlock = new BlockNode(
-      `${bufferName}_${cacheScope}_writeback`,
-      [],
-      [{ buffer: cacheBuf }],
-      [{ buffer: origBuf }],
-      store
-    );
-
-    let writebackBody = writebackBlock;
-    for (let i = origBuf.shape.length - 1; i >= 0; i--) {
-      writebackBody = new ForNode(
-        loopVars[i],
-        new IntImmNode(0),
-        new IntImmNode(origBuf.shape[i]),
-        ForKind.SERIAL,
-        writebackBody
-      );
+    const updBlock = new BlockNode(`${blockName}_upd`, [], block.reads.map(r => ({ buffer: r.buffer })), [{ buffer: acc }], cloneExprTree(store));
+    let updNest = updBlock;
+    for (let i = loops.length - 1; i >= 0; i--) {
+      updNest = new ForNode(loops[i].loopVar, new IntImmNode(0), cloneExprTree(loops[i].extent), ForKind.SERIAL, updNest);
     }
 
-    substituteBufferInBlock(block, origBuf, cacheBuf);
-    writeEntry.buffer = cacheBuf;
-
-    const outerLoop = loops.length > 0 ? loops[0] : null;
-    if (outerLoop) {
-      const seq = new SeqNode([outerLoop, writebackBody]);
-      this._replaceNode(outerLoop, seq);
-    }
-
+    this._replaceNode(loops[0], new SeqNode([initNest, updNest]));
     this._rebuildSRefTree();
     if (!this._replaying) {
-      this.trace.record('cacheWrite', [blockName, bufferName, cacheScope]);
+      this.trace.record('decomposeReduction', [blockName]);
+    }
+  }
+
+  _redirectReads(node, fromBuf, toBuf) {
+    if (!node || typeof node !== 'object') return;
+    if (node.type === 'BufferLoadNode' && node.buffer === fromBuf) node.buffer = toBuf;
+    for (const key of ['a', 'b', 'expr', 'value', 'condition', 'thenBody', 'elseBody', 'body', 'initBody', 'min', 'extent']) {
+      if (node[key]) this._redirectReads(node[key], fromBuf, toBuf);
+    }
+    if (Array.isArray(node.stmts)) for (const s of node.stmts) this._redirectReads(s, fromBuf, toBuf);
+    if (Array.isArray(node.indices)) for (const i of node.indices) this._redirectReads(i, fromBuf, toBuf);
+    if (Array.isArray(node.args)) for (const a of node.args) this._redirectReads(a, fromBuf, toBuf);
+  }
+
+  _redirectBuffer(node, fromBuf, toBuf) {
+    if (!node || typeof node !== 'object') return;
+    if ((node.type === 'BufferLoadNode' || node.type === 'BufferStoreNode') && node.buffer === fromBuf) node.buffer = toBuf;
+    for (const key of ['a', 'b', 'expr', 'value', 'condition', 'thenBody', 'elseBody', 'body', 'initBody', 'min', 'extent']) {
+      if (node[key]) this._redirectBuffer(node[key], fromBuf, toBuf);
+    }
+    if (Array.isArray(node.stmts)) for (const s of node.stmts) this._redirectBuffer(s, fromBuf, toBuf);
+    if (Array.isArray(node.indices)) for (const i of node.indices) this._redirectBuffer(i, fromBuf, toBuf);
+    if (Array.isArray(node.args)) for (const a of node.args) this._redirectBuffer(a, fromBuf, toBuf);
+  }
+
+  cacheWrite(blockName, bufferName, scope = 'local') {
+    const block = this.getBlock(blockName);
+    const loops = this.getLoops(blockName);
+    if (loops.length === 0) throw new Error('cacheWrite: block has no enclosing loops');
+    const writeEntry = (block.writes || []).find(w => w.buffer && w.buffer.name === bufferName);
+    if (!writeEntry) throw new Error(`cacheWrite: block '${blockName}' does not write '${bufferName}'`);
+    const buf = writeEntry.buffer;
+    const cache = new Buffer(`${bufferName}_${blockName}_cachew`, [...buf.shape], buf.dtype, scope);
+
+    this._redirectBuffer(block.body, buf, cache);
+    if (block.initBody) this._redirectBuffer(block.initBody, buf, cache);
+    writeEntry.buffer = cache;
+
+    const idxVars = buf.shape.map((_, d) => new VariableNode(`${cache.name}_o${d}`, 'int32'));
+    const backStore = new BufferStoreNode(buf, idxVars, new BufferLoadNode(cache, idxVars));
+    const backBlock = new BlockNode(`${cache.name}_flush`, idxVars.map(v => ({ iterVar: v, binding: v })),
+      [{ buffer: cache }], [{ buffer: buf }], backStore);
+    let backNest = backBlock;
+    for (let d = buf.shape.length - 1; d >= 0; d--) {
+      backNest = new ForNode(idxVars[d], new IntImmNode(0), new IntImmNode(buf.shape[d]), ForKind.SERIAL, backNest);
     }
 
-    return cacheBuf;
+    const blockNest = loops[0];
+    const seq = new SeqNode([]);
+    const alloc = new AllocateNode(cache, scope, seq);
+    this._replaceNode(blockNest, alloc);
+    seq.stmts.push(blockNest, backNest);
+    this._rebuildSRefTree();
+    if (!this._replaying) this.trace.record('cacheWrite', [blockName, bufferName, scope]);
+  }
+
+  cacheRead(blockName, bufferName, scope = 'local') {
+    const block = this.getBlock(blockName);
+    const loops = this.getLoops(blockName);
+    if (loops.length === 0) throw new Error('cacheRead: block has no enclosing loops');
+    const readEntry = (block.reads || []).find(r => r.buffer && r.buffer.name === bufferName);
+    if (!readEntry) throw new Error(`cacheRead: block '${blockName}' does not read '${bufferName}'`);
+    const buf = readEntry.buffer;
+    const cache = new Buffer(`${bufferName}_${blockName}_cache`, [...buf.shape], buf.dtype, scope);
+
+    const idxVars = buf.shape.map((_, d) => new VariableNode(`${cache.name}_i${d}`, 'int32'));
+    const copyStore = new BufferStoreNode(cache, idxVars, new BufferLoadNode(buf, idxVars));
+    const copyBlock = new BlockNode(`${cache.name}_fill`, idxVars.map(v => ({ iterVar: v, binding: v })),
+      [{ buffer: buf }], [{ buffer: cache }], copyStore);
+    let copyNest = copyBlock;
+    for (let d = buf.shape.length - 1; d >= 0; d--) {
+      copyNest = new ForNode(idxVars[d], new IntImmNode(0), new IntImmNode(buf.shape[d]), ForKind.SERIAL, copyNest);
+    }
+
+    this._redirectReads(block.body, buf, cache);
+    if (block.initBody) this._redirectReads(block.initBody, buf, cache);
+    readEntry.buffer = cache;
+
+    const blockNest = loops[0];
+    const seq = new SeqNode([copyNest]);
+    const alloc = new AllocateNode(cache, scope, seq);
+    this._replaceNode(blockNest, alloc);
+    seq.stmts.push(blockNest);
+    this._rebuildSRefTree();
+    if (!this._replaying) this.trace.record('cacheRead', [blockName, bufferName, scope]);
+  }
+
+  fuseConsumer(producerBlockName, consumerBlockName) {
+    const pBlock = this.getBlock(producerBlockName);
+    const cBlock = this.getBlock(consumerBlockName);
+    const pLoops = this.getLoops(producerBlockName);
+    const cLoops = this.getLoops(consumerBlockName);
+    if (!pBlock.body || pBlock.body.type !== 'BufferStoreNode') {
+      throw new Error(`fuseConsumer: producer '${producerBlockName}' body is not a store`);
+    }
+    const pSpatialVars = new Set();
+    for (const idx of pBlock.body.indices) collectVarsUsed(idx, pSpatialVars);
+    const pSpatialLoops = pLoops.filter(l => pSpatialVars.has(l.loopVar.name));
+    if (pSpatialLoops.length === 0 || cLoops.length !== pSpatialLoops.length) {
+      throw new Error(`fuseConsumer: producer/consumer spatial rank mismatch (${pSpatialLoops.length} vs ${cLoops.length})`);
+    }
+    if (!cLoops[0]._parent || cLoops[0]._parent.type !== 'SeqNode') {
+      throw new Error('fuseConsumer: consumer loop nest is not a direct SeqNode sibling; cannot fuse without duplicating it');
+    }
+
+    const innermostSpatial = pSpatialLoops[pSpatialLoops.length - 1];
+    const reductionSubNest = cloneExprTree(innermostSpatial.body);
+
+    let cBody = cloneExprTree(cBlock.body);
+    for (let i = 0; i < cLoops.length; i++) {
+      const targetName = pSpatialLoops[i].loopVar.name;
+      cBody = substituteVar(cBody, cLoops[i].loopVar.name, () => new VariableNode(targetName, 'int32'));
+    }
+    const cFusedBlock = new BlockNode(`${consumerBlockName}_fused`, [],
+      cBlock.reads.map(r => ({ buffer: r.buffer })), cBlock.writes.map(w => ({ buffer: w.buffer })), cBody);
+
+    let fused = new SeqNode([reductionSubNest, cFusedBlock]);
+    for (let i = pSpatialLoops.length - 1; i >= 0; i--) {
+      const sl = pSpatialLoops[i];
+      fused = new ForNode(sl.loopVar, new IntImmNode(0), cloneExprTree(sl.extent), sl.kind, fused, sl.threadTag);
+    }
+
+    this._replaceNode(pLoops[0], fused);
+    this._removeNode(cLoops[0]);
+    this._rebuildSRefTree();
+    if (!this._replaying) {
+      this.trace.record('fuseConsumer', [producerBlockName, consumerBlockName]);
+    }
   }
 
   annotate(loop, key, value) {
@@ -584,29 +702,17 @@ export class Schedule {
       if (this.func._setChild) this.func._setChild('body', newNode);
     }
   }
-}
 
-function substituteBufferInBlock(block, oldBuf, newBuf) {
-  const visit = (node) => {
-    if (!node || typeof node !== 'object') return;
-    if (node.type === 'BufferLoadNode' && node.buffer === oldBuf) node.buffer = newBuf;
-    if (node.type === 'BufferStoreNode' && node.buffer === oldBuf) node.buffer = newBuf;
-    if (node.type === 'BufferLoadNode' || node.type === 'BufferStoreNode') {
-      for (const idx of node.indices) visit(idx);
-      if (node.value) visit(node.value);
-      return;
+  _removeNode(node) {
+    const parent = node._parent;
+    if (parent && parent.type === 'SeqNode' && Array.isArray(parent.stmts)) {
+      const i = parent.stmts.indexOf(node);
+      if (i >= 0) {
+        parent.stmts.splice(i, 1);
+        if (parent._setChildren) parent._setChildren('stmts', parent.stmts);
+        return;
+      }
     }
-    if (node.a) visit(node.a);
-    if (node.b) visit(node.b);
-    if (node.expr) visit(node.expr);
-    if (node.args) for (const a of node.args) visit(a);
-    if (node.body) visit(node.body);
-    if (node.initBody) visit(node.initBody);
-    if (node.stmts) for (const s of node.stmts) visit(s);
-    if (node.condition) visit(node.condition);
-    if (node.thenBody) visit(node.thenBody);
-    if (node.elseBody) visit(node.elseBody);
-  };
-  visit(block.body);
-  if (block.initBody) visit(block.initBody);
+    throw new Error('_removeNode: node parent is not a SeqNode; cannot remove without duplicating it');
+  }
 }

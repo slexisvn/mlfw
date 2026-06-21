@@ -9,6 +9,8 @@ export class ScheduleValidator {
       threadBindings: new Map(),
       parallelExtents: new Map(),
       parLoops: [],
+      innermostLoopVar: null,
+      loopStack: [],
       errors
     };
 
@@ -113,7 +115,12 @@ export class ScheduleValidator {
     if (tracksReduction) ctx.parLoops.push({ varName, kind: node.kind });
 
     ctx.boundVars.add(varName);
+    const prevInnermost = ctx.innermostLoopVar;
+    ctx.innermostLoopVar = varName;
+    ctx.loopStack.push(varName);
     ScheduleValidator._visitNode(node.body, ctx);
+    ctx.loopStack.pop();
+    ctx.innermostLoopVar = prevInnermost;
     ctx.boundVars.delete(varName);
 
     if (tracksReduction) ctx.parLoops.pop();
@@ -137,6 +144,24 @@ export class ScheduleValidator {
   static _visitBlock(node, ctx) {
     for (const r of node.iterVars) {
       if (r.iterVar) ctx.boundVars.add(r.iterVar.name);
+    }
+    if (node.initBody && ctx.innermostLoopVar) {
+      const writtenIdx = new Set();
+      collectWriteIndexVars(node, writtenIdx);
+      const usedVars = new Set();
+      collectVarsUsed(node.body, usedVars);
+      collectVarsUsed(node.initBody, usedVars);
+      let reductionEnclosing = 0;
+      for (const v of ctx.loopStack) {
+        if (usedVars.has(v) && !writtenIdx.has(v)) reductionEnclosing++;
+      }
+      if (writtenIdx.has(ctx.innermostLoopVar) || reductionEnclosing > 1) {
+        ctx.errors.push(
+          `Reduction block '${node.name}' violates the init contract: codegen zeroes the accumulator ` +
+          `at the single innermost loop, so an init-bearing block needs exactly one enclosing reduction ` +
+          `loop and it must be innermost (innermost '${ctx.innermostLoopVar}', ${reductionEnclosing} enclosing reduction loops)`
+        );
+      }
     }
     if (ctx.parLoops.length > 0) {
       const used = new Set();

@@ -4,7 +4,28 @@ import { CPUTarget } from '../../../src/backend/target.js';
 
 const feat = (...v) => [v];
 
-describe('LearnedCostModel (MLP) captures non-linear interactions', () => {
+describe('LearnedCostModel (gradient-boosted trees) captures non-linear interactions', () => {
+  it('fits a threshold/cliff target (perf cliffs at tile-size boundaries) the search depends on', () => {
+    const m = new LearnedCostModel(null, {});
+    for (let tile = 1; tile <= 16; tile++) {
+      m.addSample([[tile, 0]], tile <= 4 ? 1.0 : 10.0);
+    }
+    m.train();
+    expect(m.predict([[2, 0]])).toBeLessThan(5);
+    expect(m.predict([[12, 0]])).toBeGreaterThan(5);
+  });
+
+  it('drops non-finite measured labels so one bad timing cannot poison every prediction', () => {
+    const m = new LearnedCostModel(null, {});
+    m.addSample([[1, 1]], 1);
+    m.addSample([[2, 1]], -Infinity);
+    m.addSample([[3, 1]], 3);
+    m.addSample([[2, 1]], NaN);
+    expect(m._X.length).toBe(2);
+    m.train();
+    expect(Number.isFinite(m.predict([[2, 1]]))).toBe(true);
+  });
+
   it('fits XOR, whose optimal linear regression provably has MSE 0.25', () => {
     const data = [[0, 0, 0], [0, 1, 1], [1, 0, 1], [1, 1, 0]];
     const m = new LearnedCostModel(null, { seed: 1 });

@@ -2,7 +2,7 @@ import { GraphFunction } from '../ir/graph/function.js';
 import { IRBuilder } from '../ir/graph/builder.js';
 import { UseDefAnalysis } from '../analysis/use_def.js';
 import { GradAccumulator } from './grad_accumulator.js';
-import { getVJPRule } from './vjp_registry.js';
+import { getVJPRule, isGradientBarrier } from './vjp_registry.js';
 import { RematPolicy } from './remat_policy.js';
 import { reduceGradToOperandShape } from './backward_builder.js';
 
@@ -162,6 +162,7 @@ export class JointGraphBuilder {
       if (!hasGradResult) continue;
 
       if (!getVJPRule(op.opName)) continue;
+      if (isGradientBarrier(op.opName)) continue;
 
       for (let o = 0; o < op.numOperands; o++) {
         needsGrad.add(op.getOperand(o).id);

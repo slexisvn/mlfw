@@ -3,11 +3,15 @@ import { getProgram, getProgramFor } from './cuda/program.js';
 import { acquire, copyHostToDevice, copyDeviceToHost, release } from './cuda/memory.js';
 import { launch } from './cuda/launcher.js';
 import { runCudaPlan, setCudaGraphEnabled, isCudaGraphEnabled } from './cuda/device_plan.js';
-import { uploadIfStale, downloadAndValidate, deviceBufferForInput, deviceBufferForOutput, isEagerDeferred, hostReadHook } from './cuda/resident.js';
+import { uploadIfStale, downloadAndValidate, deviceBufferForInput, deviceBufferForOutput, deviceBufferForInplace, isEagerDeferred, hostReadHook, pinResident } from './cuda/resident.js';
+import { cu } from './cuda/ffi.js';
 import { StorageImpl } from '../../tensor/core/storage_impl.js';
 import { registerMeasurer } from '../../compiler/runtime/measurer_registry.js';
-import { setGpuContiguousFn, setGpuConcatFn } from '../../dispatcher/jit_dispatch.js';
+import { setGpuContiguousFn, setGpuConcatFn, setCudnnLSTM, setGpuAdamFn, setGpuMatmul } from '../../dispatcher/jit_dispatch.js';
 import { typedArrayCtor } from '../../tensor/types/dtype.js';
+import { cudnnAvailable } from './cuda/cudnn.js';
+import { cudnnLSTMOp } from './cuda/cudnn_lstm_op.js';
+import { gpuMatmul } from './cuda/cublas_matmul_op.js';
 
 export { runCudaPlan, setCudaGraphEnabled, isCudaGraphEnabled };
 
@@ -104,20 +108,37 @@ export function runCudaKernelResident(compiledKernel, tensorArgs, shapeValues) {
 
   const outputSet = meta._outputSet || (meta._outputSet = new Set(meta.outputIndices || buffers.map((_, i) => i)));
   const ptrs = new Array(buffers.length);
+  const scratch = _acquireScratch(meta.scratch);
 
   if (isEagerDeferred()) {
     for (let i = 0; i < buffers.length; i++) {
       ptrs[i] = outputSet.has(i) ? deviceBufferForOutput(buffers[i]) : deviceBufferForInput(buffers[i]);
     }
-    launch(func, meta.gridDim, meta.blockDim, meta.sharedMemBytes || 0, ptrs, scalars, false);
+    launch(func, meta.gridDim, meta.blockDim, meta.sharedMemBytes || 0, [...ptrs, ...scratch.ptrs], scalars, false);
+    _releaseScratch(scratch);
     return;
   }
 
   for (let i = 0; i < buffers.length; i++) ptrs[i] = uploadIfStale(buffers[i]);
-  launch(func, meta.gridDim, meta.blockDim, meta.sharedMemBytes || 0, ptrs, scalars, false);
+  launch(func, meta.gridDim, meta.blockDim, meta.sharedMemBytes || 0, [...ptrs, ...scratch.ptrs], scalars, false);
   for (let i = 0; i < buffers.length; i++) {
     if (outputSet.has(i)) downloadAndValidate(buffers[i], ptrs[i]);
   }
+  _releaseScratch(scratch);
+}
+
+function _acquireScratch(scratch) {
+  if (!scratch || scratch.length === 0) return { ptrs: [], bufs: [] };
+  const ptrs = [], bufs = [];
+  for (const s of scratch) {
+    const bytes = s.size * typedArrayCtor(s.dtype).BYTES_PER_ELEMENT;
+    const p = acquire(bytes);
+    ptrs.push(p); bufs.push([p, bytes]);
+  }
+  return { ptrs, bufs };
+}
+function _releaseScratch(scratch) {
+  for (const [p, bytes] of scratch.bufs) release(p, bytes);
 }
 
 export async function runCudaKernel(compiledKernel, tensorArgs, shapeValues) {
@@ -184,7 +205,47 @@ export function deviceConcat(opName, inputArrays, inputShapes, dim, outShape, ou
   }
 }
 
+function _adamKernel(ct, name) {
+  return `extern "C" __global__ void ${name}(${ct}* w, const ${ct}* g, ${ct}* m, ${ct}* v, int n, float b1, float b2, float ob1, float ob2, float eps, float ss, float bc2s, float wd) {
+  int i = blockIdx.x*blockDim.x + threadIdx.x; if (i >= n) return;
+  float gi = (float)g[i] + wd * (float)w[i];
+  float mi = b1*(float)m[i] + ob1*gi;
+  float vi = b2*(float)v[i] + ob2*gi*gi;
+  m[i] = (${ct})mi; v[i] = (${ct})vi;
+  w[i] = (${ct})((float)w[i] - ss * mi / (sqrtf(vi)/bc2s + eps));
+}`;
+}
+
+export function deviceAdam(p, state, sc) {
+  if (!isEagerDeferred()) return false;
+  const dtype = p.dtype || 'f32';
+  if (dtype !== 'f32') return false;
+  const wRaw = p._impl.storage.rawData;
+  const gRaw = p.grad._impl.storage.rawData;
+  if (!wRaw || !gRaw) return false;
+  const n = wRaw.length;
+  getDevice();
+  const name = `adam_${dtype}`;
+  let src = _kernSrc.get(name);
+  if (!src) { src = _adamKernel(_ctype(dtype), name); _kernSrc.set(name, src); }
+  const { func } = getProgram(src, name);
+  if (!state._mDev) {
+    state._mDev = acquire(n * 4); cu.memsetD8(state._mDev, 0, n * 4);
+    state._vDev = acquire(n * 4); cu.memsetD8(state._vDev, 0, n * 4);
+    pinResident(wRaw);
+  }
+  const wDev = deviceBufferForInplace(wRaw);
+  const gDev = deviceBufferForInput(gRaw);
+  launch(func, [Math.ceil(n / 256), 1, 1], [256, 1, 1], 0,
+    [wDev, gDev, state._mDev, state._vDev],
+    [n, sc.beta1, sc.beta2, sc.omb1, sc.omb2, sc.eps, sc.stepSize, sc.bc2sqrt, sc.wd], false);
+  return true;
+}
+
 setGpuContiguousFn(deviceContiguous);
 setGpuConcatFn(deviceConcat);
+setGpuAdamFn(deviceAdam);
+setGpuMatmul(gpuMatmul);
+if (cudnnAvailable()) setCudnnLSTM(cudnnLSTMOp);
 
 registerMeasurer('cuda', measureCudaKernel);

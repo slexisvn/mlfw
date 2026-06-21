@@ -5,6 +5,7 @@ import { EvolutionarySearch } from '../../../src/compiler/autotune/search.js';
 import { TaskScheduler, GradientSchedulerPolicy } from '../../../src/compiler/autotune/task_scheduler.js';
 import { Deadline } from '../../../src/compiler/autotune/budget.js';
 import { Autotuner } from '../../../src/compiler/autotune/autotuner.js';
+import { enumerateFactorizations } from '../../../src/compiler/autotune/factorization.js';
 import { Buffer } from '../../../src/compiler/ir/tensor/buffer.js';
 import {
   PrimFunc, BlockNode, BufferStoreNode, BufferLoadNode, ForNode,
@@ -33,6 +34,34 @@ function matmulPrimFunc(name, M = 8, N = 8, K = 8) {
 }
 
 const sidx = (name) => STATEMENT_FEATURE_SCHEMA.indexOf(name);
+
+describe('Ansor multi-level tile factorization', () => {
+  it('every factor-tuple multiplies back to the extent and has the requested level count', () => {
+    for (const [extent, levels] of [[8, 3], [64, 4], [256, 4], [96, 2], [12, 3]]) {
+      const tuples = enumerateFactorizations(extent, levels);
+      expect(tuples.length).toBeGreaterThan(0);
+      for (const t of tuples) {
+        expect(t.length).toBe(levels);
+        expect(t.reduce((a, b) => a * b, 1)).toBe(extent);
+      }
+    }
+  });
+
+  it('includes a degenerate tuple so prime extents still tile validly', () => {
+    for (const [extent, levels] of [[7, 4], [13, 3], [5, 4]]) {
+      const tuples = enumerateFactorizations(extent, levels);
+      const degenerate = tuples.some(t => t.filter(x => x === 1).length === levels - 1 && t.includes(extent));
+      expect(degenerate, `extent ${extent}`).toBe(true);
+    }
+  });
+
+  it('is bounded and deterministic for a fixed extent/levels', () => {
+    const a = enumerateFactorizations(256, 4);
+    const b = enumerateFactorizations(256, 4);
+    expect(a.length).toBeLessThanOrEqual(48);
+    expect(JSON.stringify(a)).toBe(JSON.stringify(b));
+  });
+});
 
 describe('Ansor per-statement feature extraction', () => {
   it('emits one fixed-width vector per compute statement with per-access features', () => {
@@ -114,7 +143,7 @@ describe('LearnedCostModel per-statement sum formulation', () => {
   it('ignores empty statement sets', () => {
     const m = new LearnedCostModel(null, { seed: 1 });
     m.addSample([], 5);
-    expect(m._trainingData.length).toBe(0);
+    expect(m._X.length).toBe(0);
   });
 });
 

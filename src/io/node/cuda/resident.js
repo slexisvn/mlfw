@@ -36,8 +36,12 @@ export function downloadAndValidate(hostArray, dptr) {
 
 const DEFERRED_MEM_FRACTION = 0.5;
 const _def = new Map();
+const _pinned = new Set();
 let _defBytes = 0;
 let _defCap = 0;
+
+export function pinResident(hostArray) { _pinned.add(hostArray); }
+export function unpinResident(hostArray) { _pinned.delete(hostArray); }
 
 function _cap() {
   if (!_defCap) _defCap = Math.floor(getDevice().totalMem * DEFERRED_MEM_FRACTION);
@@ -51,9 +55,9 @@ function _syncDownload(hostArray, dptr) {
 
 function _evict(incoming) {
   const cap = _cap();
-  while (_defBytes + incoming > cap && _def.size > 0) {
-    const k = _def.keys().next().value;
-    const e = _def.get(k);
+  for (const [k, e] of _def) {
+    if (_defBytes + incoming <= cap) break;
+    if (_pinned.has(k)) continue;
     if (e.hostStale) _syncDownload(k, e.dptr);
     release(e.dptr, e.bytes);
     _defBytes -= e.bytes;
@@ -84,10 +88,20 @@ export function deviceBufferForOutput(hostArray) {
   return e.dptr;
 }
 
+export function deviceBufferForInplace(hostArray) {
+  const e = _defEntry(hostArray);
+  if (!e.deviceFresh) { copyHostToDevice(e.dptr, hostArray); e.deviceFresh = true; }
+  e.hostStale = true;
+  return e.dptr;
+}
+
 export function flushDeferred() {
-  for (const e of _def.values()) release(e.dptr, e.bytes);
-  _def.clear();
-  _defBytes = 0;
+  for (const [k, e] of _def) {
+    if (_pinned.has(k)) continue;
+    release(e.dptr, e.bytes);
+    _defBytes -= e.bytes;
+    _def.delete(k);
+  }
 }
 
 export function hostReadHook(hostArray) {

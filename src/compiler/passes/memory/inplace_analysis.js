@@ -7,7 +7,7 @@ export class InplaceCandidate {
 }
 
 export class InplaceAnalysis {
-  static analyze(primFunc, livenessResult) {
+  static analyze(primFunc, livenessResult, allowedDonationParams = new Set()) {
     const candidates = [];
 
     const blocks = [];
@@ -36,13 +36,13 @@ export class InplaceAnalysis {
 
       for (const writeEntry of block.writes) {
         const dstBuf = writeEntry.buffer;
-        if (livenessResult.isParam(dstBuf)) continue;
+        if (livenessResult.isParam(dstBuf) && !allowedDonationParams.has(dstBuf)) continue;
 
         for (const readEntry of block.reads) {
           const srcBuf = readEntry.buffer;
           if (srcBuf === dstBuf) continue;
           if (alreadyAliased.has(srcBuf)) continue;
-          if (livenessResult.isParam(srcBuf)) continue;
+          if (livenessResult.isParam(srcBuf) && !allowedDonationParams.has(srcBuf)) continue;
 
           if (!shapesMatch(srcBuf, dstBuf)) continue;
           if (srcBuf.dtype !== dstBuf.dtype) continue;

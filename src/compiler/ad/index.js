@@ -13,3 +13,4 @@ import './vjp_rules/linalg.js';
 import './vjp_rules/reduction.js';
 import './vjp_rules/shape.js';
 import './vjp_rules/composite.js';
+import './vjp_rules/control.js';

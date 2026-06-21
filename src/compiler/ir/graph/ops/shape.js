@@ -4,6 +4,37 @@ import * as pat from '../patterns.js';
 
 export function register(registry) {
   registry.register(new OpDef({
+    name: 'stop_gradient',
+    numOperands: 1,
+    numResults: 1,
+    traits: [OpTrait.VIEW],
+    inferResultTypes(operandTypes) {
+      if (operandTypes.length !== 1) return null;
+      return [operandTypes[0]];
+    },
+    propagateSymbolicShapes(op, shapes) {
+      const inShape = shapes.get(op.getOperand(0));
+      return inShape ? [inShape] : null;
+    }
+  }));
+
+  registry.register(new OpDef({
+    name: 'reverse',
+    numOperands: 1,
+    numResults: 1,
+    traits: [OpTrait.INJECTIVE],
+    attrs: [{ name: 'dimensions', type: 'array', required: true }],
+    inferResultTypes(operandTypes) {
+      if (operandTypes.length !== 1) return null;
+      return [operandTypes[0]];
+    },
+    propagateSymbolicShapes(op, shapes) {
+      const s = shapes.get(op.getOperand(0));
+      return s ? [s] : null;
+    }
+  }));
+
+  registry.register(new OpDef({
     name: 'broadcast_in_dim',
     numOperands: 1,
     numResults: 1,

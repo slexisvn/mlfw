@@ -1,15 +1,26 @@
 mode = "bpe"
 
-rows = load_csv("examples/qa.csv").to_array()
-questions_text = [r.question for r in rows]
-answers_text = [r.answer for r in rows]
+embed_dim = 128
+hidden = 320
+num_layers = 4
+max_epochs = 80
+batch_size = 64
 
-tok = Tokenizer(mode=mode, lowercase=true, num_merges=200)
-tok.fit(questions_text + answers_text)
+train_rows = load_csv("examples/chat_train.csv").to_array()
+test_rows = load_csv("examples/chat_test.csv").to_array()
 
-questions = tok.encodeBatch(questions_text)
+train_q_text = [r.question for r in train_rows]
+train_a_text = [r.answer for r in train_rows]
+test_q_text = [r.question for r in test_rows]
+test_a_text = [r.answer for r in test_rows]
 
-ans_ids = [tok.encode(a) for a in answers_text]
+tok = Tokenizer(mode=mode, lowercase=true, num_merges=800)
+tok.fit(train_q_text + train_a_text + test_q_text + test_a_text)
+
+questions = tok.encodeBatch(train_q_text)
+test_questions = tok.encodeBatch(test_q_text)
+
+ans_ids = [tok.encode(a) for a in train_a_text]
 ans_len = 0
 for ids in ans_ids:
   if ids.length + 1 > ans_len:
@@ -34,85 +45,80 @@ for ids in ans_ids:
 decoder_in = tensor(din_rows, dtype=i32)
 decoder_out = tensor(dout_rows, dtype=i32)
 
-loader = DataLoader(TensorDataset(questions, decoder_in, decoder_out), batch_size=216, shuffle=true)
+loader = DataLoader(TensorDataset(questions, decoder_in, decoder_out), batch_size=batch_size, shuffle=true)
 
-model ChatBot(vocab_size: int, embed_dim: int, hidden: int, pad_id: int):
-  embed = Embedding(vocab_size, embed_dim)
-  encoder = LSTM(embed_dim, hidden, 1, true)
-  dec_cell = LSTMCell(embed_dim + hidden, hidden)
-  head = Linear(hidden, vocab_size)
-  loss_fn = CrossEntropyLoss("mean", pad_id)
+model ChatBotLarge(vocab_size: int, embed_size: int, hidden_size: int, layers: int, pad_id: int):
+  embed = Embedding(vocab_size, embed_size)
+  encoder = LSTM(embed_size, hidden_size, layers, true)
+  decoder = LSTM(embed_size, hidden_size, layers, true)
+  head = Linear(2 * hidden_size, vocab_size)
+  loss_fn = CrossEntropyLoss("sum", pad_id)
 
   forward (q: Tensor) -> Tensor:
-    encoded, state = encoder(embed(q))
-    return head(encoded)
+    enc, state = encoder(embed(q))
+    return enc
 
   train (batch: list[Tensor]):
     q, din, dout = batch
-    enc, state = encoder(embed(q))
-    batch_size = q.shape[0]
-    src_len = enc.shape[1]
-    hidden_dim = enc.shape[2]
+    enc, enc_state = encoder(embed(q))
+    dec, dec_state = decoder(embed(din), enc_state)
+    scores = dec @ enc.transpose(1, 2)
+    weights = scores.softmax(2)
+    context = weights @ enc
+    combined = cat([dec, context], 2)
+    bsz = q.shape[0]
     out_len = din.shape[1]
-    h = state[0].reshape([batch_size, hidden_dim])
-    c = state[1].reshape([batch_size, hidden_dim])
+    h2 = combined.shape[2]
+    flat = combined.reshape([bsz * out_len, h2])
+    logits = head(flat)
+    vocab = logits.shape[1]
+    logits3d = logits.reshape([bsz, out_len, vocab])
     total = null
     started = false
     for t in range(out_len):
-      emb_t = embed(din.select(1, t))
-      query = h.reshape([batch_size, 1, hidden_dim])
-      scores = (enc * query).sum(2)
-      weights = scores.softmax(1).reshape([batch_size, src_len, 1])
-      context = (enc * weights).sum(1)
-      step_in = cat([emb_t, context], 1)
-      h, c = dec_cell(step_in, [h, c])
-      logits = head(h)
-      step_loss = loss_fn(logits, dout.select(1, t))
+      step_logits = logits3d.select(1, t)
+      step_loss = loss_fn(step_logits, dout.select(1, t))
       if started:
         total = total + step_loss
       else:
         total = step_loss
         started = true
-    loss = total / out_len
+    loss = total / bsz
     log("train_loss", loss, prog_bar=true)
     return loss
 
   optimizer:
-    return optim_config(Adam(ChatBot.parameters(), lr=0.01))
+    return optim_config(Adam(ChatBotLarge.parameters(), lr=0.004))
 
-fn reply(model: ChatBot, tok: Tokenizer, query: Tensor, max_len: int) -> str:
+fn reply(model: ChatBotLarge, tok: Tokenizer, query: Tensor, max_len: int) -> str:
   enc, state = model.encoder(model.embed(query))
-  hidden_dim = enc.shape[2]
-  src_len = enc.shape[1]
-  h = state[0].reshape([1, hidden_dim])
-  c = state[1].reshape([1, hidden_dim])
   last = tok.bosId
   out_ids = []
   for step in range(max_len):
-    emb_t = model.embed(tensor([last], dtype=i32))
-    query_vec = h.reshape([1, 1, hidden_dim])
-    scores = (enc * query_vec).sum(2)
-    weights = scores.softmax(1).reshape([1, src_len, 1])
-    context = (enc * weights).sum(1)
-    step_in = cat([emb_t, context], 1)
-    h, c = model.dec_cell(step_in, [h, c])
-    logits = model.head(h).reshape([tok.vocabSize])
+    emb = model.embed(tensor([last], dtype=i32))
+    emb_t = emb.reshape([1, 1, emb.shape[1]])
+    dec, state = model.decoder(emb_t, state)
+    scores = dec @ enc.transpose(1, 2)
+    weights = scores.softmax(2)
+    context = weights @ enc
+    combined = cat([dec, context], 2)
+    logits = model.head(combined).reshape([tok.vocabSize])
     last = logits.argmax().item()
     if last == tok.eosId:
       return tok.decode(out_ids)
     out_ids[out_ids.length] = last
   return tok.decode(out_ids)
 
-fn accuracy(model: ChatBot, tok: Tokenizer, qs: Tensor, q_texts: list[str], answers: list[str], max_len: int) -> int:
+fn accuracy(model: ChatBotLarge, tok: Tokenizer, qs: Tensor, answers: list[str], max_len: int, count: int) -> int:
   correct = 0
   q_len = qs.shape[1]
-  for i in range(q_texts.length):
+  for i in range(count):
     query = qs.select(0, i).reshape([1, q_len])
     if reply(model, tok, query, max_len) == answers[i]:
       correct += 1
   return correct
 
-fn show_samples(model: ChatBot, tok: Tokenizer, qs: Tensor, q_texts: list[str], max_len: int, stride: int) -> none:
+fn show_samples(model: ChatBotLarge, tok: Tokenizer, qs: Tensor, q_texts: list[str], max_len: int, stride: int) -> none:
   q_len = qs.shape[1]
   i = 0
   while i < q_texts.length:
@@ -120,24 +126,47 @@ fn show_samples(model: ChatBot, tok: Tokenizer, qs: Tensor, q_texts: list[str], 
     print("  user:", q_texts[i], "-> bot:", reply(model, tok, query, max_len))
     i += stride
 
+fn probe(model: ChatBotLarge, tok: Tokenizer, prompts: list[str], max_len: int) -> none:
+  for p in prompts:
+    ids = tok.encode(p)
+    query = tensor([ids], dtype=i32)
+    print("  user:", p, "-> bot:", reply(model, tok, query, max_len))
+
+fn param_count(vocab: int, e: int, h: int, layers: int) -> int:
+  total = vocab * e + vocab * (2 * h) + vocab
+  for l in range(layers):
+    inp = h
+    if l == 0:
+      inp = e
+    layer = 4 * h * (inp + h) + 8 * h
+    total = total + 2 * layer
+  return total
+
 gen_len = ans_len + 2
-net = ChatBot(tok.vocabSize, 64, 96, tok.padId)
-trainer = Trainer(max_epochs=150, accelerator="gpu", logger=false, enable_progress=false)
+net = ChatBotLarge(tok.vocabSize, embed_dim, hidden, num_layers, tok.padId)
+n_params = param_count(tok.vocabSize, embed_dim, hidden, num_layers)
+
+print("=== ChatBotLarge (seq2seq", num_layers, "layer LSTM + attention, GPU) ===")
+print("vocab:", tok.vocabSize, "| embed:", embed_dim, "| hidden:", hidden, "| layers:", num_layers)
+print("params:", n_params, "| train pairs:", train_q_text.length, "| test pairs:", test_q_text.length, "| answer len:", ans_len)
+
+trainer = Trainer(max_epochs=max_epochs, accelerator="gpu", gradient_clip_val=1.0, logger=false, enable_progress=true)
 trainer.fit(net, loader)
-net.eval()
-
-total = questions_text.length
-print("=== ChatBot (seq2seq LSTM + attention, tokenizer=" + mode + ", trained on GPU) ===")
-print("vocab size:", tok.vocabSize, "| pairs:", total, "| answer len:", ans_len)
-print("[before save] sample replies:")
-show_samples(net, tok, questions, questions_text, gen_len, 24)
-
 save(net, "examples/chatbot.ckpt")
-print("saved -> examples/chatbot.ckpt")
+print("saved -> examples/chatbot.ckpt (trained on GPU)")
 
-restored = ChatBot(tok.vocabSize, 64, 96, tok.padId)
+restored = ChatBotLarge(tok.vocabSize, embed_dim, hidden, num_layers, tok.padId)
 load(restored, "examples/chatbot.ckpt")
 restored.eval()
-print("[after load into a fresh model] exact match:", accuracy(restored, tok, questions, questions_text, answers_text, gen_len), "/", total)
-print("sample replies:")
-show_samples(restored, tok, questions, questions_text, gen_len, 24)
+
+eval_n = test_q_text.length
+if eval_n > 96:
+  eval_n = 96
+test_correct = accuracy(restored, tok, test_questions, test_a_text, gen_len, eval_n)
+print("[eval on CPU] test exact-match (held-out paraphrases):", test_correct, "/", eval_n)
+print("[held-out test] sample replies:")
+show_samples(restored, tok, test_questions, test_q_text, gen_len, 48)
+print("[train] sample replies (memorization check):")
+show_samples(restored, tok, questions, train_q_text, gen_len, 160)
+print("[unseen paraphrase probes]:")
+probe(restored, tok, ["hiya", "what are your opening times", "can i get my money back", "do you take mastercard", "i can not log into my account", "where do i find you"], gen_len)

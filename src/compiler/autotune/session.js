@@ -3,6 +3,29 @@ import { ScheduleValidator } from '../schedule/validator.js';
 import { FeatureExtractor } from './features.js';
 import { clonePrimFunc, extractBlockMini } from './tune_ir.js';
 import { createSearchStrategy } from './search.js';
+import { LearnedCostModel, GuidedCostModel } from './cost_model.js';
+
+const THREAD_AXES = ['threadIdx.x', 'threadIdx.y', 'threadIdx.z'];
+
+export function gpuThreadBlockSize(func) {
+  const perAxis = { 'threadIdx.x': 1, 'threadIdx.y': 1, 'threadIdx.z': 1 };
+  const seen = new Set();
+  const visit = (node) => {
+    if (!node || typeof node !== 'object' || seen.has(node)) return;
+    seen.add(node);
+    if (node.type === 'ForNode' && perAxis[node.threadTag] !== undefined) {
+      const extent = node.extent && node.extent.type === 'IntImmNode' ? node.extent.value : 1;
+      if (extent > perAxis[node.threadTag]) perAxis[node.threadTag] = extent;
+    }
+    for (const key in node) {
+      const child = node[key];
+      if (Array.isArray(child)) child.forEach(visit);
+      else if (child && typeof child === 'object') visit(child);
+    }
+  };
+  visit(func.body);
+  return THREAD_AXES.reduce((product, axis) => product * perAxis[axis], 1);
+}
 
 export class BlockTuningSession {
   constructor(opts) {
@@ -10,13 +33,19 @@ export class BlockTuningSession {
     this.primFunc = opts.primFunc;
     this.blockName = opts.blockName;
     this.sketches = opts.sketches;
-    this.costModel = opts.costModel;
-    this.learnedModel = opts.learnedModel;
     this.benchmarkRunner = opts.benchmarkRunner || null;
     this.config = opts.config;
     this.deadline = opts.deadline || null;
 
-    const mini = extractBlockMini(opts.primFunc, opts.blockName, opts.blockMap);
+    const needsWholeFunc = this.sketches.some(s => s.name === 'fused');
+    if (needsWholeFunc) {
+      this.learnedModel = new LearnedCostModel();
+      this.costModel = new GuidedCostModel(opts.costModel.analytical, this.learnedModel);
+    } else {
+      this.costModel = opts.costModel;
+      this.learnedModel = opts.learnedModel;
+    }
+    const mini = needsWholeFunc ? null : extractBlockMini(opts.primFunc, opts.blockName, opts.blockMap);
     this.evalFunc = mini || opts.primFunc;
     this.evalBlockName = opts.blockName;
 
@@ -85,6 +114,8 @@ export class BlockTuningSession {
       sketch.instantiate(params)(sch, this.evalBlockName, this.target);
       const errors = ScheduleValidator.validate(cloned);
       if (errors.length > 0) return null;
+      const blockLimit = this.target.maxThreadsPerBlock;
+      if (this.target.isGPU && this.target.isGPU() && blockLimit && gpuThreadBlockSize(cloned) > blockLimit) return null;
       return { score: this.costModel.score(cloned) };
     } catch (e) {
       return null;

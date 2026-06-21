@@ -3,7 +3,18 @@ import { IRBuilder } from '../ir/graph/builder.js';
 
 import { UseDefAnalysis } from '../analysis/use_def.js';
 import { GradAccumulator } from './grad_accumulator.js';
-import { getVJPRule } from './vjp_registry.js';
+import { getVJPRule, isGradientBarrier } from './vjp_registry.js';
+import { buildScanBackward, buildCondBackward, regionFreeVars } from './scan_backward.js';
+
+const REGION_CONTROL_FLOW = new Set(['scan', 'if']);
+
+function regionControlFlowFreeVars(op) {
+  const out = [];
+  for (const region of op.regions) {
+    if (region.blocks[0]) out.push(...regionFreeVars(region.blocks[0]));
+  }
+  return out;
+}
 
 export function reduceGradToOperandShape(builder, grad, targetShape) {
   const gradShape = grad.type.shape;
@@ -105,6 +116,13 @@ export class BackwardGraphBuilder {
 
       if (gradOuts.every(g => g === null)) continue;
 
+      if (REGION_CONTROL_FLOW.has(op.opName)) {
+        const mat = (v) => this._materialize(v, valueMap, builder);
+        if (op.opName === 'scan') buildScanBackward(op, accumulator, builder, mat, needsGrad);
+        else buildCondBackward(op, accumulator, builder, mat, needsGrad);
+        continue;
+      }
+
       const rule = getVJPRule(op.opName);
       if (!rule) continue;
 
@@ -202,7 +220,14 @@ export class BackwardGraphBuilder {
       const hasGradResult = op.results.some(r => needsGrad.has(r.id));
       if (!hasGradResult) continue;
 
+      if (REGION_CONTROL_FLOW.has(op.opName)) {
+        for (let o = 0; o < op.numOperands; o++) needsGrad.add(op.getOperand(o).id);
+        for (const fv of regionControlFlowFreeVars(op)) needsGrad.add(fv.id);
+        continue;
+      }
+
       if (!getVJPRule(op.opName)) continue;
+      if (isGradientBarrier(op.opName)) continue;
 
       for (let o = 0; o < op.numOperands; o++) {
         needsGrad.add(op.getOperand(o).id);
@@ -268,8 +293,13 @@ export class BackwardGraphBuilder {
     };
     for (const op of topoOrder) {
       if (op.opName === 'return' || op.opName === 'constant') continue;
-      if (!getVJPRule(op.opName)) continue;
       if (!op.results.some(r => needsGrad.has(r.id))) continue;
+      if (REGION_CONTROL_FLOW.has(op.opName)) {
+        for (const v of op.operands) collect(v);
+        for (const fv of regionControlFlowFreeVars(op)) collect(fv);
+        continue;
+      }
+      if (!getVJPRule(op.opName)) continue;
       for (let o = 0; o < op.numOperands; o++) collect(op.getOperand(o));
       for (let r = 0; r < op.numResults; r++) collect(op.getResult(r));
     }

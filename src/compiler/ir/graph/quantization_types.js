@@ -3,7 +3,8 @@ import { ScalarType, scalarBytes } from './types.js';
 export const QuantizationScheme = Object.freeze({
   PER_TENSOR_SYMMETRIC: 'per_tensor_symmetric',
   PER_TENSOR_ASYMMETRIC: 'per_tensor_asymmetric',
-  PER_CHANNEL: 'per_channel'
+  PER_CHANNEL: 'per_channel',
+  PER_GROUP: 'per_group'
 });
 
 const SCHEME_SET = new Set(Object.values(QuantizationScheme));
@@ -15,6 +16,7 @@ export class QuantizationParams {
     this.scale = config.scale;
     this.zeroPoint = config.zeroPoint;
     this.axis = config.axis ?? null;
+    this.groupSize = config.groupSize ?? null;
     this.dtype = config.dtype || ScalarType.I8;
     this.numBits = config.numBits || (scalarBytes(this.dtype) * 8);
     this._hash = null;
@@ -101,6 +103,35 @@ export class QuantizationParams {
     return result;
   }
 
+  quantizeArrayPerGroup(floatArr) {
+    const [cMin, cMax] = this.clampRange();
+    const result = new Array(floatArr.length);
+    for (let i = 0; i < floatArr.length; i++) {
+      const g = Math.floor(i / this.groupSize);
+      const s = this.scale[g];
+      const zp = this.zeroPoint[g];
+      result[i] = Math.max(cMin, Math.min(cMax, Math.round(floatArr[i] / s + zp)));
+    }
+    return result;
+  }
+
+  dequantizeArrayPerGroup(intArr) {
+    const result = new Array(intArr.length);
+    for (let i = 0; i < intArr.length; i++) {
+      const g = Math.floor(i / this.groupSize);
+      result[i] = (intArr[i] - this.zeroPoint[g]) * this.scale[g];
+    }
+    return result;
+  }
+
+  getScaleForGroup(g) {
+    return this.scale[g];
+  }
+
+  getZeroPointForGroup(g) {
+    return this.zeroPoint[g];
+  }
+
   getScaleForChannel(ch) {
     if (!this.isPerChannel()) return this.getScalarScale();
     return this.scale[ch];
@@ -128,6 +159,10 @@ export class QuantizationParams {
     return this.scheme === QuantizationScheme.PER_CHANNEL;
   }
 
+  isPerGroup() {
+    return this.scheme === QuantizationScheme.PER_GROUP;
+  }
+
   isSymmetric() {
     return this.scheme === QuantizationScheme.PER_TENSOR_SYMMETRIC;
   }
@@ -139,6 +174,7 @@ export class QuantizationParams {
     if (this.dtype !== other.dtype) return false;
     if (this.numBits !== other.numBits) return false;
     if (this.axis !== other.axis) return false;
+    if (this.groupSize !== other.groupSize) return false;
     if (!scaleEquals(this.scale, other.scale)) return false;
     if (!scaleEquals(this.zeroPoint, other.zeroPoint)) return false;
     return true;
@@ -156,11 +192,13 @@ export class QuantizationParams {
   }
 
   serialize() {
+    const arrayScale = this.isPerChannel() || this.isPerGroup();
     return {
       scheme: this.scheme,
-      scale: this.isPerChannel() ? [...this.scale] : this.scale,
-      zeroPoint: this.isPerChannel() ? [...this.zeroPoint] : this.zeroPoint,
+      scale: arrayScale ? [...this.scale] : this.scale,
+      zeroPoint: arrayScale ? [...this.zeroPoint] : this.zeroPoint,
       axis: this.axis,
+      groupSize: this.groupSize,
       dtype: this.dtype,
       numBits: this.numBits
     };
@@ -239,6 +277,29 @@ export class QuantizationParams {
       if (mins[c] === maxs[c]) { mins[c] -= 0.5; maxs[c] += 0.5; }
     }
     return QuantizationParams.fromRangePerChannel(mins, maxs, axis, dtype, numBits);
+  }
+
+  static fromConstantArrayPerGroup(data, groupSize, dtype = ScalarType.I8, numBits = 4) {
+    const numGroups = Math.ceil(data.length / groupSize);
+    const scales = new Float64Array(numGroups);
+    const zeroPoints = new Int32Array(numGroups);
+    const bound = (1 << (numBits - 1)) - 1;
+    for (let g = 0; g < numGroups; g++) {
+      const start = g * groupSize;
+      const end = Math.min(start + groupSize, data.length);
+      let absMax = 0;
+      for (let i = start; i < end; i++) {
+        const a = Math.abs(data[i]);
+        if (a > absMax) absMax = a;
+      }
+      scales[g] = absMax / bound || 1e-10;
+      zeroPoints[g] = 0;
+    }
+    return new QuantizationParams({
+      scheme: QuantizationScheme.PER_GROUP,
+      scale: scales, zeroPoint: zeroPoints,
+      groupSize, dtype, numBits
+    });
   }
 
   static isQuantizableDtype(dtype) {

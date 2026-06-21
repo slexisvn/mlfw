@@ -34,6 +34,7 @@ export class CPUCodegen {
       paramNames.push(sp.name);
     }
     this._paramBuffers = paramBuffers;
+    this._readBuffers = new Set();
 
     let usedBuffers, allocatedBuffers, zeroBuffers, constantBuffers;
 
@@ -45,7 +46,7 @@ export class CPUCodegen {
     } else {
       usedBuffers = new Map();
       allocatedBuffers = new Set();
-      this._scanTree(func.body, usedBuffers, allocatedBuffers);
+      this._scanTree(func.body, usedBuffers, allocatedBuffers, this._readBuffers);
       zeroBuffers = this._findZeroOnlyBuffers(func.body, paramBuffers);
       constantBuffers = this._constantBuffers;
     }
@@ -546,15 +547,14 @@ export class CPUCodegen {
         return this._isRedundantZeroFill(cur);
       }
       if (cur.type === 'BlockNode') { cur = cur.body; continue; }
-      if (cur.type === 'BufferStoreNode') {
+      if (cur.type === 'BufferStoreNode' || cur.type === 'LIRFlatStoreNode') {
         const val = cur.value;
         const isZero = (val.type === 'FloatImmNode' && val.value === 0) || (val.type === 'IntImmNode' && val.value === 0);
-        return isZero;
-      }
-      if (cur.type === 'LIRFlatStoreNode') {
-        const val = cur.value;
-        const isZero = (val.type === 'FloatImmNode' && val.value === 0) || (val.type === 'IntImmNode' && val.value === 0);
-        return isZero;
+        if (!isZero || !cur.buffer) return false;
+        const name = cur.buffer.name;
+        const onlyZero = this._zeroBuffers && this._zeroBuffers.has(name);
+        const isRead = this._readBuffers && this._readBuffers.has(name);
+        return onlyZero || !isRead;
       }
       return false;
     }
@@ -578,7 +578,7 @@ export class CPUCodegen {
     return false;
   }
 
-  _scanTree(root, usedBuffers, allocatedBuffers) {
+  _scanTree(root, usedBuffers, allocatedBuffers, readBuffers) {
     const stack = [root];
     while (stack.length > 0) {
       const node = stack.pop();
@@ -587,6 +587,7 @@ export class CPUCodegen {
         case 'BufferStoreNode':
         case 'BufferLoadNode':
           if (node.buffer) usedBuffers.set(node.buffer.name, node.buffer);
+          if (node.type === 'BufferLoadNode' && node.buffer && readBuffers) readBuffers.add(node.buffer.name);
           break;
         case 'AllocateNode':
           if (node.buffer) allocatedBuffers.add(node.buffer.name);

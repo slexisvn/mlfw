@@ -1,4 +1,5 @@
 import { encodeWat } from '../../backend/wasm/wat_encoder.js';
+import { registerMeasurer } from './measurer_registry.js';
 
 const _registry = new Map();
 
@@ -135,6 +136,28 @@ registerBackend('wasm', {
     return !!(inst && inst.parallel && inst.parallel.poolSafe);
   },
 });
+
+function measureWasm(compiled, byteSizes, shapeValues = [], opts = {}) {
+  const warmup = opts.warmup ?? 5;
+  const repeat = opts.repeat ?? 30;
+  const inst = instantiateWasm(compiled);
+  const tensorArgs = byteSizes.map((bytes) => new Float32Array(Math.max(1, Math.ceil(bytes / 4))));
+  const sv = shapeValues || [];
+  const once = () => {
+    if (inst.parallel) runWasmKernel(inst, tensorArgs, sv, 0, inst.parallel.extent);
+    else runWasmKernel(inst, tensorArgs, sv);
+  };
+  for (let i = 0; i < warmup; i++) once();
+  const samples = [];
+  for (let i = 0; i < repeat; i++) {
+    const t0 = performance.now();
+    once();
+    samples.push(performance.now() - t0);
+  }
+  return samples;
+}
+
+registerMeasurer('wasm', measureWasm);
 
 registerBackend('webgpu', {
   instantiate(kernel) {
