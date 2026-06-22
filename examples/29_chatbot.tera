@@ -17,7 +17,7 @@ test_a_text = [r.answer for r in test_rows]
 tok = Tokenizer(mode=mode, lowercase=true, num_merges=800)
 tok.fit(train_q_text + train_a_text + test_q_text + test_a_text)
 
-tok.save("tok.json")
+tok.save("examples/chatbot.tok")
 
 questions = tok.encodeBatch(train_q_text)
 test_questions = tok.encodeBatch(test_q_text)

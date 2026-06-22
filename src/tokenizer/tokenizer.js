@@ -9,6 +9,7 @@ export const TOKENIZER_FORMAT = 'mlfw-tokenizer';
 export const TOKENIZER_VERSION = 1;
 export const DEFAULT_SPECIALS = Object.freeze({ pad: '<pad>', unk: '<unk>', bos: '<bos>', eos: '<eos>' });
 
+const TOKENIZER_ARTIFACT_HEADER = `${TOKENIZER_FORMAT}-v${TOKENIZER_VERSION}`;
 const STRATEGIES = {
   word: WordStrategy,
   char: CharStrategy,
@@ -84,7 +85,7 @@ export class Tokenizer {
   save(path) {
     if (typeof path !== 'string') throw new Error('mlfw tokenizer: save(path) requires a file path string');
     const tmp = path + '.tmp';
-    fs.writeFile(tmp, JSON.stringify(this.toJSON(), null, 2) + '\n');
+    fs.writeFile(tmp, serializeTokenizer(this.toJSON()));
     fs.rename(tmp, path);
   }
 
@@ -92,7 +93,7 @@ export class Tokenizer {
     if (typeof path !== 'string') throw new Error('mlfw tokenizer: load(path) requires a file path string');
     const data = fs.readFile(path);
     const text = typeof data === 'string' ? data : new TextDecoder().decode(data);
-    return Tokenizer.fromJSON(JSON.parse(text));
+    return Tokenizer.fromJSON(parseTokenizer(text));
   }
 
   static fromJSON(data) {
@@ -187,4 +188,98 @@ function validateTokenizerData(data) {
   validateVocabSize(data.config.vocabSize, normalizeSpecials(data.specialTokens));
   if (!Array.isArray(data.vocab)) throw new Error('mlfw tokenizer: vocab must be an array');
   if (!data.strategy || typeof data.strategy !== 'object') throw new Error('mlfw tokenizer: strategy must be an object');
+}
+
+function serializeTokenizer(data) {
+  const out = [
+    TOKENIZER_ARTIFACT_HEADER,
+    record('m', [data.mode]),
+    record('z', [data.config.vocabSize == null ? '' : String(data.config.vocabSize)]),
+    record('s', SPECIAL_KEYS.map(key => data.specialTokens[key])),
+  ];
+  if (data.mode === 'bpe') {
+    const merges = [];
+    for (const pair of data.strategy.merges) merges.push(pair[0], pair[1]);
+    out.push(record('g', [String(data.strategy.lowercase ? 1 : 0), String(data.strategy.numMerges), data.strategy.endOfWord]));
+    out.push(record('r', merges));
+  } else {
+    out.push(record('g', [String(data.strategy.lowercase ? 1 : 0)]));
+  }
+  out.push(record('v', data.vocab));
+  return out.join('\n');
+}
+
+function parseTokenizer(text) {
+  if (!text.startsWith(TOKENIZER_ARTIFACT_HEADER)) throw new Error('mlfw tokenizer: unrecognized tokenizer format');
+  const records = new Map();
+  for (const line of text.split(/\r?\n/).slice(1)) {
+    if (!line) continue;
+    const tab = line.indexOf('\t');
+    if (tab < 0) throw new Error('mlfw tokenizer: malformed tokenizer artifact');
+    records.set(line.slice(0, tab), parseRecord(line.slice(tab + 1)));
+  }
+  const mode = requiredField(records, 'm')[0];
+  const rawVocabSize = requiredField(records, 'z')[0];
+  const specials = requiredField(records, 's');
+  const strategyFields = requiredField(records, 'g');
+  const vocab = requiredField(records, 'v');
+  const specialTokens = Object.fromEntries(SPECIAL_KEYS.map((key, i) => [key, specials[i]]));
+  const strategy = { lowercase: strategyFields[0] === '1' };
+  if (mode === 'bpe') {
+    const rawMerges = requiredField(records, 'r');
+    if (rawMerges.length % 2 !== 0) throw new Error('mlfw tokenizer: bpe merges must be string pairs');
+    strategy.numMerges = Number(strategyFields[1]);
+    strategy.endOfWord = strategyFields[2];
+    strategy.merges = [];
+    for (let i = 0; i < rawMerges.length; i += 2) strategy.merges.push([rawMerges[i], rawMerges[i + 1]]);
+  }
+  return {
+    format: TOKENIZER_FORMAT,
+    version: TOKENIZER_VERSION,
+    mode,
+    config: { vocabSize: rawVocabSize === '' ? null : Number(rawVocabSize), ...strategy },
+    specialTokens,
+    vocab,
+    strategy,
+  };
+}
+
+function record(name, fields) {
+  return `${name}\t${fields.map(escapeField).join('\t')}`;
+}
+
+function parseRecord(text) {
+  return text.split('\t').map(unescapeField);
+}
+
+function escapeField(value) {
+  return String(value)
+    .replace(/\\/g, '\\\\')
+    .replace(/\t/g, '\\t')
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r');
+}
+
+function unescapeField(value) {
+  let out = '';
+  for (let i = 0; i < value.length; i++) {
+    const ch = value[i];
+    if (ch !== '\\') {
+      out += ch;
+      continue;
+    }
+    const next = value[++i];
+    if (next === 't') out += '\t';
+    else if (next === 'n') out += '\n';
+    else if (next === 'r') out += '\r';
+    else if (next === '\\') out += '\\';
+    else out += next ?? '';
+  }
+  return out;
+}
+
+function requiredField(records, name) {
+  const value = records.get(name);
+  if (!value) throw new Error(`mlfw tokenizer: missing '${name}' record`);
+  return value;
 }

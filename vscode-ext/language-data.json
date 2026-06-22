@@ -7357,7 +7357,7 @@
         },
         {
           "name": "save",
-          "description": "Save the fitted tokenizer as a JSON artifact.",
+          "description": "Save the fitted tokenizer as a compact artifact.",
           "returns": "none",
           "signature": {
             "params": [
@@ -7374,7 +7374,7 @@
         },
         {
           "name": "load",
-          "description": "Load a tokenizer JSON artifact.",
+          "description": "Load a tokenizer artifact.",
           "returns": "Tokenizer",
           "signature": {
             "params": [

@@ -256,10 +256,10 @@ Build a text tokenizer. `mode` is `"word"`, `"char"`, or `"bpe"` (trainable subw
 Learn the vocabulary (and BPE merges) from a list of strings. Returns the tokenizer.
 
 ### save(path: string) -> none
-Save the fitted tokenizer as a JSON artifact.
+Save the fitted tokenizer as a compact artifact.
 
 ### load(path: string) -> Tokenizer
-Load a tokenizer JSON artifact.
+Load a tokenizer artifact.
 
 ### encode(text: string, add_bos?: boolean, add_eos?: boolean) -> int[]
 Tokenize `text` to a list of integer ids. Optionally wrap with begin/end-of-sequence tokens.

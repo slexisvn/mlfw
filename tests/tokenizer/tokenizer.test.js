@@ -109,9 +109,10 @@ describe('Tokenizer serialization', () => {
         const t = new Tokenizer({ mode, lowercase: true, numMerges: 50 });
         t.fit(CORPUS);
         t.save(path);
-        const artifact = JSON.parse(readFileSync(path, 'utf8'));
-        expect(artifact.format).toBe('mlfw-tokenizer');
-        expect(Array.isArray(artifact.vocab)).toBe(true);
+        const raw = readFileSync(path, 'utf8');
+        expect(raw).not.toContain('\n  ');
+        expect(raw.startsWith('mlfw-tokenizer-v1\n')).toBe(true);
+        expect(raw).not.toContain('"format"');
         const loaded = Tokenizer.load(path);
         expect(loaded.vocabSize).toBe(t.vocabSize);
         expect(loaded.padId).toBe(t.padId);
@@ -147,7 +148,7 @@ describe('Tokenizer serialization', () => {
     const dir = mkdtempSync(join(tmpdir(), 'mlfw-tokenizer-'));
     try {
       const path = join(dir, 'bad.json');
-      writeFileSync(path, JSON.stringify({ format: 'wrong', version: 1 }), 'utf8');
+      writeFileSync(path, 'wrong', 'utf8');
       expect(() => Tokenizer.load(path)).toThrow(/format/);
       expect(() => Tokenizer.fromJSON({ format: 'mlfw-tokenizer', version: 999 })).toThrow(/version/);
       expect(() => Tokenizer.fromJSON({
