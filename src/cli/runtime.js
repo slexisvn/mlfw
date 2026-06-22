@@ -3,13 +3,16 @@ import { Module } from '../nn/module.js';
 import { LightningModule } from '../lightning/core/module.js';
 
 import { Tensor } from '../tensor/core/tensor.js';
-import { setDefaultDevice, WASM_DEVICE } from '../tensor/types/device.js';
+import { setDefaultDevice, WASM_DEVICE, WEBGPU_DEVICE, GPU_DEVICE } from '../tensor/types/device.js';
+import { preloadWebGPU, preloadCudaRuntime } from '../runtime/backend_registry.js';
+import { flushWebGPUEager } from '../runtime/webgpu.js';
+import { GradMode } from '../autograd/grad_mode.js';
 import { SymbolicTensor } from '../tracing/symbolic_tensor.js';
 import { compile as tracingCompile } from '../tracing/compile.js';
 import { TraceLevel } from '../compiler/pipeline/trace.js';
 import { parse } from './parser.js';
 import { CompiledProgramView, formatTrace } from './format.js';
-import { installBuiltins, installSignatures, takeNamed, createDataFrameFromColumns, setUploadedCsv, removeUploadedCsv, beginUploadedCsv } from './builtins.js';
+import { installBuiltins, installSignatures, takeNamed, createDataFrameFromColumns, setUploadedCsv, removeUploadedCsv, beginUploadedCsv, resolveDeviceName } from './builtins.js';
 import { SignatureRegistry } from './signature_registry.js';
 
 class Environment {
@@ -158,7 +161,12 @@ export class TeraRuntime {
         const object = await this.evaluateExpression(node.object, env);
         const value = object[node.property];
         if (typeof value !== 'function') return value;
-        if (isTensorValue(object)) return bindTensorMethod(object, value);
+        if (node.property === 'to' && (isTensorValue(object) || object instanceof Module)) return makeDeviceMove(object, value);
+        if ((node.property === 'eval' || node.property === 'train') && object instanceof Module) return makeTrainModeToggle(object, value, node.property);
+        if (isTensorValue(object)) {
+          if (object.device === WEBGPU_DEVICE && WEBGPU_HOST_READS.has(node.property)) return makeWebgpuHostRead(object, value);
+          return bindTensorMethod(object, value);
+        }
         return value.bind(object);
       }
       if (node.type === 'Index') return await this.evaluateIndex(node, env);
@@ -613,6 +621,42 @@ export class TeraRuntime {
 
 function isTensorValue(value) {
   return value instanceof Tensor || value instanceof SymbolicTensor;
+}
+
+const WEBGPU_HOST_READS = new Set(['item', 'toArray', 'tolist']);
+
+function makeDeviceMove(object, fn) {
+  return async (...args) => {
+    const last = args[args.length - 1];
+    let device;
+    if (last && last.__named) { args.pop(); device = last.device; }
+    else if (args.length) device = args[args.length - 1];
+    device = resolveDeviceName(device);
+    if (device === WEBGPU_DEVICE) {
+      if (typeof navigator === 'undefined' || !navigator.gpu) {
+        throw new Error('webgpu device requires a browser environment (navigator.gpu); it is not available in the node CLI');
+      }
+      await preloadWebGPU();
+    } else if (device === GPU_DEVICE) {
+      await preloadCudaRuntime();
+    }
+    return fn.call(object, device);
+  };
+}
+
+function makeTrainModeToggle(object, fn, prop) {
+  return (...args) => {
+    const result = fn.apply(object, args);
+    GradMode.setEnabled(prop === 'train' ? (args.length === 0 ? true : !!args[0]) : false);
+    return result;
+  };
+}
+
+function makeWebgpuHostRead(object, fn) {
+  return async (...args) => {
+    await flushWebGPUEager();
+    return bindTensorMethod(object, fn)(...args);
+  };
 }
 
 function bindTensorMethod(object, fn) {

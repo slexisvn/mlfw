@@ -2,13 +2,12 @@ import { AutogradNode } from '../../../autograd/node.js';
 import { AutogradMeta } from '../../../tensor/core/autograd_meta.js';
 import { GradMode } from '../../../autograd/grad_mode.js';
 import { GradAccumulator } from '../../../autograd/accumulator.js';
-import { wrapResult } from '../../../dispatcher/jit_dispatch.js';
-import { contiguous } from '../../../tensor/view/view_ops.js';
+import { wrapResult, gpuContiguousArray } from '../../../dispatcher/jit_dispatch.js';
 import { isEagerDeferred, deviceBufferForInput, deviceBufferForOutput, uploadIfStale } from './resident.js';
 import { acquire, release, copyDeviceToHost } from './memory.js';
-import { cudnnLSTMForward, cudnnLSTMBackward } from './cudnn.js';
+import { cudnnLSTMForward, cudnnLSTMBackward, releaseLSTMForward } from './cudnn.js';
 
-const carr = (t) => contiguous(t)._impl.storage.rawData;
+const carr = (t) => gpuContiguousArray(t);
 const prod = (s) => s.reduce((a, b) => a * b, 1);
 function devIn(arr) { return isEagerDeferred() ? deviceBufferForInput(arr) : uploadIfStale(arr); }
 function devOut(arr, pending) {
@@ -91,20 +90,21 @@ export function cudnnLSTMOp(input, cells, opts, hx = null, cx = null) {
   const hyArr = new Float32Array(stateN), cyArr = new Float32Array(stateN);
   const yDev = devOut(yArr, pending), hyDev = devOut(hyArr, pending), cyDev = devOut(cyArr, pending);
 
-  const fwd = cudnnLSTMForward(xDev, layerDevs, opts, hxDev, cxDev, yDev, hyDev, cyDev);
+  const inputs = [input];
+  for (const c of cells) inputs.push(c.x2h.weight, c.x2h.bias, c.h2h.weight, c.h2h.bias);
+  if (hx) inputs.push(hx, cx);
+  let any = false;
+  for (const t of inputs) { if (t._impl.autogradMeta && t.requiresGrad) { any = true; break; } }
+  const training = GradMode.isEnabled() && any;
+
+  const fwd = cudnnLSTMForward(xDev, layerDevs, opts, hxDev, cxDev, yDev, hyDev, cyDev, training);
   flushOut(pending);
 
   const out = wrapResult(yArr, [seqLen, batch, hiddenSize], input.dtype, input.device);
   const hyT = wrapResult(hyArr, stateShape, input.dtype, input.device);
   const cyT = wrapResult(cyArr, stateShape, input.dtype, input.device);
 
-  const inputs = [input];
-  for (const c of cells) inputs.push(c.x2h.weight, c.x2h.bias, c.h2h.weight, c.h2h.bias);
-  if (hx) inputs.push(hx, cx);
-
-  let any = false;
-  for (const t of inputs) { if (t._impl.autogradMeta && t.requiresGrad) { any = true; break; } }
-  if (GradMode.isEnabled() && any) {
+  if (training) {
     const info = {
       xArr, yArr, hxArr, cxArr, opts, numLayers, hasInit: !!hx,
       dtype: input.dtype, device: input.device, inputShape: [...input.shape], stateShape,
@@ -120,6 +120,8 @@ export function cudnnLSTMOp(input, cells, opts, hx = null, cx = null) {
       } else node.setNextEdge(i, null, 0);
     }
     attach(node, out, 0); attach(node, hyT, 1); attach(node, cyT, 2);
+  } else {
+    releaseLSTMForward(fwd);
   }
   return [out, hyT, cyT];
 }

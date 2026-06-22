@@ -5,6 +5,16 @@ import { cu } from './ffi.js';
 import { getDevice } from './device.js';
 import { setDevice } from './runtime_api.js';
 import { acquire, release } from './memory.js';
+import { isEagerCapturing } from '../../../dispatcher/eager_mode.js';
+
+function d2d(dst, src, bytes) {
+  if (isEagerCapturing()) cu.memcpyDtoDAsync(dst, src, bytes, getDevice().stream);
+  else cu.memcpyDtoD(dst, src, bytes);
+}
+function memZero(dst, bytes) {
+  if (isEagerCapturing()) cu.memsetD8Async(dst, 0, bytes, getDevice().stream);
+  else cu.memsetD8(dst, 0, bytes);
+}
 
 function resolveCudnn() {
   const root = 'C:/Program Files/NVIDIA/CUDNN';
@@ -59,7 +69,7 @@ export function cudnnAvailable() { return ensure(); }
 
 const FLOAT = 0, ALGO_STANDARD = 0, LSTM = 2, DOUBLE_BIAS = 2, UNIDIR = 0, LINEAR_INPUT = 0, ALLOW_CONVERSION = 2;
 const LAYOUT_SEQ_MAJOR_UNPACKED = 0;
-const FWD_TRAINING = 1, WGRAD_ADD = 0;
+const FWD_TRAINING = 1, FWD_INFERENCE = 0, WGRAD_ADD = 0;
 
 function ck(label, status) {
   if (status !== 0) throw new Error('cuDNN ' + label + ' failed: ' + status + ' (' + c.getErrorString(status) + ')');
@@ -141,33 +151,41 @@ function packWeights(p, weightSpace, layerDevs, download) {
       const wSrc = BigInt(isInput ? ld.x2hW : ld.h2hW) + BigInt(gate * wBytes);
       const bSrc = BigInt(isInput ? ld.x2hB : ld.h2hB) + BigInt(gate * bBytes);
       if (download) {
-        cu.memcpyDtoD(wSrc, mAddr[0], wBytes);
-        cu.memcpyDtoD(bSrc, bAddr[0], bBytes);
+        d2d(wSrc, mAddr[0], wBytes);
+        d2d(bSrc, bAddr[0], bBytes);
       } else {
-        cu.memcpyDtoD(mAddr[0], wSrc, wBytes);
-        cu.memcpyDtoD(bAddr[0], bSrc, bBytes);
+        d2d(mAddr[0], wSrc, wBytes);
+        d2d(bAddr[0], bSrc, bBytes);
       }
     }
   }
 }
 
-export function cudnnLSTMForward(xDev, layerDevs, opts, hxDev, cxDev, yDev, hyDev, cyDev) {
+export function cudnnLSTMForward(xDev, layerDevs, opts, hxDev, cxDev, yDev, hyDev, cyDev, training = true) {
   const h = handle();
   const p = plan({ ...opts, numLayers: layerDevs.length });
   const weightSpace = acquire(p.wssN);
   packWeights(p, weightSpace, layerDevs, false);
   const workSpace = acquire(p.workN);
-  const reserveSpace = acquire(p.reserveN);
-  ck('forward', c.rnnForward(h, p.rd, FWD_TRAINING, p.devSeq, p.xDesc, xDev, p.yDesc, yDev,
-    p.hDesc, hxDev || 0n, hyDev, p.hDesc, cxDev || 0n, cyDev, p.wss, weightSpace, p.workSize, workSpace, p.reserveSize, reserveSpace));
-  return { p, weightSpace, workSpace, reserveSpace };
+  const reserveSpace = training ? acquire(p.reserveN) : 0n;
+  ck('forward', c.rnnForward(h, p.rd, training ? FWD_TRAINING : FWD_INFERENCE, p.devSeq, p.xDesc, xDev, p.yDesc, yDev,
+    p.hDesc, hxDev || 0n, hyDev, p.hDesc, cxDev || 0n, cyDev, p.wss, weightSpace, p.workSize, workSpace,
+    training ? p.reserveSize : 0n, reserveSpace));
+  return { p, weightSpace, workSpace, reserveSpace, training };
+}
+
+export function releaseLSTMForward(ctx) {
+  if (!ctx) return;
+  release(ctx.weightSpace, ctx.p.wssN);
+  release(ctx.workSpace, ctx.p.workN);
+  if (ctx.reserveSpace && ctx.reserveSpace !== 0n) release(ctx.reserveSpace, ctx.p.reserveN);
 }
 
 export function cudnnLSTMBackward(ctx, xDev, yDev, hxDev, cxDev, dyDev, dhyDev, dcyDev, dxDev, dhxDev, dcxDev, gradLayerDevs) {
   const { p, weightSpace, workSpace, reserveSpace } = ctx;
   const h = handle();
   const dweight = acquire(p.wssN);
-  cu.memsetD8(dweight, 0, p.wssN);
+  memZero(dweight, p.wssN);
   ck('backwardData', c.rnnBackwardData(h, p.rd, p.devSeq, p.yDesc, yDev, dyDev, p.xDesc, dxDev,
     p.hDesc, hxDev || 0n, dhyDev || 0n, dhxDev || 0n, p.hDesc, cxDev || 0n, dcyDev || 0n, dcxDev || 0n,
     p.wss, weightSpace, p.workSize, workSpace, p.reserveSize, reserveSpace));

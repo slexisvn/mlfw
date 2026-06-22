@@ -285,6 +285,7 @@ function _runHostConcatLike(opName, tensors, scalars) {
 
 let _gpuContiguousFn = null;
 export function setGpuContiguousFn(fn) { _gpuContiguousFn = fn; }
+export function getGpuContiguousFn() { return _gpuContiguousFn; }
 let _gpuConcatFn = null;
 export function setGpuConcatFn(fn) { _gpuConcatFn = fn; }
 let _cudnnLSTM = null;
@@ -310,6 +311,7 @@ function _gpuInputArray(t) {
   }
   return tensorToContiguous(t);
 }
+export function gpuContiguousArray(t) { return _gpuInputArray(t); }
 
 function _wrapOpForJIT(opName, dispatchKey) {
   const getTarget = _TARGET_FOR_KEY[dispatchKey];

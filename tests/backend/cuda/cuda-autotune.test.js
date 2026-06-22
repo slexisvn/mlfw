@@ -29,6 +29,22 @@ describe.skipIf(!cudaDeps)('CUDA autotuner', () => {
     }, 60000);
   });
 
+  describe('cost-model-only autotune never regresses below the default schedule', () => {
+    const countSerialLoops = (src) => (src.match(/for \(int /g) || []).length;
+
+    it('parallelizes the matmul compute rather than leaving it per-thread serial', () => {
+      const N = 128;
+      const t = new TensorType([N, N], F32);
+      const mk = () => buildFunction('mm', [t, t], [t], (b, a) => b.returnOp([b.relu(b.matmul(a[0], a[1]).getResult(0)).getResult(0)]));
+      const baseline = compileGraph(mk(), CUDATarget(), { scheduling: { enabled: true } });
+      const autotuned = compileGraph(mk(), CUDATarget(), { scheduling: { enabled: true, autotune: true, seed: 7 } });
+      const baseFor = countSerialLoops(baseline.module.kernels.get('mm').source);
+      const autoFor = countSerialLoops(autotuned.module.kernels.get('mm').source);
+      expect(baseFor, 'baseline kernel has a finite serial-loop count').toBeGreaterThan(0);
+      expect(autoFor, 'autotuned kernel has no more serial loops than the default schedule').toBeLessThanOrEqual(baseFor);
+    });
+  });
+
   describe('Ansor-style auto-scheduled matmul', () => {
     const rnd = (n, s) => Float32Array.from({ length: n }, (_, i) => Math.sin(i * 0.01 + s));
 

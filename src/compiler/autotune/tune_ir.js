@@ -16,6 +16,7 @@ export function clonePrimFunc(primFunc) {
         copy.body = cloneNode(node.body);
         copy.bufferMap = new Map(node.bufferMap);
         copy.shapeParams = node.shapeParams;
+        copy.shapeParamMap = node.shapeParamMap instanceof Map ? new Map(node.shapeParamMap) : node.shapeParamMap;
         copy._setChild('body', copy.body);
         break;
       case 'ForNode':

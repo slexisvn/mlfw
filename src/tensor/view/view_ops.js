@@ -251,15 +251,22 @@ export function select(tensor, dim, index) {
   return out;
 }
 
+let _gpuContiguousHook = null;
+export function setGpuContiguousHook(fn) { _gpuContiguousHook = fn; }
+
 export function contiguous(tensor) {
   const impl = tensor._impl;
-  if (tensor.isContiguous && impl.storageOffset === 0 && impl.storage.data.length === tensor.numel) {
+  if (tensor.isContiguous && impl.storageOffset === 0 && impl.storage.rawData.length === tensor.numel) {
     return tensor;
   }
   return _copyContiguous(tensor);
 }
 
 function _copyContiguous(tensor) {
+  if (_gpuContiguousHook) {
+    const r = _gpuContiguousHook(tensor);
+    if (r) return r;
+  }
   const sizes = tensor.shape;
   const srcStrides = tensor.strides;
   const srcData = tensor._impl.storage.data;

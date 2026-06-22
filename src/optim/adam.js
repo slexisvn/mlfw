@@ -22,7 +22,7 @@ export class Adam extends Optimizer {
           const t = state.step;
           const bc1 = 1 - Math.pow(beta1, t);
           const bc2 = 1 - Math.pow(beta2, t);
-          if (gpuAdam(p, state, { beta1, beta2, omb1: 1 - beta1, omb2: 1 - beta2, eps, stepSize: lr / bc1, bc2sqrt: Math.sqrt(bc2), wd: weightDecay })) {
+          if (gpuAdam(p, state, { beta1, beta2, omb1: 1 - beta1, omb2: 1 - beta2, eps, stepSize: lr / bc1, bc2sqrt: Math.sqrt(bc2), wd: weightDecay, lr })) {
             p._impl.bumpVersion();
             continue;
           }

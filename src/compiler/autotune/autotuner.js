@@ -7,9 +7,10 @@ import { Deadline } from './budget.js';
 import { buildBlockMap, computeWorkloadKey } from './workload_key.js';
 import { collectAllBlockNames } from './block_analysis.js';
 import { buildBlockDAG, findFusibleConsumer } from './block_dag.js';
-import { classifyBlock } from '../schedule/rules.js';
+import { classifyBlock, SchedulePolicy } from '../schedule/rules.js';
 import { BlockTuningSession, gpuThreadBlockSize } from './session.js';
 import { clonePrimFunc } from './tune_ir.js';
+import { ForKind } from '../ir/tensor/nodes.js';
 import { TaskScheduler } from './task_scheduler.js';
 import { getMeasurer } from '../../runtime/measurer_registry.js';
 
@@ -140,16 +141,35 @@ export class Autotuner {
   }
 
   _applyBestSchedule(primFunc, tuneResults) {
+    const tuned = this._buildTunedSchedule(primFunc, tuneResults);
+    if (tuned && this._scheduleIsValid(tuned)) {
+      this._adoptSchedule(primFunc, tuned);
+      return { func: primFunc };
+    }
+    const fallback = this._buildDefaultSchedule(primFunc);
+    if (fallback) {
+      this._adoptSchedule(primFunc, fallback);
+      return { func: primFunc };
+    }
+    if (tuned) {
+      this._adoptSchedule(primFunc, tuned);
+      return { func: primFunc };
+    }
+    return null;
+  }
+
+  _buildTunedSchedule(primFunc, tuneResults) {
     try {
-      const sch = new Schedule(primFunc);
-      const blockMap = buildBlockMap(primFunc.body);
-      const dag = buildBlockDAG(primFunc);
+      const work = clonePrimFunc(primFunc);
+      const sch = new Schedule(work);
+      const blockMap = buildBlockMap(work.body);
+      const dag = buildBlockDAG(work);
 
       const fusedAway = new Set();
       const ordered = [];
       for (const entry of tuneResults) {
         if (entry[1].sketchName === 'fused') {
-          const consumer = findFusibleConsumer(primFunc, dag, entry[0], classifyBlock);
+          const consumer = findFusibleConsumer(work, dag, entry[0], classifyBlock);
           if (consumer) fusedAway.add(consumer);
           ordered.unshift(entry);
         } else {
@@ -163,9 +183,9 @@ export class Autotuner {
         applied.add(result);
         if (!result.sketchName || !result.params) continue;
         try {
-          const sketches = getSketchesForBlock(primFunc, blockName, this.target, blockMap, { richGpu: !!this.config.measurer });
+          const sketches = getSketchesForBlock(work, blockName, this.target, blockMap, { richGpu: !!this.config.measurer });
           const sketch = sketches.find(s => s.name === result.sketchName);
-          if (sketch && this._fitsThreadBlock(primFunc, blockName, sketch, result.params)) {
+          if (sketch && this._fitsThreadBlock(work, blockName, sketch, result.params)) {
             const apply = sketch.instantiate(result.params);
             apply(sch, blockName, this.target);
           }
@@ -173,10 +193,50 @@ export class Autotuner {
           continue;
         }
       }
-      return { func: primFunc };
+
+      this._scheduleResidualBlocks(sch, fusedAway);
+      return work;
     } catch (e) {
       return null;
     }
+  }
+
+  _scheduleResidualBlocks(sch, fusedAway) {
+    let policy = null;
+    for (const name of collectAllBlockNames(sch.func.body)) {
+      if (fusedAway.has(name) || this._blockIsParallelized(sch, name)) continue;
+      if (!policy) policy = new SchedulePolicy(this.target);
+      try { policy.applyToBlock(sch, name); } catch (e) { /* leave block sequential */ }
+    }
+  }
+
+  _blockIsParallelized(sch, blockName) {
+    let loops;
+    try { loops = sch.getLoops(blockName); } catch (e) { return true; }
+    for (const l of loops) {
+      if (l.kind === ForKind.THREAD_BINDING || l.kind === ForKind.PARALLEL || l.kind === ForKind.VECTORIZED) return true;
+    }
+    return false;
+  }
+
+  _scheduleIsValid(func) {
+    if (!this.target.isGPU || !this.target.isGPU() || !this.target.maxThreadsPerBlock) return true;
+    return gpuThreadBlockSize(func) <= this.target.maxThreadsPerBlock;
+  }
+
+  _buildDefaultSchedule(primFunc) {
+    try {
+      const work = clonePrimFunc(primFunc);
+      new SchedulePolicy(this.target).applyToAllBlocks(new Schedule(work));
+      return work;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  _adoptSchedule(target, src) {
+    Object.assign(target, src);
+    target._setChild('body', target.body);
   }
 
   _fitsThreadBlock(primFunc, blockName, sketch, params) {

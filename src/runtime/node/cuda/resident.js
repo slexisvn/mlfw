@@ -1,9 +1,9 @@
-import { acquire, release, copyHostToDevice, copyDeviceToHost } from './memory.js';
+import { acquire, release, copyHostToDevice, copyDeviceToHost, copyHostToDeviceAsync, copyDeviceToHostAsync } from './memory.js';
 import { getDevice } from './device.js';
 import { cu, checkCU } from './ffi.js';
-import { setEagerDeferred, isEagerDeferred, setEagerFlushHook } from '../../../dispatcher/eager_mode.js';
+import { setEagerDeferred, isEagerDeferred, setEagerFlushHook, isEagerCapturing, setCudaGraphArmed } from '../../../dispatcher/eager_mode.js';
 
-export { setEagerDeferred, isEagerDeferred };
+export { setEagerDeferred, isEagerDeferred, setCudaGraphArmed };
 
 const CAPACITY = 1024;
 const _safe = new Map();
@@ -37,11 +37,16 @@ export function downloadAndValidate(hostArray, dptr) {
 const DEFERRED_MEM_FRACTION = 0.5;
 const _def = new Map();
 const _pinned = new Set();
+const _capturePinned = new Set();
 let _defBytes = 0;
 let _defCap = 0;
 
 export function pinResident(hostArray) { _pinned.add(hostArray); }
 export function unpinResident(hostArray) { _pinned.delete(hostArray); }
+export function clearCapturePins() { _capturePinned.clear(); }
+export function deviceBufferDptr(hostArray) { const e = _def.get(hostArray); return e ? e.dptr : null; }
+export function uploadStaticAsync(dptr, hostArray) { copyHostToDeviceAsync(dptr, hostArray); }
+export function downloadStaticAsync(hostArray, dptr) { copyDeviceToHostAsync(hostArray, dptr); }
 
 function _cap() {
   if (!_defCap) _defCap = Math.floor(getDevice().totalMem * DEFERRED_MEM_FRACTION);
@@ -49,6 +54,7 @@ function _cap() {
 }
 
 function _syncDownload(hostArray, dptr) {
+  if (isEagerCapturing()) throw new Error('illegal device sync during CUDA graph capture');
   checkCU('cuStreamSynchronize', cu.streamSynchronize(getDevice().stream));
   copyDeviceToHost(hostArray, dptr);
 }
@@ -57,7 +63,7 @@ function _evict(incoming) {
   const cap = _cap();
   for (const [k, e] of _def) {
     if (_defBytes + incoming <= cap) break;
-    if (_pinned.has(k)) continue;
+    if (_pinned.has(k) || _capturePinned.has(k)) continue;
     if (e.hostStale) _syncDownload(k, e.dptr);
     release(e.dptr, e.bytes);
     _defBytes -= e.bytes;
@@ -67,17 +73,25 @@ function _evict(incoming) {
 
 function _defEntry(hostArray) {
   let e = _def.get(hostArray);
-  if (e) { _def.delete(hostArray); _def.set(hostArray, e); return e; }
-  _evict(hostArray.byteLength);
-  e = { dptr: acquire(hostArray.byteLength), bytes: hostArray.byteLength, deviceFresh: false, hostStale: false };
-  _def.set(hostArray, e);
-  _defBytes += e.bytes;
+  if (e) { _def.delete(hostArray); _def.set(hostArray, e); }
+  else {
+    if (!isEagerCapturing()) _evict(hostArray.byteLength);
+    e = { dptr: acquire(hostArray.byteLength), bytes: hostArray.byteLength, deviceFresh: false, hostStale: false };
+    _def.set(hostArray, e);
+    _defBytes += e.bytes;
+  }
+  if (isEagerCapturing()) _capturePinned.add(hostArray);
   return e;
+}
+
+function _upload(dptr, hostArray) {
+  if (isEagerCapturing()) copyHostToDeviceAsync(dptr, hostArray);
+  else copyHostToDevice(dptr, hostArray);
 }
 
 export function deviceBufferForInput(hostArray) {
   const e = _defEntry(hostArray);
-  if (!e.deviceFresh) { copyHostToDevice(e.dptr, hostArray); e.deviceFresh = true; }
+  if (!e.deviceFresh) { _upload(e.dptr, hostArray); e.deviceFresh = true; }
   return e.dptr;
 }
 
@@ -90,24 +104,41 @@ export function deviceBufferForOutput(hostArray) {
 
 export function deviceBufferForInplace(hostArray) {
   const e = _defEntry(hostArray);
-  if (!e.deviceFresh) { copyHostToDevice(e.dptr, hostArray); e.deviceFresh = true; }
+  if (!e.deviceFresh) { _upload(e.dptr, hostArray); e.deviceFresh = true; }
   e.hostStale = true;
   return e.dptr;
 }
 
 export function flushDeferred() {
   for (const [k, e] of _def) {
-    if (_pinned.has(k)) continue;
+    if (_pinned.has(k) || _capturePinned.has(k)) continue;
     release(e.dptr, e.bytes);
     _defBytes -= e.bytes;
     _def.delete(k);
   }
 }
 
+export function releaseAllResident() {
+  for (const [k, e] of _def) {
+    if (e.hostStale) _syncDownload(k, e.dptr);
+    release(e.dptr, e.bytes);
+  }
+  _def.clear();
+  _defBytes = 0;
+  _pinned.clear();
+  _capturePinned.clear();
+  for (const e of _safe.values()) release(e.dptr, e.bytes);
+  _safe.clear();
+}
+
 export function hostReadHook(hostArray) {
+  const d = _def.get(hostArray);
+  if (isEagerCapturing()) {
+    if (d && d.hostStale) throw new Error('illegal host read of device-resident tensor during CUDA graph capture');
+    return;
+  }
   const s = _safe.get(hostArray);
   if (s) s.valid = false;
-  const d = _def.get(hostArray);
   if (d) {
     if (d.hostStale) { _syncDownload(hostArray, d.dptr); d.hostStale = false; }
     d.deviceFresh = false;

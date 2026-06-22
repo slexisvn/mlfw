@@ -146,9 +146,9 @@ gen_len = ans_len + 2
 net = ChatBotLarge(tok.vocabSize, embed_dim, hidden, num_layers, tok.padId)
 n_params = param_count(tok.vocabSize, embed_dim, hidden, num_layers)
 
-# print("=== ChatBotLarge (seq2seq", num_layers, "layer LSTM + attention, GPU) ===")
-# print("vocab:", tok.vocabSize, "| embed:", embed_dim, "| hidden:", hidden, "| layers:", num_layers)
-# print("params:", n_params, "| train pairs:", train_q_text.length, "| test pairs:", test_q_text.length, "| answer len:", ans_len)
+print("=== ChatBotLarge (seq2seq", num_layers, "layer LSTM + attention, GPU) ===")
+print("vocab:", tok.vocabSize, "| embed:", embed_dim, "| hidden:", hidden, "| layers:", num_layers)
+print("params:", n_params, "| train pairs:", train_q_text.length, "| test pairs:", test_q_text.length, "| answer len:", ans_len)
 
 # trainer = Trainer(max_epochs=max_epochs, accelerator="gpu", gradient_clip_val=1.0, logger=false, enable_progress=true)
 # trainer.fit(net, loader)
@@ -157,16 +157,17 @@ n_params = param_count(tok.vocabSize, embed_dim, hidden, num_layers)
 
 restored = ChatBotLarge(tok.vocabSize, embed_dim, hidden, num_layers, tok.padId)
 load(restored, "examples/chatbot.ckpt")
+# restored.to(device="gpu")
 restored.eval()
 
 eval_n = test_q_text.length
 if eval_n > 96:
   eval_n = 96
-# test_correct = accuracy(restored, tok, test_questions, test_a_text, gen_len, eval_n)
-# print("[eval on CPU] test exact-match (held-out paraphrases):", test_correct, "/", eval_n)
-# print("[held-out test] sample replies:")
-# show_samples(restored, tok, test_questions, test_q_text, gen_len, 48)
-# print("[train] sample replies (memorization check):")
-# show_samples(restored, tok, questions, train_q_text, gen_len, 160)
-# print("[unseen paraphrase probes]:")
+test_correct = accuracy(restored, tok, test_questions, test_a_text, gen_len, eval_n)
+print("[eval on CPU] test exact-match (held-out paraphrases):", test_correct, "/", eval_n)
+print("[held-out test] sample replies:")
+show_samples(restored, tok, test_questions, test_q_text, gen_len, 48)
+print("[train] sample replies (memorization check):")
+show_samples(restored, tok, questions, train_q_text, gen_len, 160)
+print("[unseen paraphrase probes]:")
 probe(restored, tok, ["thank you"], gen_len)

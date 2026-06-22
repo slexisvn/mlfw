@@ -2,7 +2,7 @@ import { AutogradNode } from '../../../autograd/node.js';
 import { AutogradMeta } from '../../../tensor/core/autograd_meta.js';
 import { GradMode } from '../../../autograd/grad_mode.js';
 import { GradAccumulator } from '../../../autograd/accumulator.js';
-import { wrapResult } from '../../../dispatcher/jit_dispatch.js';
+import { wrapResult, getGpuContiguousFn } from '../../../dispatcher/jit_dispatch.js';
 import { contiguous } from '../../../tensor/view/view_ops.js';
 import { DeviceType } from '../../../tensor/types/device.js';
 import { isEagerDeferred, deviceBufferForInput, deviceBufferForOutput, uploadIfStale } from './resident.js';
@@ -16,6 +16,22 @@ function devOut(arr, pending) {
   const dptr = acquire(arr.byteLength); pending.push([arr, dptr]); return dptr;
 }
 function flushOut(pending) { for (const [arr, dptr] of pending) { copyDeviceToHost(arr, dptr); release(dptr, arr.byteLength); } }
+
+function operandData(T) {
+  let lay = operandLayout(T);
+  if (lay) return { data: T._impl.storage.rawData, lay };
+  const fn = getGpuContiguousFn();
+  if (isEagerDeferred() && fn) {
+    const data = fn(T._impl.storage.rawData, T.shape, T.strides, T._impl.storageOffset, T.dtype);
+    const shape = T.shape, rank = shape.length;
+    const rows = shape[rank - 2], cols = shape[rank - 1];
+    let batch = 1;
+    for (let i = 0; i < rank - 2; i++) batch *= shape[i];
+    return { data, lay: { trans: false, batchStride: rows * cols, batch, rows, cols } };
+  }
+  const Tc = contiguous(T);
+  return { data: Tc._impl.storage.rawData, lay: operandLayout(Tc) };
+}
 
 function operandLayout(T) {
   if (T.storageOffset !== 0) return null;
@@ -61,15 +77,13 @@ export function gpuMatmul(A, B) {
   const M = A.shape[ra - 2], K = A.shape[ra - 1], N = B.shape[rb - 1];
   if (B.shape[rb - 2] !== K) return null;
 
-  let Ac = A, layA = operandLayout(A);
-  if (!layA) { Ac = contiguous(A); layA = operandLayout(Ac); }
-  let Bc = B, layB = operandLayout(B);
-  if (!layB) { Bc = contiguous(B); layB = operandLayout(Bc); }
+  const a = operandData(A), b = operandData(B);
+  const layA = a.lay, layB = b.lay;
   if (!layA || !layB || layA.batch !== layB.batch) return null;
 
   const batch = layA.batch, pending = [];
-  const dA = devIn(Ac._impl.storage.rawData);
-  const dB = devIn(Bc._impl.storage.rawData);
+  const dA = devIn(a.data);
+  const dB = devIn(b.data);
   const outArr = new Float32Array(batch * M * N);
   const dC = devOut(outArr, pending);
   if (batch > 1) {

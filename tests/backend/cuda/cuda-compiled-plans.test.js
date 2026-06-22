@@ -8,12 +8,19 @@ import * as nn from '../../../src/nn/index.js';
 import { compile } from '../../../src/tracing/compile.js';
 import { buildGpt2 } from '../../shared/gpt2_model.js';
 import { getBackend } from '../../../src/runtime/backend_registry.js';
+import { setCudaGraphEnabled } from '../../../src/runtime/node/cuda/device_plan.js';
+import { cu } from '../../../src/runtime/node/cuda/ffi.js';
 import { cudaDeps } from './cuda-setup.js';
 
 const flat = (v) => Array.from(v && typeof v.contiguous === 'function' ? v.contiguous().data : v.data);
 const maxRelErr = (a, b) => {
   let e = 0;
   for (let i = 0; i < a.length; i++) e = Math.max(e, Math.abs(a[i] - b[i]) / (1 + Math.abs(a[i])));
+  return e;
+};
+const maxAbsErr = (a, b) => {
+  let e = 0;
+  for (let i = 0; i < a.length; i++) e = Math.max(e, Math.abs(a[i] - b[i]));
   return e;
 };
 
@@ -210,5 +217,43 @@ describe.skipIf(!cudaDeps)('CUDA compiled multi-kernel & cuBLAS plans', () => {
       expect(maxRelErr(cpu, deviceResident), `gpt2 device-resident vs CPU (${cudaDeps.arch})`).toBeLessThan(1e-2);
       expect(maxRelErr(perStep, deviceResident), 'gpt2 device-resident vs per-step').toBeLessThan(1e-5);
     }, 180000);
+  });
+
+  describe('cuda graph capture of compiled plans (driver stream, includes cuBLAS)', () => {
+    it('graphs a Linear+ReLU plan containing a cublas step, replays bit-exactly, matches CPU', async () => {
+      const M = 8, K = 64, N = 96;
+      const x = tensor(Array.from({ length: M }, (_, i) =>
+        Array.from({ length: K }, (_, j) => Math.sin(i * 0.13 + j * 0.017))));
+      const lin = new nn.Linear(K, N); lin.eval();
+      const fwd = (inp) => lin.forward(inp).relu();
+
+      const cpu = flat(await compile({ forward: fwd }, [x], { target: CPUTarget() })(x));
+      const cf = compile({ forward: fwd }, [x], { target: CUDATarget(), matmulBackend: 'cublas' });
+
+      const baseline = flat(await cf(x));
+      expect(maxRelErr(cpu, baseline), 'baseline cublas vs cpu').toBeLessThan(1e-2);
+
+      setCudaGraphEnabled(true);
+      try {
+        const orig = cu.launchKernel;
+        let captureLaunches = 0, replayLaunches = 0;
+
+        cu.launchKernel = (...a) => { captureLaunches++; return orig(...a); };
+        let capOut;
+        try { capOut = flat(await cf(x)); } finally { cu.launchKernel = orig; }
+
+        cu.launchKernel = (...a) => { replayLaunches++; return orig(...a); };
+        let repOut;
+        try { repOut = flat(await cf(x)); } finally { cu.launchKernel = orig; }
+
+        expect(maxRelErr(cpu, capOut), 'graph capture run vs cpu').toBeLessThan(1e-2);
+        expect(maxRelErr(cpu, repOut), 'graph replay run vs cpu').toBeLessThan(1e-2);
+        expect(maxAbsErr(capOut, repOut), 'replay is bit-exact vs capture').toBe(0);
+        expect(captureLaunches, 'capture records native kernel launches').toBeGreaterThan(0);
+        expect(replayLaunches, 'replay issues no per-op cuLaunchKernel').toBe(0);
+      } finally {
+        setCudaGraphEnabled(false);
+      }
+    }, 120000);
   });
 });

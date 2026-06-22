@@ -18,6 +18,10 @@
       "browser": "./src/runtime/browser/cuda_runtime.js",
       "default": "./src/runtime/node/cuda_runtime.js"
     },
+    "#io/cuda/*": {
+      "browser": "./src/runtime/browser/cuda/*",
+      "default": "./src/runtime/node/cuda/*"
+    },
     "#plugins/query-engine": {
       "browser": "./plugins/query-engine/query-engine.browser.js",
       "default": "./plugins/query-engine/query-engine.node.js"
@@ -26,12 +30,10 @@
   "scripts": {
     "start": "node src/cli/index.js",
     "build": "node scripts/build.js",
-    "test": "vitest run --exclude '**/node_modules/**' --exclude '**/stress/**' --exclude '**/backend/cuda/**' --exclude '**/webgpu-gpu.test.*' --exclude '**/webgpu-chrome.test.*' --exclude '**/vscode-ext/**'",
-    "test:webgpu": "vitest run tests/backend/webgpu/webgpu-chrome.test.js",
+    "test": "vitest run --exclude '**/node_modules/**' --exclude '**/stress/**' --exclude '**/backend/cuda/**' --exclude '**/webgpu-gpu.test.*' --exclude '**/webgpu-chrome.test.*' --exclude '**/tera-webgpu.test.*' --exclude '**/vscode-ext/**'",
+    "test:webgpu": "vitest run tests/backend/webgpu/webgpu-chrome.test.js tests/backend/webgpu/tera-webgpu.test.js",
     "test:cuda": "vitest run tests/backend/cuda/",
-    "test:all": "vitest run",
     "build:vscode": "node vscode-ext/scripts/generate.js",
-    "test:coverage": "vitest run --coverage",
     "postinstall": "patch-package"
   },
   "devDependencies": {

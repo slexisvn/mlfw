@@ -2,7 +2,8 @@ import './qe_config.js';
 import * as fw from '../index.js';
 import * as ops from '../tensor/ops/ops.js';
 import { Tensor } from '../tensor/core/tensor.js';
-import { CPU_DEVICE, GPU_DEVICE, WASM_DEVICE } from '../tensor/types/device.js';
+import { CPU_DEVICE, GPU_DEVICE, WASM_DEVICE, WEBGPU_DEVICE } from '../tensor/types/device.js';
+import { flushWebGPUEager } from '../runtime/webgpu.js';
 import { CompiledProgramView, formatTrace, formatValue, formatValueCompact } from './format.js';
 import { printModule } from '../compiler/ir/graph/printer.js';
 import { DataLoader, TensorDataset } from '../data/index.js';
@@ -190,8 +191,9 @@ export function installBuiltins(runtime, define) {
     return result;
   });
 
-  define('print', (...args) => {
+  define('print', async (...args) => {
     const named = args.length > 0 && args[args.length - 1]?.__named ? args.pop() : null;
+    if (args.some(v => v instanceof Tensor && v.device === WEBGPU_DEVICE)) await flushWebGPUEager();
     const sep = named?.sep ?? ' ';
     const compact = args.length > 1;
     const text = args.map(v => compact ? formatValueCompact(v) : formatValue(v)).join(sep);
@@ -434,7 +436,11 @@ function callWithOptions(fn, args) {
   return fn(...args, named);
 }
 
-const DEVICE_BY_NAME = { cpu: CPU_DEVICE, gpu: GPU_DEVICE, wasm: WASM_DEVICE };
+const DEVICE_BY_NAME = { cpu: CPU_DEVICE, gpu: GPU_DEVICE, wasm: WASM_DEVICE, webgpu: WEBGPU_DEVICE };
+
+export function resolveDeviceName(name) {
+  return typeof name === 'string' ? (DEVICE_BY_NAME[name] ?? name) : name;
+}
 
 function constructWithNamed(Type, args) {
   const named = takeNamed(args);

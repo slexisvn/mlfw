@@ -83,6 +83,8 @@ export class PadBackward extends AutogradNode {
 }
 
 export class IndexSelectBackward extends AutogradNode {
+  static #gpuBackward = null;
+  static setGpuBackward(fn) { IndexSelectBackward.#gpuBackward = fn; }
   constructor() { super(2); }
 
   apply(gradOutputs) {
@@ -93,6 +95,11 @@ export class IndexSelectBackward extends AutogradNode {
     const rank = inputShape.length;
     const args = this.opArgs();
     const dim = _normDim(args && args.length > 2 ? (args[2] ?? 0) : 0, rank);
+
+    if (IndexSelectBackward.#gpuBackward) {
+      const r = IndexSelectBackward.#gpuBackward(g, index, inputShape, dim);
+      if (r) return [r];
+    }
 
     const result = zeros(inputShape, { dtype: g.dtype, device: g.device });
     const outData = result._impl.storage.data;

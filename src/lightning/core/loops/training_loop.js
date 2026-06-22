@@ -1,7 +1,8 @@
 import { Stage } from '../state.js';
 import { clipGradNorm_, clipGradValue_ } from '../../../optim/utils.js';
 import { div } from '../../../tensor/ops/ops.js';
-import { eagerFlush } from '../../../dispatcher/eager_mode.js';
+import { eagerFlush, setCudaGraphArmed } from '../../../dispatcher/eager_mode.js';
+import { GradMode } from '../../../autograd/grad_mode.js';
 
 export class TrainingLoop {
   async run(model, dataLoader, trainer, optimizers, schedulerConfigs) {
@@ -14,6 +15,7 @@ export class TrainingLoop {
 
     state.stage = Stage.TRAINING;
     model.train();
+    GradMode.setEnabled(true);
     model.onTrainEpochStart();
     callbacks.dispatch('onTrainEpochStart', trainer, model);
 
@@ -64,6 +66,9 @@ export class TrainingLoop {
   async _automaticStep(model, batch, batchIdx, trainer, optimizers, schedulerConfigs, strategy, accumGrad, callbacks) {
     if (trainer.compile) {
       return this._compiledStep(model, batch, batchIdx, trainer, optimizers, schedulerConfigs, accumGrad);
+    }
+    if (trainer.cudaGraph) {
+      return this._graphedStep(model, batch, trainer, optimizers, schedulerConfigs, strategy);
     }
     const result = await Promise.resolve(model.trainingStep(batch, batchIdx));
     let loss = result;
@@ -134,6 +139,101 @@ export class TrainingLoop {
     return loss;
   }
 
+  async _eagerTrainStepCore(model, batch, optimizers, strategy, trainer) {
+    const result = await Promise.resolve(model.trainingStep(batch, 0));
+    let loss = result;
+    if (result && typeof result === 'object' && !(result.backward)) loss = result.loss;
+    strategy.backward(loss);
+    if (trainer && trainer.gradientClipVal) {
+      const { deviceClipGradNorm } = await import('#io/cuda_runtime');
+      deviceClipGradNorm([...model.parameters()], trainer.gradientClipVal);
+    }
+    for (let i = 0; i < optimizers.length; i++) {
+      strategy.optimizerStep(optimizers[i]);
+      optimizers[i].zeroGrad();
+    }
+    return loss;
+  }
+
+  async _graphedStep(model, batch, trainer, optimizers, schedulerConfigs, strategy) {
+    const eg = await import('#io/cuda/eager_graph.js');
+    const resident = await import('#io/cuda/resident.js');
+    const mem = await import('#io/cuda/memory.js');
+
+    let r = model.__eagerGraphRunner;
+    if (!r) {
+      r = model.__eagerGraphRunner = { phase: 'warmup', seen: 0 };
+      resident.setEagerDeferred(true);
+      setCudaGraphArmed(true);
+    }
+
+    if (r.phase === 'disabled') {
+      return this._eagerTrainStepCore(model, batch, optimizers, strategy, trainer);
+    }
+
+    if (r.phase === 'warmup' && r.seen < trainer.cudaGraphWarmupSteps) {
+      r.seen++;
+      return this._eagerTrainStepCore(model, batch, optimizers, strategy, trainer);
+    }
+
+    const inputs = _flattenTensors(batch);
+
+    if (r.phase === 'warmup') {
+      r.inputs = inputs.map((t) => {
+        const raw = t._impl.storage.rawData;
+        resident.deviceBufferForInput(raw);
+        resident.pinResident(raw);
+        return { dptr: resident.deviceBufferDptr(raw) };
+      });
+      const origLog = model.log;
+      let loss;
+      try {
+        eg.beginEagerCapture();
+        model.log = () => {};
+        try { loss = await this._eagerTrainStepCore(model, batch, optimizers, strategy, trainer); }
+        finally { model.log = origLog; }
+        r.captured = eg.endEagerCapture();
+      } catch (e) {
+        try { eg.endEagerCapture(); } catch (_) {}
+        model.log = origLog;
+        resident.clearCapturePins();
+        r.phase = 'disabled';
+        r.captureError = e && e.message;
+        if (process.env.MLFW_DEBUG_CUDAGRAPH) throw e;
+        return this._eagerTrainStepCore(model, batch, optimizers, strategy, trainer);
+      }
+      r.exec = r.captured.exec;
+      r.lossDptr = resident.deviceBufferDptr(loss._impl.storage.rawData);
+      r.lossScratch = new Float32Array(1);
+      r.phase = 'replay';
+      eg.replay(r.exec);
+      eg.syncStream();
+      mem.copyDeviceToHost(r.lossScratch, r.lossDptr);
+      const v = r.lossScratch[0];
+      this._logGraphLoss(trainer, v);
+      this._stepStepSchedulers(schedulerConfigs, trainer.state.globalStep);
+      return v;
+    }
+
+    for (let i = 0; i < r.inputs.length && i < inputs.length; i++) {
+      if (r.inputs[i].dptr) mem.copyHostToDeviceAsync(r.inputs[i].dptr, inputs[i]._impl.storage.rawData);
+    }
+    eg.replay(r.exec);
+    eg.syncStream();
+    mem.copyDeviceToHost(r.lossScratch, r.lossDptr);
+    const v = r.lossScratch[0];
+    this._logGraphLoss(trainer, v);
+    this._stepStepSchedulers(schedulerConfigs, trainer.state.globalStep);
+    return v;
+  }
+
+  _logGraphLoss(trainer, value) {
+    trainer.state.stepMetrics.update('train_loss', value);
+    trainer.state.epochMetrics.update('train_loss', value);
+    if (!trainer.state._progBarMetrics) trainer.state._progBarMetrics = new Map();
+    trainer.state._progBarMetrics.set('train_loss', value);
+  }
+
   _clipGradients(model, trainer) {
     if (!trainer.gradientClipVal) return;
     const params = [...model.parameters()];
@@ -167,6 +267,14 @@ export class TrainingLoop {
       }
     }
   }
+}
+
+function _flattenTensors(batch, out = []) {
+  if (batch == null) return out;
+  if (batch.shape !== undefined && typeof batch.contiguous === 'function') { out.push(batch); return out; }
+  if (Array.isArray(batch)) { for (const b of batch) _flattenTensors(b, out); return out; }
+  if (typeof batch === 'object') { for (const k of Object.keys(batch)) _flattenTensors(batch[k], out); return out; }
+  return out;
 }
 
 function resolveLimit(limitConfig, totalBatches) {

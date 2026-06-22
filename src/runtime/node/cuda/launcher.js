@@ -1,5 +1,6 @@
 import { cu, checkCU } from './ffi.js';
 import { getDevice } from './device.js';
+import { isEagerCapturing } from '../../../dispatcher/eager_mode.js';
 
 function devicePtrParam(dptr) {
   const b = Buffer.alloc(8);
@@ -7,8 +8,20 @@ function devicePtrParam(dptr) {
   return b;
 }
 
-function scalarParam(value) {
+class TypedScalar {
+  constructor(kind, value) { this.kind = kind; this.value = value; }
+}
+
+export function f32(value) { return new TypedScalar('f32', value); }
+export function i32(value) { return new TypedScalar('i32', value); }
+
+export function scalarParam(value) {
   const b = Buffer.alloc(4);
+  if (value instanceof TypedScalar) {
+    if (value.kind === 'f32') b.writeFloatLE(value.value);
+    else b.writeInt32LE(value.value | 0);
+    return b;
+  }
   if (Number.isInteger(value)) b.writeInt32LE(value | 0);
   else b.writeFloatLE(value);
   return b;
@@ -25,5 +38,5 @@ export function launch(func, gridDim, blockDim, sharedMemBytes, devicePtrs, scal
     blockDim[0], blockDim[1], blockDim[2],
     sharedMemBytes, stream, params, null,
   ));
-  if (sync) checkCU('cuStreamSynchronize', cu.streamSynchronize(stream));
+  if (sync && !isEagerCapturing()) checkCU('cuStreamSynchronize', cu.streamSynchronize(stream));
 }

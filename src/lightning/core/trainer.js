@@ -33,6 +33,8 @@ export class Trainer {
     defaultRootDir = './lightning_logs',
     compile = false,
     compileMode = 'separate',
+    cudaGraph = false,
+    cudaGraphWarmupSteps = 3,
   } = {}) {
     this._state = new TrainerState();
     this._state.maxEpochs = maxEpochs;
@@ -40,6 +42,8 @@ export class Trainer {
 
     this._compile = compile;
     this._compileMode = compileMode;
+    this._cudaGraph = cudaGraph;
+    this._cudaGraphWarmupSteps = cudaGraphWarmupSteps;
     this._accelerator = accelerator;
     this._precision = precision;
     this._gradientClipVal = gradientClipVal;
@@ -90,6 +94,8 @@ export class Trainer {
   get gradientClipAlgorithm() { return this._gradientClipAlgorithm; }
   get compile() { return this._compile; }
   get compileMode() { return this._compileMode; }
+  get cudaGraph() { return this._cudaGraph; }
+  get cudaGraphWarmupSteps() { return this._cudaGraphWarmupSteps; }
   get accumulateGradBatches() { return this._accumulateGradBatches; }
   set accumulateGradBatches(v) { this._accumulateGradBatches = v; }
   get limitTrainBatches() { return this._limitTrainBatches; }
@@ -112,6 +118,7 @@ export class Trainer {
     model._trainer = this;
     const device = this._resolveDevice();
     this._guardEagerWebGPU(device, 'fit', valLoader != null);
+    this._guardCudaGraph(device, valLoader != null);
     model._device = device;
     await this._prepareDevice(device);
     this._strategy.setup(model, device);
@@ -119,6 +126,9 @@ export class Trainer {
     const { optimizers, schedulerConfigs } = parseOptimizersConfig(
       await Promise.resolve(model.configureOptimizers())
     );
+    if (this._cudaGraph && schedulerConfigs && schedulerConfigs.some((c) => c && c.scheduler)) {
+      throw new Error('Trainer(cudaGraph=true) v1 requires a constant learning rate: LR schedulers change lr, but lr is baked into the captured graph. Remove the scheduler or disable cudaGraph.');
+    }
     model._currentOptimizers = optimizers;
 
     this._loggerConnector.logHyperparams(this._extractHyperparams(model, optimizers));
@@ -128,6 +138,11 @@ export class Trainer {
 
     this._state.shouldStop = false;
     await this._fitLoop.run(model, trainLoader, valLoader, this, optimizers, schedulerConfigs);
+
+    if (device === GPU_DEVICE) {
+      const { teardownAfterFit } = await import('#io/cuda_runtime');
+      teardownAfterFit(model, optimizers);
+    }
 
     this._callbackConnector.dispatch('onFitEnd', this, model);
     this._callbackConnector.dispatch('teardown', this, model, Stage.TRAINING);
@@ -197,6 +212,25 @@ export class Trainer {
       return;
     }
     throw new Error(`Trainer(accelerator="webgpu"): ${stage}() reads scalar metrics synchronously via .item(), which WebGPU's asynchronous readback cannot serve eagerly. Use predict() for eager WebGPU inference, or train via compile=true.`);
+  }
+
+  _guardCudaGraph(device, hasValidation = false) {
+    if (!this._cudaGraph) return;
+    if (device.type !== 'gpu') {
+      throw new Error('Trainer(cudaGraph=true) requires accelerator="gpu" (eager CUDA whole-step capture/replay).');
+    }
+    if (this._compile) {
+      throw new Error('Trainer(cudaGraph=true) is incompatible with compile=true: CUDA graph capture targets the eager training step, not the compiled path.');
+    }
+    if (this._gradientClipVal != null && this._gradientClipAlgorithm !== 'norm') {
+      throw new Error('Trainer(cudaGraph=true) supports gradient_clip_algorithm="norm" only; "value" clipping is not yet device-side.');
+    }
+    if (this._accumulateGradBatches !== 1) {
+      throw new Error('Trainer(cudaGraph=true) v1 requires accumulateGradBatches=1.');
+    }
+    if (hasValidation) {
+      throw new Error('Trainer(cudaGraph=true) v1 does not support in-fit validation. Call fit() without a valLoader.');
+    }
   }
 
   async _prepareDevice(device) {
