@@ -455,6 +455,7 @@ export class GraphPartitioner {
 
   _computeTransferEdges(partitions) {
     const edges = [];
+    const seen = new Set();
     const opToPartition = new Map();
     for (const p of partitions) {
       for (const op of p.ops) {
@@ -471,10 +472,9 @@ export class GraphPartitioner {
           if (!srcPartition || srcPartition === p) continue;
 
           const value = op.getOperand(i);
-          const existing = edges.find(
-            e => e.src === srcPartition && e.dst === p && e.value === value
-          );
-          if (!existing) {
+          const key = `${srcPartition.id}|${p.id}|${value.id}`;
+          if (!seen.has(key)) {
+            seen.add(key);
             edges.push({
               src: srcPartition,
               dst: p,

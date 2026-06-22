@@ -47,13 +47,13 @@ export function register(registry) {
       { name: 'mesh_axis', type: 'number', required: false },
       { name: 'gather_dim', type: 'number', required: false }
     ],
-    inferResultTypes(operandTypes) {
+    inferResultTypes(operandTypes, attrMap) {
       const x = operandTypes[0];
       if (!(x instanceof TensorType)) return null;
-      const axis = 0;
-      const gatherDim = 1;
+      const meshAxis = attrMap && attrMap.has('mesh_axis') ? attrMap.get('mesh_axis') : 0;
+      const gatherDim = attrMap && attrMap.has('gather_dim') ? attrMap.get('gather_dim') : 1;
       const shape = [...x.shape];
-      shape[gatherDim] = shape[gatherDim] * shape[axis];
+      shape[gatherDim] = shape[gatherDim] * shape[meshAxis];
       return [new TensorType(shape, x.dtype)];
     }
   }));

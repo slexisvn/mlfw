@@ -1,5 +1,6 @@
 import { Value, UseLink } from './value.js';
 import { Region } from './block.js';
+import { registry } from './ops.js';
 
 let _opIdCounter = 0;
 
@@ -98,10 +99,14 @@ export class Operation {
   }
 
   isTerminator() {
+    const def = registry.get(this.opName);
+    if (def && def.isTerminator) return true;
     return this.opName === 'return' || this.opName === 'yield';
   }
 
   hasSideEffects() {
+    const def = registry.get(this.opName);
+    if (def && def.hasSideEffects) return true;
     return this.opName === 'custom_call' ||
            this.opName === 'while' ||
            this.opName === 'if';
@@ -185,6 +190,16 @@ function hashAttrValue(val) {
     let h = 0x9e3779b9;
     for (let i = 0; i < val.length; i++) {
       h = ((h ^ hashAttrValue(val[i])) * 0x01000193) & 0x7fffffff;
+    }
+    return h;
+  }
+  if (ArrayBuffer.isView(val) && val.buffer instanceof ArrayBuffer) {
+    const bytes = new Uint8Array(val.buffer, val.byteOffset, val.byteLength);
+    let h = 0x9e3779b9;
+    h = ((h ^ bytes.length) * 0x01000193) & 0x7fffffff;
+    const step = bytes.length > 256 ? Math.ceil(bytes.length / 256) : 1;
+    for (let i = 0; i < bytes.length; i += step) {
+      h = ((h ^ bytes[i]) * 0x01000193) & 0x7fffffff;
     }
     return h;
   }

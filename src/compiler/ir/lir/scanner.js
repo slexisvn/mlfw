@@ -119,6 +119,8 @@ function walkTree(root, meta, target) {
   }
 }
 
+const DYNAMIC_BUFFER_SLAB_BYTES = 65536;
+
 function computeMemoryLayout(primFunc, meta, target) {
   const align = meta.memoryLayout.alignment;
   let offset = 0;
@@ -126,7 +128,10 @@ function computeMemoryLayout(primFunc, meta, target) {
   const bufBytes = (buf) => {
     const isDynamic = buf.shape.some(d => typeof d !== 'number' || d < 0);
     const numel = buf.numel();
-    return isDynamic || numel < 0 ? 65536 : numel * wasmBytes(buf.dtype);
+    if (!isDynamic && numel >= 0) return numel * wasmBytes(buf.dtype);
+    let staticLowerBound = 1;
+    for (const d of buf.shape) staticLowerBound *= (typeof d === 'number' && d > 0) ? d : 1;
+    return Math.max(DYNAMIC_BUFFER_SLAB_BYTES, staticLowerBound * wasmBytes(buf.dtype));
   };
 
   for (const [, buf] of primFunc.bufferMap) {

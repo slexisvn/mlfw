@@ -13,7 +13,14 @@ function isFoldResultRepresentable(value, dtype) {
   return Number.isInteger(value) && Number.isSafeInteger(value);
 }
 
-function resolveConstantValue(value, visited) {
+function resolveConstantValue(value, visited, memo) {
+  if (memo.has(value)) return memo.get(value);
+  const result = computeConstantValue(value, visited, memo);
+  memo.set(value, result);
+  return result;
+}
+
+function computeConstantValue(value, visited, memo) {
   const op = value.definingOp;
   if (!op) return undefined;
   if (CONSTANT_OPS.has(op.opName)) return op.getAttr('value');
@@ -28,7 +35,7 @@ function resolveConstantValue(value, visited) {
   const childValues = new Array(op.numOperands);
   const childOps = new Array(op.numOperands);
   for (let i = 0; i < op.numOperands; i++) {
-    const v = resolveConstantValue(op.getOperand(i), visited);
+    const v = resolveConstantValue(op.getOperand(i), visited, memo);
     if (v === undefined) return undefined;
     childValues[i] = v;
     childOps[i] = op.getOperand(i).definingOp;
@@ -50,6 +57,7 @@ export class ConstantFoldPass extends FunctionPass {
     let changed = false;
     let foldedCount = 0;
     const builder = new IRBuilder(func);
+    const memo = new Map();
 
     for (const op of [...func.opsRecursive()]) {
       if (!op.parentBlock) continue;
@@ -67,7 +75,7 @@ export class ConstantFoldPass extends FunctionPass {
       let allResolved = true;
 
       for (let i = 0; i < op.numOperands; i++) {
-        const v = resolveConstantValue(op.getOperand(i), new Set());
+        const v = resolveConstantValue(op.getOperand(i), new Set(), memo);
         if (v === undefined) { allResolved = false; break; }
         constValues[i] = v;
         constOps[i] = op.getOperand(i).definingOp;

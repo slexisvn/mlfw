@@ -4,7 +4,7 @@ import { UseDefAnalysis } from '../analysis/use_def.js';
 import { GradAccumulator } from './grad_accumulator.js';
 import { getVJPRule, isGradientBarrier } from './vjp_registry.js';
 import { RematPolicy } from './remat_policy.js';
-import { reduceGradToOperandShape } from './backward_builder.js';
+import { reduceGradToOperandShape, REGION_CONTROL_FLOW } from './backward_builder.js';
 
 export class JointGraphBuilder {
   constructor(opts = {}) {
@@ -18,6 +18,7 @@ export class JointGraphBuilder {
     }
     const analysis = UseDefAnalysis.compute(forwardFunc);
     const topoOrder = analysis.topologicalOrder;
+    this._assertNoRegionControlFlow(topoOrder);
 
     const returnOp = forwardFunc.getReturnOp();
     if (!returnOp) throw new Error('Forward function has no return op');
@@ -172,9 +173,18 @@ export class JointGraphBuilder {
     return needsGrad;
   }
 
+  _assertNoRegionControlFlow(ops) {
+    for (const op of ops) {
+      if (REGION_CONTROL_FLOW.has(op.opName)) {
+        throw new Error(`JointGraphBuilder does not support region control-flow op '${op.opName}'; use BackwardGraphBuilder (separate mode) without a checkpointPolicy, which differentiates scan/if.`);
+      }
+    }
+  }
+
   _buildCheckpointed(forwardFunc) {
     const analysis = UseDefAnalysis.compute(forwardFunc);
     const topoOrder = analysis.topologicalOrder;
+    this._assertNoRegionControlFlow(topoOrder);
 
     const returnOp = forwardFunc.getReturnOp();
     if (!returnOp) throw new Error('Forward function has no return op');

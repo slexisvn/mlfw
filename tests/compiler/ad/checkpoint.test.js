@@ -252,3 +252,36 @@ describe('Checkpointed joint builder', () => {
     expect(ckptResult.numGradInputs).toBe(normalResult.numGradInputs);
   });
 });
+
+describe('AD rejects region control-flow where it cannot be differentiated', () => {
+  function buildScanModel() {
+    const T = 3, D = 2;
+    return buildFunction('scan_fwd', [t([T, D]), t([D])], [t([D])], (b, [xs, init]) => {
+      const s = b.scanOp([xs], [init], (bb, xt, cy) => {
+        const nc = bb.add(cy[0], xt[0]).getResult(0);
+        return [[nc], [nc]];
+      });
+      b.returnOp([s.getResult(0)]);
+    });
+  }
+
+  it('checkpointed backward throws on scan instead of silently dropping its gradients', () => {
+    const builder = new BackwardGraphBuilder({ checkpointPolicy: new EveryKPolicy({ segmentSize: 1 }) });
+    expect(() => builder.build(buildScanModel())).toThrow(/region control-flow|scan/i);
+  });
+
+  it('non-checkpointed backward still differentiates scan (control case)', () => {
+    const builder = new BackwardGraphBuilder();
+    expect(() => builder.build(buildScanModel())).not.toThrow();
+  });
+
+  it('joint builder throws on scan instead of silently dropping its gradients', () => {
+    const builder = new JointGraphBuilder();
+    expect(() => builder.build(buildScanModel())).toThrow(/region control-flow|scan/i);
+  });
+
+  it('checkpointed joint builder throws on scan', () => {
+    const builder = new JointGraphBuilder({ checkpointPolicy: new EveryKPolicy({ segmentSize: 1 }) });
+    expect(() => builder.build(buildScanModel())).toThrow(/region control-flow|scan/i);
+  });
+});

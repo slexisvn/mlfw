@@ -71,11 +71,20 @@ export class EvolutionarySearch {
   search(sketches, evaluator, seedPopulation = null) {
     let population = seedPopulation && seedPopulation.length ? seedPopulation : this._initPopulation(sketches);
 
+    const evalCache = new Map();
+    const evalMemo = (sketch, params) => {
+      const key = sketch.name + '|' + JSON.stringify(params);
+      if (evalCache.has(key)) return evalCache.get(key);
+      const r = evaluator(sketch, params);
+      evalCache.set(key, r);
+      return r;
+    };
+
     for (let gen = 0; gen < this.numGenerations; gen++) {
       if (this._expired()) break;
       const scored = [];
       for (const individual of population) {
-        const result = evaluator(individual.sketch, individual.params);
+        const result = evalMemo(individual.sketch, individual.params);
         if (result) {
           scored.push({ ...individual, score: result.score });
         }
@@ -100,7 +109,7 @@ export class EvolutionarySearch {
 
     const finalScored = [];
     for (const individual of population) {
-      const result = evaluator(individual.sketch, individual.params);
+      const result = evalMemo(individual.sketch, individual.params);
       if (result) {
         finalScored.push(new SearchCandidate(individual.sketch.name, individual.params, result.score));
       }

@@ -16,21 +16,20 @@ export class ScheduleRule {
   }
 }
 
-let _classifyCache = null;
-let _classifyCacheOwner = null;
+const _classifyCacheByFunc = new WeakMap();
 
 export function classifyBlock(primFunc, blockName) {
-  if (_classifyCacheOwner !== primFunc || !_classifyCache) {
-    _classifyCache = new Map();
-    collectBlockInfo(primFunc.body, _classifyCache, []);
-    _classifyCacheOwner = primFunc;
+  let cache = _classifyCacheByFunc.get(primFunc);
+  if (!cache) {
+    cache = new Map();
+    collectBlockInfo(primFunc.body, cache, []);
+    _classifyCacheByFunc.set(primFunc, cache);
   }
-  return _classifyCache.get(blockName) || null;
+  return cache.get(blockName) || null;
 }
 
-function invalidateClassifyCache() {
-  _classifyCache = null;
-  _classifyCacheOwner = null;
+function invalidateClassifyCache(primFunc) {
+  if (primFunc) _classifyCacheByFunc.delete(primFunc);
 }
 
 function collectVarNames(node, out) {
@@ -578,7 +577,7 @@ export class SchedulePolicy {
     const rule = this.selectRule(schedule.func, blockName);
     if (rule) {
       rule.apply(schedule, blockName, this.target);
-      invalidateClassifyCache();
+      invalidateClassifyCache(schedule.func);
       this._explain(blockName, rule.name, `matched rule '${rule.name}' for ${this.target.name}`);
       return rule.name;
     }
@@ -593,7 +592,7 @@ export class SchedulePolicy {
   }
 
   applyToAllBlocks(schedule) {
-    invalidateClassifyCache();
+    invalidateClassifyCache(schedule.func);
     const blocks = collectAllBlockNames(schedule.func.body);
     const seen = new Set();
     const applied = new Map();

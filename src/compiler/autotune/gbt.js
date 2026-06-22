@@ -16,6 +16,7 @@ function buildTree(X, Y, rows, depth, maxDepth, minSamples) {
   for (const i of rows) { const y = Y[i]; totalSum += y; totalSumSq += y * y; }
 
   let best = null;
+  let bestSorted = null;
   for (let f = 0; f < dim; f++) {
     const sorted = rows.slice().sort((a, b) => X[a][f] - X[b][f]);
     let leftSum = 0;
@@ -33,12 +34,12 @@ function buildTree(X, Y, rows, depth, maxDepth, minSamples) {
       const rightSum = totalSum - leftSum;
       const rightSumSq = totalSumSq - leftSumSq;
       const cost = (leftSumSq - (leftSum * leftSum) / leftCount) + (rightSumSq - (rightSum * rightSum) / rightCount);
-      if (!best || cost < best.cost) best = { f, thr: (xa + xb) / 2, sIdx: s, cost };
+      if (!best || cost < best.cost) { best = { f, thr: (xa + xb) / 2, sIdx: s, cost }; bestSorted = sorted; }
     }
   }
   if (!best) return { leaf: leafValue(rows, Y) };
 
-  const sorted = rows.slice().sort((a, b) => X[a][best.f] - X[b][best.f]);
+  const sorted = bestSorted;
   return {
     f: best.f, thr: best.thr,
     left: buildTree(X, Y, sorted.slice(0, best.sIdx + 1), depth + 1, maxDepth, minSamples),

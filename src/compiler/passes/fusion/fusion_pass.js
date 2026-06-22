@@ -4,6 +4,7 @@ import { Block, Region } from '../../ir/graph/block.js';
 import { FusionLegality, FusionKind } from './fusion_analysis.js';
 import { FusionGroupBuilder } from './fusion_groups.js';
 import { FusionCostModel } from './fusion_cost.js';
+import { makeComesBefore } from './fusion_utils.js';
 import { TraceLevel } from '../../pipeline/trace.js';
 
 export class FusionPass extends FunctionPass {
@@ -163,11 +164,12 @@ export class FusionPass extends FunctionPass {
     const yieldOp = new Operation('yield', yieldValues, []);
     bodyBlock.pushOp(yieldOp);
 
+    const comesBefore = makeComesBefore(sortedOps[0].parentBlock);
     let insertAfter = null;
     for (const val of inputValues) {
       const producer = val.definingOp;
       if (!producer || group.hasOp(producer)) continue;
-      if (!insertAfter || !this._comesBefore(producer, insertAfter)) {
+      if (!insertAfter || !comesBefore(producer, insertAfter)) {
         insertAfter = producer;
       }
     }
@@ -199,17 +201,6 @@ export class FusionPass extends FunctionPass {
         op.parentBlock.removeOp(op);
       }
     }
-  }
-
-  _comesBefore(opA, opB) {
-    if (!opA.parentBlock || opA.parentBlock !== opB.parentBlock) return false;
-    let cur = opA.parentBlock.firstOp;
-    while (cur) {
-      if (cur === opA) return true;
-      if (cur === opB) return false;
-      cur = cur._next;
-    }
-    return false;
   }
 
   _topologicalSort(group) {

@@ -6,7 +6,7 @@ import { GradAccumulator } from './grad_accumulator.js';
 import { getVJPRule, isGradientBarrier } from './vjp_registry.js';
 import { buildScanBackward, buildCondBackward, regionFreeVars } from './scan_backward.js';
 
-const REGION_CONTROL_FLOW = new Set(['scan', 'if']);
+export const REGION_CONTROL_FLOW = new Set(['scan', 'if']);
 
 function regionControlFlowFreeVars(op) {
   const out = [];
@@ -338,6 +338,14 @@ export class BackwardGraphBuilder {
 
     const needsGrad = this._computeGradReachability(forwardFunc, topoOrder);
     const segments = this._checkpointPolicy.segment(topoOrder, forwardFunc);
+
+    for (const seg of segments) {
+      for (const op of seg.ops) {
+        if (REGION_CONTROL_FLOW.has(op.opName)) {
+          throw new Error(`Checkpointed backward does not support region control-flow op '${op.opName}'; build the backward without a checkpointPolicy, which differentiates scan/if via buildScanBackward/buildCondBackward.`);
+        }
+      }
+    }
 
     const savedValueSet = new Set();
     const savedValues = [];

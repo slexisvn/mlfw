@@ -49,34 +49,16 @@ registerVJPRule('dot', (ctx) => {
 registerVJPRule('matmul', (ctx) => {
   const grad = ctx.gradOutputs[0];
   const [lhs, rhs] = ctx.operands;
-  const lhsRank = lhs.type.rank;
-  const rhsRank = rhs.type.rank;
-
-  let gradLhs, gradRhs;
-
-  if (lhsRank === 2 && rhsRank === 2) {
-    const rhsT = ctx.builder.transpose(rhs, [1, 0]).getResult(0);
-    gradLhs = ctx.builder.matmul(grad, rhsT).getResult(0);
-    const lhsT = ctx.builder.transpose(lhs, [1, 0]).getResult(0);
-    gradRhs = ctx.builder.matmul(lhsT, grad).getResult(0);
-  } else if (lhsRank === 3 && rhsRank === 3) {
-    const rhsT = ctx.builder.transpose(rhs, [0, 2, 1]).getResult(0);
-    gradLhs = ctx.builder.matmul(grad, rhsT).getResult(0);
-    const lhsT = ctx.builder.transpose(lhs, [0, 2, 1]).getResult(0);
-    gradRhs = ctx.builder.matmul(lhsT, grad).getResult(0);
-  } else {
-    const lhsPerm = Array.from({ length: lhsRank }, (_, i) => i);
-    lhsPerm[lhsRank - 2] = lhsRank - 1;
-    lhsPerm[lhsRank - 1] = lhsRank - 2;
-    const rhsPerm = Array.from({ length: rhsRank }, (_, i) => i);
-    rhsPerm[rhsRank - 2] = rhsRank - 1;
-    rhsPerm[rhsRank - 1] = rhsRank - 2;
-    const rhsT = ctx.builder.transpose(rhs, rhsPerm).getResult(0);
-    gradLhs = ctx.builder.matmul(grad, rhsT).getResult(0);
-    const lhsT = ctx.builder.transpose(lhs, lhsPerm).getResult(0);
-    gradRhs = ctx.builder.matmul(lhsT, grad).getResult(0);
-  }
-
+  const swapLastTwo = (rank) => {
+    const perm = Array.from({ length: rank }, (_, i) => i);
+    perm[rank - 2] = rank - 1;
+    perm[rank - 1] = rank - 2;
+    return perm;
+  };
+  const rhsT = ctx.builder.transpose(rhs, swapLastTwo(rhs.type.rank)).getResult(0);
+  const gradLhs = ctx.builder.matmul(grad, rhsT).getResult(0);
+  const lhsT = ctx.builder.transpose(lhs, swapLastTwo(lhs.type.rank)).getResult(0);
+  const gradRhs = ctx.builder.matmul(lhsT, grad).getResult(0);
   return [gradLhs, gradRhs];
 });
 

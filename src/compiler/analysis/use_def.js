@@ -21,21 +21,30 @@ export class UseDefAnalysis {
     const visitedOps = new Set();
     const visitingOps = new Set();
 
-    const visit = (op) => {
-      if (visitedOps.has(op)) return;
-      if (visitingOps.has(op)) {
-        throw new Error('Cycle detected in UseDefAnalysis');
+    const visit = (root) => {
+      if (visitedOps.has(root)) return;
+      visitingOps.add(root);
+      const stack = [{ op: root, i: 0 }];
+      while (stack.length > 0) {
+        const frame = stack[stack.length - 1];
+        const op = frame.op;
+        if (frame.i < op.numOperands) {
+          const defOp = op.getOperand(frame.i).definingOp;
+          frame.i++;
+          if (defOp && !visitedOps.has(defOp)) {
+            if (visitingOps.has(defOp)) {
+              throw new Error('Cycle detected in UseDefAnalysis');
+            }
+            visitingOps.add(defOp);
+            stack.push({ op: defOp, i: 0 });
+          }
+          continue;
+        }
+        visitingOps.delete(op);
+        visitedOps.add(op);
+        topologicalOrder.push(op);
+        stack.pop();
       }
-      visitingOps.add(op);
-
-      for (let i = 0; i < op.numOperands; i++) {
-        const defOp = op.getOperand(i).definingOp;
-        if (defOp) visit(defOp);
-      }
-
-      visitingOps.delete(op);
-      visitedOps.add(op);
-      topologicalOrder.push(op);
     };
 
     for (const op of func.ops()) {

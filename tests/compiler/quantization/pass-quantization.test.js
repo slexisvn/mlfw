@@ -108,7 +108,7 @@ describe('QuantizationPass target dtype bit width', () => {
   });
 
   it('i32 activation scale uses 32-bit symmetric bound', () => {
-    const bound = (1 << 31) - 1;
+    const bound = 2 ** 31 - 1;
     expect(dotScale(ScalarType.I32)).toBeCloseTo(6 / bound, 18);
   });
 });

@@ -16,17 +16,23 @@ class CostEstimate {
   }
 }
 
+const DEFAULT_COST_WEIGHTS = {
+  parallelism: 2.0,
+  vectorization: 1.5,
+  memoryCoalescing: 2.0,
+  occupancy: 1.0,
+  arithmeticIntensity: 1.0,
+  loopOverhead: -0.5,
+  codeSize: -0.3
+};
+
 export class AnalyticalCostModel {
-  constructor(target) {
+  constructor(target, opts = {}) {
     this.target = target;
     this._weights = {
-      parallelism: 2.0,
-      vectorization: 1.5,
-      memoryCoalescing: 2.0,
-      occupancy: 1.0,
-      arithmeticIntensity: 1.0,
-      loopOverhead: -0.5,
-      codeSize: -0.3
+      ...DEFAULT_COST_WEIGHTS,
+      ...(target && target.costModelWeights ? target.costModelWeights : {}),
+      ...(opts.weights || {})
     };
   }
 

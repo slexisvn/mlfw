@@ -33,14 +33,12 @@ export function computeWorkloadKey(primFunc, blockName, target, blockMap = null)
     if (block.writes.length === 1) {
       const outName = block.writes[0].buffer.name;
       const consumers = [];
-      for (const other of map.values()) {
-        if (other === block || !other.reads) continue;
-        if (other.reads.some(r => r.buffer && r.buffer.name === outName)) {
-          const cops = [];
-          collectBlockOps(other.body, cops);
-          if (other.initBody) collectBlockOps(other.initBody, cops);
-          consumers.push(`${other.name}#${cops.join(';')}`);
-        }
+      for (const other of readersByBuffer(map).get(outName) || []) {
+        if (other === block) continue;
+        const cops = [];
+        collectBlockOps(other.body, cops);
+        if (other.initBody) collectBlockOps(other.initBody, cops);
+        consumers.push(`${other.name}#${cops.join(';')}`);
       }
       if (consumers.length > 0) {
         consumers.sort();
@@ -53,6 +51,23 @@ export function computeWorkloadKey(primFunc, blockName, target, blockMap = null)
   parts.push(target.kind);
 
   return fnv1a(parts.join('|'));
+}
+
+function readersByBuffer(map) {
+  if (map.__readersByBuffer) return map.__readersByBuffer;
+  const idx = new Map();
+  for (const blk of map.values()) {
+    if (!blk.reads) continue;
+    const names = new Set();
+    for (const r of blk.reads) if (r.buffer) names.add(r.buffer.name);
+    for (const name of names) {
+      let arr = idx.get(name);
+      if (!arr) { arr = []; idx.set(name, arr); }
+      arr.push(blk);
+    }
+  }
+  map.__readersByBuffer = idx;
+  return idx;
 }
 
 function collectBlockOps(node, ops) {

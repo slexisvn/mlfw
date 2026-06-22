@@ -6,7 +6,7 @@ import { classifyFusionKind } from './fusion_analysis.js';
 import { TraceLevel } from '../../pipeline/trace.js';
 import {
   getYieldOp, countInnerOps, countReductions,
-  allInnerOpsFusable, remapOperands
+  allInnerOpsFusable, remapOperands, makeComesBefore
 } from './fusion_utils.js';
 
 export class MultiOutputFusionPass extends FunctionPass {
@@ -303,11 +303,12 @@ export class MultiOutputFusionPass extends FunctionPass {
     const block = left.parentBlock;
     if (!block) return;
 
+    const comesBefore = makeComesBefore(block);
     let insertAfter = null;
     for (const val of mergedOperands) {
       const producer = val.definingOp;
       if (!producer || producer === left || producer === right) continue;
-      if (!insertAfter || !this._comesBefore(producer, insertAfter)) {
+      if (!insertAfter || !comesBefore(producer, insertAfter)) {
         insertAfter = producer;
       }
     }
@@ -330,17 +331,6 @@ export class MultiOutputFusionPass extends FunctionPass {
     if (left.parentBlock) left.parentBlock.removeOp(left);
     right.dropAllOperands();
     if (right.parentBlock) right.parentBlock.removeOp(right);
-  }
-
-  _comesBefore(opA, opB) {
-    if (!opA.parentBlock || opA.parentBlock !== opB.parentBlock) return false;
-    let cur = opA.parentBlock.firstOp;
-    while (cur) {
-      if (cur === opA) return true;
-      if (cur === opB) return false;
-      cur = cur._next;
-    }
-    return false;
   }
 
   _hasProducerConsumerEdge(producer, consumer) {

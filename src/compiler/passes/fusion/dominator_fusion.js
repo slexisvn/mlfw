@@ -8,6 +8,7 @@ import { FusionCostModel } from './fusion_cost.js';
 import { PostDominanceAnalysis } from '../../analysis/dominance.js';
 import { TraceLevel } from '../../pipeline/trace.js';
 import { UseDefAnalysis } from '../../analysis/use_def.js';
+import { makeComesBefore } from './fusion_utils.js';
 
 const SKIP_OPS = new Set(['return', 'yield', 'constant', 'scalar_constant']);
 
@@ -327,11 +328,12 @@ export class DominatorFusionPass extends FunctionPass {
     const block = sorted[0].parentBlock;
     if (!block) return;
 
+    const comesBefore = makeComesBefore(block);
     let insertAfter = null;
     for (const val of inputValues) {
       const producer = val.definingOp;
       if (!producer || group.hasOp(producer)) continue;
-      if (!insertAfter || !this._comesBefore(producer, insertAfter)) {
+      if (!insertAfter || !comesBefore(producer, insertAfter)) {
         insertAfter = producer;
       }
     }
@@ -350,17 +352,6 @@ export class DominatorFusionPass extends FunctionPass {
       op.dropAllOperands();
       if (op.parentBlock) op.parentBlock.removeOp(op);
     }
-  }
-
-  _comesBefore(opA, opB) {
-    if (!opA.parentBlock || opA.parentBlock !== opB.parentBlock) return false;
-    let cur = opA.parentBlock.firstOp;
-    while (cur) {
-      if (cur === opA) return true;
-      if (cur === opB) return false;
-      cur = cur._next;
-    }
-    return false;
   }
 
   _topoSort(group) {

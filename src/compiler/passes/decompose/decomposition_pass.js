@@ -74,12 +74,24 @@ registerDecomposition('all_reduce', (op, b) => {
 registerDecomposition('all_gather', (op, b) => {
   const x = op.getOperand(0);
   const shape = x.type.shape;
-  const Ndev = shape[0], S = shape[1], rest = shape.slice(2);
-  const flat = b.reshape(x, [Ndev * S, ...rest]).getResult(0);
-  const outShape = [Ndev, Ndev * S, ...rest];
+  const meshAxis = op.getAttr('mesh_axis') ?? 0;
+  const gatherDim = op.getAttr('gather_dim') ?? 1;
+  const Ndev = shape[meshAxis];
+  const squeezed = shape.filter((_, i) => i !== meshAxis);
+  const gatherInSqueezed = gatherDim < meshAxis ? gatherDim : gatherDim - 1;
+  const shards = [];
+  for (let d = 0; d < Ndev; d++) {
+    const starts = shape.map((_, i) => (i === meshAxis ? d : 0));
+    const limits = shape.map((dim, i) => (i === meshAxis ? d + 1 : dim));
+    const sliced = b.slice(x, starts, limits).getResult(0);
+    shards.push(b.reshape(sliced, squeezed).getResult(0));
+  }
+  const gathered = shards.length === 1 ? shards[0] : b.concat(shards, gatherInSqueezed).getResult(0);
+  const outShape = [...shape];
+  outShape[gatherDim] = Ndev * shape[gatherDim];
   const bcastDims = [];
-  for (let i = 1; i < outShape.length; i++) bcastDims.push(i);
-  const out = b.broadcast(flat, outShape, bcastDims).getResult(0);
+  for (let i = 0; i < outShape.length; i++) if (i !== meshAxis) bcastDims.push(i);
+  const out = b.broadcast(gathered, outShape, bcastDims).getResult(0);
   op.replaceAllResultsWith([out]);
   op.erase();
 });

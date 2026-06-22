@@ -38,6 +38,21 @@ export function allInnerOpsFusable(fusionOp) {
   return true;
 }
 
+export function blockPositionIndex(block) {
+  const idx = new Map();
+  let i = 0;
+  for (let cur = block.firstOp; cur; cur = cur._next) idx.set(cur, i++);
+  return idx;
+}
+
+export function makeComesBefore(block) {
+  const idx = blockPositionIndex(block);
+  return (a, b) => {
+    const pa = idx.get(a), pb = idx.get(b);
+    return pa !== undefined && pb !== undefined && pa < pb;
+  };
+}
+
 export function remapOperands(op, valueMap) {
   const mapped = new Array(op.numOperands);
   for (let i = 0; i < op.numOperands; i++) {

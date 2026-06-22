@@ -82,31 +82,7 @@ export function register(registry) {
       if (outElements === DYNAMIC || kElements === DYNAMIC) return 0;
       return 2 * outElements * kElements / (kernel.shape[0] || 1);
     },
-    inferResultTypes(operandTypes, attrs) {
-      if (operandTypes.length !== 2) return null;
-      const inp = operandTypes[0], kernel = operandTypes[1];
-      if (!(inp instanceof TensorType) || !(kernel instanceof TensorType)) return null;
-      if (inp.dtype !== kernel.dtype) return null;
-      const strides = attrs.get ? attrs.get('strides') : attrs.strides;
-      const padding = attrs.get ? attrs.get('padding') : attrs.padding;
-      const dilation = (attrs.get ? attrs.get('dilation') : attrs.dilation) || strides.map(() => 1);
-      const spatialDims = strides.length;
-      const batch = inp.shape[0];
-      const outChannels = kernel.shape[0];
-      const outSpatial = [];
-      for (let i = 0; i < spatialDims; i++) {
-        const inDim = inp.shape[i + 2];
-        const kDim = kernel.shape[i + 2];
-        const padTotal = padding[i][0] + padding[i][1];
-        if (inDim === DYNAMIC || kDim === DYNAMIC) {
-          outSpatial.push(DYNAMIC);
-        } else {
-          const effectiveK = (kDim - 1) * dilation[i] + 1;
-          outSpatial.push(Math.floor((inDim + padTotal - effectiveK) / strides[i]) + 1);
-        }
-      }
-      return [new TensorType([batch, outChannels, ...outSpatial], inp.dtype)];
-    },
+    inferResultTypes: inferConvResultTypes,
     verify(op) {
       const errs = [];
       if (op.numOperands !== 2) { errs.push('conv expects 2 operands'); return errs; }
@@ -119,11 +95,12 @@ export function register(registry) {
   }));
 }
 
-function inferDotResultTypes(operandTypes, attrs) {
+function inferDotResultTypes(operandTypes, attrs, opts) {
   if (operandTypes.length !== 2) return null;
   const lhs = operandTypes[0], rhs = operandTypes[1];
   if (!(lhs instanceof TensorType) || !(rhs instanceof TensorType)) return null;
-  if (lhs.dtype !== rhs.dtype) return null;
+  const o = opts && !Array.isArray(opts) ? opts : {};
+  if (!o.allowMixedDtype && lhs.dtype !== rhs.dtype) return null;
   const lhsC = new Set(attrs.get ? attrs.get('lhs_contracting') : attrs.lhs_contracting);
   const rhsC = new Set(attrs.get ? attrs.get('rhs_contracting') : attrs.rhs_contracting);
   const lhsB = new Set((attrs.get ? attrs.get('lhs_batch') : attrs.lhs_batch) || []);
@@ -138,7 +115,34 @@ function inferDotResultTypes(operandTypes, attrs) {
   for (let i = 0; i < rhs.rank; i++) {
     if (!rhsC.has(i) && !rhsB.has(i)) shape.push(rhs.shape[i]);
   }
-  return [new TensorType(shape, lhs.dtype)];
+  return [new TensorType(shape, o.outputDtype || lhs.dtype)];
 }
 
-export { inferDotResultTypes };
+function inferConvResultTypes(operandTypes, attrs, opts) {
+  if (operandTypes.length !== 2) return null;
+  const inp = operandTypes[0], kernel = operandTypes[1];
+  if (!(inp instanceof TensorType) || !(kernel instanceof TensorType)) return null;
+  const o = opts && !Array.isArray(opts) ? opts : {};
+  if (!o.allowMixedDtype && inp.dtype !== kernel.dtype) return null;
+  const strides = attrs.get ? attrs.get('strides') : attrs.strides;
+  const padding = attrs.get ? attrs.get('padding') : attrs.padding;
+  const dilation = (attrs.get ? attrs.get('dilation') : attrs.dilation) || strides.map(() => 1);
+  const spatialDims = strides.length;
+  const batch = inp.shape[0];
+  const outChannels = kernel.shape[0];
+  const outSpatial = [];
+  for (let i = 0; i < spatialDims; i++) {
+    const inDim = inp.shape[i + 2];
+    const kDim = kernel.shape[i + 2];
+    const padTotal = padding[i][0] + padding[i][1];
+    if (inDim === DYNAMIC || kDim === DYNAMIC) {
+      outSpatial.push(DYNAMIC);
+    } else {
+      const effectiveK = (kDim - 1) * dilation[i] + 1;
+      outSpatial.push(Math.floor((inDim + padTotal - effectiveK) / strides[i]) + 1);
+    }
+  }
+  return [new TensorType([batch, outChannels, ...outSpatial], o.outputDtype || inp.dtype)];
+}
+
+export { inferDotResultTypes, inferConvResultTypes };

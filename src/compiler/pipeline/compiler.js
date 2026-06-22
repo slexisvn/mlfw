@@ -175,7 +175,7 @@ export class Compiler {
       this._verifyGraph(graphModule, 'before graph passes', trace, errors, failed, resilient);
     }
 
-    this._runGraphPasses(graphModule, trace, errors, failed, resilient);
+    const cudaMatmulChain = this._runGraphPasses(graphModule, trace, errors, failed, resilient);
 
     if (this.config.partition.enabled && this.config.partition.targets.length >= 2) {
       this._runPartitioning(graphModule, trace);
@@ -187,7 +187,7 @@ export class Compiler {
     const isWebGPUTarget = typeof this.config.target.isWebGPU === 'function' && this.config.target.isWebGPU();
     if (this.config.matmulBackend === 'cublas') {
       cublasSplit = splitGraphForCublas(graphModule);
-    } else if (this._cudaMatmulChain) {
+    } else if (cudaMatmulChain) {
       nativeSplit = splitGraphForNative(graphModule);
     } else if (isWebGPUTarget) {
       scanSplit = splitGraphForScan(graphModule, this.config.target);
@@ -281,8 +281,8 @@ export class Compiler {
         if (op.opName === 'dot') dotCount++;
       }
     }
-    this._cudaMatmulChain = this.config.target.kind === 'cuda' && dotCount >= 2;
-    const shouldEpilogueFuse = this.config.matmulBackend !== 'cublas' && !this._cudaMatmulChain
+    const cudaMatmulChain = this.config.target.kind === 'cuda' && dotCount >= 2;
+    const shouldEpilogueFuse = this.config.matmulBackend !== 'cublas' && !cudaMatmulChain
       && (this.config.fusion.epilogue !== undefined
         ? this.config.fusion.epilogue
         : (this.config.target && this.config.target.enableEpilogueFusion));
@@ -339,6 +339,8 @@ export class Compiler {
       const printer = new IRPrinter();
       trace.irDump('afterGraphPasses', printer.printModule(graphModule));
     }
+
+    return cudaMatmulChain;
   }
 
   _runPartitioning(graphModule, trace) {

@@ -218,6 +218,12 @@ function verifyOperation(op, func, definedValues, errors) {
               op, func
             ));
           }
+          if (!actual.shapeCompatible(expected)) {
+            errors.push(new VerificationError(
+              `Result ${i} shape ${typeToString(actual)} incompatible with inferred ${typeToString(expected)}`,
+              op, func
+            ));
+          }
         }
       }
     }

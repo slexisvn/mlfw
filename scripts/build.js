@@ -51,6 +51,7 @@ const shared = {
   target: ['es2022'],
   plugins: [browserStubPlugin, distributedStubPlugin],
   define: { 'process.env.NODE_ENV': '"production"' },
+  keepNames: true,
   logLevel: 'info',
 };
 

@@ -32,6 +32,16 @@ describe('SPMD collectives (mesh-axis model; multi-device runtime maps the axis 
     c.run(c.listKernels()[0], new Float32Array([0, 1, 10, 11]), o);
     expect([...o]).toEqual([0, 1, 10, 11, 0, 1, 10, 11]);
   });
+
+  it('all_gather honors non-default mesh_axis/gather_dim attrs', () => {
+    const f = buildFunction('ag_nd', [t([2, 3])], [t([6, 3])], (b, [x]) => {
+      b.returnOp([b.allGather(x, { meshAxis: 1, gatherDim: 0 }).getResult(0)]);
+    });
+    const c = compileGraph(f, CPUTarget());
+    const o = new Float32Array(18);
+    c.run(c.listKernels()[0], new Float32Array([0, 1, 2, 10, 11, 12]), o);
+    expect([...o]).toEqual([0, 0, 0, 10, 10, 10, 1, 1, 1, 11, 11, 11, 2, 2, 2, 12, 12, 12]);
+  });
 });
 
 describe('buffer donation (in/out aliasing)', () => {

@@ -1,6 +1,7 @@
 import { OpDef, OpTrait } from '../op_registry.js';
 import { TensorType, ScalarType, DYNAMIC, isFloatType } from '../types.js';
 import * as qpat from '../quantization_patterns.js';
+import { inferDotResultTypes, inferConvResultTypes } from './linalg.js';
 
 const QUANTIZED_INT_DTYPES = new Set([ScalarType.I8, ScalarType.UI8]);
 const DEQUANT_INPUT_DTYPES = new Set([ScalarType.I8, ScalarType.UI8, ScalarType.I32]);
@@ -130,24 +131,7 @@ export function register(registry) {
       return 2 * outputElements * contractDim;
     },
     inferResultTypes(operandTypes, attrs) {
-      if (operandTypes.length !== 2) return null;
-      const lhs = operandTypes[0], rhs = operandTypes[1];
-      if (!(lhs instanceof TensorType) || !(rhs instanceof TensorType)) return null;
-      const lhsC = new Set(attrs.get ? attrs.get('lhs_contracting') : attrs.lhs_contracting);
-      const rhsC = new Set(attrs.get ? attrs.get('rhs_contracting') : attrs.rhs_contracting);
-      const lhsB = new Set((attrs.get ? attrs.get('lhs_batch') : attrs.lhs_batch) || []);
-      const rhsB = new Set((attrs.get ? attrs.get('rhs_batch') : attrs.rhs_batch) || []);
-      const shape = [];
-      for (let i = 0; i < lhs.rank; i++) {
-        if (lhsB.has(i)) shape.push(lhs.shape[i]);
-      }
-      for (let i = 0; i < lhs.rank; i++) {
-        if (!lhsC.has(i) && !lhsB.has(i)) shape.push(lhs.shape[i]);
-      }
-      for (let i = 0; i < rhs.rank; i++) {
-        if (!rhsC.has(i) && !rhsB.has(i)) shape.push(rhs.shape[i]);
-      }
-      return [new TensorType(shape, ScalarType.I32)];
+      return inferDotResultTypes(operandTypes, attrs, { outputDtype: ScalarType.I32, allowMixedDtype: true });
     },
     verify(op) {
       const errs = [];
@@ -187,28 +171,7 @@ export function register(registry) {
       { name: 'output_zero_point', type: 'number', required: true }
     ],
     inferResultTypes(operandTypes, attrs) {
-      if (operandTypes.length !== 2) return null;
-      const inp = operandTypes[0], kernel = operandTypes[1];
-      if (!(inp instanceof TensorType) || !(kernel instanceof TensorType)) return null;
-      const strides = attrs.get ? attrs.get('strides') : attrs.strides;
-      const padding = attrs.get ? attrs.get('padding') : attrs.padding;
-      const dilation = (attrs.get ? attrs.get('dilation') : attrs.dilation) || strides.map(() => 1);
-      const spatialDims = strides.length;
-      const batch = inp.shape[0];
-      const outChannels = kernel.shape[0];
-      const outSpatial = [];
-      for (let i = 0; i < spatialDims; i++) {
-        const inDim = inp.shape[i + 2];
-        const kDim = kernel.shape[i + 2];
-        const padTotal = padding[i][0] + padding[i][1];
-        if (inDim === DYNAMIC || kDim === DYNAMIC) {
-          outSpatial.push(DYNAMIC);
-        } else {
-          const effectiveK = (kDim - 1) * dilation[i] + 1;
-          outSpatial.push(Math.floor((inDim + padTotal - effectiveK) / strides[i]) + 1);
-        }
-      }
-      return [new TensorType([batch, outChannels, ...outSpatial], ScalarType.I32)];
+      return inferConvResultTypes(operandTypes, attrs, { outputDtype: ScalarType.I32, allowMixedDtype: true });
     },
     verify(op) {
       const errs = [];

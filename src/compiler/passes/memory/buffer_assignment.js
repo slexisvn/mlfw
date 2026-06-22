@@ -25,7 +25,7 @@ export class MemoryPool {
 
   allocate(size, buffer) {
     const aligned = this._align(size);
-    const offset = this._findFreeOffset(aligned, buffer);
+    const offset = this._findFreeOffset(aligned);
     return this.placeAt(offset, aligned, buffer);
   }
 

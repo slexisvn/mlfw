@@ -24,14 +24,14 @@ export class QuantizationParams {
 
   clampRange() {
     if (this.isSymmetric()) {
-      const bound = (1 << (this.numBits - 1)) - 1;
+      const bound = 2 ** (this.numBits - 1) - 1;
       return [-bound, bound];
     }
     if (this.dtype === ScalarType.UI8) {
-      return [0, (1 << this.numBits) - 1];
+      return [0, 2 ** this.numBits - 1];
     }
-    const min = -(1 << (this.numBits - 1));
-    const max = (1 << (this.numBits - 1)) - 1;
+    const min = -(2 ** (this.numBits - 1));
+    const max = 2 ** (this.numBits - 1) - 1;
     return [min, max];
   }
 
@@ -211,14 +211,14 @@ export class QuantizationParams {
   static fromRange(min, max, scheme, dtype = ScalarType.I8, numBits = 8) {
     if (scheme === QuantizationScheme.PER_TENSOR_SYMMETRIC) {
       const absMax = Math.max(Math.abs(min), Math.abs(max));
-      const bound = (1 << (numBits - 1)) - 1;
+      const bound = 2 ** (numBits - 1) - 1;
       const scale = absMax / bound || 1e-10;
       return new QuantizationParams({ scheme, scale, zeroPoint: 0, dtype, numBits });
     }
 
     const [cMin, cMax] = dtype === ScalarType.UI8
-      ? [0, (1 << numBits) - 1]
-      : [-(1 << (numBits - 1)), (1 << (numBits - 1)) - 1];
+      ? [0, 2 ** numBits - 1]
+      : [-(2 ** (numBits - 1)), 2 ** (numBits - 1) - 1];
     const range = max - min || 1e-10;
     const scale = range / (cMax - cMin);
     const zeroPoint = Math.round(cMin - min / scale);
@@ -230,7 +230,7 @@ export class QuantizationParams {
     const numCh = mins.length;
     const scales = new Float64Array(numCh);
     const zeroPoints = new Int32Array(numCh);
-    const bound = (1 << (numBits - 1)) - 1;
+    const bound = 2 ** (numBits - 1) - 1;
     for (let c = 0; c < numCh; c++) {
       const absMax = Math.max(Math.abs(mins[c]), Math.abs(maxs[c]));
       scales[c] = absMax / bound || 1e-10;
@@ -283,7 +283,7 @@ export class QuantizationParams {
     const numGroups = Math.ceil(data.length / groupSize);
     const scales = new Float64Array(numGroups);
     const zeroPoints = new Int32Array(numGroups);
-    const bound = (1 << (numBits - 1)) - 1;
+    const bound = 2 ** (numBits - 1) - 1;
     for (let g = 0; g < numGroups; g++) {
       const start = g * groupSize;
       const end = Math.min(start + groupSize, data.length);
