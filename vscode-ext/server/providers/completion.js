@@ -151,13 +151,15 @@ function readMemberContext(text, position) {
 function collectMemberCompletions(doc, member, position, languageData) {
   const symbol = doc.symbols.resolve(member.receiver, position);
   const typeName = symbol?.typeName ?? member.receiver;
-  const methods = resolveMethods(typeName, languageData);
-  return methods.map(m => {
+  // A user model instance: offer its own fields plus the generic Module methods.
+  const modelScope = doc.symbols.scopes.find(s => s.name === typeName);
+  const methods = modelScope ? (languageData.pseudoTypes?.Model ?? []) : resolveMethods(typeName, languageData);
+  const items = methods.map(m => {
     const item = {
       label: m.name,
       kind: m.isGetter ? CompletionItemKind.Property : CompletionItemKind.Method,
       detail: m.signature.display,
-      sortText: `0_${m.name}`,
+      sortText: `1_${m.name}`,
     };
     if (m.description) {
       item.documentation = { kind: 'markdown', value: m.description };
@@ -173,6 +175,18 @@ function collectMemberCompletions(doc, member, position, languageData) {
     }
     return item;
   });
+  if (modelScope) {
+    for (const field of modelScope.symbols) {
+      if (field.kind !== 'variable') continue;
+      items.push({
+        label: field.name,
+        kind: CompletionItemKind.Field,
+        detail: field.typeName ? `${field.name}: ${field.typeName}` : 'field',
+        sortText: `0_${field.name}`,
+      });
+    }
+  }
+  return items;
 }
 
 function paramHint(p) {

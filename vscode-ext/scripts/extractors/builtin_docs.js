@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 
 const BUILTIN_HEADING = /^##\s+([A-Za-z_][A-Za-z0-9_]*)(?:\(([^)]*)\))?(?:\s*\{([A-Za-z_][A-Za-z0-9_]*)\})?\s*$/;
-const METHOD_HEADING = /^###\s+([A-Za-z_][A-Za-z0-9_]*)(?:\(([^)]*)\))?(?:\s*->\s*([A-Za-z_][A-Za-z0-9_]*))?\s*$/;
+const METHOD_HEADING = /^###\s+([A-Za-z_][A-Za-z0-9_]*)(?:\(([^)]*)\))?(?:\s*->\s*(.+?))?\s*$/;
 const KIND_TEMPLATE_HEADING = /^##\s+@kind\/([A-Za-z_][A-Za-z0-9_]*)\s*$/;
 const PSEUDO_TYPE_HEADING = /^##\s+\$([A-Za-z_][A-Za-z0-9_]*)\s*$/;
 

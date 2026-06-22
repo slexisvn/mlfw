@@ -53,7 +53,8 @@ describe('generate()', () => {
     const result = generate(sources, outputs);
     expect(result.keywords).toContain('int');
     expect(result.keywords).toContain('Tensor');
-    expect(result.keywords).toContain('list');
+    expect(result.keywords).toContain('string');
+    expect(result.keywords).toContain('Record');
     expect(result.operators.twoChar).toContain('->');
     expect(result.operators.oneChar).toContain('|');
     const grammar = JSON.parse(readFileSync(outputs.grammar, 'utf8'));
@@ -79,8 +80,14 @@ describe('generate()', () => {
     const data = JSON.parse(readFileSync(outputs.languageData, 'utf8'));
     const linear = data.builtins.find(b => b.name === 'Linear');
     expect(linear.signature.display).toContain('in: int');
-    expect(linear.signature.display).toContain('-> Module');
+    expect(linear.signature.display).toContain('-> Linear');
     expect(data.builtins.find(b => b.name === 'Adam').signature.display).toContain('-> Optimizer');
-    expect(data.builtins.find(b => b.name === 'zeros').signature.display).toContain('shape: list[int]');
+    expect(data.builtins.find(b => b.name === 'zeros').signature.display).toContain('shape: int[]');
+    expect(data.builtins.find(b => b.name === 'cat').signature.display).toContain('-> Tensor');
+    expect(data.builtins.find(b => b.name === 'range').signature.display).toContain('-> int[]');
+    const tok = data.builtins.find(b => b.name === 'Tokenizer');
+    expect(tok.methods.find(m => m.name === 'padId').returns).toBe('int');
+    expect(tok.methods.find(m => m.name === 'encode').returns).toBe('int[]');
+    expect(data.pseudoTypes.Model.find(m => m.name === 'to').returns).toBe('Model');
   });
 });

@@ -1,9 +1,31 @@
 import { parse } from './parser.js';
-import { buildBuiltinTypes, collectBuiltinNames } from './type_signatures.js';
-import { typecheck, HOST_GLOBALS } from './typechecker.js';
+import { buildBuiltinTypes, collectBuiltinNames, MODULE_CALLS } from './type_signatures.js';
+import { typecheck, typecheckWithTypes, HOST_GLOBALS } from './typechecker.js';
+import { buildSymbolTable } from './symbol_table.js';
 
-export function checkSource(source) {
-  const builtinNames = new Set([...collectBuiltinNames(), ...HOST_GLOBALS]);
-  const builtinTypes = buildBuiltinTypes();
-  return { diagnostics: typecheck(parse(source), { builtinNames, builtinTypes }) };
+function buildEnv(methodReturns) {
+  return {
+    builtinNames: new Set([...collectBuiltinNames(), ...HOST_GLOBALS]),
+    builtinTypes: buildBuiltinTypes(),
+    methodReturns,
+    moduleCalls: MODULE_CALLS,
+  };
+}
+
+export function checkSource(source, { methodReturns } = {}) {
+  return { diagnostics: typecheck(parse(source), buildEnv(methodReturns)) };
+}
+
+// Returns { diagnostics, types } where `types` maps `name:line` -> inferred type string.
+export function analyzeSource(source, { methodReturns } = {}) {
+  return typecheckWithTypes(parse(source), buildEnv(methodReturns));
+}
+
+// Full analysis for editors/notebook: diagnostics + inferred types + a scoped symbol
+// table (resolve by position, list visible symbols, model fields).
+export function analyzeDocument(source, { methodReturns } = {}) {
+  const program = parse(source);
+  const { diagnostics, types } = typecheckWithTypes(program, buildEnv(methodReturns));
+  const symbols = buildSymbolTable(program, source, types);
+  return { diagnostics, types, symbols };
 }

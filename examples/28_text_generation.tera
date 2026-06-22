@@ -1,4 +1,4 @@
-fn index_of(items: list[str], target: str) -> int:
+fn index_of(items: string[], target: string) -> int:
   i = 0
   while i < items.length:
     if items[i] == target:
@@ -37,7 +37,7 @@ model WordLM(vocab_size: int, embed_dim: int, hidden: int):
     encoded, state = lstm(embedded)
     return head(encoded)
 
-  train (batch: list[Tensor]):
+  train (batch: Tensor[]):
     inp, tgt = batch
     logits = WordLM(inp)
     shape = logits.shape
@@ -55,16 +55,16 @@ trainer.fit(net, loader)
 
 net.eval()
 
-fn generate(model: WordLM, words: list[str], seed: str, steps: int) -> str:
-  cell = model.lstm.cells[0]
+fn generate(m: WordLM, words: string[], seed: string, steps: int) -> string:
+  cell = m.lstm.cells[0]
   state = null
   last = index_of(words, seed)
   result = seed
   for step in range(steps):
-    embedded = model.embed(tensor([[last]], dtype=i32))
+    embedded = m.embed(tensor([[last]], dtype=i32))
     stepped = embedded.reshape([1, embedded.shape[2]])
     state = cell(stepped, state)
-    logits = model.head(state[0]).reshape([words.length])
+    logits = m.head(state[0]).reshape([words.length])
     last = logits.argmax().item()
     if last == 0:
       return result

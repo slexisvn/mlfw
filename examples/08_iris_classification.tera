@@ -26,13 +26,13 @@ model IrisNet(num_classes: int):
   forward (x: Tensor) -> Tensor:
     return net(x)
 
-  train (batch: list[Tensor]):
+  train (batch: Tensor[]):
     x, y = batch
     loss = loss_fn(IrisNet(x), y)
     log("train_loss", loss, prog_bar=true)
     return loss
 
-  validate (batch: list[Tensor]):
+  validate (batch: Tensor[]):
     x, y = batch
     logits = IrisNet(x)
     log("val_loss", loss_fn(logits, y), prog_bar=true)

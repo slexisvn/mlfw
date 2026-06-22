@@ -19,31 +19,31 @@ Description.
 ## tensor(data, opts?)
 Construct a tensor from a literal value, array, or nested array. Accepts `dtype`, `device`, `grad` options.
 
-## zeros(shape: list[int], opts?: dict)
+## zeros(shape: int[], opts?: Record)
 Create a tensor of the given shape filled with `0`.
 
-## ones(shape: list[int], opts?: dict)
+## ones(shape: int[], opts?: Record)
 Create a tensor of the given shape filled with `1`.
 
-## empty(shape: list[int], opts?: dict)
+## empty(shape: int[], opts?: Record)
 Allocate a tensor of the given shape without initializing its contents.
 
-## full(shape: list[int], value: float, opts?: dict)
+## full(shape: int[], value: float, opts?: Record)
 Create a tensor of the given shape filled with the provided scalar `value`.
 
-## randn(shape: list[int], opts?: dict)
+## randn(shape: int[], opts?: Record)
 Sample a tensor of the given shape from the standard normal distribution.
 
-## arange(start: int, end?: int, step?: int, opts?: dict)
+## arange(start: int, end?: int, step?: int, opts?: Record)
 Half-open integer range tensor `[start, end)` with optional `step`.
 
-## eye(n: int, m?: int, opts?: dict)
+## eye(n: int, m?: int, opts?: Record)
 Identity matrix of size `n × m` (or `n × n` if `m` omitted).
 
-## linspace(start: float, end: float, steps: int, opts?: dict)
+## linspace(start: float, end: float, steps: int, opts?: Record)
 Evenly spaced values between `start` and `end`, inclusive, with `steps` points.
 
-## randperm(n: int, opts?: dict)
+## randperm(n: int, opts?: Record)
 Random permutation of integers `0..n-1`.
 
 ## zerosLike(tensor)
@@ -64,10 +64,10 @@ Standard-normal sample with the same shape, dtype, and device as the input.
 ## where(condition: Tensor, a: Tensor, b: Tensor)
 Element-wise conditional selection: pick from `a` where `condition` is true, else from `b`.
 
-## cat(tensors: list[Tensor], axis: int = 0)
+## cat(tensors: Tensor[], axis: int = 0)
 Concatenate tensors along an existing dimension.
 
-## stack(tensors: list[Tensor], axis: int = 0)
+## stack(tensors: Tensor[], axis: int = 0)
 Stack tensors along a new dimension.
 
 ## sum(column) {function}
@@ -97,7 +97,7 @@ Compile a model or function to a backend (`cpu`/`gpu`/`wasm`/`webgpu`). `input` 
 ## Sequential(...modules)
 Compose modules into a feed-forward pipeline. The output of each module is fed to the next.
 
-## Linear(in: int, out: int, bias: bool = true)
+## Linear(in: int, out: int, bias: boolean = true)
 Fully-connected layer `y = x @ Wᵀ + b`. Set `bias=false` to disable the bias term.
 
 ## ReLU()
@@ -133,7 +133,7 @@ Flatten a contiguous range of dimensions into one. Typical use: between conv blo
 ## Dropout(p: float = 0.5)
 Randomly zero elements with probability `p` during training. Inactive at eval time.
 
-## LayerNorm(shape: list[int], eps: float = 1e-5)
+## LayerNorm(shape: int[], eps: float = 1e-5)
 Layer normalization over the given trailing shape. Stabilizes activations independent of batch.
 
 ## BatchNorm1d(features: int, eps: float = 1e-5, momentum: float = 0.1)
@@ -154,25 +154,25 @@ Batch normalization for 4-D `(N, C, H, W)` image-like inputs.
 ## AvgPool2d(kernel: int, stride?: int, padding: int = 0)
 2-D average pooling. Downsamples spatial dimensions averaging per window.
 
-## AdaptiveAvgPool2d(output_size: list[int])
+## AdaptiveAvgPool2d(output_size: int[])
 2-D adaptive average pooling to a target output spatial shape, independent of input size.
 
 ## Embedding(num: int, dim: int, padding_idx?: int)
 Lookup table mapping integer ids to dense vectors of size `dim`.
 
-## GRU(input: int, hidden: int, num_layers: int = 1, batch_first: bool = false, bias: bool = true)
+## GRU(input: int, hidden: int, num_layers: int = 1, batch_first: boolean = false, bias: boolean = true)
 Multi-layer Gated Recurrent Unit. Call `out, h_n = gru(x, h0?)` — returns the output sequence and the final hidden state. Set `batch_first=true` for `(N, T, input)` inputs.
 
-## GRUCell(input: int, hidden: int, bias: bool = true)
+## GRUCell(input: int, hidden: int, bias: boolean = true)
 Single GRU time-step. `h_next = cell(x, h)` — apply manually to step a sequence one element at a time.
 
-## LSTM(input: int, hidden: int, num_layers: int = 1, batch_first: bool = false, bias: bool = true)
+## LSTM(input: int, hidden: int, num_layers: int = 1, batch_first: boolean = false, bias: boolean = true)
 Multi-layer Long Short-Term Memory. Call `out, state = lstm(x, [h0, c0]?)` — returns the output sequence and `state = [h_n, c_n]` (final hidden and cell states). Set `batch_first=true` for `(N, T, input)` inputs.
 
-## LSTMCell(input: int, hidden: int, bias: bool = true)
+## LSTMCell(input: int, hidden: int, bias: boolean = true)
 Single LSTM time-step. `h_next, c_next = cell(x, [h, c])` — carries both hidden and cell state for O(T) autoregressive stepping.
 
-## CrossEntropyLoss(reduction: str = "mean", ignore_index?: int)
+## CrossEntropyLoss(reduction: string = "mean", ignore_index?: int)
 Combined LogSoftmax + NLL loss — standard for multiclass classification. Pass `ignore_index` (e.g. a padding id) to exclude those target positions from the loss — useful for seq2seq with padded sequences.
 
 ## MSELoss()
@@ -184,13 +184,13 @@ Negative log-likelihood loss. Pair with LogSoftmax outputs.
 ## BCELoss()
 Binary cross-entropy loss for sigmoid-activated outputs.
 
-## SGD(params: list[Tensor], lr: float = 0.01, momentum: float = 0, weight_decay: float = 0)
+## SGD(params: Tensor[], lr: float = 0.01, momentum: float = 0, weight_decay: float = 0)
 Stochastic gradient descent with optional `momentum` and `weight_decay`.
 
-## Adam(params: list[Tensor], lr: float = 0.001, betas: list[float] = [0.9, 0.999], weight_decay: float = 0)
+## Adam(params: Tensor[], lr: float = 0.001, betas: float[] = [0.9, 0.999], weight_decay: float = 0)
 Adaptive moment estimation optimizer. Standard default for deep learning.
 
-## AdamW(params: list[Tensor], lr: float = 0.001, betas: list[float] = [0.9, 0.999], weight_decay: float = 0.01)
+## AdamW(params: Tensor[], lr: float = 0.001, betas: float[] = [0.9, 0.999], weight_decay: float = 0.01)
 Adam variant with decoupled weight decay — preferred for transformer-style models.
 
 ## StepLR(optimizer: Optimizer, step_size: int, gamma: float = 0.1)
@@ -199,10 +199,10 @@ Decay the learning rate by `gamma` every `step_size` epochs.
 ## CosineAnnealingLR(optimizer: Optimizer, t_max: int, eta_min: float = 0)
 Cosine schedule decaying the learning rate to `eta_min` over `t_max` epochs.
 
-## ReduceLROnPlateau(optimizer: Optimizer, mode: str = "min", patience: int = 10, factor: float = 0.1)
+## ReduceLROnPlateau(optimizer: Optimizer, mode: string = "min", patience: int = 10, factor: float = 0.1)
 Reduce learning rate when a monitored metric stops improving.
 
-## Trainer(max_epochs: int = 20, accelerator: str = "cpu", logger: bool = true, enable_checkpointing: bool = false, enable_progress: bool = true, callbacks?: list[Callback], fast_dev_run: bool = false, gradient_clip_val?: float, log_every_n_steps: int = 50)
+## Trainer(max_epochs: int = 20, accelerator: string = "cpu", logger: boolean = true, enable_checkpointing: boolean = false, enable_progress: boolean = true, callbacks?: Callback[], fast_dev_run: boolean = false, gradient_clip_val?: float, log_every_n_steps: int = 50)
 Drives the training loop: epochs, validation, callbacks, logging, checkpointing.
 
 ### fit(model: Module, train_loader: DataLoader, val_loader?: DataLoader)
@@ -217,7 +217,7 @@ Run the model in eval mode over `loader`. Returns logged metrics.
 ### predict(model: Module, loader: DataLoader)
 Run the model in eval mode and collect outputs into an array.
 
-## log(name: str, value: Tensor, on_step?: bool, on_epoch?: bool, prog_bar: bool = false, reduce_fx: str = "mean")
+## log(name: string, value: Tensor, on_step?: boolean, on_epoch?: boolean, prog_bar: boolean = false, reduce_fx: string = "mean")
 Log a metric value from inside `train`/`validate`. Calls `.compute()` automatically on Metric instances.
 
 ## optim_config(optimizer: Optimizer, lr_scheduler?: Scheduler)
@@ -226,46 +226,58 @@ Wrap an optimizer (and optionally an LR scheduler) for return from an `optimizer
 ## TensorDataset(...tensors: Tensor)
 In-memory dataset zipping one or more tensors along their first dimension.
 
-## DataLoader(dataset: Dataset, batch_size: int = 32, shuffle: bool = true, drop_last: bool = false)
+## DataLoader(dataset: Dataset, batch_size: int = 32, shuffle: boolean = true, drop_last: boolean = false)
 Iterate over a dataset in mini-batches with optional shuffling and `drop_last`.
 
 ### length
 Number of batches per epoch.
 
-## load_csv(path: str, separator: str = ",")
+## load_csv(path: string, separator: string = ",")
 Load a CSV file into a `DataFrame`. Numeric fields are parsed as numbers; use
 the `DataFrame` API (`select`, `filter`, `groupBy`, `to_tensor`, `encode`, …)
 to analyse it.
 
-## read_text(path: str)
+## read_text(path: string)
 Read a text file and return its contents as a string.
 
-## load_json(path: str)
+## load_json(path: string)
 Read a JSON file and return it as nested dicts/lists.
 
-## save(model: Module, path: str)
+## save(model: Module, path: string)
 Save a trained model's weights to `path` (compact binary checkpoint). Mirrors PyTorch's `torch.save(model.state_dict(), path)`. Pair with `load`.
 
-## load(model: Module, path: str)
+## load(model: Module, path: string)
 Load weights from a checkpoint `path` into an existing `model` (in place) and return it. Build the model with the same architecture first, then `load(model, path)` — mirrors `model.load_state_dict(torch.load(path))`.
 
-## Tokenizer(mode: str = "word", vocab_size?: int, lowercase: bool = false, num_merges: int = 1000, special_tokens?: list[str])
+## Tokenizer(mode: string = "word", vocab_size?: int, lowercase: boolean = false, num_merges: int = 1000, special_tokens?: string[])
 Build a text tokenizer. `mode` is `"word"`, `"char"`, or `"bpe"` (trainable subword). `fit(texts)` on a corpus first, then `encode`/`decode`/`encodeBatch`. Reserves special tokens (`<pad> <unk> <bos> <eos>`) at low ids exposed as `padId`/`unkId`/`bosId`/`eosId`.
 
-### fit(texts: list[str])
+### fit(texts: string[]) -> Tokenizer
 Learn the vocabulary (and BPE merges) from a list of strings. Returns the tokenizer.
 
-### encode(text: str, add_bos?: bool, add_eos?: bool)
+### encode(text: string, add_bos?: boolean, add_eos?: boolean) -> int[]
 Tokenize `text` to a list of integer ids. Optionally wrap with begin/end-of-sequence tokens.
 
-### decode(ids: list[int], skip_special?: bool)
+### decode(ids: int[], skip_special?: boolean) -> string
 Turn a list of ids back into a string (special tokens skipped by default).
 
-### encodeBatch(texts: list[str], max_len?: int, pad_id?: int, add_bos?: bool, add_eos?: bool)
+### encodeBatch(texts: string[], max_len?: int, pad_id?: int, add_bos?: boolean, add_eos?: boolean) -> Tensor
 Encode a list of strings into a padded `[N, maxLen]` i32 tensor, ready for a model.
 
-### vocabSize
+### vocabSize -> int
 Number of tokens in the learned vocabulary (property).
+
+### padId -> int
+Reserved id of the `<pad>` token.
+
+### unkId -> int
+Reserved id of the `<unk>` (unknown) token.
+
+### bosId -> int
+Reserved id of the `<bos>` (begin-of-sequence) token.
+
+### eosId -> int
+Reserved id of the `<eos>` (end-of-sequence) token.
 
 ## encode(data)
 Encode categorical values to integer ids. Returns `[encoded_tensor, classes_array]`.
@@ -392,7 +404,7 @@ add the rest.
 ### forward(x)
 Run the module's forward pass. Calling the module directly (`module(x)`) is equivalent to `module.forward(x)`.
 
-### parameters()
+### parameters() -> Tensor[]
 Return an array of the module's learnable parameter tensors.
 
 ### train()
@@ -400,6 +412,9 @@ Set the module to training mode (enables Dropout, updates BatchNorm running stat
 
 ### eval()
 Set the module to evaluation mode (disables Dropout, freezes BatchNorm stats).
+
+### to(device: string) -> Module
+Move the module's parameters to a device (`"cpu"`, `"gpu"`, `"webgpu"`) and return it.
 
 ## @kind/sequential
 
@@ -666,7 +681,7 @@ Logarithm of softmax along `axis`, numerically stable.
 
 ## $Model
 
-### parameters()
+### parameters() -> Tensor[]
 Return the model's learnable parameter tensors.
 
 ### forward(*args)
@@ -677,6 +692,9 @@ Set training mode.
 
 ### eval() -> Model
 Set evaluation mode.
+
+### to(device: string) -> Model
+Move the model's parameters to a device (`"cpu"`, `"gpu"`, `"webgpu"`) and return it.
 
 ### state_dict()
 Return a serializable dict of parameter tensors.

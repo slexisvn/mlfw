@@ -114,6 +114,20 @@ describe('LSP smoke', () => {
     expect(adamLabels).toContain('step');
     expect(adamLabels).toContain('zero_grad');
 
+    const modelUri = 'file:///model.tera';
+    const modelText = 'model Net(c: int):\n  fc = Linear(2, c)\n  enc = LSTM(2, 2, 1, true)\n  forward (x: Tensor) -> Tensor:\n    return fc(x)\nfn run(net: Net) -> Tensor:\n  return net.fc';
+    await client.sendNotification('textDocument/didOpen', {
+      textDocument: { uri: modelUri, languageId: 'tera', version: 1, text: modelText },
+    });
+    const modelResult = await client.sendRequest('textDocument/completion', {
+      textDocument: { uri: modelUri },
+      position: { line: 6, character: 13 },
+    });
+    const modelItems = Array.isArray(modelResult) ? modelResult : modelResult?.items ?? [];
+    const modelLabels = modelItems.map(i => i.label);
+    expect(modelLabels).toContain('fc');
+    expect(modelLabels).toContain('enc');
+
     const hoverResult = await client.sendRequest('textDocument/hover', {
       textDocument: { uri: memberUri },
       position: { line: 1, character: 9 },

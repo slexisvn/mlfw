@@ -18,7 +18,7 @@ function tokenizeRaw(source) {
   let column = 1;
 
   const push = (type, value, startLine = line, startColumn = column) => {
-    tokens.push({ type, value, line: startLine, column: startColumn });
+    tokens.push({ type, value, line: startLine, column: startColumn, endLine: line, endColumn: column });
   };
 
   const advance = () => {
@@ -60,12 +60,15 @@ function tokenizeRaw(source) {
       const l = line, c = column;
       let value = '';
       while (i < source.length && /[0-9.]/.test(source[i])) value += advance();
+      let isFloat = value.includes('.');
       if (/[eE]/.test(source[i] || '')) {
+        isFloat = true;
         value += advance();
         if (/[+-]/.test(source[i] || '')) value += advance();
         while (/[0-9]/.test(source[i] || '')) value += advance();
       }
       push('number', Number(value), l, c);
+      tokens[tokens.length - 1].float = isFloat;
       continue;
     }
     if (ch === '"' || ch === "'") {

@@ -58,7 +58,7 @@ model ChatBotLarge(vocab_size: int, embed_size: int, hidden_size: int, layers: i
     enc, state = encoder(embed(q))
     return enc
 
-  train (batch: list[Tensor]):
+  train (batch: Tensor[]):
     q, din, dout = batch
     enc, enc_state = encoder(embed(q))
     dec, dec_state = decoder(embed(din), enc_state)
@@ -90,47 +90,47 @@ model ChatBotLarge(vocab_size: int, embed_size: int, hidden_size: int, layers: i
   optimizer:
     return optim_config(Adam(ChatBotLarge.parameters(), lr=0.004))
 
-fn reply(model: ChatBotLarge, tok: Tokenizer, query: Tensor, max_len: int) -> str:
-  enc, state = model.encoder(model.embed(query))
+fn reply(m: ChatBotLarge, tok: Tokenizer, query: Tensor, max_len: int) -> string:
+  enc, state = m.encoder(m.embed(query))
   last = tok.bosId
   out_ids = []
   for step in range(max_len):
-    emb = model.embed(tensor([last], dtype=i32))
+    emb = m.embed(tensor([last], dtype=i32))
     emb_t = emb.reshape([1, 1, emb.shape[1]])
-    dec, state = model.decoder(emb_t, state)
+    dec, state = m.decoder(emb_t, state)
     scores = dec @ enc.transpose(1, 2)
     weights = scores.softmax(2)
     context = weights @ enc
     combined = cat([dec, context], 2)
-    logits = model.head(combined).reshape([tok.vocabSize])
+    logits = m.head(combined).reshape([tok.vocabSize])
     last = logits.argmax().item()
     if last == tok.eosId:
       return tok.decode(out_ids)
     out_ids[out_ids.length] = last
   return tok.decode(out_ids)
 
-fn accuracy(model: ChatBotLarge, tok: Tokenizer, qs: Tensor, answers: list[str], max_len: int, count: int) -> int:
+fn accuracy(m: ChatBotLarge, tok: Tokenizer, qs: Tensor, answers: string[], max_len: int, sample_count: int) -> int:
   correct = 0
   q_len = qs.shape[1]
-  for i in range(count):
+  for i in range(sample_count):
     query = qs.select(0, i).reshape([1, q_len])
-    if reply(model, tok, query, max_len) == answers[i]:
+    if reply(m, tok, query, max_len) == answers[i]:
       correct += 1
   return correct
 
-fn show_samples(model: ChatBotLarge, tok: Tokenizer, qs: Tensor, q_texts: list[str], max_len: int, stride: int) -> none:
+fn show_samples(m: ChatBotLarge, tok: Tokenizer, qs: Tensor, q_texts: string[], max_len: int, stride: int) -> none:
   q_len = qs.shape[1]
   i = 0
   while i < q_texts.length:
     query = qs.select(0, i).reshape([1, q_len])
-    print("  user:", q_texts[i], "-> bot:", reply(model, tok, query, max_len))
+    print("  user:", q_texts[i], "-> bot:", reply(m, tok, query, max_len))
     i += stride
 
-fn probe(model: ChatBotLarge, tok: Tokenizer, prompts: list[str], max_len: int) -> none:
+fn probe(m: ChatBotLarge, tok: Tokenizer, prompts: string[], max_len: int) -> none:
   for p in prompts:
     ids = tok.encode(p)
     query = tensor([ids], dtype=i32)
-    print("  user:", p, "-> bot:", reply(model, tok, query, max_len))
+    print("  user:", p, "-> bot:", reply(m, tok, query, max_len))
 
 fn param_count(vocab: int, e: int, h: int, layers: int) -> int:
   total = vocab * e + vocab * (2 * h) + vocab

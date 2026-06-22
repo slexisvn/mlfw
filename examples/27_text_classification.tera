@@ -55,13 +55,13 @@ model SentimentNet(vocab_size: int, embed_dim: int, hidden: int, num_classes: in
     pooled = (encoded * weights).sum(1)
     return classify(pooled)
 
-  train (batch: list[Tensor]):
+  train (batch: Tensor[]):
     ids, labels = batch
     loss = loss_fn(SentimentNet(ids), labels)
     log("train_loss", loss, prog_bar=true)
     return loss
 
-  validate (batch: list[Tensor]):
+  validate (batch: Tensor[]):
     ids, labels = batch
     logits = SentimentNet(ids)
     log("val_loss", loss_fn(logits, labels), prog_bar=true)

@@ -1,4 +1,4 @@
-import { TeraRuntime, formatValue, CsvStreamParser, memfs, checkSource } from './dist/mlfw-lang.esm.js';
+import { TeraRuntime, formatValue, CsvStreamParser, memfs, analyzeDocument, buildMethodReturns } from './dist/mlfw-lang.esm.js';
 import { createChartApi, isChartSpec, renderChart } from './chart/index.js';
 import { CHART_METHOD_DOCS, chartMethodOwner } from './chart/docs.js';
 import { highlightHtml, TYPE_SET } from './highlight.js';
@@ -209,6 +209,11 @@ function save() {
   scheduleTypecheck();
 }
 
+let methodReturns = null;
+let languageData = null;
+let nbSymbols = null;
+let nbRanges = [];
+
 let typecheckTimer = null;
 function scheduleTypecheck() {
   if (typecheckTimer) clearTimeout(typecheckTimer);
@@ -224,11 +229,16 @@ function typecheckAll() {
     ranges.push({ cell, start, end: start + lineCount - 1 });
     start += lineCount;
   }
+  nbRanges = ranges;
   const combined = cells.map((c) => c.editor.value).join('\n');
   let diagnostics;
   try {
-    diagnostics = checkSource(combined).diagnostics;
+    const result = analyzeDocument(combined, { methodReturns });
+    diagnostics = result.diagnostics;
+    nbSymbols = result.symbols;
   } catch {
+    // Mid-edit parse error (e.g. a trailing `obj.`): keep the last good symbol
+    // table so hover/completion still work while the expression is incomplete.
     for (const cell of cells) renderDiagnostics(cell, []);
     return;
   }
@@ -237,25 +247,74 @@ function typecheckAll() {
     const range = ranges.find((r) => d.line >= r.start && d.line <= r.end);
     if (!range) continue;
     if (!byCell.has(range.cell)) byCell.set(range.cell, []);
-    byCell.get(range.cell).push({ line: d.line - range.start + 1, message: (d.message || '').replace(/ at \d+:\d+$/, '') });
+    byCell.get(range.cell).push({ line: d.line - range.start + 1, column: d.column ?? 1, message: (d.message || '').replace(/ at \d+:\d+$/, '') });
   }
   for (const cell of cells) renderDiagnostics(cell, byCell.get(cell) ?? []);
 }
 
 function renderDiagnostics(cell, diags) {
-  if (!cell.diag) return;
-  cell.diag.innerHTML = '';
+  if (!cell.diagLayer) return;
+  cell.diags = [];
+  cell.diagLayer.innerHTML = '';
+  const text = cell.editor.value;
+  const lh = parseFloat(getComputedStyle(cell.editor).lineHeight) || 20;
   for (const d of diags) {
-    const el = document.createElement('div');
-    el.className = 'diag';
-    el.textContent = `type · line ${d.line}: ${d.message}`;
-    cell.diag.append(el);
+    const start = offsetOf(text, d.line, d.column);
+    const a = caretCoordinates(cell.editor, start);
+    const b = caretCoordinates(cell.editor, tokenEnd(text, start));
+    const width = Math.max(b.top === a.top ? b.left - a.left : 7, 7);
+    const u = document.createElement('div');
+    u.className = 'diag-underline';
+    u.style.left = a.left + 'px';
+    u.style.top = a.top + lh - 3 + 'px';
+    u.style.width = width + 'px';
+    cell.diagLayer.append(u);
+    cell.diags.push({ message: d.message, x: a.left, y: a.top, w: width, h: lh });
   }
 }
 
+function offsetOf(text, line, column) {
+  const lines = text.split('\n');
+  let offset = 0;
+  for (let i = 0; i < line - 1 && i < lines.length; i++) offset += lines[i].length + 1;
+  return offset + (column - 1);
+}
+
+function tokenEnd(text, offset) {
+  const ch = text[offset];
+  if (ch === undefined) return offset + 1;
+  if (ch === '"' || ch === "'") {
+    let i = offset + 1;
+    while (i < text.length && text[i] !== '\n') {
+      if (text[i] === '\\') { i += 2; continue; }
+      if (text[i] === ch) { i++; break; }
+      i++;
+    }
+    return i;
+  }
+  let i = offset;
+  if (/[A-Za-z0-9_]/.test(ch)) { while (i < text.length && /[A-Za-z0-9_.]/.test(text[i])) i++; return i; }
+  while (i < text.length && /[-+*/@<>=!|]/.test(text[i])) i++;
+  return Math.max(i, offset + 1);
+}
+
+function diagAt(cell, clientX, clientY) {
+  if (!cell.diags || !cell.diags.length) return null;
+  const ta = cell.editor;
+  const rect = ta.getBoundingClientRect();
+  const x = clientX - rect.left + ta.scrollLeft;
+  const y = clientY - rect.top + ta.scrollTop;
+  for (const d of cell.diags) {
+    if (x >= d.x - 1 && x <= d.x + d.w + 1 && y >= d.y && y <= d.y + d.h) return d;
+  }
+  return null;
+}
+
 function autoSize(ta) {
+  const sx = window.scrollX, sy = window.scrollY;
   ta.style.height = 'auto';
   ta.style.height = Math.max(ta.scrollHeight, 24) + 'px';
+  if (window.scrollX !== sx || window.scrollY !== sy) window.scrollTo(sx, sy);
 }
 
 function createCell(code = '', { focus = false, before = null } = {}) {
@@ -285,7 +344,10 @@ function createCell(code = '', { focus = false, before = null } = {}) {
   editor.spellcheck = false;
   editor.value = code;
   editor.rows = 1;
-  wrap.append(pre, editor);
+  const diagLayer = document.createElement('div');
+  diagLayer.className = 'diag-layer';
+  diagLayer.setAttribute('aria-hidden', 'true');
+  wrap.append(pre, editor, diagLayer);
   const output = document.createElement('div');
   output.className = 'output';
   const diag = document.createElement('div');
@@ -308,7 +370,7 @@ function createCell(code = '', { focus = false, before = null } = {}) {
 
   root.append(gutter, main, tools);
 
-  const cell = { root, editor, output, count, pre, diag, chartCleanup: null };
+  const cell = { root, editor, output, count, pre, diag, diagLayer, diags: [], chartCleanup: null };
 
   runBtn.addEventListener('click', () => runCell(cell));
   addBtn.addEventListener('click', () => {
@@ -318,7 +380,13 @@ function createCell(code = '', { focus = false, before = null } = {}) {
   delBtn.addEventListener('click', () => deleteCell(cell));
   upBtn.addEventListener('click', () => moveCell(cell, -1));
   downBtn.addEventListener('click', () => moveCell(cell, 1));
-  editor.addEventListener('input', () => { autoSize(editor); highlight(cell); save(); updateAutocomplete(cell); });
+  editor.addEventListener('input', (e) => {
+    // During IME composition (e.g. Vietnamese Telex/VNI), only repaint the
+    // highlight; resizing or autocomplete here resets the caret mid-compose.
+    if (e.isComposing) { highlight(cell); return; }
+    autoSize(editor); highlight(cell); save(); updateAutocomplete(cell);
+  });
+  editor.addEventListener('compositionend', () => { autoSize(editor); highlight(cell); save(); updateAutocomplete(cell); });
   editor.addEventListener('keydown', (e) => onEditorKey(e, cell));
   editor.addEventListener('blur', () => setTimeout(() => { if (ac.cell === cell) closeAutocomplete(); }, 120));
   editor.addEventListener('scroll', () => { pre.scrollTop = editor.scrollTop; pre.scrollLeft = editor.scrollLeft; });
@@ -372,6 +440,7 @@ function moveCell(cell, dir) {
 }
 
 function onEditorKey(e, cell) {
+  if (e.isComposing || e.keyCode === 229) return;
   hideHover();
   if (autocompleteOpen()) {
     if (e.key === 'ArrowDown') { e.preventDefault(); moveAutocomplete(1); return; }
@@ -721,31 +790,92 @@ function caretCoordinates(ta, position) {
   return { top, left };
 }
 
-function completionCandidates(ta) {
+// --- Scope-accurate language service (same analysis as the VSCode extension) ---
+function cellRange(cell) { return nbRanges.find((r) => r.cell === cell); }
+
+function localOffsetToPos(text, offset) {
+  let line = 0, col = 0;
+  for (let i = 0; i < offset && i < text.length; i++) {
+    if (text[i] === '\n') { line++; col = 0; } else col++;
+  }
+  return { line, character: col };
+}
+
+function combinedPos(cell, localOffset) {
+  const range = cellRange(cell);
+  const lp = localOffsetToPos(cell.editor.value, localOffset);
+  return { line: (range ? range.start - 1 : 0) + lp.line, character: lp.character };
+}
+
+function nodeOffset(pre, target) {
+  let offset = 0;
+  for (const node of pre.childNodes) {
+    if (node === target || (node.contains && node.contains(target))) return offset;
+    offset += (node.textContent || '').length;
+  }
+  return offset;
+}
+
+function resolveSymbolAt(cell, name, localOffset) {
+  return nbSymbols ? nbSymbols.resolve(name, combinedPos(cell, localOffset)) : null;
+}
+
+function visibleSymbols(cell) {
+  if (!nbSymbols) return [];
+  let scope = nbSymbols.findScopeAt(combinedPos(cell, cell.editor.selectionStart));
+  const out = [];
+  while (scope) { out.push(...scope.symbols); scope = scope.parent; }
+  return out;
+}
+
+function resolveTypeMethods(typeName, seen = new Set()) {
+  if (!typeName || seen.has(typeName) || !languageData) return [];
+  seen.add(typeName);
+  const builtin = (languageData.builtins || []).find((b) => b.name === typeName);
+  if (builtin && builtin.methods && builtin.methods.length) return builtin.methods;
+  const pseudo = languageData.pseudoTypes && languageData.pseudoTypes[typeName];
+  if (pseudo) return pseudo;
+  if (builtin && builtin.returns && builtin.returns !== typeName) return resolveTypeMethods(builtin.returns, seen);
+  return [];
+}
+
+function membersForType(typeName) {
+  const scope = nbSymbols && typeName && nbSymbols.scopes.find((s) => s.name === typeName);
+  if (scope) {
+    const fields = scope.symbols.filter((s) => s.kind === 'variable').map((s) => ({ name: s.name, kind: 'field' }));
+    const inherited = ((languageData && languageData.pseudoTypes && languageData.pseudoTypes.Model) || [])
+      .map((m) => ({ name: m.name, kind: m.isGetter ? 'property' : 'method' }));
+    return [...fields, ...inherited];
+  }
+  return resolveTypeMethods(typeName).map((m) => ({ name: m.name, kind: m.isGetter ? 'property' : 'method' }));
+}
+
+function completionCandidates(cell) {
+  const ta = cell.editor;
   const before = ta.value.slice(0, ta.selectionStart);
-  const member = before.match(/([A-Za-z_]\w*)\.(\w*)$/);
+  const member = before.match(/([A-Za-z_]\w*)\s*\.\s*(\w*)$/);
+  const seen = new Set();
+  const items = [];
+  const add = (name, kind) => {
+    if (!name || seen.has(name) || name.startsWith('_') || name === 'constructor') return;
+    seen.add(name); items.push({ name, kind });
+  };
   if (member) {
-    const obj = runtime.getVariable(member[1]);
-    if (obj == null || typeof obj !== 'object') return null;
-    const prefix = member[2];
-    const keys = Object.keys(obj)
-      .filter((k) => !k.startsWith('_') && k !== 'constructor' && k.startsWith(prefix))
-      .sort();
-    if (!keys.length) return null;
-    return { start: ta.selectionStart - prefix.length, items: keys.map((name) => ({ name, kind: 'attr' })) };
+    const [, receiver, prefix] = member;
+    const sym = resolveSymbolAt(cell, receiver, ta.selectionStart - prefix.length - 1);
+    for (const m of membersForType(sym ? sym.typeName : receiver)) if (m.name.startsWith(prefix)) add(m.name, m.kind);
+    const obj = runtime.getVariable(receiver);
+    if (obj && typeof obj === 'object') for (const k of Object.keys(obj)) if (k.startsWith(prefix)) add(k, 'attr');
+    if (!items.length) return null;
+    items.sort((a, b) => a.name.localeCompare(b.name));
+    return { start: ta.selectionStart - prefix.length, items };
   }
   const word = before.match(/([A-Za-z_]\w*)$/);
   if (!word || word[1].length < 1) return null;
   const prefix = word[1];
-  const names = runtime.getCompletionNames();
-  const seen = new Set();
-  const items = [];
-  for (const name of names) {
-    if (name.startsWith(prefix) && !seen.has(name)) { seen.add(name); items.push({ name, kind: 'name' }); }
-  }
-  for (const kw of KEYWORDS) {
-    if (kw.startsWith(prefix) && !seen.has(kw)) { seen.add(kw); items.push({ name: kw, kind: 'keyword' }); }
-  }
+  for (const s of visibleSymbols(cell)) if (s.name.startsWith(prefix)) add(s.name, s.kind);
+  for (const name of runtime.getCompletionNames()) if (name.startsWith(prefix)) add(name, 'name');
+  for (const kw of KEYWORDS) if (kw.startsWith(prefix)) add(kw, 'keyword');
   items.sort((a, b) => a.name.localeCompare(b.name));
   if (!items.length || (items.length === 1 && items[0].name === prefix)) return null;
   return { start: ta.selectionStart - prefix.length, items };
@@ -753,7 +883,7 @@ function completionCandidates(ta) {
 
 function updateAutocomplete(cell) {
   const ta = cell.editor;
-  const data = completionCandidates(ta);
+  const data = completionCandidates(cell);
   if (!data) { closeAutocomplete(); return; }
 
   ac.items = data.items;
@@ -824,6 +954,9 @@ async function loadDocs() {
     const res = await fetch('./dist/language-data.json');
     if (!res.ok) return;
     const data = await res.json();
+    languageData = data;
+    methodReturns = buildMethodReturns(data);
+    scheduleTypecheck();
     for (const b of data.builtins || []) {
       docs.set(b.name, {
         display: (b.signature && b.signature.display) || b.name,
@@ -868,6 +1001,7 @@ function showHoverAt(info, rect) {
     hoverEl.className = 'hover-doc';
     document.body.append(hoverEl);
   }
+  hoverEl.classList.toggle('error', !!info.error);
   hoverEl.innerHTML = '';
   const title = document.createElement('div');
   title.className = 'hd-title';
@@ -898,16 +1032,35 @@ function showHoverAt(info, rect) {
 function hideHover() {
   if (hoverEl) hoverEl.style.display = 'none';
   hoverSpan = null;
+  hoverDiag = null;
 }
+
+let hoverDiag = null;
 
 function onEditorHover(e, cell) {
   if (autocompleteOpen()) { hideHover(); return; }
+  const diag = diagAt(cell, e.clientX, e.clientY);
+  if (diag) {
+    if (diag === hoverDiag && hoverEl && hoverEl.style.display === 'block') return;
+    hoverDiag = diag;
+    hoverSpan = null;
+    const ta = cell.editor;
+    const r = ta.getBoundingClientRect();
+    const top = r.top + diag.y - ta.scrollTop;
+    showHoverAt({ display: diag.message, kind: 'type error', error: true }, { left: r.left + diag.x - ta.scrollLeft, top, bottom: top + diag.h, height: diag.h, width: diag.w });
+    return;
+  }
+  hoverDiag = null;
   const span = spanAtPoint(cell.pre, e.clientX, e.clientY);
   if (!span) { hideHover(); return; }
   if (span === hoverSpan && hoverEl && hoverEl.style.display === 'block') return;
   const isMember = span.classList.contains('tok-method') || span.classList.contains('tok-prop');
   const owner = isMember ? chartMethodOwner(cell.pre, span) : null;
-  const info = owner === 'chart' ? CHART_METHOD_DOCS.get(span.textContent) : isMember ? memberDocs.get(span.textContent) : docs.get(span.textContent);
+  let info = owner === 'chart' ? CHART_METHOD_DOCS.get(span.textContent) : isMember ? memberDocs.get(span.textContent) : docs.get(span.textContent);
+  if (!info && !isMember) {
+    const sym = resolveSymbolAt(cell, span.textContent, nodeOffset(cell.pre, span));
+    if (sym) info = { display: sym.name, kind: sym.kind, description: sym.typeName ? `type: ${sym.typeName}` : null };
+  }
   if (!info) { hideHover(); return; }
   hoverSpan = span;
   showHoverAt(info, span.getBoundingClientRect());

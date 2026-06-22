@@ -1,7 +1,7 @@
 import { tokenize, LangSyntaxError } from '../vendor/tokenizer.js';
 import { parse } from '../vendor/parser.js';
-import { typecheck } from '../vendor/typechecker.js';
-import { buildSymbolTable } from './symbol_table.js';
+import { typecheckWithTypes } from '../vendor/typechecker.js';
+import { buildSymbolTable } from '../vendor/symbol_table.js';
 import { buildBuiltinEnv } from './builtin_types.js';
 
 export class DocumentAnalyzer {
@@ -32,29 +32,38 @@ export class DocumentAnalyzer {
 function analyze(text, builtinEnv) {
   const tokens = safeTokenize(text);
   const ast = safeParse(text);
-  let symbols = ast.program ? buildSymbolTable(ast.program, text) : null;
+  const errors = [];
+  if (tokens.error) errors.push(tokens.error);
+  if (ast.error) errors.push(ast.error);
+  let types = null;
+  if (ast.program && builtinEnv) {
+    const checked = runTypecheck(ast.program, builtinEnv);
+    errors.push(...checked.diagnostics);
+    types = checked.types;
+  }
+  let symbols = ast.program ? buildSymbolTable(ast.program, text, types) : null;
   if (!symbols) {
     const fallback = parseTruncated(text);
     if (fallback) symbols = buildSymbolTable(fallback, text);
   }
   if (!symbols) symbols = emptySymbolTable();
-  const errors = [];
-  if (tokens.error) errors.push(tokens.error);
-  if (ast.error) errors.push(ast.error);
-  if (ast.program && builtinEnv) errors.push(...typeDiagnostics(ast.program, builtinEnv));
   return { tokens: tokens.value, ast: ast.program, symbols, errors };
 }
 
-function typeDiagnostics(program, builtinEnv) {
+function runTypecheck(program, builtinEnv) {
   try {
-    return typecheck(program, builtinEnv).map(e => ({
-      message: (e.message ?? '').replace(/ at \d+:\d+$/, ''),
-      line: e.line ?? 1,
-      column: e.column ?? 1,
-      source: 'typecheck',
-    }));
+    const { diagnostics, types } = typecheckWithTypes(program, builtinEnv);
+    return {
+      diagnostics: diagnostics.map(e => ({
+        message: (e.message ?? '').replace(/ at \d+:\d+$/, ''),
+        line: e.line ?? 1,
+        column: e.column ?? 1,
+        source: 'typecheck',
+      })),
+      types,
+    };
   } catch {
-    return [];
+    return { diagnostics: [], types: null };
   }
 }
 

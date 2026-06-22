@@ -18,19 +18,20 @@ const DECL_VISITORS = {
     const child = ctx.openScope('optimizer', scope, node);
     ctx.visitAll(node.body, child);
   },
-  Assign: (node, scope) => {
-    const typeName = renderType(node.annotation) ?? inferType(node.value);
+  Assign: (node, scope, ctx) => {
+    const typeName = renderType(node.annotation) ?? bestInferred(ctx, node);
     addSymbol(scope, node.name, 'variable', node, typeName);
   },
   DestructureAssign: (node, scope, ctx) => {
     const positions = findIdentifierPositions(ctx.sourceLines, node, node.names);
     for (let i = 0; i < node.names.length; i++) {
       const pos = positions[i] ?? { line: node.line, column: node.column };
-      scope.symbols.push({ name: node.names[i], kind: 'variable', line: pos.line, column: pos.column });
+      const typeName = lookupInferred(ctx, node.names[i], node.line);
+      scope.symbols.push({ name: node.names[i], kind: 'variable', line: pos.line, column: pos.column, typeName });
     }
     updateScopeRange(scope, node);
   },
-  CompoundAssign: (node, scope) => addSymbol(scope, node.name, 'variable', node),
+  CompoundAssign: (node, scope, ctx) => addSymbol(scope, node.name, 'variable', node, lookupInferred(ctx, node.name, node.line)),
   If: (node, scope, ctx) => {
     ctx.visitAll(node.body, scope);
     for (const e of node.elifs) ctx.visitAll(e.body, scope);
@@ -38,7 +39,8 @@ const DECL_VISITORS = {
   },
   For: (node, scope, ctx) => {
     const pos = findIdentifierAfterKeyword(ctx.sourceLines, node, 'for', node.variable);
-    scope.symbols.push({ name: node.variable, kind: 'variable', line: pos.line, column: pos.column });
+    const typeName = lookupInferred(ctx, node.variable, node.line);
+    scope.symbols.push({ name: node.variable, kind: 'variable', line: pos.line, column: pos.column, typeName });
     updateScopeRange(scope, node);
     ctx.visitAll(node.body, scope);
   },
@@ -66,18 +68,20 @@ function addParamSymbols(scope, ctx, paramNames, afterPos, node) {
 
 function renderType(node) {
   if (!node) return null;
+  if (node.kind === 'ArrayType') return `${renderType(node.element)}[]`;
   if (node.kind === 'UnionType') return node.members.map(renderType).join(' | ');
-  if (node.kind === 'GenericType') return `${node.name}[${node.args.map(renderType).join(', ')}]`;
+  if (node.kind === 'GenericType') return `${node.name}<${node.args.map(renderType).join(', ')}>`;
   return node.name ?? null;
 }
 
-export function buildSymbolTable(program, sourceText = '') {
+export function buildSymbolTable(program, sourceText = '', inferredTypes = null) {
   const sourceLines = sourceText.split('\n');
   const root = makeScope('<module>', null, { line: 1, column: 1 });
   const scopes = [root];
 
   const ctx = {
     sourceLines,
+    inferredTypes,
     openScope(name, parent, node) {
       const s = makeScope(name, parent, node);
       scopes.push(s);
@@ -127,6 +131,19 @@ function addSymbol(scope, name, kind, node, typeName = null) {
   const column = node.column ?? 1;
   scope.symbols.push({ name, kind, line, column, typeName });
   updateScopeRange(scope, node);
+}
+
+function lookupInferred(ctx, name, line) {
+  if (!ctx.inferredTypes || line == null) return null;
+  return ctx.inferredTypes.get(`${name}:${line}`) ?? null;
+}
+
+// Prefer the checker's concrete inferred type; fall back to the call's callee name
+// for builtin module constructors the checker only knows as the generic `Module`.
+function bestInferred(ctx, node) {
+  const inferred = lookupInferred(ctx, node.name, node.line);
+  if (inferred && inferred !== 'Module') return inferred;
+  return inferType(node.value) ?? inferred;
 }
 
 function inferType(value) {
@@ -246,11 +263,17 @@ function resolveField(scopes, typeName, fieldName) {
 }
 
 function resolveSymbol(rootScope, name, position) {
-  const scope = findScopeAt(rootScope, position);
-  let cursor = scope;
+  const line = (position.line ?? 0) + 1;
+  const col = (position.character ?? 0) + 1;
+  const precedes = s => s.line < line || (s.line === line && s.column <= col);
+  const later = (a, b) => (b.line > a.line || (b.line === a.line && b.column > a.column)) ? b : a;
+  let cursor = findScopeAt(rootScope, position);
   while (cursor) {
-    const found = cursor.symbols.find(s => s.name === name);
-    if (found) return found;
+    const matches = cursor.symbols.filter(s => s.name === name);
+    if (matches.length) {
+      const before = matches.filter(precedes);
+      return before.length ? before.reduce(later) : matches[0];
+    }
     cursor = cursor.parent;
   }
   return null;

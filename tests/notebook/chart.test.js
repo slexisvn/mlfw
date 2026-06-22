@@ -179,7 +179,7 @@ describe('notebook chart API', () => {
 describe('notebook syntax highlight', () => {
   it('keeps chart plain and highlights chart methods', () => {
     const html = highlightHtml('chart.line(data)');
-    expect(html).toContain('chart.<span class="tok-method">line</span>');
+    expect(html).toContain('<span class="tok-ident">chart</span>.<span class="tok-method">line</span>');
     expect(html).not.toContain('tok-builtin">chart');
   });
 

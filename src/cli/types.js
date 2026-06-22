@@ -1,6 +1,10 @@
 export const ANY = Object.freeze({ kind: 'any' });
 export const UNKNOWN = Object.freeze({ kind: 'unknown' });
-export const NUMBER = Object.freeze({ kind: 'number' });
+export const INT = Object.freeze({ kind: 'number', num: 'int' });
+export const FLOAT = Object.freeze({ kind: 'number', num: 'float' });
+// Tera has a single numeric type at runtime; int/float are mutually assignable
+// display variants. NUMBER is the neutral numeric (renders as int).
+export const NUMBER = INT;
 export const STRING = Object.freeze({ kind: 'string' });
 export const BOOL = Object.freeze({ kind: 'bool' });
 export const NULL = Object.freeze({ kind: 'null' });
@@ -15,9 +19,9 @@ export function dictType(key, value) {
   return { kind: 'dict', key: key ?? ANY, value: value ?? ANY };
 }
 
-export function functionType(params, ret, variadic = false, required = null) {
+export function functionType(params, ret, variadic = false, required = null, names = null) {
   const list = params ?? [];
-  return { kind: 'function', params: list, ret: ret ?? ANY, variadic, required: required ?? list.length };
+  return { kind: 'function', params: list, ret: ret ?? ANY, variadic, required: required ?? list.length, names };
 }
 
 export function moduleType(name = '') {
@@ -30,8 +34,14 @@ export function isAny(type) {
 
 export function typeToString(type) {
   switch (type.kind) {
-    case 'list': return `list[${typeToString(type.element)}]`;
-    case 'dict': return `dict[${typeToString(type.key)}, ${typeToString(type.value)}]`;
+    case 'list': {
+      const element = typeToString(type.element);
+      const wrap = type.element.kind === 'union' || type.element.kind === 'function';
+      return wrap ? `(${element})[]` : `${element}[]`;
+    }
+    case 'dict': return `Record<${typeToString(type.key)}, ${typeToString(type.value)}>`;
+    case 'number': return type.num === 'float' ? 'float' : 'int';
+    case 'bool': return 'boolean';
     case 'module': return type.name || 'Module';
     case 'tensor': return 'Tensor';
     case 'function': return `(${type.params.map(typeToString).join(', ')}${type.variadic ? ', ...' : ''}) -> ${typeToString(type.ret)}`;
@@ -61,6 +71,7 @@ export function join(a, b) {
   if (!a) return b;
   if (!b) return a;
   if (isAny(a) || isAny(b)) return ANY;
+  if (a.kind === 'number' && b.kind === 'number') return a.num === 'float' || b.num === 'float' ? FLOAT : INT;
   if (typeToString(a) === typeToString(b)) return a;
   return unionType([a, b]);
 }

@@ -234,22 +234,43 @@ class Parser {
 
   parseUnionType() {
     const start = this.current();
-    const first = this.parsePrimaryType();
+    const first = this.parsePostfixType();
     if (!this.atValue('|')) return first;
     const members = [first];
-    while (this.matchValue('|')) members.push(this.parsePrimaryType());
+    while (this.matchValue('|')) members.push(this.parsePostfixType());
     return this.locate({ kind: 'UnionType', members }, start);
+  }
+
+  parsePostfixType() {
+    let type = this.parsePrimaryType();
+    while (this.atValue('[') && this.peek(1).value === ']') {
+      const start = this.next();
+      this.expectValue(']');
+      type = this.locate({ kind: 'ArrayType', element: type }, start);
+    }
+    return type;
   }
 
   parsePrimaryType() {
     if (this.atIdentifier('fn')) return this.parseFunctionType();
     const start = this.expect('identifier');
     const name = start.value;
-    if (!this.matchValue('[')) return this.locate({ kind: 'NameType', name }, start);
+    if (!this.matchValue('<')) return this.locate({ kind: 'NameType', name }, start);
     const args = [this.parseTypeAnnotation()];
     while (this.matchValue(',')) args.push(this.parseTypeAnnotation());
-    this.expectValue(']');
+    this.expectGenericClose();
     return this.locate({ kind: 'GenericType', name, args }, start);
+  }
+
+  expectGenericClose() {
+    if (this.matchValue('>')) return;
+    const tok = this.current();
+    if (tok.type !== 'string' && tok.value === '>=') {
+      tok.value = '=';
+      tok.column += 1;
+      return;
+    }
+    throw this.error("Expected '>'");
   }
 
   parseFunctionType() {
@@ -304,7 +325,9 @@ class Parser {
     }
     if (token.type === 'number' || token.type === 'string') {
       this.next();
-      return this.locate({ type: 'Literal', value: token.value }, token);
+      const literal = { type: 'Literal', value: token.value };
+      if (token.type === 'number') literal.isFloat = token.float === true;
+      return this.locate(literal, token);
     }
     if (token.type === 'identifier') {
       this.next();

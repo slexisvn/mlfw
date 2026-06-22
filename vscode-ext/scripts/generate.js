@@ -28,7 +28,7 @@ const OUTPUTS = {
   vendorDir: join(EXT_ROOT, 'server/vendor'),
 };
 
-const VENDORED_FILES = ['tokenizer.js', 'parser.js', 'types.js', 'typechecker.js'];
+const VENDORED_FILES = ['tokenizer.js', 'parser.js', 'types.js', 'typechecker.js', 'method_returns.js', 'symbol_table.js'];
 
 export function generate(sources = SOURCES, outputs = OUTPUTS) {
   const baseKeywords = extractKeywords(sources.parser);
@@ -84,14 +84,19 @@ const RETURNS_BY_KIND = {
 };
 
 const RETURNS_OVERRIDE = {
-  shape: null,
-  dtype: null,
-  len: null,
-  range: null,
+  shape: 'int[]',
+  dtype: 'string',
+  len: 'int',
+  range: 'int[]',
   print: null,
-  trace: null,
-  graph: null,
+  trace: 'string',
+  graph: 'string',
   compile: null,
+  cat: 'Tensor',
+  stack: 'Tensor',
+  where: 'Tensor',
+  read_text: 'string',
+  Tokenizer: 'Tokenizer',
   load_csv: 'DataFrame',
   normalize: 'Tensor',
   encode: null,
@@ -110,6 +115,9 @@ const DEFAULT_DOC_BUILTIN_KIND = 'function';
 
 function inferReturns(builtin) {
   if (builtin.name in RETURNS_OVERRIDE) return RETURNS_OVERRIDE[builtin.name];
+  // Modules construct an instance of their own nominal type (Embedding(...) -> Embedding),
+  // not the generic `Module`, so variables bound to them infer precisely.
+  if (builtin.kind === 'module' || builtin.kind === 'sequential') return builtin.name;
   return RETURNS_BY_KIND[builtin.kind] ?? null;
 }
 

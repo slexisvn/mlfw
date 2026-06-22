@@ -2,8 +2,12 @@ import {
   installBuiltins, FACTORIES, FREE_TENSOR_FUNCTIONS, COLUMN_AGGREGATES, MODULES,
 } from './builtins.js';
 import { ANY, NUMBER, STRING, NONE, TENSOR, listType, moduleType, functionType } from './types.js';
+import { moduleCallReturn } from './method_returns.js';
 
 const CONSTANT_NAMES = ['cpu', 'gpu', 'wasm', 'webgpu', 'f16', 'f32', 'f64', 'i32', 'i64', 'bool'];
+
+// NN module instances are callable (forward); map each to its call-result type.
+export const MODULE_CALLS = new Map([...MODULES, 'Sequential'].map(name => [name, moduleCallReturn(name)]));
 
 function returnOverrides() {
   return new Map([
@@ -11,6 +15,7 @@ function returnOverrides() {
     ['dtype', STRING], ['read_text', STRING], ['trace', STRING], ['graph', STRING],
     ['print', NONE], ['save', NONE], ['backward', NONE],
     ['load_csv', moduleType('DataFrame')], ['DataFrame', moduleType('DataFrame')],
+    ['Tokenizer', moduleType('Tokenizer')],
   ]);
 }
 

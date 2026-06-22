@@ -244,17 +244,18 @@ interpreter ignores them) and are enforced by the type checker.
 
 ```ebnf
 Type        →  UnionType
-UnionType   →  PrimaryType ('|' PrimaryType)*
+UnionType   →  PostfixType ('|' PostfixType)*
+PostfixType →  PrimaryType ('[' ']')*
 PrimaryType →  FnType
-            |  IDENTIFIER ('[' Type (',' Type)* ']')?
+            |  IDENTIFIER ('<' Type (',' Type)* '>')?
 FnType      →  'fn' '(' (Type (',' Type)*)? ')' '->' Type
 ```
 
 ```python
 x: int = 5
-names: list[str] = ["a", "b"]
-counts: dict[str, int] = {"a": 1}
-flag: int | str = 1
+names: string[] = ["a", "b"]
+counts: Record<string, int> = {"a": 1}
+flag: int | string = 1
 
 fn scale(x: Tensor, k: int) -> Tensor:
   return x * k
@@ -269,11 +270,13 @@ model Net(width: int):
     return x
 ```
 
-Built-in type names: `int`, `float`, `num`/`number` (all one numeric type — Tera
-has no int/float split at runtime), `str`/`string`, `bool`, `Tensor`, `list[T]`,
-`dict[K, V]`, function types `fn(T, ...) -> R`, and `none` (the absence of a
-value). Any other name (e.g. a model name or `Tokenizer`) is a nominal type.
-There is **no `any`** — the type system is strict and has no escape hatch.
+Built-in type names: `int` and `float` (one numeric type at runtime with no
+int/float split — the two names are mutually assignable and inferred from the
+literal form, e.g. `0` → `int`, `0.5` → `float`), `string`, `boolean`, `Tensor`,
+`T[]` (array of `T`, e.g. `int[]`, `string[][]`), `Record<K, V>`, function types
+`fn(T, ...) -> R`, and `none` (the absence of a value). Any other name (e.g. a
+model name or `Tokenizer`) is a nominal type. There is **no `number`** and **no
+`any`** — the type system is strict and has no escape hatch.
 
 ### Type Checking
 
@@ -285,7 +288,13 @@ strict:
   annotated;
 - referencing an undefined name is an error;
 - annotated assignments, declared return types, argument counts, and operand types
-  are all enforced.
+  are all enforced;
+- positional and named call arguments are checked by name and type; calling a
+  non-callable value is an error;
+- element types are enforced for index reads, index assignment (`xs[i] = v`), and
+  destructuring; list/string indices must be numbers;
+- a function whose declared return type is not `none` (nor a union containing
+  `none`) must return a value on every path.
 
 Local variables without an annotation are inferred from their initializer. The
 interactive REPL and the embedded `TeraRuntime` API stay dynamic (ungated).

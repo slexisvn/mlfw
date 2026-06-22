@@ -30,8 +30,8 @@
   "scripts": {
     "start": "node src/cli/index.js",
     "build": "node scripts/build.js",
-    "test": "vitest run --exclude '**/node_modules/**' --exclude '**/stress/**' --exclude '**/backend/cuda/**' --exclude '**/webgpu-gpu.test.*' --exclude '**/webgpu-chrome.test.*' --exclude '**/tera-webgpu.test.*' --exclude '**/vscode-ext/**'",
-    "test:webgpu": "vitest run tests/backend/webgpu/webgpu-chrome.test.js tests/backend/webgpu/tera-webgpu.test.js",
+    "test": "vitest run --exclude '**/node_modules/**' --exclude '**/stress/**' --exclude '**/backend/cuda/**' --exclude '**/backend/webgpu/**' --exclude '**/vscode-ext/**'",
+    "test:webgpu": "vitest run tests/backend/webgpu/",
     "test:cuda": "vitest run tests/backend/cuda/",
     "build:vscode": "node vscode-ext/scripts/generate.js",
     "postinstall": "patch-package"

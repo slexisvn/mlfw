@@ -1,11 +1,12 @@
 {
   "version": 1,
   "keywords": [
+    "Record",
     "Tensor",
     "and",
+    "boolean",
     "break",
     "continue",
-    "dict",
     "else",
     "false",
     "float",
@@ -15,17 +16,13 @@
     "if",
     "in",
     "int",
-    "list",
     "model",
     "none",
     "not",
     "null",
-    "num",
-    "number",
     "optimizer",
     "or",
     "return",
-    "str",
     "string",
     "train",
     "true",
@@ -63,15 +60,12 @@
     ],
     "other": [],
     "type": [
+      "Record",
       "Tensor",
-      "dict",
+      "boolean",
       "float",
       "int",
-      "list",
       "none",
-      "num",
-      "number",
-      "str",
       "string"
     ]
   },
@@ -1096,11 +1090,11 @@
       {
         "name": "parameters",
         "description": "Return the model's learnable parameter tensors.",
-        "returns": null,
+        "returns": "Tensor[]",
         "isGetter": false,
         "signature": {
           "params": [],
-          "display": "parameters()"
+          "display": "parameters() -> Tensor[]"
         }
       },
       {
@@ -1139,6 +1133,24 @@
         "signature": {
           "params": [],
           "display": "eval() -> Model"
+        }
+      },
+      {
+        "name": "to",
+        "description": "Move the model's parameters to a device (`\"cpu\"`, `\"gpu\"`, `\"webgpu\"`) and return it.",
+        "returns": "Model",
+        "isGetter": false,
+        "signature": {
+          "params": [
+            {
+              "name": "device",
+              "type": "string",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "to(device: string) -> Model"
         }
       },
       {
@@ -2055,7 +2067,7 @@
         "params": [
           {
             "name": "params",
-            "type": "list[Tensor]",
+            "type": "Tensor[]",
             "optional": false,
             "rest": false,
             "defaultValue": null
@@ -2069,7 +2081,7 @@
           },
           {
             "name": "betas",
-            "type": "list[float]",
+            "type": "float[]",
             "optional": true,
             "rest": false,
             "defaultValue": "[0.9, 0.999]"
@@ -2082,7 +2094,7 @@
             "defaultValue": "0"
           }
         ],
-        "display": "Adam(params: list[Tensor], lr: float = 0.001, betas: list[float] = [0.9, 0.999], weight_decay: float = 0) -> Optimizer"
+        "display": "Adam(params: Tensor[], lr: float = 0.001, betas: float[] = [0.9, 0.999], weight_decay: float = 0) -> Optimizer"
       },
       "methods": [
         {
@@ -2123,7 +2135,7 @@
         "params": [
           {
             "name": "params",
-            "type": "list[Tensor]",
+            "type": "Tensor[]",
             "optional": false,
             "rest": false,
             "defaultValue": null
@@ -2137,7 +2149,7 @@
           },
           {
             "name": "betas",
-            "type": "list[float]",
+            "type": "float[]",
             "optional": true,
             "rest": false,
             "defaultValue": "[0.9, 0.999]"
@@ -2150,7 +2162,7 @@
             "defaultValue": "0.01"
           }
         ],
-        "display": "AdamW(params: list[Tensor], lr: float = 0.001, betas: list[float] = [0.9, 0.999], weight_decay: float = 0.01) -> Optimizer"
+        "display": "AdamW(params: Tensor[], lr: float = 0.001, betas: float[] = [0.9, 0.999], weight_decay: float = 0.01) -> Optimizer"
       },
       "methods": [
         {
@@ -2186,18 +2198,18 @@
       "name": "AdaptiveAvgPool2d",
       "kind": "module",
       "description": "2-D adaptive average pooling to a target output spatial shape, independent of input size.",
-      "returns": "Module",
+      "returns": "AdaptiveAvgPool2d",
       "signature": {
         "params": [
           {
             "name": "output_size",
-            "type": "list[int]",
+            "type": "int[]",
             "optional": false,
             "rest": false,
             "defaultValue": null
           }
         ],
-        "display": "AdaptiveAvgPool2d(output_size: list[int]) -> Module"
+        "display": "AdaptiveAvgPool2d(output_size: int[]) -> AdaptiveAvgPool2d"
       },
       "methods": [
         {
@@ -2220,10 +2232,10 @@
         {
           "name": "parameters",
           "description": "Return an array of the module's learnable parameter tensors.",
-          "returns": null,
+          "returns": "Tensor[]",
           "signature": {
             "params": [],
-            "display": "parameters()"
+            "display": "parameters() -> Tensor[]"
           }
         },
         {
@@ -2242,6 +2254,23 @@
           "signature": {
             "params": [],
             "display": "eval()"
+          }
+        },
+        {
+          "name": "to",
+          "description": "Move the module's parameters to a device (`\"cpu\"`, `\"gpu\"`, `\"webgpu\"`) and return it.",
+          "returns": "Module",
+          "signature": {
+            "params": [
+              {
+                "name": "device",
+                "type": "string",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "to(device: string) -> Module"
           }
         }
       ]
@@ -2276,13 +2305,13 @@
           },
           {
             "name": "opts",
-            "type": "dict",
+            "type": "Record",
             "optional": true,
             "rest": false,
             "defaultValue": null
           }
         ],
-        "display": "arange(start: int, end?: int, step?: int, opts?: dict) -> Tensor"
+        "display": "arange(start: int, end?: int, step?: int, opts?: Record) -> Tensor"
       },
       "methods": []
     },
@@ -2309,7 +2338,7 @@
       "name": "AvgPool2d",
       "kind": "module",
       "description": "2-D average pooling. Downsamples spatial dimensions averaging per window.",
-      "returns": "Module",
+      "returns": "AvgPool2d",
       "signature": {
         "params": [
           {
@@ -2334,7 +2363,7 @@
             "defaultValue": "0"
           }
         ],
-        "display": "AvgPool2d(kernel: int, stride?: int, padding: int = 0) -> Module"
+        "display": "AvgPool2d(kernel: int, stride?: int, padding: int = 0) -> AvgPool2d"
       },
       "methods": [
         {
@@ -2357,10 +2386,10 @@
         {
           "name": "parameters",
           "description": "Return an array of the module's learnable parameter tensors.",
-          "returns": null,
+          "returns": "Tensor[]",
           "signature": {
             "params": [],
-            "display": "parameters()"
+            "display": "parameters() -> Tensor[]"
           }
         },
         {
@@ -2379,6 +2408,23 @@
           "signature": {
             "params": [],
             "display": "eval()"
+          }
+        },
+        {
+          "name": "to",
+          "description": "Move the module's parameters to a device (`\"cpu\"`, `\"gpu\"`, `\"webgpu\"`) and return it.",
+          "returns": "Module",
+          "signature": {
+            "params": [
+              {
+                "name": "device",
+                "type": "string",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "to(device: string) -> Module"
           }
         }
       ]
@@ -2387,7 +2433,7 @@
       "name": "BatchNorm1d",
       "kind": "module",
       "description": "Batch normalization for 2-D `(N, C)` or 3-D `(N, C, L)` inputs.",
-      "returns": "Module",
+      "returns": "BatchNorm1d",
       "signature": {
         "params": [
           {
@@ -2412,7 +2458,7 @@
             "defaultValue": "0.1"
           }
         ],
-        "display": "BatchNorm1d(features: int, eps: float = 1e-5, momentum: float = 0.1) -> Module"
+        "display": "BatchNorm1d(features: int, eps: float = 1e-5, momentum: float = 0.1) -> BatchNorm1d"
       },
       "methods": [
         {
@@ -2435,10 +2481,10 @@
         {
           "name": "parameters",
           "description": "Return an array of the module's learnable parameter tensors.",
-          "returns": null,
+          "returns": "Tensor[]",
           "signature": {
             "params": [],
-            "display": "parameters()"
+            "display": "parameters() -> Tensor[]"
           }
         },
         {
@@ -2457,6 +2503,23 @@
           "signature": {
             "params": [],
             "display": "eval()"
+          }
+        },
+        {
+          "name": "to",
+          "description": "Move the module's parameters to a device (`\"cpu\"`, `\"gpu\"`, `\"webgpu\"`) and return it.",
+          "returns": "Module",
+          "signature": {
+            "params": [
+              {
+                "name": "device",
+                "type": "string",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "to(device: string) -> Module"
           }
         }
       ]
@@ -2465,7 +2528,7 @@
       "name": "BatchNorm2d",
       "kind": "module",
       "description": "Batch normalization for 4-D `(N, C, H, W)` image-like inputs.",
-      "returns": "Module",
+      "returns": "BatchNorm2d",
       "signature": {
         "params": [
           {
@@ -2490,7 +2553,7 @@
             "defaultValue": "0.1"
           }
         ],
-        "display": "BatchNorm2d(features: int, eps: float = 1e-5, momentum: float = 0.1) -> Module"
+        "display": "BatchNorm2d(features: int, eps: float = 1e-5, momentum: float = 0.1) -> BatchNorm2d"
       },
       "methods": [
         {
@@ -2513,10 +2576,10 @@
         {
           "name": "parameters",
           "description": "Return an array of the module's learnable parameter tensors.",
-          "returns": null,
+          "returns": "Tensor[]",
           "signature": {
             "params": [],
-            "display": "parameters()"
+            "display": "parameters() -> Tensor[]"
           }
         },
         {
@@ -2535,6 +2598,23 @@
           "signature": {
             "params": [],
             "display": "eval()"
+          }
+        },
+        {
+          "name": "to",
+          "description": "Move the module's parameters to a device (`\"cpu\"`, `\"gpu\"`, `\"webgpu\"`) and return it.",
+          "returns": "Module",
+          "signature": {
+            "params": [
+              {
+                "name": "device",
+                "type": "string",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "to(device: string) -> Module"
           }
         }
       ]
@@ -2543,10 +2623,10 @@
       "name": "BCELoss",
       "kind": "module",
       "description": "Binary cross-entropy loss for sigmoid-activated outputs.",
-      "returns": "Module",
+      "returns": "BCELoss",
       "signature": {
         "params": [],
-        "display": "BCELoss() -> Module"
+        "display": "BCELoss() -> BCELoss"
       },
       "methods": [
         {
@@ -2569,10 +2649,10 @@
         {
           "name": "parameters",
           "description": "Return an array of the module's learnable parameter tensors.",
-          "returns": null,
+          "returns": "Tensor[]",
           "signature": {
             "params": [],
-            "display": "parameters()"
+            "display": "parameters() -> Tensor[]"
           }
         },
         {
@@ -2591,6 +2671,23 @@
           "signature": {
             "params": [],
             "display": "eval()"
+          }
+        },
+        {
+          "name": "to",
+          "description": "Move the module's parameters to a device (`\"cpu\"`, `\"gpu\"`, `\"webgpu\"`) and return it.",
+          "returns": "Module",
+          "signature": {
+            "params": [
+              {
+                "name": "device",
+                "type": "string",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "to(device: string) -> Module"
           }
         }
       ]
@@ -2607,12 +2704,12 @@
       "name": "cat",
       "kind": "other",
       "description": "Concatenate tensors along an existing dimension.",
-      "returns": null,
+      "returns": "Tensor",
       "signature": {
         "params": [
           {
             "name": "tensors",
-            "type": "list[Tensor]",
+            "type": "Tensor[]",
             "optional": false,
             "rest": false,
             "defaultValue": null
@@ -2625,7 +2722,7 @@
             "defaultValue": "0"
           }
         ],
-        "display": "cat(tensors: list[Tensor], axis: int = 0)"
+        "display": "cat(tensors: Tensor[], axis: int = 0) -> Tensor"
       },
       "methods": []
     },
@@ -2820,7 +2917,7 @@
       "name": "Conv1d",
       "kind": "module",
       "description": "1-D convolution over an input with `in` channels, producing `out` channels.",
-      "returns": "Module",
+      "returns": "Conv1d",
       "signature": {
         "params": [
           {
@@ -2859,7 +2956,7 @@
             "defaultValue": "0"
           }
         ],
-        "display": "Conv1d(in: int, out: int, kernel: int, stride: int = 1, padding: int = 0) -> Module"
+        "display": "Conv1d(in: int, out: int, kernel: int, stride: int = 1, padding: int = 0) -> Conv1d"
       },
       "methods": [
         {
@@ -2882,10 +2979,10 @@
         {
           "name": "parameters",
           "description": "Return an array of the module's learnable parameter tensors.",
-          "returns": null,
+          "returns": "Tensor[]",
           "signature": {
             "params": [],
-            "display": "parameters()"
+            "display": "parameters() -> Tensor[]"
           }
         },
         {
@@ -2904,6 +3001,23 @@
           "signature": {
             "params": [],
             "display": "eval()"
+          }
+        },
+        {
+          "name": "to",
+          "description": "Move the module's parameters to a device (`\"cpu\"`, `\"gpu\"`, `\"webgpu\"`) and return it.",
+          "returns": "Module",
+          "signature": {
+            "params": [
+              {
+                "name": "device",
+                "type": "string",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "to(device: string) -> Module"
           }
         }
       ]
@@ -2912,7 +3026,7 @@
       "name": "Conv2d",
       "kind": "module",
       "description": "2-D convolution. Use `padding` to preserve spatial dimensions.",
-      "returns": "Module",
+      "returns": "Conv2d",
       "signature": {
         "params": [
           {
@@ -2951,7 +3065,7 @@
             "defaultValue": "0"
           }
         ],
-        "display": "Conv2d(in: int, out: int, kernel: int, stride: int = 1, padding: int = 0) -> Module"
+        "display": "Conv2d(in: int, out: int, kernel: int, stride: int = 1, padding: int = 0) -> Conv2d"
       },
       "methods": [
         {
@@ -2974,10 +3088,10 @@
         {
           "name": "parameters",
           "description": "Return an array of the module's learnable parameter tensors.",
-          "returns": null,
+          "returns": "Tensor[]",
           "signature": {
             "params": [],
-            "display": "parameters()"
+            "display": "parameters() -> Tensor[]"
           }
         },
         {
@@ -2996,6 +3110,23 @@
           "signature": {
             "params": [],
             "display": "eval()"
+          }
+        },
+        {
+          "name": "to",
+          "description": "Move the module's parameters to a device (`\"cpu\"`, `\"gpu\"`, `\"webgpu\"`) and return it.",
+          "returns": "Module",
+          "signature": {
+            "params": [
+              {
+                "name": "device",
+                "type": "string",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "to(device: string) -> Module"
           }
         }
       ]
@@ -3102,12 +3233,12 @@
       "name": "CrossEntropyLoss",
       "kind": "module",
       "description": "Combined LogSoftmax + NLL loss — standard for multiclass classification. Pass `ignore_index` (e.g. a padding id) to exclude those target positions from the loss — useful for seq2seq with padded sequences.",
-      "returns": "Module",
+      "returns": "CrossEntropyLoss",
       "signature": {
         "params": [
           {
             "name": "reduction",
-            "type": "str",
+            "type": "string",
             "optional": true,
             "rest": false,
             "defaultValue": "\"mean\""
@@ -3120,7 +3251,7 @@
             "defaultValue": null
           }
         ],
-        "display": "CrossEntropyLoss(reduction: str = \"mean\", ignore_index?: int) -> Module"
+        "display": "CrossEntropyLoss(reduction: string = \"mean\", ignore_index?: int) -> CrossEntropyLoss"
       },
       "methods": [
         {
@@ -3143,10 +3274,10 @@
         {
           "name": "parameters",
           "description": "Return an array of the module's learnable parameter tensors.",
-          "returns": null,
+          "returns": "Tensor[]",
           "signature": {
             "params": [],
-            "display": "parameters()"
+            "display": "parameters() -> Tensor[]"
           }
         },
         {
@@ -3165,6 +3296,23 @@
           "signature": {
             "params": [],
             "display": "eval()"
+          }
+        },
+        {
+          "name": "to",
+          "description": "Move the module's parameters to a device (`\"cpu\"`, `\"gpu\"`, `\"webgpu\"`) and return it.",
+          "returns": "Module",
+          "signature": {
+            "params": [
+              {
+                "name": "device",
+                "type": "string",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "to(device: string) -> Module"
           }
         }
       ]
@@ -3278,20 +3426,20 @@
           },
           {
             "name": "shuffle",
-            "type": "bool",
+            "type": "boolean",
             "optional": true,
             "rest": false,
             "defaultValue": "true"
           },
           {
             "name": "drop_last",
-            "type": "bool",
+            "type": "boolean",
             "optional": true,
             "rest": false,
             "defaultValue": "false"
           }
         ],
-        "display": "DataLoader(dataset: Dataset, batch_size: int = 32, shuffle: bool = true, drop_last: bool = false)"
+        "display": "DataLoader(dataset: Dataset, batch_size: int = 32, shuffle: boolean = true, drop_last: boolean = false)"
       },
       "methods": [
         {
@@ -3335,7 +3483,7 @@
       "name": "Dropout",
       "kind": "module",
       "description": "Randomly zero elements with probability `p` during training. Inactive at eval time.",
-      "returns": "Module",
+      "returns": "Dropout",
       "signature": {
         "params": [
           {
@@ -3346,7 +3494,7 @@
             "defaultValue": "0.5"
           }
         ],
-        "display": "Dropout(p: float = 0.5) -> Module"
+        "display": "Dropout(p: float = 0.5) -> Dropout"
       },
       "methods": [
         {
@@ -3369,10 +3517,10 @@
         {
           "name": "parameters",
           "description": "Return an array of the module's learnable parameter tensors.",
-          "returns": null,
+          "returns": "Tensor[]",
           "signature": {
             "params": [],
-            "display": "parameters()"
+            "display": "parameters() -> Tensor[]"
           }
         },
         {
@@ -3391,6 +3539,23 @@
           "signature": {
             "params": [],
             "display": "eval()"
+          }
+        },
+        {
+          "name": "to",
+          "description": "Move the module's parameters to a device (`\"cpu\"`, `\"gpu\"`, `\"webgpu\"`) and return it.",
+          "returns": "Module",
+          "signature": {
+            "params": [
+              {
+                "name": "device",
+                "type": "string",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "to(device: string) -> Module"
           }
         }
       ]
@@ -3529,7 +3694,7 @@
       "name": "ELU",
       "kind": "module",
       "description": "Exponential Linear Unit activation. Smooth alternative to ReLU for negative values.",
-      "returns": "Module",
+      "returns": "ELU",
       "signature": {
         "params": [
           {
@@ -3540,7 +3705,7 @@
             "defaultValue": "1.0"
           }
         ],
-        "display": "ELU(alpha: float = 1.0) -> Module"
+        "display": "ELU(alpha: float = 1.0) -> ELU"
       },
       "methods": [
         {
@@ -3563,10 +3728,10 @@
         {
           "name": "parameters",
           "description": "Return an array of the module's learnable parameter tensors.",
-          "returns": null,
+          "returns": "Tensor[]",
           "signature": {
             "params": [],
-            "display": "parameters()"
+            "display": "parameters() -> Tensor[]"
           }
         },
         {
@@ -3586,6 +3751,23 @@
             "params": [],
             "display": "eval()"
           }
+        },
+        {
+          "name": "to",
+          "description": "Move the module's parameters to a device (`\"cpu\"`, `\"gpu\"`, `\"webgpu\"`) and return it.",
+          "returns": "Module",
+          "signature": {
+            "params": [
+              {
+                "name": "device",
+                "type": "string",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "to(device: string) -> Module"
+          }
         }
       ]
     },
@@ -3593,7 +3775,7 @@
       "name": "Embedding",
       "kind": "module",
       "description": "Lookup table mapping integer ids to dense vectors of size `dim`.",
-      "returns": "Module",
+      "returns": "Embedding",
       "signature": {
         "params": [
           {
@@ -3618,7 +3800,7 @@
             "defaultValue": null
           }
         ],
-        "display": "Embedding(num: int, dim: int, padding_idx?: int) -> Module"
+        "display": "Embedding(num: int, dim: int, padding_idx?: int) -> Embedding"
       },
       "methods": [
         {
@@ -3641,10 +3823,10 @@
         {
           "name": "parameters",
           "description": "Return an array of the module's learnable parameter tensors.",
-          "returns": null,
+          "returns": "Tensor[]",
           "signature": {
             "params": [],
-            "display": "parameters()"
+            "display": "parameters() -> Tensor[]"
           }
         },
         {
@@ -3664,6 +3846,23 @@
             "params": [],
             "display": "eval()"
           }
+        },
+        {
+          "name": "to",
+          "description": "Move the module's parameters to a device (`\"cpu\"`, `\"gpu\"`, `\"webgpu\"`) and return it.",
+          "returns": "Module",
+          "signature": {
+            "params": [
+              {
+                "name": "device",
+                "type": "string",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "to(device: string) -> Module"
+          }
         }
       ]
     },
@@ -3676,20 +3875,20 @@
         "params": [
           {
             "name": "shape",
-            "type": "list[int]",
+            "type": "int[]",
             "optional": false,
             "rest": false,
             "defaultValue": null
           },
           {
             "name": "opts",
-            "type": "dict",
+            "type": "Record",
             "optional": true,
             "rest": false,
             "defaultValue": null
           }
         ],
-        "display": "empty(shape: list[int], opts?: dict) -> Tensor"
+        "display": "empty(shape: int[], opts?: Record) -> Tensor"
       },
       "methods": []
     },
@@ -3773,13 +3972,13 @@
           },
           {
             "name": "opts",
-            "type": "dict",
+            "type": "Record",
             "optional": true,
             "rest": false,
             "defaultValue": null
           }
         ],
-        "display": "eye(n: int, m?: int, opts?: dict) -> Tensor"
+        "display": "eye(n: int, m?: int, opts?: Record) -> Tensor"
       },
       "methods": []
     },
@@ -3887,7 +4086,7 @@
       "name": "Flatten",
       "kind": "module",
       "description": "Flatten a contiguous range of dimensions into one. Typical use: between conv blocks and a Linear head.",
-      "returns": "Module",
+      "returns": "Flatten",
       "signature": {
         "params": [
           {
@@ -3905,7 +4104,7 @@
             "defaultValue": "-1"
           }
         ],
-        "display": "Flatten(start_dim: int = 1, end_dim: int = -1) -> Module"
+        "display": "Flatten(start_dim: int = 1, end_dim: int = -1) -> Flatten"
       },
       "methods": [
         {
@@ -3928,10 +4127,10 @@
         {
           "name": "parameters",
           "description": "Return an array of the module's learnable parameter tensors.",
-          "returns": null,
+          "returns": "Tensor[]",
           "signature": {
             "params": [],
-            "display": "parameters()"
+            "display": "parameters() -> Tensor[]"
           }
         },
         {
@@ -3951,6 +4150,23 @@
             "params": [],
             "display": "eval()"
           }
+        },
+        {
+          "name": "to",
+          "description": "Move the module's parameters to a device (`\"cpu\"`, `\"gpu\"`, `\"webgpu\"`) and return it.",
+          "returns": "Module",
+          "signature": {
+            "params": [
+              {
+                "name": "device",
+                "type": "string",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "to(device: string) -> Module"
+          }
         }
       ]
     },
@@ -3963,7 +4179,7 @@
         "params": [
           {
             "name": "shape",
-            "type": "list[int]",
+            "type": "int[]",
             "optional": false,
             "rest": false,
             "defaultValue": null
@@ -3977,13 +4193,13 @@
           },
           {
             "name": "opts",
-            "type": "dict",
+            "type": "Record",
             "optional": true,
             "rest": false,
             "defaultValue": null
           }
         ],
-        "display": "full(shape: list[int], value: float, opts?: dict) -> Tensor"
+        "display": "full(shape: int[], value: float, opts?: Record) -> Tensor"
       },
       "methods": []
     },
@@ -4017,10 +4233,10 @@
       "name": "GELU",
       "kind": "module",
       "description": "Gaussian Error Linear Unit activation module — commonly used in Transformers.",
-      "returns": "Module",
+      "returns": "GELU",
       "signature": {
         "params": [],
-        "display": "GELU() -> Module"
+        "display": "GELU() -> GELU"
       },
       "methods": [
         {
@@ -4043,10 +4259,10 @@
         {
           "name": "parameters",
           "description": "Return an array of the module's learnable parameter tensors.",
-          "returns": null,
+          "returns": "Tensor[]",
           "signature": {
             "params": [],
-            "display": "parameters()"
+            "display": "parameters() -> Tensor[]"
           }
         },
         {
@@ -4065,6 +4281,23 @@
           "signature": {
             "params": [],
             "display": "eval()"
+          }
+        },
+        {
+          "name": "to",
+          "description": "Move the module's parameters to a device (`\"cpu\"`, `\"gpu\"`, `\"webgpu\"`) and return it.",
+          "returns": "Module",
+          "signature": {
+            "params": [
+              {
+                "name": "device",
+                "type": "string",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "to(device: string) -> Module"
           }
         }
       ]
@@ -4197,7 +4430,7 @@
       "name": "graph",
       "kind": "utility",
       "description": "Print the IR graph of a compiled program or module.",
-      "returns": null,
+      "returns": "string",
       "signature": {
         "params": [
           {
@@ -4208,7 +4441,7 @@
             "defaultValue": null
           }
         ],
-        "display": "graph(compiled)"
+        "display": "graph(compiled) -> string"
       },
       "methods": []
     },
@@ -4216,7 +4449,7 @@
       "name": "GRU",
       "kind": "module",
       "description": "Multi-layer Gated Recurrent Unit. Call `out, h_n = gru(x, h0?)` — returns the output sequence and the final hidden state. Set `batch_first=true` for `(N, T, input)` inputs.",
-      "returns": "Module",
+      "returns": "GRU",
       "signature": {
         "params": [
           {
@@ -4242,20 +4475,20 @@
           },
           {
             "name": "batch_first",
-            "type": "bool",
+            "type": "boolean",
             "optional": true,
             "rest": false,
             "defaultValue": "false"
           },
           {
             "name": "bias",
-            "type": "bool",
+            "type": "boolean",
             "optional": true,
             "rest": false,
             "defaultValue": "true"
           }
         ],
-        "display": "GRU(input: int, hidden: int, num_layers: int = 1, batch_first: bool = false, bias: bool = true) -> Module"
+        "display": "GRU(input: int, hidden: int, num_layers: int = 1, batch_first: boolean = false, bias: boolean = true) -> GRU"
       },
       "methods": [
         {
@@ -4278,10 +4511,10 @@
         {
           "name": "parameters",
           "description": "Return an array of the module's learnable parameter tensors.",
-          "returns": null,
+          "returns": "Tensor[]",
           "signature": {
             "params": [],
-            "display": "parameters()"
+            "display": "parameters() -> Tensor[]"
           }
         },
         {
@@ -4301,6 +4534,23 @@
             "params": [],
             "display": "eval()"
           }
+        },
+        {
+          "name": "to",
+          "description": "Move the module's parameters to a device (`\"cpu\"`, `\"gpu\"`, `\"webgpu\"`) and return it.",
+          "returns": "Module",
+          "signature": {
+            "params": [
+              {
+                "name": "device",
+                "type": "string",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "to(device: string) -> Module"
+          }
         }
       ]
     },
@@ -4308,7 +4558,7 @@
       "name": "GRUCell",
       "kind": "module",
       "description": "Single GRU time-step. `h_next = cell(x, h)` — apply manually to step a sequence one element at a time.",
-      "returns": "Module",
+      "returns": "GRUCell",
       "signature": {
         "params": [
           {
@@ -4327,13 +4577,13 @@
           },
           {
             "name": "bias",
-            "type": "bool",
+            "type": "boolean",
             "optional": true,
             "rest": false,
             "defaultValue": "true"
           }
         ],
-        "display": "GRUCell(input: int, hidden: int, bias: bool = true) -> Module"
+        "display": "GRUCell(input: int, hidden: int, bias: boolean = true) -> GRUCell"
       },
       "methods": [
         {
@@ -4356,10 +4606,10 @@
         {
           "name": "parameters",
           "description": "Return an array of the module's learnable parameter tensors.",
-          "returns": null,
+          "returns": "Tensor[]",
           "signature": {
             "params": [],
-            "display": "parameters()"
+            "display": "parameters() -> Tensor[]"
           }
         },
         {
@@ -4378,6 +4628,23 @@
           "signature": {
             "params": [],
             "display": "eval()"
+          }
+        },
+        {
+          "name": "to",
+          "description": "Move the module's parameters to a device (`\"cpu\"`, `\"gpu\"`, `\"webgpu\"`) and return it.",
+          "returns": "Module",
+          "signature": {
+            "params": [
+              {
+                "name": "device",
+                "type": "string",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "to(device: string) -> Module"
           }
         }
       ]
@@ -4402,12 +4669,12 @@
       "name": "LayerNorm",
       "kind": "module",
       "description": "Layer normalization over the given trailing shape. Stabilizes activations independent of batch.",
-      "returns": "Module",
+      "returns": "LayerNorm",
       "signature": {
         "params": [
           {
             "name": "shape",
-            "type": "list[int]",
+            "type": "int[]",
             "optional": false,
             "rest": false,
             "defaultValue": null
@@ -4420,7 +4687,7 @@
             "defaultValue": "1e-5"
           }
         ],
-        "display": "LayerNorm(shape: list[int], eps: float = 1e-5) -> Module"
+        "display": "LayerNorm(shape: int[], eps: float = 1e-5) -> LayerNorm"
       },
       "methods": [
         {
@@ -4443,10 +4710,10 @@
         {
           "name": "parameters",
           "description": "Return an array of the module's learnable parameter tensors.",
-          "returns": null,
+          "returns": "Tensor[]",
           "signature": {
             "params": [],
-            "display": "parameters()"
+            "display": "parameters() -> Tensor[]"
           }
         },
         {
@@ -4466,6 +4733,23 @@
             "params": [],
             "display": "eval()"
           }
+        },
+        {
+          "name": "to",
+          "description": "Move the module's parameters to a device (`\"cpu\"`, `\"gpu\"`, `\"webgpu\"`) and return it.",
+          "returns": "Module",
+          "signature": {
+            "params": [
+              {
+                "name": "device",
+                "type": "string",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "to(device: string) -> Module"
+          }
         }
       ]
     },
@@ -4473,7 +4757,7 @@
       "name": "LeakyReLU",
       "kind": "module",
       "description": "Leaky ReLU activation; negative inputs are scaled by `negative_slope` instead of zeroed.",
-      "returns": "Module",
+      "returns": "LeakyReLU",
       "signature": {
         "params": [
           {
@@ -4484,7 +4768,7 @@
             "defaultValue": "0.01"
           }
         ],
-        "display": "LeakyReLU(negative_slope: float = 0.01) -> Module"
+        "display": "LeakyReLU(negative_slope: float = 0.01) -> LeakyReLU"
       },
       "methods": [
         {
@@ -4507,10 +4791,10 @@
         {
           "name": "parameters",
           "description": "Return an array of the module's learnable parameter tensors.",
-          "returns": null,
+          "returns": "Tensor[]",
           "signature": {
             "params": [],
-            "display": "parameters()"
+            "display": "parameters() -> Tensor[]"
           }
         },
         {
@@ -4529,6 +4813,23 @@
           "signature": {
             "params": [],
             "display": "eval()"
+          }
+        },
+        {
+          "name": "to",
+          "description": "Move the module's parameters to a device (`\"cpu\"`, `\"gpu\"`, `\"webgpu\"`) and return it.",
+          "returns": "Module",
+          "signature": {
+            "params": [
+              {
+                "name": "device",
+                "type": "string",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "to(device: string) -> Module"
           }
         }
       ]
@@ -4645,7 +4946,7 @@
       "name": "Linear",
       "kind": "module",
       "description": "Fully-connected layer `y = x @ Wᵀ + b`. Set `bias=false` to disable the bias term.",
-      "returns": "Module",
+      "returns": "Linear",
       "signature": {
         "params": [
           {
@@ -4664,13 +4965,13 @@
           },
           {
             "name": "bias",
-            "type": "bool",
+            "type": "boolean",
             "optional": true,
             "rest": false,
             "defaultValue": "true"
           }
         ],
-        "display": "Linear(in: int, out: int, bias: bool = true) -> Module"
+        "display": "Linear(in: int, out: int, bias: boolean = true) -> Linear"
       },
       "methods": [
         {
@@ -4693,10 +4994,10 @@
         {
           "name": "parameters",
           "description": "Return an array of the module's learnable parameter tensors.",
-          "returns": null,
+          "returns": "Tensor[]",
           "signature": {
             "params": [],
-            "display": "parameters()"
+            "display": "parameters() -> Tensor[]"
           }
         },
         {
@@ -4715,6 +5016,23 @@
           "signature": {
             "params": [],
             "display": "eval()"
+          }
+        },
+        {
+          "name": "to",
+          "description": "Move the module's parameters to a device (`\"cpu\"`, `\"gpu\"`, `\"webgpu\"`) and return it.",
+          "returns": "Module",
+          "signature": {
+            "params": [
+              {
+                "name": "device",
+                "type": "string",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "to(device: string) -> Module"
           }
         }
       ]
@@ -4749,13 +5067,13 @@
           },
           {
             "name": "opts",
-            "type": "dict",
+            "type": "Record",
             "optional": true,
             "rest": false,
             "defaultValue": null
           }
         ],
-        "display": "linspace(start: float, end: float, steps: int, opts?: dict) -> Tensor"
+        "display": "linspace(start: float, end: float, steps: int, opts?: Record) -> Tensor"
       },
       "methods": []
     },
@@ -4794,13 +5112,13 @@
           },
           {
             "name": "path",
-            "type": "str",
+            "type": "string",
             "optional": false,
             "rest": false,
             "defaultValue": null
           }
         ],
-        "display": "load(model: Module, path: str)"
+        "display": "load(model: Module, path: string)"
       },
       "methods": []
     },
@@ -4813,14 +5131,14 @@
         "params": [
           {
             "name": "path",
-            "type": "str",
+            "type": "string",
             "optional": false,
             "rest": false,
             "defaultValue": null
           },
           {
             "name": "separator",
-            "type": "str",
+            "type": "string",
             "optional": true,
             "rest": false,
             "defaultValue": "\""
@@ -4833,7 +5151,7 @@
             "defaultValue": null
           }
         ],
-        "display": "load_csv(path: str, separator: str = \", \") -> DataFrame"
+        "display": "load_csv(path: string, separator: string = \", \") -> DataFrame"
       },
       "methods": []
     },
@@ -4846,13 +5164,13 @@
         "params": [
           {
             "name": "path",
-            "type": "str",
+            "type": "string",
             "optional": false,
             "rest": false,
             "defaultValue": null
           }
         ],
-        "display": "load_json(path: str)"
+        "display": "load_json(path: string)"
       },
       "methods": []
     },
@@ -4860,7 +5178,7 @@
       "name": "LogSoftmax",
       "kind": "module",
       "description": "LogSoftmax module — numerically stable log of softmax.",
-      "returns": "Module",
+      "returns": "LogSoftmax",
       "signature": {
         "params": [
           {
@@ -4871,7 +5189,7 @@
             "defaultValue": "-1"
           }
         ],
-        "display": "LogSoftmax(dim: int = -1) -> Module"
+        "display": "LogSoftmax(dim: int = -1) -> LogSoftmax"
       },
       "methods": [
         {
@@ -4894,10 +5212,10 @@
         {
           "name": "parameters",
           "description": "Return an array of the module's learnable parameter tensors.",
-          "returns": null,
+          "returns": "Tensor[]",
           "signature": {
             "params": [],
-            "display": "parameters()"
+            "display": "parameters() -> Tensor[]"
           }
         },
         {
@@ -4917,6 +5235,23 @@
             "params": [],
             "display": "eval()"
           }
+        },
+        {
+          "name": "to",
+          "description": "Move the module's parameters to a device (`\"cpu\"`, `\"gpu\"`, `\"webgpu\"`) and return it.",
+          "returns": "Module",
+          "signature": {
+            "params": [
+              {
+                "name": "device",
+                "type": "string",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "to(device: string) -> Module"
+          }
         }
       ]
     },
@@ -4924,7 +5259,7 @@
       "name": "LSTM",
       "kind": "module",
       "description": "Multi-layer Long Short-Term Memory. Call `out, state = lstm(x, [h0, c0]?)` — returns the output sequence and `state = [h_n, c_n]` (final hidden and cell states). Set `batch_first=true` for `(N, T, input)` inputs.",
-      "returns": "Module",
+      "returns": "LSTM",
       "signature": {
         "params": [
           {
@@ -4950,20 +5285,20 @@
           },
           {
             "name": "batch_first",
-            "type": "bool",
+            "type": "boolean",
             "optional": true,
             "rest": false,
             "defaultValue": "false"
           },
           {
             "name": "bias",
-            "type": "bool",
+            "type": "boolean",
             "optional": true,
             "rest": false,
             "defaultValue": "true"
           }
         ],
-        "display": "LSTM(input: int, hidden: int, num_layers: int = 1, batch_first: bool = false, bias: bool = true) -> Module"
+        "display": "LSTM(input: int, hidden: int, num_layers: int = 1, batch_first: boolean = false, bias: boolean = true) -> LSTM"
       },
       "methods": [
         {
@@ -4986,10 +5321,10 @@
         {
           "name": "parameters",
           "description": "Return an array of the module's learnable parameter tensors.",
-          "returns": null,
+          "returns": "Tensor[]",
           "signature": {
             "params": [],
-            "display": "parameters()"
+            "display": "parameters() -> Tensor[]"
           }
         },
         {
@@ -5009,6 +5344,23 @@
             "params": [],
             "display": "eval()"
           }
+        },
+        {
+          "name": "to",
+          "description": "Move the module's parameters to a device (`\"cpu\"`, `\"gpu\"`, `\"webgpu\"`) and return it.",
+          "returns": "Module",
+          "signature": {
+            "params": [
+              {
+                "name": "device",
+                "type": "string",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "to(device: string) -> Module"
+          }
         }
       ]
     },
@@ -5016,7 +5368,7 @@
       "name": "LSTMCell",
       "kind": "module",
       "description": "Single LSTM time-step. `h_next, c_next = cell(x, [h, c])` — carries both hidden and cell state for O(T) autoregressive stepping.",
-      "returns": "Module",
+      "returns": "LSTMCell",
       "signature": {
         "params": [
           {
@@ -5035,13 +5387,13 @@
           },
           {
             "name": "bias",
-            "type": "bool",
+            "type": "boolean",
             "optional": true,
             "rest": false,
             "defaultValue": "true"
           }
         ],
-        "display": "LSTMCell(input: int, hidden: int, bias: bool = true) -> Module"
+        "display": "LSTMCell(input: int, hidden: int, bias: boolean = true) -> LSTMCell"
       },
       "methods": [
         {
@@ -5064,10 +5416,10 @@
         {
           "name": "parameters",
           "description": "Return an array of the module's learnable parameter tensors.",
-          "returns": null,
+          "returns": "Tensor[]",
           "signature": {
             "params": [],
-            "display": "parameters()"
+            "display": "parameters() -> Tensor[]"
           }
         },
         {
@@ -5086,6 +5438,23 @@
           "signature": {
             "params": [],
             "display": "eval()"
+          }
+        },
+        {
+          "name": "to",
+          "description": "Move the module's parameters to a device (`\"cpu\"`, `\"gpu\"`, `\"webgpu\"`) and return it.",
+          "returns": "Module",
+          "signature": {
+            "params": [
+              {
+                "name": "device",
+                "type": "string",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "to(device: string) -> Module"
           }
         }
       ]
@@ -5113,7 +5482,7 @@
       "name": "MaxPool2d",
       "kind": "module",
       "description": "2-D max pooling. Downsamples spatial dimensions taking the per-window max.",
-      "returns": "Module",
+      "returns": "MaxPool2d",
       "signature": {
         "params": [
           {
@@ -5138,7 +5507,7 @@
             "defaultValue": "0"
           }
         ],
-        "display": "MaxPool2d(kernel: int, stride?: int, padding: int = 0) -> Module"
+        "display": "MaxPool2d(kernel: int, stride?: int, padding: int = 0) -> MaxPool2d"
       },
       "methods": [
         {
@@ -5161,10 +5530,10 @@
         {
           "name": "parameters",
           "description": "Return an array of the module's learnable parameter tensors.",
-          "returns": null,
+          "returns": "Tensor[]",
           "signature": {
             "params": [],
-            "display": "parameters()"
+            "display": "parameters() -> Tensor[]"
           }
         },
         {
@@ -5183,6 +5552,23 @@
           "signature": {
             "params": [],
             "display": "eval()"
+          }
+        },
+        {
+          "name": "to",
+          "description": "Move the module's parameters to a device (`\"cpu\"`, `\"gpu\"`, `\"webgpu\"`) and return it.",
+          "returns": "Module",
+          "signature": {
+            "params": [
+              {
+                "name": "device",
+                "type": "string",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "to(device: string) -> Module"
           }
         }
       ]
@@ -5402,10 +5788,10 @@
       "name": "MSELoss",
       "kind": "module",
       "description": "Mean squared error loss — standard for regression.",
-      "returns": "Module",
+      "returns": "MSELoss",
       "signature": {
         "params": [],
-        "display": "MSELoss() -> Module"
+        "display": "MSELoss() -> MSELoss"
       },
       "methods": [
         {
@@ -5428,10 +5814,10 @@
         {
           "name": "parameters",
           "description": "Return an array of the module's learnable parameter tensors.",
-          "returns": null,
+          "returns": "Tensor[]",
           "signature": {
             "params": [],
-            "display": "parameters()"
+            "display": "parameters() -> Tensor[]"
           }
         },
         {
@@ -5450,6 +5836,23 @@
           "signature": {
             "params": [],
             "display": "eval()"
+          }
+        },
+        {
+          "name": "to",
+          "description": "Move the module's parameters to a device (`\"cpu\"`, `\"gpu\"`, `\"webgpu\"`) and return it.",
+          "returns": "Module",
+          "signature": {
+            "params": [
+              {
+                "name": "device",
+                "type": "string",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "to(device: string) -> Module"
           }
         }
       ]
@@ -5458,10 +5861,10 @@
       "name": "NLLLoss",
       "kind": "module",
       "description": "Negative log-likelihood loss. Pair with LogSoftmax outputs.",
-      "returns": "Module",
+      "returns": "NLLLoss",
       "signature": {
         "params": [],
-        "display": "NLLLoss() -> Module"
+        "display": "NLLLoss() -> NLLLoss"
       },
       "methods": [
         {
@@ -5484,10 +5887,10 @@
         {
           "name": "parameters",
           "description": "Return an array of the module's learnable parameter tensors.",
-          "returns": null,
+          "returns": "Tensor[]",
           "signature": {
             "params": [],
-            "display": "parameters()"
+            "display": "parameters() -> Tensor[]"
           }
         },
         {
@@ -5506,6 +5909,23 @@
           "signature": {
             "params": [],
             "display": "eval()"
+          }
+        },
+        {
+          "name": "to",
+          "description": "Move the module's parameters to a device (`\"cpu\"`, `\"gpu\"`, `\"webgpu\"`) and return it.",
+          "returns": "Module",
+          "signature": {
+            "params": [
+              {
+                "name": "device",
+                "type": "string",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "to(device: string) -> Module"
           }
         }
       ]
@@ -5545,20 +5965,20 @@
         "params": [
           {
             "name": "shape",
-            "type": "list[int]",
+            "type": "int[]",
             "optional": false,
             "rest": false,
             "defaultValue": null
           },
           {
             "name": "opts",
-            "type": "dict",
+            "type": "Record",
             "optional": true,
             "rest": false,
             "defaultValue": null
           }
         ],
-        "display": "ones(shape: list[int], opts?: dict) -> Tensor"
+        "display": "ones(shape: int[], opts?: Record) -> Tensor"
       },
       "methods": []
     },
@@ -5826,20 +6246,20 @@
         "params": [
           {
             "name": "shape",
-            "type": "list[int]",
+            "type": "int[]",
             "optional": false,
             "rest": false,
             "defaultValue": null
           },
           {
             "name": "opts",
-            "type": "dict",
+            "type": "Record",
             "optional": true,
             "rest": false,
             "defaultValue": null
           }
         ],
-        "display": "randn(shape: list[int], opts?: dict) -> Tensor"
+        "display": "randn(shape: int[], opts?: Record) -> Tensor"
       },
       "methods": []
     },
@@ -5878,13 +6298,13 @@
           },
           {
             "name": "opts",
-            "type": "dict",
+            "type": "Record",
             "optional": true,
             "rest": false,
             "defaultValue": null
           }
         ],
-        "display": "randperm(n: int, opts?: dict) -> Tensor"
+        "display": "randperm(n: int, opts?: Record) -> Tensor"
       },
       "methods": []
     },
@@ -5892,7 +6312,7 @@
       "name": "range",
       "kind": "utility",
       "description": "Integer range: returns an array `[start..stop)` with optional `step`.",
-      "returns": null,
+      "returns": "int[]",
       "signature": {
         "params": [
           {
@@ -5917,7 +6337,7 @@
             "defaultValue": null
           }
         ],
-        "display": "range(start: int, stop?: int, step?: int)"
+        "display": "range(start: int, stop?: int, step?: int) -> int[]"
       },
       "methods": []
     },
@@ -5925,18 +6345,18 @@
       "name": "read_text",
       "kind": "other",
       "description": "Read a text file and return its contents as a string.",
-      "returns": null,
+      "returns": "string",
       "signature": {
         "params": [
           {
             "name": "path",
-            "type": "str",
+            "type": "string",
             "optional": false,
             "rest": false,
             "defaultValue": null
           }
         ],
-        "display": "read_text(path: str)"
+        "display": "read_text(path: string) -> string"
       },
       "methods": []
     },
@@ -6032,7 +6452,7 @@
           },
           {
             "name": "mode",
-            "type": "str",
+            "type": "string",
             "optional": true,
             "rest": false,
             "defaultValue": "\"min\""
@@ -6052,7 +6472,7 @@
             "defaultValue": "0.1"
           }
         ],
-        "display": "ReduceLROnPlateau(optimizer: Optimizer, mode: str = \"min\", patience: int = 10, factor: float = 0.1) -> Scheduler"
+        "display": "ReduceLROnPlateau(optimizer: Optimizer, mode: string = \"min\", patience: int = 10, factor: float = 0.1) -> Scheduler"
       },
       "methods": [
         {
@@ -6087,10 +6507,10 @@
       "name": "ReLU",
       "kind": "module",
       "description": "Rectified Linear Unit activation module: `max(0, x)`.",
-      "returns": "Module",
+      "returns": "ReLU",
       "signature": {
         "params": [],
-        "display": "ReLU() -> Module"
+        "display": "ReLU() -> ReLU"
       },
       "methods": [
         {
@@ -6113,10 +6533,10 @@
         {
           "name": "parameters",
           "description": "Return an array of the module's learnable parameter tensors.",
-          "returns": null,
+          "returns": "Tensor[]",
           "signature": {
             "params": [],
-            "display": "parameters()"
+            "display": "parameters() -> Tensor[]"
           }
         },
         {
@@ -6135,6 +6555,23 @@
           "signature": {
             "params": [],
             "display": "eval()"
+          }
+        },
+        {
+          "name": "to",
+          "description": "Move the module's parameters to a device (`\"cpu\"`, `\"gpu\"`, `\"webgpu\"`) and return it.",
+          "returns": "Module",
+          "signature": {
+            "params": [
+              {
+                "name": "device",
+                "type": "string",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "to(device: string) -> Module"
           }
         }
       ]
@@ -6155,13 +6592,13 @@
           },
           {
             "name": "path",
-            "type": "str",
+            "type": "string",
             "optional": false,
             "rest": false,
             "defaultValue": null
           }
         ],
-        "display": "save(model: Module, path: str)"
+        "display": "save(model: Module, path: string)"
       },
       "methods": []
     },
@@ -6169,7 +6606,7 @@
       "name": "Sequential",
       "kind": "sequential",
       "description": "Compose modules into a feed-forward pipeline. The output of each module is fed to the next.",
-      "returns": "Module",
+      "returns": "Sequential",
       "signature": {
         "params": [
           {
@@ -6180,7 +6617,7 @@
             "defaultValue": null
           }
         ],
-        "display": "Sequential(...modules) -> Module"
+        "display": "Sequential(...modules) -> Sequential"
       },
       "methods": [
         {
@@ -6238,7 +6675,7 @@
         "params": [
           {
             "name": "params",
-            "type": "list[Tensor]",
+            "type": "Tensor[]",
             "optional": false,
             "rest": false,
             "defaultValue": null
@@ -6265,7 +6702,7 @@
             "defaultValue": "0"
           }
         ],
-        "display": "SGD(params: list[Tensor], lr: float = 0.01, momentum: float = 0, weight_decay: float = 0) -> Optimizer"
+        "display": "SGD(params: Tensor[], lr: float = 0.01, momentum: float = 0, weight_decay: float = 0) -> Optimizer"
       },
       "methods": [
         {
@@ -6301,10 +6738,10 @@
       "name": "Sigmoid",
       "kind": "module",
       "description": "Logistic sigmoid activation module.",
-      "returns": "Module",
+      "returns": "Sigmoid",
       "signature": {
         "params": [],
-        "display": "Sigmoid() -> Module"
+        "display": "Sigmoid() -> Sigmoid"
       },
       "methods": [
         {
@@ -6327,10 +6764,10 @@
         {
           "name": "parameters",
           "description": "Return an array of the module's learnable parameter tensors.",
-          "returns": null,
+          "returns": "Tensor[]",
           "signature": {
             "params": [],
-            "display": "parameters()"
+            "display": "parameters() -> Tensor[]"
           }
         },
         {
@@ -6349,6 +6786,23 @@
           "signature": {
             "params": [],
             "display": "eval()"
+          }
+        },
+        {
+          "name": "to",
+          "description": "Move the module's parameters to a device (`\"cpu\"`, `\"gpu\"`, `\"webgpu\"`) and return it.",
+          "returns": "Module",
+          "signature": {
+            "params": [
+              {
+                "name": "device",
+                "type": "string",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "to(device: string) -> Module"
           }
         }
       ]
@@ -6357,10 +6811,10 @@
       "name": "SiLU",
       "kind": "module",
       "description": "SiLU/Swish activation module: `x * sigmoid(x)`.",
-      "returns": "Module",
+      "returns": "SiLU",
       "signature": {
         "params": [],
-        "display": "SiLU() -> Module"
+        "display": "SiLU() -> SiLU"
       },
       "methods": [
         {
@@ -6383,10 +6837,10 @@
         {
           "name": "parameters",
           "description": "Return an array of the module's learnable parameter tensors.",
-          "returns": null,
+          "returns": "Tensor[]",
           "signature": {
             "params": [],
-            "display": "parameters()"
+            "display": "parameters() -> Tensor[]"
           }
         },
         {
@@ -6406,6 +6860,23 @@
             "params": [],
             "display": "eval()"
           }
+        },
+        {
+          "name": "to",
+          "description": "Move the module's parameters to a device (`\"cpu\"`, `\"gpu\"`, `\"webgpu\"`) and return it.",
+          "returns": "Module",
+          "signature": {
+            "params": [
+              {
+                "name": "device",
+                "type": "string",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "to(device: string) -> Module"
+          }
         }
       ]
     },
@@ -6413,7 +6884,7 @@
       "name": "Softmax",
       "kind": "module",
       "description": "Softmax module over the specified dimension.",
-      "returns": "Module",
+      "returns": "Softmax",
       "signature": {
         "params": [
           {
@@ -6424,7 +6895,7 @@
             "defaultValue": "-1"
           }
         ],
-        "display": "Softmax(dim: int = -1) -> Module"
+        "display": "Softmax(dim: int = -1) -> Softmax"
       },
       "methods": [
         {
@@ -6447,10 +6918,10 @@
         {
           "name": "parameters",
           "description": "Return an array of the module's learnable parameter tensors.",
-          "returns": null,
+          "returns": "Tensor[]",
           "signature": {
             "params": [],
-            "display": "parameters()"
+            "display": "parameters() -> Tensor[]"
           }
         },
         {
@@ -6470,6 +6941,23 @@
             "params": [],
             "display": "eval()"
           }
+        },
+        {
+          "name": "to",
+          "description": "Move the module's parameters to a device (`\"cpu\"`, `\"gpu\"`, `\"webgpu\"`) and return it.",
+          "returns": "Module",
+          "signature": {
+            "params": [
+              {
+                "name": "device",
+                "type": "string",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "to(device: string) -> Module"
+          }
         }
       ]
     },
@@ -6477,12 +6965,12 @@
       "name": "stack",
       "kind": "other",
       "description": "Stack tensors along a new dimension.",
-      "returns": null,
+      "returns": "Tensor",
       "signature": {
         "params": [
           {
             "name": "tensors",
-            "type": "list[Tensor]",
+            "type": "Tensor[]",
             "optional": false,
             "rest": false,
             "defaultValue": null
@@ -6495,7 +6983,7 @@
             "defaultValue": "0"
           }
         ],
-        "display": "stack(tensors: list[Tensor], axis: int = 0)"
+        "display": "stack(tensors: Tensor[], axis: int = 0) -> Tensor"
       },
       "methods": []
     },
@@ -6582,10 +7070,10 @@
       "name": "Tanh",
       "kind": "module",
       "description": "Hyperbolic tangent activation module.",
-      "returns": "Module",
+      "returns": "Tanh",
       "signature": {
         "params": [],
-        "display": "Tanh() -> Module"
+        "display": "Tanh() -> Tanh"
       },
       "methods": [
         {
@@ -6608,10 +7096,10 @@
         {
           "name": "parameters",
           "description": "Return an array of the module's learnable parameter tensors.",
-          "returns": null,
+          "returns": "Tensor[]",
           "signature": {
             "params": [],
-            "display": "parameters()"
+            "display": "parameters() -> Tensor[]"
           }
         },
         {
@@ -6630,6 +7118,23 @@
           "signature": {
             "params": [],
             "display": "eval()"
+          }
+        },
+        {
+          "name": "to",
+          "description": "Move the module's parameters to a device (`\"cpu\"`, `\"gpu\"`, `\"webgpu\"`) and return it.",
+          "returns": "Module",
+          "signature": {
+            "params": [
+              {
+                "name": "device",
+                "type": "string",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "to(device: string) -> Module"
           }
         }
       ]
@@ -6791,12 +7296,12 @@
       "name": "Tokenizer",
       "kind": "other",
       "description": "Build a text tokenizer. `mode` is `\"word\"`, `\"char\"`, or `\"bpe\"` (trainable subword). `fit(texts)` on a corpus first, then `encode`/`decode`/`encodeBatch`. Reserves special tokens (`<pad> <unk> <bos> <eos>`) at low ids exposed as `padId`/`unkId`/`bosId`/`eosId`.",
-      "returns": null,
+      "returns": "Tokenizer",
       "signature": {
         "params": [
           {
             "name": "mode",
-            "type": "str",
+            "type": "string",
             "optional": true,
             "rest": false,
             "defaultValue": "\"word\""
@@ -6810,7 +7315,7 @@
           },
           {
             "name": "lowercase",
-            "type": "bool",
+            "type": "boolean",
             "optional": true,
             "rest": false,
             "defaultValue": "false"
@@ -6824,96 +7329,96 @@
           },
           {
             "name": "special_tokens",
-            "type": "list[str]",
+            "type": "string[]",
             "optional": true,
             "rest": false,
             "defaultValue": null
           }
         ],
-        "display": "Tokenizer(mode: str = \"word\", vocab_size?: int, lowercase: bool = false, num_merges: int = 1000, special_tokens?: list[str])"
+        "display": "Tokenizer(mode: string = \"word\", vocab_size?: int, lowercase: boolean = false, num_merges: int = 1000, special_tokens?: string[]) -> Tokenizer"
       },
       "methods": [
         {
           "name": "fit",
           "description": "Learn the vocabulary (and BPE merges) from a list of strings. Returns the tokenizer.",
-          "returns": null,
+          "returns": "Tokenizer",
           "signature": {
             "params": [
               {
                 "name": "texts",
-                "type": "list[str]",
+                "type": "string[]",
                 "optional": false,
                 "rest": false,
                 "defaultValue": null
               }
             ],
-            "display": "fit(texts: list[str])"
+            "display": "fit(texts: string[]) -> Tokenizer"
           }
         },
         {
           "name": "encode",
           "description": "Tokenize `text` to a list of integer ids. Optionally wrap with begin/end-of-sequence tokens.",
-          "returns": null,
+          "returns": "int[]",
           "signature": {
             "params": [
               {
                 "name": "text",
-                "type": "str",
+                "type": "string",
                 "optional": false,
                 "rest": false,
                 "defaultValue": null
               },
               {
                 "name": "add_bos",
-                "type": "bool",
+                "type": "boolean",
                 "optional": true,
                 "rest": false,
                 "defaultValue": null
               },
               {
                 "name": "add_eos",
-                "type": "bool",
+                "type": "boolean",
                 "optional": true,
                 "rest": false,
                 "defaultValue": null
               }
             ],
-            "display": "encode(text: str, add_bos?: bool, add_eos?: bool)"
+            "display": "encode(text: string, add_bos?: boolean, add_eos?: boolean) -> int[]"
           }
         },
         {
           "name": "decode",
           "description": "Turn a list of ids back into a string (special tokens skipped by default).",
-          "returns": null,
+          "returns": "string",
           "signature": {
             "params": [
               {
                 "name": "ids",
-                "type": "list[int]",
+                "type": "int[]",
                 "optional": false,
                 "rest": false,
                 "defaultValue": null
               },
               {
                 "name": "skip_special",
-                "type": "bool",
+                "type": "boolean",
                 "optional": true,
                 "rest": false,
                 "defaultValue": null
               }
             ],
-            "display": "decode(ids: list[int], skip_special?: bool)"
+            "display": "decode(ids: int[], skip_special?: boolean) -> string"
           }
         },
         {
           "name": "encodeBatch",
           "description": "Encode a list of strings into a padded `[N, maxLen]` i32 tensor, ready for a model.",
-          "returns": null,
+          "returns": "Tensor",
           "signature": {
             "params": [
               {
                 "name": "texts",
-                "type": "list[str]",
+                "type": "string[]",
                 "optional": false,
                 "rest": false,
                 "defaultValue": null
@@ -6934,29 +7439,65 @@
               },
               {
                 "name": "add_bos",
-                "type": "bool",
+                "type": "boolean",
                 "optional": true,
                 "rest": false,
                 "defaultValue": null
               },
               {
                 "name": "add_eos",
-                "type": "bool",
+                "type": "boolean",
                 "optional": true,
                 "rest": false,
                 "defaultValue": null
               }
             ],
-            "display": "encodeBatch(texts: list[str], max_len?: int, pad_id?: int, add_bos?: bool, add_eos?: bool)"
+            "display": "encodeBatch(texts: string[], max_len?: int, pad_id?: int, add_bos?: boolean, add_eos?: boolean) -> Tensor"
           }
         },
         {
           "name": "vocabSize",
           "description": "Number of tokens in the learned vocabulary (property).",
-          "returns": null,
+          "returns": "int",
           "signature": {
             "params": [],
-            "display": "vocabSize()"
+            "display": "vocabSize() -> int"
+          }
+        },
+        {
+          "name": "padId",
+          "description": "Reserved id of the `<pad>` token.",
+          "returns": "int",
+          "signature": {
+            "params": [],
+            "display": "padId() -> int"
+          }
+        },
+        {
+          "name": "unkId",
+          "description": "Reserved id of the `<unk>` (unknown) token.",
+          "returns": "int",
+          "signature": {
+            "params": [],
+            "display": "unkId() -> int"
+          }
+        },
+        {
+          "name": "bosId",
+          "description": "Reserved id of the `<bos>` (begin-of-sequence) token.",
+          "returns": "int",
+          "signature": {
+            "params": [],
+            "display": "bosId() -> int"
+          }
+        },
+        {
+          "name": "eosId",
+          "description": "Reserved id of the `<eos>` (end-of-sequence) token.",
+          "returns": "int",
+          "signature": {
+            "params": [],
+            "display": "eosId() -> int"
           }
         }
       ]
@@ -6965,7 +7506,7 @@
       "name": "trace",
       "kind": "utility",
       "description": "Print the runtime execution trace of a compiled program.",
-      "returns": null,
+      "returns": "string",
       "signature": {
         "params": [
           {
@@ -6976,7 +7517,7 @@
             "defaultValue": null
           }
         ],
-        "display": "trace(compiled)"
+        "display": "trace(compiled) -> string"
       },
       "methods": []
     },
@@ -7022,42 +7563,42 @@
           },
           {
             "name": "accelerator",
-            "type": "str",
+            "type": "string",
             "optional": true,
             "rest": false,
             "defaultValue": "\"cpu\""
           },
           {
             "name": "logger",
-            "type": "bool",
+            "type": "boolean",
             "optional": true,
             "rest": false,
             "defaultValue": "true"
           },
           {
             "name": "enable_checkpointing",
-            "type": "bool",
+            "type": "boolean",
             "optional": true,
             "rest": false,
             "defaultValue": "false"
           },
           {
             "name": "enable_progress",
-            "type": "bool",
+            "type": "boolean",
             "optional": true,
             "rest": false,
             "defaultValue": "true"
           },
           {
             "name": "callbacks",
-            "type": "list[Callback]",
+            "type": "Callback[]",
             "optional": true,
             "rest": false,
             "defaultValue": null
           },
           {
             "name": "fast_dev_run",
-            "type": "bool",
+            "type": "boolean",
             "optional": true,
             "rest": false,
             "defaultValue": "false"
@@ -7077,7 +7618,7 @@
             "defaultValue": "50"
           }
         ],
-        "display": "Trainer(max_epochs: int = 20, accelerator: str = \"cpu\", logger: bool = true, enable_checkpointing: bool = false, enable_progress: bool = true, callbacks?: list[Callback], fast_dev_run: bool = false, gradient_clip_val?: float, log_every_n_steps: int = 50) -> Trainer"
+        "display": "Trainer(max_epochs: int = 20, accelerator: string = \"cpu\", logger: boolean = true, enable_checkpointing: boolean = false, enable_progress: boolean = true, callbacks?: Callback[], fast_dev_run: boolean = false, gradient_clip_val?: float, log_every_n_steps: int = 50) -> Trainer"
       },
       "methods": [
         {
@@ -7205,7 +7746,7 @@
       "name": "where",
       "kind": "other",
       "description": "Element-wise conditional selection: pick from `a` where `condition` is true, else from `b`.",
-      "returns": null,
+      "returns": "Tensor",
       "signature": {
         "params": [
           {
@@ -7230,7 +7771,7 @@
             "defaultValue": null
           }
         ],
-        "display": "where(condition: Tensor, a: Tensor, b: Tensor)"
+        "display": "where(condition: Tensor, a: Tensor, b: Tensor) -> Tensor"
       },
       "methods": []
     },
@@ -7243,20 +7784,20 @@
         "params": [
           {
             "name": "shape",
-            "type": "list[int]",
+            "type": "int[]",
             "optional": false,
             "rest": false,
             "defaultValue": null
           },
           {
             "name": "opts",
-            "type": "dict",
+            "type": "Record",
             "optional": true,
             "rest": false,
             "defaultValue": null
           }
         ],
-        "display": "zeros(shape: list[int], opts?: dict) -> Tensor"
+        "display": "zeros(shape: int[], opts?: Record) -> Tensor"
       },
       "methods": []
     },
@@ -7296,7 +7837,7 @@
         "params": [
           {
             "name": "name",
-            "type": "str",
+            "type": "string",
             "optional": false,
             "rest": false,
             "defaultValue": null
@@ -7310,34 +7851,34 @@
           },
           {
             "name": "on_step",
-            "type": "bool",
+            "type": "boolean",
             "optional": true,
             "rest": false,
             "defaultValue": null
           },
           {
             "name": "on_epoch",
-            "type": "bool",
+            "type": "boolean",
             "optional": true,
             "rest": false,
             "defaultValue": null
           },
           {
             "name": "prog_bar",
-            "type": "bool",
+            "type": "boolean",
             "optional": true,
             "rest": false,
             "defaultValue": "false"
           },
           {
             "name": "reduce_fx",
-            "type": "str",
+            "type": "string",
             "optional": true,
             "rest": false,
             "defaultValue": "\"mean\""
           }
         ],
-        "display": "log(name: str, value: Tensor, on_step?: bool, on_epoch?: bool, prog_bar: bool = false, reduce_fx: str = \"mean\") -> Tensor"
+        "display": "log(name: string, value: Tensor, on_step?: boolean, on_epoch?: boolean, prog_bar: boolean = false, reduce_fx: string = \"mean\") -> Tensor"
       },
       "methods": []
     }

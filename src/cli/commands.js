@@ -1,9 +1,24 @@
 import fs from 'node:fs';
 import { TeraRuntime } from './runtime.js';
 import { checkSource } from './check.js';
+import { buildMethodReturns } from './method_returns.js';
 import { formatValue } from './format.js';
 import { formatDiagnostic } from './diagnostics.js';
 import { startRepl } from './repl.js';
+
+let cachedMethodReturns;
+// Load generated builtin method-return types so `mlfw check`/`run` infer the same
+// method-call results as the editor (e.g. DataFrame.withColumn -> DataFrame).
+function methodReturns() {
+  if (cachedMethodReturns !== undefined) return cachedMethodReturns;
+  try {
+    const url = new URL('../../vscode-ext/language-data.json', import.meta.url);
+    cachedMethodReturns = buildMethodReturns(JSON.parse(fs.readFileSync(url, 'utf8')));
+  } catch {
+    cachedMethodReturns = null;
+  }
+  return cachedMethodReturns;
+}
 
 export const CLI_USAGE = `Usage:
   mlfw                 Start the Tera REPL
@@ -49,7 +64,7 @@ export async function runCli(args, {
   try {
     source = readFile(file);
     if (mode === 'check') {
-      const { diagnostics } = checkSource(source);
+      const { diagnostics } = checkSource(source, { methodReturns: methodReturns() });
       if (reportDiagnostics(diagnostics, source, file, stderr)) return 1;
       stdout(`${file}: OK`);
       return 0;
@@ -69,7 +84,7 @@ export async function executeSource(source, {
 } = {}) {
   if (stripExit) source = source.replace(/(?:^|\n)\s*(?:exit|quit)\s*;?\s*$/u, '');
   try {
-    const { diagnostics } = checkSource(source);
+    const { diagnostics } = checkSource(source, { methodReturns: methodReturns() });
     if (reportDiagnostics(diagnostics, source, filename, stderr)) return 1;
     const result = await new TeraRuntime({ output: stdout }).execute(source);
     const text = formatValue(result);

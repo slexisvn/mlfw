@@ -45,7 +45,7 @@ export function tokenClass(token, code, index) {
   if (TYPE_SET.has(token)) return 'tok-type';
   if (BUILTIN_SET.has(token)) return 'tok-builtin';
   if (token[0] >= 'A' && token[0] <= 'Z') return 'tok-type';
-  return null;
+  return 'tok-ident';
 }
 
 function escapeHtml(value) {

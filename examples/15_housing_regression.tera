@@ -23,13 +23,13 @@ model HousePricer():
   forward (x: Tensor) -> Tensor:
     return net(x)
 
-  train (batch: list[Tensor]):
+  train (batch: Tensor[]):
     a, b = batch
     loss = loss_fn(HousePricer(a), b)
     log("train_loss", loss, prog_bar=true)
     return loss
 
-  validate (batch: list[Tensor]):
+  validate (batch: Tensor[]):
     a, b = batch
     log("val_loss", loss_fn(HousePricer(a), b), prog_bar=true)
 

@@ -102,7 +102,7 @@
         },
         {
           "name": "storage.type.tera",
-          "match": "\\b(?:Tensor|dict|float|int|list|none|num|number|str|string)\\b"
+          "match": "\\b(?:Record|Tensor|boolean|float|int|none|string)\\b"
         }
       ]
     },
