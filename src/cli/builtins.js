@@ -221,7 +221,9 @@ export function installBuiltins(runtime, define) {
   define('webgpu', 'webgpu');
   for (const dtype of ['f16', 'f32', 'f64', 'i32', 'i64', 'bool']) define(dtype, dtype);
 
-  define('Tokenizer', (...args) => constructWithSnakeCase(Tokenizer, args));
+  const TokenizerFactory = (...args) => constructWithSnakeCase(Tokenizer, args);
+  TokenizerFactory.load = path => Tokenizer.load(path);
+  define('Tokenizer', TokenizerFactory);
 
   define('TensorDataset', (...args) => new TensorDataset(...args));
   define('DataLoader', (...args) => {

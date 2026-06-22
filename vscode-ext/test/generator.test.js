@@ -88,6 +88,8 @@ describe('generate()', () => {
     const tok = data.builtins.find(b => b.name === 'Tokenizer');
     expect(tok.methods.find(m => m.name === 'padId').returns).toBe('int');
     expect(tok.methods.find(m => m.name === 'encode').returns).toBe('int[]');
+    expect(tok.methods.find(m => m.name === 'save').returns).toBe('none');
+    expect(tok.methods.find(m => m.name === 'load').returns).toBe('Tokenizer');
     expect(data.pseudoTypes.Model.find(m => m.name === 'to').returns).toBe('Model');
   });
 });

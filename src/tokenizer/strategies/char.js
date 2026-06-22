@@ -13,4 +13,12 @@ export class CharStrategy {
   detokenize(tokens) {
     return tokens.join('');
   }
+
+  toJSON() {
+    return { lowercase: this._lowercase };
+  }
+
+  static fromJSON(data = {}) {
+    return new CharStrategy({ lowercase: data.lowercase ?? false });
+  }
 }

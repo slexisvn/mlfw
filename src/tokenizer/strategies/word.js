@@ -13,4 +13,12 @@ export class WordStrategy {
   detokenize(tokens) {
     return tokens.join(' ');
   }
+
+  toJSON() {
+    return { lowercase: this._lowercase };
+  }
+
+  static fromJSON(data = {}) {
+    return new WordStrategy({ lowercase: data.lowercase ?? false });
+  }
 }

@@ -35,4 +35,17 @@ export class Vocab {
   tokens() {
     return this._idToToken.slice();
   }
+
+  static fromTokens(tokens) {
+    if (!Array.isArray(tokens)) throw new Error('mlfw tokenizer: vocab must be an array');
+    const vocab = new Vocab();
+    const seen = new Set();
+    for (const token of tokens) {
+      if (typeof token !== 'string') throw new Error('mlfw tokenizer: vocab entries must be strings');
+      if (seen.has(token)) throw new Error(`mlfw tokenizer: duplicate vocab token '${token}'`);
+      seen.add(token);
+      vocab.add(token);
+    }
+    return vocab;
+  }
 }

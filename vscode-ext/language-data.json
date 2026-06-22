@@ -7356,6 +7356,40 @@
           }
         },
         {
+          "name": "save",
+          "description": "Save the fitted tokenizer as a JSON artifact.",
+          "returns": "none",
+          "signature": {
+            "params": [
+              {
+                "name": "path",
+                "type": "string",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "save(path: string) -> none"
+          }
+        },
+        {
+          "name": "load",
+          "description": "Load a tokenizer JSON artifact.",
+          "returns": "Tokenizer",
+          "signature": {
+            "params": [
+              {
+                "name": "path",
+                "type": "string",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "load(path: string) -> Tokenizer"
+          }
+        },
+        {
           "name": "encode",
           "description": "Tokenize `text` to a list of integer ids. Optionally wrap with begin/end-of-sequence tokens.",
           "returns": "int[]",

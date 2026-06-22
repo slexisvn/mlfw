@@ -191,6 +191,7 @@ describe('DocumentAnalyzer type checking', () => {
       '  forward (x: Tensor) -> Tensor:',
       '    return fc(x)',
       'tok = Tokenizer(mode="bpe")',
+      'loaded = Tokenizer.load("tokenizer.json")',
       'pad = tok.padId',
       'vs = tok.vocabSize',
       'ids = tok.encode("hi")',
@@ -201,6 +202,7 @@ describe('DocumentAnalyzer type checking', () => {
     const flat = doc.symbols.flat;
     expect(doc.errors.filter(e => e.source === 'typecheck')).toEqual([]);
     expect(flat.find(s => s.name === 'tok')?.typeName).toBe('Tokenizer');
+    expect(flat.find(s => s.name === 'loaded')?.typeName).toBe('Tokenizer');
     expect(flat.find(s => s.name === 'pad')?.typeName).toBe('int');
     expect(flat.find(s => s.name === 'ids')?.typeName).toBe('int[]');
     expect(flat.find(s => s.name === 'moved')?.typeName).toBe('Model');

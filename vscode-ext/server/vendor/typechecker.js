@@ -250,6 +250,7 @@ class TypeChecker {
     if (!type) return null;
     if (type.kind === 'tensor') return 'Tensor';
     if (type.kind === 'module') return type.name || null;
+    if (type.kind === 'function' && type.ret?.kind === 'module') return type.ret.name || null;
     return null;
   }
 

@@ -128,4 +128,36 @@ export class BpeStrategy {
     for (const token of tokens) joined += token;
     return joined.split(this._eow).join(' ').trim();
   }
+
+  toJSON() {
+    const merges = [...this._ranks.entries()]
+      .map(([key]) => {
+        const sep = key.indexOf(PAIR_SEP);
+        return [key.slice(0, sep), key.slice(sep + 1)];
+      });
+    return {
+      numMerges: this._numMerges,
+      lowercase: this._lowercase,
+      endOfWord: this._eow,
+      merges,
+    };
+  }
+
+  static fromJSON(data = {}) {
+    if (!Array.isArray(data.merges)) throw new Error('mlfw tokenizer: bpe strategy merges must be an array');
+    const strategy = new BpeStrategy({
+      numMerges: data.numMerges ?? data.merges.length,
+      lowercase: data.lowercase ?? false,
+      endOfWord: data.endOfWord ?? '</w>',
+    });
+    strategy._ranks = new Map();
+    for (let rank = 0; rank < data.merges.length; rank++) {
+      const pair = data.merges[rank];
+      if (!Array.isArray(pair) || pair.length !== 2 || pair.some(x => typeof x !== 'string')) {
+        throw new Error('mlfw tokenizer: bpe merges must be string pairs');
+      }
+      strategy._ranks.set(pairKey(pair[0], pair[1]), rank);
+    }
+    return strategy;
+  }
 }

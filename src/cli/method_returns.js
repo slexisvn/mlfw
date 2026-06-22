@@ -1,4 +1,4 @@
-import { ANY, INT, FLOAT, STRING, BOOL, TENSOR, listType, moduleType } from './types.js';
+import { ANY, INT, FLOAT, STRING, BOOL, NONE, TENSOR, listType, moduleType } from './types.js';
 
 // RNN families return `(output, state)` — model their call as a tensor list so a
 // destructuring assignment (`out, state = lstm(x)`) infers each part as a tensor.
@@ -18,6 +18,7 @@ export function resolveReturn(name) {
   if (name === 'float') return FLOAT;
   if (name === 'string' || name === 'str') return STRING;
   if (name === 'boolean' || name === 'bool') return BOOL;
+  if (name === 'none') return NONE;
   return moduleType(name);
 }
 

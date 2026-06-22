@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { checkSource } from '../../src/cli/check.js';
 import { buildMethodReturns } from '../../src/cli/method_returns.js';
 import { parse } from '../../src/cli/parser.js';
@@ -177,6 +179,10 @@ describe('Tera type checker', () => {
       const [error] = diagnoseWithMethods('df = load_csv("x.csv")\nn: int = df.withColumn("s", expr("x"))');
       expect(error?.message ?? '').toContain('cannot assign');
     });
+
+    it('infers Tokenizer.load as a tokenizer', () => {
+      expect(diagnoseWithMethods('tok = Tokenizer.load("tokenizer.json")\nids: int[] = tok.encode("hi")')).toEqual([]);
+    });
   });
 
   describe('rejects the old (pre-clean-break) syntax', () => {
@@ -244,6 +250,25 @@ describe('Tera type checker', () => {
     it('executes annotated assignments unchanged', async () => {
       const result = await new TeraRuntime({ output: () => {} }).execute('x: int = 41\nx + 1');
       expect(result).toBe(42);
+    });
+
+    it('saves and loads a tokenizer from Tera', async () => {
+      const dir = fs.mkdtempSync(join(tmpdir(), 'mlfw-tera-tokenizer-'));
+      try {
+        const path = join(dir, 'tokenizer.json').replace(/\\/g, '/');
+        const source = [
+          'tok = Tokenizer(mode="bpe", lowercase=true, num_merges=40)',
+          'tok.fit(["hello world", "hello there", "world hello"])',
+          `tok.save("${path}")`,
+          `tok2 = Tokenizer.load("${path}")`,
+          'ids = tok2.encode("hello world")',
+          'tok2.decode(ids)',
+        ].join('\n');
+        const result = await new TeraRuntime({ output: () => {} }).execute(source);
+        expect(result).toBe('hello world');
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
     });
   });
 

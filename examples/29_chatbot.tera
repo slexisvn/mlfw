@@ -17,6 +17,8 @@ test_a_text = [r.answer for r in test_rows]
 tok = Tokenizer(mode=mode, lowercase=true, num_merges=800)
 tok.fit(train_q_text + train_a_text + test_q_text + test_a_text)
 
+tok.save("tok.json")
+
 questions = tok.encodeBatch(train_q_text)
 test_questions = tok.encodeBatch(test_q_text)
 
@@ -155,19 +157,19 @@ print("params:", n_params, "| train pairs:", train_q_text.length, "| test pairs:
 # save(net, "examples/chatbot.ckpt")
 # print("saved -> examples/chatbot.ckpt (trained on GPU)")
 
-restored = ChatBotLarge(tok.vocabSize, embed_dim, hidden, num_layers, tok.padId)
-load(restored, "examples/chatbot.ckpt")
-# restored.to(device="gpu")
-restored.eval()
+# restored = ChatBotLarge(tok.vocabSize, embed_dim, hidden, num_layers, tok.padId)
+# load(restored, "examples/chatbot.ckpt")
+# # restored.to(device="gpu")
+# restored.eval()
 
-eval_n = test_q_text.length
-if eval_n > 96:
-  eval_n = 96
-test_correct = accuracy(restored, tok, test_questions, test_a_text, gen_len, eval_n)
-print("[eval on CPU] test exact-match (held-out paraphrases):", test_correct, "/", eval_n)
-print("[held-out test] sample replies:")
-show_samples(restored, tok, test_questions, test_q_text, gen_len, 48)
-print("[train] sample replies (memorization check):")
-show_samples(restored, tok, questions, train_q_text, gen_len, 160)
-print("[unseen paraphrase probes]:")
-probe(restored, tok, ["thank you"], gen_len)
+# eval_n = test_q_text.length
+# if eval_n > 96:
+#   eval_n = 96
+# test_correct = accuracy(restored, tok, test_questions, test_a_text, gen_len, eval_n)
+# print("[eval on CPU] test exact-match (held-out paraphrases):", test_correct, "/", eval_n)
+# print("[held-out test] sample replies:")
+# show_samples(restored, tok, test_questions, test_q_text, gen_len, 48)
+# print("[train] sample replies (memorization check):")
+# show_samples(restored, tok, questions, train_q_text, gen_len, 160)
+# print("[unseen paraphrase probes]:")
+# probe(restored, tok, ["thank you"], gen_len)

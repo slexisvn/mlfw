@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Tokenizer, Vocab } from '../../src/tokenizer/index.js';
 
 const CORPUS = [
@@ -94,6 +97,75 @@ describe('BPE training', () => {
     const ids = t.encode('helloworld');
     expect(ids.length).toBeGreaterThan(0);
     expect(typeof t.decode(ids)).toBe('string');
+  });
+});
+
+describe('Tokenizer serialization', () => {
+  for (const mode of ['word', 'char', 'bpe']) {
+    it(`${mode}: saves and loads a fitted tokenizer artifact`, () => {
+      const dir = mkdtempSync(join(tmpdir(), 'mlfw-tokenizer-'));
+      try {
+        const path = join(dir, 'tokenizer.json');
+        const t = new Tokenizer({ mode, lowercase: true, numMerges: 50 });
+        t.fit(CORPUS);
+        t.save(path);
+        const artifact = JSON.parse(readFileSync(path, 'utf8'));
+        expect(artifact.format).toBe('mlfw-tokenizer');
+        expect(Array.isArray(artifact.vocab)).toBe(true);
+        const loaded = Tokenizer.load(path);
+        expect(loaded.vocabSize).toBe(t.vocabSize);
+        expect(loaded.padId).toBe(t.padId);
+        expect(loaded.unkId).toBe(t.unkId);
+        expect(loaded.bosId).toBe(t.bosId);
+        expect(loaded.eosId).toBe(t.eosId);
+        expect(loaded.encode('hello world', { addBos: true, addEos: true })).toEqual(t.encode('hello world', { addBos: true, addEos: true }));
+        expect(loaded.decode(t.encode('hello world'))).toBe('hello world');
+        const batch = loaded.encodeBatch(['hello there', 'good night world'], { maxLen: 5 });
+        expect(batch.shape).toEqual([2, 5]);
+        expect(batch.dtype).toBe('i32');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  }
+
+  it('preserves BPE merge ranks after load', () => {
+    const repeated = Array.from({ length: 20 }, () => 'lower lowest newer wider');
+    const t = new Tokenizer({ mode: 'bpe', numMerges: 80 });
+    t.fit(repeated);
+    const loaded = Tokenizer.fromJSON(t.toJSON());
+    expect(loaded.encode('lower newer')).toEqual(t.encode('lower newer'));
+    expect(loaded.encode('zzzzz')).toEqual(t.encode('zzzzz'));
+  });
+
+  it('throws when saving before fit', () => {
+    const t = new Tokenizer({ mode: 'word' });
+    expect(() => t.save('missing.json')).toThrow(/fit/);
+  });
+
+  it('validates malformed tokenizer artifacts', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mlfw-tokenizer-'));
+    try {
+      const path = join(dir, 'bad.json');
+      writeFileSync(path, JSON.stringify({ format: 'wrong', version: 1 }), 'utf8');
+      expect(() => Tokenizer.load(path)).toThrow(/format/);
+      expect(() => Tokenizer.fromJSON({ format: 'mlfw-tokenizer', version: 999 })).toThrow(/version/);
+      expect(() => Tokenizer.fromJSON({
+        format: 'mlfw-tokenizer',
+        version: 1,
+        mode: 'bpe',
+        config: { vocabSize: null },
+        specialTokens: { pad: '<pad>', unk: '<unk>', bos: '<bos>', eos: '<eos>' },
+        vocab: ['<pad>', '<unk>', '<bos>', '<eos>'],
+        strategy: { merges: [['a']] },
+      })).toThrow(/merges/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a vocab size smaller than special tokens', () => {
+    expect(() => new Tokenizer({ mode: 'word', vocabSize: 2 })).toThrow(/vocabSize/);
   });
 });
 
