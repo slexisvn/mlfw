@@ -32,7 +32,6 @@ jobs:
         with:
           repository: ${{ env.QUERY_ENGINE_REPOSITORY }}
           path: ${{ env.QUERY_ENGINE_PATH }}
-          token: ${{ secrets.QUERY_ENGINE_REPO_TOKEN }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v5
@@ -56,8 +55,10 @@ jobs:
             npm run build
           fi
 
-          if [ -f dist/query-engine.browser.js ]; then
+          if [ -f dist/bundle/browser/query-engine.browser.js ]; then
             cp dist/bundle/browser/query-engine.browser.js query-engine.browser.js
+          elif [ -f dist/query-engine.browser.js ]; then
+            cp dist/query-engine.browser.js query-engine.browser.js
           fi
 
           test -f query-engine.browser.js
