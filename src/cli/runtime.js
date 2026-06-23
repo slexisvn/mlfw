@@ -193,7 +193,6 @@ export class TeraRuntime {
     else if (callable && typeof callable.forward === 'function' && typeof callable !== 'function') result = callable.forward(...positional);
     else if (typeof callable !== 'function') throw new Error('Value is not callable');
     else result = callable(...positional);
-    // Await if result is a Promise (e.g. WebGPU async execution)
     if (result && typeof result.then === 'function') result = await result;
     return result;
   }
@@ -398,9 +397,6 @@ export class TeraRuntime {
   _installBuiltins() {
     const define = (name, value) => this.global.define(name, value);
     installBuiltins(this, define);
-    // `log` is only valid inside train/validate (bindLog shadows this in those
-    // scopes). Defined here, AFTER installBuiltins, so it is not collected as a
-    // global builtin name but still gives a clear message when called elsewhere.
     this.global.define('log', () => { throw new Error('log() can only be called inside a train or validate block'); });
   }
 
@@ -429,7 +425,6 @@ export class TeraRuntime {
           throw new Error(`Index ${index} is out of bounds for dimension ${dim} with size ${value.shape[dim]}`);
         }
         value = value.select(dim, index);
-        // Return plain number for scalar (0-dim) result, like Python
         if (value.ndim === 0) return value.item();
       }
     }

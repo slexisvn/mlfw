@@ -1,7 +1,5 @@
 import { fs } from '#io/fs';
 
-// Parse CSV text into an array of row objects keyed by header name, suitable for
-// QueryEngine.createDataFrame(). Values are coerced to numbers where possible.
 export function parseCsvRows(content, separator = ',') {
   const lines = splitLines(content);
   if (lines.length === 0) throw new Error('CSV file is empty');
@@ -88,10 +86,6 @@ function coerceValue(raw) {
   return raw;
 }
 
-// Incremental CSV parser for streaming large files without holding the whole
-// dataset. Feed decoded text chunks via feed(); parsed rows accumulate as row
-// objects in `pending` — drain() them in batches (e.g. into a RelationBuilder)
-// so peak memory stays at one batch instead of the whole file.
 export class CsvStreamParser {
   constructor(separator = ',') {
     this.separator = separator;

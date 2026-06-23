@@ -31,9 +31,6 @@ const browserStubPlugin = {
   },
 };
 
-// The query-engine browser plugin lazily imports distributed-execution modules
-// that ship only with the node build. They are never reached in the browser, so
-// resolve them to a stub that throws if ever invoked.
 const distributedStubPlugin = {
   name: 'mlfw-distributed-stub',
   setup(b) {

@@ -1,4 +1,3 @@
-import './qe_config.js';
 import * as fw from '../index.js';
 import * as ops from '../tensor/ops/ops.js';
 import { Tensor } from '../tensor/core/tensor.js';
@@ -39,15 +38,12 @@ export const MODULES = [
   'BCELoss',
 ];
 
-// One shared query engine backs every DataFrame so they can be joined together.
 let _engine = null;
 function engine() {
   return _engine ?? (_engine = createEngine());
 }
 
 let _uploadTableId = 0;
-// Build the relation once from typed column arrays (no row objects) and register
-// it as a scannable table; returns the table name.
 function registerColumnsAsTable(columns) {
   const eng = engine();
   const relation = InMemoryRelation.fromColumns(columns);
@@ -68,14 +64,9 @@ export function createDataFrameFromColumns(columns) {
   return engine().sql(`SELECT * FROM ${registerColumnsAsTable(columns)}`);
 }
 
-// Uploaded CSV files (browser): file name -> registered table name. The relation
-// is built once on upload; load_csv() re-scans it without rebuilding or keeping a
-// second copy of the column data.
 const _uploadedCsv = new Map();
 export function setUploadedCsv(name, columns) { _uploadedCsv.set(name, registerColumnsAsTable(columns)); }
 
-// Streaming ingest: append row batches into a RelationBuilder so the whole file
-// is never held in memory at once. finish() registers the relation under `name`.
 export function beginUploadedCsv(name) {
   const builder = InMemoryRelation.builder();
   return {
@@ -104,14 +95,10 @@ function isColumnArg(value) {
   return typeof value === 'string' || value instanceof Col;
 }
 
-// DataFrame is the query-engine class shipped in the plugin bundle. Augment its
-// prototype with tera-facing conveniences: tensor conversion, label encoding,
-// and a readable print form.
 DataFrame.prototype.toString = function () {
   return `DataFrame(${this.columns().join(', ')})`;
 };
 
-// Pandas-style first-N-rows view; returns a (lazy) DataFrame.
 DataFrame.prototype.head = function (n = 5) {
   return this.limit(n);
 };

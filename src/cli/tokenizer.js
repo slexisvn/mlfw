@@ -124,7 +124,6 @@ function addIndentation(tokens) {
   for (let i = 0; i < tokens.length; i++) {
     const tok = tokens[i];
 
-    // Handle EOF: emit remaining dedents, then eof
     if (tok.type === 'eof') {
       while (indentStack.length > 1) {
         indentStack.pop();
@@ -142,7 +141,6 @@ function addIndentation(tokens) {
     if (tok.type === 'newline') {
       if (bracketDepth > 0) continue;
 
-      // Look ahead to find next non-blank line
       let j = i + 1;
       while (j < tokens.length && tokens[j].type === 'newline') j++;
       if (j >= tokens.length || tokens[j].type === 'eof') {
@@ -156,7 +154,6 @@ function addIndentation(tokens) {
         continue;
       }
 
-      // Line continuation: next line starts with '.' (method chaining)
       if (tokens[j].type === 'symbol' && tokens[j].value === '.') {
         i = j - 1;
         continue;

@@ -182,7 +182,6 @@ function extractBufferNames(buffer) {
     const name = m[1];
     if (!KEYWORDS.has(name)) names.push(name);
   }
-  // Also extract fn/model names and parameter names
   for (const m of buffer.matchAll(/\b(?:fn|model)\s+([A-Za-z_][A-Za-z0-9_]*)/g)) {
     names.push(m[1]);
   }

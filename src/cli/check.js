@@ -16,13 +16,10 @@ export function checkSource(source, { methodReturns } = {}) {
   return { diagnostics: typecheck(parse(source), buildEnv(methodReturns)) };
 }
 
-// Returns { diagnostics, types } where `types` maps `name:line` -> inferred type string.
 export function analyzeSource(source, { methodReturns } = {}) {
   return typecheckWithTypes(parse(source), buildEnv(methodReturns));
 }
 
-// Full analysis for editors/notebook: diagnostics + inferred types + a scoped symbol
-// table (resolve by position, list visible symbols, model fields).
 export function analyzeDocument(source, { methodReturns } = {}) {
   const program = parse(source);
   const { diagnostics, types } = typecheckWithTypes(program, buildEnv(methodReturns));

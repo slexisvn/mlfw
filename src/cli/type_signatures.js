@@ -6,7 +6,6 @@ import { moduleCallReturn } from './method_returns.js';
 
 const CONSTANT_NAMES = ['cpu', 'gpu', 'wasm', 'webgpu', 'f16', 'f32', 'f64', 'i32', 'i64', 'bool'];
 
-// NN module instances are callable (forward); map each to its call-result type.
 export const MODULE_CALLS = new Map([...MODULES, 'Sequential'].map(name => [name, moduleCallReturn(name)]));
 
 function returnOverrides() {

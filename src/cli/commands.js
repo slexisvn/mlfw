@@ -7,8 +7,6 @@ import { formatDiagnostic } from './diagnostics.js';
 import { startRepl } from './repl.js';
 
 let cachedMethodReturns;
-// Load generated builtin method-return types so `mlfw check`/`run` infer the same
-// method-call results as the editor (e.g. DataFrame.withColumn -> DataFrame).
 function methodReturns() {
   if (cachedMethodReturns !== undefined) return cachedMethodReturns;
   try {

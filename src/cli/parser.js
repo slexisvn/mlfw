@@ -88,11 +88,9 @@ class Parser {
 
   parseBlock() {
     this.expectValue(':');
-    // One-line form: colon followed by statement on same line
     if (!this.at('newline') && !this.at('indent') && !this.at('eof')) {
       return [this.parseStatement()];
     }
-    // Multi-line form: colon + newline + INDENT ... DEDENT
     this.skipLines();
     this.expect('indent');
     const body = this.parseProgram('dedent').body;

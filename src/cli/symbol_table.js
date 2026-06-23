@@ -138,8 +138,6 @@ function lookupInferred(ctx, name, line) {
   return ctx.inferredTypes.get(`${name}:${line}`) ?? null;
 }
 
-// Prefer the checker's concrete inferred type; fall back to the call's callee name
-// for builtin module constructors the checker only knows as the generic `Module`.
 function bestInferred(ctx, node) {
   const inferred = lookupInferred(ctx, node.name, node.line);
   if (inferred && inferred !== 'Module') return inferred;
