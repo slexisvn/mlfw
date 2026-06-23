@@ -3,23 +3,19 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>mlfw notebook</title>
+  <title>Tera notebook</title>
   <link rel="stylesheet" href="notebook.css" />
   <link rel="stylesheet" href="chart/chart.css" />
 </head>
 <body>
   <header class="toolbar">
     <div class="brand">
-      <span class="logo">mlfw</span>
+      <span class="logo">Tera</span>
       <span class="sub">notebook</span>
     </div>
     <div class="actions">
-      <button id="run-all" title="Run every cell top to bottom">▶▶ Run All</button>
-      <button id="add-cell" title="Add a cell at the end">＋ Cell</button>
       <button id="upload-csv" title="Upload file(s) — click an uploaded file to insert its load command">⭱ File</button>
       <input id="csv-file" type="file" multiple hidden />
-      <button id="restart" title="Reset variables (fresh kernel)">⟳ Restart</button>
-      <button id="clear-out" title="Clear all outputs">⌫ Clear</button>
       <button id="theme-toggle" title="Toggle dark mode">🌙 Dark</button>
       <span class="kernel" id="kernel-status">kernel: ready</span>
     </div>
@@ -33,6 +29,17 @@
     </aside>
     <div class="content">
       <main id="cells" class="cells"></main>
+      <aside class="docs-panel" aria-label="Tera documentation">
+        <div class="docs-top">
+          <div>
+            <div class="docs-kicker">Tera docs</div>
+            <h2>Reference</h2>
+          </div>
+          <span class="docs-badge">live</span>
+        </div>
+        <input id="docs-search" class="docs-search" type="search" placeholder="Search tensor, model, DataFrame..." autocomplete="off" />
+        <div id="docs-list" class="docs-list"></div>
+      </aside>
     </div>
   </div>
 
@@ -42,6 +49,6 @@
     <kbd>Tab</kbd> indent · cells share one kernel, like Jupyter
   </footer>
 
-  <script type="module" src="notebook.js"></script>
+  <script type="module" src="dist/notebook.js"></script>
 </body>
 </html>

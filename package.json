@@ -29,7 +29,9 @@
   },
   "scripts": {
     "start": "node src/cli/index.js",
-    "build": "node scripts/build.js",
+    "build": "npm run build:fw && npm run build:notebook",
+    "build:fw": "node scripts/build.js",
+    "build:notebook": "node scripts/build-notebook.js",
     "test": "vitest run --exclude '**/node_modules/**' --exclude '**/stress/**' --exclude '**/backend/cuda/**' --exclude '**/backend/webgpu/**' --exclude '**/vscode-ext/**'",
     "test:webgpu": "vitest run tests/backend/webgpu/",
     "test:cuda": "vitest run tests/backend/cuda/",

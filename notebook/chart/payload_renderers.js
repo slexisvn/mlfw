@@ -19,7 +19,11 @@ export function renderPayloadChart(host, spec) {
 
 function renderDistribution(svg, type, groups, width, height, host) {
   const layout = { left: 58, right: width - 20, top: 42, bottom: height - 48 };
-  const values = groups.flatMap(group => group.summary ? [group.summary.low, group.summary.high, ...group.summary.outliers] : []);
+  const values = groups.flatMap(group => {
+    const summaryValues = group.summary ? [group.summary.low, group.summary.high, ...group.summary.outliers] : [];
+    const densityValues = type === 'violin' ? (group.density?.points ?? []).map(point => point.x) : [];
+    return [...summaryValues, ...densityValues];
+  });
   const y = createScale(values, layout.bottom, layout.top, { padding: 0.1 });
   const x = createScale(groups.map(group => group.name), layout.left, layout.right);
   const tooltip = createTooltip(host);

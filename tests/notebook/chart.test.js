@@ -130,6 +130,25 @@ describe('notebook chart API', () => {
     expect(groups[0].density.points).toHaveLength(80);
   });
 
+  it('includes KDE support in violin scale domains', async () => {
+    const groups = await adaptDistribution([2, 4, 4, 5, 6, 8, 9], {}, true);
+    const summaryValues = groups.flatMap(group => [group.summary.low, group.summary.high, ...group.summary.outliers]);
+    const densityValues = groups.flatMap(group => group.density.points.map(point => point.x));
+    expect(Math.min(...densityValues)).toBeLessThan(Math.min(...summaryValues));
+    expect(Math.max(...densityValues)).toBeGreaterThan(Math.max(...summaryValues));
+    const domainValues = groups.flatMap(group => [
+      group.summary.low,
+      group.summary.high,
+      ...group.summary.outliers,
+      ...group.density.points.map(point => point.x),
+    ]);
+    const scale = createScale(domainValues, 240, 42, { padding: 0.1 });
+    for (const value of densityValues) {
+      expect(scale.scale(value)).toBeGreaterThanOrEqual(42);
+      expect(scale.scale(value)).toBeLessThanOrEqual(240);
+    }
+  });
+
   it('auto-selects numeric correlation columns', async () => {
     const rows = [{ a: 1, b: 2, name: 'x' }, { a: 2, b: 4, name: 'y' }];
     const frame = mockFrame(rows, ['a', 'b', 'name'], [

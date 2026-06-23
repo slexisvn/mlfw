@@ -2,6 +2,8 @@ import { TeraRuntime, formatValue, CsvStreamParser, memfs, analyzeDocument, buil
 import { createChartApi, isChartSpec, renderChart } from './chart/index.js';
 import { CHART_METHOD_DOCS, chartMethodOwner } from './chart/docs.js';
 import { highlightHtml, TYPE_SET } from './highlight.js';
+import { initNotebookDocs, setNotebookDocsError, updateNotebookDocs } from './tera-docs.js';
+import { appendInlineCode } from './format.js';
 
 const STORAGE_KEY = 'mlfw-notebook-v1';
 const THEME_KEY = 'mlfw-notebook-theme';
@@ -363,10 +365,12 @@ function createCell(code = '', { focus = false, before = null } = {}) {
   downBtn.textContent = '↓ down';
   downBtn.title = 'Move cell down';
   const addBtn = document.createElement('button');
-  addBtn.textContent = '＋ below';
+  addBtn.className = 'add-cell';
+  addBtn.textContent = '＋ cell';
+  addBtn.title = 'Add a cell below';
   const delBtn = document.createElement('button');
   delBtn.textContent = '🗑 delete';
-  tools.append(upBtn, downBtn, addBtn, delBtn);
+  tools.append(addBtn, upBtn, downBtn, delBtn);
 
   root.append(gutter, main, tools);
 
@@ -981,7 +985,10 @@ async function loadDocs() {
         });
       }
     }
-  } catch { /* hover docs unavailable */ }
+    updateNotebookDocs(data);
+  } catch {
+    setNotebookDocsError('Tera docs unavailable.');
+  }
 }
 
 let hoverSpan = null;
@@ -1016,7 +1023,7 @@ function showHoverAt(info, rect) {
   if (info.description) {
     const desc = document.createElement('div');
     desc.className = 'hd-desc';
-    desc.textContent = info.description;
+    appendInlineCode(desc, info.description);
     hoverEl.append(desc);
   }
   hoverEl.style.display = 'block';
@@ -1066,10 +1073,6 @@ function onEditorHover(e, cell) {
   showHoverAt(info, span.getBoundingClientRect());
 }
 
-document.getElementById('run-all').addEventListener('click', runAll);
-document.getElementById('add-cell').addEventListener('click', () => createCell('', { focus: true }));
-document.getElementById('restart').addEventListener('click', restart);
-document.getElementById('clear-out').addEventListener('click', clearOutputs);
 const csvInput = document.getElementById('csv-file');
 document.getElementById('upload-csv').addEventListener('click', () => csvInput.click());
 csvInput.addEventListener('change', () => { uploadFiles([...csvInput.files]); csvInput.value = ''; });
@@ -1089,6 +1092,7 @@ document.addEventListener('click', (e) => { if (ac.el && !ac.el.contains(e.targe
 document.addEventListener('scroll', hideHover, true);
 
 initTheme();
+initNotebookDocs({ createCell });
 loadDocs();
 makeRuntime();
 renderFiles();
