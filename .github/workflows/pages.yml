@@ -16,7 +16,7 @@ concurrency:
 
 env:
   NODE_VERSION: 24
-  QUERY_ENGINE_REPOSITORY: slexisvn/query-engine
+  QUERY_ENGINE_REPOSITORY: slexisvn/query_engine
   QUERY_ENGINE_PATH: plugins/query-engine
 
 jobs:
@@ -32,7 +32,7 @@ jobs:
         with:
           repository: ${{ env.QUERY_ENGINE_REPOSITORY }}
           path: ${{ env.QUERY_ENGINE_PATH }}
-          token: ${{ secrets.QUERY_ENGINE_REPO_TOKEN || github.token }}
+          token: ${{ secrets.QUERY_ENGINE_REPO_TOKEN }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v5
