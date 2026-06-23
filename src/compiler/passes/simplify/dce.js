@@ -8,6 +8,7 @@ export class DCEPass extends FunctionPass {
   constructor() {
     super('dce');
     this.preservedAnalyses = new Set([ShapeAnalysis]);
+    this.requiredAnalyses = [MemoryEffectAnalysis];
   }
 
   run(func, analysisManager) {

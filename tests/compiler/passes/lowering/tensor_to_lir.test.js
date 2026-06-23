@@ -168,17 +168,37 @@ describe('lowerToLIR — accumulator detection', () => {
     expect(innerBody.flushStore.type).toBe('LIRFlatStoreNode');
   });
 
-  it('does not convert non-add pattern to accumulator', () => {
+  it('does not convert a non-accumulator op (sub) to accumulator', () => {
     const accBuf = buf('acc', [4]);
     const load = new BufferLoadNode(accBuf, [idx('i')]);
-    const mul = new MathOpNode('*', load, new FloatImmNode(2));
-    const store = new BufferStoreNode(accBuf, [idx('i')], mul);
+    const sub = new MathOpNode('-', load, new FloatImmNode(2));
+    const store = new BufferStoreNode(accBuf, [idx('i')], sub);
     const block = new BlockNode('blk', [], [{ buffer: accBuf }], [{ buffer: accBuf }], store);
     const loop = new ForNode(idx('j'), new IntImmNode(0), new IntImmNode(8), ForKind.SERIAL, block);
     const pf = makePrimFunc('test', ['p0'], loop, new Map([['p0', accBuf]]));
 
     const lir = lowerToLIR(pf, WasmTarget());
     expect(lir.body.type).toBe('ForNode');
+  });
+
+  it('converts a prod (mul) reduction pattern to LIRAccumulatorNode with op *', () => {
+    const accBuf = buf('acc', [4]);
+    const inBuf = buf('inp', [4, 8]);
+    const load = new BufferLoadNode(accBuf, [idx('i')]);
+    const inLoad = new BufferLoadNode(inBuf, [idx('i'), idx('j')]);
+    const mul = new MathOpNode('*', load, inLoad);
+    const store = new BufferStoreNode(accBuf, [idx('i')], mul);
+    const block = new BlockNode('red', [
+      { iterVar: idx('i'), binding: idx('outer_i') }
+    ], [{ buffer: inBuf }], [{ buffer: accBuf }], store);
+    const innerLoop = new ForNode(idx('j'), new IntImmNode(0), new IntImmNode(8), ForKind.SERIAL, block);
+    const outerLoop = new ForNode(idx('outer_i'), new IntImmNode(0), new IntImmNode(4), ForKind.SERIAL, innerLoop);
+    const pf = makePrimFunc('reduce', ['p0', 'p1'], outerLoop, new Map([['p0', inBuf], ['p1', accBuf]]));
+
+    const lir = lowerToLIR(pf, WasmTarget());
+    const innerBody = lir.body.body;
+    expect(innerBody.type).toBe('LIRAccumulatorNode');
+    expect(innerBody.op).toBe('*');
   });
 
   it('handles swapped operands (val + acc)', () => {

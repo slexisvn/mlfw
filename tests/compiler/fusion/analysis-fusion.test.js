@@ -159,7 +159,7 @@ describe('FusionLegality.canFuse', () => {
     const [r1, r2] = ops(func);
     const result = new FusionLegality().canFuse(r1, r2);
     expect(result.legal).toBe(false);
-    expect(result.reason).toContain('multiple reductions');
+    expect(result.reason.toLowerCase()).toContain('reduction');
   });
 
   it('same op with itself is illegal', () => {

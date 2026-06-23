@@ -11,6 +11,22 @@ export const FusionKind = Object.freeze({
   HORIZONTAL: 'kHorizontal'
 });
 
+const PATTERN_RANK = {
+  [FusionKind.ELEMENTWISE]: 0,
+  [FusionKind.BROADCAST]: 1,
+  [FusionKind.INJECTIVE]: 2,
+  [FusionKind.REDUCTION]: 3,
+};
+
+export function canFusePatterns(pKind, cKind) {
+  const pr = PATTERN_RANK[pKind];
+  const cr = PATTERN_RANK[cKind];
+  if (pr === undefined || cr === undefined) return false;
+  if (pKind === FusionKind.REDUCTION) return cKind === FusionKind.ELEMENTWISE;
+  if (cKind === FusionKind.REDUCTION) return pr <= PATTERN_RANK[FusionKind.INJECTIVE];
+  return true;
+}
+
 export function classifyFusionKind(ops) {
   let hasReduction = false;
   let hasInjective = false;
@@ -96,35 +112,20 @@ export class FusionLegality {
     const pKind = classifyOpPattern(producer);
     const cKind = classifyOpPattern(consumer);
 
+    if (!canFusePatterns(pKind, cKind)) {
+      return { legal: false, reason: `cannot fuse pattern ${pKind} -> ${cKind}` };
+    }
+
+    if ((pKind === FusionKind.REDUCTION || cKind === FusionKind.REDUCTION) && !this.allowReductionFusion) {
+      return { legal: false, reason: 'reduction fusion disabled by target' };
+    }
+
     if (pKind === FusionKind.ELEMENTWISE && cKind === FusionKind.ELEMENTWISE) {
       return this._checkElementwisePair(producer, consumer);
     }
 
-    if (pKind === FusionKind.BROADCAST && cKind === FusionKind.ELEMENTWISE) {
+    if ((pKind === FusionKind.BROADCAST || pKind === FusionKind.REDUCTION) && cKind === FusionKind.ELEMENTWISE) {
       return LEGAL_TRUE;
-    }
-
-    if (pKind === FusionKind.ELEMENTWISE && cKind === FusionKind.REDUCTION) {
-      if (!this.allowReductionFusion) {
-        return { legal: false, reason: 'reduction fusion disabled by target' };
-      }
-      return this._checkProducerConsumerShapes(producer, consumer);
-    }
-
-    if (pKind === FusionKind.REDUCTION && cKind === FusionKind.ELEMENTWISE) {
-      if (!this.allowReductionFusion) {
-        return { legal: false, reason: 'reduction fusion disabled by target' };
-      }
-      return LEGAL_TRUE;
-    }
-
-    if (pKind === FusionKind.REDUCTION && cKind === FusionKind.REDUCTION) {
-      return { legal: false, reason: 'cannot fuse multiple reductions' };
-    }
-
-    if ((pKind === FusionKind.INJECTIVE && cKind === FusionKind.ELEMENTWISE) ||
-        (pKind === FusionKind.ELEMENTWISE && cKind === FusionKind.INJECTIVE)) {
-      return this._checkProducerConsumerShapes(producer, consumer);
     }
 
     return this._checkProducerConsumerShapes(producer, consumer);

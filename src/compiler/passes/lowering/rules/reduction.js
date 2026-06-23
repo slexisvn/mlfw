@@ -1,4 +1,4 @@
-import { MathOpNode, FloatImmNode, IntImmNode, BufferStoreNode, BufferLoadNode, BlockNode, SeqNode, CallExternNode, IfThenElseNode, CompareNode } from '../../../ir/tensor/nodes.js';
+import { MathOpNode, FloatImmNode, IntImmNode, BufferStoreNode, BufferLoadNode, BlockNode, SeqNode, CallExternNode, IfThenElseNode, CompareNode, IterVarKind } from '../../../ir/tensor/nodes.js';
 import { Buffer } from '../../../ir/tensor/buffer.js';
 import { DYNAMIC } from '../../../ir/graph/types.js';
 import { registerLoweringRule, buildSpatialNest, wrapLoopsWithNodes, concatIterVars } from '../lowering_registry.js';
@@ -45,6 +45,7 @@ export function register() {
     const accNest = buildSpatialNest(ctx, 'sa', spatialDims, inBuf.shape, inBuf);
     const rVars = ctx.allocVarArray('r', reduceDims.length);
     const rIvs = ctx.allocBindArray('rv', rVars);
+    for (const iv of rIvs) iv.kind = IterVarKind.COMM_REDUCE;
     const inIndices = new Array(inBuf.shape.length);
     for (let i = 0; i < spatialDims.length; i++) inIndices[spatialDims[i]] = accNest.ivs[i].iterVar;
     for (let i = 0; i < reduceDims.length; i++) inIndices[reduceDims[i]] = rIvs[i].iterVar;

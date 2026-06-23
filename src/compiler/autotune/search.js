@@ -144,14 +144,28 @@ export class EvolutionarySearch {
   }
 
   _mutate(sketch, params) {
-    const newParams = { ...params };
-    for (const v of sketch.variables) {
-      if (this._rngFloat() < this.mutationRate) {
-        newParams[v.name] = v.sample((max) => this._rng(max));
-      }
-    }
-    return { sketch, params: newParams };
+    const ctx = { rngFloat: () => this._rngFloat(), rng: (m) => this._rng(m), mutationRate: this.mutationRate };
+    const muts = [defaultResampleMutator, ..._mutators];
+    let cur = params;
+    for (const m of muts) cur = m(cur, sketch, ctx);
+    return { sketch, params: cur };
   }
+}
+
+const _mutators = [];
+
+export function registerMutator(fn) {
+  _mutators.push(fn);
+}
+
+function defaultResampleMutator(params, sketch, ctx) {
+  const newParams = { ...params };
+  for (const v of sketch.variables) {
+    if (ctx.rngFloat() < ctx.mutationRate) {
+      newParams[v.name] = v.sample((max) => ctx.rng(max));
+    }
+  }
+  return newParams;
 }
 
 export function createSearchStrategy(config = {}) {

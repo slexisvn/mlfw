@@ -1,0 +1,104 @@
+import { describe, it, expect } from 'vitest';
+import {
+  ForNode, BlockNode, BufferStoreNode, BufferLoadNode, MathOpNode,
+  VariableNode, IntImmNode, ForKind, SeqNode, PrimFunc,
+} from '../../../src/compiler/ir/tensor/nodes.js';
+import { Buffer } from '../../../src/compiler/ir/tensor/buffer.js';
+import { Schedule, resetVarCounter } from '../../../src/compiler/schedule/schedule.js';
+
+function countLoads(node, name) {
+  if (!node || typeof node !== 'object') return 0;
+  let c = 0;
+  if (node.type === 'BufferLoadNode' && node.buffer && node.buffer.name === name) c++;
+  for (const k of ['a', 'b', 'expr', 'value', 'condition', 'thenBody', 'elseBody', 'body', 'initBody']) {
+    if (node[k]) c += countLoads(node[k], name);
+  }
+  for (const arr of ['args', 'indices', 'stmts']) {
+    if (node[arr]) for (const x of node[arr]) c += countLoads(x, name);
+  }
+  return c;
+}
+
+function buildProducerConsumer() {
+  resetVarCounter();
+  const A = new Buffer('A', [8], 'float32', 'global');
+  const B = new Buffer('B', [8], 'float32', 'global');
+  const C = new Buffer('C', [8], 'float32', 'global');
+
+  const pi = new VariableNode('pi', 'int32');
+  const pStore = new BufferStoreNode(B, [pi], new MathOpNode('*', new BufferLoadNode(A, [pi]), new IntImmNode(2)));
+  const pBlock = new BlockNode('pb', [{ iterVar: pi, binding: pi }], [{ buffer: A }], [{ buffer: B }], pStore);
+  const pNest = new ForNode(pi, new IntImmNode(0), new IntImmNode(8), ForKind.SERIAL, pBlock);
+
+  const ci = new VariableNode('ci', 'int32');
+  const cStore = new BufferStoreNode(C, [ci], new MathOpNode('+', new BufferLoadNode(B, [ci]), new IntImmNode(1)));
+  const cBlock = new BlockNode('cb', [{ iterVar: ci, binding: ci }], [{ buffer: B }], [{ buffer: C }], cStore);
+  const cNest = new ForNode(ci, new IntImmNode(0), new IntImmNode(8), ForKind.SERIAL, cBlock);
+
+  return new Schedule(new PrimFunc('f', [], new SeqNode([pNest, cNest])));
+}
+
+describe('schedule: compute_inline / compute_at / reverse_compute_at', () => {
+  it('inlines a producer into its consumer, eliminating loads of the intermediate', () => {
+    const sch = buildProducerConsumer();
+    expect(countLoads(sch.func.body, 'B')).toBe(1);
+    expect(countLoads(sch.func.body, 'A')).toBe(1);
+
+    sch.computeInline('pb');
+
+    expect(countLoads(sch.func.body, 'B')).toBe(0);
+    expect(countLoads(sch.func.body, 'A')).toBe(1);
+    expect(sch.trace.length).toBe(1);
+  });
+
+  it('compute_at relocates a producer into a consumer loop (aligned case)', () => {
+    const sch = buildProducerConsumer();
+    expect(sch.getLoops('pb').map((l) => l.loopVar.name)).toEqual(['pi']);
+
+    sch.computeAt('pb', 'ci');
+
+    expect(sch.getLoops('pb').map((l) => l.loopVar.name)).toEqual(['ci']);
+    expect(countLoads(sch.func.body, 'B')).toBe(1);
+    expect(countLoads(sch.func.body, 'A')).toBe(1);
+    expect(sch.trace.length).toBe(1);
+  });
+
+  it('reverse_compute_at relocates a consumer into a producer loop (aligned case)', () => {
+    const sch = buildProducerConsumer();
+    expect(sch.getLoops('cb').map((l) => l.loopVar.name)).toEqual(['ci']);
+
+    sch.reverseComputeAt('cb', 'pi');
+
+    expect(sch.getLoops('cb').map((l) => l.loopVar.name)).toEqual(['pi']);
+    expect(countLoads(sch.func.body, 'B')).toBe(1);
+    expect(sch.trace.length).toBe(1);
+  });
+
+  it('compute_at refuses non-aligned loop extents', () => {
+    resetVarCounter();
+    const A = new Buffer('A', [8], 'float32', 'global');
+    const B = new Buffer('B', [8], 'float32', 'global');
+    const C = new Buffer('C', [4], 'float32', 'global');
+    const pi = new VariableNode('pi', 'int32');
+    const pStore = new BufferStoreNode(B, [pi], new BufferLoadNode(A, [pi]));
+    const pBlock = new BlockNode('pb', [{ iterVar: pi, binding: pi }], [{ buffer: A }], [{ buffer: B }], pStore);
+    const pNest = new ForNode(pi, new IntImmNode(0), new IntImmNode(8), ForKind.SERIAL, pBlock);
+    const ci = new VariableNode('ci', 'int32');
+    const cStore = new BufferStoreNode(C, [ci], new BufferLoadNode(B, [ci]));
+    const cBlock = new BlockNode('cb', [{ iterVar: ci, binding: ci }], [{ buffer: B }], [{ buffer: C }], cStore);
+    const cNest = new ForNode(ci, new IntImmNode(0), new IntImmNode(4), ForKind.SERIAL, cBlock);
+    const sch = new Schedule(new PrimFunc('f', [], new SeqNode([pNest, cNest])));
+    expect(() => sch.computeAt('pb', 'ci')).toThrow(/extent/);
+  });
+
+  it('refuses to inline a self-referential (recurrence) producer', () => {
+    resetVarCounter();
+    const B = new Buffer('B', [8], 'float32', 'global');
+    const pi = new VariableNode('pi', 'int32');
+    const store = new BufferStoreNode(B, [pi], new MathOpNode('+', new BufferLoadNode(B, [pi]), new IntImmNode(1)));
+    const block = new BlockNode('pb', [{ iterVar: pi, binding: pi }], [{ buffer: B }], [{ buffer: B }], store);
+    const nest = new ForNode(pi, new IntImmNode(0), new IntImmNode(8), ForKind.SERIAL, block);
+    const sch = new Schedule(new PrimFunc('f', [], nest));
+    expect(() => sch.computeInline('pb')).toThrow(/self-referential|consumers/);
+  });
+});

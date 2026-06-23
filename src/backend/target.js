@@ -37,7 +37,13 @@ export class TargetFeatures {
     this.supportsBlockedLayout = config.supportsBlockedLayout ?? false;
     this.supportsInt8 = config.supportsInt8 ?? false;
     this.simd = config.simd ?? false;
+    this.host = config.host || null;
+    this.attrs = new Map(Object.entries(config.attrs || {}));
   }
+
+  getAttr(key, fallback = null) { return this.attrs.has(key) ? this.attrs.get(key) : fallback; }
+  hasAttr(key) { return this.attrs.has(key); }
+  withAttr(key, value) { this.attrs.set(key, value); return this; }
 
   isGPU() {
     return this.kind === TargetKind.CUDA || this.kind === TargetKind.WEBGPU;

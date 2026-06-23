@@ -2,7 +2,7 @@ import { FunctionPass, PassResult } from '../pass.js';
 import { Operation, cloneRegion } from '../../ir/graph/operation.js';
 import { Block, Region } from '../../ir/graph/block.js';
 import { registry } from '../../ir/graph/ops.js';
-import { FusionKind, classifyOpPattern } from './fusion_analysis.js';
+import { FusionKind, classifyOpPattern, canFusePatterns } from './fusion_analysis.js';
 import { FusionGroup } from './fusion_groups.js';
 import { FusionCostModel } from './fusion_cost.js';
 import { PostDominanceAnalysis } from '../../analysis/dominance.js';
@@ -15,6 +15,7 @@ const SKIP_OPS = new Set(['return', 'yield', 'constant', 'scalar_constant']);
 export class DominatorFusionPass extends FunctionPass {
   constructor(config = {}) {
     super('DominatorFusionPass');
+    this.requiredAnalyses = [UseDefAnalysis];
     const target = config.target || {};
     this.maxFusionSize = target.maxFusionSize || config.maxFusionSize || 512;
     this.maxReductions = config.maxReductions || 1;
@@ -185,17 +186,7 @@ export class DominatorFusionPass extends FunctionPass {
   }
 
   _canFusePatterns(producer, consumer) {
-    if (producer === FusionKind.ELEMENTWISE && consumer === FusionKind.ELEMENTWISE) return true;
-    if (producer === FusionKind.BROADCAST && consumer === FusionKind.ELEMENTWISE) return true;
-    if (producer === FusionKind.INJECTIVE && consumer === FusionKind.ELEMENTWISE) return true;
-    if (producer === FusionKind.ELEMENTWISE && consumer === FusionKind.INJECTIVE) return true;
-    if (producer === FusionKind.ELEMENTWISE && consumer === FusionKind.REDUCTION) return true;
-    if (producer === FusionKind.BROADCAST && consumer === FusionKind.REDUCTION) return true;
-    if (producer === FusionKind.INJECTIVE && consumer === FusionKind.REDUCTION) return true;
-    if (producer === FusionKind.REDUCTION && consumer === FusionKind.ELEMENTWISE) return true;
-    if (producer === FusionKind.BROADCAST && consumer === FusionKind.INJECTIVE) return true;
-    if (producer === FusionKind.INJECTIVE && consumer === FusionKind.INJECTIVE) return true;
-    return false;
+    return canFusePatterns(producer, consumer);
   }
 
   _pathAllFusable(from, to, topo, pdom) {

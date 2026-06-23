@@ -1,6 +1,9 @@
 import { GradAccumulator } from './grad_accumulator.js';
-import { getVJPRule } from './vjp_registry.js';
+import { getVJPRule, requireVJPRuleOrBarrier, registerRegionVJP } from './vjp_registry.js';
 import { reduceGradToOperandShape } from './backward_builder.js';
+
+registerRegionVJP('scan', (op, ctx) => buildScanBackward(op, ctx.accumulator, ctx.builder, ctx.materialize, ctx.needsGrad, ctx.scanCheckpoint));
+registerRegionVJP('if', (op, ctx) => buildCondBackward(op, ctx.accumulator, ctx.builder, ctx.materialize, ctx.needsGrad));
 
 export function regionFreeVars(bodyBlock) {
   const local = new Set(bodyBlock.arguments.map(a => a.id));
@@ -83,7 +86,7 @@ function diffBodyStep(builder, bodyBlock, argVals, freeVarMap, gradYields, forwa
     if (op.opName === 'constant') continue;
     const gradOuts = op.results.map(r => acc.get(r.id));
     if (gradOuts.every(g => g === null)) continue;
-    const rule = getVJPRule(op.opName);
+    const rule = requireVJPRuleOrBarrier(op.opName);
     if (!rule) continue;
     const ctx = {
       builder, op,
@@ -149,7 +152,17 @@ export function buildCondBackward(ifOp, accumulator, builder, materialize, needs
   }
 }
 
-export function buildScanBackward(scanOp, accumulator, builder, materialize, needsGrad) {
+function resolveSegmentLength(scanCheckpoint, T) {
+  if (!scanCheckpoint || T <= 1) return null;
+  if (scanCheckpoint === 'sqrt' || scanCheckpoint === true) return Math.max(1, Math.ceil(Math.sqrt(T)));
+  if (typeof scanCheckpoint === 'number' && scanCheckpoint >= 1) {
+    const k = Math.floor(scanCheckpoint);
+    return k >= T ? null : k;
+  }
+  return null;
+}
+
+export function buildScanBackward(scanOp, accumulator, builder, materialize, needsGrad, scanCheckpoint = null) {
   const bodyBlock = scanOp.regions[0].blocks[0];
   assertNoNestedControlFlow(bodyBlock, 'scan');
   const numCarry = scanOp.getAttr('num_carry');
@@ -168,16 +181,9 @@ export function buildScanBackward(scanOp, accumulator, builder, materialize, nee
   const freeVarMap = new Map(freeVars.map(v => [v.id, materialize(v)]));
   const bodyConstCache = new Map();
 
-  let carry = initCarryB;
-  const carriesAtT = [carry];
-  const xsSlices = [];
-  for (let t = 0; t < T; t++) {
-    const xt = xsB.map(v => sliceStep(builder, v, t));
-    xsSlices.push(xt);
-    const { forwardYields } = diffBodyStep(builder, bodyBlock, [...xt, ...carry], freeVarMap, null, true, bodyConstCache);
-    carry = forwardYields.slice(0, numCarry);
-    carriesAtT.push(carry);
-  }
+  const sliceX = (t) => xsB.map(v => sliceStep(builder, v, t));
+  const stepForward = (xt, c) =>
+    diffBodyStep(builder, bodyBlock, [...xt, ...c], freeVarMap, null, true, bodyConstCache).forwardYields.slice(0, numCarry);
 
   const gYs = [];
   for (let i = 0; i < numYs; i++) gYs.push(accumulator.get(scanOp.getResult(numCarry + i).id));
@@ -190,19 +196,58 @@ export function buildScanBackward(scanOp, accumulator, builder, materialize, nee
   const gFree = new Map();
   const gXsSteps = xsB.map(() => new Array(T));
 
-  for (let t = T - 1; t >= 0; t--) {
-    const argVals = [...xsSlices[t], ...carriesAtT[t]];
+  const backwardStep = (t, xt, carryIn) => {
+    const argVals = [...xt, ...carryIn];
     const gY_t = gYs.map(g => (g === null ? null : sliceStep(builder, g, t)));
     const gradYields = [...gCarry, ...gY_t];
     const { gradArgs, gradFree } = diffBodyStep(builder, bodyBlock, argVals, freeVarMap, gradYields, false, bodyConstCache);
 
-    for (let i = 0; i < numXs; i++) gXsSteps[i][t] = gradArgs[i] ?? zeroLike(builder, xsSlices[t][i]);
+    for (let i = 0; i < numXs; i++) gXsSteps[i][t] = gradArgs[i] ?? zeroLike(builder, xt[i]);
     gCarry = [];
-    for (let i = 0; i < numCarry; i++) gCarry.push(gradArgs[numXs + i] ?? zeroLike(builder, carriesAtT[t][i]));
+    for (let i = 0; i < numCarry; i++) gCarry.push(gradArgs[numXs + i] ?? zeroLike(builder, carryIn[i]));
     for (const [id, g] of gradFree) {
       if (!g) continue;
       const prev = gFree.get(id);
       gFree.set(id, prev ? builder.add(prev, g).getResult(0) : g);
+    }
+  };
+
+  const segLen = resolveSegmentLength(scanCheckpoint, T);
+
+  if (!segLen) {
+    let carry = initCarryB;
+    const carriesAtT = [carry];
+    const xsSlices = [];
+    for (let t = 0; t < T; t++) {
+      const xt = sliceX(t);
+      xsSlices.push(xt);
+      carry = stepForward(xt, carry);
+      carriesAtT.push(carry);
+    }
+    for (let t = T - 1; t >= 0; t--) backwardStep(t, xsSlices[t], carriesAtT[t]);
+  } else {
+    const numSeg = Math.ceil(T / segLen);
+    const boundary = new Array(numSeg);
+    let carry = initCarryB;
+    boundary[0] = carry;
+    for (let t = 0; t < T; t++) {
+      carry = stepForward(sliceX(t), carry);
+      const s = (t + 1) / segLen;
+      if (Number.isInteger(s) && s < numSeg) boundary[s] = carry;
+    }
+    for (let s = numSeg - 1; s >= 0; s--) {
+      const start = s * segLen;
+      const end = Math.min(start + segLen, T);
+      const segXt = [];
+      const carriesIn = [boundary[s]];
+      let c = boundary[s];
+      for (let t = start; t < end; t++) {
+        const xt = sliceX(t);
+        segXt.push(xt);
+        c = stepForward(xt, c);
+        carriesIn.push(c);
+      }
+      for (let t = end - 1; t >= start; t--) backwardStep(t, segXt[t - start], carriesIn[t - start]);
     }
   }
 

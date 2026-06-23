@@ -91,6 +91,19 @@ export class BlockTuningSession {
     };
   }
 
+  bestTrace() {
+    if (!this._best) return null;
+    const sketch = this.sketchByName.get(this._best.sketchName);
+    if (!sketch) return null;
+    try {
+      const sch = new Schedule(clonePrimFunc(this.primFunc));
+      sketch.instantiate(this._best.params)(sch, this.blockName, this.target);
+      return sch.trace.serialize();
+    } catch (e) {
+      return null;
+    }
+  }
+
   _produceCandidates() {
     if (this.enumSketch) {
       const scored = [];

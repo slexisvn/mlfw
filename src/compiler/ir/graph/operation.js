@@ -100,16 +100,12 @@ export class Operation {
 
   isTerminator() {
     const def = registry.get(this.opName);
-    if (def && def.isTerminator) return true;
-    return this.opName === 'return' || this.opName === 'yield';
+    return !!(def && def.isTerminator);
   }
 
   hasSideEffects() {
     const def = registry.get(this.opName);
-    if (def && def.hasSideEffects) return true;
-    return this.opName === 'custom_call' ||
-           this.opName === 'while' ||
-           this.opName === 'if';
+    return !!(def && def.hasSideEffects);
   }
 
   getParentFunction() {

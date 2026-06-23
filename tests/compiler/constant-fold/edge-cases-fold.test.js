@@ -3,6 +3,7 @@ import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { ConstantFoldPass } from '../../../src/compiler/passes/simplify/constant_fold.js';
 import { PassResult } from '../../../src/compiler/passes/pass.js';
+import { registry } from '../../../src/compiler/ir/graph/ops.js';
 
 function run(func) {
   return new ConstantFoldPass().run(func);
@@ -203,5 +204,17 @@ describe('integer dtype fold representability guard', () => {
 
     expect(retVal(func).definingOp.opName).toBe('constant');
     expect(retVal(func).definingOp.getAttr('value')).toBe(Infinity);
+  });
+});
+
+describe('folds bail on tensor (array) constants', () => {
+  it('arithmetic/exp folds return undefined for array operands instead of corrupting them', () => {
+    expect(registry.get('add').fold([2, 3])).toBe(5);
+    expect(registry.get('add').fold([new Float32Array([1, 2]), new Float32Array([3, 4])])).toBeUndefined();
+    expect(registry.get('mul').fold([new Float32Array([1, 2]), 3])).toBeUndefined();
+    expect(registry.get('div').fold([new Float32Array([1]), new Float32Array([2])])).toBeUndefined();
+    expect(registry.get('neg').fold([new Float32Array([1, 2])])).toBeUndefined();
+    expect(registry.get('exp').fold([new Float32Array([0, 1])])).toBeUndefined();
+    expect(registry.get('exp').fold([0])).toBe(1);
   });
 });

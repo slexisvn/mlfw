@@ -44,5 +44,5 @@ registerVJPRule('reduce', (ctx) => {
     throw new Error("reduce VJP for reduce_type='prod' is not implemented; provide a gradient rule or avoid differentiating reduce_prod");
   }
 
-  return [null, null];
+  throw new Error(`reduce VJP: unsupported reduce_type '${reduceType}' on the gradient path (would silently drop the gradient)`);
 });

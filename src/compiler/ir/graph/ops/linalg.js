@@ -7,7 +7,7 @@ export function register(registry) {
     name: 'dot',
     numOperands: 2,
     numResults: 1,
-    traits: [OpTrait.OPAQUE],
+    traits: [OpTrait.OPAQUE, OpTrait.OUT_EWISE_FUSABLE],
     attrs: [
       { name: 'lhs_contracting', type: 'array', required: true },
       { name: 'rhs_contracting', type: 'array', required: true },

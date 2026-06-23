@@ -77,3 +77,16 @@ describe('scan end-to-end (cpu + wasm)', () => {
     }
   }
 });
+
+describe('scan builder validation', () => {
+  it('rejects xs inputs with mismatched leading lengths', () => {
+    const ty = (s) => new TensorType(s, ScalarType.F32);
+    expect(() => buildFunction('s', [ty([3, 2]), ty([4, 2]), ty([2])], [ty([2])], (b, [xs1, xs2, init]) => {
+      const s = b.scanOp([xs1, xs2], [init], (bb, xt, cy) => {
+        const nc = bb.add(cy[0], xt[0]).getResult(0);
+        return [[nc], [nc]];
+      });
+      b.returnOp([s.getResult(0)]);
+    })).toThrow(/leading length/);
+  });
+});

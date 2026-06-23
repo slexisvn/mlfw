@@ -1,5 +1,5 @@
 import { AnalysisManager } from '../analysis/analysis_manager.js';
-import { FunctionPass, ModulePass, PassResult } from './pass.js';
+import { FunctionPass, ModulePass, PassResult, PassContext } from './pass.js';
 import { TraceLevel } from '../pipeline/trace.js';
 import { CompilationError } from '../pipeline/trace.js';
 
@@ -29,10 +29,21 @@ export class PassManager {
     this.analysisManager = new AnalysisManager();
     this.trace = null;
     this.verifyHook = null;
+    this.instruments = [];
   }
 
   addPass(pass) {
     this.passes.push(pass);
+  }
+
+  addInstrument(instrument) {
+    this.instruments.push(instrument);
+  }
+
+  _notify(method, pass, target, result) {
+    for (const inst of this.instruments) {
+      if (typeof inst[method] === 'function') inst[method](pass, target, result);
+    }
   }
 
   setTrace(trace) {
@@ -53,6 +64,7 @@ export class PassManager {
 
   _applyPass(pass, module, ctx, results) {
     if (this.trace) pass.trace = this.trace;
+    if (this.instruments.length) this._notify('runBeforePass', pass, module, null);
     const verbose = ctx.verbose;
     const resilient = ctx.resilient;
     let changed = false;
@@ -79,7 +91,7 @@ export class PassManager {
       if (result === PassResult.CHANGED) {
         changed = true;
         ctx.anyChanged = true;
-        this.analysisManager.invalidateAll();
+        this.analysisManager.invalidateFunctions(module, pass.preservedAnalyses);
         const verr = this._verifyAfter(pass, module, true);
         if (verr) {
           ctx.errors.push(verr);
@@ -101,6 +113,7 @@ export class PassManager {
 
         if (resilient) {
           try {
+            for (const A of pass.requiredAnalyses) this.analysisManager.getAnalysis(A, func);
             const result = pass.run(func, this.analysisManager);
             if (verbose) this.trace.passRun(pass.name, result, performance.now() - t0, opsBefore, countOps(func));
             if (result === PassResult.CHANGED) {
@@ -120,6 +133,7 @@ export class PassManager {
             ctx.failedFunctions.add(func.name);
           }
         } else {
+          for (const A of pass.requiredAnalyses) this.analysisManager.getAnalysis(A, func);
           const result = pass.run(func, this.analysisManager);
           if (verbose) this.trace.passRun(pass.name, result, performance.now() - t0, opsBefore, countOps(func));
           if (result === PassResult.CHANGED) {
@@ -147,6 +161,7 @@ export class PassManager {
       changed = passChanged;
     }
 
+    if (this.instruments.length) this._notify('runAfterPass', pass, module, changed ? PassResult.CHANGED : PassResult.UNCHANGED);
     pass.trace = null;
     return { changed, fatal };
   }
@@ -156,6 +171,7 @@ export class PassManager {
     for (let iter = 0; iter < maxIter; iter++) {
       let iterChanged = false;
       for (const pass of group.passes) {
+        if (!ctx.passContext.shouldRun(pass)) continue;
         const { changed, fatal } = this._applyPass(pass, module, ctx, results);
         if (fatal) return true;
         if (changed) iterChanged = true;
@@ -173,10 +189,12 @@ export class PassManager {
       errors: [],
       failedFunctions: new Set(),
       anyChanged: false,
+      passContext: options.passContext || new PassContext(),
     };
     const results = [];
 
     for (const item of this.passes) {
+      if (!(item instanceof FixedPointGroup) && !ctx.passContext.shouldRun(item)) continue;
       const fatal = item instanceof FixedPointGroup
         ? this._runGroup(item, module, ctx, results)
         : this._applyPass(item, module, ctx, results).fatal;

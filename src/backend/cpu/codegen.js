@@ -241,7 +241,13 @@ export class CPUCodegen {
     this._emit('for (let ' + varName + ' = 0; ' + varName + ' < ' + extent + '; ' + varName + '++) {');
     this._indent++;
     this._loopStack.push(varName);
-    this._emit(accVar + ' = (' + accVar + ' + ' + this._exprToJS(node.body) + ');');
+    const accBody = this._exprToJS(node.body);
+    const accOp = node.op || '+';
+    let accRhs;
+    if (accOp === 'max') accRhs = 'Math.max(' + accVar + ', ' + accBody + ')';
+    else if (accOp === 'min') accRhs = 'Math.min(' + accVar + ', ' + accBody + ')';
+    else accRhs = '(' + accVar + ' ' + accOp + ' ' + accBody + ')';
+    this._emit(accVar + ' = ' + accRhs + ';');
     this._loopStack.pop();
     this._indent--;
     this._emit('}');

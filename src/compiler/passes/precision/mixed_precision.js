@@ -1,8 +1,25 @@
 import { FunctionPass, PassResult } from '../pass.js';
 import { Operation } from '../../ir/graph/operation.js';
 import { TensorType, ScalarType, isFloatType } from '../../ir/graph/types.js';
+import { registry } from '../../ir/graph/ops.js';
+
+export const PrecisionClass = Object.freeze({ ALWAYS: 'ALWAYS', FOLLOW: 'FOLLOW', NEVER: 'NEVER' });
+
+const DEFAULT_PRECISION_CLASSES = { dot: PrecisionClass.ALWAYS, conv: PrecisionClass.ALWAYS };
+for (const [opName, cls] of Object.entries(DEFAULT_PRECISION_CLASSES)) {
+  if (registry.has(opName)) registry.registerOpAttr(opName, 'precisionClass', cls);
+}
 
 export const DEFAULT_AUTOCAST_OPS = new Set(['dot', 'conv']);
+
+function autocastAllowSet(explicit) {
+  if (explicit) return explicit;
+  const allow = new Set(DEFAULT_AUTOCAST_OPS);
+  for (const def of registry.allOps()) {
+    if (def.getAttr('precisionClass') === PrecisionClass.ALWAYS) allow.add(def.name);
+  }
+  return allow;
+}
 
 function isCastableFloat(type, lowDtype) {
   return type instanceof TensorType && isFloatType(type.dtype) && type.dtype !== lowDtype;
@@ -54,7 +71,7 @@ function castOpToLowPrecision(op, lowDtype) {
 }
 
 export function applyAutocast(func, opts = {}) {
-  const allow = opts.allow || DEFAULT_AUTOCAST_OPS;
+  const allow = autocastAllowSet(opts.allow);
   const lowDtype = opts.dtype || ScalarType.F16;
   let changed = false;
   for (const op of [...func.opsArray()]) {

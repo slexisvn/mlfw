@@ -110,7 +110,7 @@ function _trialLaunch(rt, compiled, primFunc) {
 
 function _compileScheduledGPU(func, target, backend, rt) {
   try {
-    const primFunc = lowerGraphToPrimFunc(func);
+    const primFunc = lowerGraphToPrimFunc(func, target);
     if (primFunc.shapeParams && primFunc.shapeParams.length > 0) return null;
     new SchedulePolicy(target).applyToAllBlocks(new Schedule(primFunc));
     const compiled = backend.compile(primFunc);
@@ -191,7 +191,7 @@ export function jitCompile(opName, tensorArgs, scalarArgs, target) {
 
   let compiled = isGPU ? _compileScheduledGPU(func, target, backend, rt) : null;
   if (!compiled) {
-    compiled = backend.compile(lowerGraphToPrimFunc(func));
+    compiled = backend.compile(lowerGraphToPrimFunc(func, target));
     rt.addCompiledKernel(compiled);
   }
 

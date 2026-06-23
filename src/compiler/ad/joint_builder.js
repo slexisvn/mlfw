@@ -2,9 +2,9 @@ import { GraphFunction } from '../ir/graph/function.js';
 import { IRBuilder } from '../ir/graph/builder.js';
 import { UseDefAnalysis } from '../analysis/use_def.js';
 import { GradAccumulator } from './grad_accumulator.js';
-import { getVJPRule, isGradientBarrier } from './vjp_registry.js';
+import { getVJPRule, isGradientBarrier, requireVJPRuleOrBarrier } from './vjp_registry.js';
 import { RematPolicy } from './remat_policy.js';
-import { reduceGradToOperandShape, REGION_CONTROL_FLOW } from './backward_builder.js';
+import { reduceGradToOperandShape, REGION_CONTROL_FLOW, backpropOps } from './backward_builder.js';
 
 export class JointGraphBuilder {
   constructor(opts = {}) {
@@ -77,54 +77,10 @@ export class JointGraphBuilder {
       accumulator.accumulate(forwardOutputs[i].id, gradOutputArgs[i]);
     }
 
-    for (let i = topoOrder.length - 1; i >= 0; i--) {
-      const op = topoOrder[i];
-      if (op.opName === 'return' || op.opName === 'constant') continue;
-
-      const hasGradResult = op.results.some(r => needsGrad.has(r.id));
-      if (!hasGradResult) continue;
-
-      const gradOuts = [];
-      for (let r = 0; r < op.numResults; r++) {
-        gradOuts.push(accumulator.get(op.getResult(r).id));
-      }
-
-      if (gradOuts.every(g => g === null)) continue;
-
-      const rule = getVJPRule(op.opName);
-      if (!rule) continue;
-
-      const operandValues = new Array(op.numOperands);
-      for (let o = 0; o < op.numOperands; o++) {
-        const origVal = op.getOperand(o);
-        operandValues[o] = valueMap.get(origVal.id) || origVal;
-      }
-
-      const resultValues = new Array(op.numResults);
-      for (let r = 0; r < op.numResults; r++) {
-        const origRes = op.getResult(r);
-        resultValues[r] = valueMap.get(origRes.id) || origRes;
-      }
-
-      const ctx = {
-        builder,
-        op,
-        operands: operandValues,
-        results: resultValues,
-        gradOutputs: gradOuts,
-        attrs: op.attributes,
-      };
-
-      const gradInputs = rule(ctx);
-      if (!gradInputs) continue;
-
-      for (let o = 0; o < op.numOperands; o++) {
-        if (o >= gradInputs.length || !gradInputs[o]) continue;
-        const operandVal = op.getOperand(o);
-        if (!needsGrad.has(operandVal.id)) continue;
-        accumulator.accumulate(operandVal.id, reduceGradToOperandShape(builder, gradInputs[o], operandVal.type.shape));
-      }
-    }
+    backpropOps(topoOrder, {
+      accumulator, builder, needsGrad,
+      resolveValue: (v) => valueMap.get(v.id) || v,
+    });
 
     const gradInputValues = [];
     for (let i = 0; i < forwardInputs.length; i++) {
@@ -266,58 +222,10 @@ export class JointGraphBuilder {
         }
       }
 
-      for (let i = seg.ops.length - 1; i >= 0; i--) {
-        const op = seg.ops[i];
-        if (op.opName === 'return' || op.opName === 'constant') continue;
-
-        const hasGradResult = op.results.some(r => needsGrad.has(r.id));
-        if (!hasGradResult) continue;
-
-        const gradOuts = [];
-        for (let r = 0; r < op.numResults; r++) {
-          gradOuts.push(accumulator.get(op.getResult(r).id));
-        }
-
-        if (gradOuts.every(g => g === null)) continue;
-
-        const rule = getVJPRule(op.opName);
-        if (!rule) continue;
-
-        const operandValues = new Array(op.numOperands);
-        for (let o = 0; o < op.numOperands; o++) {
-          const origVal = op.getOperand(o);
-          operandValues[o] = recomputeMap.get(origVal.id) ||
-                             valueMap.get(origVal.id) ||
-                             origVal;
-        }
-
-        const resultValues = new Array(op.numResults);
-        for (let r = 0; r < op.numResults; r++) {
-          const origRes = op.getResult(r);
-          resultValues[r] = recomputeMap.get(origRes.id) ||
-                            valueMap.get(origRes.id) ||
-                            origRes;
-        }
-
-        const ctx = {
-          builder,
-          op,
-          operands: operandValues,
-          results: resultValues,
-          gradOutputs: gradOuts,
-          attrs: op.attributes,
-        };
-
-        const gradInputs = rule(ctx);
-        if (!gradInputs) continue;
-
-        for (let o = 0; o < op.numOperands; o++) {
-          if (o >= gradInputs.length || !gradInputs[o]) continue;
-          const operandVal = op.getOperand(o);
-          if (!needsGrad.has(operandVal.id)) continue;
-          accumulator.accumulate(operandVal.id, reduceGradToOperandShape(builder, gradInputs[o], operandVal.type.shape));
-        }
-      }
+      backpropOps(seg.ops, {
+        accumulator, builder, needsGrad,
+        resolveValue: (v) => recomputeMap.get(v.id) || valueMap.get(v.id) || v,
+      });
     }
 
     const gradInputValues = [];

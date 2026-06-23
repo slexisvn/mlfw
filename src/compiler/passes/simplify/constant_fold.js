@@ -7,6 +7,12 @@ import { isIntType } from '../../ir/graph/types.js';
 
 const CONSTANT_OPS = new Set(['constant', 'scalar_constant']);
 
+function isConstantProducer(opName) {
+  if (CONSTANT_OPS.has(opName)) return true;
+  const def = registry.get(opName);
+  return !!(def && def.isConstant);
+}
+
 function isFoldResultRepresentable(value, dtype) {
   if (!isIntType(dtype)) return true;
   if (typeof value !== 'number') return true;
@@ -23,7 +29,7 @@ function resolveConstantValue(value, visited, memo) {
 function computeConstantValue(value, visited, memo) {
   const op = value.definingOp;
   if (!op) return undefined;
-  if (CONSTANT_OPS.has(op.opName)) return op.getAttr('value');
+  if (isConstantProducer(op.opName)) return op.getAttr('value');
   if (visited.has(op)) return undefined;
   visited.add(op);
 
@@ -61,7 +67,7 @@ export class ConstantFoldPass extends FunctionPass {
 
     for (const op of [...func.opsRecursive()]) {
       if (!op.parentBlock) continue;
-      if (CONSTANT_OPS.has(op.opName)) continue;
+      if (isConstantProducer(op.opName)) continue;
 
       const def = registry.get(op.opName);
       if (!def || op.regions.length > 0) continue;

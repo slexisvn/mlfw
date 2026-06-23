@@ -94,11 +94,14 @@ export class BlockNode extends TensorNode {
   }
 }
 
+export const IterVarKind = Object.freeze({ DATA_PAR: 'DataPar', COMM_REDUCE: 'CommReduce' });
+
 export class BlockRealizeNode extends TensorNode {
-  constructor(iterVar, binding) {
+  constructor(iterVar, binding, kind = IterVarKind.DATA_PAR) {
     super();
     this.iterVar = iterVar;
     this.binding = binding;
+    this.kind = kind;
   }
 }
 

@@ -36,6 +36,10 @@ function resolveOtherOperand(op, chainSet) {
   return op0Def;
 }
 
+for (const [opName, tagFn] of EPILOGUE_TAG_TABLE) {
+  if (registry.has(opName)) registry.registerOpAttr(opName, 'epilogueTag', tagFn);
+}
+
 function comesBefore(opA, opB) {
   if (!opA.parentBlock || opA.parentBlock !== opB.parentBlock) return false;
   let cur = opA.parentBlock.firstOp;
@@ -60,7 +64,8 @@ function hasEscapingUse(removedSet, lastOp) {
 }
 
 function classifyTag(op, chainSet) {
-  const fn = EPILOGUE_TAG_TABLE.get(op.opName);
+  const def = registry.get(op.opName);
+  const fn = def && def.getAttr('epilogueTag');
   if (fn) return fn(op, chainSet);
   return 'activation';
 }
@@ -160,7 +165,8 @@ export class EpilogueFusionPass extends FunctionPass {
 
     const dots = [];
     for (const op of func.ops()) {
-      if (op.opName === 'dot') dots.push(op);
+      const def = registry.get(op.opName);
+      if (def && def.isOutEWiseFusable) dots.push(op);
     }
 
     for (const dotOp of dots) {

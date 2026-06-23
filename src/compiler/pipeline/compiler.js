@@ -27,6 +27,7 @@ import { RematerializationPass } from '../passes/memory/rematerialization.js';
 import { GraphPartitionPass, PartitionMaterializationPass } from '../passes/partition/partition_pass.js';
 import { CublasRewritePass } from '../passes/rewrite/cublas_rewrite.js';
 import { splitGraph } from './graph_split.js';
+import { graphPassesForPhase } from './graph_pass_registry.js';
 
 import { TraceLog, TraceLevel, CompilationError } from './trace.js';
 import { IRPrinter } from '../ir/graph/printer.js';
@@ -103,6 +104,8 @@ export class CompilerConfig {
       costWeights: p.costWeights || {},
     };
 
+    this.passContext = opts.passContext || null;
+
     const t = opts.trace || {};
     this.trace = {
       level: t.level ?? TraceLevel.SILENT,
@@ -114,6 +117,10 @@ export class CompilerConfig {
         ...spread(t.irSnapshot),
       },
     };
+  }
+
+  get usePartition() {
+    return this.partition.enabled && this.partition.targets.length >= 2;
   }
 }
 
@@ -177,7 +184,7 @@ export class Compiler {
 
     const cudaMatmulChain = this._runGraphPasses(graphModule, trace, errors, failed, resilient);
 
-    if (this.config.partition.enabled && this.config.partition.targets.length >= 2) {
+    if (this.config.usePartition) {
       this._runPartitioning(graphModule, trace);
     }
 
@@ -245,7 +252,9 @@ export class Compiler {
   _runGraphPasses(graphModule, trace, errors, failed, resilient) {
     const pm = new PassManager();
 
-    pm.addPass(new DecompositionPass());
+    for (const p of graphPassesForPhase('pre', this.config, this.config.target)) pm.addPass(p);
+
+    pm.addPass(new DecompositionPass(this.config.target));
     pm.addPass(new FixedPointGroup('canonicalize', [
       new CanonicalizePass(),
       new AlgebraicSimplificationPass({ fastMath: this.config.optimization.fastMath }),
@@ -271,7 +280,9 @@ export class Compiler {
         if (op.opName === 'dot') dotCount++;
       }
     }
-    const cudaMatmulChain = this.config.target.kind === 'cuda' && dotCount >= 2;
+    const tgt = this.config.target;
+    const chainThreshold = (tgt.getAttr && tgt.getAttr('matmulChainThreshold')) ?? (tgt.kind === 'cuda' ? 2 : Infinity);
+    const cudaMatmulChain = dotCount >= chainThreshold;
     const shouldEpilogueFuse = this.config.matmulBackend !== 'cublas' && !cudaMatmulChain
       && (this.config.fusion.epilogue !== undefined
         ? this.config.fusion.epilogue
@@ -306,6 +317,8 @@ export class Compiler {
       pm.addPass(new RematerializationPass(rcfg));
     }
 
+    for (const p of graphPassesForPhase('post', this.config, this.config.target)) pm.addPass(p);
+
     pm.setTrace(trace);
 
     if (this.config.verifyMode === 'full') {
@@ -317,7 +330,7 @@ export class Compiler {
 
     trace.phaseStart('graphPasses');
     const t0 = performance.now();
-    const result = pm.run(graphModule, { errorMode: resilient ? 'resilient' : 'strict' });
+    const result = pm.run(graphModule, { errorMode: resilient ? 'resilient' : 'strict', passContext: this.config.passContext });
     if (result.errors) {
       for (const e of result.errors) {
         errors.push(e);
@@ -360,7 +373,7 @@ export class Compiler {
       if (failed.has(func.name)) continue;
       try {
         const ft0 = performance.now();
-        const primFunc = lowerGraphToPrimFunc(func);
+        const primFunc = lowerGraphToPrimFunc(func, this.config.target);
         trace.functionEvent('lowering', func.name, { durationMs: performance.now() - ft0 });
         primFuncs.push(primFunc);
         if (trace.shouldSnapshot('afterLowering')) {
@@ -542,7 +555,7 @@ export class Compiler {
     const t0 = performance.now();
     const runtimeMod = new RuntimeModule('compiled');
 
-    const usePartition = this.config.partition.enabled && this.config.partition.targets.length >= 2;
+    const usePartition = this.config.usePartition;
     const backendOpts = { matmulBackend: this.config.matmulBackend };
     const backendCache = new Map();
     const getBackend = (target) => {

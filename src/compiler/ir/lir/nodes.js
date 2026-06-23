@@ -89,6 +89,7 @@ export class LIRAccumulatorNode extends LIRNode {
     super();
     this.localName = config.localName;
     this.dtype = config.dtype;
+    this.op = config.op || '+';
     this.initLoad = config.initLoad;
     this.loopVar = config.loopVar;
     this.extent = config.extent;

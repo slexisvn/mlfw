@@ -14,14 +14,21 @@ export function hasDecomposition(opName) {
 }
 
 export class DecompositionPass extends FunctionPass {
-  constructor() {
+  constructor(target = null) {
     super('DecompositionPass');
+    this.target = target;
+  }
+
+  _shouldDecompose(op) {
+    if (!this.target) return true;
+    const native = this.target.getAttr ? this.target.getAttr('nativeOps') : null;
+    return !(native && native.has(op.opName));
   }
 
   run(func) {
     const worklist = [];
     for (const op of func.opsRecursive()) {
-      if (decompositionRules.has(op.opName)) worklist.push(op);
+      if (decompositionRules.has(op.opName) && this._shouldDecompose(op)) worklist.push(op);
     }
     if (worklist.length === 0) return PassResult.UNCHANGED;
 

@@ -590,13 +590,23 @@ export class WasmCodegen {
     return true;
   }
 
+  _accumInstr(op, dtype) {
+    if (op === '*') return 'mul';
+    if (op === 'max' || op === 'min') {
+      if (isDtypeFloat(dtype)) return op;
+      throw new Error(`wasm accumulator: integer ${op} reduction not supported (dtype ${dtype})`);
+    }
+    return 'add';
+  }
+
   _visitLIRAccumulator(node) {
     const accLocal = node.localName;
     const dtype = node.dtype;
     this._ensureLocal(accLocal, wasmType(dtype));
 
     const extent = this._constExtent(node.extent);
-    const simdEntry = extent !== null && node.loopKind === ForKind.VECTORIZED
+    const accOp = node.op || '+';
+    const simdEntry = accOp === '+' && extent !== null && node.loopKind === ForKind.VECTORIZED
       && this.target.supportsSimd() ? wasmSimdEntry(dtype) : null;
     const lanes = simdEntry ? this.target.vectorWidth : 0;
 
@@ -628,7 +638,7 @@ export class WasmCodegen {
 
     this._emit('(local.get $' + accLocal + ')');
     this._emitCoercedTo(node.body, this._numPrefix(dtype));
-    this._emit(this._numPrefix(dtype) + '.add');
+    this._emit(this._numPrefix(dtype) + '.' + this._accumInstr(accOp, dtype));
     this._emit('local.set $' + accLocal);
 
     this._emit('(local.get $' + varName + ')');

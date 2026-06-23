@@ -71,6 +71,69 @@ function substituteVar(node, oldName, exprFactory) {
   return node;
 }
 
+function replaceBufferLoads(node, bufName, makeReplacement, counter) {
+  if (!node || typeof node !== 'object') return node;
+  if (node.type === 'BufferLoadNode' && node.buffer && node.buffer.name === bufName) {
+    counter.n++;
+    return makeReplacement(node);
+  }
+  switch (node.type) {
+    case 'MathOpNode':
+      node.a = replaceBufferLoads(node.a, bufName, makeReplacement, counter);
+      if (node.b) node.b = replaceBufferLoads(node.b, bufName, makeReplacement, counter);
+      break;
+    case 'CompareNode':
+      node.a = replaceBufferLoads(node.a, bufName, makeReplacement, counter);
+      node.b = replaceBufferLoads(node.b, bufName, makeReplacement, counter);
+      break;
+    case 'BufferLoadNode':
+      for (let i = 0; i < node.indices.length; i++) node.indices[i] = replaceBufferLoads(node.indices[i], bufName, makeReplacement, counter);
+      break;
+    case 'BufferStoreNode':
+      for (let i = 0; i < node.indices.length; i++) node.indices[i] = replaceBufferLoads(node.indices[i], bufName, makeReplacement, counter);
+      node.value = replaceBufferLoads(node.value, bufName, makeReplacement, counter);
+      break;
+    case 'CallExternNode':
+      for (let i = 0; i < node.args.length; i++) node.args[i] = replaceBufferLoads(node.args[i], bufName, makeReplacement, counter);
+      break;
+    case 'CastNode':
+      node.expr = replaceBufferLoads(node.expr, bufName, makeReplacement, counter);
+      break;
+    case 'IfThenElseNode':
+      node.condition = replaceBufferLoads(node.condition, bufName, makeReplacement, counter);
+      node.thenBody = replaceBufferLoads(node.thenBody, bufName, makeReplacement, counter);
+      if (node.elseBody) node.elseBody = replaceBufferLoads(node.elseBody, bufName, makeReplacement, counter);
+      break;
+    case 'ForNode':
+      node.body = replaceBufferLoads(node.body, bufName, makeReplacement, counter);
+      break;
+    case 'BlockNode':
+      node.body = replaceBufferLoads(node.body, bufName, makeReplacement, counter);
+      if (node.initBody) node.initBody = replaceBufferLoads(node.initBody, bufName, makeReplacement, counter);
+      break;
+    case 'SeqNode':
+      for (let i = 0; i < node.stmts.length; i++) node.stmts[i] = replaceBufferLoads(node.stmts[i], bufName, makeReplacement, counter);
+      break;
+    case 'LetStmtNode':
+      node.value = replaceBufferLoads(node.value, bufName, makeReplacement, counter);
+      node.body = replaceBufferLoads(node.body, bufName, makeReplacement, counter);
+      break;
+  }
+  return node;
+}
+
+function loadsBuffer(node, bufName) {
+  if (!node || typeof node !== 'object') return false;
+  if (node.type === 'BufferLoadNode' && node.buffer && node.buffer.name === bufName) return true;
+  for (const k of ['a', 'b', 'expr', 'value', 'condition', 'thenBody', 'elseBody', 'body', 'initBody']) {
+    if (node[k] && loadsBuffer(node[k], bufName)) return true;
+  }
+  if (node.args) for (const a of node.args) if (loadsBuffer(a, bufName)) return true;
+  if (node.indices) for (const i of node.indices) if (loadsBuffer(i, bufName)) return true;
+  if (node.stmts) for (const s of node.stmts) if (loadsBuffer(s, bufName)) return true;
+  return false;
+}
+
 function cloneExprTree(node) {
   if (!node || typeof node !== 'object') return node;
   if (Array.isArray(node)) return node.map(cloneExprTree);
@@ -178,7 +241,24 @@ export class Schedule {
     return this._srefTree.loopsOf(blockName).map(sref => sref.node);
   }
 
+  _resolveLoop(ref) {
+    if (typeof ref !== 'string') return ref;
+    let found = null;
+    const walk = (node) => {
+      if (!node || typeof node !== 'object' || found) return;
+      if (node.type === 'ForNode' && node.loopVar && node.loopVar.name === ref) { found = node; return; }
+      if (node.body) walk(node.body);
+      if (node.initBody) walk(node.initBody);
+      if (node.stmts) for (const s of node.stmts) walk(s);
+      if (node.thenBody) walk(node.thenBody);
+      if (node.elseBody) walk(node.elseBody);
+    };
+    walk(this.func.body);
+    return found || ref;
+  }
+
   split(loop, factor) {
+    loop = this._resolveLoop(loop);
     const extent = getConstExtent(loop.extent);
     if (extent === null) {
       throw new Error(`Cannot split loop '${loop.loopVar.name}' with non-constant extent`);
@@ -241,6 +321,8 @@ export class Schedule {
   }
 
   reorder(...newOrder) {
+    if (newOrder.length === 1 && Array.isArray(newOrder[0])) newOrder = newOrder[0];
+    newOrder = newOrder.map((l) => this._resolveLoop(l));
     if (newOrder.length < 2) return;
 
     for (const loop of newOrder) {
@@ -304,6 +386,8 @@ export class Schedule {
   }
 
   fuseLoops(outer, inner) {
+    outer = this._resolveLoop(outer);
+    inner = this._resolveLoop(inner);
     if (outer.type !== 'ForNode' || inner.type !== 'ForNode') {
       throw new Error('fuseLoops expects two ForNode arguments');
     }
@@ -390,6 +474,7 @@ export class Schedule {
   }
 
   vectorize(loop) {
+    loop = this._resolveLoop(loop);
     if (loop.type !== 'ForNode') throw new Error('vectorize expects ForNode');
     const extent = getConstExtent(loop.extent);
     if (extent === null) throw new Error('Cannot vectorize loop with non-constant extent');
@@ -405,6 +490,7 @@ export class Schedule {
   }
 
   unroll(loop) {
+    loop = this._resolveLoop(loop);
     if (loop.type !== 'ForNode') throw new Error('unroll expects ForNode');
     loop.kind = ForKind.UNROLLED;
     this.state.invalidate();
@@ -414,6 +500,7 @@ export class Schedule {
   }
 
   parallelize(loop) {
+    loop = this._resolveLoop(loop);
     if (loop.type !== 'ForNode') throw new Error('parallelize expects ForNode');
     const reductionBlock = loopCarriesReduction(loop);
     if (reductionBlock !== null) {
@@ -427,6 +514,7 @@ export class Schedule {
   }
 
   bindThread(loop, threadTag) {
+    loop = this._resolveLoop(loop);
     if (loop.type !== 'ForNode') throw new Error('bindThread expects ForNode');
     const validTags = [
       'blockIdx.x', 'blockIdx.y', 'blockIdx.z',
@@ -605,6 +693,128 @@ export class Schedule {
     if (!this._replaying) this.trace.record('cacheWrite', [blockName, bufferName, scope]);
   }
 
+  setScope(blockName, bufferName, scope) {
+    const block = this.getBlock(blockName);
+    const writeEntry = (block.writes || []).find(w => w.buffer && w.buffer.name === bufferName);
+    if (!writeEntry) throw new Error(`setScope: block '${blockName}' does not write '${bufferName}'`);
+    writeEntry.buffer.scope = scope;
+    this.state.invalidate();
+    if (!this._replaying) this.trace.record('setScope', [blockName, bufferName, scope]);
+  }
+
+  storageAlign(blockName, bufferName, axis, factor, offset) {
+    const block = this.getBlock(blockName);
+    const entry = [...(block.writes || []), ...(block.reads || [])].find(e => e.buffer && e.buffer.name === bufferName);
+    if (!entry) throw new Error(`storageAlign: block '${blockName}' does not access '${bufferName}'`);
+    if (!Number.isInteger(factor) || factor <= 0) throw new Error('storageAlign: factor must be a positive integer');
+    entry.buffer.storageAlign = { axis, factor, offset: offset || 0 };
+    this.state.invalidate();
+    if (!this._replaying) this.trace.record('storageAlign', [blockName, bufferName, axis, factor, offset || 0]);
+  }
+
+  computeInline(producerName) {
+    const prod = this.getBlock(producerName);
+    if (!prod) throw new Error(`computeInline: block '${producerName}' not found`);
+    if (prod.initBody) throw new Error('computeInline: cannot inline a reduction block (has init)');
+
+    let store = null;
+    const findStore = (n) => {
+      if (!n || store) return;
+      if (n.type === 'BufferStoreNode') { store = n; return; }
+      if (n.type === 'SeqNode') { for (const s of n.stmts) findStore(s); return; }
+      if (n.type === 'BlockNode' || n.type === 'ForNode') findStore(n.body);
+    };
+    findStore(prod.body);
+    if (!store) throw new Error('computeInline: producer has no single store to inline');
+
+    const B = store.buffer;
+    const pIdxNames = store.indices.map((ix) => (ix && ix.type === 'VariableNode') ? ix.name : null);
+    if (pIdxNames.some((n) => n === null)) throw new Error('computeInline: producer indices must be simple loop variables');
+    if (loadsBuffer(store.value, B.name)) throw new Error('computeInline: producer is self-referential (recurrence), cannot inline');
+
+    const usesBInIndex = (node) => {
+      if (!node || typeof node !== 'object') return false;
+      if ((node.type === 'BufferLoadNode' || node.type === 'BufferStoreNode') && node.indices) {
+        for (const ix of node.indices) if (loadsBuffer(ix, B.name)) return true;
+      }
+      for (const k of ['a', 'b', 'expr', 'value', 'condition', 'thenBody', 'elseBody', 'body', 'initBody']) {
+        if (node[k] && usesBInIndex(node[k])) return true;
+      }
+      if (node.args) for (const a of node.args) if (usesBInIndex(a)) return true;
+      if (node.indices) for (const ix of node.indices) if (usesBInIndex(ix)) return true;
+      if (node.stmts) for (const s of node.stmts) if (usesBInIndex(s)) return true;
+      return false;
+    };
+    if (usesBInIndex(this.func.body)) throw new Error(`computeInline: buffer '${B.name}' is used inside an index expression (indirect), cannot safely inline`);
+
+    const valExpr = store.value;
+    const counter = { n: 0 };
+    const tmpNames = pIdxNames.map((_, k) => `__inl_${producerName}_${k}`);
+    const makeRepl = (load) => {
+      let expr = cloneExprTree(valExpr);
+      for (let k = 0; k < pIdxNames.length; k++) {
+        const tn = tmpNames[k];
+        expr = substituteVar(expr, pIdxNames[k], () => new VariableNode(tn, 'int32'));
+      }
+      for (let k = 0; k < pIdxNames.length; k++) {
+        const idx = load.indices[k];
+        expr = substituteVar(expr, tmpNames[k], () => cloneExprTree(idx));
+      }
+      return expr;
+    };
+    replaceBufferLoads(this.func.body, B.name, makeRepl, counter);
+    if (counter.n === 0) throw new Error(`computeInline: buffer '${B.name}' has no consumers to inline into`);
+
+    const loops = this.getLoops(producerName);
+    const root = loops.length > 0 ? loops[0] : prod;
+    this._replaceNode(root, new SeqNode([]));
+    this._rebuildSRefTree();
+    if (!this._replaying) this.trace.record('computeInline', [producerName]);
+  }
+
+  _relocateBlockToLoop(blockName, targetLoopRef, atStart) {
+    const blk = this.getBlock(blockName);
+    if (!blk) throw new Error(`computeAt: block '${blockName}' not found`);
+    const targetLoop = this._resolveLoop(targetLoopRef);
+    if (!targetLoop || targetLoop.type !== 'ForNode') throw new Error('computeAt: target must be a loop');
+
+    const blkLoops = this.getLoops(blockName);
+    if (blkLoops.length !== 1) throw new Error('computeAt: aligned case requires exactly one enclosing loop on the moved block');
+    const blkLoop = blkLoops[0];
+    if (blkLoop === targetLoop) throw new Error('computeAt: block already at target loop');
+
+    const bExt = getConstExtent(blkLoop.extent);
+    const tExt = getConstExtent(targetLoop.extent);
+    if (bExt === null || tExt === null || bExt !== tExt) {
+      throw new Error('computeAt: aligned case requires equal static extent on the block and target loops');
+    }
+
+    const moved = cloneExprTree(blkLoop.body);
+    substituteVar(moved, blkLoop.loopVar.name, () => targetLoop.loopVar);
+    this._replaceNode(blkLoop, new SeqNode([]));
+
+    const tbody = targetLoop.body;
+    if (tbody && tbody.type === 'SeqNode') {
+      if (atStart) tbody.stmts.unshift(moved); else tbody.stmts.push(moved);
+    } else {
+      const seq = atStart ? new SeqNode([moved, tbody]) : new SeqNode([tbody, moved]);
+      targetLoop.body = seq;
+      targetLoop._setChild('body', seq);
+    }
+    this._rebuildSRefTree();
+    return targetLoop.loopVar.name;
+  }
+
+  computeAt(producerName, targetLoopRef) {
+    const targetVar = this._relocateBlockToLoop(producerName, targetLoopRef, true);
+    if (!this._replaying) this.trace.record('computeAt', [producerName, targetVar]);
+  }
+
+  reverseComputeAt(consumerName, targetLoopRef) {
+    const targetVar = this._relocateBlockToLoop(consumerName, targetLoopRef, false);
+    if (!this._replaying) this.trace.record('reverseComputeAt', [consumerName, targetVar]);
+  }
+
   cacheRead(blockName, bufferName, scope = 'local') {
     const block = this.getBlock(blockName);
     const loops = this.getLoops(blockName);
@@ -680,6 +890,7 @@ export class Schedule {
   }
 
   annotate(loop, key, value) {
+    loop = this._resolveLoop(loop);
     if (loop.type !== 'ForNode') throw new Error('annotate expects ForNode');
     if (!loop.annotations) loop.annotations = {};
     loop.annotations[key] = value;

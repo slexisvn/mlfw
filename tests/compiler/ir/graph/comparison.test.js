@@ -24,4 +24,10 @@ describe('where shape inference broadcast', () => {
     const out = def.inferResultTypes([bool([3]), f32([4]), f32([4])]);
     expect(out).toBeNull();
   });
+
+  it('returns null for mismatched branch dtypes (mirrors select)', () => {
+    const i32 = (shape) => new TensorType(shape, ScalarType.I32);
+    expect(def.inferResultTypes([bool([2]), f32([2]), i32([2])])).toBeNull();
+    expect(def.inferResultTypes([bool([2]), f32([2]), f32([2])])).not.toBeNull();
+  });
 });

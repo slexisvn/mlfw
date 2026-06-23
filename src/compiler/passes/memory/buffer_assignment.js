@@ -1,3 +1,20 @@
+function gapSelector(strategy) {
+  return {
+    best: null,
+    consider(start, gap, size) {
+      if (gap < size) return null;
+      if (strategy === 'best-fit') {
+        if (this.best === null || gap < this.best.gap) this.best = { offset: start, gap };
+        return null;
+      }
+      return start;
+    },
+    result(fallbackStart) {
+      return this.best !== null ? this.best.offset : fallbackStart;
+    },
+  };
+}
+
 export class MemoryBlock {
   constructor(offset, size, buffer) {
     this.offset = offset;
@@ -45,22 +62,17 @@ export class MemoryPool {
   _findFreeOffset(size) {
     const live = this.blocks.slice().sort((a, b) => a.offset - b.offset);
     let cursor = 0;
-    let best = null;
+    const sel = gapSelector(this.strategy);
 
     for (const block of live) {
       const start = this._align(cursor);
       const gap = block.offset - start;
-      if (gap >= size) {
-        if (this.strategy === 'best-fit') {
-          if (best === null || gap < best.gap) best = { offset: start, gap };
-        } else {
-          return start;
-        }
-      }
+      const hit = sel.consider(start, gap, size);
+      if (hit !== null) return hit;
       if (block.end > cursor) cursor = block.end;
     }
 
-    return best !== null ? best.offset : this._align(cursor);
+    return sel.result(this._align(cursor));
   }
 
   fragmentation() {
@@ -207,20 +219,15 @@ export class BufferAssignment {
     ranges.sort((a, b) => a[0] - b[0]);
 
     let cursor = 0;
-    let best = null;
+    const sel = gapSelector(strategy);
     for (const [lo, hi] of ranges) {
       const start = Math.ceil(cursor / alignment) * alignment;
       const gap = lo - start;
-      if (gap >= size) {
-        if (strategy === 'best-fit') {
-          if (best === null || gap < best.gap) best = { offset: start, gap };
-        } else {
-          return start;
-        }
-      }
+      const hit = sel.consider(start, gap, size);
+      if (hit !== null) return hit;
       if (hi > cursor) cursor = hi;
     }
-    return best !== null ? best.offset : Math.ceil(cursor / alignment) * alignment;
+    return sel.result(Math.ceil(cursor / alignment) * alignment);
   }
 
   getOffset(buffer) {

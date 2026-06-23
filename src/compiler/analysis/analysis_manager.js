@@ -1,6 +1,6 @@
 export class AnalysisManager {
   constructor() {
-    this._cache = new Map();
+    this._cache = new WeakMap();
   }
 
   getAnalysis(AnalysisClass, func) {
@@ -67,7 +67,11 @@ export class AnalysisManager {
     }
   }
 
+  invalidateFunctions(funcs, preservedSet = null) {
+    for (const func of funcs) this.invalidate(func, preservedSet);
+  }
+
   invalidateAll() {
-    this._cache.clear();
+    this._cache = new WeakMap();
   }
 }

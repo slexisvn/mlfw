@@ -3,10 +3,44 @@ import { IRBuilder } from '../ir/graph/builder.js';
 
 import { UseDefAnalysis } from '../analysis/use_def.js';
 import { GradAccumulator } from './grad_accumulator.js';
-import { getVJPRule, isGradientBarrier } from './vjp_registry.js';
+import { getVJPRule, isGradientBarrier, requireVJPRuleOrBarrier, getRegionVJP } from './vjp_registry.js';
 import { buildScanBackward, buildCondBackward, regionFreeVars } from './scan_backward.js';
 
 export const REGION_CONTROL_FLOW = new Set(['scan', 'if']);
+
+export function backpropOps(orderedOps, { accumulator, builder, needsGrad, resolveValue, handleRegionOp = null }) {
+  for (let i = orderedOps.length - 1; i >= 0; i--) {
+    const op = orderedOps[i];
+    if (op.opName === 'return' || op.opName === 'constant') continue;
+
+    const hasGradResult = op.results.some(r => needsGrad.has(r.id));
+    if (!hasGradResult) continue;
+
+    const gradOuts = [];
+    for (let r = 0; r < op.numResults; r++) gradOuts.push(accumulator.get(op.getResult(r).id));
+    if (gradOuts.every(g => g === null)) continue;
+
+    if (handleRegionOp && handleRegionOp(op)) continue;
+
+    const rule = requireVJPRuleOrBarrier(op.opName);
+    if (!rule) continue;
+
+    const operandValues = new Array(op.numOperands);
+    for (let o = 0; o < op.numOperands; o++) operandValues[o] = resolveValue(op.getOperand(o));
+    const resultValues = new Array(op.numResults);
+    for (let r = 0; r < op.numResults; r++) resultValues[r] = resolveValue(op.getResult(r));
+
+    const gradInputs = rule({ builder, op, operands: operandValues, results: resultValues, gradOutputs: gradOuts, attrs: op.attributes });
+    if (!gradInputs) continue;
+
+    for (let o = 0; o < op.numOperands; o++) {
+      if (o >= gradInputs.length || !gradInputs[o]) continue;
+      const operandVal = op.getOperand(o);
+      if (!needsGrad.has(operandVal.id)) continue;
+      accumulator.accumulate(operandVal.id, reduceGradToOperandShape(builder, gradInputs[o], operandVal.type.shape));
+    }
+  }
+}
 
 function regionControlFlowFreeVars(op) {
   const out = [];
@@ -43,6 +77,7 @@ export class BackwardGraphBuilder {
   constructor(opts = {}) {
     this._rematPolicy = opts.rematPolicy || null;
     this._checkpointPolicy = opts.checkpointPolicy || null;
+    this._scanCheckpoint = opts.scanCheckpoint || null;
   }
 
   build(forwardFunc) {
@@ -101,60 +136,16 @@ export class BackwardGraphBuilder {
       accumulator.accumulate(outputVal.id, gradOutputArgs[i]);
     }
 
-    for (let i = topoOrder.length - 1; i >= 0; i--) {
-      const op = topoOrder[i];
-      if (op.opName === 'return') continue;
-      if (op.opName === 'constant') continue;
-
-      const hasGradResult = op.results.some(r => needsGrad.has(r.id));
-      if (!hasGradResult) continue;
-
-      const gradOuts = [];
-      for (let r = 0; r < op.numResults; r++) {
-        gradOuts.push(accumulator.get(op.getResult(r).id));
-      }
-
-      if (gradOuts.every(g => g === null)) continue;
-
-      if (REGION_CONTROL_FLOW.has(op.opName)) {
-        const mat = (v) => this._materialize(v, valueMap, builder);
-        if (op.opName === 'scan') buildScanBackward(op, accumulator, builder, mat, needsGrad);
-        else buildCondBackward(op, accumulator, builder, mat, needsGrad);
-        continue;
-      }
-
-      const rule = getVJPRule(op.opName);
-      if (!rule) continue;
-
-      const operandValues = new Array(op.numOperands);
-      for (let o = 0; o < op.numOperands; o++) {
-        operandValues[o] = this._materialize(op.getOperand(o), valueMap, builder);
-      }
-
-      const resultValues = new Array(op.numResults);
-      for (let r = 0; r < op.numResults; r++) {
-        resultValues[r] = this._materialize(op.getResult(r), valueMap, builder);
-      }
-
-      const ctx = {
-        builder,
-        op,
-        operands: operandValues,
-        results: resultValues,
-        gradOutputs: gradOuts,
-        attrs: op.attributes,
-      };
-
-      const gradInputs = rule(ctx);
-      if (!gradInputs) continue;
-
-      for (let o = 0; o < op.numOperands; o++) {
-        if (o >= gradInputs.length || !gradInputs[o]) continue;
-        const operandVal = op.getOperand(o);
-        if (!needsGrad.has(operandVal.id)) continue;
-        accumulator.accumulate(operandVal.id, reduceGradToOperandShape(builder, gradInputs[o], operandVal.type.shape));
-      }
-    }
+    backpropOps(topoOrder, {
+      accumulator, builder, needsGrad,
+      resolveValue: (v) => this._materialize(v, valueMap, builder),
+      handleRegionOp: (op) => {
+        const regionFn = getRegionVJP(op.opName);
+        if (!regionFn) return false;
+        regionFn(op, { accumulator, builder, materialize: (v) => this._materialize(v, valueMap, builder), needsGrad, scanCheckpoint: this._scanCheckpoint });
+        return true;
+      },
+    });
 
     const returnValues = [];
     for (let i = 0; i < forwardInputs.length; i++) {
@@ -472,60 +463,10 @@ export class BackwardGraphBuilder {
         }
       }
 
-      for (let i = seg.ops.length - 1; i >= 0; i--) {
-        const op = seg.ops[i];
-        if (op.opName === 'return' || op.opName === 'constant') continue;
-
-        const hasGradResult = op.results.some(r => needsGrad.has(r.id));
-        if (!hasGradResult) continue;
-
-        const gradOuts = [];
-        for (let r = 0; r < op.numResults; r++) {
-          gradOuts.push(accumulator.get(op.getResult(r).id));
-        }
-
-        if (gradOuts.every(g => g === null)) continue;
-
-        const rule = getVJPRule(op.opName);
-        if (!rule) continue;
-
-        const operandValues = new Array(op.numOperands);
-        for (let o = 0; o < op.numOperands; o++) {
-          const fwdVal = op.getOperand(o);
-          operandValues[o] = recomputeMap.get(fwdVal.id) ||
-                             savedValueMap.get(fwdVal.id) ||
-                             constantMap.get(fwdVal.id) ||
-                             fwdVal;
-        }
-
-        const resultValues = new Array(op.numResults);
-        for (let r = 0; r < op.numResults; r++) {
-          const fwdRes = op.getResult(r);
-          resultValues[r] = recomputeMap.get(fwdRes.id) ||
-                            savedValueMap.get(fwdRes.id) ||
-                            constantMap.get(fwdRes.id) ||
-                            fwdRes;
-        }
-
-        const ctx = {
-          builder,
-          op,
-          operands: operandValues,
-          results: resultValues,
-          gradOutputs: gradOuts,
-          attrs: op.attributes,
-        };
-
-        const gradInputs = rule(ctx);
-        if (!gradInputs) continue;
-
-        for (let o = 0; o < op.numOperands; o++) {
-          if (o >= gradInputs.length || !gradInputs[o]) continue;
-          const operandVal = op.getOperand(o);
-          if (!needsGrad.has(operandVal.id)) continue;
-          accumulator.accumulate(operandVal.id, reduceGradToOperandShape(builder, gradInputs[o], operandVal.type.shape));
-        }
-      }
+      backpropOps(seg.ops, {
+        accumulator, builder, needsGrad,
+        resolveValue: (v) => recomputeMap.get(v.id) || savedValueMap.get(v.id) || constantMap.get(v.id) || v,
+      });
     }
 
     const returnValues = [];

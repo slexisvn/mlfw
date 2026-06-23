@@ -15,6 +15,10 @@ const NATIVE_QUANTIZED_VARIANTS = new Map([
   ['conv', 'quantized_conv']
 ]);
 
+for (const [opName, variant] of NATIVE_QUANTIZED_VARIANTS) {
+  if (registry.has(opName)) registry.registerOpAttr(opName, 'quantizedVariant', variant);
+}
+
 export class QuantizationConfig {
   constructor(opts = {}) {
     this.scheme = opts.scheme || QuantizationScheme.PER_TENSOR_SYMMETRIC;
@@ -32,6 +36,7 @@ export class QuantizationConfig {
 export class QuantizationPass extends FunctionPass {
   constructor(config = {}) {
     super('QuantizationPass');
+    this.requiredAnalyses = [UseDefAnalysis];
     this.config = config instanceof QuantizationConfig ? config : new QuantizationConfig(config);
   }
 
@@ -65,7 +70,8 @@ export class QuantizationPass extends FunctionPass {
 
       if (cfg.weightOnly && !hasConstantOperand(op)) continue;
 
-      const nativeVariant = NATIVE_QUANTIZED_VARIANTS.get(op.opName);
+      const opDef = registry.get(op.opName);
+      const nativeVariant = opDef ? opDef.getAttr('quantizedVariant') : null;
       if (nativeVariant && allOperandsCanQuantize(op, quantizedValues, cfg)) {
         if (cfg.scheme === QuantizationScheme.PER_CHANNEL && this._canPerChannelDot(op, quantizedValues)) {
           changed = this._replacePerChannelDot(op, cfg) || changed;

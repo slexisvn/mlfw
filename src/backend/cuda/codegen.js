@@ -395,7 +395,20 @@ export class CUDACodegen {
     const extent = this._exprToC(node.extent);
     this._emit(`for (int ${varName} = 0; ${varName} < ${extent}; ${varName}++) {`);
     this._indent++;
-    this._emit(`${accVar} = (${accVar} + ${this._exprToC(node.body)});`);
+    const accBody = this._exprToC(node.body);
+    const accOp = node.op || '+';
+    let accRhs;
+    if (accOp === 'max' || accOp === 'min') {
+      if (isDtypeInt(node.dtype)) {
+        const cmp = accOp === 'max' ? '>' : '<';
+        accRhs = `((${accVar}) ${cmp} (${accBody}) ? (${accVar}) : (${accBody}))`;
+      } else {
+        accRhs = `${accOp === 'max' ? 'fmaxf' : 'fminf'}(${accVar}, ${accBody})`;
+      }
+    } else {
+      accRhs = `(${accVar} ${accOp} ${accBody})`;
+    }
+    this._emit(`${accVar} = ${accRhs};`);
     this._indent--;
     this._emit('}');
 

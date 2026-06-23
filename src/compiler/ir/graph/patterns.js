@@ -1,6 +1,13 @@
 import { Pattern } from '../../passes/rewrite/pattern.js';
 import { TensorType } from './types.js';
 import { isDtypeInt } from '../../../backend/dtype_map.js';
+import { isOp, wildcard, matchPattern } from '../../passes/rewrite/dfpattern.js';
+
+const TRANSPOSE_TRANSPOSE_PAT = isOp('transpose', isOp('transpose', wildcard()));
+const RESHAPE_RESHAPE_PAT = isOp('reshape', isOp('reshape', wildcard()));
+const DOUBLE_NEG_PAT = isOp('neg', isOp('neg', wildcard()));
+const EXP_LOG_PAT = isOp('exp', isOp('log', wildcard()));
+const LOG_EXP_PAT = isOp('log', isOp('exp', wildcard()));
 
 function isConstantVal(op, val) {
   return op && op.opName === 'constant' && op.getAttr('value') === val;
@@ -23,8 +30,7 @@ export class FoldTrivialReshape extends Pattern {
 export class ReshapeReshape extends Pattern {
   constructor() { super('reshape_reshape', 10); this.rootOpName = 'reshape'; }
   match(op) {
-    const inputOp = op.getOperand(0).definingOp;
-    return inputOp && inputOp.opName === 'reshape';
+    return matchPattern(RESHAPE_RESHAPE_PAT, op) !== null;
   }
   rewrite(op, builder) {
     const originalInput = op.getOperand(0).definingOp.getOperand(0);
@@ -56,8 +62,7 @@ export class FoldTrivialTranspose extends Pattern {
 export class TransposeTranspose extends Pattern {
   constructor() { super('transpose_transpose', 10); this.rootOpName = 'transpose'; }
   match(op) {
-    const inputOp = op.getOperand(0).definingOp;
-    return inputOp && inputOp.opName === 'transpose';
+    return matchPattern(TRANSPOSE_TRANSPOSE_PAT, op) !== null;
   }
   rewrite(op, builder) {
     const originalInput = op.getOperand(0).definingOp.getOperand(0);
@@ -259,8 +264,7 @@ export class DivOne extends Pattern {
 export class DoubleNeg extends Pattern {
   constructor() { super('double_neg', 5); this.rootOpName = 'neg'; }
   match(op) {
-    const input = op.getOperand(0).definingOp;
-    return input && input.opName === 'neg';
+    return matchPattern(DOUBLE_NEG_PAT, op) !== null;
   }
   rewrite(op, builder) {
     const original = op.getOperand(0).definingOp.getOperand(0);
@@ -273,9 +277,7 @@ export class DoubleNeg extends Pattern {
 export class ExpLog extends Pattern {
   constructor(fastMath = false) { super('exp_log', 5); this.rootOpName = 'exp'; this.fastMath = fastMath; }
   match(op) {
-    if (!this.fastMath) return false;
-    const input = op.getOperand(0).definingOp;
-    return input && input.opName === 'log';
+    return this.fastMath && matchPattern(EXP_LOG_PAT, op) !== null;
   }
   rewrite(op, builder) {
     op.replaceAllResultsWith([op.getOperand(0).definingOp.getOperand(0)]);
@@ -287,9 +289,7 @@ export class ExpLog extends Pattern {
 export class LogExp extends Pattern {
   constructor(fastMath = false) { super('log_exp', 5); this.rootOpName = 'log'; this.fastMath = fastMath; }
   match(op) {
-    if (!this.fastMath) return false;
-    const input = op.getOperand(0).definingOp;
-    return input && input.opName === 'exp';
+    return this.fastMath && matchPattern(LOG_EXP_PAT, op) !== null;
   }
   rewrite(op, builder) {
     op.replaceAllResultsWith([op.getOperand(0).definingOp.getOperand(0)]);

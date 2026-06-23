@@ -1,7 +1,7 @@
 embed_dim = 128
 hidden = 320
 num_layers = 4
-max_epochs = 80
+max_epochs = 160
 batch_size = 64
 
 train_rows = load_csv("examples/chat_train.csv").to_array()
@@ -121,4 +121,4 @@ print("saved -> examples/chatbot.ckpt (trained on GPU)")
 # net.to(device="gpu")
 # net.eval()
 
-# reply(net, tok, "what can you do?", ans_len + 2)
+# reply(net, tok, "can you sing a song", 20)

@@ -23,6 +23,7 @@ export class FusionPass extends FunctionPass {
       maxRegistersPerThread: target.registersPerThread,
       maxSharedMemory: target.sharedMemoryBytes,
       libraryOps: target.libraryOps,
+      policy: target.getAttr ? target.getAttr('fusionPolicy') : null,
       ...config.cost,
     });
     this.groupBuilder = new FusionGroupBuilder(this.legality);

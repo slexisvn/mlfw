@@ -198,6 +198,8 @@ function lowerExpr(node, ctx) {
   }
 }
 
+const ACCUMULATOR_OPS = new Set(['+', '*', 'max', 'min']);
+
 function detectAccumulator(forNode) {
   const block = forNode.body;
   if (!block || block.type !== 'BlockNode') return null;
@@ -207,7 +209,7 @@ function detectAccumulator(forNode) {
 
   const store = inner;
   const val = store.value;
-  if (!val || val.type !== 'MathOpNode' || val.op !== '+') return null;
+  if (!val || val.type !== 'MathOpNode' || !ACCUMULATOR_OPS.has(val.op)) return null;
 
   let loadSide = null;
   let valueSide = null;
@@ -247,6 +249,7 @@ function detectAccumulator(forNode) {
     valueSide,
     outerIndices,
     block,
+    op: store.value.op,
   };
 }
 
@@ -288,6 +291,7 @@ function lowerAccumulator(forNode, acc, ctx) {
   return new LIRAccumulatorNode({
     localName,
     dtype,
+    op: acc.op,
     initLoad,
     loopVar: forNode.loopVar,
     extent: forNode.extent,

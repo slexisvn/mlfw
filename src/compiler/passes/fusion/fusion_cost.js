@@ -12,6 +12,7 @@ export class FusionCostModel {
     this.maxCodeSizeOps = config.maxCodeSizeOps || 256;
     this.libraryOps = config.libraryOps || new Set();
     this.registerBytesPerOp = config.registerBytesPerOp || 8;
+    this.policy = config.policy || null;
   }
 
   estimateOpCost(op) {
@@ -185,6 +186,11 @@ export class FusionCostModel {
 
   shouldFuse(group) {
     if (group.size < 2) return { fuse: false, reason: 'group too small' };
+
+    if (this.policy && typeof this.policy.shouldFuse === 'function') {
+      const override = this.policy.shouldFuse(group, this);
+      if (override) return override;
+    }
 
     const cost = this.estimateGroupCost(group);
 

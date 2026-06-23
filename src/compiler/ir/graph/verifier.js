@@ -114,7 +114,8 @@ function verifyBlock(block, func, definedValues, errors) {
     const last = block.lastOp;
     if (block.parentRegion && block.parentRegion.parentOp) {
       const parentOpName = block.parentRegion.parentOp.opName;
-      if (parentOpName === 'fusion' || parentOpName === 'if' || parentOpName === 'while' || parentOpName === 'reduce') {
+      const parentDef = registry.get(parentOpName);
+      if (parentDef && parentDef.hasRegions) {
         if (!last.isTerminator()) {
           errors.push(new VerificationError(
             `Block in ${parentOpName} region must end with terminator, got '${last.opName}'`,

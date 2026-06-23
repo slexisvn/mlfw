@@ -19,6 +19,7 @@ export const OpTrait = Object.freeze({
   REDUCTION: 'reduction',
   VIEW: 'view',
   INJECTIVE: 'injective',
+  OUT_EWISE_FUSABLE: 'out_ewise_fusable',
   OPAQUE: 'opaque'
 });
 
@@ -39,9 +40,16 @@ export class OpDef {
     this.getFlops = config.getFlops || null;
     this.hasRegions = config.hasRegions || false;
     this.numRegions = config.numRegions || 0;
+    this.regionSpecs = config.regions || null;
+    this.genericAttrs = new Map(Object.entries(config.opAttrs || {}));
   }
 
+  setAttr(key, value) { this.genericAttrs.set(key, value); return this; }
+  getAttr(key) { return this.genericAttrs.has(key) ? this.genericAttrs.get(key) : null; }
+  hasAttr(key) { return this.genericAttrs.has(key); }
+
   hasTrait(trait) { return this.traits.has(trait); }
+  addTrait(trait) { this.traits.add(trait); return this; }
   get isCommutative() { return this.traits.has(OpTrait.COMMUTATIVE); }
   get isAssociative() { return this.traits.has(OpTrait.ASSOCIATIVE); }
   get isElementwise() { return this.traits.has(OpTrait.ELEMENTWISE); }
@@ -50,6 +58,7 @@ export class OpDef {
   get isReduction() { return this.traits.has(OpTrait.REDUCTION); }
   get isBroadcast() { return this.traits.has(OpTrait.BROADCAST); }
   get isInjective() { return this.traits.has(OpTrait.INJECTIVE); }
+  get isOutEWiseFusable() { return this.traits.has(OpTrait.OUT_EWISE_FUSABLE); }
   get isOpaque() { return this.traits.has(OpTrait.OPAQUE); }
   get hasSideEffects() { return this.sideEffects !== SideEffectKind.NONE; }
 }
@@ -64,6 +73,20 @@ export class OpRegistry {
       throw new Error(`Op '${opDef.name}' already registered`);
     }
     this._defs.set(opDef.name, opDef);
+  }
+
+  registerOpAttr(opName, key, value) {
+    const def = this._defs.get(opName);
+    if (!def) throw new Error(`registerOpAttr: op '${opName}' not registered`);
+    def.setAttr(key, value);
+    return def;
+  }
+
+  registerTrait(opName, trait) {
+    const def = this._defs.get(opName);
+    if (!def) throw new Error(`registerTrait: op '${opName}' not registered`);
+    def.addTrait(trait);
+    return def;
   }
 
   get(name) {

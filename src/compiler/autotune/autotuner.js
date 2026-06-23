@@ -88,7 +88,7 @@ export class Autotuner {
         continue;
       }
 
-      const sketches = getSketchesForBlock(primFunc, name, this.target, blockMap, { richGpu: !!this.config.measurer });
+      const sketches = getSketchesForBlock(primFunc, name, this.target, blockMap, { richGpu: this.config.richGpu ?? !!this.config.measurer });
       if (sketches.length === 0) {
         tasksByKey.set(key, { key, kind: 'empty', weight: 1 });
         continue;
@@ -118,7 +118,7 @@ export class Autotuner {
       if (!best) continue;
 
       if (this.config.useTuningDB && !task.stored) {
-        const record = new TuningRecord(task.key, best.sketchName, best.params, best.score, null, this.db.version);
+        const record = new TuningRecord(task.key, best.sketchName, best.params, best.score, task.session.bestTrace(), this.db.version);
         record.medianMs = best.medianMs || null;
         record.minMs = best.minMs || null;
         this.db.store(task.key, record);
@@ -183,7 +183,7 @@ export class Autotuner {
         applied.add(result);
         if (!result.sketchName || !result.params) continue;
         try {
-          const sketches = getSketchesForBlock(work, blockName, this.target, blockMap, { richGpu: !!this.config.measurer });
+          const sketches = getSketchesForBlock(work, blockName, this.target, blockMap, { richGpu: this.config.richGpu ?? !!this.config.measurer });
           const sketch = sketches.find(s => s.name === result.sketchName);
           if (sketch && this._fitsThreadBlock(work, blockName, sketch, result.params)) {
             const apply = sketch.instantiate(result.params);

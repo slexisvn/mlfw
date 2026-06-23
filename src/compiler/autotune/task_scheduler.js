@@ -7,7 +7,8 @@ export class GradientSchedulerPolicy {
     let best = null;
     let bestPriority = -Infinity;
     for (const t of live) {
-      const priority = t.weight * t.lastGain;
+      const gain = t.gainEwma !== undefined ? t.gainEwma : t.lastGain;
+      const priority = t.weight * gain;
       if (priority > bestPriority) {
         bestPriority = priority;
         best = t;
@@ -25,9 +26,11 @@ export class TaskScheduler {
   run(tasks, deadline, config = {}) {
     const maxRounds = config.maxRoundsPerTask ?? 8;
     const patience = config.plateauPatience ?? 2;
+    const alpha = config.gainEwmaAlpha ?? 0.5;
     for (const t of tasks) {
       t.rounds = 0;
       t.lastGain = 0;
+      t.gainEwma = 0;
       t.stale = 0;
       t.plateaued = false;
     }
@@ -37,6 +40,7 @@ export class TaskScheduler {
       const gain = task.session.runRound();
       task.rounds++;
       task.lastGain = gain;
+      task.gainEwma = alpha * gain + (1 - alpha) * task.gainEwma;
       if (gain <= 0) task.stale++;
       else task.stale = 0;
       if (task.session.plateaued || task.stale >= patience || task.rounds >= maxRounds) {

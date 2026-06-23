@@ -104,3 +104,15 @@ describe('mathOp preserves non-trivial ops', () => {
     expect(result.op).toBe('%');
   });
 });
+
+describe('mathOp integer division/modulo by zero', () => {
+  it('does not fold // or % by zero', () => {
+    expect(mathOp('//', new IntImmNode(4), new IntImmNode(0)).type).toBe('MathOpNode');
+    expect(mathOp('%', new IntImmNode(4), new IntImmNode(0)).type).toBe('MathOpNode');
+  });
+
+  it('still folds // and % by a non-zero divisor', () => {
+    expect(mathOp('//', new IntImmNode(7), new IntImmNode(2)).type).toBe('IntImmNode');
+    expect(mathOp('%', new IntImmNode(7), new IntImmNode(3)).type).toBe('IntImmNode');
+  });
+});

@@ -4,21 +4,31 @@ import { Buffer } from '../../ir/tensor/buffer.js';
 import { isDtypeInt } from '../../../backend/dtype_map.js';
 import { ForNode, BlockNode, SeqNode, BufferStoreNode, BufferLoadNode, VariableNode, IntImmNode, FloatImmNode, BlockRealizeNode, ForKind } from '../../ir/tensor/nodes.js';
 
-const loweringRules = new Map();
+import { registerOpStrategy, getOpStrategy, selectImplementation } from './op_strategy.js';
+
 const CONSTANT_OPS = new Set(['constant', 'scalar_constant']);
+const GENERIC_PLEVEL = 10;
+const TARGET_PLEVEL = 20;
 
 export { CONSTANT_OPS };
+export { registerOpStrategy, getOpStrategy, OpStrategy, OpImplementation, selectImplementation } from './op_strategy.js';
 
-export function hasLoweringRule(opName) {
-  return loweringRules.has(opName) || CONSTANT_OPS.has(opName);
+export function hasLoweringRule(opName, target) {
+  if (getOpStrategy(opName, target)) return true;
+  return CONSTANT_OPS.has(opName);
 }
 
-export function registerLoweringRule(opName, ruleFunc) {
-  loweringRules.set(opName, ruleFunc);
+export function registerLoweringRule(opName, ruleFunc, plevel = GENERIC_PLEVEL) {
+  registerOpStrategy(opName, { name: `${opName}.generic`, compute: ruleFunc, plevel, targetKind: null });
 }
 
-export function getLoweringRule(opName) {
-  return loweringRules.get(opName);
+export function registerTargetLoweringRule(opName, targetKind, ruleFunc, plevel = TARGET_PLEVEL) {
+  registerOpStrategy(opName, { name: `${opName}.${targetKind}`, compute: ruleFunc, plevel, targetKind });
+}
+
+export function getLoweringRule(opName, target) {
+  const impl = selectImplementation(opName, target);
+  return impl ? impl.compute : undefined;
 }
 
 export class LoweringContext {

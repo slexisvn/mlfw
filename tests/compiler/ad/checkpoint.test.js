@@ -285,3 +285,77 @@ describe('AD rejects region control-flow where it cannot be differentiated', () 
     expect(() => builder.build(buildScanModel())).toThrow(/region control-flow|scan/i);
   });
 });
+
+describe('scan carry checkpointing (O(sqrt T) backward)', () => {
+  function buildScanModelT(T, D) {
+    return buildFunction('scan_ck_fwd', [t([T, D]), t([D])], [t([D])], (b, [xs, init]) => {
+      const s = b.scanOp([xs], [init], (bb, xt, cy) => {
+        const m = bb.mul(cy[0], xt[0]).getResult(0);
+        const nc = bb.add(m, xt[0]).getResult(0);
+        return [[nc], [nc]];
+      });
+      b.returnOp([s.getResult(0)]);
+    });
+  }
+
+  function fillInputs(bwd, seed) {
+    const ins = [];
+    for (let i = 0; i < bwd.inputTypes.length; i++) {
+      const buf = new Float32Array(numel(bwd.inputTypes[i].shape));
+      if (i === 0) {
+        buf.fill(seed);
+      } else {
+        for (let k = 0; k < buf.length; k++) buf[k] = 0.2 + ((i * 7 + k * 3) % 11) * 0.05;
+      }
+      ins.push(buf);
+    }
+    return ins;
+  }
+
+  it('opt-in checkpointed scan backward matches non-checkpointed gradients (T=8, sqrt)', () => {
+    const T = 8, D = 3;
+    const normalBwd = buildAndCompileBackward(buildScanModelT(T, D));
+    const ckptBwd = buildAndCompileBackward(buildScanModelT(T, D), { scanCheckpoint: 'sqrt' });
+
+    expect(ckptBwd.inputTypes.length).toBe(normalBwd.inputTypes.length);
+
+    const normalGrads = normalBwd.run(...fillInputs(normalBwd, 1));
+    const ckptGrads = ckptBwd.run(...fillInputs(ckptBwd, 1));
+
+    expect(ckptGrads.length).toBe(normalGrads.length);
+    for (let g = 0; g < normalGrads.length; g++) {
+      expect(ckptGrads[g].length).toBe(normalGrads[g].length);
+      for (let i = 0; i < normalGrads[g].length; i++) {
+        expect(ckptGrads[g][i]).toBeCloseTo(normalGrads[g][i], 4);
+      }
+    }
+  });
+
+  it('fixed segment size matches non-checkpointed gradients (T=9, K=3)', () => {
+    const T = 9, D = 2;
+    const normalBwd = buildAndCompileBackward(buildScanModelT(T, D));
+    const ckptBwd = buildAndCompileBackward(buildScanModelT(T, D), { scanCheckpoint: 3 });
+
+    const normalGrads = normalBwd.run(...fillInputs(normalBwd, 1));
+    const ckptGrads = ckptBwd.run(...fillInputs(ckptBwd, 1));
+
+    for (let g = 0; g < normalGrads.length; g++) {
+      for (let i = 0; i < normalGrads[g].length; i++) {
+        expect(ckptGrads[g][i]).toBeCloseTo(normalGrads[g][i], 4);
+      }
+    }
+  });
+
+  it('checkpointing recomputes the body (more body ops than non-checkpointed)', () => {
+    const T = 9, D = 2;
+    const normal = new BackwardGraphBuilder().build(buildScanModelT(T, D));
+    const ckpt = new BackwardGraphBuilder({ scanCheckpoint: 3 }).build(buildScanModelT(T, D));
+    const countMul = (r) => r.backwardFunc.opsArray().filter(o => o.opName === 'mul').length;
+    expect(countMul(ckpt)).toBeGreaterThan(countMul(normal));
+  });
+
+  it('default (no scanCheckpoint) still differentiates scan unchanged', () => {
+    const builder = new BackwardGraphBuilder();
+    expect(() => builder.build(buildScanModelT(5, 2))).not.toThrow();
+  });
+});
