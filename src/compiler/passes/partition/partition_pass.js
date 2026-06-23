@@ -3,6 +3,7 @@ import { Operation, cloneRegion } from '../../ir/graph/operation.js';
 
 import { GraphFunction } from '../../ir/graph/function.js';
 import { GraphPartitioner, PartitionerConfig } from '../../analysis/partitioner.js';
+import { topoSortOps, computePartitionIO } from './partition_core.js';
 import { TraceLevel } from '../../pipeline/trace.js';
 
 export class GraphPartitionPass extends FunctionPass {
@@ -185,32 +186,7 @@ export class PartitionMaterializationPass extends FunctionPass {
 
     for (const [pid, partition] of partitionMap) {
       const opSet = new Set(partition.ops);
-      const inputs = [];
-      const inputSet = new Set();
-      const outputs = [];
-      const outputSet = new Set();
-
-      for (const op of partition.ops) {
-        for (let i = 0; i < op.numOperands; i++) {
-          const operand = op.getOperand(i);
-          if (operand.definingOp && opSet.has(operand.definingOp)) continue;
-          if (!inputSet.has(operand)) {
-            inputSet.add(operand);
-            inputs.push(operand);
-          }
-        }
-        for (let i = 0; i < op.numResults; i++) {
-          const result = op.getResult(i);
-          if (outputSet.has(result)) continue;
-          for (const use of result.uses()) {
-            if (!opSet.has(use.user)) {
-              outputSet.add(result);
-              outputs.push(result);
-              break;
-            }
-          }
-        }
-      }
+      const { inputs, outputs } = computePartitionIO(opSet, partition.ops);
 
       const inputTypes = inputs.map(v => v.type);
       const outputTypes = outputs.map(v => v.type);
@@ -223,7 +199,7 @@ export class PartitionMaterializationPass extends FunctionPass {
         valueMap.set(inputs[i], subFunc.args[i]);
       }
 
-      const sorted = this._topoSort(partition.ops);
+      const sorted = topoSortOps(partition.ops);
       for (const op of sorted) {
         const newOperands = [];
         for (let i = 0; i < op.numOperands; i++) {
@@ -262,46 +238,4 @@ export class PartitionMaterializationPass extends FunctionPass {
     }
   }
 
-  _topoSort(ops) {
-    const opSet = new Set(ops);
-    const inDegree = new Map();
-    const adj = new Map();
-
-    for (const op of ops) {
-      inDegree.set(op, 0);
-      adj.set(op, []);
-    }
-
-    for (const op of ops) {
-      for (let i = 0; i < op.numOperands; i++) {
-        const producer = op.getOperand(i).definingOp;
-        if (producer && opSet.has(producer)) {
-          adj.get(producer).push(op);
-          inDegree.set(op, inDegree.get(op) + 1);
-        }
-      }
-    }
-
-    const queue = [];
-    for (const op of ops) {
-      if (inDegree.get(op) === 0) queue.push(op);
-    }
-
-    const sorted = [];
-    while (queue.length > 0) {
-      const op = queue.shift();
-      sorted.push(op);
-      for (const consumer of adj.get(op)) {
-        const deg = inDegree.get(consumer) - 1;
-        inDegree.set(consumer, deg);
-        if (deg === 0) queue.push(consumer);
-      }
-    }
-
-    if (sorted.length < ops.length) {
-      throw new Error('GraphPartitionPass: cycle detected in partition ops during topological sort');
-    }
-
-    return sorted;
-  }
 }

@@ -5,7 +5,7 @@ import {
 } from '../../../ir/tensor/nodes.js';
 import { ScalarType, isFloatType } from '../../../ir/graph/types.js';
 import {
-  registerLoweringRule, buildSpatialNest, buildDotGeometry,
+  registerLoweringRule, getLoweringRule, buildSpatialNest, buildDotGeometry,
   parseLayout, bufRefs, computeBroadcastIndices, makeLoopNest, wrapInLoops
 } from '../lowering_registry.js';
 
@@ -325,4 +325,6 @@ export function register() {
 
     return new SeqNode([initBody, accBody, epiBody]);
   });
+
+  registerLoweringRule('cublas_gemm', getLoweringRule('dot'));
 }

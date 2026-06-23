@@ -61,6 +61,39 @@ export function register(registry) {
   }));
 
   registry.register(new OpDef({
+    name: 'cublas_gemm',
+    numOperands: 2,
+    numResults: 1,
+    traits: [OpTrait.OPAQUE],
+    attrs: [
+      { name: 'lhs_contracting', type: 'array', required: true },
+      { name: 'rhs_contracting', type: 'array', required: true },
+      { name: 'lhs_batch', type: 'array', required: false },
+      { name: 'rhs_batch', type: 'array', required: false }
+    ],
+    inferResultTypes: inferDotResultTypes,
+    getFlops(op) {
+      const lhs = op.getOperand(0).type;
+      const result = op.getResult(0).type;
+      if (!(lhs instanceof TensorType) || !(result instanceof TensorType)) return 0;
+      let contractDim = 1;
+      for (const d of (op.getAttr('lhs_contracting') || [])) {
+        if (lhs.shape[d] !== DYNAMIC) contractDim *= lhs.shape[d];
+      }
+      const outputElements = result.numel();
+      if (outputElements === DYNAMIC) return 0;
+      return 2 * outputElements * contractDim;
+    },
+    verify(op) {
+      const errs = [];
+      if (op.numOperands !== 2) { errs.push('cublas_gemm expects 2 operands'); return errs; }
+      if (!op.hasAttr('lhs_contracting')) errs.push('cublas_gemm missing lhs_contracting');
+      if (!op.hasAttr('rhs_contracting')) errs.push('cublas_gemm missing rhs_contracting');
+      return errs;
+    }
+  }));
+
+  registry.register(new OpDef({
     name: 'conv',
     numOperands: 2,
     numResults: 1,

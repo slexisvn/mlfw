@@ -1,5 +1,6 @@
 import { GraphFunction } from '../../ir/graph/function.js';
 import { Operation } from '../../ir/graph/operation.js';
+import { topoSortOps, buildPartitions, topoSortPartitions, computePartitionIO } from './partition_core.js';
 
 const CONSTANT_OPS = new Set(['constant', 'scalar_constant']);
 const TERMINATORS = new Set(['return', 'yield']);
@@ -36,8 +37,8 @@ function constScalarOf(v) {
   return 0;
 }
 
-function cublasDotInfo(op) {
-  if (op.opName !== 'dot') return null;
+export function cublasDotInfo(op) {
+  if (op.opName !== 'dot' && op.opName !== 'cublas_gemm') return null;
   const lhsT = op.getOperand(0).type;
   const rhsT = op.getOperand(1).type;
   const outT = op.getResult(0).type;
@@ -68,161 +69,20 @@ function cublasDotInfo(op) {
   return { M, N, K, transB };
 }
 
-export function topoSortOps(ops) {
-  const opSet = new Set(ops);
-  const ordered = [];
-  const state = new Map();
-  const visit = (op) => {
-    const s = state.get(op);
-    if (s === 1 || s === 2) return;
-    state.set(op, 1);
-    for (let i = 0; i < op.numOperands; i++) {
-      const d = op.getOperand(i).definingOp;
-      if (d && opSet.has(d)) visit(d);
-    }
-    state.set(op, 2);
-    ordered.push(op);
+export { topoSortOps };
+
+function bufferLimitedConfig(opTarget) {
+  return {
+    labelOf: (op) => opTarget.get(op),
+    canMerge: (part, op) => Math.max(part.maxBuf || 0, maxResultBytes(op)) <= PARTITION_BUFFER_LIMIT,
+    onAttach: (part, op) => { part.maxBuf = Math.max(part.maxBuf || 0, maxResultBytes(op)); },
   };
-  for (const op of ops) visit(op);
-  return ordered;
-}
-
-function buildPartitions(partitionOps, opTarget) {
-  const topo = topoSortOps(partitionOps);
-  const opToPart = new Map();
-  const preds = new Map();
-  const partitions = [];
-  let nextId = 0;
-
-  const isUpstreamOf = (ancestor, node) => {
-    if (ancestor === node) return true;
-    const stack = [node];
-    const seen = new Set();
-    while (stack.length > 0) {
-      const cur = stack.pop();
-      if (cur === ancestor) return true;
-      if (seen.has(cur)) continue;
-      seen.add(cur);
-      const p = preds.get(cur);
-      if (p) for (const x of p) stack.push(x);
-    }
-    return false;
-  };
-
-  const operandParts = (op) => {
-    const s = new Set();
-    for (let i = 0; i < op.numOperands; i++) {
-      const d = op.getOperand(i).definingOp;
-      if (!d) continue;
-      const part = opToPart.get(d);
-      if (part) s.add(part);
-    }
-    return s;
-  };
-
-  const recordEdges = (op, own) => {
-    for (const part of operandParts(op)) {
-      if (part === own) continue;
-      let p = preds.get(own);
-      if (!p) { p = new Set(); preds.set(own, p); }
-      p.add(part);
-    }
-  };
-
-  for (const op of topo) {
-    const target = opTarget.get(op);
-    const opBytes = maxResultBytes(op);
-    let merged = false;
-    for (let i = 0; i < op.numOperands; i++) {
-      const producer = op.getOperand(i).definingOp;
-      if (!producer) continue;
-      const pPart = opToPart.get(producer);
-      if (!pPart || pPart.target !== target) continue;
-
-      if (Math.max(pPart.maxBuf || 0, opBytes) > PARTITION_BUFFER_LIMIT) continue;
-
-      let createsCycle = false;
-      for (const part of operandParts(op)) {
-        if (part === pPart) continue;
-        if (isUpstreamOf(pPart, part)) { createsCycle = true; break; }
-      }
-      if (createsCycle) continue;
-
-      pPart.ops.push(op);
-      pPart.opSet.add(op);
-      pPart.maxBuf = Math.max(pPart.maxBuf || 0, opBytes);
-      opToPart.set(op, pPart);
-      recordEdges(op, pPart);
-      merged = true;
-      break;
-    }
-    if (!merged) {
-      const part = { id: nextId++, target, ops: [op], opSet: new Set([op]), maxBuf: opBytes };
-      partitions.push(part);
-      opToPart.set(op, part);
-      recordEdges(op, part);
-    }
-  }
-
-  return { partitions, opToPart, preds };
-}
-
-function topoSortPartitions(partitions, preds) {
-  const inDeg = new Map();
-  const adj = new Map();
-  for (const p of partitions) { inDeg.set(p, 0); adj.set(p, []); }
-  for (const p of partitions) {
-    const ps = preds.get(p);
-    if (!ps) continue;
-    for (const q of ps) {
-      if (!adj.has(q)) continue;
-      adj.get(q).push(p);
-      inDeg.set(p, inDeg.get(p) + 1);
-    }
-  }
-  const queue = [];
-  for (const p of partitions) if (inDeg.get(p) === 0) queue.push(p);
-  const out = [];
-  while (queue.length > 0) {
-    const p = queue.shift();
-    out.push(p);
-    for (const c of adj.get(p)) {
-      const d = inDeg.get(c) - 1;
-      inDeg.set(c, d);
-      if (d === 0) queue.push(c);
-    }
-  }
-  return out.length === partitions.length ? out : null;
 }
 
 export function materializePartition(part, name, dotInfoMap) {
   const opSet = part.opSet;
   const sorted = topoSortOps(part.ops);
-  const inputs = [], inputSet = new Set();
-  const outputs = [], outputSet = new Set();
-  const constDefs = [], constSet = new Set();
-
-  for (const op of sorted) {
-    for (let i = 0; i < op.numOperands; i++) {
-      const v = op.getOperand(i);
-      const d = v.definingOp;
-      if (d && opSet.has(d)) continue;
-      if (d && isConstantOp(d)) {
-        if (!constSet.has(d)) { constSet.add(d); constDefs.push(d); }
-        continue;
-      }
-      if (!inputSet.has(v)) { inputSet.add(v); inputs.push(v); }
-    }
-    for (let i = 0; i < op.numResults; i++) {
-      const r = op.getResult(i);
-      if (outputSet.has(r)) continue;
-      let escapes = false;
-      for (const use of r.uses()) {
-        if (!opSet.has(use.user)) { escapes = true; break; }
-      }
-      if (escapes) { outputSet.add(r); outputs.push(r); }
-    }
-  }
+  const { inputs, outputs, constDefs } = computePartitionIO(opSet, sorted, { pullConstants: true, isConstant: isConstantOp });
 
   for (const v of inputs) if (!v.type || !v.type.isFullyStatic) return null;
   for (const v of outputs) if (!v.type || !v.type.isFullyStatic) return null;
@@ -246,7 +106,7 @@ export function materializePartition(part, name, dotInfoMap) {
   return { part, subFunc, inputs, outputs, dotOp };
 }
 
-const BOUNDARY_OP_NAMES = new Set(['dot', 'reduce']);
+const BOUNDARY_OP_NAMES = new Set(['dot', 'cublas_gemm', 'reduce']);
 
 function containsBoundaryOp(op) {
   if (BOUNDARY_OP_NAMES.has(op.opName)) return true;
@@ -395,7 +255,7 @@ export function splitGraphForNative(graphModule, minBoundaries = 2) {
 
   if (boundaryCount < minBoundaries || partitionOps.length === 0) return null;
 
-  const { partitions, preds } = buildPartitions(partitionOps, opTarget);
+  const { partitions, preds } = buildPartitions(partitionOps, bufferLimitedConfig(opTarget));
   if (partitions.length < 2) return null;
 
   const orderedParts = topoSortPartitions(partitions, preds);
@@ -447,7 +307,7 @@ export function splitGraphForCublas(graphModule) {
 
   if (dotCount === 0 || partitionOps.length === 0) return null;
 
-  const { partitions, preds } = buildPartitions(partitionOps, opTarget);
+  const { partitions, preds } = buildPartitions(partitionOps, bufferLimitedConfig(opTarget));
   if (partitions.length < 2) return null;
 
   const orderedParts = topoSortPartitions(partitions, preds);

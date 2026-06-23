@@ -25,8 +25,8 @@ import { CalibrationCollector } from '../analysis/calibration.js';
 import { DecompositionPass } from '../passes/decompose/decomposition_pass.js';
 import { RematerializationPass } from '../passes/memory/rematerialization.js';
 import { GraphPartitionPass, PartitionMaterializationPass } from '../passes/partition/partition_pass.js';
-import { splitGraphForCublas, splitGraphForNative, hasDependentBoundaries } from '../passes/partition/cublas_split.js';
-import { splitGraphForScan } from '../passes/partition/scan_split.js';
+import { CublasRewritePass } from '../passes/rewrite/cublas_rewrite.js';
+import { splitGraph } from './graph_split.js';
 
 import { TraceLog, TraceLevel, CompilationError } from './trace.js';
 import { IRPrinter } from '../ir/graph/printer.js';
@@ -181,21 +181,13 @@ export class Compiler {
       this._runPartitioning(graphModule, trace);
     }
 
-    let cublasSplit = null;
-    let nativeSplit = null;
-    let scanSplit = null;
     const isWebGPUTarget = typeof this.config.target.isWebGPU === 'function' && this.config.target.isWebGPU();
-    if (this.config.matmulBackend === 'cublas') {
-      cublasSplit = splitGraphForCublas(graphModule);
-    } else if (cudaMatmulChain) {
-      nativeSplit = splitGraphForNative(graphModule);
-    } else if (isWebGPUTarget) {
-      scanSplit = splitGraphForScan(graphModule, this.config.target);
-      if (!scanSplit && hasDependentBoundaries(graphModule, this.config.target.maxThreadsPerBlock || 256)) {
-        scanSplit = splitGraphForScan(graphModule, this.config.target, true);
-        if (!scanSplit) nativeSplit = splitGraphForNative(graphModule, 2);
-      }
-    }
+    const split = splitGraph(graphModule, {
+      config: this.config,
+      target: this.config.target,
+      cudaMatmulChain,
+      isWebGPU: isWebGPUTarget,
+    });
 
     if (this.config.verify) {
       this._verifyGraph(graphModule, 'after graph passes', trace, errors, failed, resilient);
@@ -205,7 +197,7 @@ export class Compiler {
 
     if (this.config.matmulBackend === 'cublas') {
       for (const pf of primFuncs) {
-        pf.cublasInfo = cublasSplit ? (cublasSplit.cublasInfos.get(pf.name) || null) : detectPureMatmul(pf);
+        pf.cublasInfo = split && split.cublasInfos ? (split.cublasInfos.get(pf.name) || null) : detectPureMatmul(pf);
       }
     }
 
@@ -225,9 +217,7 @@ export class Compiler {
 
     const runtimeModule = this._codegen(lirFuncs, trace, errors, failed, resilient);
 
-    if (cublasSplit) runtimeModule.executionPlan = cublasSplit.plan;
-    else if (nativeSplit) runtimeModule.executionPlan = nativeSplit.plan;
-    else if (scanSplit) runtimeModule.executionPlan = scanSplit.plan;
+    if (split) runtimeModule.executionPlan = split.plan;
 
     trace.phaseEnd('compile', performance.now() - t0);
 
@@ -302,6 +292,10 @@ export class Compiler {
         pm.addPass(new MultiOutputFusionPass({ maxFusionSize: this.config.target?.maxFusionSize, ...fCfg }));
       }
       pm.addPass(new DCEPass());
+    }
+
+    if (this.config.matmulBackend === 'cublas') {
+      pm.addPass(new CublasRewritePass());
     }
 
     if (this.config.optimization.rematerialization) {

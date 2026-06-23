@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { buildFunction, IRBuilder } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { GraphPartitionPass, PartitionMaterializationPass } from '../../../src/compiler/passes/partition/partition_pass.js';
+import { topoSortOps } from '../../../src/compiler/passes/partition/partition_core.js';
 import { PassResult } from '../../../src/compiler/passes/pass.js';
 import { CPUTarget, CUDATarget } from '../../../src/backend/target.js';
 import { GraphFunction } from '../../../src/compiler/ir/graph/function.js';
@@ -157,22 +158,19 @@ describe('GraphPartitionPass', () => {
 });
 
 describe('GraphPartitionPass topo sort and insertion ordering', () => {
-  it('_topoSort throws when the op set contains a cycle', () => {
-    const pass = new PartitionMaterializationPass();
-
+  it('topoSortOps throws when the op set contains a cycle', () => {
     const a = { numOperands: 1, numResults: 1, getOperand() { return { definingOp: b }; }, getResult() { return {}; } };
     const b = { numOperands: 1, numResults: 1, getOperand() { return { definingOp: a }; }, getResult() { return {}; } };
 
-    expect(() => pass._topoSort([a, b])).toThrow(/cycle/i);
+    expect(() => topoSortOps([a, b])).toThrow(/cycle/i);
   });
 
-  it('_topoSort returns all ops for an acyclic set', () => {
-    const pass = new PartitionMaterializationPass();
+  it('topoSortOps returns all ops for an acyclic set', () => {
     const r1 = {};
     const p = { numOperands: 0, numResults: 1, getOperand() { return null; }, getResult() { return r1; } };
     const c = { numOperands: 1, numResults: 0, getOperand() { return { definingOp: p }; }, getResult() { return {}; } };
 
-    const sorted = pass._topoSort([c, p]);
+    const sorted = topoSortOps([c, p]);
     expect(sorted.length).toBe(2);
     expect(sorted.indexOf(p)).toBeLessThan(sorted.indexOf(c));
   });
