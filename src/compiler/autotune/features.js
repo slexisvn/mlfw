@@ -130,7 +130,8 @@ export class FeatureExtractor {
     FeatureExtractor._collectLoads(store.value, accesses);
     let stride1 = 0, strided = 0, reuse = 0, touched = 0;
     for (const acc of accesses) {
-      touched += acc.buffer && acc.buffer.sizeInBytes ? acc.buffer.sizeInBytes() : 0;
+      const accBytes = acc.buffer && acc.buffer.sizeInBytes ? acc.buffer.sizeInBytes() : 0;
+      if (accBytes > 0) touched += accBytes;
       const last = acc.indices && acc.indices.length > 0 ? acc.indices[acc.indices.length - 1] : null;
       if (last && last.type === 'VariableNode') stride1++;
       else strided++;
@@ -296,7 +297,12 @@ export class FeatureExtractor {
 
   static _checkStride(buffer, indices, ctx) {
     if (!buffer || !indices || indices.length === 0) return;
-    const lastIdx = indices[indices.length - 1];
+    let lastIdx = indices[indices.length - 1];
+    while (lastIdx && lastIdx.type === 'MathOpNode' && lastIdx.b && lastIdx.b.type === 'IntImmNode') {
+      if (lastIdx.op === '+' && lastIdx.b.value === 0) lastIdx = lastIdx.a;
+      else if (lastIdx.op === '*' && lastIdx.b.value === 1) lastIdx = lastIdx.a;
+      else break;
+    }
     if (lastIdx && lastIdx.type === 'VariableNode') {
       ctx.strideOneAccesses++;
     } else {

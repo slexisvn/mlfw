@@ -22,7 +22,7 @@ export function register(registry) {
     numResults: 1,
     traits: [OpTrait.ELEMENTWISE, OpTrait.SAME_OPERAND_AND_RESULT_TYPE],
     inferResultTypes: inferUnaryFloat,
-    fold(constValues) { return Math.exp(constValues[0]); },
+    fold(constValues) { return typeof constValues[0] === 'number' ? Math.exp(constValues[0]) : undefined; },
     verify: verifyUnaryFloat
   }));
 

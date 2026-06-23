@@ -362,7 +362,8 @@ export class CUDACodegen {
 
   _visitWhileNode(node) {
     this._visitNode(node.condBody);
-    this._emit(`while (${node.condVar.name}) {`);
+    const condExpr = Array.isArray(node.condVar.shape) ? `${node.condVar.name}[0]` : node.condVar.name;
+    this._emit(`while (${condExpr}) {`);
     this._indent++;
     this._visitNode(node.loopBody);
     this._visitNode(node.condBody);

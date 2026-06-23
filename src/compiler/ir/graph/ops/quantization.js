@@ -45,7 +45,7 @@ export function register(registry) {
       return errs;
     },
     fold(constValues, attrs) {
-      if (constValues[0] === undefined) return undefined;
+      if (typeof constValues[0] !== 'number') return undefined;
       const scale = attrs.get ? attrs.get('scale') : attrs.scale;
       const zp = attrs.get ? attrs.get('zero_point') : attrs.zero_point;
       if (typeof scale !== 'number' || typeof zp !== 'number') return undefined;
@@ -90,7 +90,7 @@ export function register(registry) {
       return errs;
     },
     fold(constValues, attrs) {
-      if (constValues[0] === undefined) return undefined;
+      if (typeof constValues[0] !== 'number') return undefined;
       const scale = attrs.get ? attrs.get('scale') : attrs.scale;
       const zp = attrs.get ? attrs.get('zero_point') : attrs.zero_point;
       if (typeof scale !== 'number' || typeof zp !== 'number') return undefined;

@@ -1,10 +1,22 @@
-import { FeatureExtractor } from './features.js';
+import { FeatureExtractor, STATEMENT_FEATURE_SCHEMA } from './features.js';
 import { GradientBoostedTrees } from './gbt.js';
+
+const MAX_FEATURE_NAMES = new Set(['depth', 'threadBlockSize', 'gridSize', 'underReduction', 'vectorized', 'parallelized', 'innermostExtent']);
+const MEAN_FEATURE_NAMES = new Set(['arithmeticIntensity']);
+const MAX_FEATURE_IDX = new Set(STATEMENT_FEATURE_SCHEMA.map((n, i) => (MAX_FEATURE_NAMES.has(n) ? i : -1)).filter(i => i >= 0));
+const MEAN_FEATURE_IDX = new Set(STATEMENT_FEATURE_SCHEMA.map((n, i) => (MEAN_FEATURE_NAMES.has(n) ? i : -1)).filter(i => i >= 0));
 
 function aggregateStatements(stmtVecs) {
   const dim = stmtVecs[0].length;
   const out = new Array(dim + 1).fill(0);
-  for (const v of stmtVecs) for (let i = 0; i < dim; i++) out[i] += v[i] || 0;
+  for (const v of stmtVecs) {
+    for (let i = 0; i < dim; i++) {
+      const x = v[i] || 0;
+      if (MAX_FEATURE_IDX.has(i)) { if (x > out[i]) out[i] = x; }
+      else out[i] += x;
+    }
+  }
+  for (const i of MEAN_FEATURE_IDX) if (i < dim) out[i] /= stmtVecs.length;
   out[dim] = stmtVecs.length;
   return out;
 }

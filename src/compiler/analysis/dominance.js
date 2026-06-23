@@ -1,13 +1,8 @@
 import { UseDefAnalysis } from './use_def.js';
 
 export class DominanceResult {
-  constructor(idom, topoOrder) {
+  constructor(idom) {
     this.idom = idom;
-    this._topoOrder = topoOrder;
-    this._orderIndex = new Map();
-    for (let i = 0; i < topoOrder.length; i++) {
-      this._orderIndex.set(topoOrder[i], i);
-    }
   }
 
   postDominates(a, b) {

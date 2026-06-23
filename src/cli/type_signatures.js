@@ -13,9 +13,9 @@ function returnOverrides() {
   return new Map([
     ['len', NUMBER], ['range', listType(NUMBER)], ['shape', listType(NUMBER)],
     ['dtype', STRING], ['read_text', STRING], ['trace', STRING], ['graph', STRING],
-    ['print', NONE], ['save', NONE], ['backward', NONE],
+    ['print', NONE], ['backward', NONE],
     ['load_csv', moduleType('DataFrame')], ['DataFrame', moduleType('DataFrame')],
-    ['Tokenizer', moduleType('Tokenizer')],
+    ['Tokenizer', moduleType('Tokenizer')], ['load_tokenizer', moduleType('Tokenizer')],
   ]);
 }
 

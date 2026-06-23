@@ -62,7 +62,10 @@ registerDecomposition('all_reduce', (op, b) => {
   const reduceOp = op.getAttr('reduce_op') || 'sum';
   const shape = x.type.shape;
   const dtype = x.type.dtype;
-  const init = reduceOp === 'max' ? -Infinity : (reduceOp === 'min' ? Infinity : 0);
+  const init = reduceOp === 'max' ? -Infinity
+    : reduceOp === 'min' ? Infinity
+    : (reduceOp === 'prod' || reduceOp === 'and') ? 1
+    : 0;
   const red = b.reduce(x, b.scalarConstant(init, dtype).getResult(0), [axis], reduceOp).getResult(0);
   const bcastDims = [];
   for (let i = 0; i < shape.length; i++) if (i !== axis) bcastDims.push(i);

@@ -15,6 +15,7 @@ export class ValidationLoop {
     callbacks.dispatch('onValidationEpochStart', trainer, model);
 
     const limit = resolveLimit(trainer.limitValBatches, dataLoader.length);
+    state.numValBatches = limit;
     let batchIdx = 0;
 
     await noGradAsync(async () => {

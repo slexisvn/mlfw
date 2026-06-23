@@ -1,5 +1,5 @@
 import { FunctionPass, PassResult } from '../pass.js';
-import { Operation } from '../../ir/graph/operation.js';
+import { Operation, cloneRegion } from '../../ir/graph/operation.js';
 import { Block, Region } from '../../ir/graph/block.js';
 import { TensorType, DYNAMIC } from '../../ir/graph/types.js';
 import { registry } from '../../ir/graph/ops.js';
@@ -214,7 +214,7 @@ export class FusionMergerPass extends FunctionPass {
       if (op.opName === 'yield') continue;
       const mappedOperands = remapOperands(op, valueMap);
       const resultTypes = op.results.map(r => r.type);
-      const clonedRegions = op.regions.length > 0 ? op.regions.map(r => this._cloneRegionShallow(r)) : null;
+      const clonedRegions = op.regions.length > 0 ? op.regions.map(r => cloneRegion(r)) : null;
       const cloned = new Operation(op.opName, mappedOperands, resultTypes, new Map(op.attributes), clonedRegions);
       mergedBlock.pushOp(cloned);
       for (let i = 0; i < op.numResults; i++) {
@@ -244,7 +244,7 @@ export class FusionMergerPass extends FunctionPass {
       if (op.opName === 'yield') continue;
       const mappedOperands = remapOperands(op, valueMap);
       const resultTypes = op.results.map(r => r.type);
-      const clonedRegions = op.regions.length > 0 ? op.regions.map(r => this._cloneRegionShallow(r)) : null;
+      const clonedRegions = op.regions.length > 0 ? op.regions.map(r => cloneRegion(r)) : null;
       const cloned = new Operation(op.opName, mappedOperands, resultTypes, new Map(op.attributes), clonedRegions);
       mergedBlock.pushOp(cloned);
       for (let i = 0; i < op.numResults; i++) {

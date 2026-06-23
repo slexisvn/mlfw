@@ -97,6 +97,7 @@ const RETURNS_OVERRIDE = {
   where: 'Tensor',
   read_text: 'string',
   Tokenizer: 'Tokenizer',
+  load_tokenizer: 'Tokenizer',
   load_csv: 'DataFrame',
   normalize: 'Tensor',
   encode: null,

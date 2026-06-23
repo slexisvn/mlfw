@@ -257,7 +257,9 @@ function encodeBody(bodyTokens, localMap, importMap) {
       else if (t.startsWith('call')) {
         bytes.push(0x10);
         const fn = extractName(t, 'math_') || (peek() && peek().startsWith('$') ? extractName(eat(), 'math_') : '');
-        bytes.push(...uleb(importMap.get(fn) ?? 0));
+        const importIdx = importMap.get(fn);
+        if (importIdx === undefined) throw new Error(`WAT encoder: call to unresolved import '${fn}'`);
+        bytes.push(...uleb(importIdx));
       }
       else if (t === 'local.get') {
         bytes.push(0x20);

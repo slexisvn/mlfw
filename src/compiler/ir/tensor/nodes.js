@@ -267,8 +267,8 @@ export function mathOp(op, a, b) {
       case '+': return new IntImmNode(av + bv);
       case '-': return new IntImmNode(av - bv);
       case '*': return new IntImmNode(av * bv);
-      case '//': return new IntImmNode(Math.trunc(av / bv));
-      case '%': return new IntImmNode(((av % bv) + bv) % bv);
+      case '//': if (bv !== 0) return new IntImmNode(Math.trunc(av / bv)); break;
+      case '%': if (bv !== 0) return new IntImmNode(((av % bv) + bv) % bv); break;
     }
   }
 

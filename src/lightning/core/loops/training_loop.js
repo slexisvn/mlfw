@@ -12,6 +12,7 @@ export class TrainingLoop {
     const strategy = trainer.strategy;
     const accumGrad = trainer.accumulateGradBatches;
     const limit = resolveLimit(trainer.limitTrainBatches, dataLoader.length);
+    state.numTrainingBatches = limit;
 
     state.stage = Stage.TRAINING;
     model.train();

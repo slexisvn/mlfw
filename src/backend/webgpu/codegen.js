@@ -970,7 +970,8 @@ export class WebGPUCodegen {
 
   _visitWhileNode(node) {
     this._visitNode(node.condBody);
-    this._emit(`while (${node.condVar.name}) {`);
+    const condAccess = Array.isArray(node.condVar.shape) ? this._packedBufAccess(node.condVar.name, '0') : node.condVar.name;
+    this._emit(`while (${condAccess} != 0) {`);
     this._indent++;
     this._visitNode(node.loopBody);
     this._visitNode(node.condBody);

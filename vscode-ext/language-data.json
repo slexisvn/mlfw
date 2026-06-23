@@ -1180,6 +1180,24 @@
           ],
           "display": "load_state_dict(state)"
         }
+      },
+      {
+        "name": "save",
+        "description": "Save the model's weights to `path` (compact binary checkpoint). Reload into a same-architecture model with `load_model(model, path)`.",
+        "returns": "none",
+        "isGetter": false,
+        "signature": {
+          "params": [
+            {
+              "name": "path",
+              "type": "string",
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "save(path: string) -> none"
+        }
       }
     ],
     "DataFrame": [
@@ -5097,32 +5115,6 @@
       "methods": []
     },
     {
-      "name": "load",
-      "kind": "other",
-      "description": "Load weights from a checkpoint `path` into an existing `model` (in place) and return it. Build the model with the same architecture first, then `load(model, path)` — mirrors `model.load_state_dict(torch.load(path))`.",
-      "returns": null,
-      "signature": {
-        "params": [
-          {
-            "name": "model",
-            "type": "Module",
-            "optional": false,
-            "rest": false,
-            "defaultValue": null
-          },
-          {
-            "name": "path",
-            "type": "string",
-            "optional": false,
-            "rest": false,
-            "defaultValue": null
-          }
-        ],
-        "display": "load(model: Module, path: string)"
-      },
-      "methods": []
-    },
-    {
       "name": "load_csv",
       "kind": "data",
       "description": "Load a CSV file into a `DataFrame`. Numeric fields are parsed as numbers; use\nthe `DataFrame` API (`select`, `filter`, `groupBy`, `to_tensor`, `encode`, …)\nto analyse it.",
@@ -5171,6 +5163,51 @@
           }
         ],
         "display": "load_json(path: string)"
+      },
+      "methods": []
+    },
+    {
+      "name": "load_model",
+      "kind": "other",
+      "description": "Load weights from a checkpoint `path` into an existing `model` (in place) and return it. Save the model first with `model.save(path)`, rebuild it with the same architecture, then `load_model(model, path)`.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "model",
+            "type": "Module",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "path",
+            "type": "string",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "load_model(model: Module, path: string)"
+      },
+      "methods": []
+    },
+    {
+      "name": "load_tokenizer",
+      "kind": "other",
+      "description": "Load a tokenizer artifact saved with `tok.save(path)`. Returns a `Tokenizer`.",
+      "returns": "Tokenizer",
+      "signature": {
+        "params": [
+          {
+            "name": "path",
+            "type": "string",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "load_tokenizer(path: string) -> Tokenizer"
       },
       "methods": []
     },
@@ -6577,32 +6614,6 @@
       ]
     },
     {
-      "name": "save",
-      "kind": "other",
-      "description": "Save a trained model's weights to `path` (compact binary checkpoint). Mirrors PyTorch's `torch.save(model.state_dict(), path)`. Pair with `load`.",
-      "returns": null,
-      "signature": {
-        "params": [
-          {
-            "name": "model",
-            "type": "Module",
-            "optional": false,
-            "rest": false,
-            "defaultValue": null
-          },
-          {
-            "name": "path",
-            "type": "string",
-            "optional": false,
-            "rest": false,
-            "defaultValue": null
-          }
-        ],
-        "display": "save(model: Module, path: string)"
-      },
-      "methods": []
-    },
-    {
       "name": "Sequential",
       "kind": "sequential",
       "description": "Compose modules into a feed-forward pipeline. The output of each module is fed to the next.",
@@ -7357,7 +7368,7 @@
         },
         {
           "name": "save",
-          "description": "Save the fitted tokenizer as a compact artifact.",
+          "description": "Save the fitted tokenizer as a compact artifact. Reload it with the global `load_tokenizer(path)`.",
           "returns": "none",
           "signature": {
             "params": [
@@ -7370,23 +7381,6 @@
               }
             ],
             "display": "save(path: string) -> none"
-          }
-        },
-        {
-          "name": "load",
-          "description": "Load a tokenizer artifact.",
-          "returns": "Tokenizer",
-          "signature": {
-            "params": [
-              {
-                "name": "path",
-                "type": "string",
-                "optional": false,
-                "rest": false,
-                "defaultValue": null
-              }
-            ],
-            "display": "load(path: string) -> Tokenizer"
           }
         },
         {
@@ -7864,9 +7858,9 @@
     },
     {
       "name": "log",
-      "kind": "function",
-      "description": "Log a metric value from inside `train`/`validate`. Calls `.compute()` automatically on Metric instances.",
-      "returns": "Tensor",
+      "kind": "step",
+      "description": "Log a metric value. Only callable inside a `train`/`validate` block — calling it elsewhere is an error. Calls `.compute()` automatically on Metric instances.",
+      "returns": null,
       "signature": {
         "params": [
           {
@@ -7912,7 +7906,7 @@
             "defaultValue": "\"mean\""
           }
         ],
-        "display": "log(name: string, value: Tensor, on_step?: boolean, on_epoch?: boolean, prog_bar: boolean = false, reduce_fx: string = \"mean\") -> Tensor"
+        "display": "log(name: string, value: Tensor, on_step?: boolean, on_epoch?: boolean, prog_bar: boolean = false, reduce_fx: string = \"mean\")"
       },
       "methods": []
     }

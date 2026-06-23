@@ -45,6 +45,9 @@ export class AnalysisManager {
     for (const AnalysisClass of funcCache.keys()) {
       if (!preservedSet.has(AnalysisClass) && !preservedSet.has(AnalysisClass.name)) {
         toDelete.push(AnalysisClass);
+      } else {
+        const entry = funcCache.get(AnalysisClass);
+        if (entry) entry.version = func.version;
       }
     }
 

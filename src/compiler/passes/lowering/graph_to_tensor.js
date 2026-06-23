@@ -19,7 +19,7 @@ const BROADCAST_VIEW_SAFE = new Set([
   'compare', 'select', 'clamp', 'convert', 'copy_to_device', 'dot', 'fusion',
 ]);
 
-function broadcastViewSafeForUser(value, user) {
+function broadcastViewSafeForUser(value, user, visited = new Set()) {
   if (!BROADCAST_VIEW_SAFE.has(user.opName)) return false;
   if (user.opName !== 'fusion') return true;
   const region = user.regions[0];
@@ -29,7 +29,10 @@ function broadcastViewSafeForUser(value, user) {
     if (user.getOperand(o) !== value) continue;
     const blockArg = block.arguments[o];
     for (const inner of blockArg.getUsers()) {
-      if (!broadcastViewSafeForUser(blockArg, inner)) return false;
+      const key = `${blockArg.id}:${inner.id}`;
+      if (visited.has(key)) continue;
+      visited.add(key);
+      if (!broadcastViewSafeForUser(blockArg, inner, visited)) return false;
     }
   }
   return true;
@@ -55,17 +58,26 @@ function topologicalOps(graphFunc) {
   const opSet = new Set(ops);
   const ordered = [];
   const state = new Map();
-  const visit = (op) => {
-    const s = state.get(op);
-    if (s === 2) return;
-    if (s === 1) return;
-    state.set(op, 1);
-    for (let i = 0; i < op.numOperands; i++) {
-      const def = op.getOperand(i).definingOp;
-      if (def && opSet.has(def)) visit(def);
+  const visit = (root) => {
+    if (state.get(root) === 2) return;
+    state.set(root, 1);
+    const stack = [{ op: root, i: 0 }];
+    while (stack.length > 0) {
+      const frame = stack[stack.length - 1];
+      const op = frame.op;
+      if (frame.i < op.numOperands) {
+        const def = op.getOperand(frame.i).definingOp;
+        frame.i++;
+        if (def && opSet.has(def) && state.get(def) === undefined) {
+          state.set(def, 1);
+          stack.push({ op: def, i: 0 });
+        }
+        continue;
+      }
+      state.set(op, 2);
+      ordered.push(op);
+      stack.pop();
     }
-    state.set(op, 2);
-    ordered.push(op);
   };
   for (const op of ops) visit(op);
   return ordered;
@@ -130,6 +142,7 @@ export function lowerGraphToPrimFunc(graphFunc) {
 
     if ((op.opName === 'broadcast_in_dim' || op.opName === 'broadcast')
         && !returnedValues.has(op.getResult(0))
+        && op.getOperand(0).getUsers().length === 1
         && op.getResult(0).getUsers().every((u) => broadcastViewSafeForUser(op.getResult(0), u))) {
       const srcBuf = ctx.getOrAllocBuffer(op.getOperand(0));
       const outShape = op.getResult(0).type.shape;
@@ -175,5 +188,7 @@ export function lowerGraphToPrimFunc(graphFunc) {
   }
   for (const sp of shapeParams) params.push(sp);
 
-  return new PrimFunc(graphFunc.name, params, stmts.length === 1 ? stmts[0] : new SeqNode(stmts), bufferMap, shapeParams, new Map(ctx.shapeParams));
+  const primFunc = new PrimFunc(graphFunc.name, params, stmts.length === 1 ? stmts[0] : new SeqNode(stmts), bufferMap, shapeParams, new Map(ctx.shapeParams));
+  if (graphFunc._partitionTarget) primFunc._partitionTarget = graphFunc._partitionTarget;
+  return primFunc;
 }

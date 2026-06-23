@@ -50,6 +50,8 @@ export function register() {
     if (isIdentity) {
       inIndices = outIndices;
     } else {
+      for (let i = 1; i < inBuf.shape.length; i++) if (typeof inBuf.shape[i] !== 'number' || inBuf.shape[i] < 0) throw new Error('reshape lowering requires static non-leading input dims');
+      for (let i = 1; i < outBuf.shape.length; i++) if (typeof outBuf.shape[i] !== 'number' || outBuf.shape[i] < 0) throw new Error('reshape lowering requires static non-leading output dims');
       let flatIndex = outIndices[outBuf.shape.length - 1];
       let stride = 1;
       for (let i = outBuf.shape.length - 2; i >= 0; i--) {

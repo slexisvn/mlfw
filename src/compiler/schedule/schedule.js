@@ -398,6 +398,7 @@ export class Schedule {
       throw new Error(`Cannot vectorize reduction loop '${loop.loopVar.name}' (loop-carried dependency in block '${reductionBlock}')`);
     }
     loop.kind = ForKind.VECTORIZED;
+    this.state.invalidate();
     if (!this._replaying) {
       this.trace.record('vectorize', [loop.loopVar.name]);
     }
@@ -406,6 +407,7 @@ export class Schedule {
   unroll(loop) {
     if (loop.type !== 'ForNode') throw new Error('unroll expects ForNode');
     loop.kind = ForKind.UNROLLED;
+    this.state.invalidate();
     if (!this._replaying) {
       this.trace.record('unroll', [loop.loopVar.name]);
     }
@@ -418,6 +420,7 @@ export class Schedule {
       throw new Error(`Cannot parallelize reduction loop '${loop.loopVar.name}' (loop-carried dependency in block '${reductionBlock}')`);
     }
     loop.kind = ForKind.PARALLEL;
+    this.state.invalidate();
     if (!this._replaying) {
       this.trace.record('parallelize', [loop.loopVar.name]);
     }
@@ -434,6 +437,7 @@ export class Schedule {
     }
     loop.kind = ForKind.THREAD_BINDING;
     loop.threadTag = threadTag;
+    this.state.invalidate();
     if (!this._replaying) {
       this.trace.record('bindThread', [loop.loopVar.name, threadTag]);
     }
@@ -679,6 +683,7 @@ export class Schedule {
     if (loop.type !== 'ForNode') throw new Error('annotate expects ForNode');
     if (!loop.annotations) loop.annotations = {};
     loop.annotations[key] = value;
+    this.state.invalidate();
     if (!this._replaying) {
       this.trace.record('annotate', [loop.loopVar.name, key, value]);
     }

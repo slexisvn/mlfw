@@ -12,7 +12,7 @@ import { compile as tracingCompile } from '../tracing/compile.js';
 import { TraceLevel } from '../compiler/pipeline/trace.js';
 import { parse } from './parser.js';
 import { CompiledProgramView, formatTrace } from './format.js';
-import { installBuiltins, installSignatures, takeNamed, createDataFrameFromColumns, setUploadedCsv, removeUploadedCsv, beginUploadedCsv, resolveDeviceName } from './builtins.js';
+import { installBuiltins, installSignatures, takeNamed, createDataFrameFromColumns, setUploadedCsv, removeUploadedCsv, beginUploadedCsv, resolveDeviceName, saveModelCheckpoint } from './builtins.js';
 import { SignatureRegistry } from './signature_registry.js';
 
 class Environment {
@@ -347,6 +347,8 @@ export class TeraRuntime {
         toString() { return `${this._langName}${super.toString().slice(this.constructor.name.length)}`; }
       }
 
+      LangModel.prototype.save = function(path) { saveModelCheckpoint(this, path); };
+
       if (trainBlock) {
         LangModel.prototype.trainingStep = async function(batch, batchIdx) {
           const callEnv = buildStepEnv(this, modelEnv, fields, modelName);
@@ -393,6 +395,10 @@ export class TeraRuntime {
   _installBuiltins() {
     const define = (name, value) => this.global.define(name, value);
     installBuiltins(this, define);
+    // `log` is only valid inside train/validate (bindLog shadows this in those
+    // scopes). Defined here, AFTER installBuiltins, so it is not collected as a
+    // global builtin name but still gives a clear message when called elsewhere.
+    this.global.define('log', () => { throw new Error('log() can only be called inside a train or validate block'); });
   }
 
   async evaluateIndex(node, env) {

@@ -154,7 +154,10 @@ function lowerFusion(ctx, op) {
     }
     if ((useCount.get(val) || 0) > 1 && !CSE_TRIVIAL.has(expr.type)) {
       if (!cseVars.has(val)) {
-        const v = ctx.allocVar(`cse${cseCounter++}`, outBuf.dtype);
+        const exprDtype = expr.type === 'CompareNode' ? 'i32'
+          : expr.type === 'CastNode' ? expr.toDtype
+          : outBuf.dtype;
+        const v = ctx.allocVar(`cse${cseCounter++}`, exprDtype);
         cseVars.set(val, v);
         cseStmts.push({ variable: v, value: expr });
         exprMap.set(val, v);

@@ -384,6 +384,35 @@ export class GraphPartitioner {
   _mergeSmallPartitions(partitions, opToTarget) {
     if (partitions.length <= 1) return partitions;
 
+    const opToPart = new Map();
+    for (const part of partitions) for (const op of part.ops) opToPart.set(op, part);
+
+    const directSuccs = (part) => {
+      const out = new Set();
+      for (const op of part.ops) {
+        for (let r = 0; r < op.numResults; r++) {
+          for (const use of op.getResult(r).uses()) {
+            const cp = opToPart.get(use.user);
+            if (cp && cp !== part) out.add(cp);
+          }
+        }
+      }
+      return out;
+    };
+    const reachesThroughIntermediate = (a, b) => {
+      const seen = new Set([a]);
+      const stack = [...directSuccs(a)].filter(n => n !== b);
+      while (stack.length > 0) {
+        const n = stack.pop();
+        if (n === b) return true;
+        if (seen.has(n)) continue;
+        seen.add(n);
+        for (const s of directSuccs(n)) stack.push(s);
+      }
+      return false;
+    };
+    const mergeCreatesCycle = (a, b) => reachesThroughIntermediate(a, b) || reachesThroughIntermediate(b, a);
+
     const result = [];
     const merged = new Set();
 
@@ -403,6 +432,7 @@ export class GraphPartitioner {
         if (i === j || merged.has(j)) continue;
         const candidate = partitions[j];
         if (candidate.target.name !== p.target.name) continue;
+        if (mergeCreatesCycle(p, candidate)) continue;
 
         const score = this._mergeScore(p, candidate);
         if (score > bestScore) {
@@ -413,6 +443,7 @@ export class GraphPartitioner {
 
       if (bestMerge >= 0) {
         partitions[bestMerge].merge(p);
+        for (const op of p.ops) opToPart.set(op, partitions[bestMerge]);
         merged.add(i);
       } else {
         result.push(p);

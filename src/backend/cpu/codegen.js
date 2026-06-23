@@ -629,6 +629,8 @@ export class CPUCodegen {
       if (node.thenBody) stack.push(node.thenBody);
       if (node.elseBody) stack.push(node.elseBody);
       if (node.initBody) stack.push(node.initBody);
+      if (node.condBody) stack.push(node.condBody);
+      if (node.loopBody) stack.push(node.loopBody);
     }
     const result = new Set();
     this._constantBuffers = new Map();

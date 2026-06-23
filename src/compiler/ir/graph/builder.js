@@ -367,7 +367,16 @@ export class IRBuilder {
     const carryArgs = bodyBlock.arguments.slice(xtTypes.length);
     const [newCarry, ys] = bodyFn(bb, xtArgs, carryArgs);
     bb.yieldOp([...newCarry, ...ys]);
+    if (xsValues.length === 0) throw new Error('scanOp requires at least one xs input');
     const length = xsValues[0].type.shape[0];
+    if (typeof length !== 'number' || length < 0) {
+      throw new Error(`scanOp requires a static, non-negative leading dim on xs, got ${length}`);
+    }
+    for (let i = 1; i < xsValues.length; i++) {
+      if (xsValues[i].type.shape[0] !== length) {
+        throw new Error('scanOp requires all xs inputs to share the same leading length');
+      }
+    }
     const yTypes = ys.map(v => v.type.withShape([length, ...v.type.shape]));
     return this._buildOp('scan', [...xsValues, ...initCarryValues],
       [...carryTypes, ...yTypes],

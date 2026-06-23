@@ -24,6 +24,7 @@ const SCOPE_BY_BUILTIN_KIND = {
   autograd: 'support.function.autograd.tera',
   shape: 'support.function.shape.tera',
   utility: 'support.function.utility.tera',
+  step: 'support.function.tera',
   constant: 'constant.language.tera',
   other: 'support.function.tera',
 };

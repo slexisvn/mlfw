@@ -268,8 +268,8 @@ export class ReductionCPURule extends ScheduleRule {
     const spatialLoops = [];
     const reduceLoops = [];
 
+    const info = classifyBlock(schedule.func, blockName);
     for (const loop of loops) {
-      const info = classifyBlock(schedule.func, blockName);
       if (info && isReductionLoop(loop, info)) {
         reduceLoops.push(loop);
       } else {
@@ -300,8 +300,8 @@ export class ReductionGPURule extends ScheduleRule {
     if (loops.length === 0) return;
 
     const spatialLoops = [];
+    const info = classifyBlock(schedule.func, blockName);
     for (const loop of loops) {
-      const info = classifyBlock(schedule.func, blockName);
       if (!info || !isReductionLoop(loop, info)) {
         spatialLoops.push(loop);
       }

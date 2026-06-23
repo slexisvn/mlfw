@@ -1,4 +1,4 @@
-import { QuantizationParams } from '../ir/graph/quantization_types.js';
+import { QuantizationParams, QuantizationScheme } from '../ir/graph/quantization_types.js';
 import { TensorType, isFloatType } from '../ir/graph/types.js';
 
 export class ValueObserver {
@@ -222,14 +222,17 @@ export class CalibrationResult {
     const range = this.getRange(value);
     if (!range) return null;
 
+    const asymmetric = scheme === QuantizationScheme.PER_TENSOR_ASYMMETRIC;
+
     if (this._mode === 'percentile' && this._observers.get(value).histogram) {
+      if (asymmetric) return QuantizationParams.fromRange(range.min, range.max, scheme, dtype);
       const hist = this._observers.get(value).histogram;
-      const lo = -hist.computePercentileThreshold(0.999);
       const hi = hist.computePercentileThreshold(0.999);
-      return QuantizationParams.fromRange(lo, hi, scheme, dtype);
+      return QuantizationParams.fromRange(-hi, hi, scheme, dtype);
     }
 
     if (this._mode === 'entropy' && this._observers.get(value).histogram) {
+      if (asymmetric) return QuantizationParams.fromRange(range.min, range.max, scheme, dtype);
       const hist = this._observers.get(value).histogram;
       const numQuantBins = dtype === 'ui8' ? 256 : 255;
       const threshold = hist.computeEntropyThreshold(numQuantBins);

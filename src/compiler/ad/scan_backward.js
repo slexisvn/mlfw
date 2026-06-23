@@ -38,7 +38,7 @@ function stackSteps(builder, steps, fullShape) {
   return builder.concat(expanded, 0).getResult(0);
 }
 
-function diffBodyStep(builder, bodyBlock, argVals, freeVarMap, gradYields, forwardOnly) {
+function diffBodyStep(builder, bodyBlock, argVals, freeVarMap, gradYields, forwardOnly, constCache = new Map()) {
   const map = new Map();
   for (let i = 0; i < bodyBlock.arguments.length; i++) map.set(bodyBlock.arguments[i].id, argVals[i]);
   for (const [id, v] of freeVarMap) map.set(id, v);
@@ -54,9 +54,13 @@ function diffBodyStep(builder, bodyBlock, argVals, freeVarMap, gradYields, forwa
     if (map.has(o.id)) return map.get(o.id);
     const def = o.definingOp;
     if (def && def.opName === 'constant') {
-      const cloned = builder._buildOp('constant', [], [o.type], new Map(def.attributes), null);
-      map.set(o.id, cloned.getResult(0));
-      return cloned.getResult(0);
+      let clonedVal = constCache.get(o.id);
+      if (clonedVal === undefined) {
+        clonedVal = builder._buildOp('constant', [], [o.type], new Map(def.attributes), null).getResult(0);
+        constCache.set(o.id, clonedVal);
+      }
+      map.set(o.id, clonedVal);
+      return clonedVal;
     }
     return o;
   };
@@ -162,6 +166,7 @@ export function buildScanBackward(scanOp, accumulator, builder, materialize, nee
   const xsB = xsOps.map(materialize);
   const initCarryB = carryOps.map(materialize);
   const freeVarMap = new Map(freeVars.map(v => [v.id, materialize(v)]));
+  const bodyConstCache = new Map();
 
   let carry = initCarryB;
   const carriesAtT = [carry];
@@ -169,7 +174,7 @@ export function buildScanBackward(scanOp, accumulator, builder, materialize, nee
   for (let t = 0; t < T; t++) {
     const xt = xsB.map(v => sliceStep(builder, v, t));
     xsSlices.push(xt);
-    const { forwardYields } = diffBodyStep(builder, bodyBlock, [...xt, ...carry], freeVarMap, null, true);
+    const { forwardYields } = diffBodyStep(builder, bodyBlock, [...xt, ...carry], freeVarMap, null, true, bodyConstCache);
     carry = forwardYields.slice(0, numCarry);
     carriesAtT.push(carry);
   }
@@ -189,7 +194,7 @@ export function buildScanBackward(scanOp, accumulator, builder, materialize, nee
     const argVals = [...xsSlices[t], ...carriesAtT[t]];
     const gY_t = gYs.map(g => (g === null ? null : sliceStep(builder, g, t)));
     const gradYields = [...gCarry, ...gY_t];
-    const { gradArgs, gradFree } = diffBodyStep(builder, bodyBlock, argVals, freeVarMap, gradYields, false);
+    const { gradArgs, gradFree } = diffBodyStep(builder, bodyBlock, argVals, freeVarMap, gradYields, false, bodyConstCache);
 
     for (let i = 0; i < numXs; i++) gXsSteps[i][t] = gradArgs[i] ?? zeroLike(builder, xsSlices[t][i]);
     gCarry = [];

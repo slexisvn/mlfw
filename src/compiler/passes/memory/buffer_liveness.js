@@ -74,6 +74,11 @@ export class BufferLiveness {
       if (node.type === 'CallExternNode') { for (const a of node.args) touchExpr(a); return; }
       if (node.a) touchExpr(node.a);
       if (node.b) touchExpr(node.b);
+      if (node.expr) touchExpr(node.expr);
+      if (node.cond) touchExpr(node.cond);
+      if (node.condition) touchExpr(node.condition);
+      if (node.thenBody) touchExpr(node.thenBody);
+      if (node.elseBody) touchExpr(node.elseBody);
     };
 
     const touchBody = (node) => {

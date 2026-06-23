@@ -101,7 +101,12 @@ export class EvolutionarySearch {
       while (nextGen.length < this.populationSize) {
         const parentA = elites[this._rng(elites.length)];
         const parentB = elites[this._rng(elites.length)];
-        nextGen.push(this._mutate(parentA.sketch, this._crossover(parentA, parentB)));
+        if (parentA.sketch !== parentB.sketch) {
+          const pick = this._rngFloat() < 0.5 ? parentA : parentB;
+          nextGen.push(this._mutate(pick.sketch, { ...pick.params }));
+        } else {
+          nextGen.push(this._mutate(parentA.sketch, this._crossover(parentA, parentB)));
+        }
       }
 
       population = nextGen;

@@ -179,30 +179,45 @@ export class BackwardGraphBuilder {
     };
   }
 
-  _materialize(fwdVal, valueMap, builder, active) {
-    const mapped = valueMap.get(fwdVal.id);
-    if (mapped !== undefined) return mapped;
+  _materialize(rootVal, valueMap, builder) {
+    if (valueMap.has(rootVal.id)) return valueMap.get(rootVal.id);
+    if (!rootVal.definingOp) return rootVal;
 
-    const defOp = fwdVal.definingOp;
-    if (!defOp) return fwdVal;
-
-    const seen = active || new Set();
-    if (seen.has(fwdVal.id)) return fwdVal;
-    seen.add(fwdVal.id);
-
-    const operands = new Array(defOp.numOperands);
-    for (let o = 0; o < defOp.numOperands; o++) {
-      operands[o] = this._materialize(defOp.getOperand(o), valueMap, builder, seen);
+    const onStack = new Set([rootVal.id]);
+    const stack = [{ val: rootVal, i: 0 }];
+    while (stack.length > 0) {
+      const frame = stack[stack.length - 1];
+      const val = frame.val;
+      const defOp = val.definingOp;
+      if (valueMap.has(val.id) || !defOp) {
+        onStack.delete(val.id);
+        stack.pop();
+        continue;
+      }
+      if (frame.i < defOp.numOperands) {
+        const operand = defOp.getOperand(frame.i);
+        frame.i++;
+        if (operand.definingOp && !valueMap.has(operand.id) && !onStack.has(operand.id)) {
+          onStack.add(operand.id);
+          stack.push({ val: operand, i: 0 });
+        }
+        continue;
+      }
+      const operands = new Array(defOp.numOperands);
+      for (let o = 0; o < defOp.numOperands; o++) {
+        const ov = defOp.getOperand(o);
+        operands[o] = valueMap.has(ov.id) ? valueMap.get(ov.id) : ov;
+      }
+      const resultTypes = defOp.results.map(r => r.type);
+      const cloned = builder._buildOp(defOp.opName, operands, resultTypes, new Map(defOp.attributes), null);
+      for (let r = 0; r < defOp.numResults; r++) {
+        valueMap.set(defOp.getResult(r).id, cloned.getResult(r));
+      }
+      onStack.delete(val.id);
+      stack.pop();
     }
 
-    const resultTypes = defOp.results.map(r => r.type);
-    const cloned = builder._buildOp(defOp.opName, operands, resultTypes, new Map(defOp.attributes), null);
-
-    for (let r = 0; r < defOp.numResults; r++) {
-      valueMap.set(defOp.getResult(r).id, cloned.getResult(r));
-    }
-
-    return valueMap.get(fwdVal.id);
+    return valueMap.has(rootVal.id) ? valueMap.get(rootVal.id) : rootVal;
   }
 
   _computeGradReachability(func, topoOrder) {

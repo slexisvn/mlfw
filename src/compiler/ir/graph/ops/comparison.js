@@ -67,6 +67,7 @@ export function register(registry) {
       if (operandTypes.length !== 3) return null;
       const [cond, x, y] = operandTypes;
       if (!(cond instanceof TensorType) || !(x instanceof TensorType) || !(y instanceof TensorType)) return null;
+      if (x.dtype !== y.dtype) return null;
       const shape = TensorType.broadcastShape(cond.shape, x.shape, y.shape);
       if (!shape) return null;
       return [new TensorType(shape, x.dtype)];

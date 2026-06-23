@@ -146,7 +146,7 @@
         },
         {
           "name": "support.function.tera",
-          "match": "\\b(?:avg|col|count|countStar|expr|lit|max|min|sum|name|log)\\b"
+          "match": "\\b(?:avg|col|count|countStar|expr|lit|max|min|sum|name)\\b"
         },
         {
           "name": "constant.language.dtype.tera",
@@ -154,7 +154,7 @@
         },
         {
           "name": "support.function.tera",
-          "match": "\\b(?:cat|load|load_json|read_text|save|stack|Tokenizer|where)\\b"
+          "match": "\\b(?:cat|load_json|load_model|load_tokenizer|read_text|stack|Tokenizer|where)\\b"
         },
         {
           "name": "support.function.utility.tera",
@@ -187,6 +187,10 @@
         {
           "name": "support.class.trainer.tera",
           "match": "\\b(?:Trainer)\\b"
+        },
+        {
+          "name": "support.function.tera",
+          "match": "\\b(?:log)\\b"
         }
       ]
     },

@@ -191,7 +191,7 @@ describe('DocumentAnalyzer type checking', () => {
       '  forward (x: Tensor) -> Tensor:',
       '    return fc(x)',
       'tok = Tokenizer(mode="bpe")',
-      'loaded = Tokenizer.load("tokenizer.json")',
+      'loaded = load_tokenizer("tokenizer.json")',
       'pad = tok.padId',
       'vs = tok.vocabSize',
       'ids = tok.encode("hi")',
@@ -206,6 +206,27 @@ describe('DocumentAnalyzer type checking', () => {
     expect(flat.find(s => s.name === 'pad')?.typeName).toBe('int');
     expect(flat.find(s => s.name === 'ids')?.typeName).toBe('int[]');
     expect(flat.find(s => s.name === 'moved')?.typeName).toBe('Model');
+  });
+
+  it('flags log() called outside train/validate but allows it inside', () => {
+    const text = [
+      'model Reg:',
+      '  fc = Linear(4, 1)',
+      '  loss_fn = MSELoss()',
+      '  forward (x: Tensor) -> Tensor:',
+      '    return fc(x)',
+      '  train (b: Tensor[]):',
+      '    p, q = b',
+      '    loss = loss_fn(Reg(p), q)',
+      '    log("train_loss", loss, prog_bar=true)',
+      '    return loss',
+      'net = Reg()',
+      'log("name", "value")',
+    ].join('\n');
+    const doc = analyzer().update('file://log.tera', text);
+    const logErrors = doc.errors.filter(e => e.source === 'typecheck' && /inside a train or validate/.test(e.message));
+    expect(logErrors).toHaveLength(1);
+    expect(doc.errors.some(e => /undefined name 'log'/.test(e.message))).toBe(false);
   });
 
   it('infers model field member access across functions', () => {

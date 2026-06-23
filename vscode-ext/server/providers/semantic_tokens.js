@@ -31,6 +31,7 @@ const KIND_TO_TYPE = {
   shape: 'function',
   autograd: 'function',
   data: 'function',
+  step: 'function',
   constant: 'enumMember',
 };
 

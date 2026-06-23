@@ -6,6 +6,17 @@ import {
   binaryArithTraits, commBinaryArithTraits
 } from './helpers.js';
 
+function scalarBinaryFold(fn) {
+  return (constValues) => {
+    if (typeof constValues[0] !== 'number' || typeof constValues[1] !== 'number') return undefined;
+    return fn(constValues[0], constValues[1]);
+  };
+}
+
+function scalarUnaryFold(fn) {
+  return (constValues) => (typeof constValues[0] === 'number' ? fn(constValues[0]) : undefined);
+}
+
 export function register(registry) {
   registry.register(new OpDef({
     name: 'add',
@@ -15,7 +26,7 @@ export function register(registry) {
     inferResultTypes: inferBinaryElementwise,
     verify: verifyBinaryElementwise,
     getCanonicalizationPatterns() { return [pat.commutativeConstantRightFor('add'), new pat.AddZero()]; },
-    fold(constValues) { return constValues[0] + constValues[1]; }
+    fold: scalarBinaryFold((a, b) => a + b)
   }));
 
   registry.register(new OpDef({
@@ -26,7 +37,7 @@ export function register(registry) {
     inferResultTypes: inferBinaryElementwise,
     verify: verifyBinaryElementwise,
     getCanonicalizationPatterns() { return [pat.commutativeConstantRightFor('mul'), new pat.MulOne(), new pat.MulZero()]; },
-    fold(constValues) { return constValues[0] * constValues[1]; }
+    fold: scalarBinaryFold((a, b) => a * b)
   }));
 
   registry.register(new OpDef({
@@ -37,7 +48,7 @@ export function register(registry) {
     inferResultTypes: inferBinaryElementwise,
     verify: verifyBinaryElementwise,
     getCanonicalizationPatterns() { return [new pat.SubZero(), new pat.SubSelf()]; },
-    fold(constValues) { return constValues[0] - constValues[1]; }
+    fold: scalarBinaryFold((a, b) => a - b)
   }));
 
   registry.register(new OpDef({
@@ -48,7 +59,7 @@ export function register(registry) {
     inferResultTypes: inferBinaryElementwise,
     verify: verifyBinaryElementwise,
     getCanonicalizationPatterns() { return [new pat.DivOne()]; },
-    fold(constValues) { return constValues[0] / constValues[1]; }
+    fold: scalarBinaryFold((a, b) => a / b)
   }));
 
   for (const name of ['rem', 'pow']) {
@@ -70,7 +81,7 @@ export function register(registry) {
     inferResultTypes: inferUnaryElementwise,
     verify: verifyUnaryElementwise,
     getCanonicalizationPatterns() { return [new pat.DoubleNeg()]; },
-    fold(constValues) { return -constValues[0]; }
+    fold: scalarUnaryFold((a) => -a)
   }));
 
   for (const name of ['maximum', 'minimum']) {

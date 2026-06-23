@@ -166,6 +166,14 @@ DataFrame.prototype.encode = function (column, ...rest) {
   return dfEncode(this, column, knownClasses);
 };
 
+export function saveModelCheckpoint(model, path) {
+  if (!model || typeof model.stateDict !== 'function') throw new Error('save() requires a model');
+  if (typeof path !== 'string') throw new Error('save() requires a file path string');
+  const tmp = path + '.tmp';
+  fs.writeBinary(tmp, serializeCheckpoint({ modelState: model.stateDict() }));
+  fs.rename(tmp, path);
+}
+
 export function installBuiltins(runtime, define) {
   for (const name of FACTORIES) define(name, (...args) => callWithOptions(fw[name], args));
   for (const name of FREE_TENSOR_FUNCTIONS) define(name, (...args) => callWithOptions(fw[name] ?? ops[name], args));
@@ -221,9 +229,8 @@ export function installBuiltins(runtime, define) {
   define('webgpu', 'webgpu');
   for (const dtype of ['f16', 'f32', 'f64', 'i32', 'i64', 'bool']) define(dtype, dtype);
 
-  const TokenizerFactory = (...args) => constructWithSnakeCase(Tokenizer, args);
-  TokenizerFactory.load = path => Tokenizer.load(path);
-  define('Tokenizer', TokenizerFactory);
+  define('Tokenizer', (...args) => constructWithSnakeCase(Tokenizer, args));
+  define('load_tokenizer', path => Tokenizer.load(path));
 
   define('TensorDataset', (...args) => new TensorDataset(...args));
   define('DataLoader', (...args) => {
@@ -267,17 +274,9 @@ export function installBuiltins(runtime, define) {
   define('ConfusionMatrix', (...args) => constructWithSnakeCase(ConfusionMatrix, args));
   define('MetricCollection', (...args) => constructWithSnakeCase(MetricCollection, args));
 
-  define('save', (model, path) => {
-    if (!model || typeof model.stateDict !== 'function') throw new Error('save() requires a model as the first argument');
-    if (typeof path !== 'string') throw new Error('save() requires a file path string');
-    const tmp = path + '.tmp';
-    fs.writeBinary(tmp, serializeCheckpoint({ modelState: model.stateDict() }));
-    fs.rename(tmp, path);
-  });
-
-  define('load', (model, path) => {
-    if (!model || typeof model.loadStateDict !== 'function') throw new Error('load() requires a model as the first argument');
-    if (typeof path !== 'string') throw new Error('load() requires a file path string');
+  define('load_model', (model, path) => {
+    if (!model || typeof model.loadStateDict !== 'function') throw new Error('load_model() requires a model as the first argument');
+    if (typeof path !== 'string') throw new Error('load_model() requires a file path string');
     applyCheckpoint(loadCheckpoint(path), model);
     return model;
   });

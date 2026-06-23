@@ -89,7 +89,10 @@ describe('generate()', () => {
     expect(tok.methods.find(m => m.name === 'padId').returns).toBe('int');
     expect(tok.methods.find(m => m.name === 'encode').returns).toBe('int[]');
     expect(tok.methods.find(m => m.name === 'save').returns).toBe('none');
-    expect(tok.methods.find(m => m.name === 'load').returns).toBe('Tokenizer');
+    expect(tok.methods.find(m => m.name === 'load')).toBeUndefined();
+    expect(data.builtins.find(b => b.name === 'load_tokenizer').signature.display).toContain('-> Tokenizer');
+    expect(data.builtins.find(b => b.name === 'save')).toBeUndefined();
     expect(data.pseudoTypes.Model.find(m => m.name === 'to').returns).toBe('Model');
+    expect(data.pseudoTypes.Model.find(m => m.name === 'save').returns).toBe('none');
   });
 });

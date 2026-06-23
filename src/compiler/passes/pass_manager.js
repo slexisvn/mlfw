@@ -62,7 +62,16 @@ export class PassManager {
       const opsBefore = verbose ? countOps(module) : -1;
       const t0 = verbose ? performance.now() : 0;
 
-      const result = pass.run(module, this.analysisManager);
+      let result;
+      try {
+        result = pass.run(module, this.analysisManager);
+      } catch (e) {
+        if (!resilient) throw e;
+        this.analysisManager.invalidateAll();
+        results.push(PassResult.FAILED);
+        ctx.errors.push(new CompilationError('graphPasses', module.name || '<module>', e.message, pass.name));
+        return { changed, fatal: false };
+      }
       results.push(result);
 
       if (verbose) this.trace.passRun(pass.name, result, performance.now() - t0, opsBefore, countOps(module));
@@ -97,8 +106,8 @@ export class PassManager {
             if (result === PassResult.CHANGED) {
               passChanged = true;
               ctx.anyChanged = true;
-              this.analysisManager.invalidate(func, pass.preservedAnalyses);
               func.bumpVersion();
+              this.analysisManager.invalidate(func, pass.preservedAnalyses);
               const verr = this._verifyAfter(pass, func, false);
               if (verr) { ctx.errors.push(verr); ctx.failedFunctions.add(func.name); }
             } else if (result === PassResult.FAILED) {
@@ -116,8 +125,8 @@ export class PassManager {
           if (result === PassResult.CHANGED) {
             passChanged = true;
             ctx.anyChanged = true;
-            this.analysisManager.invalidate(func, pass.preservedAnalyses);
             func.bumpVersion();
+            this.analysisManager.invalidate(func, pass.preservedAnalyses);
             const verr = this._verifyAfter(pass, func, false);
             if (verr) {
               ctx.errors.push(verr);

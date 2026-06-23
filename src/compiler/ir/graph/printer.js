@@ -24,7 +24,9 @@ export class IRPrinter {
     return lines.join('\n');
   }
 
-  printFunction(func, lines = []) {
+  printFunction(func, lines = null) {
+    const ownLines = lines === null;
+    if (ownLines) lines = [];
     this.valueNames.clear();
     this._nextValueId = 0;
 
@@ -43,7 +45,7 @@ export class IRPrinter {
 
     this.indent--;
     lines.push(`${this._indentPrefix()}}`);
-    return lines.join('\n');
+    return ownLines ? lines.join('\n') : undefined;
   }
 
   printBlock(block, lines, isEntry = false) {
@@ -60,7 +62,9 @@ export class IRPrinter {
     }
   }
 
-  printOperation(op, lines = []) {
+  printOperation(op, lines = null) {
+    const ownLines = lines === null;
+    if (ownLines) lines = [];
     const prefix = this._indentPrefix();
     let line = prefix;
 
@@ -122,7 +126,7 @@ export class IRPrinter {
       lines.push(`${prefix}}`);
     }
 
-    return lines.join('\n');
+    return ownLines ? lines.join('\n') : undefined;
   }
 
   _nameValue(value) {

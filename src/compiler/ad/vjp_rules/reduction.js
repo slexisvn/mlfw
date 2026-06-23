@@ -30,5 +30,19 @@ registerVJPRule('reduce', (ctx) => {
     return [gradScaled, null];
   }
 
+  if (reduceType === 'max' || reduceType === 'min') {
+    const resultKept = ctx.builder.reshape(ctx.results[0], keepShape).getResult(0);
+    const reducedBroadcast = ctx.builder.broadcast(resultKept, inputShape, identityDims).getResult(0);
+    const mask = ctx.builder.compare(input, reducedBroadcast, 'eq').getResult(0);
+    const maskF = ctx.builder.convert(mask, dtype).getResult(0);
+    const gradBroadcast = ctx.builder.broadcast(gradKept, inputShape, identityDims).getResult(0);
+    const gradIn = ctx.builder.mul(gradBroadcast, maskF).getResult(0);
+    return [gradIn, null];
+  }
+
+  if (reduceType === 'prod') {
+    throw new Error("reduce VJP for reduce_type='prod' is not implemented; provide a gradient rule or avoid differentiating reduce_prod");
+  }
+
   return [null, null];
 });

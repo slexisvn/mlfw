@@ -2,6 +2,18 @@ import { MathOpNode, FloatImmNode, IntImmNode, BufferStoreNode, BufferLoadNode, 
 import { Buffer } from '../../../ir/tensor/buffer.js';
 import { DYNAMIC } from '../../../ir/graph/types.js';
 import { registerLoweringRule, buildSpatialNest, wrapLoopsWithNodes, concatIterVars } from '../lowering_registry.js';
+import { isDtypeInt } from '../../../../backend/dtype_map.js';
+
+const INT_DTYPE_MIN = { i8: -128, i16: -32768, i32: -2147483648, i64: -2147483648, ui8: 0, ui16: 0, ui32: 0, bool: 0 };
+const INT_DTYPE_MAX = { i8: 127, i16: 32767, i32: 2147483647, i64: 2147483647, ui8: 255, ui16: 65535, ui32: 4294967295, bool: 1 };
+
+function argReduceSentinel(dtype, isGt) {
+  if (isDtypeInt(dtype)) {
+    const v = isGt ? (INT_DTYPE_MIN[dtype] ?? -2147483648) : (INT_DTYPE_MAX[dtype] ?? 2147483647);
+    return new IntImmNode(v);
+  }
+  return new FloatImmNode(isGt ? -Infinity : Infinity);
+}
 
 const REDUCE_COMBINERS = {
   'sum':  (a, b) => new MathOpNode('+', a, b),
@@ -99,7 +111,7 @@ export function register() {
       ctx.varCounter++;
 
       const initNest = buildSpatialNest(ctx, 'ai', spatialDims, inBuf.shape, inBuf);
-      const initValStore = new BufferStoreNode(bestValBuf, initNest.indices, new FloatImmNode(compareFn === 'gt' ? -Infinity : Infinity));
+      const initValStore = new BufferStoreNode(bestValBuf, initNest.indices, argReduceSentinel(inBuf.dtype, compareFn === 'gt'));
       const initIdxStore = new BufferStoreNode(outBuf, outIndicesFor(initNest), new IntImmNode(0));
       const initBlock = new BlockNode(ctx.blockName('arg_init'), initNest.ivs, [], [{ buffer: bestValBuf }, { buffer: outBuf }], new SeqNode([initValStore, initIdxStore]));
       const initBody = spatialDims.length > 0 ? initNest.wrap(initBlock) : initBlock;

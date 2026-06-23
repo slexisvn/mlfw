@@ -180,8 +180,8 @@ describe('Tera type checker', () => {
       expect(error?.message ?? '').toContain('cannot assign');
     });
 
-    it('infers Tokenizer.load as a tokenizer', () => {
-      expect(diagnoseWithMethods('tok = Tokenizer.load("tokenizer.json")\nids: int[] = tok.encode("hi")')).toEqual([]);
+    it('infers load_tokenizer as a tokenizer', () => {
+      expect(diagnoseWithMethods('tok = load_tokenizer("tokenizer.json")\nids: int[] = tok.encode("hi")')).toEqual([]);
     });
   });
 
@@ -260,7 +260,7 @@ describe('Tera type checker', () => {
           'tok = Tokenizer(mode="bpe", lowercase=true, num_merges=40)',
           'tok.fit(["hello world", "hello there", "world hello"])',
           `tok.save("${path}")`,
-          `tok2 = Tokenizer.load("${path}")`,
+          `tok2 = load_tokenizer("${path}")`,
           'ids = tok2.encode("hello world")',
           'tok2.decode(ids)',
         ].join('\n');

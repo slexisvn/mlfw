@@ -13,12 +13,17 @@ describe('Tera: load a checkpoint onto CUDA and infer (.to(device="gpu"))', () =
   it('save -> load -> .to(device="gpu") -> forward matches the host run', async () => {
     const rt = new TeraRuntime({ output: () => {} });
     const src = [
+      'model Net4:',
+      '  fc = Linear(4, 3)',
+      '  forward (x: Tensor) -> Tensor:',
+      '    return fc(x)',
+      '',
       'x = tensor([[1.0, 2.0, 3.0, 4.0], [0.5, -0.5, 0.5, -0.5], [2.0, 0.0, -1.0, 1.0]])',
-      'net = Linear(4, 3)',
+      'net = Net4()',
       'ycpu = net(x)',
-      `save(net, "${CKPT}")`,
-      'restored = Linear(4, 3)',
-      `load(restored, "${CKPT}")`,
+      `net.save("${CKPT}")`,
+      'restored = Net4()',
+      `load_model(restored, "${CKPT}")`,
       'restored.eval()',
       'restored.to(device="gpu")',
       'ygpu = restored(x.to(device="gpu"))',

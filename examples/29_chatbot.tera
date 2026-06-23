@@ -1,7 +1,7 @@
 embed_dim = 128
 hidden = 320
 num_layers = 4
-max_epochs = 80
+max_epochs = 2
 batch_size = 64
 
 train_rows = load_csv("examples/chat_train.csv").to_array()
@@ -91,34 +91,34 @@ model ChatBotLarge(vocab_size: int, embed_size: int, hidden_size: int, layers: i
 
 net = ChatBotLarge(tok.vocabSize, embed_dim, hidden, num_layers, tok.padId)
 
-# trainer = Trainer(max_epochs=max_epochs, accelerator="gpu", gradient_clip_val=1.0, logger=false, enable_progress=true)
-# trainer.fit(net, loader)
-# save(net, "examples/chatbot.ckpt")
-# print("saved -> examples/chatbot.ckpt (trained on GPU)")
+trainer = Trainer(max_epochs=max_epochs, accelerator="gpu", gradient_clip_val=1.0, logger=false, enable_progress=true)
+trainer.fit(net, loader)
+net.save("examples/chatbot.ckpt")
+print("saved -> examples/chatbot.ckpt (trained on GPU)")
 
-fn reply(m: ChatBotLarge, tok: Tokenizer, prompt: string, max_len: int) -> string:
-  ids = tok.encode(prompt)
-  query = tensor([ids], dtype=i32)
-  enc, state = m.encoder(m.embed(query))
-  last = tok.bosId
-  out_ids = []
-  for step in range(max_len):
-    emb = m.embed(tensor([last], dtype=i32))
-    emb_t = emb.reshape([1, 1, emb.shape[1]])
-    dec, state = m.decoder(emb_t, state)
-    scores = dec @ enc.transpose(1, 2)
-    weights = scores.softmax(2)
-    context = weights @ enc
-    combined = cat([dec, context], 2)
-    logits = m.head(combined).reshape([tok.vocabSize])
-    last = logits.argmax().item()
-    if last == tok.eosId:
-      return tok.decode(out_ids)
-    out_ids[out_ids.length] = last
-  return tok.decode(out_ids)
+# fn reply(m: ChatBotLarge, tok: Tokenizer, prompt: string, max_len: int) -> string:
+#   ids = tok.encode(prompt)
+#   query = tensor([ids], dtype=i32)
+#   enc, state = m.encoder(m.embed(query))
+#   last = tok.bosId
+#   out_ids = []
+#   for step in range(max_len):
+#     emb = m.embed(tensor([last], dtype=i32))
+#     emb_t = emb.reshape([1, 1, emb.shape[1]])
+#     dec, state = m.decoder(emb_t, state)
+#     scores = dec @ enc.transpose(1, 2)
+#     weights = scores.softmax(2)
+#     context = weights @ enc
+#     combined = cat([dec, context], 2)
+#     logits = m.head(combined).reshape([tok.vocabSize])
+#     last = logits.argmax().item()
+#     if last == tok.eosId:
+#       return tok.decode(out_ids)
+#     out_ids[out_ids.length] = last
+#   return tok.decode(out_ids)
 
-load(net, "examples/chatbot.ckpt")
-net.to(device="gpu")
-net.eval()
+# load_model(net, "examples/chatbot.ckpt")
+# net.to(device="gpu")
+# net.eval()
 
-reply(net, tok, "what can you do?", ans_len + 2)
+# reply(net, tok, "what can you do?", ans_len + 2)

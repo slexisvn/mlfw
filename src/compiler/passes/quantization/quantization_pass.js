@@ -50,8 +50,14 @@ export class QuantizationPass extends FunctionPass {
     for (let i = 0; i < topo.length; i++) {
       const op = topo[i];
       if (op.opName === 'return' || op.opName === 'yield') continue;
-      if (cfg.excludeOps.has(op.opName)) continue;
-      if (!cfg.quantizableOps.has(op.opName)) continue;
+      if (cfg.excludeOps.has(op.opName) || !cfg.quantizableOps.has(op.opName)) {
+        for (let o = 0; o < op.numOperands; o++) {
+          if (quantizedValues.has(op.getOperand(o))) {
+            changed = this._insertDequantBefore(op, o, op.getOperand(o), cfg) || changed;
+          }
+        }
+        continue;
+      }
 
       if (cfg.sensitivityResult && cfg.sensitivityThreshold > 0) {
         if (cfg.sensitivityResult.isSensitive(op, cfg.sensitivityThreshold)) continue;
@@ -175,10 +181,10 @@ export class QuantizationPass extends FunctionPass {
       if (!(val.type instanceof TensorType) || !isFloatType(val.type.dtype)) continue;
       const qResult = this._insertQuantizeAfter(op, r, cfg);
       if (qResult) {
-        const users = [...val.getUsers()];
-        for (const use of users) {
-          if (use.owner && use.owner !== qResult.definingOp) {
-            use.owner.replaceOperand(use.operandIndex, qResult);
+        const uses = [...val.uses()];
+        for (const use of uses) {
+          if (use.user !== qResult.definingOp) {
+            use.user.replaceOperand(use.operandIndex, qResult);
             quantizedValues.add(qResult);
           }
         }

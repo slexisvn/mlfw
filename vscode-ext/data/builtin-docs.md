@@ -217,8 +217,8 @@ Run the model in eval mode over `loader`. Returns logged metrics.
 ### predict(model: Module, loader: DataLoader)
 Run the model in eval mode and collect outputs into an array.
 
-## log(name: string, value: Tensor, on_step?: boolean, on_epoch?: boolean, prog_bar: boolean = false, reduce_fx: string = "mean")
-Log a metric value from inside `train`/`validate`. Calls `.compute()` automatically on Metric instances.
+## log(name: string, value: Tensor, on_step?: boolean, on_epoch?: boolean, prog_bar: boolean = false, reduce_fx: string = "mean") {step}
+Log a metric value. Only callable inside a `train`/`validate` block — calling it elsewhere is an error. Calls `.compute()` automatically on Metric instances.
 
 ## optim_config(optimizer: Optimizer, lr_scheduler?: Scheduler)
 Wrap an optimizer (and optionally an LR scheduler) for return from an `optimizer:` block.
@@ -243,11 +243,11 @@ Read a text file and return its contents as a string.
 ## load_json(path: string)
 Read a JSON file and return it as nested dicts/lists.
 
-## save(model: Module, path: string)
-Save a trained model's weights to `path` (compact binary checkpoint). Mirrors PyTorch's `torch.save(model.state_dict(), path)`. Pair with `load`.
+## load_model(model: Module, path: string)
+Load weights from a checkpoint `path` into an existing `model` (in place) and return it. Save the model first with `model.save(path)`, rebuild it with the same architecture, then `load_model(model, path)`.
 
-## load(model: Module, path: string)
-Load weights from a checkpoint `path` into an existing `model` (in place) and return it. Build the model with the same architecture first, then `load(model, path)` — mirrors `model.load_state_dict(torch.load(path))`.
+## load_tokenizer(path: string)
+Load a tokenizer artifact saved with `tok.save(path)`. Returns a `Tokenizer`.
 
 ## Tokenizer(mode: string = "word", vocab_size?: int, lowercase: boolean = false, num_merges: int = 1000, special_tokens?: string[])
 Build a text tokenizer. `mode` is `"word"`, `"char"`, or `"bpe"` (trainable subword). `fit(texts)` on a corpus first, then `encode`/`decode`/`encodeBatch`. Reserves special tokens (`<pad> <unk> <bos> <eos>`) at low ids exposed as `padId`/`unkId`/`bosId`/`eosId`.
@@ -256,10 +256,7 @@ Build a text tokenizer. `mode` is `"word"`, `"char"`, or `"bpe"` (trainable subw
 Learn the vocabulary (and BPE merges) from a list of strings. Returns the tokenizer.
 
 ### save(path: string) -> none
-Save the fitted tokenizer as a compact artifact.
-
-### load(path: string) -> Tokenizer
-Load a tokenizer artifact.
+Save the fitted tokenizer as a compact artifact. Reload it with the global `load_tokenizer(path)`.
 
 ### encode(text: string, add_bos?: boolean, add_eos?: boolean) -> int[]
 Tokenize `text` to a list of integer ids. Optionally wrap with begin/end-of-sequence tokens.
@@ -707,6 +704,9 @@ Return a serializable dict of parameter tensors.
 
 ### load_state_dict(state)
 Load parameter tensors from a previously saved dict.
+
+### save(path: string) -> none
+Save the model's weights to `path` (compact binary checkpoint). Reload into a same-architecture model with `load_model(model, path)`.
 
 ## $DataFrame
 
