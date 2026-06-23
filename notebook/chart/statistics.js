@@ -81,6 +81,38 @@ export function pearson(left, right) {
   return denominator === 0 ? NaN : numerator / denominator;
 }
 
+export function linearRegression(points) {
+  const valid = points.filter(point => validNumber(point.x) && validNumber(point.y));
+  if (valid.length < 2) return null;
+  const meanX = valid.reduce((sum, point) => sum + point.x, 0) / valid.length;
+  const meanY = valid.reduce((sum, point) => sum + point.y, 0) / valid.length;
+  let numerator = 0;
+  let denominator = 0;
+  for (const point of valid) {
+    const dx = point.x - meanX;
+    numerator += dx * (point.y - meanY);
+    denominator += dx * dx;
+  }
+  if (denominator === 0) return null;
+  const slope = numerator / denominator;
+  const intercept = meanY - slope * meanX;
+  const minX = Math.min(...valid.map(point => point.x));
+  const maxX = Math.max(...valid.map(point => point.x));
+  const predict = x => slope * x + intercept;
+  const ssTot = valid.reduce((sum, point) => sum + (point.y - meanY) ** 2, 0);
+  const ssRes = valid.reduce((sum, point) => sum + (point.y - predict(point.x)) ** 2, 0);
+  const r2 = ssTot === 0 ? 1 : 1 - ssRes / ssTot;
+  return {
+    slope,
+    intercept,
+    r2,
+    points: [
+      { x: minX, y: predict(minX), tooltip: `fit: y = ${formatNumber(slope)}x + ${formatNumber(intercept)}  R²=${formatNumber(r2)}` },
+      { x: maxX, y: predict(maxX), tooltip: `fit: y = ${formatNumber(slope)}x + ${formatNumber(intercept)}  R²=${formatNumber(r2)}` },
+    ],
+  };
+}
+
 export function spearman(left, right) {
   return pearson(ranks(left), ranks(right));
 }
@@ -152,4 +184,8 @@ export function makeHexbins(points, bins = 30) {
 
 function validNumber(value) {
   return typeof value === 'number' && Number.isFinite(value);
+}
+
+function formatNumber(value) {
+  return Number(value.toPrecision(4));
 }

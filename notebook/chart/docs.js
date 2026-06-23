@@ -39,6 +39,18 @@ export const CHART_METHOD_DOCS = new Map([
     'chart.hexbin(data, x?, y?, bins=30, title?, zoom=true)',
     'Aggregate dense numeric X/Y observations into hexagonal bins whose intensity represents the number of points.'
   )],
+  ['heatmap', doc(
+    'chart.heatmap(data, x?, y?, value?, title?)',
+    'Draw a numeric matrix heatmap. For DataFrame input, provide x, y, and value columns; 2D arrays are supported directly.'
+  )],
+  ['regression', doc(
+    'chart.regression(data, x?, y?, title?, zoom=true)',
+    'Plot numeric X/Y observations with a least-squares linear fit and R² tooltip.'
+  )],
+  ['ecdf', doc(
+    'chart.ecdf(data, x?, color?, title?, zoom=true)',
+    'Draw an empirical cumulative distribution function for comparing numeric distributions without binning.'
+  )],
 ]);
 
 export function chartMethodOwner(pre, span) {

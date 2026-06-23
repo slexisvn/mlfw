@@ -52,22 +52,33 @@ function renderDistribution(svg, type, groups, width, height, host) {
 
 function renderMatrix(svg, payload, width, height) {
   const layout = { left: 90, right: width - 20, top: 55, bottom: height - 65 };
-  const count = payload.columns.length;
-  const cellWidth = (layout.right - layout.left) / count;
-  const cellHeight = (layout.bottom - layout.top) / count;
+  const columns = payload.columns || [];
+  const rows = payload.rows || payload.columns || [];
+  const columnCount = Math.max(1, columns.length);
+  const rowCount = Math.max(1, rows.length);
+  const cellWidth = (layout.right - layout.left) / columnCount;
+  const cellHeight = (layout.bottom - layout.top) / rowCount;
+  const values = payload.cells.map(cell => Number.isFinite(cell.value) ? cell.value : 0);
+  const min = values.length ? Math.min(...values) : 0;
+  const max = values.length ? Math.max(...values) : 1;
   payload.cells.forEach(cell => {
-    const column = payload.columns.indexOf(cell.x);
-    const row = payload.columns.indexOf(cell.y);
+    const column = columns.indexOf(cell.x);
+    const row = rows.indexOf(cell.y);
+    if (column < 0 || row < 0) return;
     const value = Number.isFinite(cell.value) ? cell.value : 0;
-    const rect = svgElement('rect', { class: 'chart-correlation-cell', x: layout.left + column * cellWidth, y: layout.top + row * cellHeight, width: cellWidth, height: cellHeight, fill: correlationColor(value) });
+    const rect = svgElement('rect', { class: 'chart-correlation-cell', x: layout.left + column * cellWidth, y: layout.top + row * cellHeight, width: cellWidth, height: cellHeight, fill: matrixColor(value, min, max, payload.method) });
     const title = svgElement('title');
-    title.textContent = `${cell.y} × ${cell.x}: ${Number.isFinite(cell.value) ? formatValue(cell.value) : 'NaN'} (${payload.method}, n=${cell.count})`;
+    title.textContent = payload.method
+      ? `${cell.y} × ${cell.x}: ${Number.isFinite(cell.value) ? formatValue(cell.value) : 'NaN'} (${payload.method}, n=${cell.count})`
+      : `${cell.y} × ${cell.x}: ${Number.isFinite(cell.value) ? formatValue(cell.value) : 'NaN'}`;
     rect.append(title);
     svg.append(rect);
     if (cellWidth >= 38 && cellHeight >= 25) svg.append(svgText(Number.isFinite(cell.value) ? value.toFixed(2) : 'NaN', { class: 'chart-correlation-value', x: layout.left + (column + 0.5) * cellWidth, y: layout.top + (row + 0.5) * cellHeight + 4, 'text-anchor': 'middle' }));
   });
-  payload.columns.forEach((column, index) => {
-    svg.append(svgText(column, { class: 'chart-matrix-label', x: layout.left - 8, y: layout.top + (index + 0.5) * cellHeight + 4, 'text-anchor': 'end' }));
+  rows.forEach((row, index) => {
+    svg.append(svgText(row, { class: 'chart-matrix-label', x: layout.left - 8, y: layout.top + (index + 0.5) * cellHeight + 4, 'text-anchor': 'end' }));
+  });
+  columns.forEach((column, index) => {
     svg.append(svgText(column, { class: 'chart-matrix-label', transform: `translate(${layout.left + (index + 0.5) * cellWidth} ${layout.bottom + 8}) rotate(-45)`, 'text-anchor': 'end' }));
   });
 }
@@ -84,4 +95,11 @@ function renderSimpleAxes(svg, layout, x, y) {
 function correlationColor(value) {
   const amount = Math.min(1, Math.abs(value));
   return value < 0 ? `rgba(224,108,117,${0.18 + amount * 0.82})` : `rgba(79,107,237,${0.18 + amount * 0.82})`;
+}
+
+function matrixColor(value, min, max, method) {
+  if (method) return correlationColor(value);
+  const t = max === min ? 0.5 : (value - min) / (max - min);
+  const alpha = 0.18 + Math.max(0, Math.min(1, t)) * 0.82;
+  return `rgba(79,107,237,${alpha})`;
 }

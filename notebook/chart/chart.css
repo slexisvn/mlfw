@@ -15,6 +15,7 @@
 .chart-grid line { stroke: var(--border); stroke-dasharray: 2 3; }
 .chart-axis-label { fill: var(--text); font-size: 11px; }
 .chart-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart-regression-line { fill: none; stroke-width: 2.2; stroke-dasharray: 6 4; stroke-linecap: round; }
 .chart-area { fill-opacity: .24; stroke-width: 1.5; stroke-linejoin: round; }
 .chart-point { stroke: var(--panel); stroke-width: 1.5; opacity: 0; transition: opacity .12s; }
 .chart-series:hover .chart-point { opacity: 1; }

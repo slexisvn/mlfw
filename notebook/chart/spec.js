@@ -1,6 +1,10 @@
 export const CHART_SPEC = 'tera.notebook.chart';
 export const MAX_POINTS = 10000;
-export const CHART_TYPES = new Set(['line', 'bar', 'scatter', 'histogram', 'area', 'box', 'violin', 'density', 'correlation', 'hexbin']);
+export const CHART_TYPES = new Set([
+  'line', 'bar', 'scatter', 'histogram', 'area',
+  'box', 'violin', 'density', 'correlation', 'hexbin',
+  'heatmap', 'regression', 'ecdf',
+]);
 
 export function isChartSpec(value) {
   return value?.kind === CHART_SPEC && CHART_TYPES.has(value.type) && (Array.isArray(value.series) || value.payload != null);

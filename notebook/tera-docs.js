@@ -500,6 +500,15 @@ function chartExample(name) {
   if (name === 'correlation') {
     return 'data = DataFrame(a=[1, 2, 3, 4], b=[2, 4, 6, 8], c=[4, 3, 2, 1])\nchart.correlation(data, columns=["a", "b", "c"], title="Correlation")';
   }
+  if (name === 'heatmap') {
+    return 'data = DataFrame(day=["Mon", "Mon", "Tue", "Tue"], segment=["A", "B", "A", "B"], value=[12, 18, 9, 24])\nchart.heatmap(data, x="day", y="segment", value="value", title="Heatmap")';
+  }
+  if (name === 'regression') {
+    return 'data = DataFrame(x=[1, 2, 3, 4, 5], y=[1.2, 2.1, 2.8, 4.2, 5.1])\nchart.regression(data, x="x", y="y", title="Linear fit")';
+  }
+  if (name === 'ecdf') {
+    return 'data = DataFrame(score=[2, 3, 3, 4, 4, 5, 6, 8])\nchart.ecdf(data, x="score", title="ECDF")';
+  }
   return `data = DataFrame(x=[1, 2, 3], y=[1, 4, 9])\nchart.${name}(data)`;
 }
 

@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { createChartApi } from '../../notebook/chart/api.js';
 import { adaptHistogram, adaptSeries } from '../../notebook/chart/adapters.js';
-import { adaptCorrelation, adaptDistribution, adaptHexbin, prepareSeriesMode } from '../../notebook/chart/advanced_adapters.js';
+import { adaptCorrelation, adaptDistribution, adaptEcdf, adaptHeatmap, adaptHexbin, adaptRegression, prepareSeriesMode } from '../../notebook/chart/advanced_adapters.js';
 import { rendererTypes } from '../../notebook/chart/registry.js';
 import '../../notebook/chart/render.js';
 import { layoutSeries } from '../../notebook/chart/render.js';
 import { createScale } from '../../notebook/chart/scales.js';
 import { isChartSpec, MAX_POINTS } from '../../notebook/chart/spec.js';
 import { clampDomain, domainsEqual, panDomain, zoomDomain } from '../../notebook/chart/zoom.js';
-import { boxSummary, correlationMatrix, kde, makeHexbins, pearson, spearman } from '../../notebook/chart/statistics.js';
+import { boxSummary, correlationMatrix, kde, linearRegression, makeHexbins, pearson, spearman } from '../../notebook/chart/statistics.js';
 import { highlightHtml } from '../../notebook/highlight.js';
 import { CHART_METHOD_DOCS } from '../../notebook/chart/docs.js';
 import { regularHexagonPoints } from '../../notebook/chart/renderers/hexbin.js';
@@ -69,7 +69,7 @@ describe('notebook chart API', () => {
   });
 
   it('registers all v1 renderers and creates numeric and categorical scales', () => {
-    expect(rendererTypes().sort()).toEqual(['area', 'bar', 'density', 'hexbin', 'histogram', 'line', 'scatter']);
+    expect(rendererTypes().sort()).toEqual(['area', 'bar', 'density', 'ecdf', 'hexbin', 'histogram', 'line', 'regression', 'scatter']);
     expect(createScale([0, 10], 0, 100).scale(5)).toBe(50);
     expect(createScale(['a', 'b'], 0, 100).scale('a')).toBe(25);
   });
@@ -130,6 +130,14 @@ describe('notebook chart API', () => {
     expect(groups[0].density.points).toHaveLength(80);
   });
 
+  it('computes linear regression fits', () => {
+    const fit = linearRegression([{ x: 1, y: 2 }, { x: 2, y: 4 }, { x: 3, y: 6 }]);
+    expect(fit.slope).toBeCloseTo(2);
+    expect(fit.intercept).toBeCloseTo(0);
+    expect(fit.r2).toBeCloseTo(1);
+    expect(fit.points).toHaveLength(2);
+  });
+
   it('includes KDE support in violin scale domains', async () => {
     const groups = await adaptDistribution([2, 4, 4, 5, 6, 8, 9], {}, true);
     const summaryValues = groups.flatMap(group => [group.summary.low, group.summary.high, ...group.summary.outliers]);
@@ -173,6 +181,20 @@ describe('notebook chart API', () => {
     expect(() => prepareSeriesMode(series, 'area', 'stacked')).toThrow(/matching x values/);
   });
 
+  it('adapts heatmap, regression, and ECDF inputs', async () => {
+    const heatmap = await adaptHeatmap([[1, 2], [3, 4]], {});
+    expect(heatmap.columns).toEqual(['0', '1']);
+    expect(heatmap.rows).toEqual(['0', '1']);
+    expect(heatmap.cells).toHaveLength(4);
+
+    const regression = await adaptRegression([[1, 2], [2, 4], [3, 6]], { x: 0, y: 1 });
+    expect(regression.series).toHaveLength(2);
+    expect(regression.fit.slope).toBeCloseTo(2);
+
+    const ecdf = await adaptEcdf([3, 1, 2], {});
+    expect(ecdf[0].points).toEqual([{ x: 1, y: 1 / 3 }, { x: 2, y: 2 / 3 }, { x: 3, y: 1 }]);
+  });
+
   it('creates every advanced chart through the public API', async () => {
     const chart = createChartApi();
     expect((await chart.box([1, 2, 3])).family).toBe('distribution');
@@ -180,6 +202,9 @@ describe('notebook chart API', () => {
     expect((await chart.density([1, 2, 3])).series[0].points).toHaveLength(80);
     expect((await chart.hexbin([[1, 2], [2, 3]], { __named: true, bins: 10 })).type).toBe('hexbin');
     expect((await chart.area([[1, 2], [2, 3]], { __named: true, x: 0, y: 1 })).options.mode).toBe('overlay');
+    expect((await chart.heatmap([[1, 2], [3, 4]])).type).toBe('heatmap');
+    expect((await chart.regression([[1, 2], [2, 4]], { __named: true, x: 0, y: 1 })).type).toBe('regression');
+    expect((await chart.ecdf([3, 1, 2])).type).toBe('ecdf');
   });
 
   it('stacks positive and negative series independently', () => {
@@ -203,7 +228,7 @@ describe('notebook syntax highlight', () => {
   });
 
   it('provides hover descriptions for every chart method', () => {
-    const methods = ['line', 'bar', 'scatter', 'histogram', 'area', 'box', 'violin', 'density', 'correlation', 'hexbin'];
+    const methods = ['line', 'bar', 'scatter', 'histogram', 'area', 'box', 'violin', 'density', 'correlation', 'hexbin', 'heatmap', 'regression', 'ecdf'];
     expect([...CHART_METHOD_DOCS.keys()]).toEqual(methods);
     for (const method of methods) {
       const info = CHART_METHOD_DOCS.get(method);

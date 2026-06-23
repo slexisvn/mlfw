@@ -1,6 +1,6 @@
 import { isDataFrame, isTensor } from './adapters.js';
 import { MAX_POINTS } from './spec.js';
-import { boxSummary, correlationMatrix, kde, makeHexbins } from './statistics.js';
+import { boxSummary, correlationMatrix, kde, linearRegression, makeHexbins } from './statistics.js';
 
 export async function adaptDistribution(data, config, includeDensity = false) {
   const groups = await numericGroups(data, config.x, config.color);
@@ -17,6 +17,20 @@ export async function adaptDensity(data, config) {
   return groups.map(group => {
     const density = kde(group.values, config.bandwidth);
     return { name: group.name, points: density.points, count: group.values.length, missing: group.missing, bandwidth: density.bandwidth };
+  });
+}
+
+export async function adaptEcdf(data, config) {
+  const groups = await numericGroups(data, config.x, config.color);
+  return groups.map(group => {
+    const values = [...group.values].sort((a, b) => a - b);
+    const n = values.length;
+    return {
+      name: group.name,
+      points: values.map((value, index) => ({ x: value, y: (index + 1) / n })),
+      count: n,
+      missing: group.missing,
+    };
   });
 }
 
@@ -40,6 +54,55 @@ export async function adaptCorrelation(data, config) {
 export async function adaptHexbin(data, config) {
   const series = await xyPoints(data, config.x, config.y);
   return { bins: makeHexbins(series.points, config.bins ?? 30), count: series.points.length, missing: series.missing };
+}
+
+export async function adaptRegression(data, config) {
+  const series = await xyPoints(data, config.x, config.y);
+  const fit = linearRegression(series.points);
+  const points = { name: 'points', points: series.points };
+  const line = fit ? { name: 'linear fit', points: fit.points, fit } : { name: 'linear fit', points: [], fit: null };
+  return { series: [points, line], count: series.points.length, missing: series.missing, fit };
+}
+
+export async function adaptHeatmap(data, config) {
+  if (isDataFrame(data)) {
+    const x = requiredColumn(config.x, 'x');
+    const y = requiredColumn(config.y, 'y');
+    const value = requiredColumn(config.value ?? config.z, 'value');
+    const count = Number(await data.count());
+    ensureLimit(count);
+    const rows = await data.select(x, y, value).collect();
+    const cells = [];
+    for (const row of rows) {
+      if (!validNumber(row[value])) continue;
+      cells.push({ x: String(row[x]), y: String(row[y]), value: row[value], count: 1 });
+    }
+    return {
+      columns: unique(cells.map(cell => cell.x)),
+      rows: unique(cells.map(cell => cell.y)),
+      cells,
+      value,
+    };
+  }
+  const rows = isTensor(data) ? data.toArray() : data;
+  if (!Array.isArray(rows) || !Array.isArray(rows[0])) throw new Error('chart.heatmap expects a DataFrame or 2D array');
+  ensureLimit(rows.length * rows[0].length);
+  const height = rows.length;
+  const width = rows[0].length;
+  const cells = [];
+  for (let rowIndex = 0; rowIndex < height; rowIndex++) {
+    const row = rows[rowIndex];
+    if (!Array.isArray(row) || row.length !== width) throw new Error('heatmap array rows must have equal length');
+    for (let columnIndex = 0; columnIndex < width; columnIndex++) {
+      if (validNumber(row[columnIndex])) cells.push({ x: String(columnIndex), y: String(rowIndex), value: row[columnIndex], count: 1 });
+    }
+  }
+  return {
+    columns: Array.from({ length: width }, (_, index) => String(index)),
+    rows: Array.from({ length: height }, (_, index) => String(index)),
+    cells,
+    value: 'value',
+  };
 }
 
 export function prepareSeriesMode(series, type, modeValue) {
@@ -118,10 +181,19 @@ async function xyPoints(data, x, y) {
   return { points, missing };
 }
 
+function requiredColumn(value, label) {
+  if (typeof value !== 'string' || value.length === 0) throw new Error(`chart requires ${label}="column"`);
+  return value;
+}
+
 function normalizeColumns(value) {
   const columns = Array.isArray(value) ? value : [value];
   if (columns.some(column => typeof column !== 'string')) throw new Error('columns must be an array of column names');
   return columns;
+}
+
+function unique(values) {
+  return [...new Set(values)];
 }
 
 function flatten(value) {

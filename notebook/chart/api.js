@@ -1,5 +1,5 @@
 import { adaptHistogram, adaptSeries } from './adapters.js';
-import { adaptCorrelation, adaptDensity, adaptDistribution, adaptHexbin, prepareSeriesMode } from './advanced_adapters.js';
+import { adaptCorrelation, adaptDensity, adaptDistribution, adaptEcdf, adaptHeatmap, adaptHexbin, adaptRegression, prepareSeriesMode } from './advanced_adapters.js';
 import { createPayloadSpec, createSpec } from './spec.js';
 
 export function createChartApi() {
@@ -14,6 +14,9 @@ export function createChartApi() {
     density: (...args) => createDensity(args),
     correlation: (...args) => createCorrelation(args),
     hexbin: (...args) => createHexbin(args),
+    heatmap: (...args) => createHeatmap(args),
+    regression: (...args) => createRegression(args),
+    ecdf: (...args) => createEcdf(args),
   });
 }
 
@@ -43,6 +46,22 @@ async function createHexbin(args) {
   const { data, options } = splitArgs(args);
   const payload = await adaptHexbin(data, options);
   return createSpec('hexbin', [{ name: 'count', points: payload.bins.map(bin => ({ ...bin, value: bin.count })) }], options);
+}
+
+async function createHeatmap(args) {
+  const { data, options } = splitArgs(args);
+  return createPayloadSpec('heatmap', 'matrix', await adaptHeatmap(data, options), options);
+}
+
+async function createRegression(args) {
+  const { data, options } = splitArgs(args);
+  const payload = await adaptRegression(data, options);
+  return createSpec('regression', payload.series, { ...options, zoom: options.zoom ?? true });
+}
+
+async function createEcdf(args) {
+  const { data, options } = splitArgs(args);
+  return createSpec('ecdf', await adaptEcdf(data, options), { ...options, y_label: options.y_label ?? options.yLabel ?? 'Cumulative probability' });
 }
 
 async function createHistogram(args) {

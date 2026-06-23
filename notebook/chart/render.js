@@ -12,6 +12,7 @@ import { renderLine } from './renderers/line.js';
 import { renderScatter } from './renderers/scatter.js';
 import { renderArea } from './renderers/area.js';
 import { renderHexbin } from './renderers/hexbin.js';
+import { renderRegression } from './renderers/regression.js';
 import { renderPayloadChart } from './payload_renderers.js';
 import { domainsEqual } from './zoom.js';
 
@@ -21,7 +22,9 @@ registerRenderer('scatter', renderScatter);
 registerRenderer('histogram', renderHistogram);
 registerRenderer('area', renderArea);
 registerRenderer('density', renderLine);
+registerRenderer('ecdf', renderLine);
 registerRenderer('hexbin', renderHexbin);
+registerRenderer('regression', renderRegression);
 
 export function renderChart(host, spec) {
   if (!isChartSpec(spec)) throw new Error('renderChart expects a ChartSpec');
@@ -33,7 +36,7 @@ export function renderChart(host, spec) {
   const yValues = allSpecPoints.flatMap(point => [point.y, point.y0, point.y1].filter(value => value != null));
   const baseX = createScale(xValues, 0, 1, { padding: spec.type === 'bar' ? 0 : 0.03 });
   const baseY = createScale(yValues, 1, 0, { zero: ['bar', 'histogram', 'area', 'density'].includes(spec.type), padding: 0.08 });
-  const zoomEnabled = spec.options.zoom && ['line', 'scatter', 'histogram', 'area', 'density', 'hexbin'].includes(spec.type) && baseX.type === 'linear' && baseY.type === 'linear';
+  const zoomEnabled = spec.options.zoom && ['line', 'scatter', 'histogram', 'area', 'density', 'hexbin', 'regression', 'ecdf'].includes(spec.type) && baseX.type === 'linear' && baseY.type === 'linear';
   const bounds = zoomEnabled ? { x: baseX.domain, y: baseY.domain } : null;
   let domains = zoomEnabled ? { x: [...bounds.x], y: [...bounds.y] } : null;
   let interactionContext = null;
