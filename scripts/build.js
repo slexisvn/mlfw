@@ -78,7 +78,7 @@ await Promise.all([
   }),
   build({
     ...shared,
-    entryPoints: [resolve(root, 'notebook/lib.js')],
+    entryPoints: [resolve(root, 'src/notebook/browser.js')],
     format: 'esm',
     outfile: resolve(root, 'notebook/dist/mlfw-lang.esm.js'),
     sourcemap: true,
