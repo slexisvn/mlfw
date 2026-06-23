@@ -1997,6 +1997,467 @@
           "display": "cast(targetType) -> Column"
         }
       }
+    ],
+    "List": [
+      {
+        "name": "append",
+        "description": "Add `x` to the end of the list, growing it in place.",
+        "returns": "none",
+        "isGetter": false,
+        "signature": {
+          "params": [
+            {
+              "name": "x",
+              "type": null,
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "append(x) -> none"
+        }
+      },
+      {
+        "name": "extend",
+        "description": "Append every element of list `other` to the end of this list, in place.",
+        "returns": "none",
+        "isGetter": false,
+        "signature": {
+          "params": [
+            {
+              "name": "other",
+              "type": null,
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "extend(other) -> none"
+        }
+      },
+      {
+        "name": "insert",
+        "description": "Insert `x` at index `i`, shifting later elements right. Negative `i` counts from\nthe end; out-of-range `i` is clamped to the nearest end.",
+        "returns": "none",
+        "isGetter": false,
+        "signature": {
+          "params": [
+            {
+              "name": "i",
+              "type": null,
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            },
+            {
+              "name": "x",
+              "type": null,
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "insert(i, x) -> none"
+        }
+      },
+      {
+        "name": "pop",
+        "description": "Remove and return the element at index `i` (the last element when `i` is omitted).\nErrors on an empty list.",
+        "returns": "any",
+        "isGetter": false,
+        "signature": {
+          "params": [
+            {
+              "name": "i",
+              "type": null,
+              "optional": true,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "pop(i?) -> any"
+        }
+      },
+      {
+        "name": "remove",
+        "description": "Remove the first element equal to `x`. Does nothing if no element matches.",
+        "returns": "none",
+        "isGetter": false,
+        "signature": {
+          "params": [
+            {
+              "name": "x",
+              "type": null,
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "remove(x) -> none"
+        }
+      },
+      {
+        "name": "index",
+        "description": "Return the position of the first element equal to `x`, or `-1` if absent.",
+        "returns": "int",
+        "isGetter": false,
+        "signature": {
+          "params": [
+            {
+              "name": "x",
+              "type": null,
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "index(x) -> int"
+        }
+      },
+      {
+        "name": "count",
+        "description": "Return how many elements are equal to `x`.",
+        "returns": "int",
+        "isGetter": false,
+        "signature": {
+          "params": [
+            {
+              "name": "x",
+              "type": null,
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "count(x) -> int"
+        }
+      },
+      {
+        "name": "contains",
+        "description": "True when the list holds an element equal to `x`.",
+        "returns": "boolean",
+        "isGetter": false,
+        "signature": {
+          "params": [
+            {
+              "name": "x",
+              "type": null,
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "contains(x) -> boolean"
+        }
+      },
+      {
+        "name": "reverse",
+        "description": "Reverse the order of the elements in place.",
+        "returns": "none",
+        "isGetter": false,
+        "signature": {
+          "params": [],
+          "display": "reverse() -> none"
+        }
+      },
+      {
+        "name": "clear",
+        "description": "Remove all elements, leaving an empty list.",
+        "returns": "none",
+        "isGetter": false,
+        "signature": {
+          "params": [],
+          "display": "clear() -> none"
+        }
+      },
+      {
+        "name": "copy",
+        "description": "Return a shallow copy of the list.",
+        "returns": "list",
+        "isGetter": false,
+        "signature": {
+          "params": [],
+          "display": "copy() -> list"
+        }
+      }
+    ],
+    "String": [
+      {
+        "name": "upper",
+        "description": "Return the string with every character upper-cased.",
+        "returns": "string",
+        "isGetter": false,
+        "signature": {
+          "params": [],
+          "display": "upper() -> string"
+        }
+      },
+      {
+        "name": "lower",
+        "description": "Return the string with every character lower-cased.",
+        "returns": "string",
+        "isGetter": false,
+        "signature": {
+          "params": [],
+          "display": "lower() -> string"
+        }
+      },
+      {
+        "name": "strip",
+        "description": "Return the string with leading and trailing whitespace removed.",
+        "returns": "string",
+        "isGetter": false,
+        "signature": {
+          "params": [],
+          "display": "strip() -> string"
+        }
+      },
+      {
+        "name": "lstrip",
+        "description": "Return the string with leading whitespace removed.",
+        "returns": "string",
+        "isGetter": false,
+        "signature": {
+          "params": [],
+          "display": "lstrip() -> string"
+        }
+      },
+      {
+        "name": "rstrip",
+        "description": "Return the string with trailing whitespace removed.",
+        "returns": "string",
+        "isGetter": false,
+        "signature": {
+          "params": [],
+          "display": "rstrip() -> string"
+        }
+      },
+      {
+        "name": "split",
+        "description": "Split the string on `sep`. With no `sep`, split on runs of whitespace and drop\nempty pieces.",
+        "returns": "string[]",
+        "isGetter": false,
+        "signature": {
+          "params": [
+            {
+              "name": "sep",
+              "type": null,
+              "optional": true,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "split(sep?) -> string[]"
+        }
+      },
+      {
+        "name": "join",
+        "description": "Join `parts` into one string using this string as the separator, e.g.\n`\", \".join(words)`.",
+        "returns": "string",
+        "isGetter": false,
+        "signature": {
+          "params": [
+            {
+              "name": "parts",
+              "type": null,
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "join(parts) -> string"
+        }
+      },
+      {
+        "name": "replace",
+        "description": "Return a copy with every occurrence of `old` replaced by `new`.",
+        "returns": "string",
+        "isGetter": false,
+        "signature": {
+          "params": [
+            {
+              "name": "old",
+              "type": null,
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            },
+            {
+              "name": "new",
+              "type": null,
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "replace(old, new) -> string"
+        }
+      },
+      {
+        "name": "starts_with",
+        "description": "True when the string begins with `prefix`.",
+        "returns": "boolean",
+        "isGetter": false,
+        "signature": {
+          "params": [
+            {
+              "name": "prefix",
+              "type": null,
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "starts_with(prefix) -> boolean"
+        }
+      },
+      {
+        "name": "ends_with",
+        "description": "True when the string ends with `suffix`.",
+        "returns": "boolean",
+        "isGetter": false,
+        "signature": {
+          "params": [
+            {
+              "name": "suffix",
+              "type": null,
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "ends_with(suffix) -> boolean"
+        }
+      },
+      {
+        "name": "find",
+        "description": "Return the index of the first occurrence of `sub`, or `-1` if absent.",
+        "returns": "int",
+        "isGetter": false,
+        "signature": {
+          "params": [
+            {
+              "name": "sub",
+              "type": null,
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "find(sub) -> int"
+        }
+      },
+      {
+        "name": "contains",
+        "description": "True when `sub` occurs anywhere in the string.",
+        "returns": "boolean",
+        "isGetter": false,
+        "signature": {
+          "params": [
+            {
+              "name": "sub",
+              "type": null,
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "contains(sub) -> boolean"
+        }
+      }
+    ],
+    "Dict": [
+      {
+        "name": "keys",
+        "description": "Return a list of the dictionary's keys.",
+        "returns": "list",
+        "isGetter": false,
+        "signature": {
+          "params": [],
+          "display": "keys() -> list"
+        }
+      },
+      {
+        "name": "values",
+        "description": "Return a list of the dictionary's values.",
+        "returns": "list",
+        "isGetter": false,
+        "signature": {
+          "params": [],
+          "display": "values() -> list"
+        }
+      },
+      {
+        "name": "items",
+        "description": "Return a list of `[key, value]` pairs.",
+        "returns": "list",
+        "isGetter": false,
+        "signature": {
+          "params": [],
+          "display": "items() -> list"
+        }
+      },
+      {
+        "name": "get",
+        "description": "Return the value for `key`, or `default` (or `null` when omitted) if the key is absent.",
+        "returns": "any",
+        "isGetter": false,
+        "signature": {
+          "params": [
+            {
+              "name": "key",
+              "type": null,
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            },
+            {
+              "name": "default",
+              "type": null,
+              "optional": true,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "get(key, default?) -> any"
+        }
+      },
+      {
+        "name": "has",
+        "description": "True when `key` is present in the dictionary.",
+        "returns": "boolean",
+        "isGetter": false,
+        "signature": {
+          "params": [
+            {
+              "name": "key",
+              "type": null,
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "has(key) -> boolean"
+        }
+      },
+      {
+        "name": "remove",
+        "description": "Remove `key` and its value from the dictionary. Does nothing if absent.",
+        "returns": "none",
+        "isGetter": false,
+        "signature": {
+          "params": [
+            {
+              "name": "key",
+              "type": null,
+              "optional": false,
+              "rest": false,
+              "defaultValue": null
+            }
+          ],
+          "display": "remove(key) -> none"
+        }
+      }
     ]
   },
   "builtins": [

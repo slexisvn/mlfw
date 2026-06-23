@@ -858,3 +858,100 @@ True where the value is one of the given values.
 
 ### cast(targetType) -> Column
 Cast the column to another data type.
+
+## $List
+
+### append(x) -> none
+Add `x` to the end of the list, growing it in place.
+
+### extend(other) -> none
+Append every element of list `other` to the end of this list, in place.
+
+### insert(i, x) -> none
+Insert `x` at index `i`, shifting later elements right. Negative `i` counts from
+the end; out-of-range `i` is clamped to the nearest end.
+
+### pop(i?) -> any
+Remove and return the element at index `i` (the last element when `i` is omitted).
+Errors on an empty list.
+
+### remove(x) -> none
+Remove the first element equal to `x`. Does nothing if no element matches.
+
+### index(x) -> int
+Return the position of the first element equal to `x`, or `-1` if absent.
+
+### count(x) -> int
+Return how many elements are equal to `x`.
+
+### contains(x) -> boolean
+True when the list holds an element equal to `x`.
+
+### reverse() -> none
+Reverse the order of the elements in place.
+
+### clear() -> none
+Remove all elements, leaving an empty list.
+
+### copy() -> list
+Return a shallow copy of the list.
+
+## $String
+
+### upper() -> string
+Return the string with every character upper-cased.
+
+### lower() -> string
+Return the string with every character lower-cased.
+
+### strip() -> string
+Return the string with leading and trailing whitespace removed.
+
+### lstrip() -> string
+Return the string with leading whitespace removed.
+
+### rstrip() -> string
+Return the string with trailing whitespace removed.
+
+### split(sep?) -> string[]
+Split the string on `sep`. With no `sep`, split on runs of whitespace and drop
+empty pieces.
+
+### join(parts) -> string
+Join `parts` into one string using this string as the separator, e.g.
+`", ".join(words)`.
+
+### replace(old, new) -> string
+Return a copy with every occurrence of `old` replaced by `new`.
+
+### starts_with(prefix) -> boolean
+True when the string begins with `prefix`.
+
+### ends_with(suffix) -> boolean
+True when the string ends with `suffix`.
+
+### find(sub) -> int
+Return the index of the first occurrence of `sub`, or `-1` if absent.
+
+### contains(sub) -> boolean
+True when `sub` occurs anywhere in the string.
+
+## $Dict
+
+### keys() -> list
+Return a list of the dictionary's keys.
+
+### values() -> list
+Return a list of the dictionary's values.
+
+### items() -> list
+Return a list of `[key, value]` pairs.
+
+### get(key, default?) -> any
+Return the value for `key`, or `default` (or `null` when omitted) if the key is absent.
+
+### has(key) -> boolean
+True when `key` is present in the dictionary.
+
+### remove(key) -> none
+Remove `key` and its value from the dictionary. Does nothing if absent.

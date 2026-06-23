@@ -13,6 +13,7 @@ import { TraceLevel } from '../compiler/pipeline/trace.js';
 import { parse } from './parser.js';
 import { CompiledProgramView, formatTrace } from './format.js';
 import { installBuiltins, installSignatures, takeNamed, createDataFrameFromColumns, setUploadedCsv, removeUploadedCsv, beginUploadedCsv, resolveDeviceName, saveModelCheckpoint } from './builtins.js';
+import { lookupCollectionMethod } from './collection_methods.js';
 import { SignatureRegistry } from './signature_registry.js';
 
 class Environment {
@@ -159,6 +160,8 @@ export class TeraRuntime {
       }
       if (node.type === 'Member') {
         const object = await this.evaluateExpression(node.object, env);
+        const collMethod = lookupCollectionMethod(object, node.property);
+        if (collMethod) return collMethod;
         const value = object[node.property];
         if (typeof value !== 'function') return value;
         if (node.property === 'to' && (isTensorValue(object) || object instanceof Module)) return makeDeviceMove(object, value);

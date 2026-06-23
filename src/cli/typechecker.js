@@ -32,6 +32,41 @@ const TENSOR_MEMBERS = {
   dtype: STRING, device: STRING, requiresGrad: BOOL, grad: TENSOR,
 };
 
+function listMethodResult(prop, type) {
+  switch (prop) {
+    case 'append': case 'extend': case 'insert':
+    case 'remove': case 'reverse': case 'clear': return NONE;
+    case 'pop': return type.element;
+    case 'index': case 'count': return INT;
+    case 'contains': return BOOL;
+    case 'copy': return listType(type.element);
+    default: return null;
+  }
+}
+
+function stringMethodResult(prop) {
+  switch (prop) {
+    case 'upper': case 'lower': case 'strip': case 'lstrip': case 'rstrip':
+    case 'replace': case 'join': return STRING;
+    case 'split': return listType(STRING);
+    case 'starts_with': case 'ends_with': case 'contains': return BOOL;
+    case 'find': return INT;
+    default: return null;
+  }
+}
+
+function dictMethodResult(prop, type) {
+  switch (prop) {
+    case 'keys': return listType(type.key);
+    case 'values': return listType(type.value);
+    case 'items': return listType(ANY);
+    case 'get': return type.value;
+    case 'has': return BOOL;
+    case 'remove': return NONE;
+    default: return null;
+  }
+}
+
 const COMPARISONS = new Set(['==', '!=', '<', '<=', '>', '>=']);
 const ARITHMETIC = new Set(['-', '*', '/', '**']);
 const NON_CALLABLE = new Set(['number', 'string', 'bool', 'list', 'dict', 'tensor', 'null', 'none']);
@@ -265,6 +300,9 @@ class TypeChecker {
       known = this.methodReturns.get('Model')?.get(property);
     }
     if (known) return known;
+    if (objectType.kind === 'list') { const t = listMethodResult(property, objectType); if (t) return t; }
+    if (objectType.kind === 'string') { const t = stringMethodResult(property); if (t) return t; }
+    if (objectType.kind === 'dict') { const t = dictMethodResult(property, objectType); if (t) return t; }
     if (this.isTensor(objectType)) return this.tensorMethodResult(property);
     return null;
   }

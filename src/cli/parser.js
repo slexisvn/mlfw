@@ -315,7 +315,7 @@ class Parser {
 
   parsePrefix() {
     const token = this.current();
-    if (token.value === '-' || token.value === '+') {
+    if (token.type === 'symbol' && (token.value === '-' || token.value === '+')) {
       this.next();
       return this.locate({ type: 'Unary', op: token.value, value: this.parseExpression(7) }, token);
     }

@@ -28,6 +28,15 @@ describe('Tera parser', () => {
     expect(expr.left).toMatchObject({ type: 'Unary', op: 'not' });
   });
 
+  it('treats a string literal of "-" or "+" as a string, not a unary operator', () => {
+    expect(parse('x = "-"').body[0].value).toMatchObject({ type: 'Literal', value: '-' });
+    expect(parse('x = "+"').body[0].value).toMatchObject({ type: 'Literal', value: '+' });
+    const call = parse('s = "-".join(["a", "b"])').body[0].value;
+    expect(call).toMatchObject({ type: 'Call' });
+    expect(call.callee).toMatchObject({ type: 'Member', property: 'join' });
+    expect(call.callee.object).toMatchObject({ type: 'Literal', value: '-' });
+  });
+
   it('parses or with lower precedence than and', () => {
     const expr = parse('a and b or c').body[0].expression;
     expect(expr).toMatchObject({ type: 'Binary', op: 'or' });

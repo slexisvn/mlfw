@@ -114,3 +114,83 @@ a, b = [10, 20]
     expect(r).toEqual([7, 10, 20]);
   });
 });
+
+describe('Tera list methods', () => {
+  it('append / extend / insert / pop / remove mutate in place', async () => {
+    const r = await run(`
+xs = [1, 2]
+xs.append(3)
+xs.extend([4, 5])
+xs.insert(0, 0)
+last = xs.pop()
+xs.remove(4)
+[xs, last]
+`);
+    expect(r).toEqual([[0, 1, 2, 3], 5]);
+  });
+
+  it('index / count / contains / reverse / clear / copy', async () => {
+    const r = await run(`
+xs = [3, 1, 3, 2]
+i = xs.index(3)
+miss = xs.index(9)
+c = xs.count(3)
+cp = xs.copy()
+xs.reverse()
+cp.clear()
+[i, miss, c, xs.contains(2), xs.contains(9), xs, cp]
+`);
+    expect(r).toEqual([0, -1, 2, true, false, [2, 3, 1, 3], []]);
+  });
+
+  it('pop accepts an explicit and negative index', async () => {
+    const r = await run(`
+xs = [10, 20, 30]
+a = xs.pop(0)
+b = xs.pop(-1)
+[a, b, xs]
+`);
+    expect(r).toEqual([10, 30, [20]]);
+  });
+
+  it('pop on an empty list throws', async () => {
+    await expect(run('xs = []\nxs.pop()')).rejects.toThrow();
+  });
+});
+
+describe('Tera string methods', () => {
+  it('case, search, and replace', async () => {
+    const r = await run(`
+s = "Hello World"
+[s.upper(), s.lower(), s.contains("World"), s.starts_with("He"), s.ends_with("ld"), s.find("o"), s.find("z"), s.replace("o", "0")]
+`);
+    expect(r).toEqual(['HELLO WORLD', 'hello world', true, true, true, 4, -1, 'Hell0 W0rld']);
+  });
+
+  it('strip variants and split / join', async () => {
+    const r = await run(`
+parts = "a,b,c".split(",")
+joined = "-".join(["x", "y", "z"])
+ws = "  a   b  c ".split()
+["  hi  ".strip(), "  hi  ".lstrip(), "  hi  ".rstrip(), parts, joined, ws]
+`);
+    expect(r).toEqual(['hi', 'hi  ', '  hi', ['a', 'b', 'c'], 'x-y-z', ['a', 'b', 'c']]);
+  });
+});
+
+describe('Tera dict methods', () => {
+  it('keys / values / get / has / remove / items', async () => {
+    const r = await run(`
+d = {"a": 1, "b": 2}
+d["c"] = 3
+k = d.keys()
+v = d.values()
+g1 = d.get("b")
+g2 = d.get("z")
+g3 = d.get("z", 99)
+d.remove("a")
+[k, v, d.has("a"), d.has("b"), g1, g2, g3, d.items()]
+`);
+    expect(r).toEqual([['a', 'b', 'c'], [1, 2, 3], false, true, 2, null, 99, [['b', 2], ['c', 3]]]);
+  });
+});

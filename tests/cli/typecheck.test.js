@@ -185,6 +185,53 @@ describe('Tera type checker', () => {
     });
   });
 
+  describe('list / string / dict method-return inference', () => {
+    it('accepts well-typed list method results', () => {
+      const source = [
+        'xs: int[] = [1, 2, 3]',
+        'xs.append(4)',
+        'i: int = xs.index(2)',
+        'n: int = xs.count(2)',
+        'found: boolean = xs.contains(2)',
+        'last: int = xs.pop()',
+        'cp: int[] = xs.copy()',
+      ].join('\n');
+      expect(diagnose(source)).toEqual([]);
+    });
+
+    it('accepts well-typed string method results', () => {
+      const source = [
+        's: string = "Hello"',
+        'u: string = s.upper()',
+        'parts: string[] = s.split("l")',
+        'pre: boolean = s.starts_with("He")',
+        'at: int = s.find("l")',
+      ].join('\n');
+      expect(diagnose(source)).toEqual([]);
+    });
+
+    it('accepts well-typed dict method results', () => {
+      const source = [
+        'd: Record<string, int> = {"a": 1}',
+        'ks: string[] = d.keys()',
+        'vs: int[] = d.values()',
+        'v: int = d.get("a")',
+        'present: boolean = d.has("a")',
+      ].join('\n');
+      expect(diagnose(source)).toEqual([]);
+    });
+
+    it('flags assigning a list method result to an incompatible annotation', () => {
+      const [error] = diagnose('xs: int[] = [1]\nbad: string = xs.index(1)');
+      expect(error?.message ?? '').toContain('cannot assign');
+    });
+
+    it('flags assigning a string method result to an incompatible annotation', () => {
+      const [error] = diagnose('s: string = "a"\nbad: int = s.upper()');
+      expect(error?.message ?? '').toContain('cannot assign');
+    });
+  });
+
   describe('rejects the old (pre-clean-break) syntax', () => {
     const removed = [
       'x: list[int] = [1]',
