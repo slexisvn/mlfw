@@ -1177,6 +1177,14 @@ window.addEventListener('drop', (e) => {
 document.addEventListener('click', (e) => { if (ac.el && !ac.el.contains(e.target)) closeAutocomplete(); });
 document.addEventListener('scroll', hideHover, true);
 
+const toolbarEl = document.querySelector('.toolbar');
+function syncToolbarHeight() {
+  if (toolbarEl) document.documentElement.style.setProperty('--toolbar-h', toolbarEl.offsetHeight + 'px');
+}
+if (toolbarEl && 'ResizeObserver' in window) new ResizeObserver(syncToolbarHeight).observe(toolbarEl);
+window.addEventListener('resize', syncToolbarHeight);
+syncToolbarHeight();
+
 initTheme();
 initNotebookDocs({ createCell });
 loadDocs();
