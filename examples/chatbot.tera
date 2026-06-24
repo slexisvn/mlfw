@@ -29,17 +29,15 @@ din_rows = []
 dout_rows = []
 for ids in ans_ids:
   din = [tok.bosId]
-  dout = []
-  for id in ids:
-    din[din.length] = id
-    dout[dout.length] = id
-  dout[dout.length] = tok.eosId
+  din.extend(ids)
+  dout = ids.copy()
+  dout.append(tok.eosId)
   while din.length < ans_len:
-    din[din.length] = tok.padId
+    din.append(tok.padId)
   while dout.length < ans_len:
-    dout[dout.length] = tok.padId
-  din_rows[din_rows.length] = din
-  dout_rows[dout_rows.length] = dout
+    dout.append(tok.padId)
+  din_rows.append(din)
+  dout_rows.append(dout)
 
 decoder_in = tensor(din_rows, dtype=i32)
 decoder_out = tensor(dout_rows, dtype=i32)
@@ -114,7 +112,7 @@ print("saved -> examples/chatbot.ckpt (trained on GPU)")
 #     last = logits.argmax().item()
 #     if last == tok.eosId:
 #       return tok.decode(out_ids)
-#     out_ids[out_ids.length] = last
+#     out_ids.append(last)
 #   return tok.decode(out_ids)
 
 # load_model(net, "examples/chatbot.ckpt")
