@@ -19,8 +19,9 @@
 .chart-area { fill-opacity: .24; stroke-width: 1.5; stroke-linejoin: round; }
 .chart-point { stroke: var(--panel); stroke-width: 1.5; opacity: 0; transition: opacity .12s; }
 .chart-series:hover .chart-point { opacity: 1; }
-.chart-scatter-point, .chart-bar { opacity: .85; transition: opacity .12s; }
-.chart-scatter-point:hover, .chart-bar:hover { opacity: 1; }
+.chart-scatter-point, .chart-bubble-point, .chart-bar { opacity: .85; transition: opacity .12s; }
+.chart-bubble-point { stroke: var(--panel); stroke-width: 1.5; fill-opacity: .52; }
+.chart-scatter-point:hover, .chart-bubble-point:hover, .chart-bar:hover { opacity: 1; }
 .chart-legend { display: flex; flex-wrap: wrap; gap: 5px 10px; margin: 4px 0 0 48px; }
 .chart-legend-item { display: inline-flex; align-items: center; gap: 5px; padding: 2px 5px; border: 0; border-radius: 4px; background: transparent; color: var(--text); font: 11px/1.4 var(--code-font); cursor: pointer; }
 .chart-legend-item:hover { background: var(--accent-soft); }
@@ -38,7 +39,23 @@
 .chart-payload-tick, .chart-matrix-label { fill: var(--muted); font-size: 10px; }
 .chart-correlation-cell { stroke: var(--panel); stroke-width: 1; }
 .chart-correlation-value { fill: #fff; font-size: 10px; font-weight: 600; pointer-events: none; }
+.chart-funnel-step { opacity: .78; stroke: var(--panel); stroke-width: 1; }
+.chart-funnel-label { fill: #fff; font-size: 11px; font-weight: 650; pointer-events: none; }
+.chart-funnel-rate { fill: var(--muted); font-size: 10px; font-family: var(--code-font); }
+.chart-waterfall-zero { stroke: var(--border-strong); stroke-width: 1; }
+.chart-waterfall-bar { opacity: .82; stroke: var(--panel); stroke-width: 1; }
+.chart-waterfall-connector { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; }
 .chart-zoom-controls { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin: 4px 0 0; color: var(--muted); font: 10px/1.4 var(--code-font); }
 .chart-zoom-controls button { padding: 2px 7px; border: 1px solid var(--border-strong); border-radius: 5px; background: var(--panel); color: var(--text); font: 10px/1.4 var(--code-font); cursor: pointer; }
 .chart-zoom-controls button:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); }
 .chart-zoom-controls button:disabled { opacity: .4; cursor: default; }
+
+@media (max-width: 560px) {
+  .chart-title { font-size: 13px; }
+  .chart-axes, .chart-payload-tick, .chart-matrix-label { font-size: 9px; }
+  .chart-axis-label { display: none; }
+  .chart-legend { margin-left: 0; gap: 4px 7px; }
+  .chart-legend-item { font-size: 10px; padding: 2px 4px; }
+  .chart-zoom-controls { justify-content: flex-start; flex-wrap: wrap; }
+  .chart-funnel-label { font-size: 10px; }
+}

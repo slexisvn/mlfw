@@ -3,6 +3,8 @@ import { panDomain, zoomDomain } from './zoom.js';
 export function createZoomInteraction(host, getContext, onChange, onReset) {
   let dragging = false;
   let last = null;
+  const pointers = new Map();
+  let pinch = null;
 
   const wheel = event => {
     const context = activeContext(event);
@@ -17,17 +19,50 @@ export function createZoomInteraction(host, getContext, onChange, onReset) {
   };
 
   const pointerDown = event => {
-    if (event.button !== 0 || !activeContext(event)) return;
+    const context = activeContext(event);
+    if (event.button !== 0 || !context) return;
+    event.preventDefault();
+    pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    try { host.setPointerCapture?.(event.pointerId); } catch {}
+    if (pointers.size >= 2) {
+      dragging = false;
+      last = null;
+      pinch = pinchState(context);
+      host.classList.add('chart-panning');
+      return;
+    }
     dragging = true;
     last = { x: event.clientX, y: event.clientY };
     host.classList.add('chart-panning');
-    host.setPointerCapture?.(event.pointerId);
   };
 
   const pointerMove = event => {
+    if (pointers.has(event.pointerId)) pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pointers.size >= 2) {
+      const context = getContext();
+      if (!context?.enabled || !pinch) return;
+      event.preventDefault();
+      const current = twoPointerGeometry();
+      if (!current || pinch.distance <= 0 || current.distance <= 0) return;
+      const midpoint = svgClientPoint(current.midpoint.x, current.midpoint.y, context);
+      const dx = current.midpoint.x - pinch.midpoint.x;
+      const dy = current.midpoint.y - pinch.midpoint.y;
+      const rect = context.svg.getBoundingClientRect();
+      const xSpan = pinch.domains.x[1] - pinch.domains.x[0];
+      const ySpan = pinch.domains.y[1] - pinch.domains.y[0];
+      const factor = pinch.distance / current.distance;
+      const zoomedX = zoomDomain(pinch.domains.x, context.x.invert(midpoint.x), factor, context.bounds.x);
+      const zoomedY = zoomDomain(pinch.domains.y, context.y.invert(midpoint.y), factor, context.bounds.y);
+      onChange({
+        x: panDomain(zoomedX, -dx / rect.width * xSpan, context.bounds.x),
+        y: panDomain(zoomedY, dy / rect.height * ySpan, context.bounds.y),
+      });
+      return;
+    }
     if (!dragging || !last) return;
     const context = getContext();
     if (!context?.enabled) return;
+    event.preventDefault();
     const dx = event.clientX - last.x;
     const dy = event.clientY - last.y;
     last = { x: event.clientX, y: event.clientY };
@@ -41,10 +76,24 @@ export function createZoomInteraction(host, getContext, onChange, onReset) {
   };
 
   const pointerUp = event => {
+    pointers.delete(event.pointerId);
+    try { host.releasePointerCapture?.(event.pointerId); } catch {}
+    if (pointers.size >= 2) {
+      const context = getContext();
+      pinch = context?.enabled ? pinchState(context) : null;
+      return;
+    }
+    if (pointers.size === 1) {
+      const point = [...pointers.values()][0];
+      dragging = true;
+      last = { ...point };
+      pinch = null;
+      return;
+    }
     dragging = false;
     last = null;
+    pinch = null;
     host.classList.remove('chart-panning');
-    host.releasePointerCapture?.(event.pointerId);
   };
 
   const doubleClick = event => {
@@ -78,12 +127,39 @@ export function createZoomInteraction(host, getContext, onChange, onReset) {
       ? context
       : null;
   }
+
+  function pinchState(context) {
+    const geometry = twoPointerGeometry();
+    if (!geometry) return null;
+    return {
+      distance: geometry.distance,
+      midpoint: geometry.midpoint,
+      domains: { x: [...context.domains.x], y: [...context.domains.y] },
+    };
+  }
+
+  function twoPointerGeometry() {
+    const points = [...pointers.values()];
+    if (points.length < 2) return null;
+    const a = points[0];
+    const b = points[1];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    return {
+      distance: Math.hypot(dx, dy),
+      midpoint: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
+    };
+  }
 }
 
 function svgPoint(event, context) {
+  return svgClientPoint(event.clientX, event.clientY, context);
+}
+
+function svgClientPoint(clientX, clientY, context) {
   const rect = context.svg.getBoundingClientRect();
   return {
-    x: (event.clientX - rect.left) / rect.width * context.layout.width,
-    y: (event.clientY - rect.top) / rect.height * context.layout.height,
+    x: (clientX - rect.left) / rect.width * context.layout.width,
+    y: (clientY - rect.top) / rect.height * context.layout.height,
   };
 }

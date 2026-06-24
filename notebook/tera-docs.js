@@ -509,6 +509,15 @@ function chartExample(name) {
   if (name === 'ecdf') {
     return 'data = DataFrame(score=[2, 3, 3, 4, 4, 5, 6, 8])\nchart.ecdf(data, x="score", title="ECDF")';
   }
+  if (name === 'bubble') {
+    return 'data = DataFrame(cpc=[0.4, 0.8, 1.2, 1.6], roas=[4.8, 3.5, 2.6, 1.9], spend=[1200, 3000, 5200, 7800], channel=["A", "B", "C", "D"])\nchart.bubble(data, x="cpc", y="roas", size="spend", color="channel", title="Spend vs ROAS")';
+  }
+  if (name === 'funnel') {
+    return 'data = DataFrame(step=["Impressions", "Clicks", "Leads", "Sales"], value=[120000, 8200, 940, 180])\nchart.funnel(data, step="step", value="value", title="Acquisition funnel")';
+  }
+  if (name === 'waterfall') {
+    return 'data = DataFrame(step=["Base", "Search", "Social", "Email", "Returns"], value=[50000, 18000, 12000, 7000, -4000])\nchart.waterfall(data, step="step", value="value", title="Revenue contribution")';
+  }
   return `data = DataFrame(x=[1, 2, 3], y=[1, 4, 9])\nchart.${name}(data)`;
 }
 

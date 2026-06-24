@@ -3,7 +3,7 @@ export const MAX_POINTS = 10000;
 export const CHART_TYPES = new Set([
   'line', 'bar', 'scatter', 'histogram', 'area',
   'box', 'violin', 'density', 'correlation', 'hexbin',
-  'heatmap', 'regression', 'ecdf',
+  'heatmap', 'regression', 'ecdf', 'bubble', 'funnel', 'waterfall',
 ]);
 
 export function isChartSpec(value) {
@@ -32,7 +32,7 @@ export function createSpec(type, series, options = {}) {
 
 function normalizeOptions(options) {
   const width = finitePositive(options.width, null);
-  const height = finitePositive(options.height, 360);
+  const height = finitePositive(options.height, null);
   return {
     title: textOrNull(options.title),
     xLabel: textOrNull(options.x_label ?? options.xLabel),
@@ -47,6 +47,7 @@ function normalizeOptions(options) {
 
 function payloadPointCount(payload) {
   if (Array.isArray(payload)) return payload.length;
+  if (Array.isArray(payload?.steps)) return payload.steps.length;
   if (Array.isArray(payload?.cells)) return payload.cells.length;
   if (Array.isArray(payload?.bins)) return payload.bins.length;
   return 0;

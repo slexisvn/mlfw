@@ -32,6 +32,10 @@ const SEED = [
 
 const listEl = document.getElementById('cells');
 const kernelStatus = document.getElementById('kernel-status');
+const docsPanel = document.getElementById('docs-panel');
+const docsToggle = document.getElementById('docs-toggle');
+const docsClose = document.getElementById('docs-close');
+const docsBackdrop = document.getElementById('docs-backdrop');
 
 let runtime;
 let execCount = 0;
@@ -48,6 +52,29 @@ function makeRuntime() {
 function setKernel(text, busy) {
   kernelStatus.textContent = 'kernel: ' + text;
   kernelStatus.classList.toggle('busy', !!busy);
+}
+
+function setDocsOpen(open) {
+  const mobile = window.matchMedia('(max-width: 980px)').matches;
+  if (mobile) {
+    document.body.classList.toggle('docs-open', open);
+    if (docsBackdrop) docsBackdrop.hidden = !open;
+  } else {
+    document.body.classList.toggle('docs-closed', !open);
+    document.body.classList.remove('docs-open');
+    if (docsBackdrop) docsBackdrop.hidden = true;
+  }
+  docsToggle?.setAttribute('aria-expanded', isDocsVisible() ? 'true' : 'false');
+  if (open) setTimeout(() => document.getElementById('docs-search')?.focus(), 80);
+}
+
+function toggleDocs() {
+  setDocsOpen(!isDocsVisible());
+}
+
+function isDocsVisible() {
+  const mobile = window.matchMedia('(max-width: 980px)').matches;
+  return mobile ? document.body.classList.contains('docs-open') : !document.body.classList.contains('docs-closed');
 }
 
 const uploadedFiles = new Map();
@@ -70,7 +97,7 @@ function loadCommandFor(name) {
   const v = csvVarName(name);
   if (ext === 'csv' || ext === 'tsv') return `${v} = load_csv("${name}")`;
   if (ext === 'json') return `${v} = load_json("${name}")`;
-  if (ext === 'ckpt' || ext === 'safetensors') return `load(model, "${name}")`;
+  if (ext === 'ckpt' || ext === 'safetensors') return `load_model(model, "${name}")`;
   return `${v} = read_text("${name}")`;
 }
 
@@ -754,6 +781,20 @@ function initTheme() {
 themeBtn.addEventListener('click', () => {
   const current = document.documentElement.getAttribute('data-theme');
   applyTheme(current === 'dark' ? 'light' : 'dark');
+});
+
+docsToggle?.addEventListener('click', toggleDocs);
+docsClose?.addEventListener('click', () => setDocsOpen(false));
+docsBackdrop?.addEventListener('click', () => setDocsOpen(false));
+window.addEventListener('resize', () => {
+  if (!window.matchMedia('(max-width: 980px)').matches) {
+    document.body.classList.remove('docs-open');
+    if (docsBackdrop) docsBackdrop.hidden = true;
+  }
+  docsToggle?.setAttribute('aria-expanded', isDocsVisible() ? 'true' : 'false');
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && document.body.classList.contains('docs-open')) setDocsOpen(false);
 });
 
 const ac = { el: null, items: [], index: 0, cell: null, start: 0, end: 0 };

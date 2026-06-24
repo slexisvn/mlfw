@@ -1,5 +1,5 @@
 import { adaptHistogram, adaptSeries } from './adapters.js';
-import { adaptCorrelation, adaptDensity, adaptDistribution, adaptEcdf, adaptHeatmap, adaptHexbin, adaptRegression, prepareSeriesMode } from './advanced_adapters.js';
+import { adaptBubble, adaptCorrelation, adaptDensity, adaptDistribution, adaptEcdf, adaptFunnel, adaptHeatmap, adaptHexbin, adaptRegression, adaptWaterfall, prepareSeriesMode } from './advanced_adapters.js';
 import { createPayloadSpec, createSpec } from './spec.js';
 
 export function createChartApi() {
@@ -17,6 +17,9 @@ export function createChartApi() {
     heatmap: (...args) => createHeatmap(args),
     regression: (...args) => createRegression(args),
     ecdf: (...args) => createEcdf(args),
+    bubble: (...args) => createBubble(args),
+    funnel: (...args) => createFunnel(args),
+    waterfall: (...args) => createWaterfall(args),
   });
 }
 
@@ -62,6 +65,21 @@ async function createRegression(args) {
 async function createEcdf(args) {
   const { data, options } = splitArgs(args);
   return createSpec('ecdf', await adaptEcdf(data, options), { ...options, y_label: options.y_label ?? options.yLabel ?? 'Cumulative probability' });
+}
+
+async function createBubble(args) {
+  const { data, options } = splitArgs(args);
+  return createSpec('bubble', await adaptBubble(data, options), options);
+}
+
+async function createFunnel(args) {
+  const { data, options } = splitArgs(args);
+  return createPayloadSpec('funnel', 'funnel', await adaptFunnel(data, options), options);
+}
+
+async function createWaterfall(args) {
+  const { data, options } = splitArgs(args);
+  return createPayloadSpec('waterfall', 'waterfall', await adaptWaterfall(data, options), options);
 }
 
 async function createHistogram(args) {

@@ -51,6 +51,18 @@ export const CHART_METHOD_DOCS = new Map([
     'chart.ecdf(data, x?, color?, title?, zoom=true)',
     'Draw an empirical cumulative distribution function for comparing numeric distributions without binning.'
   )],
+  ['bubble', doc(
+    'chart.bubble(data, x?, y?, size?, color?, title?, zoom=true)',
+    'Plot X/Y observations with marker area scaled by a third numeric variable. Useful for spend, revenue, or segment size.'
+  )],
+  ['funnel', doc(
+    'chart.funnel(data, step?, value?, title?)',
+    'Show a conversion funnel across ordered stages, including overall and step-to-step retention.'
+  )],
+  ['waterfall', doc(
+    'chart.waterfall(data, step?, value?, title?)',
+    'Show how positive and negative contributions accumulate from a starting point to a final total.'
+  )],
 ]);
 
 export function chartMethodOwner(pre, span) {

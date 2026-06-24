@@ -64,6 +64,72 @@ export async function adaptRegression(data, config) {
   return { series: [points, line], count: series.points.length, missing: series.missing, fit };
 }
 
+export async function adaptBubble(data, config) {
+  if (isDataFrame(data)) {
+    const x = requiredColumn(config.x, 'x');
+    const y = requiredColumn(config.y, 'y');
+    const size = requiredColumn(config.size ?? config.value, 'size');
+    const columns = unique([x, y, size, config.color].filter(value => value != null));
+    const count = Number(await data.count());
+    ensureLimit(count);
+    const rows = await data.select(...columns).collect();
+    const groups = new Map();
+    let missing = 0;
+    for (const row of rows) {
+      const groupName = config.color == null ? size : String(row[config.color] ?? 'NULL');
+      if (!groups.has(groupName)) groups.set(groupName, { name: groupName, points: [] });
+      if (validNumber(row[x]) && validNumber(row[y]) && validNumber(row[size])) {
+        groups.get(groupName).points.push({ x: row[x], y: row[y], size: Math.abs(row[size]), value: row[size] });
+      } else {
+        missing++;
+      }
+    }
+    return [...groups.values()].map(group => ({ ...group, missing }));
+  }
+  const rows = isTensor(data) ? data.toArray() : data;
+  if (!Array.isArray(rows) || !Array.isArray(rows[0])) throw new Error('chart.bubble array data must be 2D');
+  ensureLimit(rows.length);
+  const xi = Number(config.x ?? 0);
+  const yi = Number(config.y ?? 1);
+  const si = Number(config.size ?? config.value ?? 2);
+  const points = [];
+  let missing = 0;
+  for (const row of rows) {
+    if (validNumber(row[xi]) && validNumber(row[yi]) && validNumber(row[si])) {
+      points.push({ x: row[xi], y: row[yi], size: Math.abs(row[si]), value: row[si] });
+    } else {
+      missing++;
+    }
+  }
+  return [{ name: 'bubble', points, missing }];
+}
+
+export async function adaptFunnel(data, config) {
+  const steps = await orderedSteps(data, config.step ?? config.x, config.value ?? config.y, 'chart.funnel');
+  const first = steps[0]?.value || 0;
+  return {
+    steps: steps.map((step, index) => ({
+      ...step,
+      index,
+      rate: first === 0 ? 0 : step.value / first,
+      previousRate: index === 0 || steps[index - 1].value === 0 ? null : step.value / steps[index - 1].value,
+    })),
+  };
+}
+
+export async function adaptWaterfall(data, config) {
+  const rows = await orderedSteps(data, config.step ?? config.x, config.value ?? config.y, 'chart.waterfall');
+  let total = 0;
+  return {
+    steps: rows.map((row, index) => {
+      const start = total;
+      total += row.value;
+      return { ...row, index, start, end: total };
+    }),
+    total,
+  };
+}
+
 export async function adaptHeatmap(data, config) {
   if (isDataFrame(data)) {
     const x = requiredColumn(config.x, 'x');
@@ -179,6 +245,29 @@ async function xyPoints(data, x, y) {
   }
   ensureLimit(rows.length);
   return { points, missing };
+}
+
+async function orderedSteps(data, stepColumn, valueColumn, label) {
+  if (isDataFrame(data)) {
+    const step = requiredColumn(stepColumn, 'step');
+    const value = requiredColumn(valueColumn, 'value');
+    const count = Number(await data.count());
+    ensureLimit(count);
+    const rows = await data.select(step, value).collect();
+    const result = [];
+    for (const row of rows) {
+      if (validNumber(row[value])) result.push({ name: String(row[step]), value: row[value] });
+    }
+    return result;
+  }
+  const rows = isTensor(data) ? data.toArray() : data;
+  if (!Array.isArray(rows) || !Array.isArray(rows[0])) throw new Error(`${label} array data must be 2D`);
+  ensureLimit(rows.length);
+  const si = Number(stepColumn ?? 0);
+  const vi = Number(valueColumn ?? 1);
+  return rows
+    .filter(row => validNumber(row[vi]))
+    .map(row => ({ name: String(row[si]), value: row[vi] }));
 }
 
 function requiredColumn(value, label) {

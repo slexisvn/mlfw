@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createChartApi } from '../../notebook/chart/api.js';
 import { adaptHistogram, adaptSeries } from '../../notebook/chart/adapters.js';
-import { adaptCorrelation, adaptDistribution, adaptEcdf, adaptHeatmap, adaptHexbin, adaptRegression, prepareSeriesMode } from '../../notebook/chart/advanced_adapters.js';
+import { adaptBubble, adaptCorrelation, adaptDistribution, adaptEcdf, adaptFunnel, adaptHeatmap, adaptHexbin, adaptRegression, adaptWaterfall, prepareSeriesMode } from '../../notebook/chart/advanced_adapters.js';
 import { rendererTypes } from '../../notebook/chart/registry.js';
 import '../../notebook/chart/render.js';
 import { layoutSeries } from '../../notebook/chart/render.js';
@@ -69,7 +69,7 @@ describe('notebook chart API', () => {
   });
 
   it('registers all v1 renderers and creates numeric and categorical scales', () => {
-    expect(rendererTypes().sort()).toEqual(['area', 'bar', 'density', 'ecdf', 'hexbin', 'histogram', 'line', 'regression', 'scatter']);
+    expect(rendererTypes().sort()).toEqual(['area', 'bar', 'bubble', 'density', 'ecdf', 'hexbin', 'histogram', 'line', 'regression', 'scatter']);
     expect(createScale([0, 10], 0, 100).scale(5)).toBe(50);
     expect(createScale(['a', 'b'], 0, 100).scale('a')).toBe(25);
   });
@@ -193,6 +193,15 @@ describe('notebook chart API', () => {
 
     const ecdf = await adaptEcdf([3, 1, 2], {});
     expect(ecdf[0].points).toEqual([{ x: 1, y: 1 / 3 }, { x: 2, y: 2 / 3 }, { x: 3, y: 1 }]);
+
+    const bubble = await adaptBubble([[1, 2, 10], [2, 4, 30]], { x: 0, y: 1, size: 2 });
+    expect(bubble[0].points[1]).toEqual({ x: 2, y: 4, size: 30, value: 30 });
+
+    const funnel = await adaptFunnel([['View', 100], ['Click', 25]], {});
+    expect(funnel.steps[1].rate).toBe(0.25);
+
+    const waterfall = await adaptWaterfall([['Base', 100], ['Cost', -30], ['Upsell', 15]], {});
+    expect(waterfall.steps.at(-1).end).toBe(85);
   });
 
   it('creates every advanced chart through the public API', async () => {
@@ -205,6 +214,9 @@ describe('notebook chart API', () => {
     expect((await chart.heatmap([[1, 2], [3, 4]])).type).toBe('heatmap');
     expect((await chart.regression([[1, 2], [2, 4]], { __named: true, x: 0, y: 1 })).type).toBe('regression');
     expect((await chart.ecdf([3, 1, 2])).type).toBe('ecdf');
+    expect((await chart.bubble([[1, 2, 10]], { __named: true, x: 0, y: 1, size: 2 })).type).toBe('bubble');
+    expect((await chart.funnel([['View', 100], ['Click', 20]])).type).toBe('funnel');
+    expect((await chart.waterfall([['Start', 10], ['Lift', 4]])).type).toBe('waterfall');
   });
 
   it('stacks positive and negative series independently', () => {
@@ -228,7 +240,7 @@ describe('notebook syntax highlight', () => {
   });
 
   it('provides hover descriptions for every chart method', () => {
-    const methods = ['line', 'bar', 'scatter', 'histogram', 'area', 'box', 'violin', 'density', 'correlation', 'hexbin', 'heatmap', 'regression', 'ecdf'];
+    const methods = ['line', 'bar', 'scatter', 'histogram', 'area', 'box', 'violin', 'density', 'correlation', 'hexbin', 'heatmap', 'regression', 'ecdf', 'bubble', 'funnel', 'waterfall'];
     expect([...CHART_METHOD_DOCS.keys()]).toEqual(methods);
     for (const method of methods) {
       const info = CHART_METHOD_DOCS.get(method);

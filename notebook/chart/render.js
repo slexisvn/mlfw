@@ -13,6 +13,7 @@ import { renderScatter } from './renderers/scatter.js';
 import { renderArea } from './renderers/area.js';
 import { renderHexbin } from './renderers/hexbin.js';
 import { renderRegression } from './renderers/regression.js';
+import { renderBubble } from './renderers/bubble.js';
 import { renderPayloadChart } from './payload_renderers.js';
 import { domainsEqual } from './zoom.js';
 
@@ -25,6 +26,7 @@ registerRenderer('density', renderLine);
 registerRenderer('ecdf', renderLine);
 registerRenderer('hexbin', renderHexbin);
 registerRenderer('regression', renderRegression);
+registerRenderer('bubble', renderBubble);
 
 export function renderChart(host, spec) {
   if (!isChartSpec(spec)) throw new Error('renderChart expects a ChartSpec');
@@ -36,7 +38,7 @@ export function renderChart(host, spec) {
   const yValues = allSpecPoints.flatMap(point => [point.y, point.y0, point.y1].filter(value => value != null));
   const baseX = createScale(xValues, 0, 1, { padding: spec.type === 'bar' ? 0 : 0.03 });
   const baseY = createScale(yValues, 1, 0, { zero: ['bar', 'histogram', 'area', 'density'].includes(spec.type), padding: 0.08 });
-  const zoomEnabled = spec.options.zoom && ['line', 'scatter', 'histogram', 'area', 'density', 'hexbin', 'regression', 'ecdf'].includes(spec.type) && baseX.type === 'linear' && baseY.type === 'linear';
+  const zoomEnabled = spec.options.zoom && ['line', 'scatter', 'histogram', 'area', 'density', 'hexbin', 'regression', 'ecdf', 'bubble'].includes(spec.type) && baseX.type === 'linear' && baseY.type === 'linear';
   const bounds = zoomEnabled ? { x: baseX.domain, y: baseY.domain } : null;
   let domains = zoomEnabled ? { x: [...bounds.x], y: [...bounds.y] } : null;
   let interactionContext = null;
@@ -55,8 +57,9 @@ export function renderChart(host, spec) {
     host.className = 'chart-view';
     host.classList.toggle('chart-zoom-enabled', zoomEnabled);
     const width = spec.options.width ?? Math.max(320, host.clientWidth || 720);
-    const height = spec.options.height;
-    const layout = { width, height, left: 58, right: width - 20, top: spec.options.title ? 42 : 20, bottom: height - 48 };
+    const height = chartHeight(width, spec.options.height);
+    const compact = width < 520;
+    const layout = { width, height, left: compact ? 44 : 58, right: width - 16, top: spec.options.title ? 42 : 20, bottom: height - (compact ? 42 : 48) };
     const selected = spec.series.map((series, index) => ({ ...series, index, color: colorAt(index) })).filter(series => !hidden.has(series.index));
     const visible = layoutSeries(selected, spec);
     const svg = svgElement('svg', { class: 'chart-svg', viewBox: `0 0 ${width} ${height}`, role: 'img' });
@@ -81,7 +84,7 @@ export function renderChart(host, spec) {
       const groupWidth = x.type === 'category' ? x.step * 0.78 : Math.max(4, (layout.right - layout.left) / maxSeriesPoints) * 0.78;
       const stacked = spec.options.mode === 'stacked';
       const seriesOffset = visibleSeriesCount === 1 || stacked ? 0 : (visibleIndex - (visibleSeriesCount - 1) / 2) * (groupWidth / visibleSeriesCount);
-      renderer(group, series, { x, y, layout, tooltip, visibleSeriesCount, maxSeriesPoints, seriesOffset, stacked });
+      renderer(group, series, { x, y, layout, tooltip, visibleSeriesCount, maxSeriesPoints, seriesOffset, stacked, allPoints: visible.flatMap(item => item.points) });
       marks.append(group);
     });
     svg.append(marks);
@@ -125,6 +128,13 @@ export function renderChart(host, spec) {
   function isZoomed() {
     return zoomEnabled && (!domainsEqual(domains.x, bounds.x) || !domainsEqual(domains.y, bounds.y));
   }
+}
+
+function chartHeight(width, explicit) {
+  if (explicit != null) return explicit;
+  if (width < 420) return 260;
+  if (width < 720) return 310;
+  return 360;
 }
 
 export function layoutSeries(series, spec) {
