@@ -61,6 +61,12 @@ jobs:
             cp dist/query-engine.browser.js query-engine.browser.js
           fi
 
+          if [ -f dist/bundle/node/query-engine.node.js ]; then
+            cp dist/bundle/node/query-engine.node.js query-engine.node.js
+          elif [ -f dist/query-engine.node.js ]; then
+            cp dist/query-engine.node.js query-engine.node.js
+          fi
+
           test -f query-engine.browser.js
 
       - name: Build mlfw browser bundles

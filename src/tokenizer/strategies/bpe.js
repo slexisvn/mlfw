@@ -10,6 +10,7 @@ export class BpeStrategy {
     this._lowercase = lowercase;
     this._eow = endOfWord;
     this._ranks = new Map();
+    this._encodeCache = new Map();
   }
 
   _pretokenize(text) {
@@ -24,6 +25,8 @@ export class BpeStrategy {
   }
 
   fit(texts) {
+    this._encodeCache = new Map();
+
     const wordFreq = new Map();
     for (const text of texts) {
       for (const word of this._pretokenize(text)) {
@@ -37,12 +40,44 @@ export class BpeStrategy {
     const pairCounts = new Map();
     const pairWords = new Map();
 
+    const heap = [];
+    const higher = (a, b) => a[0] > b[0] || (a[0] === b[0] && a[1] < b[1]);
+    const pushHeap = (count, key) => {
+      heap.push([count, key]);
+      let i = heap.length - 1;
+      while (i > 0) {
+        const p = (i - 1) >> 1;
+        if (higher(heap[i], heap[p])) { const t = heap[p]; heap[p] = heap[i]; heap[i] = t; i = p; }
+        else break;
+      }
+    };
+    const popHeap = () => {
+      const top = heap[0];
+      const last = heap.pop();
+      if (heap.length > 0) {
+        heap[0] = last;
+        let i = 0;
+        const n = heap.length;
+        while (true) {
+          let pick = i;
+          const l = 2 * i + 1, r = 2 * i + 2;
+          if (l < n && higher(heap[l], heap[pick])) pick = l;
+          if (r < n && higher(heap[r], heap[pick])) pick = r;
+          if (pick === i) break;
+          const t = heap[pick]; heap[pick] = heap[i]; heap[i] = t; i = pick;
+        }
+      }
+      return top;
+    };
+
     const addWordPairs = (word) => {
       const seq = symbols.get(word);
       const freq = wordFreq.get(word);
       for (let i = 0; i + 1 < seq.length; i++) {
         const key = pairKey(seq[i], seq[i + 1]);
-        pairCounts.set(key, (pairCounts.get(key) || 0) + freq);
+        const count = (pairCounts.get(key) || 0) + freq;
+        pairCounts.set(key, count);
+        pushHeap(count, key);
         let words = pairWords.get(key);
         if (!words) { words = new Set(); pairWords.set(key, words); }
         words.add(word);
@@ -55,8 +90,12 @@ export class BpeStrategy {
       for (let i = 0; i + 1 < seq.length; i++) {
         const key = pairKey(seq[i], seq[i + 1]);
         const remaining = (pairCounts.get(key) || 0) - freq;
-        if (remaining <= 0) pairCounts.delete(key);
-        else pairCounts.set(key, remaining);
+        if (remaining <= 0) {
+          pairCounts.delete(key);
+        } else {
+          pairCounts.set(key, remaining);
+          pushHeap(remaining, key);
+        }
         const words = pairWords.get(key);
         if (words) words.delete(word);
       }
@@ -68,8 +107,10 @@ export class BpeStrategy {
     for (let merge = 0; merge < this._numMerges; merge++) {
       let best = null;
       let bestCount = 0;
-      for (const [key, count] of pairCounts) {
-        if (count > bestCount) { bestCount = count; best = key; }
+      while (heap.length > 0) {
+        const [count, key] = popHeap();
+        const current = pairCounts.get(key);
+        if (current === count && current > 0) { best = key; bestCount = current; break; }
       }
       if (best === null || bestCount <= 0) break;
 
@@ -101,6 +142,9 @@ export class BpeStrategy {
   }
 
   _encodeWord(word) {
+    const cached = this._encodeCache.get(word);
+    if (cached !== undefined) return cached;
+
     let seq = this._baseSymbols(word);
     while (seq.length > 1) {
       let bestRank = Infinity;
@@ -112,6 +156,7 @@ export class BpeStrategy {
       if (bestIdx < 0) break;
       seq = seq.slice(0, bestIdx).concat(seq[bestIdx] + seq[bestIdx + 1], seq.slice(bestIdx + 2));
     }
+    this._encodeCache.set(word, seq);
     return seq;
   }
 
