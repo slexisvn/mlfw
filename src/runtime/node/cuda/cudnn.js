@@ -1,10 +1,9 @@
 import koffi from 'koffi';
-import { readdirSync, existsSync } from 'fs';
-import { join } from 'path';
 import { cu } from './ffi.js';
 import { getDevice } from './device.js';
 import { setDevice } from './runtime_api.js';
 import { acquire, release } from './memory.js';
+import { loadCudaLib, CUDNN_SPEC } from './lib_resolver.js';
 import { isEagerCapturing } from '../../../dispatcher/eager_mode.js';
 
 function d2d(dst, src, bytes) {
@@ -16,29 +15,11 @@ function memZero(dst, bytes) {
   else cu.memsetD8(dst, 0, bytes);
 }
 
-function resolveCudnn() {
-  const root = 'C:/Program Files/NVIDIA/CUDNN';
-  if (existsSync(root)) {
-    for (const ver of readdirSync(root).sort().reverse()) {
-      const binBase = join(root, ver, 'bin');
-      if (!existsSync(binBase)) continue;
-      for (const cd of readdirSync(binBase).filter(d => d.startsWith('12.')).sort().reverse()) {
-        const dir = join(binBase, cd, 'x64');
-        if (existsSync(join(dir, 'cudnn64_9.dll'))) {
-          if (!process.env.PATH.includes(dir)) process.env.PATH = dir + ';' + process.env.PATH;
-          return join(dir, 'cudnn64_9.dll');
-        }
-      }
-    }
-  }
-  return 'cudnn64_9.dll';
-}
-
 let c, _inited = null;
 function ensure() {
   if (_inited !== null) return _inited;
   try {
-    const dnn = koffi.load(resolveCudnn());
+    const dnn = koffi.load(loadCudaLib(CUDNN_SPEC));
     c = {
       create: dnn.func('int cudnnCreate(_Out_ void **h)'),
       setStream: dnn.func('int cudnnSetStream(void *h, void *stream)'),

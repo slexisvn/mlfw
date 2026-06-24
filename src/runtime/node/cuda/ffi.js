@@ -1,35 +1,10 @@
 import koffi from 'koffi';
-import { readdirSync, existsSync } from 'fs';
-import { join } from 'path';
+import { loadCudaLib, cudaIncludeDir, DRIVER_SPEC, NVRTC_SPEC } from './lib_resolver.js';
 
-const NVRTC_PATTERN = /^nvrtc64_\d+_\d+\.dll$/;
+export { cudaIncludeDir };
 
-let _cudaRoot = null;
-
-function resolveNvrtcName() {
-  const roots = [];
-  if (process.env.CUDA_PATH) roots.push(process.env.CUDA_PATH);
-  const toolkit = 'C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA';
-  if (existsSync(toolkit)) {
-    for (const v of readdirSync(toolkit)) roots.push(join(toolkit, v));
-  }
-  for (const root of roots) {
-    const bin = join(root, 'bin');
-    if (!existsSync(bin)) continue;
-    const matches = readdirSync(bin).filter(f => NVRTC_PATTERN.test(f) && !f.includes('.alt'));
-    if (matches.length > 0) {
-      process.env.PATH = bin + ';' + process.env.PATH;
-      _cudaRoot = root;
-      return matches.sort().pop();
-    }
-  }
-  return 'nvrtc64_120_0.dll';
-}
-
-const drv = koffi.load('nvcuda.dll');
-const nvrtc = koffi.load(resolveNvrtcName());
-
-export const cudaIncludeDir = _cudaRoot ? join(_cudaRoot, 'include') : null;
+const drv = koffi.load(loadCudaLib(DRIVER_SPEC));
+const nvrtc = koffi.load(loadCudaLib(NVRTC_SPEC));
 
 export const cu = {
   init: drv.func('int cuInit(uint)'),

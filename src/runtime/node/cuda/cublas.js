@@ -1,27 +1,9 @@
 import koffi from 'koffi';
-import { readdirSync, existsSync } from 'fs';
-import { join } from 'path';
 import { getDevice } from './device.js';
+import { loadCudaLib, CUDART_SPEC, CUBLAS_SPEC } from './lib_resolver.js';
 
-function resolveLib(pattern, fallback) {
-  const roots = [];
-  if (process.env.CUDA_PATH) roots.push(process.env.CUDA_PATH);
-  const toolkit = 'C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA';
-  if (existsSync(toolkit)) for (const v of readdirSync(toolkit)) roots.push(join(toolkit, v));
-  for (const root of roots) {
-    const bin = join(root, 'bin');
-    if (!existsSync(bin)) continue;
-    const matches = readdirSync(bin).filter(f => pattern.test(f));
-    if (matches.length > 0) {
-      if (!process.env.PATH.includes(bin)) process.env.PATH = bin + ';' + process.env.PATH;
-      return matches.sort().pop();
-    }
-  }
-  return fallback;
-}
-
-const rt = koffi.load(resolveLib(/^cudart64_\d+\.dll$/, 'cudart64_12.dll'));
-const blas = koffi.load(resolveLib(/^cublas64_\d+\.dll$/, 'cublas64_12.dll'));
+const rt = koffi.load(loadCudaLib(CUDART_SPEC));
+const blas = koffi.load(loadCudaLib(CUBLAS_SPEC));
 
 const cudaSetDevice = rt.func('int cudaSetDevice(int d)');
 const cudaMalloc = rt.func('int cudaMalloc(_Out_ void **p, size_t s)');
