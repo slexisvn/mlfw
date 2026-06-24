@@ -1,12 +1,17 @@
 import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { copyFileSync } from 'node:fs';
+import { copyFileSync, readFileSync, rmSync } from 'node:fs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..');
 const entry = resolve(root, 'src/index.js');
 const outdir = resolve(root, 'dist');
+
+const pkg = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
+const external = Object.keys(pkg.dependencies ?? {});
+
+rmSync(outdir, { recursive: true, force: true });
 
 const NODE_STUBS = {
   'webgpu': `
@@ -42,7 +47,7 @@ const distributedStubPlugin = {
   },
 };
 
-const shared = {
+const sharedBrowser = {
   bundle: true,
   platform: 'browser',
   target: ['es2022'],
@@ -50,48 +55,40 @@ const shared = {
   define: { 'process.env.NODE_ENV': '"production"' },
   keepNames: true,
   logLevel: 'info',
+  format: 'esm',
+  minify: true,
 };
+
+const sharedNode = {
+  bundle: true,
+  platform: 'node',
+  minify: true,
+  keepNames: true,
+  format: 'esm',
+  external,
+}
 
 await Promise.all([
   build({
-    ...shared,
+    ...sharedNode,
     entryPoints: [entry],
-    format: 'esm',
-    outfile: resolve(outdir, 'mlfw.esm.js'),
-    sourcemap: true,
+    outfile: resolve(outdir, 'index.js'),
   }),
   build({
-    ...shared,
-    entryPoints: [entry],
-    format: 'esm',
-    outfile: resolve(outdir, 'mlfw.esm.min.js'),
-    minify: true,
-    sourcemap: true,
+    ...sharedNode,
+    entryPoints: [resolve(root, 'src/cli/index.js')],
+    outfile: resolve(outdir, 'cli.js'),
   }),
   build({
-    ...shared,
-    entryPoints: [entry],
-    format: 'iife',
-    globalName: 'mlfw',
-    outfile: resolve(outdir, 'mlfw.global.js'),
-    sourcemap: true,
-  }),
-  build({
-    ...shared,
+    ...sharedBrowser,
     entryPoints: [resolve(root, 'src/notebook/browser.js')],
-    format: 'esm',
-    outfile: resolve(root, 'notebook/dist/mlfw-lang.esm.js'),
-    sourcemap: true,
+    outfile: resolve(root, 'notebook/dist/mlfw.esm.js'),
   }),
   build({
-    ...shared,
+    ...sharedBrowser,
     entryPoints: [resolve(root, 'src/cli/csv.js')],
-    format: 'esm',
     outfile: resolve(root, 'notebook/dist/csv.esm.js'),
-    sourcemap: true,
   }),
 ]);
 
 copyFileSync(resolve(root, 'vscode-ext/language-data.json'), resolve(root, 'notebook/dist/language-data.json'));
-
-console.log('Browser bundles written to dist/ and notebook/dist/');

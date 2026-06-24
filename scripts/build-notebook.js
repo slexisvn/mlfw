@@ -7,7 +7,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..');
 
 const required = [
-  resolve(root, 'notebook/dist/mlfw-lang.esm.js'),
+  resolve(root, 'notebook/dist/mlfw.esm.js'),
   resolve(root, 'notebook/dist/csv.esm.js'),
   resolve(root, 'notebook/dist/language-data.json'),
 ];

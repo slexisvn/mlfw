@@ -3,14 +3,14 @@ export const BANNER = `Tera — Tensor Algebra
 Try:
   x = tensor([[1, 2], [3, 4]])
   w = randn([2, 3])
-  y = relu(x @ w)
+  y = (x @ w).relu()
 
 Type help for examples. Type exit to quit.`;
 
 const HELP = {
   main: `Getting started:
   x = tensor([[1, 2], [3, 4]])
-  shape(x)
+  x.shape
   y = x * 2 + 1
   x[:, 0]
 
@@ -40,22 +40,22 @@ More:
   z = zeros([2, 3])
   r = randn([4, 8])
 
-  shape(x)
+  x.shape
   x + 1
   x * 2
   x @ randn([2, 3])
-  mean(x, axis=0)
-  relu(x)
+  x.mean(axis=0)
+  x.relu()
   x[:, 1]
   x[0:2]
-  reshape(x, [4])
-  transpose(x, 0, 1)
+  x.reshape([4])
+  x.transpose(0, 1)
 
 Autograd:
   x = tensor([2], grad=true)
-  y = sum(x * x)
-  backward(y)
-  grad(x)`,
+  y = (x * x).sum()
+  y.backward()
+  x.grad`,
 
   model: `Neural network examples:
   model = Sequential(
@@ -68,12 +68,12 @@ Autograd:
   output = model(x)
 
 Custom model:
-  model MLP(input, hidden, output):
+  model MLP(input: int, hidden: int, output: int):
     fc1 = Linear(input, hidden)
     fc2 = Linear(hidden, output)
 
-    forward x:
-      x = relu(fc1(x))
+    forward (x: Tensor) -> Tensor:
+      x = fc1(x).relu()
       return fc2(x)
 
 
@@ -82,24 +82,24 @@ Custom model:
   output = net(x)`,
 
   fn: `Function examples:
-  fn double(x):
+  fn double(x: int) -> int:
     return x * 2
   double(5)
 
-  fn normalize(x):
-    return x / sum(x)
-  normalize(tensor([3, 1, 2]))
+  fn to_prob(x: Tensor) -> Tensor:
+    return x / x.sum()
+  to_prob(tensor([3, 1, 2]))
 
 Closure (captures outer variables):
   scale = 10
-  fn scaled_add(a, b):
+  fn scaled_add(a: int, b: int) -> int:
     return (a + b) * scale
 
 Multi-statement:
-  fn describe(x):
-    print(shape(x))
-    print(dtype(x))
-    return mean(x)`,
+  fn describe(x: Tensor) -> Tensor:
+    print(x.shape)
+    print(x.dtype)
+    return x.mean()`,
 
   control: `Conditionals:
   if x > 0:
@@ -156,7 +156,7 @@ Targets: cpu (default), gpu, wasm, webgpu`,
 const EXAMPLES = {
   tensor: `x = tensor([[1, 2], [3, 4]])
 w = randn([2, 3])
-y = relu(x @ w)
+y = (x @ w).relu()
 y`,
 
   linear: `model = Sequential(
@@ -167,12 +167,12 @@ y`,
 x = randn([8, 2])
 model(x)`,
 
-  custom: `model MLP(input, hidden, output):
+  custom: `model MLP(input: int, hidden: int, output: int):
   fc1 = Linear(input, hidden)
   fc2 = Linear(hidden, output)
 
-  forward x:
-    x = relu(fc1(x))
+  forward (x: Tensor) -> Tensor:
+    x = fc1(x).relu()
     return fc2(x)
 
 model = MLP(2, 4, 1)

@@ -1,4 +1,4 @@
-import { TeraRuntime, formatValue, CsvStreamParser, memfs, analyzeDocument, buildMethodReturns } from './dist/mlfw-lang.esm.js';
+import { TeraRuntime, formatValue, CsvStreamParser, memfs, analyzeDocument, buildMethodReturns } from './dist/mlfw.esm.js';
 import { createChartApi, isChartSpec, renderChart } from './chart/index.js';
 import { CHART_METHOD_DOCS, chartMethodOwner } from './chart/docs.js';
 import { highlightHtml, TYPE_SET } from './highlight.js';

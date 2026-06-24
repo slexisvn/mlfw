@@ -20,10 +20,8 @@ function methodReturns() {
 
 export const CLI_USAGE = `Usage:
   mlfw                 Start the Tera REPL
-  mlfw repl            Start the Tera REPL
-  mlfw run <file>      Execute a Tera file (.tera)
   mlfw check <file>    Type-check a Tera file without executing
-  mlfw <file>          Execute a Tera file`;
+  mlfw <file>          Execute a Tera file (.tera)`;
 
 function reportDiagnostics(diagnostics, source, filename, stderr) {
   for (const diagnostic of diagnostics) stderr(formatDiagnostic(diagnostic, source, filename));

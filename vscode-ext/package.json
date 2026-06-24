@@ -2,9 +2,19 @@
   "name": "tera-language",
   "displayName": "Tera Language",
   "description": "Syntax highlighting, diagnostics and IntelliSense for Tera (.tera) — tensor algebra & neural network DSL.",
-  "version": "0.11.16",
+  "version": "0.1.0",
   "icon": "icons/icon.png",
-  "publisher": "mlfw",
+  "publisher": "slexisvn",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/slexisvn/mlfw.git",
+    "directory": "vscode-ext"
+  },
+  "homepage": "https://github.com/slexisvn/mlfw#readme",
+  "bugs": {
+    "url": "https://github.com/slexisvn/mlfw/issues"
+  },
   "engines": {
     "vscode": "^1.94.0"
   },

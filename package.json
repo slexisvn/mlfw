@@ -1,10 +1,22 @@
 {
-  "name": "mlc",
+  "name": "@slexisvn/mlfw",
   "version": "0.1.0",
   "type": "module",
   "bin": {
-    "mlfw": "./src/cli/index.js"
+    "tera": "./dist/cli.js"
   },
+  "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "browser": "./dist/mlfw.esm.min.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "patches"
+  ],
   "imports": {
     "#io/fs": {
       "browser": "./src/runtime/browser/fs.js",
@@ -41,13 +53,13 @@
   "devDependencies": {
     "@vitest/coverage-v8": "^4.1.8",
     "esbuild": "^0.28.0",
-    "patch-package": "^8.0.1",
     "puppeteer-core": "^25.1.0",
     "vitest": "^4.1.8"
   },
   "dependencies": {
     "cli-highlight": "^2.1.11",
     "koffi": "^3.0.2",
+    "patch-package": "^8.0.1",
     "terminal-kit": "^3.1.2",
     "webgpu": "^0.4.0"
   }
