@@ -386,7 +386,7 @@ body.docs-closed .docs-panel {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;
-  overflow: hidden;
+  overflow: visible;
   box-shadow: 0 1px 2px rgba(20, 25, 50, 0.04);
   transition: border-color .12s, box-shadow .15s, transform .12s;
 }
@@ -394,6 +394,8 @@ body.docs-closed .docs-panel {
 .cell:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow); }
 
 .gutter {
+  align-self: stretch;
+  min-height: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -401,6 +403,16 @@ body.docs-closed .docs-panel {
   padding: 12px 0;
   background: var(--gutter-bg);
   border-right: 1px solid var(--border);
+  border-radius: 12px 0 0 12px;
+}
+.gutter .run-stack {
+  position: sticky;
+  top: 72px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
 }
 .gutter .run {
   width: 30px; height: 30px;
@@ -413,9 +425,42 @@ body.docs-closed .docs-panel {
   display: flex; align-items: center; justify-content: center;
 }
 .gutter .run:hover { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; border-color: transparent; }
-.gutter .count { font-family: var(--code-font); font-size: 11px; color: var(--muted); }
+.gutter .run.running {
+  position: relative;
+  color: transparent;
+  opacity: 1;
+  border-color: var(--accent);
+  background: var(--panel);
+  pointer-events: none;
+}
+.gutter .run.running::before {
+  content: "";
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: cell-spin .7s linear infinite;
+}
+.gutter .run.running::after {
+  content: "";
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+@keyframes cell-spin {
+  to { transform: rotate(360deg); }
+}
+.gutter .count {
+  font-family: var(--code-font);
+  font-size: 11px;
+  color: var(--muted);
+}
 
-.main { display: flex; flex-direction: column; min-width: 0; }
+.main { display: flex; flex-direction: column; min-width: 0; overflow: hidden; border-radius: 0 12px 12px 0; }
 
 .editor-wrap { position: relative; }
 

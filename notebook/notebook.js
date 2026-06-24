@@ -1,5 +1,5 @@
-import { TeraRuntime, formatValue, CsvStreamParser, memfs, analyzeDocument, buildMethodReturns } from './dist/mlfw.esm.js';
-import { createChartApi, isChartSpec, renderChart } from './chart/index.js';
+import { CsvStreamParser, analyzeDocument, buildMethodReturns } from './dist/mlfw.esm.js';
+import { renderChart } from './chart/index.js';
 import { CHART_METHOD_DOCS, chartMethodOwner } from './chart/docs.js';
 import { highlightHtml, TYPE_SET } from './highlight.js';
 import { initNotebookDocs, setNotebookDocsError, updateNotebookDocs } from './tera-docs.js';
@@ -37,16 +37,48 @@ const docsToggle = document.getElementById('docs-toggle');
 const docsClose = document.getElementById('docs-close');
 const docsBackdrop = document.getElementById('docs-backdrop');
 
-let runtime;
 let execCount = 0;
-let activeOutput = [];
+let kernel = null;
+let kernelCompletionNames = [];
 const cells = [];
 
 function makeRuntime() {
   execCount = 0;
-  activeOutput = [];
-  runtime = new TeraRuntime({ output: (t) => activeOutput.push(String(t)) });
-  runtime.registerGlobal('chart', createChartApi());
+  kernel?.terminate();
+  kernel = createKernelClient();
+  kernel.call('completionNames').then(names => { kernelCompletionNames = names || []; }).catch(() => {});
+}
+
+function createKernelClient() {
+  const worker = new Worker(new URL('./kernel-worker.js', import.meta.url), { type: 'module' });
+  let nextId = 0;
+  const pending = new Map();
+  worker.onmessage = event => {
+    const { id, ok, result, error } = event.data || {};
+    const entry = pending.get(id);
+    if (!entry) return;
+    pending.delete(id);
+    if (ok) entry.resolve(result);
+    else entry.reject(new Error(error || 'Kernel worker failed'));
+  };
+  worker.onerror = event => {
+    const error = new Error(event.message || 'Kernel worker failed');
+    for (const entry of pending.values()) entry.reject(error);
+    pending.clear();
+  };
+  return {
+    call(type, payload = {}, transfer = []) {
+      const id = ++nextId;
+      const promise = new Promise((resolve, reject) => pending.set(id, { resolve, reject }));
+      worker.postMessage({ id, type, payload }, transfer);
+      return promise;
+    },
+    terminate() {
+      worker.terminate();
+      for (const entry of pending.values()) entry.reject(new Error('Kernel restarted'));
+      pending.clear();
+    },
+  };
 }
 
 function setKernel(text, busy) {
@@ -155,9 +187,13 @@ async function uploadCsv(file) {
     setKernel(`loading ${file.name} ${pct}%`, true);
   };
   setKernel(`loading ${file.name}…`, true);
-  const handle = runtime.beginUploadedCsv(file.name);
+  await kernel.call('beginCsv', { name: file.name });
   let appended = false;
-  const onBatch = (rows) => { appended = true; handle.appendRows(rows); };
+  const pending = [];
+  const onBatch = (rows) => {
+    appended = true;
+    pending.push(kernel.call('appendCsvRows', { name: file.name, rows }));
+  };
   let result;
   try {
     result = await parseCsvInWorker(file, onBatch, onProgress);
@@ -165,7 +201,8 @@ async function uploadCsv(file) {
     if (appended) throw err;
     result = await parseCsvOnMainThread(file, onBatch, onProgress);
   }
-  handle.finish();
+  await Promise.all(pending);
+  await kernel.call('finishCsv', { name: file.name });
   uploadedFiles.set(file.name, { kind: 'csv', rowCount: result.rowCount, size: file.size });
   renderFiles();
 }
@@ -174,9 +211,10 @@ async function uploadGenericFile(file) {
   setKernel(`loading ${file.name}…`, true);
   const ext = fileExt(file.name);
   if (BINARY_EXTS.has(ext)) {
-    memfs.writeBinary(file.name, new Uint8Array(await file.arrayBuffer()));
+    const buffer = await file.arrayBuffer();
+    await kernel.call('writeFile', { name: file.name, data: buffer, binary: true }, [buffer]);
   } else {
-    memfs.writeFile(file.name, await file.text());
+    await kernel.call('writeFile', { name: file.name, data: await file.text(), binary: false });
   }
   uploadedFiles.set(file.name, { kind: 'file', ext, size: file.size });
   renderFiles();
@@ -195,11 +233,12 @@ async function uploadFiles(fileList) {
   setKernel('ready');
 }
 
-function removeFile(name) {
+async function removeFile(name) {
   const meta = uploadedFiles.get(name);
   uploadedFiles.delete(name);
-  if (meta && meta.kind === 'file') { try { memfs.remove(name); } catch (_) { setKernel('ready'); } }
-  else runtime.removeUploadedCsv(name);
+  if (meta) {
+    try { await kernel.call('removeFile', { name, kind: meta.kind }); } catch (_) { setKernel('ready'); }
+  }
   renderFiles();
 }
 
@@ -227,7 +266,7 @@ function renderFiles() {
     del.className = 'file-del';
     del.textContent = '×';
     del.title = 'Remove file';
-    del.addEventListener('click', () => removeFile(name));
+    del.addEventListener('click', () => { removeFile(name); });
     li.append(open, del);
     list.append(li);
   }
@@ -352,6 +391,8 @@ function createCell(code = '', { focus = false, before = null } = {}) {
 
   const gutter = document.createElement('div');
   gutter.className = 'gutter';
+  const runStack = document.createElement('div');
+  runStack.className = 'run-stack';
   const runBtn = document.createElement('button');
   runBtn.className = 'run';
   runBtn.textContent = '▶';
@@ -359,7 +400,8 @@ function createCell(code = '', { focus = false, before = null } = {}) {
   const count = document.createElement('span');
   count.className = 'count';
   count.textContent = '[ ]';
-  gutter.append(runBtn, count);
+  runStack.append(runBtn, count);
+  gutter.append(runStack);
 
   const main = document.createElement('div');
   main.className = 'main';
@@ -401,7 +443,7 @@ function createCell(code = '', { focus = false, before = null } = {}) {
 
   root.append(gutter, main, tools);
 
-  const cell = { root, editor, output, count, pre, diag, diagLayer, diags: [], chartCleanup: null };
+  const cell = { root, editor, output, count, runBtn, pre, diag, diagLayer, diags: [], chartCleanup: null };
 
   runBtn.addEventListener('click', () => runCell(cell));
   addBtn.addEventListener('click', () => {
@@ -583,25 +625,36 @@ function insertText(ta, text) {
 async function runCell(cell) {
   closeAutocomplete();
   const code = cell.editor.value;
-  clearCellOutput(cell);
-  if (!code.trim()) { cell.count.textContent = '[ ]'; return; }
+  if (!code.trim()) {
+    clearCellOutput(cell);
+    cell.count.textContent = '[ ]';
+    return;
+  }
 
   cell.count.textContent = '[*]';
+  cell.runBtn.classList.add('running');
+  cell.runBtn.disabled = true;
+  cell.runBtn.title = 'Running';
+  cell.runBtn.setAttribute('aria-busy', 'true');
   setKernel('running…', true);
-  activeOutput = [];
 
   let result;
   try {
     // In the notebook, `df.show()` is the idiomatic "display this frame" call —
     // drop a trailing .show(...) so the DataFrame itself renders as a paginated table.
-    const value = await runtime.execute(code.replace(SHOW_TAIL, ''));
-    result = { ok: true, prints: activeOutput.slice(), value };
+    const value = await kernel.call('execute', { source: code.replace(SHOW_TAIL, '') });
+    kernelCompletionNames = value.completionNames || kernelCompletionNames;
+    result = { ok: true, prints: value.prints || [], value: value.value };
   } catch (err) {
-    result = { ok: false, prints: activeOutput.slice(), error: (err && err.message) || String(err) };
+    result = { ok: false, prints: [], error: (err && err.message) || String(err) };
   }
 
   execCount += 1;
   cell.count.textContent = '[' + execCount + ']';
+  cell.runBtn.classList.remove('running');
+  cell.runBtn.disabled = false;
+  cell.runBtn.title = 'Run this cell';
+  cell.runBtn.removeAttribute('aria-busy');
   renderOutput(cell, result);
   setKernel('ready');
   save();
@@ -609,8 +662,8 @@ async function runCell(cell) {
 }
 
 function renderOutput(cell, result) {
+  clearCellOutput(cell);
   const out = cell.output;
-  out.innerHTML = '';
   for (const line of result.prints) {
     const pre = document.createElement('div');
     pre.className = 'print';
@@ -624,15 +677,15 @@ function renderOutput(cell, result) {
     out.append(err);
     return;
   }
-  if (isDataFrame(result.value)) {
+  if (result.value?.kind === 'dataframe') {
     renderDataFrameTable(out, result.value);
     return;
   }
-  if (isChartSpec(result.value)) {
-    cell.chartCleanup = renderChart(out, result.value);
+  if (result.value?.kind === 'chart') {
+    cell.chartCleanup = renderChart(out, result.value.spec);
     return;
   }
-  const text = result.value === undefined ? '' : formatValue(result.value);
+  const text = result.value?.kind === 'text' ? result.value.text : '';
   if (text) {
     const res = document.createElement('div');
     res.className = 'result';
@@ -644,24 +697,18 @@ function renderOutput(cell, result) {
 const SHOW_TAIL = /\.show\s*\([^()]*\)\s*;?\s*$/;
 const DF_PAGE_SIZE = 25;
 
-function isDataFrame(v) {
-  return v && typeof v.limit === 'function' && typeof v.collect === 'function' && typeof v.count === 'function';
-}
-
 async function renderDataFrameTable(out, df) {
   const view = document.createElement('div');
   view.className = 'df-view';
   out.append(view);
   let offset = 0;
-  let total = null;
-  let columns = null;
+  const total = df.total;
+  const columns = df.columns;
 
   async function load() {
     view.classList.add('df-loading');
     try {
-      const rows = await df.limit(DF_PAGE_SIZE, offset).collect();
-      if (total === null) total = await df.count();
-      if (columns === null) columns = await df.columns();
+      const { rows } = await kernel.call('dataframePage', { id: df.id, offset, limit: DF_PAGE_SIZE });
       render(rows);
     } catch (e) {
       view.innerHTML = '';
@@ -909,8 +956,6 @@ function completionCandidates(cell) {
     const [, receiver, prefix] = member;
     const sym = resolveSymbolAt(cell, receiver, ta.selectionStart - prefix.length - 1);
     for (const m of membersForType(sym ? sym.typeName : receiver)) if (m.name.startsWith(prefix)) add(m.name, m.kind);
-    const obj = runtime.getVariable(receiver);
-    if (obj && typeof obj === 'object') for (const k of Object.keys(obj)) if (k.startsWith(prefix)) add(k, 'attr');
     if (!items.length) return null;
     items.sort((a, b) => a.name.localeCompare(b.name));
     return { start: ta.selectionStart - prefix.length, items };
@@ -919,7 +964,7 @@ function completionCandidates(cell) {
   if (!word || word[1].length < 1) return null;
   const prefix = word[1];
   for (const s of visibleSymbols(cell)) if (s.name.startsWith(prefix)) add(s.name, s.kind);
-  for (const name of runtime.getCompletionNames()) if (name.startsWith(prefix)) add(name, 'name');
+  for (const name of kernelCompletionNames) if (name.startsWith(prefix)) add(name, 'name');
   for (const kw of KEYWORDS) if (kw.startsWith(prefix)) add(kw, 'keyword');
   items.sort((a, b) => a.name.localeCompare(b.name));
   if (!items.length || (items.length === 1 && items[0].name === prefix)) return null;

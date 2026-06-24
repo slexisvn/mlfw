@@ -39,6 +39,11 @@ await Promise.all([
     entryPoints: [resolve(root, 'notebook/csv-worker.js')],
     outfile: resolve(root, 'notebook/dist/csv-worker.js'),
   }),
+  build({
+    ...shared,
+    entryPoints: [resolve(root, 'notebook/kernel-worker.js')],
+    outfile: resolve(root, 'notebook/dist/kernel-worker.js'),
+  }),
 ]);
 
 console.log('Notebook app bundle written to notebook/dist/');
