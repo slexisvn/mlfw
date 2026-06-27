@@ -174,6 +174,50 @@ describe('InplaceAnalysis', () => {
     expect(usingSrc.length).toBe(1);
   });
 
+  function inplaceCandidate(block1Body, extraReads = []) {
+    const paramBuf = new Buffer('param', [8], 'f32', 'global');
+    const srcBuf = new Buffer('src', [8], 'f32', 'global');
+    const dstBuf = new Buffer('dst', [8], 'f32', 'global');
+    const outBuf = new Buffer('out', [8], 'f32', 'global');
+    const i = makeVar('i');
+    const reads = [{ buffer: srcBuf }, ...extraReads];
+    const block0 = makeBlock('b0', [{ buffer: paramBuf }], [{ buffer: srcBuf }]);
+    const block1 = new BlockNode('b1', [makeBind('i')], reads, [{ buffer: dstBuf }], block1Body(srcBuf, dstBuf, i));
+    const block2 = makeBlock('b2', [{ buffer: dstBuf }], [{ buffer: outBuf }]);
+    const pf = makePrimFunc(new SeqNode([block0, block1, block2]), [paramBuf, outBuf]);
+    const candidates = InplaceAnalysis.analyze(pf, BufferLiveness.analyze(pf));
+    return { candidates, srcBuf, dstBuf };
+  }
+
+  it('accepts inplace for an elementwise transform that reads src at the dst write index', () => {
+    const { candidates, srcBuf, dstBuf } = inplaceCandidate((src, dst, i) =>
+      new BufferStoreNode(dst, [i], new MathOpNode('+',
+        new MathOpNode('*', new BufferLoadNode(src, [i]), new IntImmNode(2)), new IntImmNode(1))));
+    expect(candidates.find(c => c.srcBuffer === srcBuf && c.dstBuffer === dstBuf)).toBeDefined();
+  });
+
+  it('rejects inplace for a stencil that reads src at a shifted index', () => {
+    const { candidates, srcBuf, dstBuf } = inplaceCandidate((src, dst, i) =>
+      new BufferStoreNode(dst, [i], new MathOpNode('+',
+        new BufferLoadNode(src, [i]),
+        new BufferLoadNode(src, [new MathOpNode('+', i, new IntImmNode(1))]))));
+    expect(candidates.find(c => c.srcBuffer === srcBuf && c.dstBuffer === dstBuf)).toBeUndefined();
+  });
+
+  it('rejects inplace for an index permutation (transpose/reverse-like)', () => {
+    const { candidates, srcBuf, dstBuf } = inplaceCandidate((src, dst, i) =>
+      new BufferStoreNode(dst, [i], new BufferLoadNode(src, [new MathOpNode('-', new IntImmNode(7), i)])));
+    expect(candidates.find(c => c.srcBuffer === srcBuf && c.dstBuffer === dstBuf)).toBeUndefined();
+  });
+
+  it('rejects inplace for a gather (data-dependent src index)', () => {
+    const idxBuf = new Buffer('idx', [8], 'i32', 'global');
+    const { candidates, srcBuf, dstBuf } = inplaceCandidate((src, dst, i) =>
+      new BufferStoreNode(dst, [i], new BufferLoadNode(src, [new BufferLoadNode(idxBuf, [i])])),
+      [{ buffer: idxBuf }]);
+    expect(candidates.find(c => c.srcBuffer === srcBuf && c.dstBuffer === dstBuf)).toBeUndefined();
+  });
+
   it('returns empty array when no candidates exist', () => {
     const paramBuf = new Buffer('param', [8], 'f32', 'global');
     const outBuf = new Buffer('out', [8], 'f32', 'global');
