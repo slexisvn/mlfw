@@ -22,15 +22,6 @@ import { printTensorIR } from '../ir/tensor/printer.js';
 import { lowerToLIR } from '../passes/lowering/tensor_to_lir.js';
 import { verifyLIR } from '../ir/lir/verifier.js';
 
-function spread(obj) { return obj && typeof obj === 'object' ? obj : {}; }
-
-function omit(obj, ...keys) {
-  const s = new Set(keys);
-  const r = {};
-  for (const k of Object.keys(obj)) { if (!s.has(k)) r[k] = obj[k]; }
-  return r;
-}
-
 export { CompilationError } from './trace.js';
 
 export class CompilerConfig {
@@ -40,56 +31,36 @@ export class CompilerConfig {
     this.verifyMode = opts.verify === 'full' ? 'full' : 'normal';
     this.errorMode = opts.errorMode || 'strict';
 
-    const f = opts.fusion || {};
-    this.fusion = {
-      enabled:   f.enabled   ?? opts.enableFusion ?? true,
-      strategy:  f.strategy  ?? opts.fusionStrategy ?? 'xla',
-      epilogue:  f.epilogue  ?? opts.enableEpilogueFusion,
-      ...spread(opts.fusionConfig), ...omit(f, 'enabled', 'strategy', 'epilogue'),
-    };
-
-    const s = opts.scheduling || {};
     const isWebGPU = this.target && typeof this.target.isWebGPU === 'function' && this.target.isWebGPU();
-    this.scheduling = {
-      enabled:  s.enabled  ?? opts.enableSchedule ?? isWebGPU,
-      autotune: s.autotune ?? opts.enableAutotune ?? false,
-      ...spread(opts.autotuneConfig), ...omit(s, 'enabled', 'autotune'),
-    };
 
+    this.fusion = { enabled: true, strategy: 'xla', epilogue: undefined, ...opts.fusion };
+    this.scheduling = { enabled: isWebGPU, autotune: false, ...opts.scheduling };
     this.matmulBackend = opts.matmulBackend || 'native';
-
-    const q = opts.quantization || {};
-    this.quantization = {
-      enabled: q.enabled ?? opts.enableQuantization ?? false,
-      ...spread(opts.quantizationConfig), ...omit(q, 'enabled'),
-    };
-
-    const o = opts.optimization || {};
+    this.quantization = { enabled: false, ...opts.quantization };
     this.optimization = {
-      layout:            o.layout            ?? opts.enableLayoutOptimization ?? false,
-      rematerialization: o.rematerialization ?? opts.enableRematerialization ?? false,
-      rematConfig:       o.rematConfig       ?? opts.rematerializationConfig ?? {},
-      fastMath:          o.fastMath          ?? opts.fastMath ?? false,
-      maxSimplifyIterations: o.maxSimplifyIterations ?? opts.maxSimplifyIterations ?? 8,
+      layout: false,
+      rematerialization: false,
+      rematConfig: {},
+      fastMath: false,
+      maxSimplifyIterations: 8,
+      ...opts.optimization,
     };
-
-    const m = opts.memory || {};
     this.memory = {
-      alignment:    m.alignment    ?? opts.memoryAlignment ?? 64,
-      inplaceReuse: m.inplaceReuse ?? opts.enableInplaceReuse ?? true,
-      allocStrategy: m.allocStrategy ?? opts.allocStrategy ?? 'best-fit',
-      poolAllocation: m.poolAllocation ?? opts.poolAllocation ?? false,
+      alignment: 64,
+      inplaceReuse: true,
+      allocStrategy: 'best-fit',
+      poolAllocation: false,
+      ...opts.memory,
     };
-
-    const p = opts.partition || {};
     this.partition = {
-      enabled: p.enabled ?? false,
-      targets: p.targets || [],
-      defaultTarget: p.defaultTarget || null,
-      opTargetOverrides: p.opTargetOverrides || new Map(),
-      memoryLimits: p.memoryLimits || new Map(),
-      minPartitionSize: p.minPartitionSize || 1,
-      costWeights: p.costWeights || {},
+      enabled: false,
+      targets: [],
+      defaultTarget: null,
+      opTargetOverrides: new Map(),
+      memoryLimits: new Map(),
+      minPartitionSize: 1,
+      costWeights: {},
+      ...opts.partition,
     };
 
     this.passContext = opts.passContext || null;
@@ -104,7 +75,7 @@ export class CompilerConfig {
         afterGraphPasses: false,
         afterLowering: false,
         afterScheduling: false,
-        ...spread(t.irSnapshot),
+        ...(t.irSnapshot || {}),
       },
     };
   }

@@ -1,6 +1,7 @@
 
 import { TargetKind } from '../../backend/target.js';
 import { ForKind } from '../ir/tensor/nodes.js';
+import { some as irSome, collect as irCollect } from '../ir/ir_visitor.js';
 
 export class ScheduleRule {
   constructor(name) {
@@ -166,33 +167,11 @@ export class ElementwiseCPURule extends ScheduleRule {
 }
 
 export function primFuncHasReduction(primFunc) {
-  const stack = [primFunc.body];
-  while (stack.length > 0) {
-    const n = stack.pop();
-    if (!n) continue;
-    if (n.type === 'BlockNode' && (n.initBody !== null || computeReductionLoopVars(n).size > 0)) return true;
-    if (n.body) stack.push(n.body);
-    if (n.stmts) for (const s of n.stmts) stack.push(s);
-    if (n.thenBody) stack.push(n.thenBody);
-    if (n.elseBody) stack.push(n.elseBody);
-    if (n.initBody) stack.push(n.initBody);
-  }
-  return false;
+  return irSome(primFunc.body, (n) => n.type === 'BlockNode' && (n.initBody !== null || computeReductionLoopVars(n).size > 0), { kinds: 'stmt' });
 }
 
 export function primFuncHasRecurrence(primFunc) {
-  const stack = [primFunc.body];
-  while (stack.length > 0) {
-    const n = stack.pop();
-    if (!n) continue;
-    if (n.type === 'ForNode' && n.kind === ForKind.RECURRENCE) return true;
-    if (n.body) stack.push(n.body);
-    if (n.stmts) for (const s of n.stmts) stack.push(s);
-    if (n.thenBody) stack.push(n.thenBody);
-    if (n.elseBody) stack.push(n.elseBody);
-    if (n.initBody) stack.push(n.initBody);
-  }
-  return false;
+  return irSome(primFunc.body, (n) => n.type === 'ForNode' && n.kind === ForKind.RECURRENCE, { kinds: 'stmt' });
 }
 
 function bindFusedSpatialGPU(schedule, fused, target) {
@@ -607,17 +586,5 @@ export class SchedulePolicy {
 }
 
 function collectAllBlockNames(root) {
-  const result = [];
-  const stack = [root];
-  while (stack.length > 0) {
-    const node = stack.pop();
-    if (!node) continue;
-    if (node.type === 'BlockNode') result.push(node.name);
-    if (node.body) stack.push(node.body);
-    if (node.stmts) for (const s of node.stmts) stack.push(s);
-    if (node.thenBody) stack.push(node.thenBody);
-    if (node.elseBody) stack.push(node.elseBody);
-    if (node.initBody) stack.push(node.initBody);
-  }
-  return result;
+  return irCollect(root, (n) => n.type === 'BlockNode', { kinds: 'stmt' }).map((n) => n.name);
 }

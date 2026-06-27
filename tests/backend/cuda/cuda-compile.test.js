@@ -1351,7 +1351,7 @@ describe('GPU kernel quality — scheduled shared memory + barriers', () => {
   it('scheduled multi-stage matmul chain splits into multiple valid kernels', () => {
     const model = new Sequential(new Linear(4, 8), new ReLU(), new Linear(8, 2));
     const x = tensor([[1, 2, 3, 4]]);
-    const compiled = compileGPU(model, [x], { enableSchedule: true });
+    const compiled = compileGPU(model, [x], { scheduling: { enabled: true } });
     const s = splitInfo(compiled);
 
     expect(s.count).toBeGreaterThan(1);
@@ -1361,7 +1361,7 @@ describe('GPU kernel quality — scheduled shared memory + barriers', () => {
   it('scheduled split chain produces one valid kernel per stage', () => {
     const model = new Sequential(new Linear(4, 8), new ReLU(), new Linear(8, 2));
     const x = tensor([[1, 2, 3, 4]]);
-    const compiled = compileGPU(model, [x], { enableSchedule: true });
+    const compiled = compileGPU(model, [x], { scheduling: { enabled: true } });
     const s = splitInfo(compiled);
 
     expect(s.count).toBeGreaterThan(1);
@@ -1371,7 +1371,7 @@ describe('GPU kernel quality — scheduled shared memory + barriers', () => {
   it('scheduled kernel has balanced braces', () => {
     const model = new Sequential(new Linear(4, 8), new ReLU(), new Linear(8, 2));
     const x = tensor([[1, 2, 3, 4]]);
-    const compiled = compileGPU(model, [x], { enableSchedule: true });
+    const compiled = compileGPU(model, [x], { scheduling: { enabled: true } });
     const src = compiled.source();
 
     let depth = 0;
@@ -1394,7 +1394,7 @@ describe('GPU kernel quality — scheduled shared memory + barriers', () => {
   it('scheduled single-layer has no barriers or __shared__ promotion', () => {
     const model = new Sequential(new Linear(4, 4));
     const x = tensor([[1, 2, 3, 4]]);
-    const compiled = compileGPU(model, [x], { enableSchedule: true });
+    const compiled = compileGPU(model, [x], { scheduling: { enabled: true } });
     const src = compiled.source();
 
     expect(src).not.toContain('__syncthreads()');
@@ -1403,7 +1403,7 @@ describe('GPU kernel quality — scheduled shared memory + barriers', () => {
   it('wide bottleneck: Linear(4,64)->ReLU->Linear(64,2) scheduled', () => {
     const model = new Sequential(new Linear(4, 64), new ReLU(), new Linear(64, 2));
     const x = tensor([[1, 2, 3, 4]]);
-    const compiled = compileGPU(model, [x], { enableSchedule: true });
+    const compiled = compileGPU(model, [x], { scheduling: { enabled: true } });
     const s = splitInfo(compiled);
 
     expect(s.count).toBeGreaterThan(1);
@@ -1419,7 +1419,7 @@ describe('GPU kernel quality — scheduled shared memory + barriers', () => {
       new Linear(8, 2),
     );
     const x = tensor([[1, 2, 3, 4]]);
-    const compiled = compileGPU(model, [x], { enableSchedule: true });
+    const compiled = compileGPU(model, [x], { scheduling: { enabled: true } });
     const s = splitInfo(compiled);
 
     expect(s.count).toBeGreaterThan(1);
@@ -1434,7 +1434,7 @@ describe('GPU kernel quality — scheduled shared memory + barriers', () => {
       new Linear(8, 2),
     );
     const x = tensor([[1, 2, 3, 4]]);
-    const compiled = compileGPU(model, [x], { enableSchedule: true });
+    const compiled = compileGPU(model, [x], { scheduling: { enabled: true } });
     const s = splitInfo(compiled);
 
     expect(s.count).toBeGreaterThan(1);
@@ -1449,7 +1449,7 @@ describe('GPU kernel quality — scheduled shared memory + barriers', () => {
       new Linear(8, 8),
     );
     const x = tensor([[1, 2, 3, 4]]);
-    const compiled = compileGPU(model, [x], { enableSchedule: true });
+    const compiled = compileGPU(model, [x], { scheduling: { enabled: true } });
     const src = compiled.source();
 
     expect(src).not.toMatch(/if \(threadIdx\.\w < \d+\)/);
@@ -1462,7 +1462,7 @@ describe('GPU kernel quality — scheduled shared memory + barriers', () => {
       new Linear(4, 1),
     );
     const x = tensor([Array.from({ length: 32 }, (_, i) => i)]);
-    const compiled = compileGPU(model, [x], { enableSchedule: true });
+    const compiled = compileGPU(model, [x], { scheduling: { enabled: true } });
     const s = splitInfo(compiled);
 
     expect(s.count).toBeGreaterThan(1);
@@ -1472,7 +1472,7 @@ describe('GPU kernel quality — scheduled shared memory + barriers', () => {
   it('split matmul chain keeps each accumulator in a register, no shared promotion', () => {
     const model = new Sequential(new Linear(4, 8), new ReLU(), new Linear(8, 2));
     const x = tensor([[1, 2, 3, 4]]);
-    const compiled = compileGPU(model, [x], { enableSchedule: true });
+    const compiled = compileGPU(model, [x], { scheduling: { enabled: true } });
     const s = splitInfo(compiled);
 
     expect(s.count).toBeGreaterThan(1);

@@ -1,5 +1,6 @@
 import { ForKind } from '../../compiler/ir/tensor/nodes.js';
 import { jsTypedArray, isJSMathFunc, isDtypeInt, dtypeBytes } from '../dtype_map.js';
+import { flattenRowMajorIndex } from '../index_emit.js';
 
 import '../../tensor/utils/half.js';
 
@@ -494,22 +495,7 @@ export class CPUCodegen {
   }
 
   _flatIndex(buffer, indices) {
-    if (indices.length === 0) return '0';
-    if (indices.length === 1) return this._exprToJS(indices[0]);
-    const parts = [];
-    for (let i = 0; i < indices.length; i++) {
-      const idx = this._exprToJS(indices[i]);
-      if (idx === '0') continue;
-      const stride = buffer.strides[i];
-      if (stride === 1) {
-        parts.push(idx);
-      } else if (typeof stride === 'number' && stride >= 0) {
-        parts.push(`${idx} * ${stride}`);
-      } else {
-        parts.push(`${idx} * ${this._computeDynamicStride(buffer, i)}`);
-      }
-    }
-    return parts.length === 0 ? '0' : parts.join(' + ');
+    return flattenRowMajorIndex(buffer, indices, (e) => this._exprToJS(e), (b, i) => this._computeDynamicStride(b, i), true);
   }
 
   _computeDynamicStride(buffer, dimIdx) {

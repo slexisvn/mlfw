@@ -2,6 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { Block, Region } from '../../../../src/compiler/ir/graph/block.js';
 import { Operation } from '../../../../src/compiler/ir/graph/operation.js';
 import { TensorType, ScalarType } from '../../../../src/compiler/ir/graph/types.js';
+import { buildFunction } from '../../../../src/compiler/ir/graph/builder.js';
+import { AnalysisManager } from '../../../../src/compiler/analysis/analysis_manager.js';
+import { UseDefAnalysis } from '../../../../src/compiler/analysis/use_def.js';
 
 function t() { return new TensorType([4], ScalarType.F32); }
 function mkOp(operands = []) { return new Operation('neg', operands, [t()]); }
@@ -78,5 +81,34 @@ describe('Block/Region mutation invariants', () => {
   it('replaceAllResultsWith rejects a mismatched result count', () => {
     const op = mkOp();
     expect(() => op.replaceAllResultsWith([])).toThrow(/results/);
+  });
+});
+
+describe('IR version tracking from mutation primitives', () => {
+  function addFunc() {
+    const ty = new TensorType([4], ScalarType.F32);
+    return buildFunction('f', [ty, ty], [ty], (b, [x, y]) => {
+      const a = b.add(x, y);
+      b.returnOp([b.mul(a.getResult(0), x).getResult(0)]);
+    });
+  }
+
+  it('a structural mutation bumps the function version directly', () => {
+    const func = addFunc();
+    const v0 = func.version;
+    func.getReturnOp().replaceOperand(0, func.args[0]);
+    expect(func.version).toBeGreaterThan(v0);
+  });
+
+  it('a mutation invalidates the analysis cache without any pass reporting CHANGED', () => {
+    const func = addFunc();
+    const am = new AnalysisManager();
+    const a1 = am.getAnalysis(UseDefAnalysis, func);
+    expect(am.getAnalysis(UseDefAnalysis, func)).toBe(a1);
+
+    func.getReturnOp().replaceOperand(0, func.args[0]);
+
+    const a2 = am.getAnalysis(UseDefAnalysis, func);
+    expect(a2).not.toBe(a1);
   });
 });

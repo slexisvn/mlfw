@@ -884,7 +884,7 @@ describe('Model-level GPU compilation quality', () => {
       new Linear(16, 4),
     );
     const x = tensor([Array.from({ length: 8 }, (_, i) => i * 0.1)]);
-    const compiled = compileGPU(model, [x], { enableSchedule: true });
+    const compiled = compileGPU(model, [x], { scheduling: { enabled: true } });
     const src = modelAllSrc(compiled);
     expect(modelKernelCount(compiled)).toBeGreaterThan(1);
     expect(src).toContain('__global__');
@@ -898,7 +898,7 @@ describe('Model-level GPU compilation quality', () => {
       new Linear(16, 4),
     );
     const x = tensor([[1, 2, 3, 4]]);
-    const compiled = compileGPU(model, [x], { enableSchedule: true });
+    const compiled = compileGPU(model, [x], { scheduling: { enabled: true } });
     const src = modelAllSrc(compiled);
     expect(src).toContain('tanhf(');
     expect(src).toContain('__global__');
@@ -910,7 +910,7 @@ describe('Model-level GPU compilation quality', () => {
       new Linear(8, 2),
     );
     const x = tensor([[1, 2, 3, 4]]);
-    const compiled = compileGPU(model, [x], { enableSchedule: true });
+    const compiled = compileGPU(model, [x], { scheduling: { enabled: true } });
     const src = modelAllSrc(compiled);
     expect(src).toContain('__global__');
     expect(src).toContain('expf(');
@@ -923,7 +923,7 @@ describe('Model-level GPU compilation quality', () => {
       new Linear(16, 4),
     );
     const x = tensor([[1, 2, 3, 4]]);
-    const compiled = compileGPU(model, [x], { enableSchedule: true });
+    const compiled = compileGPU(model, [x], { scheduling: { enabled: true } });
     const src = compiled.source();
     expect(src).toContain('__global__');
     expect(src).not.toContain('undefined');
@@ -935,7 +935,7 @@ describe('Model-level GPU compilation quality', () => {
       new Linear(16, 4),
     );
     const x = tensor([[1, 2, 3, 4]]);
-    const compiled = compileGPU(model, [x], { enableSchedule: true });
+    const compiled = compileGPU(model, [x], { scheduling: { enabled: true } });
     const src = compiled.source();
     expect(src).toContain('__global__');
     expect(src).not.toContain('undefined');
@@ -947,7 +947,7 @@ describe('Model-level GPU compilation quality', () => {
       new Linear(16, 4),
     );
     const x = tensor([[1, 2, 3, 4]]);
-    const compiled = compileGPU(model, [x], { enableSchedule: true });
+    const compiled = compileGPU(model, [x], { scheduling: { enabled: true } });
     const src = compiled.source();
     expect(src).toContain('__global__');
     expect(src).not.toContain('undefined');
@@ -965,7 +965,7 @@ describe('Model-level GPU compilation quality', () => {
       new Linear(2, 1),
     );
     const x = tensor([Array.from({ length: 8 }, (_, i) => i * 0.1)]);
-    const compiled = compileGPU(model, [x], { enableSchedule: true });
+    const compiled = compileGPU(model, [x], { scheduling: { enabled: true } });
     const src = modelAllSrc(compiled);
     expect(modelKernelCount(compiled)).toBeGreaterThan(1);
     expect(src).toContain('__global__');

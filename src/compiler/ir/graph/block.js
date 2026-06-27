@@ -18,6 +18,21 @@ export class Block {
     return this.parentRegion ? this.parentRegion.parentOp : null;
   }
 
+  _owningFunction() {
+    let block = this;
+    while (block) {
+      if (block._parentFunction) return block._parentFunction;
+      const op = block.parentOp;
+      block = op ? op.parentBlock : null;
+    }
+    return null;
+  }
+
+  _notifyMutation() {
+    const fn = this._owningFunction();
+    if (fn) fn.bumpVersion();
+  }
+
   getArgument(index) {
     return this.arguments[index];
   }
@@ -25,6 +40,7 @@ export class Block {
   addArgument(type) {
     const arg = new BlockArgument(type, this, this.arguments.length);
     this.arguments.push(arg);
+    this._notifyMutation();
     return arg;
   }
 
@@ -42,6 +58,7 @@ export class Block {
     }
     this.arguments = kept;
     for (let i = 0; i < kept.length; i++) kept[i].argIndex = i;
+    this._notifyMutation();
     return this;
   }
 
@@ -59,6 +76,7 @@ export class Block {
     }
     this._tail = op;
     this._size++;
+    this._notifyMutation();
   }
 
   insertBefore(op, ref) {
@@ -78,6 +96,7 @@ export class Block {
     }
     ref._prev = op;
     this._size++;
+    this._notifyMutation();
   }
 
   insertAfter(op, ref) {
@@ -97,6 +116,7 @@ export class Block {
     }
     ref._next = op;
     this._size++;
+    this._notifyMutation();
   }
 
   removeOp(op) {
@@ -115,6 +135,7 @@ export class Block {
     op._next = null;
     op.parentBlock = null;
     this._size--;
+    this._notifyMutation();
   }
 
   *ops() {

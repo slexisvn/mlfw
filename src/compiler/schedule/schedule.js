@@ -6,6 +6,7 @@ import { Buffer } from '../ir/tensor/buffer.js';
 import { ScheduleTrace } from './trace.js';
 import { ScheduleValidator } from './validator.js';
 import { ScheduleState } from './schedule_state.js';
+import { ScheduleMutator } from './mutator.js';
 import { SRefTree } from './sref.js';
 import { loopCarriesReduction, collectVarsUsed } from './legality.js';
 
@@ -224,6 +225,7 @@ export class Schedule {
     this.state = new ScheduleState(primFunc);
     this._replaying = false;
     this._srefTree = new SRefTree(primFunc);
+    this.mutator = new ScheduleMutator(primFunc);
   }
 
   _rebuildSRefTree() {
@@ -310,7 +312,7 @@ export class Schedule {
       )
     );
 
-    this._replaceNode(loop, outerLoop);
+    this.mutator.replaceNode(loop, outerLoop);
     this._rebuildSRefTree();
 
     if (!this._replaying) {
@@ -363,7 +365,7 @@ export class Schedule {
     const topmostSRef = this._srefTree.getSRef(topmostLoop);
     const topmostParent = topmostSRef ? topmostSRef.parent : null;
 
-    this._replaceNode(topmostLoop, newOrder[0]);
+    this.mutator.replaceNode(topmostLoop, newOrder[0]);
 
     for (const loop of newOrder) {
       if (loop === newOrder[0]) continue;
@@ -421,7 +423,7 @@ export class Schedule {
       new MathOpNode('%', fusedVar, new IntImmNode(innerExtent))
     );
 
-    this._replaceNode(outer, fusedLoop);
+    this.mutator.replaceNode(outer, fusedLoop);
     this._srefTree.replaceNode(outer, fusedLoop);
     this.state.invalidate();
 
@@ -598,7 +600,7 @@ export class Schedule {
         cloneExprTree(spatialLoops[i].extent), ForKind.SERIAL, combineNest);
     }
 
-    this._replaceNode(loops[0], new SeqNode([partialNest, combineNest]));
+    this.mutator.replaceNode(loops[0], new SeqNode([partialNest, combineNest]));
     this._rebuildSRefTree();
     if (!this._replaying) {
       this.trace.record('rfactor', [blockName, reductionVarName, factor]);
@@ -633,33 +635,11 @@ export class Schedule {
       updNest = new ForNode(loops[i].loopVar, new IntImmNode(0), cloneExprTree(loops[i].extent), ForKind.SERIAL, updNest);
     }
 
-    this._replaceNode(loops[0], new SeqNode([initNest, updNest]));
+    this.mutator.replaceNode(loops[0], new SeqNode([initNest, updNest]));
     this._rebuildSRefTree();
     if (!this._replaying) {
       this.trace.record('decomposeReduction', [blockName]);
     }
-  }
-
-  _redirectReads(node, fromBuf, toBuf) {
-    if (!node || typeof node !== 'object') return;
-    if (node.type === 'BufferLoadNode' && node.buffer === fromBuf) node.buffer = toBuf;
-    for (const key of ['a', 'b', 'expr', 'value', 'condition', 'thenBody', 'elseBody', 'body', 'initBody', 'min', 'extent']) {
-      if (node[key]) this._redirectReads(node[key], fromBuf, toBuf);
-    }
-    if (Array.isArray(node.stmts)) for (const s of node.stmts) this._redirectReads(s, fromBuf, toBuf);
-    if (Array.isArray(node.indices)) for (const i of node.indices) this._redirectReads(i, fromBuf, toBuf);
-    if (Array.isArray(node.args)) for (const a of node.args) this._redirectReads(a, fromBuf, toBuf);
-  }
-
-  _redirectBuffer(node, fromBuf, toBuf) {
-    if (!node || typeof node !== 'object') return;
-    if ((node.type === 'BufferLoadNode' || node.type === 'BufferStoreNode') && node.buffer === fromBuf) node.buffer = toBuf;
-    for (const key of ['a', 'b', 'expr', 'value', 'condition', 'thenBody', 'elseBody', 'body', 'initBody', 'min', 'extent']) {
-      if (node[key]) this._redirectBuffer(node[key], fromBuf, toBuf);
-    }
-    if (Array.isArray(node.stmts)) for (const s of node.stmts) this._redirectBuffer(s, fromBuf, toBuf);
-    if (Array.isArray(node.indices)) for (const i of node.indices) this._redirectBuffer(i, fromBuf, toBuf);
-    if (Array.isArray(node.args)) for (const a of node.args) this._redirectBuffer(a, fromBuf, toBuf);
   }
 
   cacheWrite(blockName, bufferName, scope = 'local') {
@@ -671,8 +651,8 @@ export class Schedule {
     const buf = writeEntry.buffer;
     const cache = new Buffer(`${bufferName}_${blockName}_cachew`, [...buf.shape], buf.dtype, scope);
 
-    this._redirectBuffer(block.body, buf, cache);
-    if (block.initBody) this._redirectBuffer(block.initBody, buf, cache);
+    this.mutator.redirectBuffer(block.body, buf, cache);
+    if (block.initBody) this.mutator.redirectBuffer(block.initBody, buf, cache);
     writeEntry.buffer = cache;
 
     const idxVars = buf.shape.map((_, d) => new VariableNode(`${cache.name}_o${d}`, 'int32'));
@@ -687,7 +667,7 @@ export class Schedule {
     const blockNest = loops[0];
     const seq = new SeqNode([]);
     const alloc = new AllocateNode(cache, scope, seq);
-    this._replaceNode(blockNest, alloc);
+    this.mutator.replaceNode(blockNest, alloc);
     seq.stmts.push(blockNest, backNest);
     this._rebuildSRefTree();
     if (!this._replaying) this.trace.record('cacheWrite', [blockName, bufferName, scope]);
@@ -767,7 +747,7 @@ export class Schedule {
 
     const loops = this.getLoops(producerName);
     const root = loops.length > 0 ? loops[0] : prod;
-    this._replaceNode(root, new SeqNode([]));
+    this.mutator.replaceNode(root, new SeqNode([]));
     this._rebuildSRefTree();
     if (!this._replaying) this.trace.record('computeInline', [producerName]);
   }
@@ -791,7 +771,7 @@ export class Schedule {
 
     const moved = cloneExprTree(blkLoop.body);
     substituteVar(moved, blkLoop.loopVar.name, () => targetLoop.loopVar);
-    this._replaceNode(blkLoop, new SeqNode([]));
+    this.mutator.replaceNode(blkLoop, new SeqNode([]));
 
     const tbody = targetLoop.body;
     if (tbody && tbody.type === 'SeqNode') {
@@ -833,14 +813,14 @@ export class Schedule {
       copyNest = new ForNode(idxVars[d], new IntImmNode(0), new IntImmNode(buf.shape[d]), ForKind.SERIAL, copyNest);
     }
 
-    this._redirectReads(block.body, buf, cache);
-    if (block.initBody) this._redirectReads(block.initBody, buf, cache);
+    this.mutator.redirectReads(block.body, buf, cache);
+    if (block.initBody) this.mutator.redirectReads(block.initBody, buf, cache);
     readEntry.buffer = cache;
 
     const blockNest = loops[0];
     const seq = new SeqNode([copyNest]);
     const alloc = new AllocateNode(cache, scope, seq);
-    this._replaceNode(blockNest, alloc);
+    this.mutator.replaceNode(blockNest, alloc);
     seq.stmts.push(blockNest);
     this._rebuildSRefTree();
     if (!this._replaying) this.trace.record('cacheRead', [blockName, bufferName, scope]);
@@ -881,8 +861,8 @@ export class Schedule {
       fused = new ForNode(sl.loopVar, new IntImmNode(0), cloneExprTree(sl.extent), sl.kind, fused, sl.threadTag);
     }
 
-    this._replaceNode(pLoops[0], fused);
-    this._removeNode(cLoops[0]);
+    this.mutator.replaceNode(pLoops[0], fused);
+    this.mutator.removeNode(cLoops[0]);
     this._rebuildSRefTree();
     if (!this._replaying) {
       this.trace.record('fuseConsumer', [producerBlockName, consumerBlockName]);
@@ -906,29 +886,5 @@ export class Schedule {
 
   verify() {
     return ScheduleValidator.validate(this.func);
-  }
-
-  _replaceNode(oldNode, newNode) {
-    if (oldNode._parent) {
-      oldNode.replaceWith(newNode);
-      return;
-    }
-    if (this.func.body === oldNode || this.func.body === undefined) {
-      this.func.body = newNode;
-      if (this.func._setChild) this.func._setChild('body', newNode);
-    }
-  }
-
-  _removeNode(node) {
-    const parent = node._parent;
-    if (parent && parent.type === 'SeqNode' && Array.isArray(parent.stmts)) {
-      const i = parent.stmts.indexOf(node);
-      if (i >= 0) {
-        parent.stmts.splice(i, 1);
-        if (parent._setChildren) parent._setChildren('stmts', parent.stmts);
-        return;
-      }
-    }
-    throw new Error('_removeNode: node parent is not a SeqNode; cannot remove without duplicating it');
   }
 }

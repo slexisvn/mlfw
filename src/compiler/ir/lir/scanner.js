@@ -1,6 +1,7 @@
 import { LIRMetadata, normalizeDtype, isWasmNativeOp } from './nodes.js';
 import { wasmBytes } from '../../../backend/dtype_map.js';
 import { ForKind } from '../tensor/nodes.js';
+import { collect as irCollect } from '../ir_visitor.js';
 
 export function scanMetadata(primFunc, target) {
   const meta = new LIRMetadata();
@@ -152,28 +153,11 @@ function computeMemoryLayout(primFunc, meta, target) {
 
 function detectZeroBuffers(root, meta) {
   const bufferWrites = new Map();
-  const stack = [root];
 
-  while (stack.length > 0) {
-    const node = stack.pop();
-    if (!node || typeof node !== 'object') continue;
-
-    if (node.type === 'BufferStoreNode' && node.buffer) {
-      const name = node.buffer.name;
-      if (!meta.paramBuffers.has(name)) {
-        if (!bufferWrites.has(name)) bufferWrites.set(name, []);
-        bufferWrites.get(name).push(node.value);
-      }
-    }
-
-    if (node.body) stack.push(node.body);
-    if (node.value && typeof node.value === 'object' && node.value.type) stack.push(node.value);
-    if (node.stmts) for (const s of node.stmts) stack.push(s);
-    if (node.thenBody) stack.push(node.thenBody);
-    if (node.elseBody) stack.push(node.elseBody);
-    if (node.initBody) stack.push(node.initBody);
-    if (node.condBody) stack.push(node.condBody);
-    if (node.loopBody) stack.push(node.loopBody);
+  for (const node of irCollect(root, (n) => n.type === 'BufferStoreNode' && n.buffer && !meta.paramBuffers.has(n.buffer.name))) {
+    const name = node.buffer.name;
+    if (!bufferWrites.has(name)) bufferWrites.set(name, []);
+    bufferWrites.get(name).push(node.value);
   }
 
   for (const [name, writes] of bufferWrites) {

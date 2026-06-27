@@ -1,3 +1,5 @@
+import { walk as irWalk } from '../ir/ir_visitor.js';
+
 export const DepKind = Object.freeze({
   RAW: 'read-after-write',
   WAR: 'write-after-read',
@@ -96,53 +98,11 @@ function accessesConflict(accA, accB, kindFilter) {
 }
 
 function visitExprTree(node, reads, writes) {
-  if (!node || typeof node !== 'object') return;
-  switch (node.type) {
-    case 'BufferLoadNode':
-      if (node.buffer) reads.add(node.buffer.name);
-      if (node.indices) for (const idx of node.indices) visitExprTree(idx, reads, writes);
-      return;
-    case 'BufferStoreNode':
-      if (node.buffer) writes.add(node.buffer.name);
-      if (node.indices) for (const idx of node.indices) visitExprTree(idx, reads, writes);
-      visitExprTree(node.value, reads, writes);
-      return;
-    case 'MathOpNode':
-      visitExprTree(node.a, reads, writes);
-      if (node.b) visitExprTree(node.b, reads, writes);
-      return;
-    case 'CompareNode':
-      visitExprTree(node.a, reads, writes);
-      visitExprTree(node.b, reads, writes);
-      return;
-    case 'CallExternNode':
-      for (const arg of node.args) visitExprTree(arg, reads, writes);
-      return;
-    case 'IfThenElseNode':
-      visitExprTree(node.condition, reads, writes);
-      visitExprTree(node.thenBody, reads, writes);
-      if (node.elseBody) visitExprTree(node.elseBody, reads, writes);
-      return;
-    case 'CastNode':
-      visitExprTree(node.expr, reads, writes);
-      return;
-    case 'LetStmtNode':
-      visitExprTree(node.value, reads, writes);
-      visitExprTree(node.body, reads, writes);
-      return;
-    case 'SeqNode':
-      for (const s of node.stmts) visitExprTree(s, reads, writes);
-      return;
-    case 'ForNode':
-      visitExprTree(node.body, reads, writes);
-      return;
-    case 'BlockNode':
-      if (node.initBody) visitExprTree(node.initBody, reads, writes);
-      visitExprTree(node.body, reads, writes);
-      return;
-    default:
-      return;
-  }
+  if (!node) return;
+  irWalk(node, (n) => {
+    if (n.type === 'BufferLoadNode' && n.buffer) reads.add(n.buffer.name);
+    else if (n.type === 'BufferStoreNode' && n.buffer) writes.add(n.buffer.name);
+  });
 }
 
 export class DependencyAnalysis {

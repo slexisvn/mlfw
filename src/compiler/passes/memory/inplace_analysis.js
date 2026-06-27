@@ -1,3 +1,5 @@
+import { walk as irWalk, collect as irCollect } from '../../ir/ir_visitor.js';
+
 export class InplaceCandidate {
   constructor(srcBuffer, dstBuffer, reason) {
     this.srcBuffer = srcBuffer;
@@ -80,7 +82,6 @@ function shapesMatch(a, b) {
   return true;
 }
 
-const META_KEYS = new Set(['_parent', '_parentKey', '_parentIdx']);
 
 function exprEqual(x, y) {
   if (x === y) return true;
@@ -107,23 +108,7 @@ function indexListEqual(a, b) {
 }
 
 function walkNodes(root, visit) {
-  const stack = [root];
-  const seen = new Set();
-  while (stack.length > 0) {
-    const node = stack.pop();
-    if (!node || typeof node !== 'object' || seen.has(node)) continue;
-    seen.add(node);
-    visit(node);
-    for (const key of Object.keys(node)) {
-      if (META_KEYS.has(key)) continue;
-      const value = node[key];
-      if (Array.isArray(value)) {
-        for (const item of value) if (item && typeof item === 'object') stack.push(item);
-      } else if (value && typeof value === 'object') {
-        stack.push(value);
-      }
-    }
-  }
+  if (root) irWalk(root, visit);
 }
 
 function isInplaceComputeSafe(block, srcBuf, dstBuf) {
@@ -168,15 +153,6 @@ function isInplaceComputeSafe(block, srcBuf, dstBuf) {
 }
 
 function collectBlocks(node, result) {
-  const stack = [node];
-  while (stack.length > 0) {
-    const cur = stack.pop();
-    if (!cur) continue;
-    if (cur.type === 'BlockNode') result.push(cur);
-    if (cur.body) stack.push(cur.body);
-    if (cur.stmts) for (const s of cur.stmts) stack.push(s);
-    if (cur.thenBody) stack.push(cur.thenBody);
-    if (cur.elseBody) stack.push(cur.elseBody);
-    if (cur.initBody) stack.push(cur.initBody);
-  }
+  if (!node) return;
+  for (const b of irCollect(node, (n) => n.type === 'BlockNode', { kinds: 'stmt' })) result.push(b);
 }

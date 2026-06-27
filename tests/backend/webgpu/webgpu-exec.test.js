@@ -105,7 +105,7 @@ describe('webgpu compilation output', () => {
   it('scheduled multi-stage kernel uses workgroup memory and barriers', () => {
     const model = new Sequential(new Linear(4, 8), new ReLU(), new Linear(8, 2));
     const x = tensor([[1, 2, 3, 4]]);
-    const compiled = compileWebGPU(model, [x], { enableSchedule: true });
+    const compiled = compileWebGPU(model, [x], { scheduling: { enabled: true } });
     const src = compiled.source();
 
     expect(src).toMatch(/var<workgroup>/);
@@ -117,7 +117,7 @@ describe('webgpu compilation output', () => {
   it('scheduled kernel emits bounds guard for smaller stages', () => {
     const model = new Sequential(new Linear(4, 8), new ReLU(), new Linear(8, 2));
     const x = tensor([[1, 2, 3, 4]]);
-    const compiled = compileWebGPU(model, [x], { enableSchedule: true });
+    const compiled = compileWebGPU(model, [x], { scheduling: { enabled: true } });
     const src = compiled.source();
 
     expect(src).toMatch(/if \(i32\(_lid\.x\) < 2\)/);
@@ -126,7 +126,7 @@ describe('webgpu compilation output', () => {
   it('scheduled kernel has balanced braces', () => {
     const model = new Sequential(new Linear(4, 8), new ReLU(), new Linear(8, 2));
     const x = tensor([[1, 2, 3, 4]]);
-    const compiled = compileWebGPU(model, [x], { enableSchedule: true });
+    const compiled = compileWebGPU(model, [x], { scheduling: { enabled: true } });
     const src = compiled.source();
     let depth = 0;
     for (const ch of src) {
@@ -143,7 +143,7 @@ describe('webgpu compilation output', () => {
       new Linear(8, 4),
     );
     const x = tensor([[1, 2, 3, 4, 5, 6, 7, 8]]);
-    const compiled = compileWebGPU(model, [x], { enableSchedule: true });
+    const compiled = compileWebGPU(model, [x], { scheduling: { enabled: true } });
     const src = compiled.source();
 
     const usedVars = new Set();
@@ -181,7 +181,7 @@ describe('webgpu compilation output', () => {
   it('scheduled single-layer has no barriers or workgroup promotion', () => {
     const model = new Sequential(new Linear(4, 2));
     const x = tensor([[1, 2, 3, 4]]);
-    const compiled = compileWebGPU(model, [x], { enableSchedule: true });
+    const compiled = compileWebGPU(model, [x], { scheduling: { enabled: true } });
     const src = compiled.source();
 
     expect(src).not.toContain('workgroupBarrier()');
@@ -190,7 +190,7 @@ describe('webgpu compilation output', () => {
   it('scheduled activation-before-matmul promotes cross-thread intermediate to workgroup', () => {
     const model = new Sequential(new Tanh(), new Linear(4, 4));
     const x = tensor([[0.5, -0.3, 0.1, 0.8]]);
-    const compiled = compileWebGPU(model, [x], { enableSchedule: true });
+    const compiled = compileWebGPU(model, [x], { scheduling: { enabled: true } });
     const src = compiled.source();
 
     expect(src).toContain('var<workgroup>');
@@ -200,7 +200,7 @@ describe('webgpu compilation output', () => {
   it('scheduled workgroup_size matches largest stage extent', () => {
     const model = new Sequential(new Linear(4, 16), new ReLU(), new Linear(16, 2));
     const x = tensor([[1, 2, 3, 4]]);
-    const compiled = compileWebGPU(model, [x], { enableSchedule: true });
+    const compiled = compileWebGPU(model, [x], { scheduling: { enabled: true } });
     const src = compiled.source();
 
     const wgMatch = src.match(/@workgroup_size\((\d+)/);
@@ -211,7 +211,7 @@ describe('webgpu compilation output', () => {
   it('scheduled kernel barrier count matches stage count minus one', () => {
     const model = new Sequential(new Linear(4, 8), new ReLU(), new Linear(8, 2));
     const x = tensor([[1, 2, 3, 4]]);
-    const compiled = compileWebGPU(model, [x], { enableSchedule: true });
+    const compiled = compileWebGPU(model, [x], { scheduling: { enabled: true } });
     const src = compiled.source();
 
     const barrierCount = (src.match(/workgroupBarrier\(\)/g) || []).length;
@@ -221,7 +221,7 @@ describe('webgpu compilation output', () => {
   it('storage bindings are never promoted to workgroup', () => {
     const model = new Sequential(new Linear(4, 8), new ReLU(), new Linear(8, 2));
     const x = tensor([[1, 2, 3, 4]]);
-    const compiled = compileWebGPU(model, [x], { enableSchedule: true });
+    const compiled = compileWebGPU(model, [x], { scheduling: { enabled: true } });
     const src = compiled.source();
 
     const storageBindings = [...src.matchAll(/var<storage[^>]*>\s+(buf_\d+)/g)].map(m => m[1]);
@@ -240,7 +240,7 @@ describe('webgpu compilation output', () => {
       new Linear(4, 2),
     );
     const x = tensor([[1, 2, 3, 4]]);
-    const compiled = compileWebGPU(model, [x], { enableSchedule: true });
+    const compiled = compileWebGPU(model, [x], { scheduling: { enabled: true } });
     const src = compiled.source();
 
     expect(src).toContain('var<workgroup>');
@@ -260,7 +260,7 @@ describe('webgpu compilation output', () => {
   it('bounds guards only appear when stages have different extents', () => {
     const model = new Sequential(new Linear(4, 4), new ReLU());
     const x = tensor([[1, 2, 3, 4]]);
-    const compiled = compileWebGPU(model, [x], { enableSchedule: true });
+    const compiled = compileWebGPU(model, [x], { scheduling: { enabled: true } });
     const src = compiled.source();
 
     expect(src).not.toMatch(/if \(i32\(_lid\.\w\) </);
@@ -269,7 +269,7 @@ describe('webgpu compilation output', () => {
   it('each workgroup var has explicit array size', () => {
     const model = new Sequential(new Linear(4, 8), new ReLU(), new Linear(8, 2));
     const x = tensor([[1, 2, 3, 4]]);
-    const compiled = compileWebGPU(model, [x], { enableSchedule: true });
+    const compiled = compileWebGPU(model, [x], { scheduling: { enabled: true } });
     const src = compiled.source();
 
     const wgDecls = [...src.matchAll(/var<workgroup>\s+\w+:\s*array<[^,]+,\s*(\d+)>/g)];
@@ -306,7 +306,7 @@ describe('webgpu compilation output', () => {
   it('wide bottleneck: cross-workgroup shared intermediate stays within one workgroup', () => {
     const model = new Sequential(new Linear(4, 64), new ReLU(), new Linear(64, 2));
     const x = tensor([[1, 2, 3, 4]]);
-    const compiled = compileWebGPU(model, [x], { enableSchedule: true });
+    const compiled = compileWebGPU(model, [x], { scheduling: { enabled: true } });
     const src = compiled.source();
 
     expect(src).toMatch(/@workgroup_size\(\d+, 1, 1\)/);
@@ -325,7 +325,7 @@ describe('webgpu compilation output', () => {
       new Linear(8, 2),
     );
     const x = tensor([[1, 2, 3, 4]]);
-    const compiled = compileWebGPU(model, [x], { enableSchedule: true });
+    const compiled = compileWebGPU(model, [x], { scheduling: { enabled: true } });
     const src = compiled.source();
 
     let depth = 0;
@@ -402,7 +402,7 @@ describe('webgpu compilation output', () => {
       new Linear(8, 2),
     );
     const x = tensor([[1, 2, 3, 4]]);
-    const compiled = compileWebGPU(model, [x], { enableSchedule: true });
+    const compiled = compileWebGPU(model, [x], { scheduling: { enabled: true } });
     const src = compiled.source();
 
     expect(src).toContain('var<workgroup>');
@@ -426,7 +426,7 @@ describe('webgpu compilation output', () => {
       new Linear(8, 8),
     );
     const x = tensor([[1, 2, 3, 4]]);
-    const compiled = compileWebGPU(model, [x], { enableSchedule: true });
+    const compiled = compileWebGPU(model, [x], { scheduling: { enabled: true } });
     const src = compiled.source();
 
     expect(src).not.toMatch(/if \(i32\(_lid\.\w\) </);
@@ -439,7 +439,7 @@ describe('webgpu compilation output', () => {
       new Linear(16, 32),
     );
     const x = tensor([[1, 2]]);
-    const compiled = compileWebGPU(model, [x], { enableSchedule: true });
+    const compiled = compileWebGPU(model, [x], { scheduling: { enabled: true } });
     const src = compiled.source();
 
     const wgMatch = src.match(/@workgroup_size\((\d+)/);
@@ -456,7 +456,7 @@ describe('webgpu compilation output', () => {
       new Linear(4, 1),
     );
     const x = tensor([Array.from({ length: 32 }, (_, i) => i)]);
-    const compiled = compileWebGPU(model, [x], { enableSchedule: true });
+    const compiled = compileWebGPU(model, [x], { scheduling: { enabled: true } });
     const src = compiled.source();
 
     expect(src).toContain('var<workgroup>');
@@ -475,7 +475,7 @@ describe('webgpu compilation output', () => {
   it('workgroup var count matches intermediate buffer count', () => {
     const model = new Sequential(new Linear(4, 8), new ReLU(), new Linear(8, 2));
     const x = tensor([[1, 2, 3, 4]]);
-    const compiled = compileWebGPU(model, [x], { enableSchedule: true });
+    const compiled = compileWebGPU(model, [x], { scheduling: { enabled: true } });
     const src = compiled.source();
 
     const wgVars = [...src.matchAll(/var<workgroup>\s+(buf_\d+)/g)].map(m => m[1]);
@@ -488,7 +488,7 @@ describe('webgpu compilation output', () => {
   it('barrier appears before every bounds-guarded section', () => {
     const model = new Sequential(new Linear(4, 8), new ReLU(), new Linear(8, 2));
     const x = tensor([[1, 2, 3, 4]]);
-    const compiled = compileWebGPU(model, [x], { enableSchedule: true });
+    const compiled = compileWebGPU(model, [x], { scheduling: { enabled: true } });
     const src = compiled.source();
 
     const lines = src.split('\n');

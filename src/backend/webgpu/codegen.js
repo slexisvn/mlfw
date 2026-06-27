@@ -1,5 +1,6 @@
 import { ForKind } from '../../compiler/ir/tensor/nodes.js';
 import { wgslType, wgslBytes, wgslMathFunc, hasWgslMathFunc } from '../dtype_map.js';
+import { flattenRowMajorIndex } from '../index_emit.js';
 import { MinHeap } from '../../util/min_heap.js';
 
 
@@ -1128,21 +1129,7 @@ export class WebGPUCodegen {
   }
 
   _flatIndex(buffer, indices) {
-    if (indices.length === 0) return '0';
-    if (indices.length === 1) return this._exprToWGSL(indices[0]);
-    const parts = new Array(indices.length);
-    for (let i = 0; i < indices.length; i++) {
-      const idx = this._exprToWGSL(indices[i]);
-      const stride = buffer.strides[i];
-      if (stride === 1) {
-        parts[i] = idx;
-      } else if (typeof stride === 'number' && stride >= 0) {
-        parts[i] = `${idx} * ${stride}`;
-      } else {
-        parts[i] = `${idx} * ${this._computeDynamicStride(buffer, i)}`;
-      }
-    }
-    return parts.join(' + ');
+    return flattenRowMajorIndex(buffer, indices, (e) => this._exprToWGSL(e), (b, i) => this._computeDynamicStride(b, i), false);
   }
 
   _computeDynamicStride(buffer, dimIdx) {

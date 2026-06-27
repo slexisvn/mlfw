@@ -76,6 +76,7 @@ export class Value {
 
   replaceAllUsesWith(newValue) {
     if (this === newValue) return;
+    const hadUses = this._useHead !== null;
     let cur = this._useHead;
     while (cur) {
       cur.user.operands[cur.operandIndex] = newValue;
@@ -94,6 +95,14 @@ export class Value {
     this._useHead = null;
     this._useTail = null;
     this._useCount = 0;
+    if (hadUses) {
+      const fn = this._owningFunction();
+      if (fn) fn.bumpVersion();
+    }
+  }
+
+  _owningFunction() {
+    return this.definingOp ? this.definingOp.getParentFunction() : null;
   }
 
   isBlockArgument() { return false; }
@@ -104,6 +113,10 @@ export class BlockArgument extends Value {
     super(type, null, 0);
     this.ownerBlock = ownerBlock;
     this.argIndex = argIndex;
+  }
+
+  _owningFunction() {
+    return this.ownerBlock ? this.ownerBlock._owningFunction() : null;
   }
 
   isBlockArgument() { return true; }

@@ -76,14 +76,17 @@ export class Operation {
     const link = new UseLink(this, index);
     newValue.addUse(link);
     this._operandLinks[index] = link;
+    if (this.parentBlock) this.parentBlock._notifyMutation();
   }
 
   dropAllOperands() {
+    const had = this.operands.length > 0;
     for (let i = 0; i < this.operands.length; i++) {
       this.operands[i].removeUse(this._operandLinks[i]);
     }
     this.operands = [];
     this._operandLinks = [];
+    if (had && this.parentBlock) this.parentBlock._notifyMutation();
   }
 
   erase() {
