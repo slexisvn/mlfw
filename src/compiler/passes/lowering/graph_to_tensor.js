@@ -1,4 +1,5 @@
 import { PrimFunc, SeqNode, BufferStoreNode, BufferLoadNode, BlockNode } from '../../ir/tensor/nodes.js';
+import { topoSortOpSet } from '../../ir/graph/graph_algorithms.js';
 
 import { LoweringContext, registerLoweringRule, hasLoweringRule, getLoweringRule, lowerConstant, CONSTANT_OPS, makeLoopNest, wrapInLoops } from './lowering_registry.js';
 import { register as registerElementwise } from './rules/elementwise.js';
@@ -53,34 +54,7 @@ registerAttention();
 export { LoweringContext, hasLoweringRule, registerLoweringRule, canInlineFuse, registerInlineFusionBuilder };
 
 function topologicalOps(graphFunc) {
-  const ops = [];
-  for (const op of graphFunc.ops()) ops.push(op);
-  const opSet = new Set(ops);
-  const ordered = [];
-  const state = new Map();
-  const visit = (root) => {
-    if (state.get(root) === 2) return;
-    state.set(root, 1);
-    const stack = [{ op: root, i: 0 }];
-    while (stack.length > 0) {
-      const frame = stack[stack.length - 1];
-      const op = frame.op;
-      if (frame.i < op.numOperands) {
-        const def = op.getOperand(frame.i).definingOp;
-        frame.i++;
-        if (def && opSet.has(def) && state.get(def) === undefined) {
-          state.set(def, 1);
-          stack.push({ op: def, i: 0 });
-        }
-        continue;
-      }
-      state.set(op, 2);
-      ordered.push(op);
-      stack.pop();
-    }
-  };
-  for (const op of ops) visit(op);
-  return ordered;
+  return topoSortOpSet([...graphFunc.ops()], 'ignore');
 }
 
 export function lowerGraphToPrimFunc(graphFunc, target = null, context = null) {

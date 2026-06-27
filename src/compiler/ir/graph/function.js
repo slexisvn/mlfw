@@ -1,4 +1,5 @@
 import { Block, Region } from './block.js';
+import { topoSortByOperands } from './graph_algorithms.js';
 
 function* opsInRegions(op) {
   if (!op.regions || op.regions.length === 0) return;
@@ -124,32 +125,9 @@ export class GraphFunction {
 }
 
 function topoOrderTopLevel(block) {
-  const inBlock = new Set(block.opsArray());
-  const state = new Map();
-  const ordered = [];
-  for (const root of inBlock) {
-    if (state.get(root) !== undefined) continue;
-    const stack = [{ op: root, i: 0 }];
-    state.set(root, 1);
-    while (stack.length > 0) {
-      const frame = stack[stack.length - 1];
-      const op = frame.op;
-      if (frame.i < op.numOperands) {
-        const operand = op.getOperand(frame.i);
-        frame.i++;
-        const def = operand && operand.definingOp;
-        if (def && inBlock.has(def) && state.get(def) === undefined) {
-          state.set(def, 1);
-          stack.push({ op: def, i: 0 });
-        }
-        continue;
-      }
-      state.set(op, 2);
-      ordered.push(op);
-      stack.pop();
-    }
-  }
-  return ordered;
+  const arr = block.opsArray();
+  const inBlock = new Set(arr);
+  return topoSortByOperands(arr, (op) => inBlock.has(op), 'ignore');
 }
 
 export function cloneGraphFunction(func) {

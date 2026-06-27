@@ -3,6 +3,7 @@ import { wgslType, wgslBytes, wgslMathFunc, hasWgslMathFunc, cCompareOp } from '
 import { flattenRowMajorIndex } from '../index_emit.js';
 import { MinHeap } from '../../util/min_heap.js';
 import { irChildNodes } from '../../compiler/ir/ir_visitor.js';
+import { parseThreadAxis, maxBindingExtent, visitStatements } from '../codegen_utils.js';
 
 
 const BOOL_OPS = new Set(['!', '&&', '||']);
@@ -300,21 +301,14 @@ export class WebGPUCodegen {
   }
 
   _applyBindingDim(tag, extent) {
-    const idx = tag.indexOf('.');
-    if (idx < 0) return;
-    const prefix = tag.substring(0, idx);
-    const axis = tag.charCodeAt(idx + 1) - 120;
-    if (axis < 0 || axis > 2) return;
-    if (prefix === 'threadIdx') this._workgroupSize[axis] = Math.max(this._workgroupSize[axis], extent);
-    else if (prefix === 'blockIdx') this._dispatchSize[axis] = Math.max(this._dispatchSize[axis], extent);
+    const p = parseThreadAxis(tag);
+    if (!p) return;
+    if (p.space === 'thread') this._workgroupSize[p.axis] = Math.max(this._workgroupSize[p.axis], extent);
+    else this._dispatchSize[p.axis] = Math.max(this._dispatchSize[p.axis], extent);
   }
 
   _getMaxBindingExtent(tag) {
-    const entries = this._threadBindings.get(tag);
-    if (!entries) return 0;
-    let max = 0;
-    for (const e of entries) if (e.extent > max) max = e.extent;
-    return max;
+    return maxBindingExtent(this._threadBindings, tag);
   }
 
   _hasRecurrence(func) {
@@ -628,36 +622,13 @@ export class WebGPUCodegen {
   }
 
   _visitNode(node) {
-    const stack = [node];
-    while (stack.length > 0) {
-      const cur = stack.pop();
-      if (!cur) continue;
-      switch (cur.type) {
-        case 'SeqNode':
-          for (let i = cur.stmts.length - 1; i >= 0; i--) stack.push(cur.stmts[i]);
-          continue;
-        case 'AllocateNode':
-          this._visitAllocateNode(cur);
-          stack.push(cur.body);
-          continue;
-        case 'ForNode': this._visitForNode(cur); continue;
-        case 'BlockNode': this._visitBlockNode(cur); continue;
-        case 'IfThenElseNode': this._visitIfStmt(cur); continue;
-        case 'LetStmtNode': this._visitLetStmtNode(cur); continue;
-        case 'BufferStoreNode': this._visitBufferStoreNode(cur); continue;
-        case 'LIRFlatStoreNode': this._visitLIRFlatStore(cur); continue;
-        case 'LIRBindingsNode': this._visitLIRBindings(cur); continue;
-        case 'LIRAccumulatorNode': this._visitLIRAccumulator(cur); continue;
-        case 'WhileNode': this._visitWhileNode(cur); continue;
-        case 'SyncThreadsNode':
-          if (this._needsBarriers) {
-            this._emit('storageBarrier();');
-            this._emit('workgroupBarrier();');
-          }
-          continue;
-        case 'EvaluateNode': continue;
-        default: throw new Error(`WebGPU codegen: unhandled statement node '${cur.type}'`);
-      }
+    visitStatements(this, node);
+  }
+
+  _emitSync() {
+    if (this._needsBarriers) {
+      this._emit('storageBarrier();');
+      this._emit('workgroupBarrier();');
     }
   }
 

@@ -2,6 +2,7 @@ import { ForKind } from '../../compiler/ir/tensor/nodes.js';
 import { cType, cPtrType, cLiteralSuffix, cMathFunc, isDtypeInt, dtypeBytes, cCompareOp } from '../dtype_map.js';
 import { flattenRowMajorIndex } from '../index_emit.js';
 import { irChildNodes } from '../../compiler/ir/ir_visitor.js';
+import { parseThreadAxis, maxBindingExtent, visitStatements } from '../codegen_utils.js';
 
 
 export class CUDAKernel {
@@ -180,13 +181,10 @@ export class CUDACodegen {
   }
 
   _applyBindingDim(tag, extent) {
-    const idx = tag.indexOf('.');
-    if (idx < 0) return;
-    const prefix = tag.substring(0, idx);
-    const axis = tag.charCodeAt(idx + 1) - 120;
-    if (axis < 0 || axis > 2) return;
-    if (prefix === 'threadIdx') this._blockDim[axis] = Math.max(this._blockDim[axis], extent);
-    else if (prefix === 'blockIdx') this._gridDim[axis] = Math.max(this._gridDim[axis], extent);
+    const p = parseThreadAxis(tag);
+    if (!p) return;
+    if (p.space === 'thread') this._blockDim[p.axis] = Math.max(this._blockDim[p.axis], extent);
+    else this._gridDim[p.axis] = Math.max(this._gridDim[p.axis], extent);
   }
 
   _emit(line) {
@@ -194,32 +192,11 @@ export class CUDACodegen {
   }
 
   _visitNode(node) {
-    const stack = [node];
-    while (stack.length > 0) {
-      const cur = stack.pop();
-      if (!cur) continue;
-      switch (cur.type) {
-        case 'SeqNode':
-          for (let i = cur.stmts.length - 1; i >= 0; i--) stack.push(cur.stmts[i]);
-          continue;
-        case 'AllocateNode':
-          this._visitAllocateNode(cur);
-          stack.push(cur.body);
-          continue;
-        case 'ForNode': this._visitForNode(cur); continue;
-        case 'BlockNode': this._visitBlockNode(cur); continue;
-        case 'IfThenElseNode': this._visitIfStmt(cur); continue;
-        case 'LetStmtNode': this._visitLetStmtNode(cur); continue;
-        case 'BufferStoreNode': this._visitBufferStoreNode(cur); continue;
-        case 'SyncThreadsNode': this._emit('__syncthreads();'); continue;
-        case 'LIRFlatStoreNode': this._visitLIRFlatStore(cur); continue;
-        case 'LIRBindingsNode': this._visitLIRBindings(cur); continue;
-        case 'LIRAccumulatorNode': this._visitLIRAccumulator(cur); continue;
-        case 'WhileNode': this._visitWhileNode(cur); continue;
-        case 'EvaluateNode': continue;
-        default: throw new Error(`CUDA codegen: unhandled statement node '${cur.type}'`);
-      }
-    }
+    visitStatements(this, node);
+  }
+
+  _emitSync() {
+    this._emit('__syncthreads();');
   }
 
   _matchFullReduction(node) {
@@ -503,11 +480,7 @@ export class CUDACodegen {
   }
 
   _getMaxBindingExtent(tag) {
-    const entries = this._threadBindings.get(tag);
-    if (!entries) return 0;
-    let max = 0;
-    for (const e of entries) if (e.extent > max) max = e.extent;
-    return max;
+    return maxBindingExtent(this._threadBindings, tag);
   }
 
   _scanStoreTargets(root) {

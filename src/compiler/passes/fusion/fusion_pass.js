@@ -1,6 +1,7 @@
 import { FunctionPass, PassResult } from '../pass.js';
 import { Operation, cloneRegion } from '../../ir/graph/operation.js';
 import { Block, Region } from '../../ir/graph/block.js';
+import { topoSortByOperands } from '../../ir/graph/graph_algorithms.js';
 import { FusionLegality, FusionKind } from './fusion_analysis.js';
 import { FusionGroupBuilder } from './fusion_groups.js';
 import { FusionCostModel } from './fusion_cost.js';
@@ -205,31 +206,7 @@ export class FusionPass extends FunctionPass {
   }
 
   _topologicalSort(group) {
-    const sorted = [];
-    const visited = new Set();
-    const visiting = new Set();
-
-    const visit = (op) => {
-      if (visited.has(op)) return true;
-      if (visiting.has(op)) return false;
-      visiting.add(op);
-      for (let i = 0; i < op.numOperands; i++) {
-        const defOp = op.getOperand(i).definingOp;
-        if (defOp && group.hasOp(defOp)) {
-          if (!visit(defOp)) return false;
-        }
-      }
-      visiting.delete(op);
-      visited.add(op);
-      sorted.push(op);
-      return true;
-    };
-
-    for (const op of group.ops) {
-      if (!visit(op)) return null;
-    }
-
-    return sorted;
+    return topoSortByOperands(group.ops, (op) => group.hasOp(op), 'null');
   }
 }
 

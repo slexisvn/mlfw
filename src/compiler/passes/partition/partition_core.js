@@ -1,21 +1,7 @@
+import { topoSortOpSet } from '../../ir/graph/graph_algorithms.js';
+
 export function topoSortOps(ops) {
-  const opSet = new Set(ops);
-  const ordered = [];
-  const state = new Map();
-  const visit = (op) => {
-    const s = state.get(op);
-    if (s === 2) return;
-    if (s === 1) throw new Error('partition topo sort: cycle detected');
-    state.set(op, 1);
-    for (let i = 0; i < op.numOperands; i++) {
-      const d = op.getOperand(i).definingOp;
-      if (d && opSet.has(d)) visit(d);
-    }
-    state.set(op, 2);
-    ordered.push(op);
-  };
-  for (const op of ops) visit(op);
-  return ordered;
+  return topoSortOpSet(ops, 'throw');
 }
 
 export function buildPartitions(partitionOps, { labelOf, sameLabel = (a, b) => a === b, canMerge = () => true, onAttach = () => {}, sort = topoSortOps }) {

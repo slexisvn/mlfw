@@ -327,28 +327,33 @@ export class Compiler {
     trace.phaseEnd('partition', performance.now() - t0);
   }
 
+  _eachFunc(funcs, phase, trace, errors, failed, resilient, fn) {
+    for (const f of funcs) {
+      if (failed.has(f.name)) continue;
+      try {
+        fn(f);
+      } catch (e) {
+        errors.push(new CompilationError(phase, f.name, e.message));
+        failed.add(f.name);
+        trace.errorEvent(phase, f.name, e.message);
+        if (!resilient) break;
+      }
+    }
+  }
+
   _lowerAll(graphModule, trace, errors, failed, resilient) {
     trace.phaseStart('lowering');
     const t0 = performance.now();
     const primFuncs = [];
-    for (const func of graphModule) {
-      if (failed.has(func.name)) continue;
-      try {
-        const ft0 = performance.now();
-        const primFunc = lowerGraphToPrimFunc(func, this.config.target, this.context);
-        trace.functionEvent('lowering', func.name, { durationMs: performance.now() - ft0 });
-        primFuncs.push(primFunc);
-        if (trace.shouldSnapshot('afterLowering')) {
-          trace.irDump('afterLowering:' + func.name, printTensorIR(primFunc));
-        }
-      } catch (e) {
-        const err = new CompilationError('lowering', func.name, e.message);
-        errors.push(err);
-        failed.add(func.name);
-        trace.errorEvent('lowering', func.name, e.message);
-        if (!resilient) break;
+    this._eachFunc(graphModule, 'lowering', trace, errors, failed, resilient, (func) => {
+      const ft0 = performance.now();
+      const primFunc = lowerGraphToPrimFunc(func, this.config.target, this.context);
+      trace.functionEvent('lowering', func.name, { durationMs: performance.now() - ft0 });
+      primFuncs.push(primFunc);
+      if (trace.shouldSnapshot('afterLowering')) {
+        trace.irDump('afterLowering:' + func.name, printTensorIR(primFunc));
       }
-    }
+    });
     trace.phaseEnd('lowering', performance.now() - t0);
     return primFuncs;
   }
@@ -359,52 +364,34 @@ export class Compiler {
     const sCfg = this.config.scheduling;
     if (sCfg.autotune) {
       const autotuner = new Autotuner(this.config.target, sCfg, trace);
-      for (const pf of primFuncs) {
-        if (failed.has(pf.name)) continue;
-        if (pf.cublasInfo) continue;
-        try {
-          const ft0 = performance.now();
-          const tuneResult = autotuner.tuneAndApply(pf);
-          const durationMs = performance.now() - ft0;
-          let cacheHits = 0, blockCount = 0;
-          if (tuneResult && tuneResult.results) {
-            blockCount = tuneResult.results.size;
-            for (const [blockName, r] of tuneResult.results) {
-              if (r.fromCache) cacheHits++;
-              if (trace.explainsEnabled) {
-                trace.explain('schedule', blockName, r.sketchName,
-                  `autotuned: best of search${r.fromCache ? ' (cached)' : ''}, score ${r.score != null ? r.score.toFixed(3) : 'n/a'}`,
-                  { target: this.config.target.name, params: r.params });
-              }
+      this._eachFunc(primFuncs, 'scheduling', trace, errors, failed, resilient, (pf) => {
+        if (pf.cublasInfo) return;
+        const ft0 = performance.now();
+        const tuneResult = autotuner.tuneAndApply(pf);
+        const durationMs = performance.now() - ft0;
+        let cacheHits = 0, blockCount = 0;
+        if (tuneResult && tuneResult.results) {
+          blockCount = tuneResult.results.size;
+          for (const [blockName, r] of tuneResult.results) {
+            if (r.fromCache) cacheHits++;
+            if (trace.explainsEnabled) {
+              trace.explain('schedule', blockName, r.sketchName,
+                `autotuned: best of search${r.fromCache ? ' (cached)' : ''}, score ${r.score != null ? r.score.toFixed(3) : 'n/a'}`,
+                { target: this.config.target.name, params: r.params });
             }
           }
-          trace.autotuneStats(pf.name, { durationMs, blockCount, applied: !!(tuneResult && tuneResult.applied), cacheHits });
-        } catch (e) {
-          const err = new CompilationError('scheduling', pf.name, e.message);
-          errors.push(err);
-          failed.add(pf.name);
-          trace.errorEvent('scheduling', pf.name, e.message);
-          if (!resilient) break;
         }
-      }
+        trace.autotuneStats(pf.name, { durationMs, blockCount, applied: !!(tuneResult && tuneResult.applied), cacheHits });
+      });
     } else if (sCfg.enabled) {
       const policy = new SchedulePolicy(this.config.target, null, trace);
-      for (const pf of primFuncs) {
-        if (failed.has(pf.name)) continue;
-        if (pf.cublasInfo) continue;
-        try {
-          const ft0 = performance.now();
-          const sch = new Schedule(pf);
-          policy.applyToAllBlocks(sch);
-          trace.functionEvent('scheduling', pf.name, { durationMs: performance.now() - ft0 });
-        } catch (e) {
-          const err = new CompilationError('scheduling', pf.name, e.message);
-          errors.push(err);
-          failed.add(pf.name);
-          trace.errorEvent('scheduling', pf.name, e.message);
-          if (!resilient) break;
-        }
-      }
+      this._eachFunc(primFuncs, 'scheduling', trace, errors, failed, resilient, (pf) => {
+        if (pf.cublasInfo) return;
+        const ft0 = performance.now();
+        const sch = new Schedule(pf);
+        policy.applyToAllBlocks(sch);
+        trace.functionEvent('scheduling', pf.name, { durationMs: performance.now() - ft0 });
+      });
     }
     trace.phaseEnd('scheduling', performance.now() - t0);
 
@@ -420,27 +407,18 @@ export class Compiler {
     const t0 = performance.now();
     const alignment = this.config.memory.alignment || this.config.target?.cacheLineSizeBytes || 64;
     const planner = new MemoryPlanner({ alignment, enableInplace: this.config.memory.inplaceReuse, allocStrategy: this.config.memory.allocStrategy, poolAllocation: this.config.memory.poolAllocation });
-    for (const pf of primFuncs) {
-      if (failed.has(pf.name)) continue;
-      if (pf.gpuRegisterBlocked) continue;
-      try {
-        const ft0 = performance.now();
-        const { plan } = planner.planAndRewrite(pf);
-        const report = plan.getReport();
-        trace.memoryStats(pf.name, {
-          durationMs: performance.now() - ft0,
-          peakMemory: report.peakMemory,
-          totalTemporaries: report.totalTemporaries,
-          totalInplace: report.totalInplace,
-        });
-      } catch (e) {
-        const err = new CompilationError('memoryPlanning', pf.name, e.message);
-        errors.push(err);
-        failed.add(pf.name);
-        trace.errorEvent('memoryPlanning', pf.name, e.message);
-        if (!resilient) break;
-      }
-    }
+    this._eachFunc(primFuncs, 'memoryPlanning', trace, errors, failed, resilient, (pf) => {
+      if (pf.gpuRegisterBlocked) return;
+      const ft0 = performance.now();
+      const { plan } = planner.planAndRewrite(pf);
+      const report = plan.getReport();
+      trace.memoryStats(pf.name, {
+        durationMs: performance.now() - ft0,
+        peakMemory: report.peakMemory,
+        totalTemporaries: report.totalTemporaries,
+        totalInplace: report.totalInplace,
+      });
+    });
     trace.phaseEnd('memoryPlanning', performance.now() - t0);
   }
 
@@ -485,29 +463,20 @@ export class Compiler {
     trace.phaseStart('lirLowering');
     const t0 = performance.now();
     const lirFuncs = [];
-    for (const pf of primFuncs) {
-      if (failed.has(pf.name)) continue;
-      try {
-        const ft0 = performance.now();
-        const lirFunc = lowerToLIR(pf, this.config.target);
-        if (pf.cublasInfo) lirFunc.cublasInfo = pf.cublasInfo;
-        if (pf.gpuRegisterBlocked) lirFunc.gpuRegisterBlocked = true;
-        if (this.config.verifyMode === 'full') {
-          const lirErrors = verifyLIR(lirFunc);
-          if (lirErrors.length > 0) {
-            throw new Error('LIR verification failed: ' + lirErrors.map(e => e.toString()).join('; '));
-          }
+    this._eachFunc(primFuncs, 'lirLowering', trace, errors, failed, resilient, (pf) => {
+      const ft0 = performance.now();
+      const lirFunc = lowerToLIR(pf, this.config.target);
+      if (pf.cublasInfo) lirFunc.cublasInfo = pf.cublasInfo;
+      if (pf.gpuRegisterBlocked) lirFunc.gpuRegisterBlocked = true;
+      if (this.config.verifyMode === 'full') {
+        const lirErrors = verifyLIR(lirFunc);
+        if (lirErrors.length > 0) {
+          throw new Error('LIR verification failed: ' + lirErrors.map(e => e.toString()).join('; '));
         }
-        trace.functionEvent('lirLowering', pf.name, { durationMs: performance.now() - ft0 });
-        lirFuncs.push(lirFunc);
-      } catch (e) {
-        const err = new CompilationError('lirLowering', pf.name, e.message);
-        errors.push(err);
-        failed.add(pf.name);
-        trace.errorEvent('lirLowering', pf.name, e.message);
-        if (!resilient) break;
       }
-    }
+      trace.functionEvent('lirLowering', pf.name, { durationMs: performance.now() - ft0 });
+      lirFuncs.push(lirFunc);
+    });
     trace.phaseEnd('lirLowering', performance.now() - t0);
     return lirFuncs;
   }
@@ -526,38 +495,29 @@ export class Compiler {
     };
     const defaultBackend = usePartition ? null : new BackendPipeline(this.config.target, backendOpts);
 
-    for (const pf of primFuncs) {
-      if (failed.has(pf.name)) continue;
-      try {
-        const ft0 = performance.now();
-        let backend;
-        if (usePartition) {
-          const targetName = pf._partitionTarget;
-          const target = targetName
-            ? this.config.partition.targets.find(t => t.name === targetName)
-            : this.config.target;
-          backend = getBackend(target || this.config.target);
-        } else {
-          backend = defaultBackend;
-        }
-        const compiled = backend.compile(pf);
-        runtimeMod.addCompiledKernel(compiled);
-        if (pf.shapeParamMap && pf.shapeParamMap.size > 0) {
-          runtimeMod.setShapeParamMap(pf.name, pf.shapeParamMap, pf.bufferMap);
-        }
-        trace.codegenStats(pf.name, {
-          durationMs: performance.now() - ft0,
-          sourceSize: compiled.source.length,
-          targetName: compiled.target.name,
-        });
-      } catch (e) {
-        const err = new CompilationError('codegen', pf.name, e.message);
-        errors.push(err);
-        failed.add(pf.name);
-        trace.errorEvent('codegen', pf.name, e.message);
-        if (!resilient) break;
+    this._eachFunc(primFuncs, 'codegen', trace, errors, failed, resilient, (pf) => {
+      const ft0 = performance.now();
+      let backend;
+      if (usePartition) {
+        const targetName = pf._partitionTarget;
+        const target = targetName
+          ? this.config.partition.targets.find(t => t.name === targetName)
+          : this.config.target;
+        backend = getBackend(target || this.config.target);
+      } else {
+        backend = defaultBackend;
       }
-    }
+      const compiled = backend.compile(pf);
+      runtimeMod.addCompiledKernel(compiled);
+      if (pf.shapeParamMap && pf.shapeParamMap.size > 0) {
+        runtimeMod.setShapeParamMap(pf.name, pf.shapeParamMap, pf.bufferMap);
+      }
+      trace.codegenStats(pf.name, {
+        durationMs: performance.now() - ft0,
+        sourceSize: compiled.source.length,
+        targetName: compiled.target.name,
+      });
+    });
 
     trace.phaseEnd('codegen', performance.now() - t0);
     return runtimeMod;
