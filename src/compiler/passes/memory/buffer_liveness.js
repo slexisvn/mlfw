@@ -42,6 +42,16 @@ export class BufferLivenessResult {
   }
 }
 
+const META_KEYS = new Set(['_parent', '_parentKey', '_parentIdx']);
+
+function isBuffer(x) {
+  return !!x && typeof x === 'object'
+    && typeof x.name === 'string'
+    && x.dtype !== undefined
+    && x.shape !== undefined
+    && x.type === undefined;
+}
+
 export class BufferLiveness {
   static analyze(primFunc) {
     const intervals = new Map();
@@ -68,30 +78,20 @@ export class BufferLiveness {
       touchLog.push(buffer);
     };
 
-    const touchExpr = (node) => {
-      if (!node || typeof node !== 'object') return;
-      if (node.type === 'BufferLoadNode') { touch(node.buffer); return; }
-      if (node.type === 'CallExternNode') { for (const a of node.args) touchExpr(a); return; }
-      if (node.a) touchExpr(node.a);
-      if (node.b) touchExpr(node.b);
-      if (node.expr) touchExpr(node.expr);
-      if (node.cond) touchExpr(node.cond);
-      if (node.condition) touchExpr(node.condition);
-      if (node.thenBody) touchExpr(node.thenBody);
-      if (node.elseBody) touchExpr(node.elseBody);
-    };
-
-    const touchBody = (node) => {
-      if (!node) return;
-      if (node.type === 'BufferStoreNode') {
-        touch(node.buffer);
-        touchExpr(node.value);
-        for (const idx of node.indices) touchExpr(idx);
-      } else if (node.type === 'BufferLoadNode') {
-        touch(node.buffer);
-        for (const idx of node.indices) touchExpr(idx);
-      } else if (node.type === 'SeqNode') {
-        for (const s of node.stmts) touchBody(s);
+    const touchAll = (node, seen) => {
+      if (!node || typeof node !== 'object' || seen.has(node)) return;
+      seen.add(node);
+      if (isBuffer(node)) { touch(node); return; }
+      if (isBuffer(node.buffer)) touch(node.buffer);
+      for (const key of Object.keys(node)) {
+        if (META_KEYS.has(key) || key === 'buffer') continue;
+        const value = node[key];
+        if (!value || typeof value !== 'object') continue;
+        if (Array.isArray(value)) {
+          for (const item of value) touchAll(item, seen);
+        } else {
+          touchAll(value, seen);
+        }
       }
     };
 
@@ -112,7 +112,19 @@ export class BufferLiveness {
         case 'ForNode': {
           const bodyStart = stmtIdx;
           const logStart = touchLog.length;
+          touchAll(node.min, new Set());
+          touchAll(node.extent, new Set());
           walk(node.body);
+          const bodyEnd = stmtIdx > bodyStart ? stmtIdx - 1 : bodyStart;
+          extendRegion(logStart, bodyEnd);
+          break;
+        }
+        case 'WhileNode': {
+          const bodyStart = stmtIdx;
+          const logStart = touchLog.length;
+          touchAll(node.condVar, new Set());
+          walk(node.condBody);
+          walk(node.loopBody);
           const bodyEnd = stmtIdx > bodyStart ? stmtIdx - 1 : bodyStart;
           extendRegion(logStart, bodyEnd);
           break;
@@ -121,8 +133,8 @@ export class BufferLiveness {
           stmtOrder.push({ idx: stmtIdx, node });
           for (const r of node.reads) touch(r.buffer);
           for (const w of node.writes) touch(w.buffer);
-          touchBody(node.body);
-          if (node.initBody) touchBody(node.initBody);
+          touchAll(node.body, new Set());
+          if (node.initBody) touchAll(node.initBody, new Set());
           stmtIdx++;
           break;
         case 'AllocateNode':
@@ -132,6 +144,7 @@ export class BufferLiveness {
         case 'IfThenElseNode': {
           const branchStart = stmtIdx;
           const logStart = touchLog.length;
+          touchAll(node.condition, new Set());
           walk(node.thenBody);
           if (node.elseBody) walk(node.elseBody);
           const branchEnd = stmtIdx > branchStart ? stmtIdx - 1 : branchStart;
@@ -139,10 +152,14 @@ export class BufferLiveness {
           break;
         }
         case 'LetStmtNode':
+          touchAll(node.value, new Set());
           walk(node.body);
           break;
+        case 'EvaluateNode':
+          touchAll(node.value, new Set());
+          break;
         default:
-          touchBody(node);
+          touchAll(node, new Set());
           break;
       }
     };
