@@ -2,11 +2,14 @@ import { GraphFunction } from '../ir/graph/function.js';
 import { IRBuilder } from '../ir/graph/builder.js';
 
 import { UseDefAnalysis } from '../analysis/use_def.js';
-import { GradAccumulator } from './grad_accumulator.js';
+import { GradAccumulator, gradOrZero } from './grad_accumulator.js';
 import { getVJPRule, isGradientBarrier, requireVJPRuleOrBarrier, getRegionVJP } from './vjp_registry.js';
 import { buildScanBackward, buildCondBackward, regionFreeVars } from './scan_backward.js';
+import { REGION_CONTROL_FLOW } from './control_flow_ops.js';
 
-export const REGION_CONTROL_FLOW = new Set(['scan', 'if']);
+export { REGION_CONTROL_FLOW };
+
+const FALLBACK_REMAT_OPS = new Set(['neg', 'abs', 'sign', 'floor', 'ceil']);
 
 export function backpropOps(orderedOps, { accumulator, builder, needsGrad, resolveValue, handleRegionOp = null }) {
   for (let i = orderedOps.length - 1; i >= 0; i--) {
@@ -150,14 +153,7 @@ export class BackwardGraphBuilder {
     const returnValues = [];
     for (let i = 0; i < forwardInputs.length; i++) {
       if (needsGrad.has(forwardInputs[i].id)) {
-        const grad = accumulator.get(forwardInputs[i].id);
-        if (grad) {
-          returnValues.push(grad);
-        } else {
-          const zeroConst = builder.scalarConstant(0, forwardInputs[i].type.dtype).getResult(0);
-          const zeroBroadcast = builder.broadcast(zeroConst, forwardInputs[i].type.shape, []).getResult(0);
-          returnValues.push(zeroBroadcast);
-        }
+        returnValues.push(gradOrZero(builder, forwardInputs[i], accumulator));
       }
     }
 
@@ -317,9 +313,7 @@ export class BackwardGraphBuilder {
     if (this._rematPolicy) {
       return !this._rematPolicy.shouldRematerialize(op);
     }
-    const name = op.opName;
-    const alwaysRemat = new Set(['neg', 'abs', 'sign', 'floor', 'ceil']);
-    return !alwaysRemat.has(name);
+    return !FALLBACK_REMAT_OPS.has(op.opName);
   }
 
   _getGradInputIndices(forwardInputs, needsGrad) {
@@ -357,6 +351,14 @@ export class BackwardGraphBuilder {
     const savedValues = [];
     const savedValueIndices = new Map();
 
+    const valueById = new Map();
+    for (const op of topoOrder) {
+      for (let r = 0; r < op.numResults; r++) {
+        const res = op.getResult(r);
+        valueById.set(res.id, res);
+      }
+    }
+
     const inputIds = new Set(forwardInputs.map(v => v.id));
     for (const input of forwardInputs) {
       if (needsGrad.has(input.id) && !savedValueSet.has(input.id)) {
@@ -370,7 +372,7 @@ export class BackwardGraphBuilder {
       for (const valId of seg.boundaryInputs) {
         if (!inputIds.has(valId) && !savedValueSet.has(valId)) {
           savedValueSet.add(valId);
-          const val = this._findValue(topoOrder, valId);
+          const val = valueById.get(valId) || null;
           if (val) {
             savedValueIndices.set(valId, savedValues.length);
             savedValues.push(val);
@@ -380,7 +382,7 @@ export class BackwardGraphBuilder {
       for (const valId of seg.boundaryOutputs) {
         if (!savedValueSet.has(valId)) {
           savedValueSet.add(valId);
-          const val = this._findValue(topoOrder, valId);
+          const val = valueById.get(valId) || null;
           if (val) {
             savedValueIndices.set(valId, savedValues.length);
             savedValues.push(val);
@@ -472,14 +474,7 @@ export class BackwardGraphBuilder {
     const returnValues = [];
     for (let i = 0; i < forwardInputs.length; i++) {
       if (needsGrad.has(forwardInputs[i].id)) {
-        const grad = accumulator.get(forwardInputs[i].id);
-        if (grad) {
-          returnValues.push(grad);
-        } else {
-          const zeroConst = builder.scalarConstant(0, forwardInputs[i].type.dtype).getResult(0);
-          const zeroBroadcast = builder.broadcast(zeroConst, forwardInputs[i].type.shape, []).getResult(0);
-          returnValues.push(zeroBroadcast);
-        }
+        returnValues.push(gradOrZero(builder, forwardInputs[i], accumulator));
       }
     }
 
@@ -492,12 +487,4 @@ export class BackwardGraphBuilder {
     };
   }
 
-  _findValue(topoOrder, valueId) {
-    for (const op of topoOrder) {
-      for (let r = 0; r < op.numResults; r++) {
-        if (op.getResult(r).id === valueId) return op.getResult(r);
-      }
-    }
-    return null;
-  }
 }

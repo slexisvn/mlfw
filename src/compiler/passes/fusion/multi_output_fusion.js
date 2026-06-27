@@ -16,6 +16,7 @@ export class MultiOutputFusionPass extends FunctionPass {
     this.maxReductions = config.maxReductions || 1;
     this.minSharedInputBytes = config.minSharedInputBytes || 0;
     this.maxOutputs = config.maxOutputs || 8;
+    this.maxConsumersPerInput = config.maxConsumersPerInput || 64;
   }
 
   run(func) {
@@ -75,8 +76,9 @@ export class MultiOutputFusionPass extends FunctionPass {
 
     for (const [inputId, consumers] of inputMap) {
       if (consumers.length < 2) continue;
-      for (let i = 0; i < consumers.length; i++) {
-        for (let j = i + 1; j < consumers.length; j++) {
+      const lim = Math.min(consumers.length, this.maxConsumersPerInput);
+      for (let i = 0; i < lim; i++) {
+        for (let j = i + 1; j < lim; j++) {
           const a = consumers[i], b = consumers[j];
           if (a === b) continue;
           const key = pairKey(a, b);

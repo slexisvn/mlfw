@@ -60,7 +60,7 @@ export class MemoryPool {
   placeAt(offset, size, buffer) {
     const aligned = this._align(size);
     const block = new MemoryBlock(offset, aligned, buffer);
-    this.blocks.push(block);
+    insertByOffset(this.blocks, block);
     const end = offset + aligned;
     if (end > this.peakUsage) this.peakUsage = end;
     return block;
@@ -71,7 +71,7 @@ export class MemoryPool {
   }
 
   _findFreeOffset(size) {
-    const live = this.blocks.slice().sort((a, b) => a.offset - b.offset);
+    const live = this.blocks;
     let cursor = 0;
     const sel = gapSelector(this.strategy);
 

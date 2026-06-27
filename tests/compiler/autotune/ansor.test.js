@@ -148,10 +148,10 @@ describe('LearnedCostModel per-statement sum formulation', () => {
 });
 
 describe('GuidedCostModel closes the loop: learned model steers once trained', () => {
-  it('falls back to analytical cold, then routes to learned.predict after training', () => {
+  it('falls back to analytical cold, keeps analytical until confident, then routes to learned.predict', () => {
     const analytical = new AnalyticalCostModel(CPUTarget());
     const learned = new LearnedCostModel(null, { seed: 4 });
-    const guided = new GuidedCostModel(analytical, learned);
+    const guided = new GuidedCostModel(analytical, learned, { confidenceSamples: 8 });
     const pf = matmulPrimFunc('gemm', 8, 8, 8);
 
     expect(guided.score(pf)).toBe(analytical.score(pf));
@@ -161,6 +161,11 @@ describe('GuidedCostModel closes the loop: learned model steers once trained', (
     learned.train();
 
     expect(learned.trained).toBe(true);
+    expect(guided.score(pf)).toBe(analytical.score(pf));
+
+    for (let i = 6; i < 8; i++) learned.addSample([new Array(dim).fill(i)], i * 1.5);
+    learned.train();
+
     expect(guided.score(pf)).toBe(learned.predict(FeatureExtractor.extractStatements(pf)));
   });
 });

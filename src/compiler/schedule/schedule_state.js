@@ -1,5 +1,4 @@
 import { SRefTree } from './sref.js';
-import { DependencyAnalysis } from './dep_analysis.js';
 import { ForKind } from '../ir/tensor/nodes.js';
 
 export class LoopBinding {
@@ -26,7 +25,6 @@ export class ScheduleState {
     this.primFunc = primFunc;
     this._dirty = true;
     this._tree = null;
-    this._depAnalysis = null;
     this._loopBindings = null;
     this._blockBindings = null;
   }
@@ -34,7 +32,6 @@ export class ScheduleState {
   _ensureBuilt() {
     if (!this._dirty) return;
     this._tree = new SRefTree(this.primFunc);
-    this._depAnalysis = new DependencyAnalysis(this._tree);
     this._loopBindings = new Map();
     this._blockBindings = new Map();
 
@@ -67,15 +64,9 @@ export class ScheduleState {
     return this._tree;
   }
 
-  get depAnalysis() {
-    this._ensureBuilt();
-    return this._depAnalysis;
-  }
-
   invalidate() {
     this._dirty = true;
     this._tree = null;
-    this._depAnalysis = null;
     this._loopBindings = null;
     this._blockBindings = null;
   }
@@ -98,22 +89,6 @@ export class ScheduleState {
 
   getLoopsOf(blockName) {
     return this.tree.loopsOf(blockName);
-  }
-
-  getReads(blockName) {
-    return this.depAnalysis.getReads(blockName);
-  }
-
-  getWrites(blockName) {
-    return this.depAnalysis.getWrites(blockName);
-  }
-
-  getDeps(srcBlock, dstBlock) {
-    return this.depAnalysis.computeDeps(srcBlock, dstBlock);
-  }
-
-  canReorder(blockA, blockB) {
-    return this.depAnalysis.canReorder(blockA, blockB);
   }
 
   threadBindingSummary() {

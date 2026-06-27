@@ -36,13 +36,13 @@ export class RematerializationPass extends FunctionPass {
 
     while (iterations < this.config.maxIterations) {
       const useDef = UseDefAnalysis.compute(func);
-      const { peakPressure, candidates } = this._analyzeIntervalPressure(func, useDef);
+      const { peakPressure, candidates, opIndex } = this._analyzeIntervalPressure(func, useDef);
       lastPeak = peakPressure;
       if (peakPressure <= this.config.memoryBudget) break;
       if (candidates.length === 0) break;
 
       candidates.sort((a, b) => b.score - a.score);
-      this._rematerialize(func, candidates[0]);
+      this._rematerialize(func, candidates[0], opIndex);
       changed = true;
       iterations++;
     }
@@ -61,7 +61,7 @@ export class RematerializationPass extends FunctionPass {
 
   _analyzeIntervalPressure(func, useDef) {
     const topo = useDef.topologicalOrder;
-    const { intervals } = LivenessAnalysis.buildIntervals(func, topo);
+    const { intervals, opIndex } = LivenessAnalysis.buildIntervals(func, topo);
 
     const events = [];
     for (const [value, intv] of intervals) {
@@ -113,7 +113,7 @@ export class RematerializationPass extends FunctionPass {
       });
     }
 
-    return { peakPressure, peakIdx, candidates };
+    return { peakPressure, peakIdx, candidates, opIndex };
   }
 
   _canRematerialize(value) {
@@ -196,7 +196,7 @@ export class RematerializationPass extends FunctionPass {
     return Infinity;
   }
 
-  _rematerialize(func, candidate) {
+  _rematerialize(func, candidate, opOrder) {
     const { value, definingOp } = candidate;
     const uses = [];
     for (const use of value.uses()) {
@@ -204,12 +204,6 @@ export class RematerializationPass extends FunctionPass {
     }
 
     if (uses.length <= 1) return;
-
-    const opOrder = new Map();
-    let idx = 0;
-    for (const op of func.ops()) {
-      opOrder.set(op, idx++);
-    }
 
     uses.sort((a, b) => (opOrder.get(a.user) || 0) - (opOrder.get(b.user) || 0));
 

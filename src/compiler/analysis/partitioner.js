@@ -171,9 +171,7 @@ export class GraphPartitioner {
 
     if (target.isGPU()) {
       return def.isElementwise || def.isReduction || def.isBroadcast ||
-             def.isInjective || opName === 'dot' || opName === 'conv' ||
-             opName === 'batch_dot' || opName === 'softmax' ||
-             opName === 'layer_norm' || opName === 'batch_norm';
+             def.isInjective || def.getAttr('gpuCapable') === true;
     }
 
     if (target.isCPU()) return true;
@@ -316,38 +314,58 @@ export class GraphPartitioner {
     const opToPart = new Map();
     for (const part of partitions) for (const op of part.ops) opToPart.set(op, part);
 
-    const directSuccs = (part) => {
-      const out = new Set();
-      for (const op of part.ops) {
-        for (let r = 0; r < op.numResults; r++) {
-          for (const use of op.getResult(r).uses()) {
-            const cp = opToPart.get(use.user);
-            if (cp && cp !== part) out.add(cp);
+    const mergedAway = new Set();
+    let succCache = null;
+    let reachCache = null;
+    const buildSucc = () => {
+      succCache = new Map();
+      reachCache = new Map();
+      for (const part of partitions) {
+        if (mergedAway.has(part)) continue;
+        succCache.set(part, new Set());
+      }
+      for (const part of partitions) {
+        if (mergedAway.has(part)) continue;
+        const out = succCache.get(part);
+        for (const op of part.ops) {
+          for (let r = 0; r < op.numResults; r++) {
+            for (const use of op.getResult(r).uses()) {
+              const cp = opToPart.get(use.user);
+              if (cp && cp !== part) out.add(cp);
+            }
           }
         }
       }
-      return out;
     };
-    const reachesThroughIntermediate = (a, b) => {
-      const seen = new Set([a]);
-      const stack = [...directSuccs(a)].filter(n => n !== b);
+    buildSucc();
+
+    const reachOf = (part) => {
+      let r = reachCache.get(part);
+      if (r) return r;
+      r = new Set();
+      const stack = [...succCache.get(part)];
       while (stack.length > 0) {
         const n = stack.pop();
-        if (n === b) return true;
-        if (seen.has(n)) continue;
-        seen.add(n);
-        for (const s of directSuccs(n)) stack.push(s);
+        if (r.has(n)) continue;
+        r.add(n);
+        for (const s of succCache.get(n)) stack.push(s);
+      }
+      reachCache.set(part, r);
+      return r;
+    };
+    const pathThroughIntermediate = (a, b) => {
+      for (const c of succCache.get(a)) {
+        if (c !== b && reachOf(c).has(b)) return true;
       }
       return false;
     };
-    const mergeCreatesCycle = (a, b) => reachesThroughIntermediate(a, b) || reachesThroughIntermediate(b, a);
+    const mergeCreatesCycle = (a, b) => pathThroughIntermediate(a, b) || pathThroughIntermediate(b, a);
 
     const result = [];
-    const merged = new Set();
 
     for (let i = 0; i < partitions.length; i++) {
-      if (merged.has(i)) continue;
       const p = partitions[i];
+      if (mergedAway.has(p)) continue;
 
       if (p.size >= this.config.minPartitionSize) {
         result.push(p);
@@ -358,8 +376,9 @@ export class GraphPartitioner {
       let bestScore = -Infinity;
 
       for (let j = 0; j < partitions.length; j++) {
-        if (i === j || merged.has(j)) continue;
+        if (i === j) continue;
         const candidate = partitions[j];
+        if (mergedAway.has(candidate)) continue;
         if (candidate.target.name !== p.target.name) continue;
         if (mergeCreatesCycle(p, candidate)) continue;
 
@@ -373,7 +392,8 @@ export class GraphPartitioner {
       if (bestMerge >= 0) {
         partitions[bestMerge].merge(p);
         for (const op of p.ops) opToPart.set(op, partitions[bestMerge]);
-        merged.add(i);
+        mergedAway.add(p);
+        buildSucc();
       } else {
         result.push(p);
       }

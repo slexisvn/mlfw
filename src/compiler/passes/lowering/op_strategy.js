@@ -35,6 +35,7 @@ export class OpStrategy {
 }
 
 const strategyRegistry = new Map();
+const viewCache = new Map();
 
 export function registerOpStrategy(opName, { name, compute, plevel = 10, targetKind = null }) {
   let strat = strategyRegistry.get(opName);
@@ -43,6 +44,7 @@ export function registerOpStrategy(opName, { name, compute, plevel = 10, targetK
     strategyRegistry.set(opName, strat);
   }
   strat.addImplementation(name, compute, plevel, targetKind);
+  viewCache.clear();
   return strat;
 }
 
@@ -50,13 +52,17 @@ export function getOpStrategy(opName, target = null) {
   const full = strategyRegistry.get(opName);
   if (!full) return null;
   const kind = target ? target.kind : null;
+  const cacheKey = `${opName}|${kind === null ? '' : kind}`;
+  if (viewCache.has(cacheKey)) return viewCache.get(cacheKey);
   const view = new OpStrategy(opName);
   for (const impl of full.implementations) {
     if (impl.targetKind === null || impl.targetKind === kind) {
       view.implementations.push(impl);
     }
   }
-  return view.implementations.length > 0 ? view : null;
+  const result = view.implementations.length > 0 ? view : null;
+  viewCache.set(cacheKey, result);
+  return result;
 }
 
 export function selectImplementation(opName, target = null) {

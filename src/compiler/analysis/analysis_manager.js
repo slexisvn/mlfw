@@ -41,9 +41,26 @@ export class AnalysisManager {
       return;
     }
 
+    const isPreserved = (cls) => preservedSet.has(cls) || preservedSet.has(cls.name);
+
+    const staleMemo = new Map();
+    const isStale = (cls) => {
+      const cached = staleMemo.get(cls);
+      if (cached !== undefined) return cached;
+      const deps = cls.dependencies;
+      let stale = false;
+      if (deps) {
+        for (const dep of deps) {
+          if (!isPreserved(dep) || isStale(dep)) { stale = true; break; }
+        }
+      }
+      staleMemo.set(cls, stale);
+      return stale;
+    };
+
     const toDelete = [];
     for (const AnalysisClass of funcCache.keys()) {
-      if (!preservedSet.has(AnalysisClass) && !preservedSet.has(AnalysisClass.name)) {
+      if (!isPreserved(AnalysisClass) || isStale(AnalysisClass)) {
         toDelete.push(AnalysisClass);
       } else {
         const entry = funcCache.get(AnalysisClass);
@@ -53,17 +70,6 @@ export class AnalysisManager {
 
     for (const cls of toDelete) {
       funcCache.delete(cls);
-      this._cascadeInvalidate(funcCache, cls);
-    }
-  }
-
-  _cascadeInvalidate(funcCache, invalidatedClass) {
-    for (const [AnalysisClass] of funcCache) {
-      const deps = AnalysisClass.dependencies;
-      if (deps && deps.includes(invalidatedClass)) {
-        funcCache.delete(AnalysisClass);
-        this._cascadeInvalidate(funcCache, AnalysisClass);
-      }
     }
   }
 

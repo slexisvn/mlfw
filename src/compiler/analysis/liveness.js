@@ -80,42 +80,31 @@ export class LivenessAnalysis {
       liveOut.set(op, new Set());
     }
 
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (let i = topo.length - 1; i >= 0; i--) {
-        const op = topo[i];
-        const currentOut = liveOut.get(op);
-        const oldOutSize = currentOut.size;
+    for (let i = topo.length - 1; i >= 0; i--) {
+      const op = topo[i];
+      const currentOut = liveOut.get(op);
 
-        const users = useDef.opUsers.get(op);
-        if (users) {
-          for (const user of users) {
-            const userIn = liveIn.get(user);
-            if (userIn) {
-              for (const v of userIn) {
-                currentOut.add(v);
-              }
+      const users = useDef.opUsers.get(op);
+      if (users) {
+        for (const user of users) {
+          const userIn = liveIn.get(user);
+          if (userIn) {
+            for (const v of userIn) {
+              currentOut.add(v);
             }
           }
         }
+      }
 
-        const currentIn = liveIn.get(op);
-        const oldInSize = currentIn.size;
-
-        for (const v of currentOut) {
-          currentIn.add(v);
-        }
-        for (let j = 0; j < op.numResults; j++) {
-          currentIn.delete(op.getResult(j));
-        }
-        for (let j = 0; j < op.numOperands; j++) {
-          currentIn.add(op.getOperand(j));
-        }
-
-        if (currentOut.size !== oldOutSize || currentIn.size !== oldInSize) {
-          changed = true;
-        }
+      const currentIn = liveIn.get(op);
+      for (const v of currentOut) {
+        currentIn.add(v);
+      }
+      for (let j = 0; j < op.numResults; j++) {
+        currentIn.delete(op.getResult(j));
+      }
+      for (let j = 0; j < op.numOperands; j++) {
+        currentIn.add(op.getOperand(j));
       }
     }
 

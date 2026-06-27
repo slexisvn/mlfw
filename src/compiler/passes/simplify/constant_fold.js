@@ -1,7 +1,6 @@
 import { FunctionPass, PassResult } from '../pass.js';
 import { IRBuilder } from '../../ir/graph/builder.js';
 import { registry } from '../../ir/graph/ops.js';
-import { OpTrait } from '../../ir/graph/op_registry.js';
 import { TraceLevel } from '../../pipeline/trace.js';
 import { isIntType } from '../../ir/graph/types.js';
 
@@ -35,7 +34,7 @@ function computeConstantValue(value, visited, memo) {
 
   const def = registry.get(op.opName);
   if (!def || !def.fold) return undefined;
-  if (def.sideEffects || (def.hasTrait && def.hasTrait(OpTrait.SIDE_EFFECT))) return undefined;
+  if (def.hasSideEffects) return undefined;
   if (op.regions.length > 0) return undefined;
 
   const childValues = new Array(op.numOperands);
@@ -71,7 +70,7 @@ export class ConstantFoldPass extends FunctionPass {
 
       const def = registry.get(op.opName);
       if (!def || op.regions.length > 0) continue;
-      if (def.sideEffects || (def.hasTrait && def.hasTrait(OpTrait.SIDE_EFFECT))) continue;
+      if (def.hasSideEffects) continue;
       if (def.getMemoryEffects && def.getMemoryEffects(op).length > 0) continue;
       if (!def.fold) continue;
       if (op.numOperands === 0) continue;
@@ -102,6 +101,12 @@ export class ConstantFoldPass extends FunctionPass {
         changed = true;
         foldedCount++;
       } catch (e) {
+        if (this.trace && this.trace.level >= TraceLevel.DEBUG) {
+          this.trace.emit({
+            type: 'pass_detail', passName: this.name,
+            foldError: op.opName, message: e.message, level: TraceLevel.DEBUG,
+          });
+        }
       }
     }
 

@@ -7,6 +7,7 @@ export function register(registry) {
     name: 'dot',
     numOperands: 2,
     numResults: 1,
+    opAttrs: { gpuCapable: true },
     traits: [OpTrait.OPAQUE, OpTrait.OUT_EWISE_FUSABLE],
     attrs: [
       { name: 'lhs_contracting', type: 'array', required: true },
@@ -97,6 +98,7 @@ export function register(registry) {
     name: 'conv',
     numOperands: 2,
     numResults: 1,
+    opAttrs: { gpuCapable: true },
     traits: [OpTrait.OPAQUE],
     attrs: [
       { name: 'strides', type: 'array', required: true },

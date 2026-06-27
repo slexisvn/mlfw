@@ -1,6 +1,5 @@
 import { FunctionPass, PassResult } from '../pass.js';
 import { registry } from '../../ir/graph/ops.js';
-import { OpTrait } from '../../ir/graph/op_registry.js';
 import { ShapeAnalysis } from '../../analysis/shape_analysis.js';
 import { TraceLevel } from '../../pipeline/trace.js';
 
@@ -27,7 +26,7 @@ export class CSEPass extends FunctionPass {
 
         const def = registry.get(op.opName);
 
-        if (def && (def.sideEffects || (def.hasTrait && def.hasTrait(OpTrait.SIDE_EFFECT)))) continue;
+        if (def && def.hasSideEffects) continue;
         if (def && def.getMemoryEffects && def.getMemoryEffects(op).length > 0) continue;
 
         const hash = op.structuralHash();

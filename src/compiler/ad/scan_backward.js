@@ -1,6 +1,7 @@
 import { GradAccumulator } from './grad_accumulator.js';
 import { getVJPRule, requireVJPRuleOrBarrier, registerRegionVJP } from './vjp_registry.js';
 import { reduceGradToOperandShape } from './backward_builder.js';
+import { NESTED_CONTROL_FLOW } from './control_flow_ops.js';
 
 registerRegionVJP('scan', (op, ctx) => buildScanBackward(op, ctx.accumulator, ctx.builder, ctx.materialize, ctx.needsGrad, ctx.scanCheckpoint));
 registerRegionVJP('if', (op, ctx) => buildCondBackward(op, ctx.accumulator, ctx.builder, ctx.materialize, ctx.needsGrad));
@@ -108,8 +109,6 @@ function diffBodyStep(builder, bodyBlock, argVals, freeVarMap, gradYields, forwa
   for (const id of freeVarMap.keys()) gradFree.set(id, acc.get(id));
   return { forwardYields, gradArgs, gradFree };
 }
-
-const NESTED_CONTROL_FLOW = new Set(['scan', 'while', 'if']);
 
 function assertNoNestedControlFlow(block, host) {
   for (const op of block.ops()) {

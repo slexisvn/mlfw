@@ -105,6 +105,11 @@ function collectBlockInfo(root, result, initialLoopStack) {
   }
 }
 
+function isMatmulShape(info) {
+  return info.hasReduction && info.readBuffers.length === 2 &&
+         info.writeBuffers.length === 1 && info.loopCount >= 3;
+}
+
 function hasMultipleBlocks(loop) {
   let count = 0;
   const stack = [loop.body];
@@ -310,8 +315,7 @@ export class MatmulTiledCPURule extends ScheduleRule {
     if (target.kind !== TargetKind.CPU) return false;
     const info = classifyBlock(primFunc, blockName);
     if (!info) return false;
-    if (!info.hasReduction || !blockName.includes('matmul')) return false;
-    if (info.loopCount < 3) return false;
+    if (!isMatmulShape(info)) return false;
     const cacheBytes = target.l1CacheBytes || 32768;
     const tileDim = Math.max(8, Math.min(64, Math.floor(Math.sqrt(cacheBytes / 4))));
     const maxExtent = info.loops.reduce((m, l) => {
@@ -354,8 +358,7 @@ export class MatmulTiledGPURule extends ScheduleRule {
     if (!target.isGPU()) return false;
     const info = classifyBlock(primFunc, blockName);
     if (!info) return false;
-    if (!info.hasReduction || !blockName.includes('matmul')) return false;
-    if (info.loopCount < 3) return false;
+    if (!isMatmulShape(info)) return false;
     const smemBytes = target.sharedMemoryBytes || 49152;
     const bytesPerTile = 4 * 2;
     const tileDim = Math.max(16, Math.min(128, Math.floor(Math.sqrt(smemBytes / bytesPerTile))));

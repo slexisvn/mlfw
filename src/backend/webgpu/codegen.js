@@ -2,6 +2,7 @@ import { ForKind } from '../../compiler/ir/tensor/nodes.js';
 import { wgslType, wgslBytes, wgslMathFunc, hasWgslMathFunc } from '../dtype_map.js';
 import { flattenRowMajorIndex } from '../index_emit.js';
 import { MinHeap } from '../../util/min_heap.js';
+import { irChildNodes } from '../../compiler/ir/ir_visitor.js';
 
 
 const BOOL_OPS = new Set(['!', '&&', '||']);
@@ -268,13 +269,7 @@ export class WebGPUCodegen {
       if (node.type === 'LIRAccumulatorNode' && node.flushStore) {
         this._storeBuffers.add(node.flushStore.buffer.name);
       }
-      if (node.body) stack.push(node.body);
-      if (node.stmts) for (const s of node.stmts) stack.push(s);
-      if (node.thenBody) stack.push(node.thenBody);
-      if (node.elseBody) stack.push(node.elseBody);
-      if (node.loopBody) stack.push(node.loopBody);
-      if (node.condBody) stack.push(node.condBody);
-      if (node.initBody) stack.push(node.initBody);
+      for (const c of irChildNodes(node)) stack.push(c);
     }
   }
 
@@ -661,7 +656,7 @@ export class WebGPUCodegen {
           }
           continue;
         case 'EvaluateNode': continue;
-        default: continue;
+        default: throw new Error(`WebGPU codegen: unhandled statement node '${cur.type}'`);
       }
     }
   }
@@ -880,18 +875,8 @@ export class WebGPUCodegen {
     while (stack.length > 0) {
       const node = stack.pop();
       if (!node) continue;
-      if (node.type === 'AllocateNode') {
-        names.add(node.buffer.name);
-        stack.push(node.body);
-        continue;
-      }
-      if (node.body) stack.push(node.body);
-      if (node.stmts) for (const s of node.stmts) stack.push(s);
-      if (node.thenBody) stack.push(node.thenBody);
-      if (node.elseBody) stack.push(node.elseBody);
-      if (node.loopBody) stack.push(node.loopBody);
-      if (node.condBody) stack.push(node.condBody);
-      if (node.initBody) stack.push(node.initBody);
+      if (node.type === 'AllocateNode') names.add(node.buffer.name);
+      for (const c of irChildNodes(node)) stack.push(c);
     }
   }
 
@@ -908,22 +893,7 @@ export class WebGPUCodegen {
         if (node.flushStore && node.flushStore.buffer) refs.set(node.flushStore.buffer.name, node.flushStore.buffer);
         if (node.initLoad && node.initLoad.buffer) refs.set(node.initLoad.buffer.name, node.initLoad.buffer);
       }
-      if (node.value) stack.push(node.value);
-      if (node.body) stack.push(node.body);
-      if (node.stmts) for (const s of node.stmts) stack.push(s);
-      if (node.thenBody) stack.push(node.thenBody);
-      if (node.elseBody) stack.push(node.elseBody);
-      if (node.loopBody) stack.push(node.loopBody);
-      if (node.condBody) stack.push(node.condBody);
-      if (node.initBody) stack.push(node.initBody);
-      if (node.indices) for (const idx of node.indices) stack.push(idx);
-      if (node.a) stack.push(node.a);
-      if (node.b) stack.push(node.b);
-      if (node.condition) stack.push(node.condition);
-      if (node.expr) stack.push(node.expr);
-      if (node.args) for (const a of node.args) stack.push(a);
-      if (node.offsetExpr) stack.push(node.offsetExpr);
-      if (node.extent) stack.push(node.extent);
+      for (const c of irChildNodes(node)) stack.push(c);
     }
   }
 
@@ -1151,6 +1121,6 @@ export class WebGPUCodegen {
       const v = this._primFunc.shapeParamMap.get(key);
       if (v) return `i32(_shapes.${v.name})`;
     }
-    return '1';
+    throw new Error(`WebGPU codegen: missing shape param for ${buffer.name}:${dimIdx}`);
   }
 }

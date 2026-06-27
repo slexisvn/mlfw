@@ -175,6 +175,10 @@ export class LearnedCostModel {
     return this._gbt !== null;
   }
 
+  get sampleCount() {
+    return this._X.length;
+  }
+
   serialize() {
     return { gbt: this._gbt ? this._gbt.serialize() : null, numSamples: this._X.length };
   }
@@ -185,13 +189,19 @@ export class LearnedCostModel {
 }
 
 export class GuidedCostModel {
-  constructor(analytical, learned) {
+  constructor(analytical, learned, opts = {}) {
     this.analytical = analytical;
     this.learned = learned;
+    this.confidenceSamples = opts.confidenceSamples ?? 8;
+  }
+
+  _learnedConfident() {
+    return this.learned && this.learned.trained &&
+           this.learned.sampleCount >= this.confidenceSamples;
   }
 
   score(primFunc) {
-    if (this.learned && this.learned.trained) {
+    if (this._learnedConfident()) {
       return this.learned.predict(FeatureExtractor.extractStatements(primFunc));
     }
     return this.analytical.score(primFunc);

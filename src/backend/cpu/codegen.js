@@ -1,6 +1,7 @@
 import { ForKind } from '../../compiler/ir/tensor/nodes.js';
 import { jsTypedArray, isJSMathFunc, isDtypeInt, dtypeBytes } from '../dtype_map.js';
 import { flattenRowMajorIndex } from '../index_emit.js';
+import { irChildNodes } from '../../compiler/ir/ir_visitor.js';
 
 import '../../tensor/utils/half.js';
 
@@ -158,7 +159,8 @@ export class CPUCodegen {
         case 'LIRAccumulatorNode': this._visitLIRAccumulator(node); return;
         case 'WhileNode': this._visitWhileNode(node); return;
         case 'EvaluateNode': return;
-        default: return;
+        case 'SyncThreadsNode': return;
+        default: throw new Error(`CPU codegen: unhandled statement node '${node.type}'`);
       }
     }
   }
@@ -517,7 +519,7 @@ export class CPUCodegen {
       const v = this._primFunc.shapeParamMap.get(key);
       if (v) return v.name;
     }
-    return '1';
+    throw new Error(`CPU codegen: missing shape param for ${buffer.name}:${dimIdx}`);
   }
 
   _cleanupSource(src) {
@@ -602,21 +604,9 @@ export class CPUCodegen {
           if (node.buffer) allocatedBuffers.add(node.buffer.name);
           break;
       }
-      if (node.body) stack.push(node.body);
-      if (node.value && typeof node.value === 'object' && node.value.type) stack.push(node.value);
-      if (node.stmts) for (const s of node.stmts) stack.push(s);
-      if (node.thenBody) stack.push(node.thenBody);
-      if (node.elseBody) stack.push(node.elseBody);
-      if (node.initBody) stack.push(node.initBody);
-      if (node.condition && typeof node.condition === 'object' && node.condition.type) stack.push(node.condition);
-      if (node.a && typeof node.a === 'object' && node.a.type) stack.push(node.a);
-      if (node.b && typeof node.b === 'object' && node.b.type) stack.push(node.b);
-      if (node.expr && typeof node.expr === 'object' && node.expr.type) stack.push(node.expr);
-      if (node.args) for (const a of node.args) { if (typeof a === 'object' && a !== null && a.type) stack.push(a); }
-      if (node.indices) for (const idx of node.indices) { if (typeof idx === 'object' && idx !== null && idx.type) stack.push(idx); }
       if (node.reads) for (const r of node.reads) { if (r.buffer) usedBuffers.set(r.buffer.name, r.buffer); }
       if (node.writes) for (const w of node.writes) { if (w.buffer) usedBuffers.set(w.buffer.name, w.buffer); }
-      if (node.iterVars) for (const iv of node.iterVars) { if (iv.binding && typeof iv.binding === 'object' && iv.binding.type) stack.push(iv.binding); }
+      for (const c of irChildNodes(node)) stack.push(c);
     }
   }
 
@@ -633,13 +623,7 @@ export class CPUCodegen {
           bufWrites.get(name).push(node.value);
         }
       }
-      if (node.body) stack.push(node.body);
-      if (node.stmts) for (const s of node.stmts) stack.push(s);
-      if (node.thenBody) stack.push(node.thenBody);
-      if (node.elseBody) stack.push(node.elseBody);
-      if (node.initBody) stack.push(node.initBody);
-      if (node.condBody) stack.push(node.condBody);
-      if (node.loopBody) stack.push(node.loopBody);
+      for (const c of irChildNodes(node)) stack.push(c);
     }
     const result = new Set();
     this._constantBuffers = new Map();

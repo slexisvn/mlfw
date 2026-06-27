@@ -1,7 +1,7 @@
 import { GraphFunction } from '../ir/graph/function.js';
 import { IRBuilder } from '../ir/graph/builder.js';
 import { UseDefAnalysis } from '../analysis/use_def.js';
-import { GradAccumulator } from './grad_accumulator.js';
+import { GradAccumulator, gradOrZero } from './grad_accumulator.js';
 import { getVJPRule, isGradientBarrier, requireVJPRuleOrBarrier } from './vjp_registry.js';
 import { RematPolicy } from './remat_policy.js';
 import { reduceGradToOperandShape, REGION_CONTROL_FLOW, backpropOps } from './backward_builder.js';
@@ -84,14 +84,7 @@ export class JointGraphBuilder {
 
     const gradInputValues = [];
     for (let i = 0; i < forwardInputs.length; i++) {
-      const grad = accumulator.get(forwardInputs[i].id);
-      if (grad) {
-        gradInputValues.push(grad);
-      } else {
-        const zeroConst = builder.scalarConstant(0, forwardInputs[i].type.dtype).getResult(0);
-        const zeroBroadcast = builder.broadcast(zeroConst, forwardInputs[i].type.shape, []).getResult(0);
-        gradInputValues.push(zeroBroadcast);
-      }
+      gradInputValues.push(gradOrZero(builder, forwardInputs[i], accumulator));
     }
 
     builder.returnOp([...fwdOutputValues, ...gradInputValues]);
@@ -230,14 +223,7 @@ export class JointGraphBuilder {
 
     const gradInputValues = [];
     for (let i = 0; i < forwardInputs.length; i++) {
-      const grad = accumulator.get(forwardInputs[i].id);
-      if (grad) {
-        gradInputValues.push(grad);
-      } else {
-        const zeroConst = builder.scalarConstant(0, forwardInputs[i].type.dtype).getResult(0);
-        const zeroBroadcast = builder.broadcast(zeroConst, forwardInputs[i].type.shape, []).getResult(0);
-        gradInputValues.push(zeroBroadcast);
-      }
+      gradInputValues.push(gradOrZero(builder, forwardInputs[i], accumulator));
     }
 
     builder.returnOp([...fwdOutputValues, ...gradInputValues]);

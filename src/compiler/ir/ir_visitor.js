@@ -38,7 +38,7 @@ const SCHEMA = {
 
   LIRFunc: [field('body', 'stmt')],
   LIRFlatStoreNode: [field('offsetExpr', 'expr'), field('value', 'expr')],
-  LIRAccumulatorNode: [field('loopVar', 'expr', { bind: true }), field('extent', 'expr'), field('initLoad', 'stmt'), field('initBody', 'stmt'), field('body', 'stmt'), field('flushStore', 'stmt')],
+  LIRAccumulatorNode: [field('loopVar', 'expr', { bind: true }), field('extent', 'expr'), field('initLoad', 'stmt'), field('initBody', 'stmt'), field('body', 'expr'), field('flushStore', 'stmt')],
   LIRBindingsNode: [field('bindings', 'expr', { bindingsExpr: true }), field('body', 'stmt')],
 };
 
@@ -46,7 +46,6 @@ function normOpts(opts) {
   return {
     kinds: opts.kinds || 'both',
     descendParams: opts.descendParams === true,
-    descendRegions: opts.descendRegions === true,
     bindVars: opts.bindVars !== false,
   };
 }
@@ -88,12 +87,21 @@ export function childAccessors(node, opts = {}) {
   if (fields === undefined) throw new Error(`ir_visitor: no child schema for node type '${node.type}'`);
   const out = [];
   for (const f of fields) {
-    if (f.region && !o.descendRegions) continue;
     if (f.region) continue;
     if (f.param && !o.descendParams) continue;
     if (f.bind && !o.bindVars) continue;
     if (o.kinds !== 'both' && f.kind !== o.kinds) continue;
     out.push(buildAccessor(node, f));
+  }
+  return out;
+}
+
+export function irChildNodes(node, opts = {}) {
+  if (!isIRNode(node) || SCHEMA[node.type] === undefined) return [];
+  const out = [];
+  for (const acc of childAccessors(node, opts)) {
+    const kids = acc.read();
+    for (let i = 0; i < kids.length; i++) out.push(kids[i]);
   }
   return out;
 }
@@ -169,6 +177,7 @@ export function transform(node, fn, opts = {}) {
 
 function transformInner(node, fn, o) {
   if (!isIRNode(node)) return node;
+  let anyChanged = false;
   for (const acc of childAccessors(node, o)) {
     const kids = acc.read();
     if (kids.length === 0) continue;
@@ -179,9 +188,9 @@ function transformInner(node, fn, o) {
       if (nk !== kids[i]) changed = true;
       next[i] = nk;
     }
-    if (changed) acc.write(next);
+    if (changed) { acc.write(next); anyChanged = true; }
   }
-  relink(node);
+  if (anyChanged) relink(node);
   const replaced = fn(node);
   return replaced === undefined || replaced === null ? node : replaced;
 }

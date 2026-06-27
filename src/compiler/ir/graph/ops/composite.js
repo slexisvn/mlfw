@@ -78,6 +78,7 @@ export function register(registry) {
     name: 'softmax',
     numOperands: 1,
     numResults: 1,
+    opAttrs: { gpuCapable: true },
     attrs: [{ name: 'axis', type: 'number', required: true }],
     inferResultTypes: inferSameAsInputFloat,
     verify: verifyUnaryFloat
@@ -123,6 +124,7 @@ export function register(registry) {
     name: 'layer_norm',
     numOperands: 3,
     numResults: 1,
+    opAttrs: { gpuCapable: true },
     attrs: [
       { name: 'axis', type: 'number', required: true },
       { name: 'epsilon', type: 'number', required: true }
@@ -143,6 +145,7 @@ export function register(registry) {
     name: 'batch_norm',
     numOperands: 5,
     numResults: 1,
+    opAttrs: { gpuCapable: true },
     attrs: [
       { name: 'axis', type: 'number', required: true },
       { name: 'epsilon', type: 'number', required: true }

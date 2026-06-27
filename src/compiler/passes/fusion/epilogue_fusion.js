@@ -8,8 +8,14 @@ const CONSTANT_OPS = new Set(['constant', 'scalar_constant']);
 const BROADCAST_OPS = new Set(['broadcast_in_dim', 'broadcast']);
 const PASSTHROUGH_OPS = new Set([...CONSTANT_OPS, ...BROADCAST_OPS]);
 
-function isEpilogueCandidate(op) {
+function isPassthrough(op) {
   if (PASSTHROUGH_OPS.has(op.opName)) return true;
+  const def = registry.get(op.opName);
+  return def !== null && (def.isBroadcast || def.isConstant);
+}
+
+function isEpilogueCandidate(op) {
+  if (isPassthrough(op)) return true;
   const def = registry.get(op.opName);
   return def !== null && def.isElementwise;
 }
@@ -30,7 +36,7 @@ const EPILOGUE_TAG_TABLE = new Map([
 
 function resolveOtherOperand(op, chainSet) {
   const op0Def = op.getOperand(0).definingOp;
-  if (op0Def && chainSet.has(op0Def) && !PASSTHROUGH_OPS.has(op0Def.opName)) {
+  if (op0Def && chainSet.has(op0Def) && !isPassthrough(op0Def)) {
     return op.getOperand(1).definingOp;
   }
   return op0Def;

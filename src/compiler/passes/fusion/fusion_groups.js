@@ -310,10 +310,19 @@ export class FusionGroupBuilder {
       candidates.push(h);
     }
 
+    const allOps = [...func.ops()];
+    const opEdges = [];
+    for (const op of allOps) {
+      for (let i = 0; i < op.numOperands; i++) {
+        const def = op.getOperand(i).definingOp;
+        if (def) opEdges.push(op, def);
+      }
+    }
+
     for (const h of candidates) {
       for (const op of h.ops) opToRep.set(op, h);
     }
-    if (!this._condensedHasCycle(func, opToRep)) {
+    if (!this._condensedHasCycle(allOps, opEdges, opToRep)) {
       return [...pcGroups, ...candidates];
     }
 
@@ -323,7 +332,7 @@ export class FusionGroupBuilder {
     const result = [...pcGroups];
     for (const h of candidates) {
       for (const op of h.ops) opToRep.set(op, h);
-      if (this._condensedHasCycle(func, opToRep)) {
+      if (this._condensedHasCycle(allOps, opEdges, opToRep)) {
         for (const op of h.ops) opToRep.delete(op);
         continue;
       }
@@ -333,23 +342,20 @@ export class FusionGroupBuilder {
     return result;
   }
 
-  _condensedHasCycle(func, opToRep) {
+  _condensedHasCycle(allOps, opEdges, opToRep) {
     const repOf = (op) => opToRep.get(op) || op;
     const adj = new Map();
     const nodes = new Set();
-    for (const op of func.ops()) {
-      const r = repOf(op);
+    for (const op of allOps) nodes.add(repOf(op));
+    for (let e = 0; e < opEdges.length; e += 2) {
+      const r = repOf(opEdges[e]);
+      const pr = repOf(opEdges[e + 1]);
+      if (pr === r) continue;
+      nodes.add(pr);
       nodes.add(r);
-      for (let i = 0; i < op.numOperands; i++) {
-        const def = op.getOperand(i).definingOp;
-        if (!def) continue;
-        const pr = repOf(def);
-        if (pr === r) continue;
-        nodes.add(pr);
-        let succ = adj.get(pr);
-        if (!succ) { succ = new Set(); adj.set(pr, succ); }
-        succ.add(r);
-      }
+      let succ = adj.get(pr);
+      if (!succ) { succ = new Set(); adj.set(pr, succ); }
+      succ.add(r);
     }
 
     const WHITE = 0, GRAY = 1, BLACK = 2;

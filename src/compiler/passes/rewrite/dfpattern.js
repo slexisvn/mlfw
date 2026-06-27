@@ -45,7 +45,14 @@ class AltPattern extends DFPattern {
     this.patterns = patterns;
   }
   match(op, bindings) {
-    return this.patterns.some((p) => p.match(op, bindings));
+    for (const p of this.patterns) {
+      const trial = { ...bindings };
+      if (p.match(op, trial)) {
+        Object.assign(bindings, trial);
+        return true;
+      }
+    }
+    return false;
   }
 }
 

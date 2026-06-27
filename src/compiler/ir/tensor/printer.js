@@ -184,7 +184,7 @@ export class TensorIRPrinter {
   visitCompareNode(node) {
     this.push(`(`);
     this.visit(node.a);
-    this.push(` ${node.op} `);
+    this.push(` ${node.toC()} `);
     this.visit(node.b);
     this.push(`)`);
   }

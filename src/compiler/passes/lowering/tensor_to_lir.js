@@ -214,10 +214,10 @@ function detectAccumulator(forNode) {
   let loadSide = null;
   let valueSide = null;
 
-  if (val.a && val.a.type === 'BufferLoadNode' && val.a.buffer.name === store.buffer.name) {
+  if (val.a && val.a.type === 'BufferLoadNode' && val.a.buffer === store.buffer) {
     loadSide = val.a;
     valueSide = val.b;
-  } else if (val.b && val.b.type === 'BufferLoadNode' && val.b.buffer.name === store.buffer.name) {
+  } else if (val.b && val.b.type === 'BufferLoadNode' && val.b.buffer === store.buffer) {
     loadSide = val.b;
     valueSide = val.a;
   }

@@ -2,6 +2,7 @@ import { ForKind } from '../../compiler/ir/tensor/nodes.js';
 import { wasmType, wasmLoad, wasmStore, wasmBytes, isDtypeFloat, wasmSimdEntry, wasmVecOp } from '../dtype_map.js';
 import { inferDtype } from '../../compiler/ir/lir/nodes.js';
 import { HALF_WASM_CONSTANTS } from '../../tensor/utils/half.js';
+import { irChildNodes } from '../../compiler/ir/ir_visitor.js';
 
 const _HALF_DTYPES = new Set(['f16', 'bf16']);
 
@@ -407,7 +408,8 @@ export class WasmCodegen {
         case 'LIRAccumulatorNode': this._visitLIRAccumulator(node); return;
         case 'WhileNode': this._visitWhile(node); return;
         case 'EvaluateNode': return;
-        default: return;
+        case 'SyncThreadsNode': return;
+        default: throw new Error(`WASM codegen: unhandled statement node '${node.type}'`);
       }
     }
   }
@@ -981,7 +983,7 @@ export class WasmCodegen {
       const v = this._primFunc.shapeParamMap.get(key);
       if (v) return v.name;
     }
-    return '_ds_0';
+    throw new Error(`WASM codegen: missing shape param for ${buffer.name}:${dimIdx}`);
   }
 
   _emitExpr(node) {
@@ -2039,14 +2041,9 @@ export class WasmCodegen {
       if ((n.type === 'BufferStoreNode' || n.type === 'BufferLoadNode') && n.buffer) {
         result.set(n.buffer.name, n.buffer);
       }
-      if (n.body) stack.push(n.body);
-      if (n.stmts) for (const s of n.stmts) stack.push(s);
-      if (n.thenBody) stack.push(n.thenBody);
-      if (n.elseBody) stack.push(n.elseBody);
-      if (n.initBody) stack.push(n.initBody);
-      if (n.value && typeof n.value === 'object' && n.value.type) stack.push(n.value);
       if (n.reads) for (const r of n.reads) if (r.buffer) result.set(r.buffer.name, r.buffer);
       if (n.writes) for (const w of n.writes) if (w.buffer) result.set(w.buffer.name, w.buffer);
+      for (const c of irChildNodes(n)) stack.push(c);
     }
   }
 
