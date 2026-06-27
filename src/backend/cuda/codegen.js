@@ -1,5 +1,5 @@
 import { ForKind } from '../../compiler/ir/tensor/nodes.js';
-import { cType, cPtrType, cLiteralSuffix, cMathFunc, isDtypeInt, dtypeBytes } from '../dtype_map.js';
+import { cType, cPtrType, cLiteralSuffix, cMathFunc, isDtypeInt, dtypeBytes, cCompareOp } from '../dtype_map.js';
 import { flattenRowMajorIndex } from '../index_emit.js';
 import { irChildNodes } from '../../compiler/ir/ir_visitor.js';
 
@@ -432,7 +432,7 @@ export class CUDACodegen {
         if (node.op === '//') return `(${a} / ${b})`;
         return `(${a} ${node.op} ${b})`;
       }
-      case 'CompareNode': return `(${this._exprToC(node.a)} ${node.toC()} ${this._exprToC(node.b)})`;
+      case 'CompareNode': return `(${this._exprToC(node.a)} ${cCompareOp(node.direction)} ${this._exprToC(node.b)})`;
       case 'IfThenElseNode': return `(${this._exprToC(node.condition)} ? ${this._exprToC(node.thenBody)} : ${this._exprToC(node.elseBody)})`;
       case 'CastNode': return `((${cType(node.toDtype)})(${this._exprToC(node.expr)}))`;
       case 'CallExternNode': return this._emitExternCall(node);
@@ -455,7 +455,7 @@ export class CUDACodegen {
     for (let i = 0; i < n; i++) args[i] = this._exprToC(node.args[i]);
     const joined = args.join(', ');
     const dtype = node.dtype || this._defaultDtype;
-    if (node.externName === 'rsqrt') return `${cMathFunc('rsqrt', dtype) || 'rsqrtf'}(${joined})`;
+    if (node.externName === 'rsqrt') return `${cMathFunc('rsqrt', dtype)}(${joined})`;
     if (node.externName === 'sign') {
       const v = args[0];
       const zero = `0.0${cLiteralSuffix(dtype)}`;

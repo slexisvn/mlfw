@@ -1,6 +1,5 @@
 import { FunctionPass } from '../pass.js';
 import { PatternSet, PatternApplicator } from '../rewrite/pattern.js';
-import { ShapeAnalysis } from '../../analysis/shape_analysis.js';
 import * as pat from '../../ir/graph/patterns.js';
 
 function buildAlgebraicPatterns(fastMath) {
@@ -32,7 +31,7 @@ const _fastMathPatterns = buildAlgebraicPatterns(true);
 export class AlgebraicSimplificationPass extends FunctionPass {
   constructor(opts = {}) {
     super('algebraic_simplify');
-    this.preservedAnalyses = new Set([ShapeAnalysis]);
+    this.preservedAnalyses = new Set();
     this.patterns = opts.fastMath ? _fastMathPatterns : _soundPatterns;
   }
 

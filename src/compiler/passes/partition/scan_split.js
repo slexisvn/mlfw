@@ -2,17 +2,12 @@ import { Operation } from '../../ir/graph/operation.js';
 import { GraphFunction } from '../../ir/graph/function.js';
 import { GraphModule } from '../../ir/graph/module.js';
 import { materializePartition, isConstantOp, TERMINATORS, splitGraphForNative, topoSortOps } from './cublas_split.js';
+import { dtypeBytes } from '../../../backend/dtype_map.js';
 
 function numel(shape) {
   let n = 1;
   for (const d of shape) { if (typeof d !== 'number' || d < 0) return -1; n *= d; }
   return n;
-}
-
-function dtypeBytes(dtype) {
-  if (dtype === 'f16' || dtype === 'i16') return 2;
-  if (dtype === 'i8' || dtype === 'u8') return 1;
-  return 4;
 }
 
 function isScanOversized(scanOp, region, target) {

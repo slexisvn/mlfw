@@ -1,5 +1,5 @@
 import { ForKind } from '../../compiler/ir/tensor/nodes.js';
-import { wgslType, wgslBytes, wgslMathFunc, hasWgslMathFunc } from '../dtype_map.js';
+import { wgslType, wgslBytes, wgslMathFunc, hasWgslMathFunc, cCompareOp } from '../dtype_map.js';
 import { flattenRowMajorIndex } from '../index_emit.js';
 import { MinHeap } from '../../util/min_heap.js';
 import { irChildNodes } from '../../compiler/ir/ir_visitor.js';
@@ -983,7 +983,9 @@ export class WebGPUCodegen {
     const extent = this._exprToWGSL(node.extent);
     this._emit(`for (var ${varName}: i32 = 0; ${varName} < ${extent}; ${varName} = ${varName} + 1) {`);
     this._indent++;
-    this._emit(`${accVar} = (${accVar} + ${this._exprToWGSL(node.body)});`);
+    const accOp = node.op || '+';
+    const accBody = this._exprToWGSL(node.body);
+    this._emit(`${accVar} = ${(accOp === 'max' || accOp === 'min') ? `${accOp}(${accVar}, ${accBody})` : `(${accVar} ${accOp} ${accBody})`};`);
     this._indent--;
     this._emit('}');
 
@@ -1034,7 +1036,7 @@ export class WebGPUCodegen {
         if (node.op === '%') return `(${a} % ${b})`;
         return `(${a} ${node.op} ${b})`;
       }
-      case 'CompareNode': return `(${this._numericExpr(node.a)} ${node.toC()} ${this._numericExpr(node.b)})`;
+      case 'CompareNode': return `(${this._numericExpr(node.a)} ${cCompareOp(node.direction)} ${this._numericExpr(node.b)})`;
       case 'IfThenElseNode': return `select(${this._exprToWGSL(node.elseBody)}, ${this._exprToWGSL(node.thenBody)}, ${this._boolExpr(node.condition)})`;
       case 'CastNode': return `${wgslType(node.toDtype)}(${this._exprToWGSL(node.expr)})`;
       case 'CallExternNode': return this._emitExternCall(node);

@@ -1,12 +1,11 @@
 import { FunctionPass, PassResult } from '../pass.js';
 import { registry } from '../../ir/graph/ops.js';
-import { ShapeAnalysis } from '../../analysis/shape_analysis.js';
 import { TraceLevel } from '../../pipeline/trace.js';
 
 export class CSEPass extends FunctionPass {
   constructor() {
     super('cse');
-    this.preservedAnalyses = new Set([ShapeAnalysis]);
+    this.preservedAnalyses = new Set();
   }
 
   run(func, analysisManager) {

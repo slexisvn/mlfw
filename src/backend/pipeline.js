@@ -1,5 +1,4 @@
 
-import { createCPULibrarySelector, createGPULibrarySelector } from './library_selector.js';
 import { getCodegenEntry, getSnippetBuilder } from './codegen_registry.js';
 
 export function detectPureMatmul(primFunc) {
@@ -54,15 +53,11 @@ export class BackendPipeline {
   constructor(target, options = {}) {
     this.target = target;
     this.matmulBackend = options.matmulBackend || 'native';
-    this.librarySelector = target.isCPU()
-      ? createCPULibrarySelector(target)
-      : target.isGPU()
-        ? createGPULibrarySelector(target)
-        : null;
+    this.context = options.context || null;
   }
 
   compile(primFunc) {
-    const entry = getCodegenEntry(this.target.kind);
+    const entry = (this.context && this.context.getCodegenEntry(this.target.kind)) || getCodegenEntry(this.target.kind);
     if (!entry) throw new Error(`Unsupported target kind: ${this.target.kind}`);
     const { source, metadata } = entry.compile(primFunc, this.target, this);
     return new CompiledKernel(primFunc.name, source, this.target, metadata);

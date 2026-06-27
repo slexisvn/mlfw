@@ -65,12 +65,6 @@ describe('BackendPipeline — GPU compile', () => {
     const result = pipeline.compile(pf);
     expect(result.metadata.sharedMemBytes).toBe(64 * 4);
   });
-
-  it('GPU pipeline has a GPU library selector', () => {
-    const pipeline = new BackendPipeline(CUDATarget());
-    expect(pipeline.librarySelector).not.toBeNull();
-    expect(pipeline.librarySelector.shouldUseLibrary('dot', [64, 64], 'f32')).toBe(true);
-  });
 });
 
 describe('BackendPipeline.compileAll', () => {

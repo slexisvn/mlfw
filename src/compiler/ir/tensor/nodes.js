@@ -204,26 +204,11 @@ export class MathOpNode extends TensorNode {
 }
 
 export class CompareNode extends TensorNode {
-  static JS_OPS = { eq: '===', ne: '!==', lt: '<', le: '<=', gt: '>', ge: '>=' };
-  static C_OPS = { eq: '==', ne: '!=', lt: '<', le: '<=', gt: '>', ge: '>=' };
-
   constructor(direction, a, b) {
     super();
     this.direction = direction;
     this.a = a;
     this.b = b;
-  }
-
-  toJS() {
-    const op = CompareNode.JS_OPS[this.direction];
-    if (!op) throw new Error(`CompareNode: unsupported direction '${this.direction}'`);
-    return op;
-  }
-
-  toC() {
-    const op = CompareNode.C_OPS[this.direction];
-    if (!op) throw new Error(`CompareNode: unsupported direction '${this.direction}'`);
-    return op;
   }
 }
 

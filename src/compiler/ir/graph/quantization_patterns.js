@@ -48,32 +48,6 @@ export class QuantizeDequantizeIdentity extends Pattern {
   }
 }
 
-export class DequantizeQuantizeIdentity extends Pattern {
-  constructor() {
-    super('dequantize_quantize_identity', 20);
-    this.rootOpName = 'dequantize';
-  }
-
-  match(op) {
-    const inputOp = op.getOperand(0).definingOp;
-    if (!inputOp || inputOp.opName !== 'quantize') return false;
-    return quantParamsMatch(op, inputOp);
-  }
-
-  rewrite(op, builder) {
-    const original = op.getOperand(0).definingOp.getOperand(0);
-    if (!original.type || !op.getResult(0).type) return false;
-    const srcType = original.type;
-    const dstType = op.getResult(0).type;
-    if (srcType instanceof TensorType && dstType instanceof TensorType && srcType.dtype === dstType.dtype) {
-      op.replaceAllResultsWith([original]);
-      op.erase();
-      return true;
-    }
-    return false;
-  }
-}
-
 export class ConstantQuantize extends Pattern {
   constructor() {
     super('constant_quantize', 15);

@@ -1,13 +1,12 @@
 import { FunctionPass, PassResult } from '../pass.js';
 import { MemoryEffectAnalysis } from '../../analysis/memory_effect.js';
 
-import { ShapeAnalysis } from '../../analysis/shape_analysis.js';
 import { TraceLevel } from '../../pipeline/trace.js';
 
 export class DCEPass extends FunctionPass {
   constructor() {
     super('dce');
-    this.preservedAnalyses = new Set([ShapeAnalysis]);
+    this.preservedAnalyses = new Set();
     this.requiredAnalyses = [MemoryEffectAnalysis];
   }
 

@@ -6,7 +6,7 @@ import { classifyFusionKind } from './fusion_analysis.js';
 import { TraceLevel } from '../../pipeline/trace.js';
 import {
   getYieldOp, countInnerOps, countReductions,
-  allInnerOpsFusable, remapOperands, makeComesBefore
+  allInnerOpsFusable, makeComesBefore
 } from './fusion_utils.js';
 
 export class MultiOutputFusionPass extends FunctionPass {
@@ -247,13 +247,7 @@ export class MultiOutputFusionPass extends FunctionPass {
 
     for (const op of lBlock.ops()) {
       if (op.opName === 'yield') continue;
-      const mappedOperands = remapOperands(op, valueMap);
-      const resultTypes = op.results.map(r => r.type);
-      const cloned = new Operation(op.opName, mappedOperands, resultTypes, new Map(op.attributes));
-      mergedBlock.pushOp(cloned);
-      for (let i = 0; i < op.numResults; i++) {
-        valueMap.set(op.getResult(i), cloned.getResult(i));
-      }
+      mergedBlock.pushOp(op.clone(valueMap));
     }
 
     for (let i = 0; i < rBlock.arguments.length; i++) {
@@ -262,13 +256,7 @@ export class MultiOutputFusionPass extends FunctionPass {
 
     for (const op of rBlock.ops()) {
       if (op.opName === 'yield') continue;
-      const mappedOperands = remapOperands(op, valueMap);
-      const resultTypes = op.results.map(r => r.type);
-      const cloned = new Operation(op.opName, mappedOperands, resultTypes, new Map(op.attributes));
-      mergedBlock.pushOp(cloned);
-      for (let i = 0; i < op.numResults; i++) {
-        valueMap.set(op.getResult(i), cloned.getResult(i));
-      }
+      mergedBlock.pushOp(op.clone(valueMap));
     }
 
     const mergedYieldOperands = [];

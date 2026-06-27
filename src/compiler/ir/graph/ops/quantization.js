@@ -52,7 +52,7 @@ export function register(registry) {
       return Math.round(constValues[0] / scale + zp);
     },
     getCanonicalizationPatterns() {
-      return [new qpat.QuantizeDequantizeIdentity()];
+      return [new qpat.QuantizeDequantizeIdentity(), new qpat.ConstantQuantize()];
     }
   }));
 

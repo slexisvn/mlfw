@@ -7,40 +7,24 @@ import {
   registerLoweringRule, lowerPointwise, buildSpatialNest,
   buildDotGeometry, parseLayout
 } from '../lowering_registry.js';
+import { buildQuantizeExpr, buildDequantizeExpr } from '../quant_math.js';
 
 export function register() {
   registerLoweringRule('quantize', (ctx, op, inputs, outputs) => {
     const scale = op.getAttr('scale');
     const zeroPoint = op.getAttr('zero_point');
-    const tgtDtype = op.getAttr('target_dtype') || 'i8';
-    const isUnsigned = tgtDtype === 'ui8';
-    const bits = 8;
-    const cMin = isUnsigned ? 0 : -(1 << (bits - 1));
-    const cMax = isUnsigned ? (1 << bits) - 1 : (1 << (bits - 1)) - 1;
-
-    return lowerPointwise(ctx, op, inputs, outputs, (_op, loads) => {
-      const scaled = new MathOpNode('/', loads[0], new FloatImmNode(scale));
-      const shifted = zeroPoint !== 0 ? new MathOpNode('+', scaled, new FloatImmNode(zeroPoint)) : scaled;
-      const rounded = new CallExternNode('round', [shifted], 'f32');
-      const clamped = new CallExternNode('min', [
-        new CallExternNode('max', [rounded, new FloatImmNode(cMin)], 'f32'),
-        new FloatImmNode(cMax)
-      ], 'f32');
-      return new CastNode(clamped, 'f32', tgtDtype);
-    });
+    const targetDtype = op.getAttr('target_dtype') || 'i8';
+    return lowerPointwise(ctx, op, inputs, outputs, (_op, loads) =>
+      buildQuantizeExpr(loads[0], { scale, zeroPoint, targetDtype }));
   });
 
   registerLoweringRule('dequantize', (ctx, op, inputs, outputs) => {
     const scale = op.getAttr('scale');
     const zeroPoint = op.getAttr('zero_point');
     const srcDtype = inputs[0].dtype || 'i8';
-    const tgtDtype = op.getAttr('target_dtype') || 'f32';
-
-    return lowerPointwise(ctx, op, inputs, outputs, (_op, loads) => {
-      const asFloat = new CastNode(loads[0], srcDtype, tgtDtype);
-      const shifted = zeroPoint !== 0 ? new MathOpNode('-', asFloat, new FloatImmNode(zeroPoint)) : asFloat;
-      return new MathOpNode('*', shifted, new FloatImmNode(scale));
-    });
+    const targetDtype = op.getAttr('target_dtype') || 'f32';
+    return lowerPointwise(ctx, op, inputs, outputs, (_op, loads) =>
+      buildDequantizeExpr(loads[0], { scale, zeroPoint, srcDtype, targetDtype }));
   });
 
   registerLoweringRule('quantized_dot', (ctx, op, inputs, outputs) => {

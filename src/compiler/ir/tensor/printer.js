@@ -1,4 +1,4 @@
-
+import { cCompareOp } from '../../../backend/dtype_map.js';
 
 export class TensorIRPrinter {
   constructor() {
@@ -184,7 +184,7 @@ export class TensorIRPrinter {
   visitCompareNode(node) {
     this.push(`(`);
     this.visit(node.a);
-    this.push(` ${node.toC()} `);
+    this.push(` ${cCompareOp(node.direction)} `);
     this.visit(node.b);
     this.push(`)`);
   }

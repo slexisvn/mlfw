@@ -518,7 +518,7 @@ export class Compiler {
     const runtimeMod = new RuntimeModule('compiled');
 
     const usePartition = this.config.usePartition;
-    const backendOpts = { matmulBackend: this.config.matmulBackend };
+    const backendOpts = { matmulBackend: this.config.matmulBackend, context: this.context };
     const backendCache = new Map();
     const getBackend = (target) => {
       if (!backendCache.has(target.name)) backendCache.set(target.name, new BackendPipeline(target, backendOpts));

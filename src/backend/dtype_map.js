@@ -121,7 +121,7 @@ const C_MATH_BASES = {
   'exp': 'exp', 'log': 'log', 'sqrt': 'sqrt', 'tanh': 'tanh',
   'abs': 'fabs', 'sin': 'sin', 'cos': 'cos', 'ceil': 'ceil',
   'floor': 'floor', 'max': 'fmax', 'min': 'fmin', 'pow': 'pow',
-  'round': 'round', 'fmod': 'fmod',
+  'round': 'round', 'fmod': 'fmod', 'rsqrt': 'rsqrt',
   'erf': 'erf', 'log2': 'log2', 'log10': 'log10', 'exp2': 'exp2'
 };
 
@@ -129,6 +129,21 @@ export function cMathFunc(name, dtype) {
   const base = C_MATH_BASES[name];
   if (!base) return name;
   return base + cMathFuncSuffix(dtype);
+}
+
+const COMPARE_C_OPS = { eq: '==', ne: '!=', lt: '<', le: '<=', gt: '>', ge: '>=' };
+const COMPARE_JS_OPS = { eq: '===', ne: '!==', lt: '<', le: '<=', gt: '>', ge: '>=' };
+
+export function cCompareOp(direction) {
+  const op = COMPARE_C_OPS[direction];
+  if (!op) throw new Error(`unsupported compare direction '${direction}'`);
+  return op;
+}
+
+export function jsCompareOp(direction) {
+  const op = COMPARE_JS_OPS[direction];
+  if (!op) throw new Error(`unsupported compare direction '${direction}'`);
+  return op;
 }
 
 const JS_MATH_FUNCS = new Set([

@@ -1,5 +1,5 @@
 import { ForKind } from '../../compiler/ir/tensor/nodes.js';
-import { jsTypedArray, isJSMathFunc, isDtypeInt, dtypeBytes } from '../dtype_map.js';
+import { jsTypedArray, isJSMathFunc, isDtypeInt, dtypeBytes, jsCompareOp } from '../dtype_map.js';
 import { flattenRowMajorIndex } from '../index_emit.js';
 import { irChildNodes } from '../../compiler/ir/ir_visitor.js';
 
@@ -343,11 +343,6 @@ export class CPUCodegen {
     this._emit('}');
   }
 
-  _visitLetStmtNode(node) {
-    this._emit(`const ${node.variable.name} = ${this._exprToJS(node.value)};`);
-    this._visitNode(node.body);
-  }
-
   _visitWhileNode(node) {
     this._visitNode(node.condBody);
     this._emit(`while (${node.condVar.name}[0]) {`);
@@ -438,7 +433,7 @@ export class CPUCodegen {
         case 'CompareNode':
           if (top.phase === 0) { top.phase = 1; work.push({ node: node.a, phase: 0 }); }
           else if (top.phase === 1) { top.phase = 2; work.push({ node: node.b, phase: 0 }); }
-          else { work.pop(); const b = vals.pop(), a = vals.pop(); vals.push(`(${a} ${node.toJS()} ${b})`); }
+          else { work.pop(); const b = vals.pop(), a = vals.pop(); vals.push(`(${a} ${jsCompareOp(node.direction)} ${b})`); }
           continue;
 
         case 'IfThenElseNode':

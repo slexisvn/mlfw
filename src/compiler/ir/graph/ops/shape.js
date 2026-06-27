@@ -243,7 +243,8 @@ export function register(registry) {
         shape.push(Math.ceil((limits[i] - starts[i]) / strides[i]));
       }
       return [new TensorType(shape, inp.dtype)];
-    }
+    },
+    getCanonicalizationPatterns() { return [new pat.FoldTrivialSlice()]; }
   }));
 
   registry.register(new OpDef({
@@ -298,7 +299,8 @@ export function register(registry) {
         }
       }
       return [new TensorType(shape, inp.dtype)];
-    }
+    },
+    getCanonicalizationPatterns() { return [new pat.FoldTrivialPad()]; }
   }));
 
   registry.register(new OpDef({

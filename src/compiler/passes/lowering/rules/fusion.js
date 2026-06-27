@@ -2,6 +2,7 @@ import { FloatImmNode, IntImmNode, MathOpNode, CompareNode, BufferStoreNode, Buf
 
 import { getLoweringRule, makeLoopNest, wrapInLoops, computeBroadcastIndices, bufRefs, lowerConstant, CONSTANT_OPS } from '../lowering_registry.js';
 import { buildElementwiseExpr, ELEMENTWISE_OPS } from './elementwise.js';
+import { buildQuantizeExpr, buildDequantizeExpr } from '../quant_math.js';
 
 const INLINE_FUSION_BUILDERS = new Map();
 
@@ -47,32 +48,20 @@ function initBuiltinFusionBuilders() {
     throw new Error('iota fusion must be handled by the index-aware path in lowerFusion');
   });
 
-  INLINE_FUSION_BUILDERS.set('quantize', (innerOp, args) => {
-    const scale = innerOp.getAttr('scale');
-    const zp = innerOp.getAttr('zero_point');
-    const tgtDtype = innerOp.getAttr('target_dtype') || 'i8';
-    const isUnsigned = tgtDtype === 'ui8';
-    const cMin = isUnsigned ? 0 : -128;
-    const cMax = isUnsigned ? 255 : 127;
-    const scaled = new MathOpNode('/', args[0], new FloatImmNode(scale));
-    const shifted = new MathOpNode('+', scaled, new FloatImmNode(zp));
-    const rounded = new CallExternNode('round', [shifted], 'f32');
-    const clamped = new CallExternNode('min', [
-      new CallExternNode('max', [rounded, new FloatImmNode(cMin)], 'f32'),
-      new FloatImmNode(cMax)
-    ], 'f32');
-    return new CastNode(clamped, 'f32', tgtDtype);
-  });
+  INLINE_FUSION_BUILDERS.set('quantize', (innerOp, args) =>
+    buildQuantizeExpr(args[0], {
+      scale: innerOp.getAttr('scale'),
+      zeroPoint: innerOp.getAttr('zero_point'),
+      targetDtype: innerOp.getAttr('target_dtype') || 'i8',
+    }));
 
-  INLINE_FUSION_BUILDERS.set('dequantize', (innerOp, args) => {
-    const scale = innerOp.getAttr('scale');
-    const zp = innerOp.getAttr('zero_point');
-    const srcDtype = innerOp.getOperand(0).type?.dtype || 'i8';
-    const tgtDtype = innerOp.getAttr('target_dtype') || 'f32';
-    const asFloat = new CastNode(args[0], srcDtype, tgtDtype);
-    const shifted = new MathOpNode('-', asFloat, new FloatImmNode(zp));
-    return new MathOpNode('*', shifted, new FloatImmNode(scale));
-  });
+  INLINE_FUSION_BUILDERS.set('dequantize', (innerOp, args) =>
+    buildDequantizeExpr(args[0], {
+      scale: innerOp.getAttr('scale'),
+      zeroPoint: innerOp.getAttr('zero_point'),
+      srcDtype: innerOp.getOperand(0).type?.dtype || 'i8',
+      targetDtype: innerOp.getAttr('target_dtype') || 'f32',
+    }));
 }
 
 const CSE_TRIVIAL = new Set(['BufferLoadNode', 'VariableNode', 'IntImmNode', 'FloatImmNode']);
