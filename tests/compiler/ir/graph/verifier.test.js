@@ -33,7 +33,7 @@ describe('verifyFunction operand definition', () => {
     expect(errors.some(e => /used before definition/.test(e.message))).toBe(true);
   });
 
-  it('accepts a value defined later in block order (no topological requirement)', () => {
+  it('accepts a value used before its definition in block order (dataflow DAG, no topological requirement)', () => {
     const t = f32([4]);
     const func = buildFunction('reorder', [t, t], [t], (b, args) => {
       const a = b.add(args[0], args[1]);
@@ -46,6 +46,58 @@ describe('verifyFunction operand definition', () => {
     block.removeOp(addOp);
     block.insertAfter(addOp, mulOp);
 
+    const errors = verifyFunction(func);
+    expect(errors.some(e => /used before definition/.test(e.message))).toBe(false);
+  });
+
+  it('flags a value that escapes the region it is defined in', () => {
+    const t = f32([4]);
+    const pred = new TensorType([], ScalarType.BOOL);
+    const func = buildFunction('escape', [pred, t], [t], (b, args) => {
+      const branch = b.ifOp(
+        args[0],
+        [t],
+        (tb) => { tb.yieldOp([tb.neg(args[1]).getResult(0)]); },
+        (eb) => { eb.yieldOp([eb.exp(args[1]).getResult(0)]); }
+      );
+      b.returnOp([branch.getResult(0)]);
+    });
+    const negOp = [...func.opsRecursive()].find(o => o.opName === 'neg');
+    const innerValue = negOp.getResult(0);
+    func.getReturnOp().replaceOperand(0, innerValue);
+
+    const errors = verifyFunction(func);
+    expect(errors.some(e => /used before definition/.test(e.message))).toBe(true);
+  });
+
+  it('flags a value dependency cycle', () => {
+    const t = f32([4]);
+    const func = buildFunction('cycle', [t], [t], (b, args) => {
+      const a = b.add(args[0], args[0]);
+      const c = b.mul(a.getResult(0), args[0]);
+      b.returnOp([c.getResult(0)]);
+    });
+    const addOp = func.findOp(o => o.opName === 'add');
+    const mulOp = func.findOp(o => o.opName === 'mul');
+    addOp.replaceOperand(0, mulOp.getResult(0));
+
+    const errors = verifyFunction(func);
+    expect(errors.some(e => /dependency cycle/.test(e.message))).toBe(true);
+  });
+
+  it('still accepts a value defined in an enclosing scope from a nested region', () => {
+    const t = f32([4]);
+    const func = buildFunction('nested', [t], [t], (b, args) => {
+      const outer = b.add(args[0], args[0]);
+      const pred = b.scalarConstant(1);
+      const branch = b.ifOp(
+        pred.getResult(0),
+        [t],
+        (tb) => { tb.yieldOp([outer.getResult(0)]); },
+        (eb) => { eb.yieldOp([outer.getResult(0)]); }
+      );
+      b.returnOp([branch.getResult(0)]);
+    });
     const errors = verifyFunction(func);
     expect(errors.some(e => /used before definition/.test(e.message))).toBe(false);
   });

@@ -56,7 +56,9 @@ export function verifyFunction(func, errors = []) {
   for (const arg of func.entryBlock.arguments) {
     definedValues.add(arg);
   }
-  collectDefinedValues(func.body, definedValues);
+  for (const block of func.body) {
+    collectScopeDefs(block, definedValues);
+  }
 
   for (const block of func.body) {
     verifyBlock(block, func, definedValues, errors);
@@ -95,17 +97,58 @@ export function verifyFunction(func, errors = []) {
   return errors;
 }
 
-function collectDefinedValues(blockList, definedValues) {
-  for (const block of blockList) {
-    for (const arg of block.arguments) definedValues.add(arg);
-    for (const op of block) {
-      for (let i = 0; i < op.numResults; i++) definedValues.add(op.getResult(i));
-      for (const region of op.regions) collectDefinedValues(region, definedValues);
+function collectScopeDefs(block, scope) {
+  for (const arg of block.arguments) scope.add(arg);
+  for (const op of block) {
+    for (let i = 0; i < op.numResults; i++) {
+      const result = op.getResult(i);
+      if (result) scope.add(result);
+    }
+  }
+}
+
+function detectCycles(block, func, errors) {
+  const inBlock = new Set();
+  for (const op of block) inBlock.add(op);
+
+  const VISITING = 1;
+  const DONE = 2;
+  const state = new Map();
+  const reported = new Set();
+
+  for (const root of block) {
+    if (state.get(root) !== undefined) continue;
+    const stack = [{ op: root, i: 0 }];
+    state.set(root, VISITING);
+    while (stack.length > 0) {
+      const frame = stack[stack.length - 1];
+      const op = frame.op;
+      if (frame.i < op.numOperands) {
+        const operand = op.getOperand(frame.i);
+        frame.i++;
+        const def = operand && operand.definingOp;
+        if (!def || !inBlock.has(def)) continue;
+        const seen = state.get(def);
+        if (seen === VISITING) {
+          if (!reported.has(def)) {
+            reported.add(def);
+            errors.push(new VerificationError('participates in a value dependency cycle', def, func));
+          }
+        } else if (seen === undefined) {
+          state.set(def, VISITING);
+          stack.push({ op: def, i: 0 });
+        }
+        continue;
+      }
+      state.set(op, DONE);
+      stack.pop();
     }
   }
 }
 
 function verifyBlock(block, func, definedValues, errors) {
+  detectCycles(block, func, errors);
+
   for (const op of block) {
     verifyOperation(op, func, definedValues, errors);
   }
@@ -233,9 +276,9 @@ function verifyOperation(op, func, definedValues, errors) {
   for (const region of op.regions) {
     const regionDefinedValues = new Set(definedValues);
     for (const block of region) {
-      for (const arg of block.arguments) {
-        regionDefinedValues.add(arg);
-      }
+      collectScopeDefs(block, regionDefinedValues);
+    }
+    for (const block of region) {
       verifyBlock(block, func, regionDefinedValues, errors);
     }
   }
