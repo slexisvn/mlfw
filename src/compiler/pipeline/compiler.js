@@ -1,17 +1,8 @@
-import { GraphModule } from '../ir/graph/module.js';
-import { PassManager, FixedPointGroup } from '../passes/pass_manager.js';
-import { CanonicalizePass } from '../passes/canonicalize/canonicalize.js';
-import { AlgebraicSimplificationPass } from '../passes/simplify/algebraic.js';
-import { ConstantFoldPass } from '../passes/simplify/constant_fold.js';
-import { CSEPass } from '../passes/simplify/cse.js';
-import { DCEPass } from '../passes/simplify/dce.js';
-import { FusionPass } from '../passes/fusion/fusion_pass.js';
-import { EpilogueFusionPass } from '../passes/fusion/epilogue_fusion.js';
-import { FusionMergerPass } from '../passes/fusion/fusion_merger.js';
-import { MultiOutputFusionPass } from '../passes/fusion/multi_output_fusion.js';
-import { DominatorFusionPass } from '../passes/fusion/dominator_fusion.js';
-import { LayoutTransformPass } from '../passes/layout/layout_transform.js';
-import { QuantizationPass } from '../passes/quantization/quantization_pass.js';
+import { GraphModule, cloneGraphModule } from '../ir/graph/module.js';
+import { cloneGraphFunction } from '../ir/graph/function.js';
+import { CompilerContext } from './compiler_context.js';
+import { PassManager } from '../passes/pass_manager.js';
+import { buildGraphPipeline } from './graph_pipeline.js';
 import { lowerGraphToPrimFunc } from '../passes/lowering/graph_to_tensor.js';
 import { Schedule } from '../schedule/schedule.js';
 import { SchedulePolicy } from '../schedule/rules.js';
@@ -22,12 +13,8 @@ import { Autotuner } from '../autotune/autotuner.js';
 import { TensorVerifier } from '../ir/tensor/verifier.js';
 import { verifyModule, verifyFunction } from '../ir/graph/verifier.js';
 import { CalibrationCollector } from '../analysis/calibration.js';
-import { DecompositionPass } from '../passes/decompose/decomposition_pass.js';
-import { RematerializationPass } from '../passes/memory/rematerialization.js';
 import { GraphPartitionPass, PartitionMaterializationPass } from '../passes/partition/partition_pass.js';
-import { CublasRewritePass } from '../passes/rewrite/cublas_rewrite.js';
 import { splitGraph } from './graph_split.js';
-import { graphPassesForPhase } from './graph_pass_registry.js';
 
 import { TraceLog, TraceLevel, CompilationError } from './trace.js';
 import { IRPrinter } from '../ir/graph/printer.js';
@@ -105,6 +92,8 @@ export class CompilerConfig {
     };
 
     this.passContext = opts.passContext || null;
+    this.loweringRules = opts.loweringRules || null;
+    this.codegenEntries = opts.codegenEntries || null;
 
     const t = opts.trace || {};
     this.trace = {
@@ -168,6 +157,10 @@ export class Compiler {
   constructor(config) {
     this.config = config instanceof CompilerConfig ? config : new CompilerConfig(config);
     if (!this.config.target) throw new Error('Compiler requires a target');
+    this.context = new CompilerContext({
+      loweringRules: this.config.loweringRules,
+      codegenEntries: this.config.codegenEntries,
+    });
   }
 
   compile(graphModule) {
@@ -178,18 +171,21 @@ export class Compiler {
     const t0 = performance.now();
     trace.phaseStart('compile');
 
+    const original = graphModule;
+    const working = resilient ? cloneGraphModule(graphModule) : graphModule;
+
     if (this.config.verify) {
-      this._verifyGraph(graphModule, 'before graph passes', trace, errors, failed, resilient);
+      this._verifyGraph(working, 'before graph passes', trace, errors, failed, resilient);
     }
 
-    const cudaMatmulChain = this._runGraphPasses(graphModule, trace, errors, failed, resilient);
+    const cudaMatmulChain = this._runGraphPasses(working, original, trace, errors, failed, resilient);
 
     if (this.config.usePartition) {
-      this._runPartitioning(graphModule, trace);
+      this._runPartitioning(working, trace);
     }
 
     const isWebGPUTarget = typeof this.config.target.isWebGPU === 'function' && this.config.target.isWebGPU();
-    const split = splitGraph(graphModule, {
+    const split = splitGraph(working, {
       config: this.config,
       target: this.config.target,
       cudaMatmulChain,
@@ -197,10 +193,10 @@ export class Compiler {
     });
 
     if (this.config.verify) {
-      this._verifyGraph(graphModule, 'after graph passes', trace, errors, failed, resilient);
+      this._verifyGraph(working, 'after graph passes', trace, errors, failed, resilient);
     }
 
-    const primFuncs = this._lowerAll(graphModule, trace, errors, failed, resilient);
+    const primFuncs = this._lowerAll(working, trace, errors, failed, resilient);
 
     if (this.config.matmulBackend === 'cublas') {
       for (const pf of primFuncs) {
@@ -249,30 +245,8 @@ export class Compiler {
     return collector;
   }
 
-  _runGraphPasses(graphModule, trace, errors, failed, resilient) {
+  _runGraphPasses(graphModule, original, trace, errors, failed, resilient) {
     const pm = new PassManager();
-
-    for (const p of graphPassesForPhase('pre', this.config, this.config.target)) pm.addPass(p);
-
-    pm.addPass(new DecompositionPass(this.config.target));
-    pm.addPass(new FixedPointGroup('canonicalize', [
-      new CanonicalizePass(),
-      new AlgebraicSimplificationPass({ fastMath: this.config.optimization.fastMath }),
-      new ConstantFoldPass(),
-      new CSEPass(),
-      new DCEPass(),
-    ], this.config.optimization.maxSimplifyIterations));
-
-    if (this.config.optimization.layout && this.config.target) {
-      pm.addPass(new LayoutTransformPass({ target: this.config.target }));
-      pm.addPass(new DCEPass());
-    }
-
-    if (this.config.quantization.enabled) {
-      pm.addPass(new QuantizationPass({ ...this.config.quantization, target: this.config.target }));
-      pm.addPass(new CanonicalizePass());
-      pm.addPass(new DCEPass());
-    }
 
     let dotCount = 0;
     for (const func of graphModule) {
@@ -283,41 +257,10 @@ export class Compiler {
     const tgt = this.config.target;
     const chainThreshold = (tgt.getAttr && tgt.getAttr('matmulChainThreshold')) ?? (tgt.kind === 'cuda' ? 2 : Infinity);
     const cudaMatmulChain = dotCount >= chainThreshold;
-    const shouldEpilogueFuse = this.config.matmulBackend !== 'cublas' && !cudaMatmulChain
-      && (this.config.fusion.epilogue !== undefined
-        ? this.config.fusion.epilogue
-        : (this.config.target && this.config.target.enableEpilogueFusion));
 
-    if (shouldEpilogueFuse) {
-      pm.addPass(new EpilogueFusionPass({ target: this.config.target }));
-      pm.addPass(new DCEPass());
+    for (const p of buildGraphPipeline(this.config, this.config.target, { cudaMatmulChain })) {
+      pm.addPass(p);
     }
-
-    if (this.config.fusion.enabled) {
-      const fCfg = this.config.fusion;
-      if (fCfg.strategy === 'dominator') {
-        pm.addPass(new DominatorFusionPass({ target: this.config.target, ...fCfg }));
-      } else {
-        pm.addPass(new FusionPass({ target: this.config.target, cost: { launchOverheadUs: 5 }, ...fCfg }));
-        pm.addPass(new FusionMergerPass({ maxFusionSize: this.config.target?.maxFusionSize, ...fCfg }));
-        pm.addPass(new MultiOutputFusionPass({ maxFusionSize: this.config.target?.maxFusionSize, ...fCfg }));
-      }
-      pm.addPass(new DCEPass());
-    }
-
-    if (this.config.matmulBackend === 'cublas') {
-      pm.addPass(new CublasRewritePass());
-    }
-
-    if (this.config.optimization.rematerialization) {
-      const rcfg = { ...this.config.optimization.rematConfig };
-      if (rcfg.memoryBudget === undefined && this.config.target && this.config.target.memoryBudgetBytes > 0) {
-        rcfg.memoryBudget = this.config.target.memoryBudgetBytes;
-      }
-      pm.addPass(new RematerializationPass(rcfg));
-    }
-
-    for (const p of graphPassesForPhase('post', this.config, this.config.target)) pm.addPass(p);
 
     pm.setTrace(trace);
 
@@ -337,7 +280,13 @@ export class Compiler {
         trace.errorEvent(e.phase, e.funcName, e.message, e.passName);
       }
       if (result.failedFunctions) {
-        for (const name of result.failedFunctions) failed.add(name);
+        for (const name of result.failedFunctions) {
+          failed.add(name);
+          if (resilient && original && original !== graphModule) {
+            const orig = original.getFunction(name);
+            if (orig) graphModule.addFunction(cloneGraphFunction(orig));
+          }
+        }
       }
     }
     trace.phaseEnd('graphPasses', performance.now() - t0);
@@ -373,7 +322,7 @@ export class Compiler {
       if (failed.has(func.name)) continue;
       try {
         const ft0 = performance.now();
-        const primFunc = lowerGraphToPrimFunc(func, this.config.target);
+        const primFunc = lowerGraphToPrimFunc(func, this.config.target, this.context);
         trace.functionEvent('lowering', func.name, { durationMs: performance.now() - ft0 });
         primFuncs.push(primFunc);
         if (trace.shouldSnapshot('afterLowering')) {

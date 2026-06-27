@@ -83,7 +83,7 @@ function topologicalOps(graphFunc) {
   return ordered;
 }
 
-export function lowerGraphToPrimFunc(graphFunc, target = null) {
+export function lowerGraphToPrimFunc(graphFunc, target = null, context = null) {
   const ctx = new LoweringContext();
   const params = [];
   const bufferMap = new Map();
@@ -159,7 +159,7 @@ export function lowerGraphToPrimFunc(graphFunc, target = null) {
       continue;
     }
 
-    const rule = getLoweringRule(op.opName, target);
+    const rule = getLoweringRule(op.opName, target, context);
     if (!rule) throw new Error(`No lowering rule defined for op: ${op.opName}`);
 
     const inputs = new Array(op.numOperands);

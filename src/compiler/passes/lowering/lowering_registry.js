@@ -26,7 +26,11 @@ export function registerTargetLoweringRule(opName, targetKind, ruleFunc, plevel 
   registerOpStrategy(opName, { name: `${opName}.${targetKind}`, compute: ruleFunc, plevel, targetKind });
 }
 
-export function getLoweringRule(opName, target) {
+export function getLoweringRule(opName, target, context = null) {
+  if (context) {
+    const override = context.getLoweringRule(opName);
+    if (override) return override;
+  }
   const impl = selectImplementation(opName, target);
   return impl ? impl.compute : undefined;
 }

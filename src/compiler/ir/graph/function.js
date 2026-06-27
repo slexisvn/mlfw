@@ -122,3 +122,54 @@ export class GraphFunction {
     return errors;
   }
 }
+
+function topoOrderTopLevel(block) {
+  const inBlock = new Set(block.opsArray());
+  const state = new Map();
+  const ordered = [];
+  for (const root of inBlock) {
+    if (state.get(root) !== undefined) continue;
+    const stack = [{ op: root, i: 0 }];
+    state.set(root, 1);
+    while (stack.length > 0) {
+      const frame = stack[stack.length - 1];
+      const op = frame.op;
+      if (frame.i < op.numOperands) {
+        const operand = op.getOperand(frame.i);
+        frame.i++;
+        const def = operand && operand.definingOp;
+        if (def && inBlock.has(def) && state.get(def) === undefined) {
+          state.set(def, 1);
+          stack.push({ op: def, i: 0 });
+        }
+        continue;
+      }
+      state.set(op, 2);
+      ordered.push(op);
+      stack.pop();
+    }
+  }
+  return ordered;
+}
+
+export function cloneGraphFunction(func) {
+  const clone = new GraphFunction(func.name, func.inputTypes, func.outputTypes);
+  const valueMap = new Map();
+  const srcBlock = func.entryBlock;
+  const dstBlock = clone.entryBlock;
+
+  for (let i = 0; i < srcBlock.arguments.length; i++) {
+    valueMap.set(srcBlock.arguments[i], dstBlock.arguments[i]);
+  }
+
+  const clonedByOrig = new Map();
+  for (const op of topoOrderTopLevel(srcBlock)) {
+    clonedByOrig.set(op, op.clone(valueMap));
+  }
+  for (const op of srcBlock) {
+    dstBlock.pushOp(clonedByOrig.get(op));
+  }
+
+  clone._version = func._version;
+  return clone;
+}

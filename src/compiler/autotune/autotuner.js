@@ -79,7 +79,7 @@ export class Autotuner {
     if (this.config.onWarning) {
       try {
         this.config.onWarning({ stage, func: this._funcName, block: blockName || null, message, error });
-      } catch (e) { /* a warning sink must never break compilation */ }
+      } catch (e) { void e; }
     }
     if (this.trace) {
       this.trace.warn('autotune', this._funcName, `${stage}${blockName ? ' [' + blockName + ']' : ''}: ${message}`);
@@ -227,7 +227,7 @@ export class Autotuner {
     for (const name of collectAllBlockNames(sch.func.body)) {
       if (fusedAway.has(name) || this._blockIsParallelized(sch, name)) continue;
       if (!policy) policy = new SchedulePolicy(this.target);
-      try { policy.applyToBlock(sch, name); } catch (e) { this._warn('residual-block', name, e); /* leave block sequential */ }
+      try { policy.applyToBlock(sch, name); } catch (e) { this._warn('residual-block', name, e); }
     }
   }
 

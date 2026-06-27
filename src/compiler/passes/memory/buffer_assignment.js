@@ -1,3 +1,14 @@
+function insertByOffset(arr, entry) {
+  let lo = 0;
+  let hi = arr.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (arr[mid].offset <= entry.offset) lo = mid + 1;
+    else hi = mid;
+  }
+  arr.splice(lo, 0, entry);
+}
+
 function gapSelector(strategy) {
   return {
     best: null,
@@ -195,7 +206,7 @@ export class BufferAssignment {
       const lastUseEff = effLastUse.get(buf) ?? interval.lastUse;
       const offset = this._interferenceOffset(placed, interval.firstUse, lastUseEff, pool._align(size), alignment, strategy);
       const block = pool.placeAt(offset, size, buf);
-      placed.push({ firstUse: interval.firstUse, lastUseEff, offset: block.offset, size: block.size });
+      insertByOffset(placed, { firstUse: interval.firstUse, lastUseEff, offset: block.offset, size: block.size });
 
       this.assignments.set(buf, {
         offset: block.offset,
@@ -216,7 +227,6 @@ export class BufferAssignment {
         ranges.push([p.offset, p.offset + p.size]);
       }
     }
-    ranges.sort((a, b) => a[0] - b[0]);
 
     let cursor = 0;
     const sel = gapSelector(strategy);

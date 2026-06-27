@@ -1,3 +1,5 @@
+import { cloneGraphFunction } from './function.js';
+
 export class GraphModule {
   constructor(name = 'module') {
     this.name = name;
@@ -55,4 +57,13 @@ export class GraphModule {
     }
     return errors;
   }
+}
+
+export function cloneGraphModule(module) {
+  const clone = new GraphModule(module.name);
+  for (const func of module) {
+    clone.addFunction(cloneGraphFunction(func));
+  }
+  clone._version = module._version;
+  return clone;
 }

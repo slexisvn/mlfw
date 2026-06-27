@@ -31,6 +31,11 @@ export class Block {
   removeArguments(indices) {
     const drop = indices instanceof Set ? indices : new Set(indices);
     if (drop.size === 0) return this;
+    for (let i = 0; i < this.arguments.length; i++) {
+      if (drop.has(i) && this.arguments[i].hasUses) {
+        throw new Error(`removeArguments: block argument ${i} still has uses`);
+      }
+    }
     const kept = [];
     for (let i = 0; i < this.arguments.length; i++) {
       if (!drop.has(i)) kept.push(this.arguments[i]);
@@ -41,6 +46,9 @@ export class Block {
   }
 
   pushOp(op) {
+    if (op.parentBlock !== null) {
+      throw new Error(`pushOp: operation '${op.opName}' is already attached to a block`);
+    }
     op.parentBlock = this;
     op._prev = this._tail;
     op._next = null;
@@ -54,6 +62,12 @@ export class Block {
   }
 
   insertBefore(op, ref) {
+    if (op.parentBlock !== null) {
+      throw new Error(`insertBefore: operation '${op.opName}' is already attached to a block`);
+    }
+    if (!ref || ref.parentBlock !== this) {
+      throw new Error('insertBefore: reference operation is not in this block');
+    }
     op.parentBlock = this;
     op._prev = ref._prev;
     op._next = ref;
@@ -67,6 +81,12 @@ export class Block {
   }
 
   insertAfter(op, ref) {
+    if (op.parentBlock !== null) {
+      throw new Error(`insertAfter: operation '${op.opName}' is already attached to a block`);
+    }
+    if (!ref || ref.parentBlock !== this) {
+      throw new Error('insertAfter: reference operation is not in this block');
+    }
     op.parentBlock = this;
     op._prev = ref;
     op._next = ref._next;
@@ -143,12 +163,18 @@ export class Region {
   get isEmpty() { return this.blocks.length === 0; }
 
   addBlock(block) {
+    if (block.parentRegion !== null) {
+      throw new Error('addBlock: block already belongs to a region');
+    }
     block.parentRegion = this;
     this.blocks.push(block);
     return block;
   }
 
   insertBlock(index, block) {
+    if (block.parentRegion !== null) {
+      throw new Error('insertBlock: block already belongs to a region');
+    }
     block.parentRegion = this;
     this.blocks.splice(index, 0, block);
   }

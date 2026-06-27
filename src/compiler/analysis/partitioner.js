@@ -477,8 +477,9 @@ export class GraphPartitioner {
     }
 
     const sorted = [];
-    while (queue.length > 0) {
-      const op = queue.shift();
+    let head = 0;
+    while (head < queue.length) {
+      const op = queue[head++];
       sorted.push(op);
       for (const consumer of adj.get(op)) {
         const deg = inDegree.get(consumer) - 1;

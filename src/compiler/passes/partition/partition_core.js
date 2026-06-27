@@ -144,8 +144,9 @@ export function topoSortPartitions(partitions, preds) {
   const queue = [];
   for (const p of partitions) if (inDeg.get(p) === 0) queue.push(p);
   const out = [];
-  while (queue.length > 0) {
-    const p = queue.shift();
+  let head = 0;
+  while (head < queue.length) {
+    const p = queue[head++];
     out.push(p);
     for (const c of adj.get(p)) {
       const d = inDeg.get(c) - 1;
