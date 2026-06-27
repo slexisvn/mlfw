@@ -53,6 +53,7 @@ export class MemoryPlanner {
     this.alignment = config.alignment || 64;
     this.enableInplace = config.enableInplace !== false;
     this.allocStrategy = config.allocStrategy || 'best-fit';
+    this.poolAllocation = config.poolAllocation || false;
   }
 
   plan(primFunc) {
@@ -80,11 +81,16 @@ export class MemoryPlanner {
     const temporaries = plan.liveness.getTemporaries();
     if (temporaries.length === 0) return primFunc;
 
-    const aliasMap = this._buildReuseAliases(temporaries, plan, primFunc);
-    plan.aliasMap = aliasMap;
-    if (aliasMap.size > 0) {
-      rewriteBufferAliases(primFunc.body, aliasMap);
+    let aliasMap = new Map();
+    if (this.poolAllocation) {
+      this._assignPoolOffsets(primFunc, plan, temporaries);
+    } else {
+      aliasMap = this._buildReuseAliases(temporaries, plan, primFunc);
+      if (aliasMap.size > 0) {
+        rewriteBufferAliases(primFunc.body, aliasMap);
+      }
     }
+    plan.aliasMap = aliasMap;
 
     const sorted = [...temporaries].sort((a, b) => b.firstUse - a.firstUse);
 
@@ -104,6 +110,19 @@ export class MemoryPlanner {
     primFunc.body = body;
     primFunc._setChild('body', body);
     return primFunc;
+  }
+
+  _assignPoolOffsets(primFunc, plan, temporaries) {
+    const unsafe = collectFreshZeroDependent(primFunc);
+    for (const interval of temporaries) {
+      const buf = interval.buffer;
+      if (unsafe.has(buf)) continue;
+      if (buf.scope !== 'global') continue;
+      const assignment = plan.assignment.getAssignment(buf);
+      if (!assignment || assignment.inplaceOf || assignment.isDynamic) continue;
+      if (!(assignment.size > 0)) continue;
+      buf.poolByteOffset = assignment.offset;
+    }
   }
 
   _buildReuseAliases(temporaries, plan, primFunc) {

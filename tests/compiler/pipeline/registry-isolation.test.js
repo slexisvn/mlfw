@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { GraphModule } from '../../../src/compiler/ir/graph/module.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
@@ -6,6 +6,8 @@ import { Compiler } from '../../../src/compiler/pipeline/compiler.js';
 import { CPUTarget } from '../../../src/backend/target.js';
 import { lowerPointwise } from '../../../src/compiler/passes/lowering/lowering_registry.js';
 import { MathOpNode, FloatImmNode } from '../../../src/compiler/ir/tensor/nodes.js';
+import { registerGraphPass, clearGraphPasses } from '../../../src/compiler/pipeline/graph_pass_registry.js';
+import { FunctionPass, PassResult } from '../../../src/compiler/passes/pass.js';
 
 function f32(shape) { return new TensorType(shape, ScalarType.F32); }
 
@@ -43,5 +45,29 @@ describe('per-Compiler lowering-rule isolation', () => {
     const out = new Float32Array(3);
     r.run(r.listKernels()[0], new Float32Array([1, 2, 3]), out);
     expect([...out]).toEqual([-1, -2, -3]);
+  });
+});
+
+describe('per-Compiler graph-pass hook isolation', () => {
+  afterEach(() => clearGraphPasses());
+
+  it('each instance snapshots its hooks at construction and is unaffected by later global mutation', () => {
+    let aRan = 0;
+    let bRan = 0;
+    class PassA extends FunctionPass { constructor() { super('PassA'); } run() { aRan++; return PassResult.UNCHANGED; } }
+    class PassB extends FunctionPass { constructor() { super('PassB'); } run() { bRan++; return PassResult.UNCHANGED; } }
+
+    registerGraphPass(() => new PassA(), { phase: 'post' });
+    const compilerA = new Compiler({ target: CPUTarget() });
+    clearGraphPasses();
+    registerGraphPass(() => new PassB(), { phase: 'post' });
+    const compilerB = new Compiler({ target: CPUTarget() });
+
+    compilerA.compile(negModule());
+    expect(aRan).toBeGreaterThan(0);
+    expect(bRan).toBe(0);
+
+    compilerB.compile(negModule());
+    expect(bRan).toBeGreaterThan(0);
   });
 });

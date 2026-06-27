@@ -1,3 +1,5 @@
+import { snapshotGraphPasses, graphPassesForPhase } from './graph_pass_registry.js';
+
 function toMap(value) {
   if (value instanceof Map) return value;
   if (value && typeof value === 'object') return new Map(Object.entries(value));
@@ -5,9 +7,10 @@ function toMap(value) {
 }
 
 export class CompilerContext {
-  constructor({ loweringRules = null, codegenEntries = null } = {}) {
+  constructor({ loweringRules = null, codegenEntries = null, graphPasses = null } = {}) {
     this.loweringRules = toMap(loweringRules);
     this.codegenEntries = toMap(codegenEntries);
+    this.graphPasses = graphPasses || snapshotGraphPasses();
   }
 
   get hasOverrides() {
@@ -20,5 +23,9 @@ export class CompilerContext {
 
   getCodegenEntry(targetKind) {
     return this.codegenEntries.get(targetKind) || null;
+  }
+
+  passesForPhase(phase, config, target) {
+    return graphPassesForPhase(phase, config, target, this.graphPasses);
   }
 }

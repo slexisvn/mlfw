@@ -78,6 +78,7 @@ export class CompilerConfig {
       alignment:    m.alignment    ?? opts.memoryAlignment ?? 64,
       inplaceReuse: m.inplaceReuse ?? opts.enableInplaceReuse ?? true,
       allocStrategy: m.allocStrategy ?? opts.allocStrategy ?? 'best-fit',
+      poolAllocation: m.poolAllocation ?? opts.poolAllocation ?? false,
     };
 
     const p = opts.partition || {};
@@ -171,56 +172,25 @@ export class Compiler {
     const t0 = performance.now();
     trace.phaseStart('compile');
 
-    const original = graphModule;
-    const working = resilient ? cloneGraphModule(graphModule) : graphModule;
+    const ctx = {
+      compiler: this,
+      trace,
+      errors,
+      failed,
+      resilient,
+      original: graphModule,
+      working: resilient ? cloneGraphModule(graphModule) : graphModule,
+      cudaMatmulChain: false,
+      split: null,
+      primFuncs: null,
+      lirFuncs: null,
+      runtimeModule: null,
+    };
 
-    if (this.config.verify) {
-      this._verifyGraph(working, 'before graph passes', trace, errors, failed, resilient);
+    for (const phase of this._compilePhases()) {
+      if (phase.when && !phase.when(ctx)) continue;
+      phase.run(ctx);
     }
-
-    const cudaMatmulChain = this._runGraphPasses(working, original, trace, errors, failed, resilient);
-
-    if (this.config.usePartition) {
-      this._runPartitioning(working, trace);
-    }
-
-    const isWebGPUTarget = typeof this.config.target.isWebGPU === 'function' && this.config.target.isWebGPU();
-    const split = splitGraph(working, {
-      config: this.config,
-      target: this.config.target,
-      cudaMatmulChain,
-      isWebGPU: isWebGPUTarget,
-    });
-
-    if (this.config.verify) {
-      this._verifyGraph(working, 'after graph passes', trace, errors, failed, resilient);
-    }
-
-    const primFuncs = this._lowerAll(working, trace, errors, failed, resilient);
-
-    if (this.config.matmulBackend === 'cublas') {
-      for (const pf of primFuncs) {
-        pf.cublasInfo = split && split.cublasInfos ? (split.cublasInfos.get(pf.name) || null) : detectPureMatmul(pf);
-      }
-    }
-
-    this._scheduleAll(primFuncs, trace, errors, failed, resilient);
-
-    if (this.config.verifyMode === 'full') {
-      this._verifyAll(primFuncs, errors, failed, resilient);
-    }
-
-    this._planMemory(primFuncs, trace, errors, failed, resilient);
-
-    if (this.config.verify) {
-      this._verifyAll(primFuncs, errors, failed, resilient);
-    }
-
-    const lirFuncs = this._lowerToLIR(primFuncs, trace, errors, failed, resilient);
-
-    const runtimeModule = this._codegen(lirFuncs, trace, errors, failed, resilient);
-
-    if (split) runtimeModule.executionPlan = split.plan;
 
     trace.phaseEnd('compile', performance.now() - t0);
 
@@ -228,7 +198,79 @@ export class Compiler {
       throw new Error(errors[0].toString());
     }
 
-    return new CompilationResult(runtimeModule, trace, errors);
+    return new CompilationResult(ctx.runtimeModule, trace, errors);
+  }
+
+  _compilePhases() {
+    return [
+      {
+        name: 'verify:pre',
+        when: (ctx) => ctx.compiler.config.verify,
+        run: (ctx) => ctx.compiler._verifyGraph(ctx.working, 'before graph passes', ctx.trace, ctx.errors, ctx.failed, ctx.resilient),
+      },
+      {
+        name: 'graphPasses',
+        run: (ctx) => { ctx.cudaMatmulChain = ctx.compiler._runGraphPasses(ctx.working, ctx.original, ctx.trace, ctx.errors, ctx.failed, ctx.resilient); },
+      },
+      {
+        name: 'partition',
+        when: (ctx) => ctx.compiler.config.usePartition,
+        run: (ctx) => ctx.compiler._runPartitioning(ctx.working, ctx.trace),
+      },
+      {
+        name: 'split',
+        run: (ctx) => {
+          const cfg = ctx.compiler.config;
+          const isWebGPU = typeof cfg.target.isWebGPU === 'function' && cfg.target.isWebGPU();
+          ctx.split = splitGraph(ctx.working, { config: cfg, target: cfg.target, cudaMatmulChain: ctx.cudaMatmulChain, isWebGPU });
+        },
+      },
+      {
+        name: 'verify:post',
+        when: (ctx) => ctx.compiler.config.verify,
+        run: (ctx) => ctx.compiler._verifyGraph(ctx.working, 'after graph passes', ctx.trace, ctx.errors, ctx.failed, ctx.resilient),
+      },
+      {
+        name: 'lowering',
+        run: (ctx) => {
+          ctx.primFuncs = ctx.compiler._lowerAll(ctx.working, ctx.trace, ctx.errors, ctx.failed, ctx.resilient);
+          if (ctx.compiler.config.matmulBackend === 'cublas') {
+            for (const pf of ctx.primFuncs) {
+              pf.cublasInfo = ctx.split && ctx.split.cublasInfos ? (ctx.split.cublasInfos.get(pf.name) || null) : detectPureMatmul(pf);
+            }
+          }
+        },
+      },
+      {
+        name: 'scheduling',
+        run: (ctx) => ctx.compiler._scheduleAll(ctx.primFuncs, ctx.trace, ctx.errors, ctx.failed, ctx.resilient),
+      },
+      {
+        name: 'verify:tensor-full',
+        when: (ctx) => ctx.compiler.config.verifyMode === 'full',
+        run: (ctx) => ctx.compiler._verifyAll(ctx.primFuncs, ctx.errors, ctx.failed, ctx.resilient),
+      },
+      {
+        name: 'memoryPlanning',
+        run: (ctx) => ctx.compiler._planMemory(ctx.primFuncs, ctx.trace, ctx.errors, ctx.failed, ctx.resilient),
+      },
+      {
+        name: 'verify:tensor',
+        when: (ctx) => ctx.compiler.config.verify,
+        run: (ctx) => ctx.compiler._verifyAll(ctx.primFuncs, ctx.errors, ctx.failed, ctx.resilient),
+      },
+      {
+        name: 'lirLowering',
+        run: (ctx) => { ctx.lirFuncs = ctx.compiler._lowerToLIR(ctx.primFuncs, ctx.trace, ctx.errors, ctx.failed, ctx.resilient); },
+      },
+      {
+        name: 'codegen',
+        run: (ctx) => {
+          ctx.runtimeModule = ctx.compiler._codegen(ctx.lirFuncs, ctx.trace, ctx.errors, ctx.failed, ctx.resilient);
+          if (ctx.split) ctx.runtimeModule.executionPlan = ctx.split.plan;
+        },
+      },
+    ];
   }
 
   compileFunction(graphFunc) {
@@ -258,7 +300,7 @@ export class Compiler {
     const chainThreshold = (tgt.getAttr && tgt.getAttr('matmulChainThreshold')) ?? (tgt.kind === 'cuda' ? 2 : Infinity);
     const cudaMatmulChain = dotCount >= chainThreshold;
 
-    for (const p of buildGraphPipeline(this.config, this.config.target, { cudaMatmulChain })) {
+    for (const p of buildGraphPipeline(this.config, this.config.target, { cudaMatmulChain, context: this.context })) {
       pm.addPass(p);
     }
 
@@ -406,7 +448,7 @@ export class Compiler {
     trace.phaseStart('memoryPlanning');
     const t0 = performance.now();
     const alignment = this.config.memory.alignment || this.config.target?.cacheLineSizeBytes || 64;
-    const planner = new MemoryPlanner({ alignment, enableInplace: this.config.memory.inplaceReuse, allocStrategy: this.config.memory.allocStrategy });
+    const planner = new MemoryPlanner({ alignment, enableInplace: this.config.memory.inplaceReuse, allocStrategy: this.config.memory.allocStrategy, poolAllocation: this.config.memory.poolAllocation });
     for (const pf of primFuncs) {
       if (failed.has(pf.name)) continue;
       if (pf.gpuRegisterBlocked) continue;

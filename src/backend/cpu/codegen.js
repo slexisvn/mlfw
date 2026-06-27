@@ -1,5 +1,5 @@
 import { ForKind } from '../../compiler/ir/tensor/nodes.js';
-import { jsTypedArray, isJSMathFunc, isDtypeInt } from '../dtype_map.js';
+import { jsTypedArray, isJSMathFunc, isDtypeInt, dtypeBytes } from '../dtype_map.js';
 
 import '../../tensor/utils/half.js';
 
@@ -59,13 +59,22 @@ export class CPUCodegen {
     this._emit(`function ${func.name}(${paramNames.join(', ')}) {`);
     this._indent++;
 
+    let poolBytes = 0;
+    for (const [, buf] of usedBuffers) {
+      if (buf.poolByteOffset !== undefined && buf.poolByteOffset !== null) {
+        const n = buf.numel();
+        if (n > 0) poolBytes = Math.max(poolBytes, buf.poolByteOffset + n * dtypeBytes(buf.dtype));
+      }
+    }
+    if (poolBytes > 0) this._emit(`const _mem_pool = new ArrayBuffer(${poolBytes});`);
+
     for (const [bufName, buf] of usedBuffers) {
       if (zeroBuffers.has(bufName)) continue;
       if (constantBuffers.has(bufName)) continue;
       if (!paramBuffers.has(bufName) && !allocatedBuffers.has(bufName)) {
         const numel = buf.numel();
         if (numel > 0) {
-          this._emit(`const ${bufName} = new ${jsTypedArray(buf.dtype)}(${numel});`);
+          this._emit(`const ${bufName} = ${this._allocRhs(buf, numel)};`);
         } else if (numel < 0) {
           const parts = [];
           for (let d = 0; d < buf.shape.length; d++) {
@@ -90,6 +99,14 @@ export class CPUCodegen {
 
   _emit(line) {
     this._lines.push('  '.repeat(this._indent) + line);
+  }
+
+  _allocRhs(buf, numel) {
+    const ty = jsTypedArray(buf.dtype);
+    if (buf.poolByteOffset !== undefined && buf.poolByteOffset !== null && numel > 0) {
+      return `new ${ty}(_mem_pool, ${buf.poolByteOffset}, ${numel})`;
+    }
+    return `new ${ty}(${numel})`;
   }
 
   _wrapLoad(dtype, expr) {
@@ -120,7 +137,7 @@ export class CPUCodegen {
           const buf = node.buffer;
           const numel = buf.numel();
           if (numel > 0) {
-            this._emit(`const ${buf.name} = new ${jsTypedArray(buf.dtype)}(${numel});`);
+            this._emit(`const ${buf.name} = ${this._allocRhs(buf, numel)};`);
           } else if (numel < 0) {
             this._emit(`const ${buf.name} = new ${jsTypedArray(buf.dtype)}(${this._dynamicNumel(buf)});`);
           }

@@ -18,10 +18,13 @@ import { graphPassesForPhase } from './graph_pass_registry.js';
 
 const DEFAULT_LAUNCH_OVERHEAD_US = 5;
 
-export function buildGraphPipeline(config, target, { cudaMatmulChain = false } = {}) {
+export function buildGraphPipeline(config, target, { cudaMatmulChain = false, context = null } = {}) {
+  const passesForPhase = context
+    ? (phase) => context.passesForPhase(phase, config, target)
+    : (phase) => graphPassesForPhase(phase, config, target);
   const passes = [];
 
-  for (const p of graphPassesForPhase('pre', config, target)) passes.push(p);
+  for (const p of passesForPhase('pre')) passes.push(p);
 
   passes.push(new DecompositionPass(target));
   passes.push(new FixedPointGroup('canonicalize', [
@@ -78,7 +81,7 @@ export function buildGraphPipeline(config, target, { cudaMatmulChain = false } =
     passes.push(new RematerializationPass(rcfg));
   }
 
-  for (const p of graphPassesForPhase('post', config, target)) passes.push(p);
+  for (const p of passesForPhase('post')) passes.push(p);
 
   return passes;
 }
