@@ -396,7 +396,7 @@ export class Compiler {
     const t0 = performance.now();
     const sCfg = this.config.scheduling;
     if (sCfg.autotune) {
-      const autotuner = new Autotuner(this.config.target, sCfg);
+      const autotuner = new Autotuner(this.config.target, sCfg, trace);
       for (const pf of primFuncs) {
         if (failed.has(pf.name)) continue;
         if (pf.cublasInfo) continue;

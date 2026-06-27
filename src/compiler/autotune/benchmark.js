@@ -80,7 +80,12 @@ export class BenchmarkRunner {
     this.maxCv = config.maxCv ?? 0;
     this.maxReMeasures = config.maxReMeasures ?? 1;
     this.measurer = config.measurer || null;
+    this._warn = config.warn || null;
     this._bufferCache = new Map();
+  }
+
+  _record(stage, error) {
+    if (this._warn) this._warn(stage, null, error);
   }
 
   _getOrAllocBuffers(primFunc) {
@@ -115,7 +120,8 @@ export class BenchmarkRunner {
     let compiled;
     try {
       compiled = backend.compile(primFunc);
-    } catch {
+    } catch (e) {
+      this._record('benchmark-compile', e);
       return null;
     }
 
@@ -124,14 +130,15 @@ export class BenchmarkRunner {
     let fn;
     try {
       fn = new Function('return ' + compiled.source)();
-    } catch {
+    } catch (e) {
+      this._record('benchmark-construct-fn', e);
       return null;
     }
 
     const { buffers, totalBytes } = this._getOrAllocBuffers(primFunc);
 
     for (let i = 0; i < this.warmup; i++) {
-      try { fn(...buffers); } catch { return null; }
+      try { fn(...buffers); } catch (e) { this._record('benchmark-warmup-run', e); return null; }
     }
 
     const samples = [];
@@ -151,7 +158,8 @@ export class BenchmarkRunner {
     let compiled;
     try {
       compiled = new BackendPipeline(this.target).compile(primFunc);
-    } catch {
+    } catch (e) {
+      this._record('measured-compile', e);
       return null;
     }
     const byteSizes = [];
@@ -164,7 +172,8 @@ export class BenchmarkRunner {
     let samples;
     try {
       samples = this.measurer(compiled, byteSizes, [], { warmup: this.warmup, repeat: this.repeat });
-    } catch {
+    } catch (e) {
+      this._record('measurer', e);
       return null;
     }
     if (!samples || samples.length === 0) return null;

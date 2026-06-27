@@ -95,6 +95,10 @@ export class TraceLog {
     this.emit({ type: 'error', phase, funcName, message, passName: passName || null, level: TraceLevel.INFO });
   }
 
+  warn(phase, funcName, message, detail) {
+    this.emit({ type: 'warning', phase, funcName, message, detail: detail || null, level: TraceLevel.INFO });
+  }
+
   explain(category, subject, decision, reason, data) {
     this.emit({ type: 'explain', category, subject, decision, reason, ...(data || {}), level: TraceLevel.DEBUG });
   }

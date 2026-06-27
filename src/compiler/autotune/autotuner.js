@@ -46,30 +46,48 @@ class AutotuneConfig {
     this.maxRoundsPerTask = opts.maxRoundsPerTask ?? 8;
     this.plateauPatience = opts.plateauPatience ?? 2;
     this.schedulerPolicy = opts.schedulerPolicy || null;
+    this.onWarning = opts.onWarning || null;
   }
 }
 
 export class Autotuner {
-  constructor(target, config = {}) {
+  constructor(target, config = {}, trace = null) {
     this.target = target;
     this.config = config instanceof AutotuneConfig ? config : new AutotuneConfig(config);
+    this.trace = trace;
+    this._funcName = null;
     if (this.config.hardwareMeasure) this.config.measurer = resolveMeasurer(target);
     this.analyticalModel = new AnalyticalCostModel(target);
     this.learnedModel = new LearnedCostModel();
     this.costModel = new GuidedCostModel(this.analyticalModel, this.learnedModel);
     this.db = this.config.tuningDB instanceof TuningDatabase ? this.config.tuningDB : new TuningDatabase();
+    const warn = (stage, block, e) => this._warn(stage, block, e);
     this.benchmarkRunner = this.config.enableBenchmark
       ? new BenchmarkRunner(target, {
           warmup: this.config.benchmarkWarmup,
           repeat: this.config.benchmarkRepeat,
           maxCv: this.config.benchmarkMaxCv,
-          measurer: this.config.measurer
+          measurer: this.config.measurer,
+          warn
         })
       : null;
     this.scheduler = new TaskScheduler(this.config.schedulerPolicy);
   }
 
+  _warn(stage, blockName, error) {
+    const message = error && error.message ? error.message : String(error);
+    if (this.config.onWarning) {
+      try {
+        this.config.onWarning({ stage, func: this._funcName, block: blockName || null, message, error });
+      } catch (e) { /* a warning sink must never break compilation */ }
+    }
+    if (this.trace) {
+      this.trace.warn('autotune', this._funcName, `${stage}${blockName ? ' [' + blockName + ']' : ''}: ${message}`);
+    }
+  }
+
   tune(primFunc, blockName = null) {
+    this._funcName = primFunc.name;
     const blockNames = blockName ? [blockName] : collectAllBlockNames(primFunc.body);
     const blockMap = buildBlockMap(primFunc.body);
     const deadline = new Deadline(this.config.timeBudgetMs, this.config.clock);
@@ -97,7 +115,8 @@ export class Autotuner {
       const session = new BlockTuningSession({
         target: this.target, primFunc, blockName: name, blockMap, sketches,
         costModel: this.costModel, learnedModel: this.learnedModel,
-        benchmarkRunner: this.benchmarkRunner, config: this.config, deadline
+        benchmarkRunner: this.benchmarkRunner, config: this.config, deadline,
+        warn: (stage, block, e) => this._warn(stage, block, e)
       });
       tasksByKey.set(key, { key, kind: 'session', session, weight: 1 });
     }
@@ -146,15 +165,15 @@ export class Autotuner {
       this._adoptSchedule(primFunc, tuned);
       return { func: primFunc };
     }
+    if (tuned) {
+      this._warn('tuned-schedule-invalid', null, new Error('tuned schedule exceeds target thread-block limit; falling back to default'));
+    }
     const fallback = this._buildDefaultSchedule(primFunc);
-    if (fallback) {
+    if (fallback && this._scheduleIsValid(fallback)) {
       this._adoptSchedule(primFunc, fallback);
       return { func: primFunc };
     }
-    if (tuned) {
-      this._adoptSchedule(primFunc, tuned);
-      return { func: primFunc };
-    }
+    this._warn('no-valid-schedule', null, new Error('neither tuned nor default schedule is valid; leaving function unscheduled'));
     return null;
   }
 
@@ -190,6 +209,7 @@ export class Autotuner {
             apply(sch, blockName, this.target);
           }
         } catch (e) {
+          this._warn('apply-tuned-block', blockName, e);
           continue;
         }
       }
@@ -197,6 +217,7 @@ export class Autotuner {
       this._scheduleResidualBlocks(sch, fusedAway);
       return work;
     } catch (e) {
+      this._warn('build-tuned-schedule', null, e);
       return null;
     }
   }
@@ -206,13 +227,13 @@ export class Autotuner {
     for (const name of collectAllBlockNames(sch.func.body)) {
       if (fusedAway.has(name) || this._blockIsParallelized(sch, name)) continue;
       if (!policy) policy = new SchedulePolicy(this.target);
-      try { policy.applyToBlock(sch, name); } catch (e) { /* leave block sequential */ }
+      try { policy.applyToBlock(sch, name); } catch (e) { this._warn('residual-block', name, e); /* leave block sequential */ }
     }
   }
 
   _blockIsParallelized(sch, blockName) {
     let loops;
-    try { loops = sch.getLoops(blockName); } catch (e) { return true; }
+    try { loops = sch.getLoops(blockName); } catch (e) { this._warn('block-loops', blockName, e); return true; }
     for (const l of loops) {
       if (l.kind === ForKind.THREAD_BINDING || l.kind === ForKind.PARALLEL || l.kind === ForKind.VECTORIZED) return true;
     }
@@ -230,6 +251,7 @@ export class Autotuner {
       new SchedulePolicy(this.target).applyToAllBlocks(new Schedule(work));
       return work;
     } catch (e) {
+      this._warn('build-default-schedule', null, e);
       return null;
     }
   }
@@ -246,6 +268,7 @@ export class Autotuner {
       sketch.instantiate(params)(new Schedule(trial), blockName, this.target);
       return gpuThreadBlockSize(trial) <= this.target.maxThreadsPerBlock;
     } catch (e) {
+      this._warn('fits-thread-block', blockName, e);
       return false;
     }
   }

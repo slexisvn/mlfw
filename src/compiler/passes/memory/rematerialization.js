@@ -69,7 +69,7 @@ export class RematerializationPass extends FunctionPass {
       const bytes = value.type.sizeInBytes();
       if (bytes === DYNAMIC || bytes <= 0) continue;
       events.push({ idx: intv.start, delta: bytes, value });
-      events.push({ idx: intv.end + 1, delta: -bytes, value: null });
+      events.push({ idx: intv.end + 1, delta: -bytes, value });
     }
     events.sort((a, b) => a.idx - b.idx || a.delta - b.delta);
 

@@ -36,6 +36,8 @@ export class BlockTuningSession {
     this.benchmarkRunner = opts.benchmarkRunner || null;
     this.config = opts.config;
     this.deadline = opts.deadline || null;
+    this._warn = opts.warn || (() => {});
+    this._warnedEvalSketches = new Set();
 
     const needsWholeFunc = this.sketches.some(s => s.name === 'fused');
     if (needsWholeFunc) {
@@ -100,6 +102,7 @@ export class BlockTuningSession {
       sketch.instantiate(this._best.params)(sch, this.blockName, this.target);
       return sch.trace.serialize();
     } catch (e) {
+      this._warn('best-trace', this.blockName, e);
       return null;
     }
   }
@@ -131,6 +134,10 @@ export class BlockTuningSession {
       if (this.target.isGPU && this.target.isGPU() && blockLimit && gpuThreadBlockSize(cloned) > blockLimit) return null;
       return { score: this.costModel.score(cloned) };
     } catch (e) {
+      if (!this._warnedEvalSketches.has(sketch.name)) {
+        this._warnedEvalSketches.add(sketch.name);
+        this._warn('evaluate-candidate', this.blockName, e);
+      }
       return null;
     }
   }
@@ -161,6 +168,7 @@ export class BlockTuningSession {
       miniScheduled = clonePrimFunc(this.evalFunc);
       sketch.instantiate(cand.params)(new Schedule(miniScheduled), this.evalBlockName, this.target);
     } catch (e) {
+      this._warn('measure-candidate', this.blockName, e);
       return null;
     }
     const result = this.benchmarkRunner.run(scheduled);

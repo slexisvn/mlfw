@@ -6,6 +6,8 @@ import { PassResult } from '../../../src/compiler/passes/pass.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
 import { CPUTarget } from '../../../src/backend/target.js';
 import { TraceLevel } from '../../../src/compiler/pipeline/trace.js';
+import { UseDefAnalysis } from '../../../src/compiler/analysis/use_def.js';
+import { LivenessAnalysis } from '../../../src/compiler/analysis/liveness.js';
 
 function run(func, opts = {}) {
   return new RematerializationPass(opts).run(func);
@@ -223,6 +225,42 @@ describe('RematerializationPass maxIterations', () => {
     const after = opNames(func);
     const clonedCount = after.length - before.length;
     expect(clonedCount).toBeLessThanOrEqual(1);
+  });
+});
+
+describe('RematerializationPass interval pressure', () => {
+  it('only considers values that are actually live at the pressure peak', () => {
+    const t = new TensorType([1024, 1024], ScalarType.F32);
+    const func = buildFunction('f', [t], [t, t, t, t, t, t], (b, args) => {
+      const t1 = b.neg(args[0]);                          // dies early ([0,2]), useCount 2 (rematerializable)
+      const x = b.add(t1.getResult(0), args[0]);
+      const y = b.exp(t1.getResult(0));                   // t1 dead after here
+      const c1 = b.exp(x.getResult(0));                   // the late high-pressure burst, all live to return
+      const c2 = b.exp(y.getResult(0));
+      const c3 = b.add(c1.getResult(0), c2.getResult(0));
+      const c4 = b.mul(c1.getResult(0), c2.getResult(0));
+      const c5 = b.add(c3.getResult(0), c4.getResult(0));
+      const c6 = b.mul(c3.getResult(0), c4.getResult(0));
+      b.returnOp([
+        c1.getResult(0), c2.getResult(0), c3.getResult(0),
+        c4.getResult(0), c5.getResult(0), c6.getResult(0)
+      ]);
+    });
+
+    const pass = new RematerializationPass({ memoryBudget: 1 });
+    const useDef = UseDefAnalysis.compute(func);
+    const { peakIdx, candidates } = pass._analyzeIntervalPressure(func, useDef);
+    const { intervals } = LivenessAnalysis.buildIntervals(func, useDef.topologicalOrder);
+
+    expect(candidates.length).toBeGreaterThan(0);
+    for (const c of candidates) {
+      const iv = intervals.get(c.value);
+      const liveAtPeak = iv.start <= peakIdx && peakIdx <= iv.end;
+      expect(
+        liveAtPeak,
+        `candidate '${c.value.definingOp.opName}' interval [${iv.start},${iv.end}] is not live at peak ${peakIdx}`
+      ).toBe(true);
+    }
   });
 });
 
