@@ -64,4 +64,19 @@ describe('Block/Region mutation invariants', () => {
     expect(() => new Region().addBlock(block)).toThrow(/already belongs/);
     expect(() => new Region().insertBlock(0, block)).toThrow(/already belongs/);
   });
+
+  it('replaceOperand rejects an out-of-range index or a non-Value operand', () => {
+    const block = new Block([t()]);
+    const arg = block.getArgument(0);
+    const op = mkOp([arg]);
+    block.pushOp(op);
+    expect(() => op.replaceOperand(5, arg)).toThrow(/out of range/);
+    expect(() => op.replaceOperand(0, {})).toThrow(/not a Value/);
+    expect(() => op.replaceOperand(0, arg)).not.toThrow();
+  });
+
+  it('replaceAllResultsWith rejects a mismatched result count', () => {
+    const op = mkOp();
+    expect(() => op.replaceAllResultsWith([])).toThrow(/results/);
+  });
 });

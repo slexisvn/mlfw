@@ -63,6 +63,12 @@ export class Operation {
   removeAttr(name) { return this.attributes.delete(name); }
 
   replaceOperand(index, newValue) {
+    if (index < 0 || index >= this.operands.length) {
+      throw new Error(`replaceOperand: index ${index} out of range for '${this.opName}' (${this.operands.length} operands)`);
+    }
+    if (!(newValue instanceof Value)) {
+      throw new Error(`replaceOperand: new operand for '${this.opName}' is not a Value`);
+    }
     const oldValue = this.operands[index];
     if (oldValue === newValue) return;
     oldValue.removeUse(this._operandLinks[index]);
@@ -93,6 +99,9 @@ export class Operation {
   }
 
   replaceAllResultsWith(newValues) {
+    if (!newValues || newValues.length !== this.results.length) {
+      throw new Error(`replaceAllResultsWith: '${this.opName}' has ${this.results.length} results, got ${newValues ? newValues.length : 0}`);
+    }
     for (let i = 0; i < this.results.length; i++) {
       this.results[i].replaceAllUsesWith(newValues[i]);
     }
