@@ -5,7 +5,7 @@ import {
 import { Buffer } from '../../../ir/tensor/buffer.js';
 import { MemoryScope } from '../../../ir/tensor/tensor_types.js';
 import {
-  registerLoweringRule, getLoweringRule, lowerConstant, CONSTANT_OPS,
+  registerLoweringRule, getLoweringRule, lowerConstant, isConstantOp,
   makeLoopNest, wrapInLoops
 } from '../lowering_registry.js';
 
@@ -46,7 +46,7 @@ function lowerRegionBody(ctx, region, argBuffers) {
       }
       return { stmts, yieldBuffers: results };
     }
-    if (CONSTANT_OPS.has(innerOp.opName)) {
+    if (isConstantOp(innerOp.opName)) {
       stmts.push(lowerConstant(ctx, innerOp));
       continue;
     }

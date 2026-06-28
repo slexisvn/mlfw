@@ -2,6 +2,7 @@ import {
   MathOpNode, FloatImmNode, CompareNode, IfThenElseNode,
   CallExternNode, CastNode
 } from '../../../ir/tensor/nodes.js';
+import { registry } from '../../../ir/graph/ops.js';
 import { registerLoweringRule, lowerPointwise } from '../lowering_registry.js';
 
 const BINARY_ARITH = new Set(['+', '-', '*', '/']);
@@ -13,7 +14,9 @@ const SYNTHETIC_UNARY = {
   'reciprocal': (args) => new MathOpNode('/', new FloatImmNode(1), args[0]),
 };
 
-const ELEMENTWISE_OPS = {
+const ELEMENTWISE_SCALAR_OP_ATTR = 'elementwiseScalarOp';
+
+const ELEMENTWISE_SCALAR_OPS = {
   'add': '+', 'sub': '-', 'mul': '*', 'div': '/',
   'max': 'max', 'min': 'min', 'exp': 'exp', 'log': 'log',
   'sqrt': 'sqrt', 'rsqrt': 'rsqrt', 'tanh': 'tanh', 'abs': 'abs',
@@ -26,10 +29,25 @@ const ELEMENTWISE_OPS = {
   'logical_not': '!', 'logical_and': '&&', 'logical_or': '||'
 };
 
-export { ELEMENTWISE_OPS };
+for (const [opName, jsOp] of Object.entries(ELEMENTWISE_SCALAR_OPS)) {
+  if (registry.has(opName)) registry.registerOpAttr(opName, ELEMENTWISE_SCALAR_OP_ATTR, jsOp);
+}
+
+export function elementwiseScalarOp(opName) {
+  const def = registry.get(opName);
+  return def ? def.getAttr(ELEMENTWISE_SCALAR_OP_ATTR) : null;
+}
+
+export function elementwiseOpNames() {
+  const names = [];
+  for (const def of registry.allOps()) {
+    if (def.hasAttr(ELEMENTWISE_SCALAR_OP_ATTR)) names.push(def.name);
+  }
+  return names;
+}
 
 export function buildElementwiseExpr(opName, loadArgs, dtype) {
-  const jsOp = ELEMENTWISE_OPS[opName];
+  const jsOp = elementwiseScalarOp(opName);
   if (!jsOp) return null;
   if (SYNTHETIC_UNARY[opName]) return SYNTHETIC_UNARY[opName](loadArgs);
   if (loadArgs.length === 2 && BINARY_ARITH.has(jsOp)) {
@@ -48,7 +66,7 @@ export function buildElementwiseExpr(opName, loadArgs, dtype) {
 }
 
 export function register() {
-  for (const opName of Object.keys(ELEMENTWISE_OPS)) {
+  for (const opName of elementwiseOpNames()) {
     registerLoweringRule(opName, (ctx, op, inputs, outputs) =>
       lowerPointwise(ctx, op, inputs, outputs, (o, loads, dtype) => buildElementwiseExpr(o.opName, loads, dtype))
     );

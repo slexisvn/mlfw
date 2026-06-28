@@ -6,18 +6,22 @@ import { isDtypeInt } from '../../../backend/dtype_map.js';
 import { ForNode, BlockNode, SeqNode, BufferStoreNode, BufferLoadNode, VariableNode, IntImmNode, FloatImmNode, BlockRealizeNode, ForKind, MathOpNode, CompareNode, IfThenElseNode, mathOp } from '../../ir/tensor/nodes.js';
 import { symIntToNode } from '../../ir/tensor/sym_lower.js';
 
+import { registry } from '../../ir/graph/ops.js';
 import { registerOpStrategy, getOpStrategy, selectImplementation } from './op_strategy.js';
 
-const CONSTANT_OPS = new Set(['constant', 'scalar_constant']);
 const GENERIC_PLEVEL = 10;
 const TARGET_PLEVEL = 20;
 
-export { CONSTANT_OPS };
+export function isConstantOp(opName) {
+  const def = registry.get(opName);
+  return def !== null && def.isConstant;
+}
+
 export { registerOpStrategy, getOpStrategy, OpStrategy, OpImplementation, selectImplementation } from './op_strategy.js';
 
 export function hasLoweringRule(opName, target) {
   if (getOpStrategy(opName, target)) return true;
-  return CONSTANT_OPS.has(opName);
+  return isConstantOp(opName);
 }
 
 export function registerLoweringRule(opName, ruleFunc, plevel = GENERIC_PLEVEL) {

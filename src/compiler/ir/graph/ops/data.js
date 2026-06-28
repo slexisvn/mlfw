@@ -2,8 +2,7 @@ import { OpDef, OpTrait } from '../op_registry.js';
 import { TensorType, TupleType, ScalarType } from '../types.js';
 
 export function register(registry) {
-  registry.register(new OpDef({
-    name: 'constant',
+  const constantConfig = {
     numOperands: 0,
     numResults: 1,
     attrs: [
@@ -16,7 +15,10 @@ export function register(registry) {
       if (!tt) return null;
       return [tt];
     }
-  }));
+  };
+  for (const name of ['constant', 'scalar_constant']) {
+    registry.register(new OpDef({ name, ...constantConfig }));
+  }
 
   registry.register(new OpDef({
     name: 'iota',

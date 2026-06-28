@@ -1,7 +1,7 @@
 import { FloatImmNode, IntImmNode, MathOpNode, CompareNode, BufferStoreNode, BufferLoadNode, BlockNode, SeqNode, IfThenElseNode, CallExternNode, CastNode, LetStmtNode } from '../../../ir/tensor/nodes.js';
 
-import { getLoweringRule, makeLoopNest, wrapInLoops, computeBroadcastIndices, bufRefs, lowerConstant, CONSTANT_OPS } from '../lowering_registry.js';
-import { buildElementwiseExpr, ELEMENTWISE_OPS } from './elementwise.js';
+import { getLoweringRule, makeLoopNest, wrapInLoops, computeBroadcastIndices, bufRefs, lowerConstant, isConstantOp } from '../lowering_registry.js';
+import { buildElementwiseExpr, elementwiseOpNames } from './elementwise.js';
 import { buildQuantizeExpr, buildDequantizeExpr } from '../quant_math.js';
 
 const INLINE_FUSION_BUILDERS = new Map();
@@ -19,7 +19,7 @@ export function getInlineFusionBuilder(opName) {
 }
 
 function initBuiltinFusionBuilders() {
-  for (const opName of Object.keys(ELEMENTWISE_OPS)) {
+  for (const opName of elementwiseOpNames()) {
     INLINE_FUSION_BUILDERS.set(opName, (innerOp, args, dtype) =>
       buildElementwiseExpr(innerOp.opName, args, dtype)
     );
@@ -91,7 +91,7 @@ function lowerFusion(ctx, op) {
       }
       continue;
     }
-    if (innerOp.opName === 'yield' || CONSTANT_OPS.has(innerOp.opName)) continue;
+    if (innerOp.opName === 'yield' || isConstantOp(innerOp.opName)) continue;
     for (let r = 0; r < innerOp.numResults; r++) {
       const dims = valueDims.get(innerOp.getResult(r));
       if (!dims) continue;
@@ -165,7 +165,7 @@ function lowerFusion(ctx, op) {
       break;
     }
 
-    if (CONSTANT_OPS.has(innerOp.opName)) {
+    if (isConstantOp(innerOp.opName)) {
       const val = innerOp.getAttr('value');
       exprMap.set(innerOp.getResult(0), new FloatImmNode(typeof val === 'number' ? val : 0));
       continue;
@@ -207,7 +207,7 @@ function canLowerAsElementwiseFusion(op) {
   if (!region) return false;
   for (const innerOp of region.entryBlock.ops()) {
     if (innerOp.opName === 'yield') continue;
-    if (CONSTANT_OPS.has(innerOp.opName)) {
+    if (isConstantOp(innerOp.opName)) {
       if (typeof innerOp.getAttr('value') === 'number') continue;
       return false;
     }
@@ -264,7 +264,7 @@ function lowerFusionAsIndividualOps(ctx, fusionOp, stmts) {
       }
     }
 
-    if (CONSTANT_OPS.has(innerOp.opName)) {
+    if (isConstantOp(innerOp.opName)) {
       stmts.push(lowerConstant(ctx, innerOp));
       continue;
     }

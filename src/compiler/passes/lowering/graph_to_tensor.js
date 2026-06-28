@@ -1,7 +1,8 @@
 import { PrimFunc, SeqNode, BufferStoreNode, BufferLoadNode, BlockNode } from '../../ir/tensor/nodes.js';
 import { topoSortOpSet } from '../../ir/graph/graph_algorithms.js';
+import { registry } from '../../ir/graph/ops.js';
 
-import { LoweringContext, registerLoweringRule, hasLoweringRule, getLoweringRule, lowerConstant, CONSTANT_OPS, makeLoopNest, wrapInLoops } from './lowering_registry.js';
+import { LoweringContext, registerLoweringRule, hasLoweringRule, getLoweringRule, lowerConstant, isConstantOp, makeLoopNest, wrapInLoops } from './lowering_registry.js';
 import { register as registerElementwise } from './rules/elementwise.js';
 import { register as registerShape } from './rules/shape.js';
 import { register as registerReduction } from './rules/reduction.js';
@@ -13,15 +14,17 @@ import { register as registerFusion, canInlineFuse, lowerFusion, canLowerAsEleme
 import { register as registerPooling } from './rules/pooling.js';
 import { register as registerResize } from './rules/resize.js';
 import { register as registerAttention } from './rules/attention.js';
-import { ELEMENTWISE_OPS } from './rules/elementwise.js';
+import { elementwiseOpNames } from './rules/elementwise.js';
 
-const BROADCAST_VIEW_SAFE = new Set([
-  ...Object.keys(ELEMENTWISE_OPS),
-  'compare', 'select', 'clamp', 'convert', 'copy_to_device', 'dot', 'fusion',
-]);
+const BROADCAST_VIEW_SAFE_EXTRA = ['compare', 'select', 'clamp', 'convert', 'copy_to_device', 'dot', 'fusion'];
+
+for (const opName of [...elementwiseOpNames(), ...BROADCAST_VIEW_SAFE_EXTRA]) {
+  if (registry.has(opName)) registry.registerOpAttr(opName, 'broadcastViewSafe', true);
+}
 
 function broadcastViewSafeForUser(value, user, visited = new Set()) {
-  if (!BROADCAST_VIEW_SAFE.has(user.opName)) return false;
+  const def = registry.get(user.opName);
+  if (!def || !def.getAttr('broadcastViewSafe')) return false;
   if (user.opName !== 'fusion') return true;
   const region = user.regions[0];
   if (!region) return false;
@@ -98,12 +101,12 @@ export function lowerGraphToPrimFunc(graphFunc, target = null, context = null) {
   const stmts = [];
 
   for (const op of graphFunc.ops()) {
-    if (CONSTANT_OPS.has(op.opName)) stmts.push(lowerConstant(ctx, op));
+    if (isConstantOp(op.opName)) stmts.push(lowerConstant(ctx, op));
   }
 
   for (const op of topologicalOps(graphFunc)) {
     if (op.opName === 'return' || op.opName === 'yield') continue;
-    if (CONSTANT_OPS.has(op.opName)) continue;
+    if (isConstantOp(op.opName)) continue;
 
     if (op.opName === 'fusion') {
       if (canLowerAsElementwiseFusion(op)) {
