@@ -6,6 +6,7 @@ import { OpTrait } from '../../ir/graph/op_registry.js';
 import { UseDefAnalysis } from '../../analysis/use_def.js';
 import { QuantizationScheme, QuantizationParams } from '../../ir/graph/quantization_types.js';
 import { TraceLevel } from '../../pipeline/trace.js';
+import { isTerminatorOp } from '../../ir/graph/op_traits.js';
 
 const DEFAULT_EXCLUDE_OPS = new Set(['softmax', 'sqrt', 'div', 'rsqrt', 'log', 'exp', 'tanh']);
 const DEFAULT_QUANTIZABLE_OPS = new Set(['dot', 'conv', 'add', 'mul', 'sub']);
@@ -54,7 +55,7 @@ export class QuantizationPass extends FunctionPass {
 
     for (let i = 0; i < topo.length; i++) {
       const op = topo[i];
-      if (op.opName === 'return' || op.opName === 'yield') continue;
+      if (isTerminatorOp(op.opName)) continue;
       if (cfg.excludeOps.has(op.opName) || !cfg.quantizableOps.has(op.opName)) {
         for (let o = 0; o < op.numOperands; o++) {
           if (quantizedValues.has(op.getOperand(o))) {

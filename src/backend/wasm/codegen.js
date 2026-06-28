@@ -1,5 +1,5 @@
 import { ForKind } from '../../compiler/ir/tensor/nodes.js';
-import { wasmType, wasmLoad, wasmStore, wasmBytes, isDtypeFloat, wasmSimdEntry, wasmVecOp } from '../dtype_map.js';
+import { wasmType, wasmLoad, wasmStore, wasmBytes, isDtypeFloat, wasmSimdEntry, wasmVecOp } from '../../util/dtype_map.js';
 import { inferDtype } from '../../compiler/ir/lir/nodes.js';
 import { HALF_WASM_CONSTANTS } from '../../tensor/utils/half.js';
 import { irChildNodes } from '../../compiler/ir/ir_visitor.js';

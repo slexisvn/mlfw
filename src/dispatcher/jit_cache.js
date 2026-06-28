@@ -8,7 +8,7 @@ import { PassManager } from '../compiler/passes/pass_manager.js';
 import { DecompositionPass } from '../compiler/passes/decompose/decomposition_pass.js';
 import { CanonicalizePass } from '../compiler/passes/canonicalize/canonicalize.js';
 import { DCEPass } from '../compiler/passes/simplify/dce.js';
-import { reduceInitValue } from '../backend/dtype_map.js';
+import { reduceInitValue } from '../util/dtype_map.js';
 import { Schedule } from '../compiler/schedule/schedule.js';
 import { SchedulePolicy } from '../compiler/schedule/rules.js';
 import { typedArrayCtor } from '../tensor/types/dtype.js';

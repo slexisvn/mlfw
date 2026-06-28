@@ -1,5 +1,6 @@
 import { FunctionPass, PassResult } from '../pass.js';
 import { MemoryEffectAnalysis } from '../../analysis/memory_effect.js';
+import { isTerminatorOp } from '../../ir/graph/op_traits.js';
 
 import { TraceLevel } from '../../pipeline/trace.js';
 
@@ -59,7 +60,7 @@ export class DCEPass extends FunctionPass {
   }
 
   _isDead(op, memEffects) {
-    if (op.opName === 'return' || op.opName === 'yield') return false;
+    if (isTerminatorOp(op.opName)) return false;
 
     if (op.regions && op.regions.length > 0) return false;
 

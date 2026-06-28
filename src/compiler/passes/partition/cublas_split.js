@@ -1,14 +1,10 @@
 import { GraphFunction } from '../../ir/graph/function.js';
 import { Operation } from '../../ir/graph/operation.js';
 import { topoSortOps, buildPartitions, topoSortPartitions, computePartitionIO } from './partition_core.js';
-
-const CONSTANT_OPS = new Set(['constant', 'scalar_constant']);
-const TERMINATORS = new Set(['return', 'yield']);
-
-export { TERMINATORS, CONSTANT_OPS };
+import { isConstantOp as isConstantOpName, isTerminatorOp } from '../../ir/graph/op_traits.js';
 
 export function isConstantOp(op) {
-  return CONSTANT_OPS.has(op.opName);
+  return isConstantOpName(op.opName);
 }
 
 const PARTITION_BUFFER_LIMIT = 32 * 1024;
@@ -152,7 +148,7 @@ export function hasDependentBoundaries(graphModule, minIntermediate = 256) {
     return m;
   };
   for (const op of func.ops()) {
-    if (TERMINATORS.has(op.opName) || !containsBoundaryOp(op)) continue;
+    if (isTerminatorOp(op.opName) || !containsBoundaryOp(op)) continue;
     for (let i = 0; i < op.numOperands; i++) {
       if (maxBoundaryInSubtree(op.getOperand(i).definingOp) > minIntermediate) return true;
     }
@@ -246,7 +242,7 @@ export function splitGraphForNative(graphModule, minBoundaries = 2) {
   let boundaryCount = 0;
 
   for (const op of func.ops()) {
-    if (TERMINATORS.has(op.opName)) continue;
+    if (isTerminatorOp(op.opName)) continue;
     if (isConstantOp(op)) continue;
     if (containsBoundaryOp(op)) opTarget.set(op, 'boundary#' + boundaryCount++);
     else opTarget.set(op, 'native');
@@ -292,7 +288,7 @@ export function splitGraphForCublas(graphModule) {
   let dotCount = 0;
 
   for (const op of func.ops()) {
-    if (TERMINATORS.has(op.opName)) continue;
+    if (isTerminatorOp(op.opName)) continue;
     if (isConstantOp(op)) continue;
     const info = cublasDotInfo(op);
     if (info) {

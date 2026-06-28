@@ -1,8 +1,9 @@
 import { Operation } from '../../ir/graph/operation.js';
 import { GraphFunction } from '../../ir/graph/function.js';
 import { GraphModule } from '../../ir/graph/module.js';
-import { materializePartition, isConstantOp, TERMINATORS, splitGraphForNative, topoSortOps } from './cublas_split.js';
-import { dtypeBytes } from '../../../backend/dtype_map.js';
+import { materializePartition, isConstantOp, splitGraphForNative, topoSortOps } from './cublas_split.js';
+import { isTerminatorOp } from '../../ir/graph/op_traits.js';
+import { dtypeBytes } from '../../../util/dtype_map.js';
 import { shapeProduct } from '../../ir/graph/types.js';
 
 function numel(shape) {
@@ -220,7 +221,7 @@ export function splitGraphForScan(graphModule, target, force = false) {
 
   const reachList = [];
   for (const op of reach) {
-    if (isConstantOp(op) || TERMINATORS.has(op.opName)) continue;
+    if (isConstantOp(op) || isTerminatorOp(op.opName)) continue;
     reachList.push(op);
   }
   const ordered = topoSortOps(reachList);

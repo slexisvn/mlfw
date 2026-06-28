@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { Buffer } from '../../../src/compiler/ir/tensor/buffer.js';
-import { dtypeBytes } from '../../../src/backend/dtype_map.js';
+import { dtypeBytes } from '../../../src/util/dtype_map.js';
 
 describe('Buffer.sizeInBytes', () => {
   const dtypes = ['f16', 'f32', 'f64', 'i8', 'i16', 'i32', 'i64', 'ui8', 'bool', 'index'];

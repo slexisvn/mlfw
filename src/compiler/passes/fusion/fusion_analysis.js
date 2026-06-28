@@ -1,6 +1,7 @@
 import { TensorType, DYNAMIC } from '../../ir/graph/types.js';
 import { registry } from '../../ir/graph/ops.js';
 import { canInlineFuse, hasLoweringRule } from '../lowering/graph_to_tensor.js';
+import { isTerminatorOp } from '../../ir/graph/op_traits.js';
 
 export const FusionKind = Object.freeze({
   ELEMENTWISE: 'kElementwise',
@@ -73,7 +74,7 @@ export class FusionLegality {
   isOpLowerable(opName) {
     let result = this._lowerableCache.get(opName);
     if (result === undefined) {
-      result = opName === 'return' || opName === 'yield' || canInlineFuse(opName) || hasLoweringRule(opName);
+      result = isTerminatorOp(opName) || canInlineFuse(opName) || hasLoweringRule(opName);
       this._lowerableCache.set(opName, result);
     }
     return result;

@@ -2,7 +2,7 @@ import { MathOpNode, FloatImmNode, IntImmNode, BufferStoreNode, BufferLoadNode, 
 import { Buffer } from '../../../ir/tensor/buffer.js';
 import { DYNAMIC } from '../../../ir/graph/types.js';
 import { registerLoweringRule, buildSpatialNest, wrapLoopsWithNodes, concatIterVars } from '../lowering_registry.js';
-import { isDtypeInt } from '../../../../backend/dtype_map.js';
+import { isDtypeInt } from '../../../../util/dtype_map.js';
 
 const INT_DTYPE_MIN = { i8: -128, i16: -32768, i32: -2147483648, i64: -2147483648, ui8: 0, ui16: 0, ui32: 0, bool: 0 };
 const INT_DTYPE_MAX = { i8: 127, i16: 32767, i32: 2147483647, i64: 2147483647, ui8: 255, ui16: 65535, ui32: 4294967295, bool: 1 };

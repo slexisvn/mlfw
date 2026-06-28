@@ -1,17 +1,12 @@
 import { FunctionPass, PassResult } from '../pass.js';
 import { Operation } from '../../ir/graph/operation.js';
 import { registry } from '../../ir/graph/ops.js';
+import { isBroadcastOp, isConstantOp } from '../../ir/graph/op_traits.js';
 
 import { TraceLevel } from '../../pipeline/trace.js';
 
-const CONSTANT_OPS = new Set(['constant', 'scalar_constant']);
-const BROADCAST_OPS = new Set(['broadcast_in_dim', 'broadcast']);
-const PASSTHROUGH_OPS = new Set([...CONSTANT_OPS, ...BROADCAST_OPS]);
-
 function isPassthrough(op) {
-  if (PASSTHROUGH_OPS.has(op.opName)) return true;
-  const def = registry.get(op.opName);
-  return def !== null && (def.isBroadcast || def.isConstant);
+  return isBroadcastOp(op.opName) || isConstantOp(op.opName);
 }
 
 function isEpilogueCandidate(op) {
@@ -86,7 +81,7 @@ function collectChainAndAnalyze(dotOp) {
     visited.add(op);
     for (let i = 0; i < op.numOperands; i++) {
       const defOp = op.getOperand(i).definingOp;
-      if (defOp && defOp !== dotOp && !visited.has(defOp) && PASSTHROUGH_OPS.has(defOp.opName)) {
+      if (defOp && defOp !== dotOp && !visited.has(defOp) && isPassthrough(defOp)) {
         absorb(defOp);
       }
     }
@@ -115,7 +110,7 @@ function collectChainAndAnalyze(dotOp) {
 
   const tags = [];
   for (const op of chain) {
-    if (BROADCAST_OPS.has(op.opName) || CONSTANT_OPS.has(op.opName)) continue;
+    if (isPassthrough(op)) continue;
     tags.push(classifyTag(op, chainSet));
   }
 

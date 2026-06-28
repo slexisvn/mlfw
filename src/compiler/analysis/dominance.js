@@ -1,4 +1,5 @@
 import { UseDefAnalysis } from './use_def.js';
+import { isTerminatorOp } from '../ir/graph/op_traits.js';
 
 export class DominanceResult {
   constructor(idom) {
@@ -58,7 +59,7 @@ export class PostDominanceAnalysis {
 
     const exitSet = new Set();
     for (const op of topo) {
-      if (op.opName === 'return' || op.opName === 'yield') {
+      if (isTerminatorOp(op.opName)) {
         exitSet.add(op);
       }
     }

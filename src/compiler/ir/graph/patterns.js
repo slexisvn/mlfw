@@ -1,7 +1,7 @@
-import { Pattern } from '../../passes/rewrite/pattern.js';
+import { Pattern } from '../rewrite/pattern.js';
 import { TensorType } from './types.js';
-import { isDtypeInt } from '../../../backend/dtype_map.js';
-import { isOp, wildcard, matchPattern } from '../../passes/rewrite/dfpattern.js';
+import { isDtypeInt } from '../../../util/dtype_map.js';
+import { isOp, wildcard, matchPattern } from '../rewrite/dfpattern.js';
 
 const TRANSPOSE_TRANSPOSE_PAT = isOp('transpose', isOp('transpose', wildcard()));
 const RESHAPE_RESHAPE_PAT = isOp('reshape', isOp('reshape', wildcard()));

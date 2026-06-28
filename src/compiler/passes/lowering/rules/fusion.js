@@ -3,6 +3,7 @@ import { FloatImmNode, IntImmNode, MathOpNode, CompareNode, BufferStoreNode, Buf
 import { getLoweringRule, makeLoopNest, wrapInLoops, computeBroadcastIndices, bufRefs, lowerConstant, isConstantOp } from '../lowering_registry.js';
 import { buildElementwiseExpr, elementwiseOpNames } from './elementwise.js';
 import { buildQuantizeExpr, buildDequantizeExpr } from '../quant_math.js';
+import { isBroadcastOp } from '../../../ir/graph/op_traits.js';
 
 const INLINE_FUSION_BUILDERS = new Map();
 
@@ -84,7 +85,7 @@ function lowerFusion(ctx, op) {
   const opsArr = [...entryBlock.ops()];
   for (let k = opsArr.length - 1; k >= 0; k--) {
     const innerOp = opsArr[k];
-    if (innerOp.opName === 'broadcast_in_dim' || innerOp.opName === 'broadcast') {
+    if (isBroadcastOp(innerOp.opName)) {
       const dims = innerOp.getAttr('broadcast_dimensions');
       if (dims && dims.length > 0) {
         valueDims.set(innerOp.getOperand(0), dims);

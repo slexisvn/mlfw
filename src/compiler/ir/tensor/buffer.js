@@ -1,4 +1,4 @@
-import { dtypeBytes } from '../../../backend/dtype_map.js';
+import { dtypeBytes } from '../../../util/dtype_map.js';
 import { shapeProduct, symbolicShapeProduct, DYNAMIC } from '../graph/types.js';
 
 export class Buffer {

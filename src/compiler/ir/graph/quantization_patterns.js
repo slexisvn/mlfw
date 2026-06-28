@@ -1,4 +1,4 @@
-import { Pattern } from '../../passes/rewrite/pattern.js';
+import { Pattern } from '../rewrite/pattern.js';
 import { TensorType, ScalarType, scalarBytes } from './types.js';
 
 function quantParamsMatch(opA, opB) {

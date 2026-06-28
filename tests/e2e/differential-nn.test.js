@@ -6,7 +6,7 @@ import { max_pool2d, avg_pool2d } from '../../src/nn/functional/pooling.js';
 import { compile } from '../../src/tracing/compile.js';
 import { CPUTarget, WasmTarget } from '../../src/backend/target.js';
 import { eq, where, gt, clamp, pad, one_hot, index_select, cat, stack, roll, flip, cumsum, sort, topk, argsort, gather, scatter_add, scatter } from '../../src/index.js';
-import { isDtypeFloat } from '../../src/backend/dtype_map.js';
+import { isDtypeFloat } from '../../src/util/dtype_map.js';
 
 function mulberry32(seed) {
   let a = seed >>> 0;

@@ -1,6 +1,7 @@
 import { GraphFunction } from '../ir/graph/function.js';
 import { IRBuilder } from '../ir/graph/builder.js';
 import { UseDefAnalysis } from '../analysis/use_def.js';
+import { isConstantOp } from '../ir/graph/op_traits.js';
 
 const _jvpRules = new Map();
 
@@ -39,7 +40,7 @@ export function buildForwardDiff(forwardFunc) {
     const cloned = op.clone(fwdMap);
     builder.block.pushOp(cloned);
 
-    if (op.opName === 'constant' || op.opName === 'scalar_constant') {
+    if (isConstantOp(op.opName)) {
       for (let r = 0; r < op.numResults; r++) tan.set(op.getResult(r), zeroLike(op.getResult(r).type));
       continue;
     }

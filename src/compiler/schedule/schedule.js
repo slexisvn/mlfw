@@ -10,130 +10,29 @@ import { ScheduleMutator } from './mutator.js';
 import { SRefTree } from './sref.js';
 import { loopCarriesReduction, collectVarsUsed } from './legality.js';
 import { cloneIRShared } from '../ir/clone_ir.js';
+import { transform as irTransform, some as irSome } from '../ir/ir_visitor.js';
 
 const RFACTOR_ASSOCIATIVE_OPS = new Set(['+', '*', 'min', 'max']);
 
 function substituteVar(node, oldName, exprFactory) {
-  if (!node || typeof node !== 'object') return node;
-  if (node.type === 'VariableNode' && node.name === oldName) return exprFactory();
-
-  switch (node.type) {
-    case 'MathOpNode':
-      node.a = substituteVar(node.a, oldName, exprFactory);
-      if (node.b) node.b = substituteVar(node.b, oldName, exprFactory);
-      break;
-    case 'CompareNode':
-      node.a = substituteVar(node.a, oldName, exprFactory);
-      node.b = substituteVar(node.b, oldName, exprFactory);
-      break;
-    case 'BufferLoadNode':
-      for (let i = 0; i < node.indices.length; i++)
-        node.indices[i] = substituteVar(node.indices[i], oldName, exprFactory);
-      break;
-    case 'BufferStoreNode':
-      for (let i = 0; i < node.indices.length; i++)
-        node.indices[i] = substituteVar(node.indices[i], oldName, exprFactory);
-      node.value = substituteVar(node.value, oldName, exprFactory);
-      break;
-    case 'CallExternNode':
-      for (let i = 0; i < node.args.length; i++)
-        node.args[i] = substituteVar(node.args[i], oldName, exprFactory);
-      break;
-    case 'CastNode':
-      node.expr = substituteVar(node.expr, oldName, exprFactory);
-      break;
-    case 'IfThenElseNode':
-      node.condition = substituteVar(node.condition, oldName, exprFactory);
-      node.thenBody = substituteVar(node.thenBody, oldName, exprFactory);
-      if (node.elseBody) node.elseBody = substituteVar(node.elseBody, oldName, exprFactory);
-      break;
-    case 'ForNode':
-      node.body = substituteVar(node.body, oldName, exprFactory);
-      break;
-    case 'BlockNode':
-      node.body = substituteVar(node.body, oldName, exprFactory);
-      if (node.initBody) node.initBody = substituteVar(node.initBody, oldName, exprFactory);
-      for (let i = 0; i < node.iterVars.length; i++) {
-        if (node.iterVars[i].binding)
-          node.iterVars[i].binding = substituteVar(node.iterVars[i].binding, oldName, exprFactory);
-      }
-      break;
-    case 'SeqNode':
-      for (let i = 0; i < node.stmts.length; i++)
-        node.stmts[i] = substituteVar(node.stmts[i], oldName, exprFactory);
-      break;
-    case 'LetStmtNode':
-      node.value = substituteVar(node.value, oldName, exprFactory);
-      node.body = substituteVar(node.body, oldName, exprFactory);
-      break;
-    case 'BlockRealizeNode':
-      if (node.binding) node.binding = substituteVar(node.binding, oldName, exprFactory);
-      break;
-  }
-  return node;
+  return irTransform(node, (n) => {
+    if (n.type === 'VariableNode' && n.name === oldName) return exprFactory();
+    return n;
+  }, { bindVars: false });
 }
 
 function replaceBufferLoads(node, bufName, makeReplacement, counter) {
-  if (!node || typeof node !== 'object') return node;
-  if (node.type === 'BufferLoadNode' && node.buffer && node.buffer.name === bufName) {
-    counter.n++;
-    return makeReplacement(node);
-  }
-  switch (node.type) {
-    case 'MathOpNode':
-      node.a = replaceBufferLoads(node.a, bufName, makeReplacement, counter);
-      if (node.b) node.b = replaceBufferLoads(node.b, bufName, makeReplacement, counter);
-      break;
-    case 'CompareNode':
-      node.a = replaceBufferLoads(node.a, bufName, makeReplacement, counter);
-      node.b = replaceBufferLoads(node.b, bufName, makeReplacement, counter);
-      break;
-    case 'BufferLoadNode':
-      for (let i = 0; i < node.indices.length; i++) node.indices[i] = replaceBufferLoads(node.indices[i], bufName, makeReplacement, counter);
-      break;
-    case 'BufferStoreNode':
-      for (let i = 0; i < node.indices.length; i++) node.indices[i] = replaceBufferLoads(node.indices[i], bufName, makeReplacement, counter);
-      node.value = replaceBufferLoads(node.value, bufName, makeReplacement, counter);
-      break;
-    case 'CallExternNode':
-      for (let i = 0; i < node.args.length; i++) node.args[i] = replaceBufferLoads(node.args[i], bufName, makeReplacement, counter);
-      break;
-    case 'CastNode':
-      node.expr = replaceBufferLoads(node.expr, bufName, makeReplacement, counter);
-      break;
-    case 'IfThenElseNode':
-      node.condition = replaceBufferLoads(node.condition, bufName, makeReplacement, counter);
-      node.thenBody = replaceBufferLoads(node.thenBody, bufName, makeReplacement, counter);
-      if (node.elseBody) node.elseBody = replaceBufferLoads(node.elseBody, bufName, makeReplacement, counter);
-      break;
-    case 'ForNode':
-      node.body = replaceBufferLoads(node.body, bufName, makeReplacement, counter);
-      break;
-    case 'BlockNode':
-      node.body = replaceBufferLoads(node.body, bufName, makeReplacement, counter);
-      if (node.initBody) node.initBody = replaceBufferLoads(node.initBody, bufName, makeReplacement, counter);
-      break;
-    case 'SeqNode':
-      for (let i = 0; i < node.stmts.length; i++) node.stmts[i] = replaceBufferLoads(node.stmts[i], bufName, makeReplacement, counter);
-      break;
-    case 'LetStmtNode':
-      node.value = replaceBufferLoads(node.value, bufName, makeReplacement, counter);
-      node.body = replaceBufferLoads(node.body, bufName, makeReplacement, counter);
-      break;
-  }
-  return node;
+  return irTransform(node, (n) => {
+    if (n.type === 'BufferLoadNode' && n.buffer && n.buffer.name === bufName) {
+      counter.n++;
+      return makeReplacement(n);
+    }
+    return n;
+  }, { bindVars: false });
 }
 
 function loadsBuffer(node, bufName) {
-  if (!node || typeof node !== 'object') return false;
-  if (node.type === 'BufferLoadNode' && node.buffer && node.buffer.name === bufName) return true;
-  for (const k of ['a', 'b', 'expr', 'value', 'condition', 'thenBody', 'elseBody', 'body', 'initBody']) {
-    if (node[k] && loadsBuffer(node[k], bufName)) return true;
-  }
-  if (node.args) for (const a of node.args) if (loadsBuffer(a, bufName)) return true;
-  if (node.indices) for (const i of node.indices) if (loadsBuffer(i, bufName)) return true;
-  if (node.stmts) for (const s of node.stmts) if (loadsBuffer(s, bufName)) return true;
-  return false;
+  return irSome(node, (n) => n.type === 'BufferLoadNode' && n.buffer && n.buffer.name === bufName);
 }
 
 function cloneExprTree(node) {

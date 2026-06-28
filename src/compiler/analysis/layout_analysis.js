@@ -2,6 +2,7 @@ import { UseDefAnalysis } from './use_def.js';
 import { Layout, TensorType } from '../ir/graph/types.js';
 import { registry } from '../ir/graph/ops.js';
 import { OpTrait } from '../ir/graph/op_registry.js';
+import { isTerminatorOp } from '../ir/graph/op_traits.js';
 
 export class LayoutAnalysisResult {
   constructor(assignments, conversions, totalCost) {
@@ -29,7 +30,7 @@ export class LayoutAnalysis {
 
     for (let i = 0; i < topo.length; i++) {
       const op = topo[i];
-      if (op.opName === 'return' || op.opName === 'yield') continue;
+      if (isTerminatorOp(op.opName)) continue;
 
       const pref = policy ? policy.getPreference(op) : null;
 

@@ -4,10 +4,7 @@ import { registry } from '../../ir/graph/ops.js';
 import { TraceLevel } from '../../pipeline/trace.js';
 import { isIntType } from '../../ir/graph/types.js';
 
-const CONSTANT_OPS = new Set(['constant', 'scalar_constant']);
-
 function isConstantProducer(opName) {
-  if (CONSTANT_OPS.has(opName)) return true;
   const def = registry.get(opName);
   return !!(def && def.isConstant);
 }

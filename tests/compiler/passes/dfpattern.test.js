@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { wildcard, isOp, hasAttr, alt, capture, matchPattern } from '../../../src/compiler/passes/rewrite/dfpattern.js';
+import { wildcard, isOp, hasAttr, alt, capture, matchPattern } from '../../../src/compiler/ir/rewrite/dfpattern.js';
 
 function mkOp(opName, operands = [], attrs = {}) {
   return {

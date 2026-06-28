@@ -2,20 +2,17 @@ import { DYNAMIC } from '../../ir/graph/types.js';
 import { SymInt, symVarName } from '../../analysis/sym_int.js';
 import { MemoryScope } from '../../ir/tensor/tensor_types.js';
 import { Buffer } from '../../ir/tensor/buffer.js';
-import { isDtypeInt } from '../../../backend/dtype_map.js';
+import { isDtypeInt } from '../../../util/dtype_map.js';
 import { ForNode, BlockNode, SeqNode, BufferStoreNode, BufferLoadNode, VariableNode, IntImmNode, FloatImmNode, BlockRealizeNode, ForKind, MathOpNode, CompareNode, IfThenElseNode, mathOp } from '../../ir/tensor/nodes.js';
 import { symIntToNode } from '../../ir/tensor/sym_lower.js';
 
-import { registry } from '../../ir/graph/ops.js';
+import { isConstantOp } from '../../ir/graph/op_traits.js';
 import { registerOpStrategy, getOpStrategy, selectImplementation } from './op_strategy.js';
 
 const GENERIC_PLEVEL = 10;
 const TARGET_PLEVEL = 20;
 
-export function isConstantOp(opName) {
-  const def = registry.get(opName);
-  return def !== null && def.isConstant;
-}
+export { isConstantOp };
 
 export { registerOpStrategy, getOpStrategy, OpStrategy, OpImplementation, selectImplementation } from './op_strategy.js';
 

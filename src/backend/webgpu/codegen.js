@@ -1,5 +1,5 @@
 import { ForKind } from '../../compiler/ir/tensor/nodes.js';
-import { wgslType, wgslBytes, wgslMathFunc, hasWgslMathFunc, cCompareOp } from '../dtype_map.js';
+import { wgslType, wgslBytes, wgslMathFunc, hasWgslMathFunc, cCompareOp } from '../../util/dtype_map.js';
 import { flattenRowMajorIndex } from '../index_emit.js';
 import { MinHeap } from '../../util/min_heap.js';
 import { irChildNodes } from '../../compiler/ir/ir_visitor.js';

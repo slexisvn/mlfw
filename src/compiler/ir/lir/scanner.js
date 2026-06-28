@@ -1,5 +1,5 @@
 import { LIRMetadata, normalizeDtype, isWasmNativeOp } from './nodes.js';
-import { wasmBytes } from '../../../backend/dtype_map.js';
+import { dtypeBytes } from '../../../util/dtype_map.js';
 import { ForKind } from '../tensor/nodes.js';
 import { collect as irCollect } from '../ir_visitor.js';
 
@@ -129,10 +129,10 @@ function computeMemoryLayout(primFunc, meta, target) {
   const bufBytes = (buf) => {
     const isDynamic = buf.shape.some(d => typeof d !== 'number' || d < 0);
     const numel = buf.numel();
-    if (!isDynamic && numel >= 0) return numel * wasmBytes(buf.dtype);
+    if (!isDynamic && numel >= 0) return numel * dtypeBytes(buf.dtype);
     let staticLowerBound = 1;
     for (const d of buf.shape) staticLowerBound *= (typeof d === 'number' && d > 0) ? d : 1;
-    return Math.max(DYNAMIC_BUFFER_SLAB_BYTES, staticLowerBound * wasmBytes(buf.dtype));
+    return Math.max(DYNAMIC_BUFFER_SLAB_BYTES, staticLowerBound * dtypeBytes(buf.dtype));
   };
 
   for (const [, buf] of primFunc.bufferMap) {

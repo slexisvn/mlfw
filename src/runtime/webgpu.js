@@ -1,4 +1,4 @@
-import { wgslType, wgslBytes } from '../backend/dtype_map.js';
+import { wgslType, wgslBytes } from '../util/dtype_map.js';
 import { bf16ToF32, f32ToBf16 } from '../tensor/utils/half.js';
 import { wrapResult } from '../dispatcher/jit_dispatch.js';
 import { WEBGPU_DEVICE } from '../tensor/types/device.js';

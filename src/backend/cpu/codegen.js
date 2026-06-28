@@ -1,5 +1,5 @@
 import { ForKind } from '../../compiler/ir/tensor/nodes.js';
-import { jsTypedArray, isJSMathFunc, isDtypeInt, dtypeBytes, jsCompareOp } from '../dtype_map.js';
+import { jsTypedArray, isJSMathFunc, isDtypeInt, dtypeBytes, jsCompareOp } from '../../util/dtype_map.js';
 import { flattenRowMajorIndex } from '../index_emit.js';
 import { irChildNodes } from '../../compiler/ir/ir_visitor.js';
 import { dynamicDimProduct, resolveShapeParam, isZeroFillBody } from '../codegen_utils.js';

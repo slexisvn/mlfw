@@ -1,4 +1,4 @@
-import { cCompareOp } from '../../../backend/dtype_map.js';
+import { cCompareOp } from '../../../util/dtype_map.js';
 
 export class TensorIRPrinter {
   constructor() {

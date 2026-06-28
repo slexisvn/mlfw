@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
-import { Pattern, PatternSet, PatternApplicator } from '../../../src/compiler/passes/rewrite/pattern.js';
+import { Pattern, PatternSet } from '../../../src/compiler/ir/rewrite/pattern.js';
+import { PatternApplicator } from '../../../src/compiler/passes/rewrite/pattern.js';
 import { PassResult } from '../../../src/compiler/passes/pass.js';
 
 class NegNegPattern extends Pattern {

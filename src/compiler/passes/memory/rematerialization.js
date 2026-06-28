@@ -6,8 +6,7 @@ import { registry } from '../../ir/graph/ops.js';
 import { TraceLevel } from '../../pipeline/trace.js';
 import { UseDefAnalysis } from '../../analysis/use_def.js';
 import { LivenessAnalysis } from '../../analysis/liveness.js';
-
-const NEVER_REMAT = new Set(['return', 'yield', 'constant', 'scalar_constant']);
+import { isConstantOp, isTerminatorOp } from '../../ir/graph/op_traits.js';
 
 export class RematerializationConfig {
   constructor(opts = {}) {
@@ -121,7 +120,7 @@ export class RematerializationPass extends FunctionPass {
 
     const defOp = value.definingOp;
     if (!defOp) return false;
-    if (NEVER_REMAT.has(defOp.opName)) return false;
+    if (isTerminatorOp(defOp.opName) || isConstantOp(defOp.opName)) return false;
     if (this.config.excludeOps.has(defOp.opName)) return false;
     if (defOp.regions.length > 0) return false;
     if (defOp.hasSideEffects()) return false;

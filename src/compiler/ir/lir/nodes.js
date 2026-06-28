@@ -1,4 +1,4 @@
-import { isDtypeFloat } from '../../../backend/dtype_map.js';
+import { isDtypeFloat } from '../../../util/dtype_map.js';
 
 export class LIRNode {
   constructor() {

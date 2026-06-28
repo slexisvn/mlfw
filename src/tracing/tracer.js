@@ -5,7 +5,7 @@ import { TensorType, ScalarType, DYNAMIC } from '../compiler/ir/graph/types.js';
 import { registry } from '../compiler/ir/graph/ops.js';
 import { SymbolicTensor } from './symbolic_tensor.js';
 import { ShapeEnv } from './shape_env.js';
-import { reduceInitValue } from '../backend/dtype_map.js';
+import { reduceInitValue } from '../util/dtype_map.js';
 
 function _traceReduce(b, args, a, reduceType) {
   const rank = args[0].type.rank;

@@ -3,6 +3,7 @@ import { topoSortOpSet } from '../../ir/graph/graph_algorithms.js';
 import { registry } from '../../ir/graph/ops.js';
 
 import { LoweringContext, registerLoweringRule, hasLoweringRule, getLoweringRule, lowerConstant, isConstantOp, makeLoopNest, wrapInLoops } from './lowering_registry.js';
+import { isTerminatorOp, isBroadcastOp } from '../../ir/graph/op_traits.js';
 import { register as registerElementwise } from './rules/elementwise.js';
 import { register as registerShape } from './rules/shape.js';
 import { register as registerReduction } from './rules/reduction.js';
@@ -105,7 +106,7 @@ export function lowerGraphToPrimFunc(graphFunc, target = null, context = null) {
   }
 
   for (const op of topologicalOps(graphFunc)) {
-    if (op.opName === 'return' || op.opName === 'yield') continue;
+    if (isTerminatorOp(op.opName)) continue;
     if (isConstantOp(op.opName)) continue;
 
     if (op.opName === 'fusion') {
@@ -117,7 +118,7 @@ export function lowerGraphToPrimFunc(graphFunc, target = null, context = null) {
       continue;
     }
 
-    if ((op.opName === 'broadcast_in_dim' || op.opName === 'broadcast')
+    if (isBroadcastOp(op.opName)
         && !returnedValues.has(op.getResult(0))
         && op.getOperand(0).getUsers().length === 1
         && op.getResult(0).getUsers().every((u) => broadcastViewSafeForUser(op.getResult(0), u))) {

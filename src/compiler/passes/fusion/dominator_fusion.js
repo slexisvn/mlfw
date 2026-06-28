@@ -10,8 +10,11 @@ import { PostDominanceAnalysis } from '../../analysis/dominance.js';
 import { TraceLevel } from '../../pipeline/trace.js';
 import { UseDefAnalysis } from '../../analysis/use_def.js';
 import { makeComesBefore } from './fusion_utils.js';
+import { isConstantOp, isTerminatorOp } from '../../ir/graph/op_traits.js';
 
-const SKIP_OPS = new Set(['return', 'yield', 'constant', 'scalar_constant']);
+function isSkipOp(opName) {
+  return isTerminatorOp(opName) || isConstantOp(opName);
+}
 
 export class DominatorFusionPass extends FunctionPass {
   constructor(config = {}) {
@@ -83,14 +86,14 @@ export class DominatorFusionPass extends FunctionPass {
 
     for (let i = topo.length - 1; i >= 0; i--) {
       const op = topo[i];
-      if (SKIP_OPS.has(op.opName)) continue;
+      if (isSkipOp(op.opName)) continue;
 
       const pattern = classifyOpPattern(op);
       if (pattern === FusionKind.OPAQUE) continue;
       if (this.libraryOps.has(op.opName)) continue;
 
       const pdomOp = pdom.immediatePDom(op);
-      if (!pdomOp || SKIP_OPS.has(pdomOp.opName)) continue;
+      if (!pdomOp || isSkipOp(pdomOp.opName)) continue;
 
       const pdomPattern = classifyOpPattern(pdomOp);
       if (pdomPattern === FusionKind.OPAQUE) continue;

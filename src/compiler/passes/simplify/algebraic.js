@@ -1,5 +1,6 @@
 import { FunctionPass } from '../pass.js';
-import { PatternSet, PatternApplicator } from '../rewrite/pattern.js';
+import { PatternSet } from '../../ir/rewrite/pattern.js';
+import { PatternApplicator } from '../rewrite/pattern.js';
 import * as pat from '../../ir/graph/patterns.js';
 
 function buildAlgebraicPatterns(fastMath) {
