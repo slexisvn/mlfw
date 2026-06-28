@@ -127,12 +127,16 @@ export class MemoryPlanner {
 
   _buildReuseAliases(temporaries, plan, primFunc) {
     const unsafe = collectFreshZeroDependent(primFunc);
+    const inplaceSources = new Set(plan.assignment.inplaceMap.values());
+    const effLastUse = plan.assignment.effLastUse;
+    const lastUseOf = (interval) => effLastUse.get(interval.buffer) ?? interval.lastUse;
 
     const groups = new Map();
     for (const interval of temporaries) {
       const buf = interval.buffer;
       const assignment = plan.assignment.getAssignment(buf);
       if (!assignment || assignment.inplaceOf || assignment.isDynamic) continue;
+      if (inplaceSources.has(buf)) continue;
       if (buf.numel() <= 0) continue;
       if (unsafe.has(buf)) continue;
       const key = `${buf.scope}|${buf.dtype}|${buf.shape.join(',')}|${buf.strides.join(',')}`;
@@ -144,17 +148,17 @@ export class MemoryPlanner {
     const aliasMap = new Map();
     for (const bucket of groups.values()) {
       if (bucket.length < 2) continue;
-      bucket.sort((a, b) => a.firstUse - b.firstUse || a.lastUse - b.lastUse);
+      bucket.sort((a, b) => a.firstUse - b.firstUse || lastUseOf(a) - lastUseOf(b));
       const slots = new MinHeap((x, y) => x.lastUse - y.lastUse);
       for (const interval of bucket) {
         const free = slots.peek();
         if (free && free.lastUse < interval.firstUse) {
           slots.pop();
-          free.lastUse = interval.lastUse;
+          free.lastUse = lastUseOf(interval);
           slots.push(free);
           aliasMap.set(interval.buffer, free.rep);
         } else {
-          slots.push({ rep: interval.buffer, lastUse: interval.lastUse });
+          slots.push({ rep: interval.buffer, lastUse: lastUseOf(interval) });
         }
       }
     }

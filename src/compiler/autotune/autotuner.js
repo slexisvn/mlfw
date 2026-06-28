@@ -90,6 +90,7 @@ export class Autotuner {
     this._funcName = primFunc.name;
     const blockNames = blockName ? [blockName] : collectAllBlockNames(primFunc.body);
     const blockMap = buildBlockMap(primFunc.body);
+    const dag = buildBlockDAG(primFunc);
     const deadline = new Deadline(this.config.timeBudgetMs, this.config.clock);
 
     const tasksByKey = new Map();
@@ -106,7 +107,7 @@ export class Autotuner {
         continue;
       }
 
-      const sketches = getSketchesForBlock(primFunc, name, this.target, blockMap, { richGpu: this.config.richGpu ?? !!this.config.measurer });
+      const sketches = getSketchesForBlock(primFunc, name, this.target, blockMap, { richGpu: this.config.richGpu ?? !!this.config.measurer, dag });
       if (sketches.length === 0) {
         tasksByKey.set(key, { key, kind: 'empty', weight: 1 });
         continue;
@@ -202,7 +203,7 @@ export class Autotuner {
         applied.add(result);
         if (!result.sketchName || !result.params) continue;
         try {
-          const sketches = getSketchesForBlock(work, blockName, this.target, blockMap, { richGpu: this.config.richGpu ?? !!this.config.measurer });
+          const sketches = getSketchesForBlock(work, blockName, this.target, blockMap, { richGpu: this.config.richGpu ?? !!this.config.measurer, dag });
           const sketch = sketches.find(s => s.name === result.sketchName);
           if (sketch && this._fitsThreadBlock(work, blockName, sketch, result.params)) {
             const apply = sketch.instantiate(result.params);

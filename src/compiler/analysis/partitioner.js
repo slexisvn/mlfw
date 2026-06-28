@@ -292,29 +292,38 @@ export class GraphPartitioner {
     for (const part of partitions) for (const op of part.ops) opToPart.set(op, part);
 
     const mergedAway = new Set();
-    let succCache = null;
-    let reachCache = null;
-    const buildSucc = () => {
-      succCache = new Map();
-      reachCache = new Map();
-      for (const part of partitions) {
-        if (mergedAway.has(part)) continue;
-        succCache.set(part, new Set());
-      }
-      for (const part of partitions) {
-        if (mergedAway.has(part)) continue;
-        const out = succCache.get(part);
-        for (const op of part.ops) {
-          for (let r = 0; r < op.numResults; r++) {
-            for (const use of op.getResult(r).uses()) {
-              const cp = opToPart.get(use.user);
-              if (cp && cp !== part) out.add(cp);
-            }
+    const succCache = new Map();
+    let reachCache = new Map();
+    for (const part of partitions) {
+      if (mergedAway.has(part)) continue;
+      succCache.set(part, new Set());
+    }
+    for (const part of partitions) {
+      if (mergedAway.has(part)) continue;
+      const out = succCache.get(part);
+      for (const op of part.ops) {
+        for (let r = 0; r < op.numResults; r++) {
+          for (const use of op.getResult(r).uses()) {
+            const cp = opToPart.get(use.user);
+            if (cp && cp !== part) out.add(cp);
           }
         }
       }
+    }
+
+    const mergeSucc = (q, p) => {
+      const qSucc = succCache.get(q);
+      for (const s of succCache.get(p)) if (s !== q) qSucc.add(s);
+      qSucc.delete(p);
+      for (const [x, xs] of succCache) {
+        if (xs.has(p)) {
+          xs.delete(p);
+          if (x !== q) xs.add(q);
+        }
+      }
+      succCache.delete(p);
+      reachCache = new Map();
     };
-    buildSucc();
 
     const reachOf = (part) => {
       let r = reachCache.get(part);
@@ -325,7 +334,8 @@ export class GraphPartitioner {
         const n = stack.pop();
         if (r.has(n)) continue;
         r.add(n);
-        for (const s of succCache.get(n)) stack.push(s);
+        const ns = succCache.get(n);
+        if (ns) for (const s of ns) stack.push(s);
       }
       reachCache.set(part, r);
       return r;
@@ -359,7 +369,7 @@ export class GraphPartitioner {
         if (candidate.target.name !== p.target.name) continue;
         if (mergeCreatesCycle(p, candidate)) continue;
 
-        const score = this._mergeScore(p, candidate);
+        const score = this.config.costWeights.transferCost * this._mergeScore(p, candidate);
         if (score > bestScore) {
           bestScore = score;
           bestMerge = j;
@@ -367,10 +377,11 @@ export class GraphPartitioner {
       }
 
       if (bestMerge >= 0) {
-        partitions[bestMerge].merge(p);
-        for (const op of p.ops) opToPart.set(op, partitions[bestMerge]);
+        const q = partitions[bestMerge];
+        mergeSucc(q, p);
+        q.merge(p);
+        for (const op of p.ops) opToPart.set(op, q);
         mergedAway.add(p);
-        buildSucc();
       } else {
         result.push(p);
       }

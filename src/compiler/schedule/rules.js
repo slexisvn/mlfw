@@ -21,16 +21,22 @@ const _classifyCacheByFunc = new WeakMap();
 
 export function classifyBlock(primFunc, blockName) {
   let cache = _classifyCacheByFunc.get(primFunc);
+  if (cache && cache.has(blockName)) return cache.get(blockName);
   if (!cache) {
     cache = new Map();
-    collectBlockInfo(primFunc.body, cache, []);
     _classifyCacheByFunc.set(primFunc, cache);
   }
-  return cache.get(blockName) || null;
+  collectBlockInfo(primFunc.body, cache, []);
+  return cache.has(blockName) ? cache.get(blockName) : null;
 }
 
 function invalidateClassifyCache(primFunc) {
   if (primFunc) _classifyCacheByFunc.delete(primFunc);
+}
+
+function invalidateClassifyBlock(primFunc, blockName) {
+  const cache = _classifyCacheByFunc.get(primFunc);
+  if (cache) cache.delete(blockName);
 }
 
 function collectVarNames(node, out) {
@@ -82,15 +88,17 @@ function collectBlockInfo(root, result, initialLoopStack) {
     if (node.type === 'ForNode') {
       stack.push({ node: node.body, loops: [...loops, node] });
     } else if (node.type === 'BlockNode') {
-      const reductionLoopVars = computeReductionLoopVars(node);
-      result.set(node.name, {
-        loopCount: loops.length,
-        hasReduction: node.initBody !== null || reductionLoopVars.size > 0,
-        reductionLoopVars,
-        readBuffers: node.reads.map(r => r.buffer.name),
-        writeBuffers: node.writes.map(r => r.buffer.name),
-        loops: [...loops]
-      });
+      if (!result.has(node.name)) {
+        const reductionLoopVars = computeReductionLoopVars(node);
+        result.set(node.name, {
+          loopCount: loops.length,
+          hasReduction: node.initBody !== null || reductionLoopVars.size > 0,
+          reductionLoopVars,
+          readBuffers: node.reads.map(r => r.buffer.name),
+          writeBuffers: node.writes.map(r => r.buffer.name),
+          loops: [...loops]
+        });
+      }
       stack.push({ node: node.body, loops });
     } else if (node.type === 'SeqNode') {
       for (let i = node.stmts.length - 1; i >= 0; i--) stack.push({ node: node.stmts[i], loops });
@@ -569,7 +577,7 @@ export class SchedulePolicy {
     const rule = this.selectRule(schedule.func, blockName);
     if (rule) {
       rule.apply(schedule, blockName, this.target);
-      invalidateClassifyCache(schedule.func);
+      invalidateClassifyBlock(schedule.func, blockName);
       this._explain(blockName, rule.name, `matched rule '${rule.name}' for ${this.target.name}`);
       return rule.name;
     }

@@ -11,7 +11,17 @@ export class TuningRecord {
     this.traceData = traceData;
     this.version = version;
     this.timestamp = Date.now();
+    this.medianMs = null;
+    this.minMs = null;
   }
+}
+
+function rankRecords(a, b) {
+  const am = a.medianMs != null ? 1 : 0;
+  const bm = b.medianMs != null ? 1 : 0;
+  if (am !== bm) return bm - am;
+  if (am === 1) return a.medianMs - b.medianMs;
+  return b.score - a.score;
 }
 
 export class TuningDatabase {
@@ -31,7 +41,7 @@ export class TuningDatabase {
       this._records.set(workloadKey, list);
     }
     list.push(record);
-    list.sort((a, b) => b.score - a.score);
+    list.sort(rankRecords);
     if (list.length > 10) list.length = 10;
   }
 
@@ -68,7 +78,9 @@ export class TuningDatabase {
           score: r.score,
           traceData: r.traceData,
           version: r.version,
-          timestamp: r.timestamp
+          timestamp: r.timestamp,
+          medianMs: r.medianMs,
+          minMs: r.minMs
         });
       }
     }
@@ -86,6 +98,8 @@ export class TuningDatabase {
         entry.score, entry.traceData, entry.version
       );
       record.timestamp = entry.timestamp;
+      record.medianMs = entry.medianMs ?? null;
+      record.minMs = entry.minMs ?? null;
       db.store(entry.workloadKey, record);
     }
     return db;

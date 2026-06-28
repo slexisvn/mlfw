@@ -305,7 +305,7 @@ export class IRBuilder {
     bodyRegion.addBlock(bodyBlock);
     const op = this._buildOp('fusion', operands, resultTypes, { fusion_kind: fusionKind }, [bodyRegion]);
     if (bodyBuilder) {
-      const innerBuilder = new IRBuilder(Object.create(this.func, {}));
+      const innerBuilder = new IRBuilder(this.func);
       innerBuilder.block = bodyBlock;
       bodyBuilder(innerBuilder, bodyBlock.arguments);
     }
@@ -321,12 +321,12 @@ export class IRBuilder {
     elseRegion.addBlock(elseBlock);
     const op = this._buildOp('if', [predicate], resultTypes, null, [thenRegion, elseRegion]);
     if (thenBuilder) {
-      const tb = new IRBuilder(Object.create(this.func, {}));
+      const tb = new IRBuilder(this.func);
       tb.block = thenBlock;
       thenBuilder(tb);
     }
     if (elseBuilder) {
-      const eb = new IRBuilder(Object.create(this.func, {}));
+      const eb = new IRBuilder(this.func);
       eb.block = elseBlock;
       elseBuilder(eb);
     }
@@ -343,12 +343,12 @@ export class IRBuilder {
     bodyRegion.addBlock(bodyBlock);
     const op = this._buildOp('while', initValues, types, null, [condRegion, bodyRegion]);
     if (condBuilder) {
-      const cb = new IRBuilder(Object.create(this.func, {}));
+      const cb = new IRBuilder(this.func);
       cb.block = condBlock;
       condBuilder(cb, condBlock.arguments);
     }
     if (bodyBuilder) {
-      const bb = new IRBuilder(Object.create(this.func, {}));
+      const bb = new IRBuilder(this.func);
       bb.block = bodyBlock;
       bodyBuilder(bb, bodyBlock.arguments);
     }
@@ -361,7 +361,7 @@ export class IRBuilder {
     const bodyRegion = new Region();
     const bodyBlock = new Block([...xtTypes, ...carryTypes]);
     bodyRegion.addBlock(bodyBlock);
-    const bb = new IRBuilder(Object.create(this.func, {}));
+    const bb = new IRBuilder(this.func);
     bb.block = bodyBlock;
     const xtArgs = bodyBlock.arguments.slice(0, xtTypes.length);
     const carryArgs = bodyBlock.arguments.slice(xtTypes.length);

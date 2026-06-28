@@ -103,6 +103,7 @@ export class BufferAssignment {
     this.assignments = new Map();
     this.pools = new Map();
     this.inplaceMap = new Map();
+    this.effLastUse = new Map();
   }
 
   assign(intervals, inplaceCandidates = [], alignment = 64, strategy = 'best-fit') {
@@ -145,6 +146,7 @@ export class BufferAssignment {
         }
       }
     }
+    this.effLastUse = effLastUse;
 
     const sorted = [...intervals].sort((a, b) => {
       const aSize = a.size;

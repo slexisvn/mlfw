@@ -191,9 +191,9 @@ export class QuantizationPass extends FunctionPass {
         for (const use of uses) {
           if (use.user !== qResult.definingOp) {
             use.user.replaceOperand(use.operandIndex, qResult);
-            quantizedValues.add(qResult);
           }
         }
+        quantizedValues.add(qResult);
         changed = true;
       }
     }

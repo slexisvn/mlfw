@@ -40,6 +40,7 @@ function deriveMultiLevel(primFunc, blockName, target, dag) {
 const _sketchRules = [];
 
 export function registerSketchRule(rule, { priority = 100 } = {}) {
+  if (_sketchRules.some(r => r.derive === rule.derive && r.matches === rule.matches)) return;
   _sketchRules.push({ matches: rule.matches, derive: rule.derive, priority });
   _sketchRules.sort((a, b) => a.priority - b.priority);
 }
@@ -65,7 +66,7 @@ export function deriveSketches(primFunc, blockName, target, opts = {}) {
   if (target.kind !== TargetKind.CPU && !target.isGPU()) return [];
 
   const struct = analyzeBlockStructure(primFunc, blockName);
-  const dag = buildBlockDAG(primFunc);
+  const dag = opts.dag || buildBlockDAG(primFunc);
   for (const rule of _sketchRules) {
     if (rule.matches(struct, target)) return rule.derive(primFunc, blockName, target, dag);
   }

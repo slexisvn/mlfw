@@ -1,6 +1,7 @@
 import { Value, UseLink } from './value.js';
 import { Region } from './block.js';
 import { registry } from './ops.js';
+import { topoSortByOperands } from './graph_algorithms.js';
 
 let _opIdCounter = 0;
 
@@ -121,25 +122,19 @@ export class Operation {
   }
 
   getParentFunction() {
-    let block = this.parentBlock;
-    while (block) {
-      const parentOp = block.parentOp;
-      if (!parentOp) {
-        return block._parentFunction || null;
-      }
-      block = parentOp.parentBlock;
-    }
-    return null;
+    return this.parentBlock ? this.parentBlock._owningFunction() : null;
   }
 
   clone(valueMap = new Map()) {
     const mappedOperands = this.operands.map(v => valueMap.get(v) || v);
     const clonedRegions = this.regions.map(r => cloneRegion(r, valueMap));
+    const clonedAttrs = new Map();
+    for (const [k, v] of this.attributes) clonedAttrs.set(k, cloneAttrValue(v));
     const op = new Operation(
       this.opName,
       mappedOperands,
       this.results.map(r => r.type),
-      new Map(this.attributes),
+      clonedAttrs,
       clonedRegions
     );
     for (let i = 0; i < this.results.length; i++) {
@@ -162,6 +157,9 @@ export class Operation {
       }
       h = ((h ^ hashAttrValue(val)) * 0x01000193) & 0x7fffffff;
     }
+    if (this.regions.length > 0) {
+      h = ((h ^ (0x9e3779b9 + this.regions.length)) * 0x01000193) & 0x7fffffff;
+    }
     return h;
   }
 
@@ -170,6 +168,7 @@ export class Operation {
     if (this.operands.length !== other.operands.length) return false;
     if (this.results.length !== other.results.length) return false;
     if (this.attributes.size !== other.attributes.size) return false;
+    if (this.regions.length > 0 || other.regions.length > 0) return false;
     for (let i = 0; i < this.operands.length; i++) {
       if (this.operands[i] !== other.operands[i]) return false;
     }
@@ -182,6 +181,11 @@ export class Operation {
     }
     return true;
   }
+}
+
+function cloneAttrValue(v) {
+  if (Array.isArray(v)) return v.map(cloneAttrValue);
+  return v;
 }
 
 function hashAttrValue(val) {
@@ -241,8 +245,14 @@ export function cloneRegion(region, valueMap = new Map()) {
     for (let i = 0; i < block.arguments.length; i++) {
       valueMap.set(block.arguments[i], newBlock.arguments[i]);
     }
-    for (const op of block) {
-      newBlock.pushOp(op.clone(valueMap));
+    const arr = block.opsArray();
+    const inBlock = new Set(arr);
+    const clonedByOrig = new Map();
+    for (const op of topoSortByOperands(arr, (o) => inBlock.has(o), 'ignore')) {
+      clonedByOrig.set(op, op.clone(valueMap));
+    }
+    for (const op of arr) {
+      newBlock.pushOp(clonedByOrig.get(op));
     }
     newRegion.addBlock(newBlock);
   }

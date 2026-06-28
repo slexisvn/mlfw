@@ -5,7 +5,7 @@ function leafValue(rows, Y) {
   return sum / rows.length;
 }
 
-function buildTree(X, Y, rows, depth, maxDepth, minSamples) {
+function buildTree(X, Y, rows, depth, maxDepth, minSamples, featureOrder) {
   const n = rows.length;
   if (depth >= maxDepth || n < minSamples * 2) {
     return { leaf: leafValue(rows, Y) };
@@ -13,12 +13,13 @@ function buildTree(X, Y, rows, depth, maxDepth, minSamples) {
   const dim = X[0].length;
   let totalSum = 0;
   let totalSumSq = 0;
+  const rowSet = new Set(rows);
   for (const i of rows) { const y = Y[i]; totalSum += y; totalSumSq += y * y; }
 
   let best = null;
   let bestSorted = null;
   for (let f = 0; f < dim; f++) {
-    const sorted = rows.slice().sort((a, b) => X[a][f] - X[b][f]);
+    const sorted = featureOrder[f].filter(r => rowSet.has(r));
     let leftSum = 0;
     let leftSumSq = 0;
     for (let s = 0; s < sorted.length - 1; s++) {
@@ -42,9 +43,21 @@ function buildTree(X, Y, rows, depth, maxDepth, minSamples) {
   const sorted = bestSorted;
   return {
     f: best.f, thr: best.thr,
-    left: buildTree(X, Y, sorted.slice(0, best.sIdx + 1), depth + 1, maxDepth, minSamples),
-    right: buildTree(X, Y, sorted.slice(best.sIdx + 1), depth + 1, maxDepth, minSamples)
+    left: buildTree(X, Y, sorted.slice(0, best.sIdx + 1), depth + 1, maxDepth, minSamples, featureOrder),
+    right: buildTree(X, Y, sorted.slice(best.sIdx + 1), depth + 1, maxDepth, minSamples, featureOrder)
   };
+}
+
+function buildFeatureOrder(X) {
+  const n = X.length;
+  const dim = n > 0 ? X[0].length : 0;
+  const order = new Array(dim);
+  const base = [];
+  for (let i = 0; i < n; i++) base.push(i);
+  for (let f = 0; f < dim; f++) {
+    order[f] = base.slice().sort((a, b) => X[a][f] - X[b][f]);
+  }
+  return order;
 }
 
 function predictTree(node, x) {
@@ -73,11 +86,12 @@ export class GradientBoostedTrees {
     const preds = new Array(n).fill(base);
     const rows = [];
     for (let i = 0; i < n; i++) rows.push(i);
+    const featureOrder = buildFeatureOrder(X);
     const trees = [];
     for (let t = 0; t < this.numTrees; t++) {
       const residuals = new Array(n);
       for (let i = 0; i < n; i++) residuals[i] = Y[i] - preds[i];
-      const tree = buildTree(X, residuals, rows, 0, this.maxDepth, this.minSamples);
+      const tree = buildTree(X, residuals, rows, 0, this.maxDepth, this.minSamples, featureOrder);
       for (let i = 0; i < n; i++) preds[i] += this.lr * predictTree(tree, X[i]);
       trees.push(tree);
     }

@@ -17,7 +17,7 @@ export function buildBlockMap(root) {
 export function computeWorkloadKey(primFunc, blockName, target, blockMap = null) {
   const map = blockMap || buildBlockMap(primFunc.body);
   const block = map.get(blockName) || null;
-  const parts = [blockName];
+  const parts = [];
 
   if (block) {
     const bufShapes = [];
@@ -38,7 +38,7 @@ export function computeWorkloadKey(primFunc, blockName, target, blockMap = null)
         const cops = [];
         collectBlockOps(other.body, cops);
         if (other.initBody) collectBlockOps(other.initBody, cops);
-        consumers.push(`${other.name}#${cops.join(';')}`);
+        consumers.push(cops.join(';'));
       }
       if (consumers.length > 0) {
         consumers.sort();
@@ -79,7 +79,7 @@ function collectBlockOps(node, ops) {
       collectBlockOps(node.value, ops);
       return;
     case 'BufferLoadNode':
-      ops.push(`load:${node.buffer.name}`);
+      ops.push(`load:${node.buffer.shape.join('x')}:${node.buffer.dtype}`);
       if (node.indices) for (const idx of node.indices) collectBlockOps(idx, ops);
       return;
     case 'MathOpNode':

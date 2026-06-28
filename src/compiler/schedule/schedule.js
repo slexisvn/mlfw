@@ -175,8 +175,17 @@ export class Schedule {
     this.mutator = new ScheduleMutator(primFunc);
   }
 
-  _rebuildSRefTree() {
-    this._srefTree.rebuildFrom(this.func.body);
+  _replaceInTree(oldNode, newNode) {
+    if (!this._srefTree.replaceNode(oldNode, newNode)) {
+      this._srefTree.rebuildFrom(this.func.body);
+    }
+    this.state.invalidate();
+  }
+
+  _removeFromTree(node) {
+    if (!this._srefTree.removeNode(node)) {
+      this._srefTree.rebuildFrom(this.func.body);
+    }
     this.state.invalidate();
   }
 
@@ -260,7 +269,7 @@ export class Schedule {
     );
 
     this.mutator.replaceNode(loop, outerLoop);
-    this._rebuildSRefTree();
+    this._replaceInTree(loop, outerLoop);
 
     if (!this._replaying) {
       this.trace.record('split', [loop.loopVar.name, factor]);
@@ -281,6 +290,9 @@ export class Schedule {
     }
 
     const loopSet = new Set(newOrder);
+    if (loopSet.size !== newOrder.length) {
+      throw new Error('reorder: duplicate loop in requested order');
+    }
     let topmostLoop = null;
     let topmostDepth = Infinity;
     const depthMap = new Map();
@@ -300,17 +312,19 @@ export class Schedule {
       }
       if (node.type === 'SeqNode') {
         for (const s of node.stmts) findDepths(s, depth);
+      } else if (node.type === 'IfThenElseNode') {
+        findDepths(node.thenBody, depth);
+      } else if (node.type === 'BlockNode' || node.type === 'AllocateNode' || node.type === 'LetStmtNode') {
+        findDepths(node.body, depth);
       }
-      if (node.type === 'BlockNode') findDepths(node.body, depth);
     };
     findDepths(this.func.body, 0);
 
-    const sorted = [...newOrder].sort((a, b) => depthMap.get(a) - depthMap.get(b));
-    const innermostOriginal = sorted[sorted.length - 1];
-    const innermostBody = innermostOriginal.body;
+    if (depthMap.size !== newOrder.length) {
+      throw new Error('reorder: not all requested loops were found in the function nest');
+    }
 
-    const topmostSRef = this._srefTree.getSRef(topmostLoop);
-    const topmostParent = topmostSRef ? topmostSRef.parent : null;
+    const { wrappers, innermostBody } = this._collectReorderNest(loopSet, topmostLoop);
 
     this.mutator.replaceNode(topmostLoop, newOrder[0]);
 
@@ -321,17 +335,86 @@ export class Schedule {
       loop._parentIdx = -1;
     }
 
+    let inner = innermostBody;
+    for (let i = wrappers.length - 1; i >= 0; i--) {
+      this._setWrapperChild(wrappers[i], inner);
+      inner = wrappers[i];
+    }
+
     for (let i = 0; i < newOrder.length; i++) {
-      const child = i < newOrder.length - 1 ? newOrder[i + 1] : innermostBody;
+      const child = i < newOrder.length - 1 ? newOrder[i + 1] : inner;
       newOrder[i].body = child;
       newOrder[i]._setChild('body', child);
     }
 
-    this._rebuildSRefTree();
+    this._replaceInTree(topmostLoop, newOrder[0]);
 
     if (!this._replaying) {
       this.trace.record('reorder', [newOrder.map(l => l.loopVar.name)]);
     }
+  }
+
+  _setWrapperChild(wrapper, child) {
+    if (wrapper.type === 'IfThenElseNode') {
+      wrapper._parent = null; wrapper._parentKey = null; wrapper._parentIdx = -1;
+      wrapper.thenBody = child;
+      wrapper._setChild('thenBody', child);
+    } else {
+      wrapper._parent = null; wrapper._parentKey = null; wrapper._parentIdx = -1;
+      wrapper.body = child;
+      wrapper._setChild('body', child);
+    }
+  }
+
+  _collectReorderNest(loopSet, topmostLoop) {
+    const remaining = new Set(loopSet);
+    const wrappers = [];
+    let node = topmostLoop;
+    let started = false;
+    let innermostBody = null;
+    while (node) {
+      if (node.type === 'ForNode') {
+        if (loopSet.has(node)) {
+          remaining.delete(node);
+          started = true;
+          if (remaining.size === 0) { innermostBody = node.body; break; }
+          node = node.body;
+          continue;
+        }
+        if (started) {
+          throw new Error(
+            `reorder: loops are not a perfect nest — non-reordered loop '${node.loopVar.name}' ` +
+            `is interleaved between reordered loops`
+          );
+        }
+        node = node.body;
+      } else if (node.type === 'IfThenElseNode') {
+        if (node.elseBody) {
+          throw new Error('reorder: cannot reorder across a conditional with an else-branch');
+        }
+        if (started) wrappers.push(node);
+        node = node.thenBody;
+      } else if (node.type === 'AllocateNode' || node.type === 'LetStmtNode') {
+        if (started) wrappers.push(node);
+        node = node.body;
+      } else if (node.type === 'BlockNode') {
+        if (started) {
+          throw new Error('reorder: a compute block separates the reordered loops');
+        }
+        node = node.body;
+      } else if (node.type === 'SeqNode') {
+        if (node.stmts.length !== 1) {
+          throw new Error('reorder: loops are not a perfect nest — multiple statements separate the reordered loops');
+        }
+        node = node.stmts[0];
+      } else {
+        break;
+      }
+    }
+    if (remaining.size > 0) {
+      throw new Error('reorder: loops do not form a single perfect nest');
+    }
+    return { wrappers, innermostBody };
   }
 
   fuseLoops(outer, inner) {
@@ -364,15 +447,14 @@ export class Schedule {
     );
 
     substituteVar(fusedLoop.body, outerName, () =>
-      new MathOpNode('/', fusedVar, new IntImmNode(innerExtent))
+      new MathOpNode('//', fusedVar, new IntImmNode(innerExtent))
     );
     substituteVar(fusedLoop.body, innerName, () =>
       new MathOpNode('%', fusedVar, new IntImmNode(innerExtent))
     );
 
     this.mutator.replaceNode(outer, fusedLoop);
-    this._srefTree.replaceNode(outer, fusedLoop);
-    this.state.invalidate();
+    this._replaceInTree(outer, fusedLoop);
 
     if (!this._replaying) {
       this.trace.record('fuseLoops', [outerName, innerName]);
@@ -547,8 +629,9 @@ export class Schedule {
         cloneExprTree(spatialLoops[i].extent), ForKind.SERIAL, combineNest);
     }
 
-    this.mutator.replaceNode(loops[0], new SeqNode([partialNest, combineNest]));
-    this._rebuildSRefTree();
+    const rfReplacement = new SeqNode([partialNest, combineNest]);
+    this.mutator.replaceNode(loops[0], rfReplacement);
+    this._replaceInTree(loops[0], rfReplacement);
     if (!this._replaying) {
       this.trace.record('rfactor', [blockName, reductionVarName, factor]);
     }
@@ -582,8 +665,9 @@ export class Schedule {
       updNest = new ForNode(loops[i].loopVar, new IntImmNode(0), cloneExprTree(loops[i].extent), ForKind.SERIAL, updNest);
     }
 
-    this.mutator.replaceNode(loops[0], new SeqNode([initNest, updNest]));
-    this._rebuildSRefTree();
+    const decompReplacement = new SeqNode([initNest, updNest]);
+    this.mutator.replaceNode(loops[0], decompReplacement);
+    this._replaceInTree(loops[0], decompReplacement);
     if (!this._replaying) {
       this.trace.record('decomposeReduction', [blockName]);
     }
@@ -616,7 +700,7 @@ export class Schedule {
     const alloc = new AllocateNode(cache, scope, seq);
     this.mutator.replaceNode(blockNest, alloc);
     seq.stmts.push(blockNest, backNest);
-    this._rebuildSRefTree();
+    this._replaceInTree(blockNest, alloc);
     if (!this._replaying) this.trace.record('cacheWrite', [blockName, bufferName, scope]);
   }
 
@@ -694,8 +778,9 @@ export class Schedule {
 
     const loops = this.getLoops(producerName);
     const root = loops.length > 0 ? loops[0] : prod;
-    this.mutator.replaceNode(root, new SeqNode([]));
-    this._rebuildSRefTree();
+    const inlineEmpty = new SeqNode([]);
+    this.mutator.replaceNode(root, inlineEmpty);
+    this._replaceInTree(root, inlineEmpty);
     if (!this._replaying) this.trace.record('computeInline', [producerName]);
   }
 
@@ -718,7 +803,8 @@ export class Schedule {
 
     const moved = cloneExprTree(blkLoop.body);
     substituteVar(moved, blkLoop.loopVar.name, () => targetLoop.loopVar);
-    this.mutator.replaceNode(blkLoop, new SeqNode([]));
+    const relocEmpty = new SeqNode([]);
+    this.mutator.replaceNode(blkLoop, relocEmpty);
 
     const tbody = targetLoop.body;
     if (tbody && tbody.type === 'SeqNode') {
@@ -728,7 +814,8 @@ export class Schedule {
       targetLoop.body = seq;
       targetLoop._setChild('body', seq);
     }
-    this._rebuildSRefTree();
+    this._replaceInTree(blkLoop, relocEmpty);
+    this._replaceInTree(targetLoop, targetLoop);
     return targetLoop.loopVar.name;
   }
 
@@ -769,7 +856,7 @@ export class Schedule {
     const alloc = new AllocateNode(cache, scope, seq);
     this.mutator.replaceNode(blockNest, alloc);
     seq.stmts.push(blockNest);
-    this._rebuildSRefTree();
+    this._replaceInTree(blockNest, alloc);
     if (!this._replaying) this.trace.record('cacheRead', [blockName, bufferName, scope]);
   }
 
@@ -808,9 +895,11 @@ export class Schedule {
       fused = new ForNode(sl.loopVar, new IntImmNode(0), cloneExprTree(sl.extent), sl.kind, fused, sl.threadTag);
     }
 
+    const consumerNest = cLoops[0];
     this.mutator.replaceNode(pLoops[0], fused);
-    this.mutator.removeNode(cLoops[0]);
-    this._rebuildSRefTree();
+    this.mutator.removeNode(consumerNest);
+    this._replaceInTree(pLoops[0], fused);
+    this._removeFromTree(consumerNest);
     if (!this._replaying) {
       this.trace.record('fuseConsumer', [producerBlockName, consumerBlockName]);
     }
@@ -852,7 +941,7 @@ export class Schedule {
     this.mutator.replaceNode(loop, wrapper);
     wrapper.body = loop;
     wrapper._setChild('body', loop);
-    this._rebuildSRefTree();
+    this._replaceInTree(loop, wrapper);
     if (!this._replaying) this.trace.record('blockize', [loop.loopVar.name]);
     return wrapper;
   }

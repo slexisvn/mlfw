@@ -10,13 +10,13 @@ import {
 } from '../../../src/compiler/ir/tensor/nodes.js';
 import { CPUTarget } from '../../../src/backend/target.js';
 
-function buf(name) {
-  return new Buffer(name, [16], 'f32', 'global');
+function buf(name, shape = [16]) {
+  return new Buffer(name, shape, 'f32', 'global');
 }
 
-function makeBlock(name, loadBufferName) {
-  const out = buf('out_' + name);
-  const inp = buf(loadBufferName);
+function makeBlock(name, loadBufferName, shape = [16]) {
+  const out = buf('out_' + name, shape);
+  const inp = buf(loadBufferName, shape);
   const load = new BufferLoadNode(inp, []);
   const store = new BufferStoreNode(out, [], load);
   const block = new BlockNode(name, [], [{ buffer: inp }], [{ buffer: out }], store);
@@ -27,14 +27,21 @@ function makePrimFunc(block) {
   return new PrimFunc('f', [], block, new Map());
 }
 
-describe('computeWorkloadKey — load op includes buffer name', () => {
-  it('produces distinct keys for loads from differently named buffers', () => {
+describe('computeWorkloadKey — structural (shape-based) key', () => {
+  it('dedups loads from differently named buffers of the same shape (keeps tuning O(n) at scale)', () => {
     const target = CPUTarget();
     const pfA = makePrimFunc(makeBlock('blk', 'srcA'));
     const pfB = makePrimFunc(makeBlock('blk', 'srcB'));
     const keyA = computeWorkloadKey(pfA, 'blk', target);
     const keyB = computeWorkloadKey(pfB, 'blk', target);
-    expect(keyA).not.toBe(keyB);
+    expect(keyA).toBe(keyB);
+  });
+
+  it('produces distinct keys for loads of differently shaped buffers', () => {
+    const target = CPUTarget();
+    const pfA = makePrimFunc(makeBlock('blk', 'src', [16]));
+    const pfB = makePrimFunc(makeBlock('blk', 'src', [32]));
+    expect(computeWorkloadKey(pfA, 'blk', target)).not.toBe(computeWorkloadKey(pfB, 'blk', target));
   });
 
   it('is stable for identical structure', () => {
