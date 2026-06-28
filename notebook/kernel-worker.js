@@ -91,6 +91,7 @@ function removeFile(name, kind) {
 
 async function serializeValue(value) {
   if (value === undefined) return { kind: 'empty' };
+  if (value && value.__isFigureBuilder) value = await value.build();
   if (isChartSpec(value)) return { kind: 'chart', spec: value };
   if (isDataFrame(value)) {
     const id = `df-${++dataframeId}`;

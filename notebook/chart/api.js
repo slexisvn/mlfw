@@ -1,5 +1,6 @@
 import { adaptHistogram, adaptSeries } from './adapters.js';
 import { adaptBubble, adaptCorrelation, adaptDensity, adaptDistribution, adaptEcdf, adaptFunnel, adaptHeatmap, adaptHexbin, adaptRegression, adaptWaterfall, prepareSeriesMode } from './advanced_adapters.js';
+import { createFigure } from './figure.js';
 import { createPayloadSpec, createSpec } from './spec.js';
 
 export function createChartApi() {
@@ -20,7 +21,13 @@ export function createChartApi() {
     bubble: (...args) => createBubble(args),
     funnel: (...args) => createFunnel(args),
     waterfall: (...args) => createWaterfall(args),
+    figure: (...args) => createFigureBuilder(args),
   });
+}
+
+function createFigureBuilder(args) {
+  const { data, options } = splitArgs(args);
+  return createFigure(data, options);
 }
 
 async function createSeriesChart(type, args) {

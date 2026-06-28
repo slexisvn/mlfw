@@ -13,7 +13,11 @@
 .chart-axes { fill: var(--muted); font-size: 10px; }
 .chart-axes line { stroke: var(--border-strong); }
 .chart-grid line { stroke: var(--border); stroke-dasharray: 2 3; }
-.chart-axis-label { fill: var(--text); font-size: 11px; }
+.chart-axis-label { fill: var(--text); font-size: 12.5px; font-weight: 500; letter-spacing: .3px; }
+.chart-view.chart-compact .chart-axis-label { font-size: 10px; letter-spacing: 0; }
+.chart-view.chart-compact .chart-title { font-size: 13px; }
+.chart-view.chart-compact .chart-axes, .chart-view.chart-compact .chart-facet-label { font-size: 9px; }
+.chart-facet-label { fill: var(--text); font-size: 11px; font-weight: 600; }
 .chart-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .chart-regression-line { fill: none; stroke-width: 2.2; stroke-dasharray: 6 4; stroke-linecap: round; }
 .chart-area { fill-opacity: .24; stroke-width: 1.5; stroke-linejoin: round; }
@@ -53,7 +57,6 @@
 @media (max-width: 560px) {
   .chart-title { font-size: 13px; }
   .chart-axes, .chart-payload-tick, .chart-matrix-label { font-size: 9px; }
-  .chart-axis-label { display: none; }
   .chart-legend { margin-left: 0; gap: 4px 7px; }
   .chart-legend-item { font-size: 10px; padding: 2px 4px; }
   .chart-zoom-controls { justify-content: flex-start; flex-wrap: wrap; }

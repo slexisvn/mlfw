@@ -63,6 +63,10 @@ export const CHART_METHOD_DOCS = new Map([
     'chart.waterfall(data, step?, value?, title?)',
     'Show how positive and negative contributions accumulate from a starting point to a final total.'
   )],
+  ['figure', doc(
+    'chart.figure(data, title?).encode(x?, color?).bar(y?).line(y?, axis?).facet(col?)',
+    'Compose multiple marks on one coordinate system. Chain .line/.bar/.scatter/.point/.area/.histogram/.regression/.bubble; pass axis="right" for a secondary y-axis, or .facet("column") to split into small-multiple panels.'
+  )],
 ]);
 
 export function chartMethodOwner(pre, span) {

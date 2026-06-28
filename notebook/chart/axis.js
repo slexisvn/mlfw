@@ -22,3 +22,14 @@ export function renderAxes(root, layout, xScale, yScale, labels) {
   if (labels.y) axes.append(svgText(labels.y, { class: 'chart-axis-label', transform: `translate(16 ${(layout.top + layout.bottom) / 2}) rotate(-90)`, 'text-anchor': 'middle' }));
   root.append(grid, axes);
 }
+
+export function renderRightAxis(root, layout, yScale, label) {
+  const axes = svgElement('g', { class: 'chart-axes' });
+  for (const tick of yScale.ticks) {
+    const y = yScale.scale(tick);
+    axes.append(svgText(formatTick(tick), { x: layout.right + 9, y: y + 4, 'text-anchor': 'start' }));
+  }
+  axes.append(svgElement('line', { x1: layout.right, x2: layout.right, y1: layout.top, y2: layout.bottom }));
+  if (label) axes.append(svgText(label, { class: 'chart-axis-label', transform: `translate(${(layout.frameRight ?? layout.width) - 16} ${(layout.top + layout.bottom) / 2}) rotate(90)`, 'text-anchor': 'middle' }));
+  root.append(axes);
+}

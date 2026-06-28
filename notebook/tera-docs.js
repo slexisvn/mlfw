@@ -518,6 +518,9 @@ function chartExample(name) {
   if (name === 'waterfall') {
     return 'data = DataFrame(step=["Base", "Search", "Social", "Email", "Returns"], value=[50000, 18000, 12000, 7000, -4000])\nchart.waterfall(data, step="step", value="value", title="Revenue contribution")';
   }
+  if (name === 'figure') {
+    return 'data = DataFrame(month=["Jan", "Feb", "Mar"], revenue=[120, 150, 170], growth=[8, 12, 9])\nchart.figure(data, title="Revenue & growth").encode(x="month").bar(y="revenue").line(y="growth", axis="right")';
+  }
   return `data = DataFrame(x=[1, 2, 3], y=[1, 4, 9])\nchart.${name}(data)`;
 }
 

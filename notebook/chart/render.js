@@ -1,4 +1,4 @@
-import { renderAxes } from './axis.js';
+import { renderAxes, renderRightAxis } from './axis.js';
 import { renderLegend } from './legend.js';
 import { createZoomInteraction } from './interaction.js';
 import { colorAt } from './palette.js';
@@ -30,6 +30,7 @@ registerRenderer('bubble', renderBubble);
 
 export function renderChart(host, spec) {
   if (!isChartSpec(spec)) throw new Error('renderChart expects a ChartSpec');
+  if (spec.type === 'figure') return renderFigure(host, spec);
   if (spec.payload != null) return renderPayloadChart(host, spec);
   const hidden = new Set();
   const initialSeries = layoutSeries(spec.series, spec);
@@ -59,6 +60,7 @@ export function renderChart(host, spec) {
     const width = spec.options.width ?? Math.max(320, host.clientWidth || 720);
     const height = chartHeight(width, spec.options.height);
     const compact = width < 520;
+    host.classList.toggle('chart-compact', compact);
     const layout = { width, height, left: compact ? 44 : 58, right: width - 16, top: spec.options.title ? 42 : 20, bottom: height - (compact ? 42 : 48) };
     const selected = spec.series.map((series, index) => ({ ...series, index, color: colorAt(index) })).filter(series => !hidden.has(series.index));
     const visible = layoutSeries(selected, spec);
@@ -128,6 +130,205 @@ export function renderChart(host, spec) {
   function isZoomed() {
     return zoomEnabled && (!domainsEqual(domains.x, bounds.x) || !domainsEqual(domains.y, bounds.y));
   }
+}
+
+const FIGURE_ZERO_MARKS = new Set(['bar', 'area', 'histogram']);
+
+export function renderFigure(host, spec) {
+  if (Array.isArray(spec.panels)) return renderFacet(host, spec);
+  const items = flattenFigureItems(spec.layers);
+  const hidden = new Set();
+  let observer = null;
+  let tooltip = null;
+  let frame = 0;
+  const drawSoon = () => {
+    cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(draw);
+  };
+
+  const draw = () => {
+    tooltip?.remove();
+    host.innerHTML = '';
+    host.className = 'chart-view';
+    const width = spec.options.width ?? Math.max(320, host.clientWidth || 720);
+    const height = chartHeight(width, spec.options.height);
+    const compact = width < 520;
+    host.classList.toggle('chart-compact', compact);
+    const visible = items.filter(item => !hidden.has(item.index));
+    const hasRight = visible.some(item => item.axis === 'right');
+    const layout = {
+      width,
+      height,
+      frameRight: width,
+      left: compact ? 44 : 58,
+      right: width - (hasRight ? (compact ? 44 : 58) : 16),
+      top: spec.options.title ? 42 : 20,
+      bottom: height - (compact ? 42 : 48),
+    };
+    const svg = svgElement('svg', { class: 'chart-svg', viewBox: `0 0 ${width} ${height}`, role: 'img' });
+    if (spec.options.title) svg.append(svgText(spec.options.title, { class: 'chart-title', x: layout.left, y: 24 }));
+    if (spec.options.width != null) svg.style.width = `${width}px`;
+    tooltip = createTooltip(host);
+    const scales = figureScales(visible, layout);
+    renderAxes(svg, layout, scales.x, scales.y, { x: spec.options.xLabel, y: spec.options.yLabel });
+    if (scales.yRight) renderRightAxis(svg, layout, scales.yRight, spec.options.y2Label);
+    paintFigurePanel(svg, layout, visible, scales, tooltip);
+    host.append(svg);
+    if (spec.options.legend && items.length > 1) {
+      renderLegend(host, items.map(item => ({ name: item.series.name, color: item.color })), hidden, drawSoon);
+    }
+  };
+
+  draw();
+  if (typeof ResizeObserver !== 'undefined' && spec.options.width == null) {
+    observer = new ResizeObserver(drawSoon);
+    observer.observe(host);
+  }
+  return () => {
+    cancelAnimationFrame(frame);
+    observer?.disconnect();
+    tooltip?.remove();
+  };
+}
+
+function renderFacet(host, spec) {
+  const panels = spec.panels.map(panel => ({ label: panel.label, items: flattenFigureItems(panel.layers) }));
+  const globalItems = panels.flatMap(panel => panel.items);
+  const hidden = new Set();
+  let observer = null;
+  let tooltip = null;
+  let frame = 0;
+  const drawSoon = () => {
+    cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(draw);
+  };
+
+  const draw = () => {
+    tooltip?.remove();
+    host.innerHTML = '';
+    host.className = 'chart-view';
+    const width = spec.options.width ?? Math.max(320, host.clientWidth || 720);
+    const compact = width < 520;
+    host.classList.toggle('chart-compact', compact);
+    const minPanelWidth = compact ? 150 : 240;
+    const autoCols = Math.max(1, Math.floor(width / minPanelWidth));
+    const cols = Math.max(1, Math.min(panels.length, spec.facet.cols ?? autoCols));
+    const rows = Math.ceil(panels.length / cols);
+    const cellWidth = width / cols;
+    const cellHeight = spec.options.height ? spec.options.height / rows : chartHeight(cellWidth, null);
+    const headOffset = spec.options.title ? 34 : 6;
+    const height = headOffset + rows * cellHeight;
+    const svg = svgElement('svg', { class: 'chart-svg', viewBox: `0 0 ${width} ${height}`, role: 'img' });
+    if (spec.options.title) svg.append(svgText(spec.options.title, { class: 'chart-title', x: 12, y: 24 }));
+    if (spec.options.width != null) svg.style.width = `${width}px`;
+    tooltip = createTooltip(host);
+    const visibleGlobal = globalItems.filter(item => !hidden.has(item.index));
+    panels.forEach((panel, panelIndex) => {
+      const col = panelIndex % cols;
+      const row = Math.floor(panelIndex / cols);
+      const originX = col * cellWidth;
+      const originY = headOffset + row * cellHeight;
+      const visible = panel.items.filter(item => !hidden.has(item.index));
+      const hasRight = visible.some(item => item.axis === 'right');
+      const layout = {
+        width,
+        height,
+        frameRight: originX + cellWidth,
+        left: originX + (compact ? 40 : 50),
+        right: originX + cellWidth - (hasRight ? (compact ? 38 : 48) : 12),
+        top: originY + 24,
+        bottom: originY + cellHeight - 34,
+      };
+      const cell = svgElement('g', { class: 'chart-facet-panel' });
+      cell.append(svgText(panel.label, { class: 'chart-facet-label', x: layout.left, y: originY + 16 }));
+      const scales = figureScales(visibleGlobal, layout);
+      renderAxes(cell, layout, scales.x, scales.y, { x: col === 0 ? spec.options.xLabel : null, y: col === 0 ? spec.options.yLabel : null });
+      if (scales.yRight) renderRightAxis(cell, layout, scales.yRight, col === cols - 1 ? spec.options.y2Label : null);
+      paintFigurePanel(cell, layout, visible, scales, tooltip);
+      svg.append(cell);
+    });
+    host.append(svg);
+    const legendItems = panels[0]?.items ?? [];
+    if (spec.options.legend && legendItems.length > 1) {
+      renderLegend(host, legendItems.map(item => ({ name: item.series.name, color: item.color })), hidden, drawSoon);
+    }
+  };
+
+  draw();
+  if (typeof ResizeObserver !== 'undefined' && spec.options.width == null) {
+    observer = new ResizeObserver(drawSoon);
+    observer.observe(host);
+  }
+  return () => {
+    cancelAnimationFrame(frame);
+    observer?.disconnect();
+    tooltip?.remove();
+  };
+}
+
+function figureScales(domainItems, layout) {
+  const hasBar = domainItems.some(item => item.mark === 'bar');
+  const xValues = domainItems.flatMap(item => item.series.points.map(point => point.x));
+  const leftValues = figureAxisValues(domainItems.filter(item => item.axis === 'left'));
+  const rightValues = figureAxisValues(domainItems.filter(item => item.axis === 'right'));
+  const x = createScale(xValues, layout.left, layout.right, { padding: hasBar ? 0 : 0.03 });
+  const y = createScale(leftValues, layout.bottom, layout.top, { zero: domainItems.some(item => item.axis === 'left' && FIGURE_ZERO_MARKS.has(item.mark)), padding: 0.08 });
+  const yRight = rightValues.length
+    ? createScale(rightValues, layout.bottom, layout.top, { zero: domainItems.some(item => item.axis === 'right' && FIGURE_ZERO_MARKS.has(item.mark)), padding: 0.08 })
+    : null;
+  return { x, y, yRight };
+}
+
+function paintFigurePanel(svg, layout, visible, scales, tooltip) {
+  const clipId = `chart-clip-${nextChartId++}`;
+  const defs = svgElement('defs');
+  const clip = svgElement('clipPath', { id: clipId });
+  clip.append(svgElement('rect', { x: layout.left, y: layout.top, width: Math.max(0, layout.right - layout.left), height: Math.max(0, layout.bottom - layout.top) }));
+  defs.append(clip);
+  svg.append(defs);
+  const marks = svgElement('g', { class: 'chart-marks', 'clip-path': `url(#${clipId})` });
+  const barItems = visible.filter(item => item.mark === 'bar');
+  const barCount = Math.max(1, barItems.length);
+  const maxBarPoints = Math.max(1, ...barItems.map(item => item.series.points.length));
+  const allPoints = visible.flatMap(item => item.series.points);
+  visible.forEach(item => {
+    const group = svgElement('g', { class: `chart-series chart-series-${item.index}` });
+    const stacked = item.mode === 'stacked';
+    let seriesOffset = 0;
+    if (item.mark === 'bar' && !stacked && barCount > 1) {
+      const groupWidth = scales.x.type === 'category' ? scales.x.step * 0.78 : Math.max(4, (layout.right - layout.left) / maxBarPoints) * 0.78;
+      seriesOffset = (barItems.indexOf(item) - (barCount - 1) / 2) * (groupWidth / barCount);
+    }
+    getRenderer(item.mark)(group, { ...item.series, color: item.color, index: item.index }, {
+      x: scales.x,
+      y: item.axis === 'right' ? scales.yRight : scales.y,
+      layout,
+      tooltip,
+      visibleSeriesCount: barCount,
+      maxSeriesPoints: maxBarPoints,
+      seriesOffset,
+      stacked,
+      allPoints,
+    });
+    marks.append(group);
+  });
+  svg.append(marks);
+}
+
+function flattenFigureItems(layers) {
+  const items = [];
+  let index = 0;
+  for (const layer of layers) {
+    for (const series of layer.series) {
+      items.push({ mark: layer.mark, axis: layer.axis, mode: layer.mode, series, color: colorAt(index), index });
+      index++;
+    }
+  }
+  return items;
+}
+
+function figureAxisValues(items) {
+  return items.flatMap(item => item.series.points.flatMap(point => [point.y, point.y0, point.y1].filter(value => value != null)));
 }
 
 function chartHeight(width, explicit) {
