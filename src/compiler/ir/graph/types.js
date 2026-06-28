@@ -1,3 +1,11 @@
+import { SymInt } from '../../analysis/sym_int.js';
+
+export function dimEquals(a, b) {
+  if (a === b) return true;
+  if (a instanceof SymInt && b instanceof SymInt) return SymInt.equals(a, b);
+  return false;
+}
+
 export const ScalarType = Object.freeze({
   F16: 'f16',
   BF16: 'bf16',
@@ -39,6 +47,22 @@ export function shapeProduct(shape, dynamicValue) {
     n *= d;
   }
   return n;
+}
+
+export function symbolicShapeProduct(shape) {
+  let prod = 1;
+  for (let i = 0; i < shape.length; i++) {
+    const d = shape[i];
+    if (typeof d === 'number') {
+      if (d < 0) return DYNAMIC;
+      prod = SymInt.mul(prod, d);
+    } else if (d instanceof SymInt) {
+      prod = SymInt.mul(prod, d);
+    } else {
+      return DYNAMIC;
+    }
+  }
+  return prod;
 }
 
 export function scalarBytes(dtype) {
@@ -118,7 +142,7 @@ export class Layout {
     for (let i = n - 1; i >= 0; i--) {
       const dim = this.order[i];
       strides[dim] = stride;
-      if (shape[dim] === DYNAMIC) {
+      if (shape[dim] === DYNAMIC || shape[dim] instanceof SymInt) {
         stride = DYNAMIC;
       } else if (stride !== DYNAMIC) {
         stride *= shape[dim];
@@ -149,11 +173,12 @@ export class Layout {
 }
 
 export function broadcastDim(a, b) {
-  if (a === b) return a;
+  if (dimEquals(a, b)) return a;
   if (a === 1) return b;
   if (b === 1) return a;
   if (a === DYNAMIC) return b === DYNAMIC ? DYNAMIC : b;
   if (b === DYNAMIC) return a;
+  if (a instanceof SymInt || b instanceof SymInt) return DYNAMIC;
   return null;
 }
 
@@ -167,11 +192,15 @@ export class TensorType {
 
   get rank() { return this.shape.length; }
   get isScalar() { return this.shape.length === 0; }
-  get isFullyStatic() { return this.shape.every(d => d >= 0); }
-  get hasDynamic() { return this.shape.some(d => d === DYNAMIC); }
+  get isFullyStatic() { return this.shape.every(d => typeof d === 'number' && d >= 0); }
+  get hasDynamic() { return this.shape.some(d => d === DYNAMIC || d instanceof SymInt); }
 
   numel() {
     return shapeProduct(this.shape, DYNAMIC);
+  }
+
+  symbolicNumel() {
+    return symbolicShapeProduct(this.shape);
   }
 
   sizeInBytes() {
@@ -193,7 +222,7 @@ export class TensorType {
     if (this.dtype !== other.dtype) return false;
     if (this.shape.length !== other.shape.length) return false;
     for (let i = 0; i < this.shape.length; i++) {
-      if (this.shape[i] !== other.shape[i]) return false;
+      if (!dimEquals(this.shape[i], other.shape[i])) return false;
     }
     return this.layout.equals(other.layout);
   }
@@ -203,7 +232,7 @@ export class TensorType {
     if (this.dtype !== other.dtype) return false;
     if (this.shape.length !== other.shape.length) return false;
     for (let i = 0; i < this.shape.length; i++) {
-      if (this.shape[i] !== other.shape[i]) return false;
+      if (!dimEquals(this.shape[i], other.shape[i])) return false;
     }
     return true;
   }
@@ -213,7 +242,8 @@ export class TensorType {
     for (let i = 0; i < this.shape.length; i++) {
       const a = this.shape[i], b = other.shape[i];
       if (a === DYNAMIC || b === DYNAMIC) continue;
-      if (a !== b) return false;
+      if (dimEquals(a, b)) continue;
+      if (typeof a === 'number' && typeof b === 'number') return false;
     }
     return true;
   }
@@ -222,7 +252,8 @@ export class TensorType {
     if (this._hash !== null) return this._hash;
     let h = 0x811c9dc5;
     for (let i = 0; i < this.shape.length; i++) {
-      h = ((h ^ (this.shape[i] & 0xffff)) * 0x01000193) & 0x7fffffff;
+      const d = typeof this.shape[i] === 'number' ? (this.shape[i] & 0xffff) : 0x7fff;
+      h = ((h ^ d) * 0x01000193) & 0x7fffffff;
     }
     h = ((h ^ this.dtype.charCodeAt(0)) * 0x01000193) & 0x7fffffff;
     this._hash = h;

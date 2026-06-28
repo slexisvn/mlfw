@@ -1,24 +1,44 @@
 import { GradAccumulator } from './grad_accumulator.js';
-import { getVJPRule, requireVJPRuleOrBarrier, registerRegionVJP } from './vjp_registry.js';
+import { getVJPRule, requireVJPRuleOrBarrier, registerRegionVJP, getRegionVJP } from './vjp_registry.js';
 import { reduceGradToOperandShape } from './backward_builder.js';
-import { NESTED_CONTROL_FLOW } from './control_flow_ops.js';
+import { REGION_CONTROL_FLOW } from './control_flow_ops.js';
+
+const ALWAYS_NEEDS_GRAD = { has: () => true };
 
 registerRegionVJP('scan', (op, ctx) => buildScanBackward(op, ctx.accumulator, ctx.builder, ctx.materialize, ctx.needsGrad, ctx.scanCheckpoint));
 registerRegionVJP('if', (op, ctx) => buildCondBackward(op, ctx.accumulator, ctx.builder, ctx.materialize, ctx.needsGrad));
 
 export function regionFreeVars(bodyBlock) {
   const local = new Set(bodyBlock.arguments.map(a => a.id));
-  for (const op of bodyBlock.ops()) for (const r of op.results) local.add(r.id);
+  const addLocals = (block) => {
+    for (const op of block.ops()) {
+      for (const r of op.results) local.add(r.id);
+      for (const region of (op.regions || [])) {
+        for (const b of region.blocks) {
+          for (const a of b.arguments) local.add(a.id);
+          addLocals(b);
+        }
+      }
+    }
+  };
+  addLocals(bodyBlock);
+
   const seen = new Set();
   const free = [];
-  for (const op of bodyBlock.ops()) {
-    for (const o of op.operands) {
-      if (local.has(o.id) || seen.has(o.id)) continue;
-      if (o.definingOp && o.definingOp.opName === 'constant') continue;
-      seen.add(o.id);
-      free.push(o);
+  const scan = (block) => {
+    for (const op of block.ops()) {
+      for (const o of op.operands) {
+        if (local.has(o.id) || seen.has(o.id)) continue;
+        if (o.definingOp && o.definingOp.opName === 'constant') continue;
+        seen.add(o.id);
+        free.push(o);
+      }
+      for (const region of (op.regions || [])) {
+        for (const b of region.blocks) scan(b);
+      }
     }
-  }
+  };
+  scan(bodyBlock);
   return free;
 }
 
@@ -42,10 +62,17 @@ function stackSteps(builder, steps, fullShape) {
   return builder.concat(expanded, 0).getResult(0);
 }
 
-function diffBodyStep(builder, bodyBlock, argVals, freeVarMap, gradYields, forwardOnly, constCache = new Map()) {
+function diffBodyStep(builder, bodyBlock, argVals, freeVarMap, gradYields, forwardOnly, constCache = new Map(), freeVars = []) {
   const map = new Map();
-  for (let i = 0; i < bodyBlock.arguments.length; i++) map.set(bodyBlock.arguments[i].id, argVals[i]);
+  const vmap = new Map();
+  for (let i = 0; i < bodyBlock.arguments.length; i++) {
+    map.set(bodyBlock.arguments[i].id, argVals[i]);
+    vmap.set(bodyBlock.arguments[i], argVals[i]);
+  }
   for (const [id, v] of freeVarMap) map.set(id, v);
+  for (const fv of freeVars) {
+    if (freeVarMap.has(fv.id)) vmap.set(fv, freeVarMap.get(fv.id));
+  }
 
   const bodyOps = [];
   let yieldOp = null;
@@ -64,15 +91,29 @@ function diffBodyStep(builder, bodyBlock, argVals, freeVarMap, gradYields, forwa
         constCache.set(o.id, clonedVal);
       }
       map.set(o.id, clonedVal);
+      vmap.set(o, clonedVal);
       return clonedVal;
     }
     return o;
   };
 
   for (const op of bodyOps) {
+    if (REGION_CONTROL_FLOW.has(op.opName)) {
+      for (const o of op.operands) { matOperand(o); vmap.set(o, map.get(o.id) ?? o); }
+      const cloned = op.clone(vmap);
+      builder.block.pushOp(cloned);
+      for (let r = 0; r < op.numResults; r++) {
+        map.set(op.getResult(r).id, cloned.getResult(r));
+        vmap.set(op.getResult(r), cloned.getResult(r));
+      }
+      continue;
+    }
     const operands = op.operands.map(matOperand);
     const cloned = builder._buildOp(op.opName, operands, op.results.map(r => r.type), new Map(op.attributes), null);
-    for (let r = 0; r < op.numResults; r++) map.set(op.getResult(r).id, cloned.getResult(r));
+    for (let r = 0; r < op.numResults; r++) {
+      map.set(op.getResult(r).id, cloned.getResult(r));
+      vmap.set(op.getResult(r), cloned.getResult(r));
+    }
   }
 
   const forwardYields = yieldOp.operands.map(o => map.get(o.id));
@@ -87,6 +128,13 @@ function diffBodyStep(builder, bodyBlock, argVals, freeVarMap, gradYields, forwa
     if (op.opName === 'constant') continue;
     const gradOuts = op.results.map(r => acc.get(r.id));
     if (gradOuts.every(g => g === null)) continue;
+    if (REGION_CONTROL_FLOW.has(op.opName)) {
+      const regionFn = getRegionVJP(op.opName);
+      if (regionFn) {
+        regionFn(op, { accumulator: acc, builder, materialize: matOperand, needsGrad: ALWAYS_NEEDS_GRAD, scanCheckpoint: null });
+      }
+      continue;
+    }
     const rule = requireVJPRuleOrBarrier(op.opName);
     if (!rule) continue;
     const ctx = {
@@ -111,19 +159,9 @@ function diffBodyStep(builder, bodyBlock, argVals, freeVarMap, gradYields, forwa
   return { forwardYields, gradArgs, gradFree };
 }
 
-function assertNoNestedControlFlow(block, host) {
-  for (const op of block.ops()) {
-    if (NESTED_CONTROL_FLOW.has(op.opName)) {
-      throw new Error(`${host} VJP does not support nested control flow ('${op.opName}') in the body`);
-    }
-  }
-}
-
 export function buildCondBackward(ifOp, accumulator, builder, materialize, needsGrad) {
   const thenBlock = ifOp.regions[0].blocks[0];
   const elseBlock = ifOp.regions[1].blocks[0];
-  assertNoNestedControlFlow(thenBlock, 'if');
-  assertNoNestedControlFlow(elseBlock, 'if');
 
   const pred = materialize(ifOp.getOperand(0));
   const gradResults = [];
@@ -134,8 +172,8 @@ export function buildCondBackward(ifOp, accumulator, builder, materialize, needs
   const thenMap = new Map(thenFree.map(v => [v.id, materialize(v)]));
   const elseMap = new Map(elseFree.map(v => [v.id, materialize(v)]));
 
-  const { gradFree: gThen } = diffBodyStep(builder, thenBlock, [], thenMap, gradResults, false);
-  const { gradFree: gElse } = diffBodyStep(builder, elseBlock, [], elseMap, gradResults, false);
+  const { gradFree: gThen } = diffBodyStep(builder, thenBlock, [], thenMap, gradResults, false, new Map(), thenFree);
+  const { gradFree: gElse } = diffBodyStep(builder, elseBlock, [], elseMap, gradResults, false, new Map(), elseFree);
 
   const allVars = new Map();
   for (const v of thenFree) allVars.set(v.id, v);
@@ -164,7 +202,6 @@ function resolveSegmentLength(scanCheckpoint, T) {
 
 export function buildScanBackward(scanOp, accumulator, builder, materialize, needsGrad, scanCheckpoint = null) {
   const bodyBlock = scanOp.regions[0].blocks[0];
-  assertNoNestedControlFlow(bodyBlock, 'scan');
   const numCarry = scanOp.getAttr('num_carry');
   const numXs = scanOp.getAttr('num_xs');
   const numYs = scanOp.numResults - numCarry;
@@ -183,7 +220,7 @@ export function buildScanBackward(scanOp, accumulator, builder, materialize, nee
 
   const sliceX = (t) => xsB.map(v => sliceStep(builder, v, t));
   const stepForward = (xt, c) =>
-    diffBodyStep(builder, bodyBlock, [...xt, ...c], freeVarMap, null, true, bodyConstCache).forwardYields.slice(0, numCarry);
+    diffBodyStep(builder, bodyBlock, [...xt, ...c], freeVarMap, null, true, bodyConstCache, freeVars).forwardYields.slice(0, numCarry);
 
   const gYs = [];
   for (let i = 0; i < numYs; i++) gYs.push(accumulator.get(scanOp.getResult(numCarry + i).id));
@@ -200,7 +237,7 @@ export function buildScanBackward(scanOp, accumulator, builder, materialize, nee
     const argVals = [...xt, ...carryIn];
     const gY_t = gYs.map(g => (g === null ? null : sliceStep(builder, g, t)));
     const gradYields = [...gCarry, ...gY_t];
-    const { gradArgs, gradFree } = diffBodyStep(builder, bodyBlock, argVals, freeVarMap, gradYields, false, bodyConstCache);
+    const { gradArgs, gradFree } = diffBodyStep(builder, bodyBlock, argVals, freeVarMap, gradYields, false, bodyConstCache, freeVars);
 
     for (let i = 0; i < numXs; i++) gXsSteps[i][t] = gradArgs[i] ?? zeroLike(builder, xt[i]);
     gCarry = [];

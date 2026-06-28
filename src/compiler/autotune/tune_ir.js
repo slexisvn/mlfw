@@ -1,84 +1,49 @@
 import { PrimFunc, ForNode } from '../ir/tensor/nodes.js';
+import { cloneIRShared } from '../ir/clone_ir.js';
 
 function deepCloneIR(node) {
-  if (!node || typeof node !== 'object') return node;
-  if (Array.isArray(node)) return node.map(deepCloneIR);
-  const copy = Object.create(Object.getPrototypeOf(node));
-  copy.type = node.type;
-  copy._parent = null;
-  copy._parentKey = null;
-  copy._parentIdx = -1;
-  switch (node.type) {
-    case 'PrimFunc':
-      copy.name = node.name;
-      copy.params = node.params;
-      copy.body = deepCloneIR(node.body);
-      copy.bufferMap = new Map(node.bufferMap);
-      copy.shapeParams = node.shapeParams;
-      copy.shapeParamMap = node.shapeParamMap instanceof Map ? new Map(node.shapeParamMap) : node.shapeParamMap;
-      copy._setChild('body', copy.body);
-      break;
-    case 'ForNode':
-      copy.loopVar = node.loopVar;
-      copy.min = deepCloneIR(node.min);
-      copy.extent = deepCloneIR(node.extent);
-      copy.kind = node.kind;
-      copy.body = deepCloneIR(node.body);
-      copy.threadTag = node.threadTag;
-      copy._setChild('body', copy.body);
-      break;
-    case 'BlockNode':
-      copy.name = node.name;
-      copy.iterVars = node.iterVars.map(deepCloneIR);
-      copy.reads = node.reads;
-      copy.writes = node.writes;
-      copy.body = deepCloneIR(node.body);
-      copy.initBody = deepCloneIR(node.initBody);
-      copy._setChild('body', copy.body);
-      copy._setChild('initBody', copy.initBody);
-      break;
-    case 'SeqNode':
-      copy.stmts = node.stmts.map(deepCloneIR);
-      copy._setChildren('stmts', copy.stmts);
-      break;
-    case 'AllocateNode':
-      copy.buffer = node.buffer;
-      copy.scope = node.scope;
-      copy.body = deepCloneIR(node.body);
-      copy._setChild('body', copy.body);
-      break;
-    case 'LetStmtNode':
-      copy.variable = node.variable;
-      copy.value = deepCloneIR(node.value);
-      copy.body = deepCloneIR(node.body);
-      copy._setChild('body', copy.body);
-      break;
-    case 'IfThenElseNode':
-      copy.condition = deepCloneIR(node.condition);
-      copy.thenBody = deepCloneIR(node.thenBody);
-      copy.elseBody = deepCloneIR(node.elseBody);
-      copy._setChild('thenBody', copy.thenBody);
-      copy._setChild('elseBody', copy.elseBody);
-      break;
-    case 'WhileNode':
-      copy.condVar = node.condVar;
-      copy.condBody = deepCloneIR(node.condBody);
-      copy.loopBody = deepCloneIR(node.loopBody);
-      copy._setChild('condBody', copy.condBody);
-      copy._setChild('loopBody', copy.loopBody);
-      break;
-    default:
-      for (const key of Object.keys(node)) {
-        if (key === '_parent' || key === '_parentKey' || key === '_parentIdx') continue;
-        const val = node[key];
-        if (val instanceof Map) copy[key] = new Map(val);
-        else if (Array.isArray(val)) copy[key] = val.map(deepCloneIR);
-        else if (typeof val === 'object' && val !== null && val.type) copy[key] = deepCloneIR(val);
-        else copy[key] = val;
-      }
-      break;
-  }
-  return copy;
+  return cloneIRShared(node, deepCloneIR, (n, copy, rec) => {
+    switch (n.type) {
+      case 'PrimFunc':
+        copy.name = n.name;
+        copy.params = n.params;
+        copy.body = rec(n.body);
+        copy.bufferMap = new Map(n.bufferMap);
+        copy.shapeParams = n.shapeParams;
+        copy.shapeParamMap = n.shapeParamMap instanceof Map ? new Map(n.shapeParamMap) : n.shapeParamMap;
+        copy._setChild('body', copy.body);
+        return copy;
+      case 'AllocateNode':
+        copy.buffer = n.buffer;
+        copy.scope = n.scope;
+        copy.body = rec(n.body);
+        copy._setChild('body', copy.body);
+        return copy;
+      case 'LetStmtNode':
+        copy.variable = n.variable;
+        copy.value = rec(n.value);
+        copy.body = rec(n.body);
+        copy._setChild('body', copy.body);
+        return copy;
+      case 'WhileNode':
+        copy.condVar = n.condVar;
+        copy.condBody = rec(n.condBody);
+        copy.loopBody = rec(n.loopBody);
+        copy._setChild('condBody', copy.condBody);
+        copy._setChild('loopBody', copy.loopBody);
+        return copy;
+      default:
+        for (const key of Object.keys(n)) {
+          if (key === '_parent' || key === '_parentKey' || key === '_parentIdx') continue;
+          const val = n[key];
+          if (val instanceof Map) copy[key] = new Map(val);
+          else if (Array.isArray(val)) copy[key] = val.map(rec);
+          else if (typeof val === 'object' && val !== null && val.type) copy[key] = rec(val);
+          else copy[key] = val;
+        }
+        return copy;
+    }
+  });
 }
 
 export function clonePrimFunc(primFunc) {

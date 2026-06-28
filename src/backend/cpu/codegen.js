@@ -492,7 +492,7 @@ export class CPUCodegen {
   }
 
   _resolveShapeParam(buffer, dimIdx) {
-    return resolveShapeParam(this._primFunc, buffer, dimIdx, (v) => v.name, 'CPU');
+    return resolveShapeParam(this._primFunc, buffer, dimIdx, (v) => v.name, 'CPU', 'js');
   }
 
   _cleanupSource(src) {

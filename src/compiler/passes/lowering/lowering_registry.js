@@ -1,8 +1,10 @@
 import { DYNAMIC } from '../../ir/graph/types.js';
+import { SymInt, symVarName } from '../../analysis/sym_int.js';
 import { MemoryScope } from '../../ir/tensor/tensor_types.js';
 import { Buffer } from '../../ir/tensor/buffer.js';
 import { isDtypeInt } from '../../../backend/dtype_map.js';
 import { ForNode, BlockNode, SeqNode, BufferStoreNode, BufferLoadNode, VariableNode, IntImmNode, FloatImmNode, BlockRealizeNode, ForKind, MathOpNode, CompareNode, IfThenElseNode, mathOp } from '../../ir/tensor/nodes.js';
+import { symIntToNode } from '../../ir/tensor/sym_lower.js';
 
 import { registerOpStrategy, getOpStrategy, selectImplementation } from './op_strategy.js';
 
@@ -41,6 +43,7 @@ export class LoweringContext {
     this.varCounter = 0;
     this.shapeParams = new Map();
     this.symbolToVar = new Map();
+    this.symVars = new Map();
     this._blockCounter = 0;
   }
 
@@ -79,8 +82,31 @@ export class LoweringContext {
 
   _registerDynamicDims(buf) {
     for (let i = 0; i < buf.shape.length; i++) {
-      if (buf.shape[i] === DYNAMIC) this.extentNode(DYNAMIC, buf, i);
+      const d = buf.shape[i];
+      if (d === DYNAMIC) this.extentNode(DYNAMIC, buf, i);
+      else if (d instanceof SymInt) this._registerSymIntDim(buf, i, d);
     }
+  }
+
+  _symVarNode(name) {
+    let v = this.symVars.get(name);
+    if (!v) {
+      v = new VariableNode(symVarName(name), 'int32');
+      this.symVars.set(name, v);
+    }
+    return v;
+  }
+
+  _registerSymIntDim(buf, dimIdx, sym) {
+    for (const name of SymInt.freeVars(sym)) this._symVarNode(name);
+    if (sym.type === 'var') {
+      const key = `${buf.name}:${dimIdx}`;
+      if (!this.shapeParams.has(key)) this.shapeParams.set(key, this._symVarNode(sym.name));
+    }
+  }
+
+  symIntToExtentNode(sym) {
+    return symIntToNode(sym, (name) => this._symVarNode(name));
   }
 
   _shapeParamVar(buf, dimIdx) {
@@ -100,6 +126,7 @@ export class LoweringContext {
   }
 
   extentNode(dim, buf, dimIdx = -1) {
+    if (dim instanceof SymInt) return this.symIntToExtentNode(dim);
     if (dim !== DYNAMIC) return new IntImmNode(dim);
     return this._shapeParamVar(buf, dimIdx);
   }
@@ -107,7 +134,7 @@ export class LoweringContext {
   extentNodes(shape, buf) {
     const nodes = new Array(shape.length);
     for (let i = 0; i < shape.length; i++) {
-      nodes[i] = shape[i] === DYNAMIC ? this._shapeParamVar(buf, i) : new IntImmNode(shape[i]);
+      nodes[i] = this.extentNode(shape[i], buf, i);
     }
     return nodes;
   }

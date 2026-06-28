@@ -110,6 +110,12 @@ function isMatmulShape(info) {
          info.writeBuffers.length === 1 && info.loopCount >= 3;
 }
 
+function blockHasNonConstExtent(primFunc, blockName) {
+  const info = classifyBlock(primFunc, blockName);
+  if (!info) return false;
+  return info.loops.some(l => l.extent && l.extent.type !== 'IntImmNode');
+}
+
 function hasMultipleBlocks(loop) {
   let count = 0;
   const stack = [loop.body];
@@ -556,6 +562,10 @@ export class SchedulePolicy {
   }
 
   applyToBlock(schedule, blockName) {
+    if (this.target.isGPU() && blockHasNonConstExtent(schedule.func, blockName)) {
+      this._explain(blockName, 'none', 'block has dynamic loop extents; runs sequentially (no dynamic grid)');
+      return null;
+    }
     const rule = this.selectRule(schedule.func, blockName);
     if (rule) {
       rule.apply(schedule, blockName, this.target);

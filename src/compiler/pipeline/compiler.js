@@ -43,6 +43,7 @@ export class CompilerConfig {
       maxSimplifyIterations: 8,
       loopPartition: false,
       detectAccumulators: false,
+      tensorize: false,
       ...opts.optimization,
     };
     this.memory = {

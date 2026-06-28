@@ -1,4 +1,6 @@
 import { MathOpNode, IntImmNode, VariableNode } from '../tensor/nodes.js';
+import { SymInt, symVarName } from '../../analysis/sym_int.js';
+import { symIntToNode } from '../tensor/sym_lower.js';
 
 export function flattenIndex(buffer, indices, shapeParamMap) {
   const baseOffset = typeof buffer.offset === 'number' ? buffer.offset : 0;
@@ -45,6 +47,10 @@ export function computeDynamicStride(buffer, dimIdx, shapeParamMap) {
 }
 
 export function resolveShapeParam(buffer, dimIdx, shapeParamMap) {
+  const d = buffer.shape[dimIdx];
+  if (d instanceof SymInt) {
+    return symIntToNode(d, (name) => new VariableNode(symVarName(name), 'index'));
+  }
   if (shapeParamMap) {
     const key = `${buffer.name}:${dimIdx}`;
     const v = shapeParamMap.get(key);

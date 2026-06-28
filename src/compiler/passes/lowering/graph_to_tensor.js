@@ -160,6 +160,11 @@ export function lowerGraphToPrimFunc(graphFunc, target = null, context = null) {
     seenSp.add(sp.name);
     shapeParams.push(sp);
   }
+  for (const [name, node] of ctx.symVars) {
+    if (!seenSp.has(node.name)) {
+      throw new Error(`Symbolic dimension '${name}' has no input dimension to bind it to at runtime`);
+    }
+  }
   for (const sp of shapeParams) params.push(sp);
 
   const primFunc = new PrimFunc(graphFunc.name, params, stmts.length === 1 ? stmts[0] : new SeqNode(stmts), bufferMap, shapeParams, new Map(ctx.shapeParams));

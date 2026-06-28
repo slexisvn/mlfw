@@ -979,7 +979,7 @@ export class WasmCodegen {
   }
 
   _resolveShapeParam(buffer, dimIdx) {
-    return resolveShapeParam(this._primFunc, buffer, dimIdx, (v) => v.name, 'WASM');
+    return resolveShapeParam(this._primFunc, buffer, dimIdx, (v) => v.name, 'WASM', 'wat');
   }
 
   _emitExpr(node) {

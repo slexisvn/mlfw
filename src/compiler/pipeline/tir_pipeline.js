@@ -3,9 +3,15 @@ import { SimplifyPass } from '../passes/simplify/simplify_pass.js';
 import { MemoryPlanPass } from '../passes/memory/memory_plan_pass.js';
 import { LoopPartitionPass } from '../passes/loop_partition/loop_partition.js';
 import { AccumulatorDetectionPass } from '../passes/lowering/accumulator_pass.js';
+import { AutoTensorizePass } from '../passes/schedule/tensorize_pass.js';
+import { tirPassesForPhase } from './tir_pass_registry.js';
 
 export function buildTirPipeline(config) {
   const passes = [];
+
+  for (const p of tirPassesForPhase('pre', config)) passes.push(p);
+
+  if (config.optimization.tensorize) passes.push(new AutoTensorizePass(config));
 
   passes.push(new SchedulePass(config));
 
@@ -16,6 +22,8 @@ export function buildTirPipeline(config) {
   passes.push(new MemoryPlanPass(config));
 
   if (config.optimization.detectAccumulators) passes.push(new AccumulatorDetectionPass());
+
+  for (const p of tirPassesForPhase('post', config)) passes.push(p);
 
   return passes;
 }

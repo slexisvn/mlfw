@@ -26,7 +26,7 @@ export class SchedulePass extends PrimFuncPass {
     const sCfg = this.config.scheduling;
     const trace = ctx.trace;
     if (sCfg.autotune) {
-      if (pf.cublasInfo) return;
+      if (pf.cublasInfo || pf._tensorIntrin) return;
       const ft0 = performance.now();
       const tuneResult = this._autotuner.tuneAndApply(pf);
       const durationMs = performance.now() - ft0;
@@ -44,7 +44,7 @@ export class SchedulePass extends PrimFuncPass {
       }
       trace.autotuneStats(pf.name, { durationMs, blockCount, applied: !!(tuneResult && tuneResult.applied), cacheHits });
     } else if (sCfg.enabled) {
-      if (pf.cublasInfo) return;
+      if (pf.cublasInfo || pf._tensorIntrin) return;
       const ft0 = performance.now();
       const sch = new Schedule(pf);
       this._policy.applyToAllBlocks(sch);

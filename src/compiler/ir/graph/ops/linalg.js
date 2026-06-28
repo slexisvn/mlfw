@@ -52,8 +52,9 @@ export function register(registry) {
             const ld = lhsC[i], rd = rhsC[i];
             if (ld >= lhs.rank) errs.push(`dot lhs_contracting[${i}]=${ld} out of range (rank ${lhs.rank})`);
             if (rd >= rhs.rank) errs.push(`dot rhs_contracting[${i}]=${rd} out of range (rank ${rhs.rank})`);
-            if (ld < lhs.rank && rd < rhs.rank && lhs.shape[ld] !== DYNAMIC && rhs.shape[rd] !== DYNAMIC && lhs.shape[ld] !== rhs.shape[rd]) {
-              errs.push(`dot contracting dim size mismatch at [${i}]: lhs dim ${ld} size ${lhs.shape[ld]} vs rhs dim ${rd} size ${rhs.shape[rd]}`);
+            const ldDim = lhs.shape[ld], rdDim = rhs.shape[rd];
+            if (ld < lhs.rank && rd < rhs.rank && typeof ldDim === 'number' && ldDim !== DYNAMIC && typeof rdDim === 'number' && rdDim !== DYNAMIC && ldDim !== rdDim) {
+              errs.push(`dot contracting dim size mismatch at [${i}]: lhs dim ${ld} size ${ldDim} vs rhs dim ${rd} size ${rdDim}`);
             }
           }
         }

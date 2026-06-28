@@ -75,7 +75,7 @@ describe.skipIf(!cudaDeps)('flash / wmma / cp.async / collectives on real GPU', 
   it('wmma fp16 tensor-core GEMM matches reference', async () => {
     const M = 32, N = 32, K = 32;
     const f = matmulFunc(M, N, K, 'f16', 'f16', 'f32');
-    f.gpuWmma = { M, N, K, a: 'A', b: 'B', c: 'C' };
+    f._tensorIntrin = { name: 'wmma_16x16x16_f16f16f32', info: { M, N, K, a: 'A', b: 'B', c: 'C' } };
     const af = Float32Array.from({ length: M * K }, (_, i) => Math.sin(i * 0.1) * 0.5);
     const bf = Float32Array.from({ length: K * N }, (_, i) => Math.cos(i * 0.1) * 0.5);
     const A = new Uint16Array(M * K), B = new Uint16Array(K * N);
@@ -92,7 +92,7 @@ describe.skipIf(!cudaDeps)('flash / wmma / cp.async / collectives on real GPU', 
   it('cp.async software-pipelined GEMM matches reference', async () => {
     const M = 64, N = 64, K = 64;
     const f = matmulFunc(M, N, K, 'f32', 'f32', 'f32');
-    f.gpuPipelined = { M, N, K, a: 'A', b: 'B', c: 'C', tile: 16 };
+    f._tensorIntrin = { name: 'gemm_pipelined_f32', info: { M, N, K, a: 'A', b: 'B', c: 'C', tile: 16 } };
     const A = Float32Array.from({ length: M * K }, (_, i) => Math.sin(i * 0.05) * 0.5);
     const B = Float32Array.from({ length: K * N }, (_, i) => Math.cos(i * 0.05) * 0.5);
     const C = new Float32Array(M * N);

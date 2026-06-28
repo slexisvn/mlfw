@@ -2,6 +2,12 @@ const SYM_INT_METHOD_NAMES = {
   ceildiv: 'ceilDiv'
 };
 
+export const SYM_VAR_PREFIX = '_sym_';
+
+export function symVarName(name) {
+  return SYM_VAR_PREFIX + name;
+}
+
 export class SymInt {
   constructor(type, name = null, args = []) {
     this.type = type;

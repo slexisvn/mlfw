@@ -35,6 +35,7 @@ function lowerRegionBody(ctx, region, argBuffers) {
   const valueMap = new Map();
   for (let i = 0; i < entryBlock.arguments.length; i++) {
     valueMap.set(entryBlock.arguments[i], argBuffers[i]);
+    if (argBuffers[i]) ctx.bufferMap.set(entryBlock.arguments[i], argBuffers[i]);
   }
   const stmts = [];
   for (const innerOp of entryBlock.ops()) {
@@ -62,6 +63,7 @@ function lowerRegionBody(ctx, region, argBuffers) {
       const proxy = { type: innerOp.getResult(i).type };
       outputs[i] = ctx.getOrAllocBuffer(proxy);
       valueMap.set(innerOp.getResult(i), outputs[i]);
+      ctx.bufferMap.set(innerOp.getResult(i), outputs[i]);
     }
     const rule = getLoweringRule(innerOp.opName);
     if (!rule) throw new Error(`No lowering rule for op '${innerOp.opName}' inside region`);

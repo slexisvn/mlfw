@@ -1,3 +1,32 @@
+import { SymInt, symVarName } from '../compiler/analysis/sym_int.js';
+
+function symOpToString(type, a, b, dialect) {
+  switch (type) {
+    case 'add': return `(${a} + ${b})`;
+    case 'sub': return `(${a} - ${b})`;
+    case 'mul': return `(${a} * ${b})`;
+    case 'neg': return `(-${a})`;
+    case 'div': return dialect === 'js' ? `((${a} / ${b}) | 0)` : `(${a} / ${b})`;
+    case 'mod': return dialect === 'js' ? `((${a} % ${b} + ${b}) % ${b})` : `(${a} % ${b})`;
+    case 'ceildiv': return dialect === 'js' ? `(((${a} + ${b} - 1) / ${b}) | 0)` : `((${a} + ${b} - 1) / ${b})`;
+    case 'max': return dialect === 'js' ? `Math.max(${a}, ${b})` : `max(${a}, ${b})`;
+    case 'min': return dialect === 'js' ? `Math.min(${a}, ${b})` : `min(${a}, ${b})`;
+    default: throw new Error(`emitSymInt: unsupported op '${type}'`);
+  }
+}
+
+export function emitSymInt(expr, formatVar, dialect = 'c') {
+  if (typeof expr === 'number') return String(expr);
+  if (!(expr instanceof SymInt)) return String(expr);
+  if (expr.type === 'var') return formatVar({ name: symVarName(expr.name) });
+  if (dialect === 'wat') {
+    throw new Error('emitSymInt: compound symbolic expressions are not supported on the WASM backend');
+  }
+  const a = emitSymInt(expr.args[0], formatVar, dialect);
+  const b = expr.args.length > 1 ? emitSymInt(expr.args[1], formatVar, dialect) : null;
+  return symOpToString(expr.type, a, b, dialect);
+}
+
 export function parseThreadAxis(tag) {
   const idx = tag.indexOf('.');
   if (idx < 0) return null;
@@ -68,7 +97,9 @@ export function isZeroFillBody(body) {
   return false;
 }
 
-export function resolveShapeParam(primFunc, buffer, dimIdx, format, label) {
+export function resolveShapeParam(primFunc, buffer, dimIdx, format, label, dialect = 'c') {
+  const d = buffer.shape[dimIdx];
+  if (d instanceof SymInt) return emitSymInt(d, format, dialect);
   if (primFunc && primFunc.shapeParamMap) {
     const v = primFunc.shapeParamMap.get(`${buffer.name}:${dimIdx}`);
     if (v) return format(v);

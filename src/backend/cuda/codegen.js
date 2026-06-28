@@ -3,6 +3,7 @@ import { cType, cPtrType, cLiteralSuffix, cMathFunc, isDtypeInt, dtypeBytes, cCo
 import { flattenRowMajorIndex } from '../index_emit.js';
 import { irChildNodes } from '../../compiler/ir/ir_visitor.js';
 import { parseThreadAxis, maxBindingExtent, visitStatements, estimateBufferSize, dynamicDimProduct, resolveShapeParam } from '../codegen_utils.js';
+import { getCudaIntrin } from './tensor_intrin.js';
 
 
 export class CUDAKernel {
@@ -114,9 +115,13 @@ export class CUDACodegen {
     }
 
     this._emitMissingLocalDecls(func);
-    if (func.gpuWmma) this._emitWmmaBody(func.gpuWmma);
-    else if (func.gpuPipelined) this._emitPipelinedBody(func.gpuPipelined);
-    else this._visitNode(func.body);
+    if (func._tensorIntrin) {
+      const emit = getCudaIntrin(func._tensorIntrin.name);
+      if (!emit) throw new Error(`CUDA codegen: unknown tensor intrinsic '${func._tensorIntrin.name}'`);
+      emit(this, func._tensorIntrin.info);
+    } else {
+      this._visitNode(func.body);
+    }
     this._indent--;
     this._emit('}');
 
@@ -480,61 +485,8 @@ export class CUDACodegen {
     }
   }
 
-  _emitWmmaBody(info) {
-    const { M, N, K, a, b, c } = info;
-    this._blockDim = [32, 1, 1];
-    this._gridDim = [Math.ceil(M / 16), Math.ceil(N / 16), 1];
-    this._emit('const int warpM = blockIdx.x;');
-    this._emit('const int warpN = blockIdx.y;');
-    this._emit('fragment<accumulator, 16, 16, 16, float> cf;');
-    this._emit('fill_fragment(cf, 0.0f);');
-    this._emit(`for (int kk = 0; kk < ${K}; kk += 16) {`);
-    this._indent++;
-    this._emit('fragment<matrix_a, 16, 16, 16, half, row_major> af;');
-    this._emit('fragment<matrix_b, 16, 16, 16, half, row_major> bf;');
-    this._emit(`load_matrix_sync(af, ${a} + warpM * 16 * ${K} + kk, ${K});`);
-    this._emit(`load_matrix_sync(bf, ${b} + kk * ${N} + warpN * 16, ${N});`);
-    this._emit('mma_sync(cf, af, bf, cf);');
-    this._indent--;
-    this._emit('}');
-    this._emit(`store_matrix_sync(${c} + warpM * 16 * ${N} + warpN * 16, cf, ${N}, mem_row_major);`);
-  }
-
-  _emitPipelinedBody(info) {
-    const { M, N, K, a, b, c, tile = 16 } = info;
-    this._blockDim = [tile, tile, 1];
-    this._gridDim = [Math.ceil(N / tile), Math.ceil(M / tile), 1];
-    const T = tile;
-    this._emit(`__shared__ float As[2][${T}][${T}];`);
-    this._emit(`__shared__ float Bs[2][${T}][${T}];`);
-    this._emit(`const int row = blockIdx.y * ${T} + threadIdx.y;`);
-    this._emit(`const int col = blockIdx.x * ${T} + threadIdx.x;`);
-    this._emit('float acc = 0.0f;');
-    this._emit(`const int nTiles = ${K} / ${T};`);
-    this._emit(`__pipeline_memcpy_async(&As[0][threadIdx.y][threadIdx.x], &${a}[row * ${K} + threadIdx.x], sizeof(float));`);
-    this._emit(`__pipeline_memcpy_async(&Bs[0][threadIdx.y][threadIdx.x], &${b}[threadIdx.y * ${N} + col], sizeof(float));`);
-    this._emit('__pipeline_commit();');
-    this._emit('for (int t = 0; t < nTiles; t++) {');
-    this._indent++;
-    this._emit('const int cur = t & 1, nxt = (t + 1) & 1;');
-    this._emit('if (t + 1 < nTiles) {');
-    this._indent++;
-    this._emit(`__pipeline_memcpy_async(&As[nxt][threadIdx.y][threadIdx.x], &${a}[row * ${K} + (t + 1) * ${T} + threadIdx.x], sizeof(float));`);
-    this._emit(`__pipeline_memcpy_async(&Bs[nxt][threadIdx.y][threadIdx.x], &${b}[((t + 1) * ${T} + threadIdx.y) * ${N} + col], sizeof(float));`);
-    this._emit('__pipeline_commit();');
-    this._indent--;
-    this._emit('}');
-    this._emit('__pipeline_wait_prior(t + 1 < nTiles ? 1 : 0);');
-    this._emit('__syncthreads();');
-    this._emit(`for (int kk = 0; kk < ${T}; kk++) acc += As[cur][threadIdx.y][kk] * Bs[cur][kk][threadIdx.x];`);
-    this._emit('__syncthreads();');
-    this._indent--;
-    this._emit('}');
-    this._emit(`${c}[row * ${N} + col] = acc;`);
-  }
-
   _analyzeSharing(func) {
-    if (func.gpuWmma || func.gpuPipelined) { this._needsBarriers = false; return; }
+    if (func._tensorIntrin) { this._needsBarriers = false; return; }
     if (func.gpuRegisterBlocked) {
       this._needsBarriers = false;
       return;
@@ -664,6 +616,6 @@ export class CUDACodegen {
   }
 
   _resolveShapeParam(buffer, dimIdx) {
-    return resolveShapeParam(this._primFunc, buffer, dimIdx, (v) => v.name, 'CUDA');
+    return resolveShapeParam(this._primFunc, buffer, dimIdx, (v) => v.name, 'CUDA', 'c');
   }
 }

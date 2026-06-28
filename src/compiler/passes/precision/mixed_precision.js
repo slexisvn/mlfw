@@ -5,12 +5,36 @@ import { registry } from '../../ir/graph/ops.js';
 
 export const PrecisionClass = Object.freeze({ ALWAYS: 'ALWAYS', FOLLOW: 'FOLLOW', NEVER: 'NEVER' });
 
-const DEFAULT_PRECISION_CLASSES = { dot: PrecisionClass.ALWAYS, conv: PrecisionClass.ALWAYS };
+const DEFAULT_PRECISION_CLASSES = {
+  dot: PrecisionClass.ALWAYS,
+  conv: PrecisionClass.ALWAYS,
+  reshape: PrecisionClass.FOLLOW,
+  transpose: PrecisionClass.FOLLOW,
+  broadcast_in_dim: PrecisionClass.FOLLOW,
+  slice: PrecisionClass.FOLLOW,
+  concat: PrecisionClass.FOLLOW,
+  reverse: PrecisionClass.FOLLOW,
+  add: PrecisionClass.FOLLOW,
+  sub: PrecisionClass.FOLLOW,
+  mul: PrecisionClass.FOLLOW,
+  maximum: PrecisionClass.FOLLOW,
+  minimum: PrecisionClass.FOLLOW,
+  relu: PrecisionClass.FOLLOW,
+};
 for (const [opName, cls] of Object.entries(DEFAULT_PRECISION_CLASSES)) {
   if (registry.has(opName)) registry.registerOpAttr(opName, 'precisionClass', cls);
 }
 
 export const DEFAULT_AUTOCAST_OPS = new Set(['dot', 'conv']);
+
+function followOpSet(explicit) {
+  if (explicit) return explicit;
+  const follow = new Set();
+  for (const def of registry.allOps()) {
+    if (def.getAttr('precisionClass') === PrecisionClass.FOLLOW) follow.add(def.name);
+  }
+  return follow;
+}
 
 function autocastAllowSet(explicit) {
   if (explicit) return explicit;
@@ -70,6 +94,42 @@ function castOpToLowPrecision(op, lowDtype) {
   return true;
 }
 
+function isUpConvert(value, lowDtype) {
+  const d = value.definingOp;
+  return d && d.opName === 'convert'
+    && d.getOperand(0).type instanceof TensorType
+    && d.getOperand(0).type.dtype === lowDtype;
+}
+
+function followHasLowInput(op, lowDtype) {
+  for (let i = 0; i < op.numOperands; i++) {
+    const t = op.getOperand(i).type;
+    if (!(t instanceof TensorType) || !isFloatType(t.dtype)) continue;
+    if (t.dtype === lowDtype || isUpConvert(op.getOperand(i), lowDtype)) return true;
+  }
+  return false;
+}
+
+function resultIsLow(op, lowDtype) {
+  const r = op.getResult(0);
+  return r && r.type instanceof TensorType && r.type.dtype === lowDtype;
+}
+
+function foldDoubleConverts(func) {
+  let changed = false;
+  for (const op of [...func.opsArray()]) {
+    if (!op.parentBlock || op.opName !== 'convert') continue;
+    const inner = op.getOperand(0).definingOp;
+    if (!inner || inner.opName !== 'convert') continue;
+    if (inner.getOperand(0).type.dtype !== op.getAttr('target_dtype')) continue;
+    op.getResult(0).replaceAllUsesWith(inner.getOperand(0));
+    op.erase();
+    if (inner.getResult(0).uses && [...inner.getResult(0).uses()].length === 0) inner.erase();
+    changed = true;
+  }
+  return changed;
+}
+
 export function applyAutocast(func, opts = {}) {
   const allow = autocastAllowSet(opts.allow);
   const lowDtype = opts.dtype || ScalarType.F16;
@@ -79,6 +139,22 @@ export function applyAutocast(func, opts = {}) {
     if (!allow.has(op.opName)) continue;
     changed = castOpToLowPrecision(op, lowDtype) || changed;
   }
+
+  if (opts.propagateFollow && changed) {
+    const follow = followOpSet(opts.follow);
+    let progress = true;
+    while (progress) {
+      progress = false;
+      for (const op of [...func.opsArray()]) {
+        if (!op.parentBlock || !follow.has(op.opName)) continue;
+        if (resultIsLow(op, lowDtype)) continue;
+        if (!followHasLowInput(op, lowDtype)) continue;
+        if (castOpToLowPrecision(op, lowDtype)) progress = true;
+      }
+      if (foldDoubleConverts(func)) progress = true;
+    }
+  }
+
   return changed;
 }
 

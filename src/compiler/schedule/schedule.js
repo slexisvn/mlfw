@@ -9,6 +9,7 @@ import { ScheduleState } from './schedule_state.js';
 import { ScheduleMutator } from './mutator.js';
 import { SRefTree } from './sref.js';
 import { loopCarriesReduction, collectVarsUsed } from './legality.js';
+import { cloneIRShared } from '../ir/clone_ir.js';
 
 const RFACTOR_ASSOCIATIVE_OPS = new Set(['+', '*', 'min', 'max']);
 
@@ -136,72 +137,18 @@ function loadsBuffer(node, bufName) {
 }
 
 function cloneExprTree(node) {
-  if (!node || typeof node !== 'object') return node;
-  if (Array.isArray(node)) return node.map(cloneExprTree);
-  const copy = Object.create(Object.getPrototypeOf(node));
-  copy.type = node.type;
-  copy._parent = null;
-  copy._parentKey = null;
-  copy._parentIdx = -1;
-  switch (node.type) {
-    case 'ForNode':
-      copy.loopVar = node.loopVar; copy.min = cloneExprTree(node.min);
-      copy.extent = cloneExprTree(node.extent); copy.kind = node.kind;
-      copy.body = cloneExprTree(node.body); copy.threadTag = node.threadTag;
-      copy._setChild('body', copy.body);
-      break;
-    case 'BlockNode':
-      copy.name = node.name; copy.iterVars = node.iterVars.map(cloneExprTree);
-      copy.reads = node.reads; copy.writes = node.writes;
-      copy.body = cloneExprTree(node.body);
-      copy.initBody = node.initBody ? cloneExprTree(node.initBody) : null;
-      copy._setChild('body', copy.body);
-      copy._setChild('initBody', copy.initBody);
-      break;
-    case 'SeqNode':
-      copy.stmts = node.stmts.map(cloneExprTree);
-      copy._setChildren('stmts', copy.stmts);
-      break;
-    case 'IfThenElseNode':
-      copy.condition = cloneExprTree(node.condition);
-      copy.thenBody = cloneExprTree(node.thenBody);
-      copy.elseBody = node.elseBody ? cloneExprTree(node.elseBody) : null;
-      copy._setChild('thenBody', copy.thenBody);
-      copy._setChild('elseBody', copy.elseBody);
-      break;
-    case 'BufferStoreNode':
-      copy.buffer = node.buffer;
-      copy.indices = node.indices.map(cloneExprTree);
-      copy.value = cloneExprTree(node.value);
-      break;
-    case 'BufferLoadNode':
-      copy.buffer = node.buffer;
-      copy.indices = node.indices.map(cloneExprTree);
-      break;
-    case 'BlockRealizeNode':
-      copy.iterVar = node.iterVar;
-      copy.binding = cloneExprTree(node.binding);
-      break;
-    case 'MathOpNode':
-      copy.op = node.op; copy.a = cloneExprTree(node.a); copy.b = cloneExprTree(node.b);
-      break;
-    case 'CompareNode':
-      copy.direction = node.direction; copy.a = cloneExprTree(node.a); copy.b = cloneExprTree(node.b);
-      break;
-    case 'CastNode':
-      copy.expr = cloneExprTree(node.expr); copy.fromDtype = node.fromDtype; copy.toDtype = node.toDtype;
-      break;
-    case 'CallExternNode':
-      copy.externName = node.externName; copy.args = node.args.map(cloneExprTree); copy.dtype = node.dtype;
-      break;
-    default:
-      for (const key of Object.keys(node)) {
-        if (key === '_parent' || key === '_parentKey' || key === '_parentIdx') continue;
-        copy[key] = node[key];
-      }
-      break;
-  }
-  return copy;
+  return cloneIRShared(node, cloneExprTree, (n, copy, rec) => {
+    if (n.type === 'BlockRealizeNode') {
+      copy.iterVar = n.iterVar;
+      copy.binding = rec(n.binding);
+      return copy;
+    }
+    for (const key of Object.keys(n)) {
+      if (key === '_parent' || key === '_parentKey' || key === '_parentIdx') continue;
+      copy[key] = n[key];
+    }
+    return copy;
+  });
 }
 
 function getConstExtent(node) {
@@ -880,6 +827,36 @@ export class Schedule {
     }
   }
 
+  tensorize(intrinName, info) {
+    if (typeof intrinName !== 'string') throw new Error('tensorize expects an intrinsic name');
+    if (!info || typeof info.M !== 'number' || typeof info.N !== 'number' || typeof info.K !== 'number') {
+      throw new Error('tensorize expects info { M, N, K, a, b, c }');
+    }
+    this.func._tensorIntrin = { name: intrinName, info };
+    this.state.invalidate();
+  }
+
+  blockize(loopRef, name = null) {
+    const loop = this._resolveLoop(loopRef);
+    if (!loop || loop.type !== 'ForNode') throw new Error('blockize expects a loop');
+    const reads = new Map(), writes = new Map();
+    collectBufferAccess(loop, reads, writes);
+    const blockName = name || `blockized_${loop.loopVar.name}`;
+    const wrapper = new BlockNode(
+      blockName,
+      [],
+      [...reads.values()].map(b => ({ buffer: b })),
+      [...writes.values()].map(b => ({ buffer: b })),
+      new SeqNode([])
+    );
+    this.mutator.replaceNode(loop, wrapper);
+    wrapper.body = loop;
+    wrapper._setChild('body', loop);
+    this._rebuildSRefTree();
+    if (!this._replaying) this.trace.record('blockize', [loop.loopVar.name]);
+    return wrapper;
+  }
+
   getTrace() {
     return this.trace;
   }
@@ -887,4 +864,16 @@ export class Schedule {
   verify() {
     return ScheduleValidator.validate(this.func);
   }
+}
+
+function collectBufferAccess(node, reads, writes) {
+  if (!node || typeof node !== 'object') return;
+  if (node.type === 'BufferLoadNode' && node.buffer) reads.set(node.buffer.name, node.buffer);
+  if (node.type === 'BufferStoreNode' && node.buffer) writes.set(node.buffer.name, node.buffer);
+  for (const k of ['a', 'b', 'value', 'expr', 'condition', 'thenBody', 'elseBody', 'body', 'initBody']) {
+    if (node[k]) collectBufferAccess(node[k], reads, writes);
+  }
+  if (node.indices) for (const ix of node.indices) collectBufferAccess(ix, reads, writes);
+  if (node.args) for (const a of node.args) collectBufferAccess(a, reads, writes);
+  if (node.stmts) for (const s of node.stmts) collectBufferAccess(s, reads, writes);
 }

@@ -1,5 +1,5 @@
 import { dtypeBytes } from '../../../backend/dtype_map.js';
-import { shapeProduct } from '../graph/types.js';
+import { shapeProduct, symbolicShapeProduct, DYNAMIC } from '../graph/types.js';
 
 export class Buffer {
   constructor(name, shape, dtype, scope, strides = null, offset = 0, alignment = 64) {
@@ -19,7 +19,9 @@ export class Buffer {
       let s = 1;
       for (let i = shape.length - 1; i >= 0; i--) {
         this.strides[i] = s;
+        if (s === DYNAMIC) continue;
         if (typeof shape[i] === 'number') s *= shape[i];
+        else s = DYNAMIC;
       }
     }
   }
@@ -34,6 +36,10 @@ export class Buffer {
 
   numel() {
     return shapeProduct(this.shape, -1);
+  }
+
+  symbolicNumel() {
+    return symbolicShapeProduct(this.shape);
   }
 
   sizeInBytes() {

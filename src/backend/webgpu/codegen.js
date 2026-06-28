@@ -10,6 +10,16 @@ const BOOL_OPS = new Set(['!', '&&', '||']);
 const CMP_OPS = new Set(['<', '>', '<=', '>=', '==', '!=']);
 const COMPARE_DIRS = new Set(['eq', 'ne', 'lt', 'le', 'gt', 'ge']);
 
+const FULL_WALK_KEYS = ['body', 'loopBody', 'condBody', 'initBody', 'thenBody', 'elseBody', 'value', 'a', 'b', 'condition', 'expr', 'offsetExpr'];
+function walkFullChildren(node, visit) {
+  for (const k of FULL_WALK_KEYS) if (node[k]) visit(node[k]);
+  if (node.stmts) for (const s of node.stmts) visit(s);
+  if (node.indices) for (const i of node.indices) visit(i);
+  if (node.args) for (const a of node.args) visit(a);
+  if (node.initLoad) visit(node.initLoad);
+  if (node.flushStore) visit(node.flushStore);
+}
+
 const WGSL_THREAD_TAG_MAP = {
   'threadIdx.x': 'local_invocation_id.x',
   'threadIdx.y': 'local_invocation_id.y',
@@ -514,13 +524,7 @@ export class WebGPUCodegen {
       if (node.type === 'LIRFlatLoadNode' && node.buffer && !storageNames.has(node.buffer.name)
         && node.offsetExpr && indexUsesLoopVar([node.offsetExpr], inner)) result.add(node.buffer.name);
 
-      for (const k of ['body', 'loopBody', 'condBody', 'initBody', 'thenBody', 'elseBody', 'value',
-        'a', 'b', 'condition', 'expr', 'offsetExpr']) if (node[k]) walk(node[k], inner);
-      if (node.stmts) for (const s of node.stmts) walk(s, inner);
-      if (node.indices) for (const i of node.indices) walk(i, inner);
-      if (node.args) for (const a of node.args) walk(a, inner);
-      if (node.initLoad) walk(node.initLoad, inner);
-      if (node.flushStore) walk(node.flushStore, inner);
+      walkFullChildren(node, (c) => walk(c, inner));
     };
 
     walk(func.body, []);
@@ -555,13 +559,7 @@ export class WebGPUCodegen {
       if (node.type === 'BufferLoadNode' && node.buffer) record(loads, node.buffer.name, inner);
       if (node.type === 'LIRFlatLoadNode' && node.buffer) record(loads, node.buffer.name, inner);
 
-      for (const k of ['body', 'loopBody', 'condBody', 'initBody', 'thenBody', 'elseBody', 'value',
-        'a', 'b', 'condition', 'expr', 'offsetExpr']) if (node[k]) walk(node[k], inner);
-      if (node.stmts) for (const s of node.stmts) walk(s, inner);
-      if (node.indices) for (const i of node.indices) walk(i, inner);
-      if (node.args) for (const a of node.args) walk(a, inner);
-      if (node.initLoad) walk(node.initLoad, inner);
-      if (node.flushStore) walk(node.flushStore, inner);
+      walkFullChildren(node, (c) => walk(c, inner));
     };
     walk(func.body, 1);
 
@@ -1037,6 +1035,6 @@ export class WebGPUCodegen {
   }
 
   _resolveShapeParam(buffer, dimIdx) {
-    return resolveShapeParam(this._primFunc, buffer, dimIdx, (v) => `i32(_shapes.${v.name})`, 'WebGPU');
+    return resolveShapeParam(this._primFunc, buffer, dimIdx, (v) => `i32(_shapes.${v.name})`, 'WebGPU', 'wgsl');
   }
 }
