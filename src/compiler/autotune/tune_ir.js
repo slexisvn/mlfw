@@ -85,6 +85,10 @@ export function clonePrimFunc(primFunc) {
   return deepCloneIR(primFunc);
 }
 
+export function cloneTensorIR(node) {
+  return deepCloneIR(node);
+}
+
 function cloneBlockSubtree(block) {
   return deepCloneIR(block);
 }

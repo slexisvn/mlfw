@@ -2,14 +2,12 @@ import { GraphModule, cloneGraphModule } from '../ir/graph/module.js';
 import { cloneGraphFunction } from '../ir/graph/function.js';
 import { CompilerContext } from './compiler_context.js';
 import { PassManager } from '../passes/pass_manager.js';
+import { TirPassManager } from '../passes/tir_pass_manager.js';
 import { buildGraphPipeline } from './graph_pipeline.js';
+import { buildTirPipeline } from './tir_pipeline.js';
 import { lowerGraphToPrimFunc } from '../passes/lowering/graph_to_tensor.js';
-import { Schedule } from '../schedule/schedule.js';
-import { SchedulePolicy } from '../schedule/rules.js';
-import { MemoryPlanner } from '../passes/memory/memory_planning.js';
 import { BackendPipeline, detectPureMatmul } from '../../backend/pipeline.js';
 import { RuntimeModule } from '../../runtime/runtime.js';
-import { Autotuner } from '../autotune/autotuner.js';
 import { TensorVerifier } from '../ir/tensor/verifier.js';
 import { verifyModule, verifyFunction } from '../ir/graph/verifier.js';
 import { CalibrationCollector } from '../analysis/calibration.js';
@@ -20,7 +18,6 @@ import { TraceLog, TraceLevel, CompilationError } from './trace.js';
 import { IRPrinter } from '../ir/graph/printer.js';
 import { printTensorIR } from '../ir/tensor/printer.js';
 import { lowerToLIR } from '../passes/lowering/tensor_to_lir.js';
-import { simplifyPrimFunc } from '../passes/simplify/simplify_tir.js';
 import { verifyLIR } from '../ir/lir/verifier.js';
 
 export { CompilationError } from './trace.js';
@@ -44,6 +41,8 @@ export class CompilerConfig {
       rematConfig: {},
       fastMath: false,
       maxSimplifyIterations: 8,
+      loopPartition: false,
+      detectAccumulators: false,
       ...opts.optimization,
     };
     this.memory = {
@@ -214,21 +213,8 @@ export class Compiler {
         },
       },
       {
-        name: 'scheduling',
-        run: (ctx) => ctx.compiler._scheduleAll(ctx.primFuncs, ctx.trace, ctx.errors, ctx.failed, ctx.resilient),
-      },
-      {
-        name: 'simplify',
-        run: (ctx) => ctx.compiler._simplifyAll(ctx.primFuncs, ctx.trace, ctx.errors, ctx.failed, ctx.resilient),
-      },
-      {
-        name: 'verify:tensor-full',
-        when: (ctx) => ctx.compiler.config.verifyMode === 'full',
-        run: (ctx) => ctx.compiler._verifyAll(ctx.primFuncs, ctx.errors, ctx.failed, ctx.resilient),
-      },
-      {
-        name: 'memoryPlanning',
-        run: (ctx) => ctx.compiler._planMemory(ctx.primFuncs, ctx.trace, ctx.errors, ctx.failed, ctx.resilient),
+        name: 'tirPasses',
+        run: (ctx) => ctx.compiler._runTirPasses(ctx),
       },
       {
         name: 'verify:tensor',
@@ -363,79 +349,20 @@ export class Compiler {
     return primFuncs;
   }
 
-  _scheduleAll(primFuncs, trace, errors, failed, resilient) {
-    trace.phaseStart('scheduling');
-    const t0 = performance.now();
-    const sCfg = this.config.scheduling;
-    if (sCfg.autotune) {
-      const autotuner = new Autotuner(this.config.target, sCfg, trace);
-      this._eachFunc(primFuncs, 'scheduling', trace, errors, failed, resilient, (pf) => {
-        if (pf.cublasInfo) return;
-        const ft0 = performance.now();
-        const tuneResult = autotuner.tuneAndApply(pf);
-        const durationMs = performance.now() - ft0;
-        let cacheHits = 0, blockCount = 0;
-        if (tuneResult && tuneResult.results) {
-          blockCount = tuneResult.results.size;
-          for (const [blockName, r] of tuneResult.results) {
-            if (r.fromCache) cacheHits++;
-            if (trace.explainsEnabled) {
-              trace.explain('schedule', blockName, r.sketchName,
-                `autotuned: best of search${r.fromCache ? ' (cached)' : ''}, score ${r.score != null ? r.score.toFixed(3) : 'n/a'}`,
-                { target: this.config.target.name, params: r.params });
-            }
-          }
-        }
-        trace.autotuneStats(pf.name, { durationMs, blockCount, applied: !!(tuneResult && tuneResult.applied), cacheHits });
-      });
-    } else if (sCfg.enabled) {
-      const policy = new SchedulePolicy(this.config.target, null, trace);
-      this._eachFunc(primFuncs, 'scheduling', trace, errors, failed, resilient, (pf) => {
-        if (pf.cublasInfo) return;
-        const ft0 = performance.now();
-        const sch = new Schedule(pf);
-        policy.applyToAllBlocks(sch);
-        trace.functionEvent('scheduling', pf.name, { durationMs: performance.now() - ft0 });
-      });
+  _runTirPasses(ctx) {
+    const tirPM = new TirPassManager();
+    for (const pass of buildTirPipeline(this.config)) tirPM.addPass(pass);
+    tirPM.setTrace(ctx.trace);
+    if (this.config.verifyMode === 'full') {
+      const verifier = new TensorVerifier();
+      tirPM.setVerifyHook((pf) => verifier.verify(pf));
     }
-    trace.phaseEnd('scheduling', performance.now() - t0);
-
-    if (trace.shouldSnapshot('afterScheduling')) {
-      for (const pf of primFuncs) {
-        if (!failed.has(pf.name)) trace.irDump('afterScheduling:' + pf.name, printTensorIR(pf));
-      }
-    }
-  }
-
-  _simplifyAll(primFuncs, trace, errors, failed, resilient) {
-    trace.phaseStart('simplify');
-    const t0 = performance.now();
-    this._eachFunc(primFuncs, 'simplify', trace, errors, failed, resilient, (pf) => {
-      const ft0 = performance.now();
-      simplifyPrimFunc(pf);
-      trace.functionEvent('simplify', pf.name, { durationMs: performance.now() - ft0 });
+    tirPM.run(ctx.primFuncs, {
+      trace: ctx.trace,
+      errors: ctx.errors,
+      failed: ctx.failed,
+      resilient: ctx.resilient,
     });
-    trace.phaseEnd('simplify', performance.now() - t0);
-  }
-
-  _planMemory(primFuncs, trace, errors, failed, resilient) {
-    trace.phaseStart('memoryPlanning');
-    const t0 = performance.now();
-    const alignment = this.config.memory.alignment || this.config.target?.cacheLineSizeBytes || 64;
-    const planner = new MemoryPlanner({ alignment, enableInplace: this.config.memory.inplaceReuse, allocStrategy: this.config.memory.allocStrategy, poolAllocation: this.config.memory.poolAllocation });
-    this._eachFunc(primFuncs, 'memoryPlanning', trace, errors, failed, resilient, (pf) => {
-      if (pf.gpuRegisterBlocked) return;
-      const ft0 = performance.now();
-      const { plan } = planner.planAndRewrite(pf);
-      const report = plan.getReport();
-      trace.memoryStats(pf.name, {
-        durationMs: performance.now() - ft0,
-        peakMemory: report.peakMemory,
-        totalTemporaries: report.totalTemporaries,
-        totalInplace: report.totalInplace,
-      });
-    });
-    trace.phaseEnd('memoryPlanning', performance.now() - t0);
   }
 
   _verifyGraph(graphModule, phase, trace, errors, failed, resilient) {

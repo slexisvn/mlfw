@@ -1,0 +1,126 @@
+import { describe, it, expect } from 'vitest';
+import { TirPassManager } from '../../../src/compiler/passes/tir_pass_manager.js';
+import { PrimFuncPass } from '../../../src/compiler/passes/tir_pass.js';
+import { TraceLog, TraceLevel } from '../../../src/compiler/pipeline/trace.js';
+import { PrimFunc, SeqNode } from '../../../src/compiler/ir/tensor/nodes.js';
+
+function pf(name) {
+  return new PrimFunc(name, [], new SeqNode([]));
+}
+
+function mkCtx({ resilient = false, sink = null } = {}) {
+  return {
+    trace: new TraceLog({ level: sink ? TraceLevel.VERBOSE : TraceLevel.SILENT, sink }),
+    errors: [],
+    failed: new Set(),
+    resilient,
+  };
+}
+
+class RecordPass extends PrimFuncPass {
+  constructor(name, log, failOn = null) {
+    super(name, name);
+    this.log = log;
+    this.failOn = failOn;
+    this.begins = 0;
+    this.ends = 0;
+  }
+  begin() { this.begins++; }
+  end() { this.ends++; }
+  run(pf) {
+    this.log.push(`${this.name}:${pf.name}`);
+    if (pf.name === this.failOn) throw new Error(`boom on ${pf.name}`);
+    return pf;
+  }
+}
+
+describe('TirPassManager', () => {
+  it('runs each pass over each func, passes outer / funcs inner', () => {
+    const log = [];
+    const pm = new TirPassManager();
+    pm.addPass(new RecordPass('P1', log));
+    pm.addPass(new RecordPass('P2', log));
+    const funcs = [pf('f1'), pf('f2')];
+    pm.run(funcs, mkCtx());
+    expect(log).toEqual(['P1:f1', 'P1:f2', 'P2:f1', 'P2:f2']);
+  });
+
+  it('calls begin/end exactly once per pass', () => {
+    const pm = new TirPassManager();
+    const p = new RecordPass('P', []);
+    pm.addPass(p);
+    pm.run([pf('a'), pf('b')], mkCtx());
+    expect(p.begins).toBe(1);
+    expect(p.ends).toBe(1);
+  });
+
+  it('replaces a func in place when a pass returns a new PrimFunc', () => {
+    const replacement = pf('f1');
+    class Swap extends PrimFuncPass {
+      constructor() { super('Swap', 'Swap'); }
+      run() { return replacement; }
+    }
+    const pm = new TirPassManager();
+    pm.addPass(new Swap());
+    const funcs = [pf('f1')];
+    pm.run(funcs, mkCtx());
+    expect(funcs[0]).toBe(replacement);
+  });
+
+  it('resilient: a throwing func is failed and skipped by later passes; siblings continue', () => {
+    const log = [];
+    const pm = new TirPassManager();
+    pm.addPass(new RecordPass('P1', log, 'f1'));
+    pm.addPass(new RecordPass('P2', log));
+    const ctx = mkCtx({ resilient: true });
+    pm.run([pf('f1'), pf('f2')], ctx);
+
+    expect(ctx.failed.has('f1')).toBe(true);
+    expect(ctx.errors).toHaveLength(1);
+    expect(ctx.errors[0].funcName).toBe('f1');
+    expect(ctx.errors[0].phase).toBe('P1');
+    expect(log).toEqual(['P1:f1', 'P1:f2', 'P2:f2']);
+  });
+
+  it('strict: a throwing func breaks the current pass loop but later passes still run on survivors', () => {
+    const log = [];
+    const pm = new TirPassManager();
+    pm.addPass(new RecordPass('P1', log, 'f1'));
+    pm.addPass(new RecordPass('P2', log));
+    const ctx = mkCtx({ resilient: false });
+    pm.run([pf('f1'), pf('f2')], ctx);
+
+    expect(ctx.failed.has('f1')).toBe(true);
+    expect(log).toEqual(['P1:f1', 'P2:f2']);
+  });
+
+  it('full-mode verify hook fails invalid IR (strict throws)', () => {
+    const pm = new TirPassManager();
+    pm.addPass(new RecordPass('P1', []));
+    pm.setVerifyHook((f) => (f.name === 'bad' ? ['region escape'] : []));
+    expect(() => pm.run([pf('bad')], mkCtx())).toThrow(/TensorIR verification failed for bad/);
+  });
+
+  it('full-mode verify hook fails invalid IR (resilient records + fails func)', () => {
+    const pm = new TirPassManager();
+    pm.addPass(new RecordPass('P1', []));
+    pm.setVerifyHook((f) => (f.name === 'bad' ? ['region escape'] : []));
+    const ctx = mkCtx({ resilient: true });
+    pm.run([pf('bad'), pf('ok')], ctx);
+    expect(ctx.failed.has('bad')).toBe(true);
+    expect(ctx.failed.has('ok')).toBe(false);
+    expect(ctx.errors[0].phase).toBe('verification');
+  });
+
+  it('emits phase start/end events per pass phase', () => {
+    const events = [];
+    const pm = new TirPassManager();
+    pm.addPass(new RecordPass('Alpha', []));
+    pm.addPass(new RecordPass('Beta', []));
+    pm.run([pf('f')], mkCtx({ sink: (e) => events.push(e) }));
+    const phases = events.filter((e) => e.type === 'phase');
+    expect(phases.filter((e) => e.phase === 'Alpha' && e.action === 'start')).toHaveLength(1);
+    expect(phases.filter((e) => e.phase === 'Alpha' && e.action === 'end')).toHaveLength(1);
+    expect(phases.filter((e) => e.phase === 'Beta' && e.action === 'start')).toHaveLength(1);
+  });
+});
