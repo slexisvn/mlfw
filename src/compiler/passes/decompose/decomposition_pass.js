@@ -147,18 +147,18 @@ registerDecomposition('log_softmax', (op, b) => {
   op.erase();
 });
 
+function emitSigmoid(b, x, dtype, shape) {
+  const negX = b.neg(x).getResult(0);
+  const expNeg = b.exp(negX).getResult(0);
+  const one = b.broadcast(b.scalarConstant(1, dtype).getResult(0), shape, []).getResult(0);
+  const denom = b.add(one, expNeg).getResult(0);
+  return b.div(one, denom).getResult(0);
+}
+
 registerDecomposition('sigmoid', (op, b) => {
   const x = op.getOperand(0);
-  const dtype = x.type.dtype;
-  const shape = x.type.shape;
-
-  const negX = b.neg(x);
-  const expNeg = b.exp(negX.getResult(0));
-  const one = b.broadcast(b.scalarConstant(1, dtype).getResult(0), shape, []);
-  const denom = b.add(one.getResult(0), expNeg.getResult(0));
-  const result = b.div(one.getResult(0), denom.getResult(0));
-
-  op.replaceAllResultsWith([result.getResult(0)]);
+  const result = emitSigmoid(b, x, x.type.dtype, x.type.shape);
+  op.replaceAllResultsWith([result]);
   op.erase();
 });
 
@@ -166,33 +166,19 @@ registerDecomposition('gelu', (op, b) => {
   const x = op.getOperand(0);
   const dtype = x.type.dtype;
   const shape = x.type.shape;
-
-  const coeff = b.broadcast(b.scalarConstant(1.702, dtype).getResult(0), shape, []);
-  const scaled = b.mul(coeff.getResult(0), x);
-  const negScaled = b.neg(scaled.getResult(0));
-  const expNeg = b.exp(negScaled.getResult(0));
-  const one = b.broadcast(b.scalarConstant(1, dtype).getResult(0), shape, []);
-  const denom = b.add(one.getResult(0), expNeg.getResult(0));
-  const sig = b.div(one.getResult(0), denom.getResult(0));
-  const result = b.mul(x, sig.getResult(0));
-
-  op.replaceAllResultsWith([result.getResult(0)]);
+  const coeff = b.broadcast(b.scalarConstant(1.702, dtype).getResult(0), shape, []).getResult(0);
+  const scaled = b.mul(coeff, x).getResult(0);
+  const sig = emitSigmoid(b, scaled, dtype, shape);
+  const result = b.mul(x, sig).getResult(0);
+  op.replaceAllResultsWith([result]);
   op.erase();
 });
 
 registerDecomposition('silu', (op, b) => {
   const x = op.getOperand(0);
-  const dtype = x.type.dtype;
-  const shape = x.type.shape;
-
-  const negX = b.neg(x);
-  const expNeg = b.exp(negX.getResult(0));
-  const one = b.broadcast(b.scalarConstant(1, dtype).getResult(0), shape, []);
-  const denom = b.add(one.getResult(0), expNeg.getResult(0));
-  const sig = b.div(one.getResult(0), denom.getResult(0));
-  const result = b.mul(x, sig.getResult(0));
-
-  op.replaceAllResultsWith([result.getResult(0)]);
+  const sig = emitSigmoid(b, x, x.type.dtype, x.type.shape);
+  const result = b.mul(x, sig).getResult(0);
+  op.replaceAllResultsWith([result]);
   op.erase();
 });
 

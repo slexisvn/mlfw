@@ -15,8 +15,7 @@ registerVJPRule('log', (ctx) => {
 registerVJPRule('sqrt', (ctx) => {
   const grad = ctx.gradOutputs[0];
   const result = ctx.results[0];
-  const two = ctx.builder.scalarConstant(2, result.type.dtype).getResult(0);
-  const twoBroadcast = ctx.builder.broadcast(two, result.type.shape, []).getResult(0);
+  const twoBroadcast = ctx.full(2, result.type);
   const twoSqrt = ctx.builder.mul(twoBroadcast, result).getResult(0);
   return [ctx.builder.div(grad, twoSqrt).getResult(0)];
 });
@@ -25,18 +24,14 @@ registerVJPRule('tanh', (ctx) => {
   const grad = ctx.gradOutputs[0];
   const result = ctx.results[0];
   const tanhSq = ctx.builder.mul(result, result).getResult(0);
-  const one = ctx.builder.scalarConstant(1, result.type.dtype).getResult(0);
-  const oneBroadcast = ctx.builder.broadcast(one, result.type.shape, []).getResult(0);
-  const oneMinusTanhSq = ctx.builder.sub(oneBroadcast, tanhSq).getResult(0);
+  const oneMinusTanhSq = ctx.builder.sub(ctx.full(1, result.type), tanhSq).getResult(0);
   return [ctx.builder.mul(grad, oneMinusTanhSq).getResult(0)];
 });
 
 registerVJPRule('sigmoid', (ctx) => {
   const grad = ctx.gradOutputs[0];
   const result = ctx.results[0];
-  const one = ctx.builder.scalarConstant(1, result.type.dtype).getResult(0);
-  const oneBroadcast = ctx.builder.broadcast(one, result.type.shape, []).getResult(0);
-  const oneMinusSig = ctx.builder.sub(oneBroadcast, result).getResult(0);
+  const oneMinusSig = ctx.builder.sub(ctx.full(1, result.type), result).getResult(0);
   const sigGrad = ctx.builder.mul(result, oneMinusSig).getResult(0);
   return [ctx.builder.mul(grad, sigGrad).getResult(0)];
 });
@@ -44,8 +39,7 @@ registerVJPRule('sigmoid', (ctx) => {
 registerVJPRule('relu', (ctx) => {
   const grad = ctx.gradOutputs[0];
   const [x] = ctx.operands;
-  const zero = ctx.builder.scalarConstant(0, x.type.dtype).getResult(0);
-  const zeroBroadcast = ctx.builder.broadcast(zero, x.type.shape, []).getResult(0);
+  const zeroBroadcast = ctx.full(0, x.type);
   const mask = ctx.builder.compare(x, zeroBroadcast, 'gt').getResult(0);
   return [ctx.builder.select(mask, grad, zeroBroadcast).getResult(0)];
 });
@@ -53,10 +47,8 @@ registerVJPRule('relu', (ctx) => {
 registerVJPRule('gelu', (ctx) => {
   const grad = ctx.gradOutputs[0];
   const [x] = ctx.operands;
-  const dtype = x.type.dtype;
-  const shape = x.type.shape;
-  const c = ctx.builder.broadcast(ctx.builder.scalarConstant(1.702, dtype).getResult(0), shape, []).getResult(0);
-  const one = ctx.builder.broadcast(ctx.builder.scalarConstant(1, dtype).getResult(0), shape, []).getResult(0);
+  const c = ctx.full(1.702, x.type);
+  const one = ctx.full(1, x.type);
   const cx = ctx.builder.mul(c, x).getResult(0);
   const s = ctx.builder.sigmoid(cx).getResult(0);
   const oneMinusS = ctx.builder.sub(one, s).getResult(0);
@@ -69,12 +61,8 @@ registerVJPRule('gelu', (ctx) => {
 registerVJPRule('silu', (ctx) => {
   const grad = ctx.gradOutputs[0];
   const [x] = ctx.operands;
-  const dtype = x.type.dtype;
-  const shape = x.type.shape;
   const sig = ctx.builder.sigmoid(x).getResult(0);
-  const one = ctx.builder.scalarConstant(1, dtype).getResult(0);
-  const oneBr = ctx.builder.broadcast(one, shape, []).getResult(0);
-  const oneMinusSig = ctx.builder.sub(oneBr, sig).getResult(0);
+  const oneMinusSig = ctx.builder.sub(ctx.full(1, x.type), sig).getResult(0);
   const xTimesOneMinusSig = ctx.builder.mul(x, oneMinusSig).getResult(0);
   const deriv = ctx.builder.add(sig, ctx.builder.mul(sig, xTimesOneMinusSig).getResult(0)).getResult(0);
   return [ctx.builder.mul(grad, deriv).getResult(0)];
@@ -105,9 +93,7 @@ registerVJPRule('abs', (ctx) => {
 registerVJPRule('erf', (ctx) => {
   const grad = ctx.gradOutputs[0];
   const [x] = ctx.operands;
-  const dtype = x.type.dtype;
-  const shape = x.type.shape;
-  const coeff = ctx.builder.broadcast(ctx.builder.scalarConstant(2.0 / Math.sqrt(Math.PI), dtype).getResult(0), shape, []).getResult(0);
+  const coeff = ctx.full(2.0 / Math.sqrt(Math.PI), x.type);
   const xSq = ctx.builder.mul(x, x).getResult(0);
   const negXSq = ctx.builder.neg(xSq).getResult(0);
   const expNegXSq = ctx.builder.exp(negXSq).getResult(0);
@@ -118,9 +104,7 @@ registerVJPRule('erf', (ctx) => {
 registerVJPRule('log2', (ctx) => {
   const grad = ctx.gradOutputs[0];
   const [x] = ctx.operands;
-  const dtype = x.type.dtype;
-  const shape = x.type.shape;
-  const ln2 = ctx.builder.broadcast(ctx.builder.scalarConstant(Math.LN2, dtype).getResult(0), shape, []).getResult(0);
+  const ln2 = ctx.full(Math.LN2, x.type);
   const xLn2 = ctx.builder.mul(x, ln2).getResult(0);
   return [ctx.builder.div(grad, xLn2).getResult(0)];
 });
@@ -128,9 +112,7 @@ registerVJPRule('log2', (ctx) => {
 registerVJPRule('log10', (ctx) => {
   const grad = ctx.gradOutputs[0];
   const [x] = ctx.operands;
-  const dtype = x.type.dtype;
-  const shape = x.type.shape;
-  const ln10 = ctx.builder.broadcast(ctx.builder.scalarConstant(Math.LN10, dtype).getResult(0), shape, []).getResult(0);
+  const ln10 = ctx.full(Math.LN10, x.type);
   const xLn10 = ctx.builder.mul(x, ln10).getResult(0);
   return [ctx.builder.div(grad, xLn10).getResult(0)];
 });
@@ -138,9 +120,7 @@ registerVJPRule('log10', (ctx) => {
 registerVJPRule('exp2', (ctx) => {
   const grad = ctx.gradOutputs[0];
   const result = ctx.results[0];
-  const dtype = result.type.dtype;
-  const shape = result.type.shape;
-  const ln2 = ctx.builder.broadcast(ctx.builder.scalarConstant(Math.LN2, dtype).getResult(0), shape, []).getResult(0);
+  const ln2 = ctx.full(Math.LN2, result.type);
   const deriv = ctx.builder.mul(result, ln2).getResult(0);
   return [ctx.builder.mul(grad, deriv).getResult(0)];
 });
@@ -148,9 +128,7 @@ registerVJPRule('exp2', (ctx) => {
 registerVJPRule('square', (ctx) => {
   const grad = ctx.gradOutputs[0];
   const [x] = ctx.operands;
-  const dtype = x.type.dtype;
-  const shape = x.type.shape;
-  const two = ctx.builder.broadcast(ctx.builder.scalarConstant(2, dtype).getResult(0), shape, []).getResult(0);
+  const two = ctx.full(2, x.type);
   const deriv = ctx.builder.mul(two, x).getResult(0);
   return [ctx.builder.mul(grad, deriv).getResult(0)];
 });
@@ -167,7 +145,7 @@ registerVJPRule('rsqrt', (ctx) => {
   const grad = ctx.gradOutputs[0];
   const result = ctx.results[0];
   const resultCubed = ctx.builder.mul(ctx.builder.mul(result, result).getResult(0), result).getResult(0);
-  const half = ctx.builder.broadcast(ctx.builder.scalarConstant(-0.5, result.type.dtype).getResult(0), result.type.shape, []).getResult(0);
+  const half = ctx.full(-0.5, result.type);
   const deriv = ctx.builder.mul(half, resultCubed).getResult(0);
   return [ctx.builder.mul(grad, deriv).getResult(0)];
 });

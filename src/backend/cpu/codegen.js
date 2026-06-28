@@ -2,6 +2,7 @@ import { ForKind } from '../../compiler/ir/tensor/nodes.js';
 import { jsTypedArray, isJSMathFunc, isDtypeInt, dtypeBytes, jsCompareOp } from '../dtype_map.js';
 import { flattenRowMajorIndex } from '../index_emit.js';
 import { irChildNodes } from '../../compiler/ir/ir_visitor.js';
+import { dynamicDimProduct, resolveShapeParam, isZeroFillBody } from '../codegen_utils.js';
 
 import '../../tensor/utils/half.js';
 
@@ -471,7 +472,7 @@ export class CPUCodegen {
           }
           continue;
 
-        default: work.pop(); vals.push('0'); continue;
+        default: throw new Error(`CPU codegen: unhandled expr node '${node.type}'`);
       }
     }
 
@@ -479,16 +480,7 @@ export class CPUCodegen {
   }
 
   _dynamicNumel(buffer) {
-    const parts = [];
-    for (let d = 0; d < buffer.shape.length; d++) {
-      const dim = buffer.shape[d];
-      if (typeof dim === 'number' && dim >= 0) {
-        parts.push(String(dim));
-      } else {
-        parts.push(this._resolveShapeParam(buffer, d));
-      }
-    }
-    return parts.length === 0 ? '1' : parts.join(' * ');
+    return dynamicDimProduct(buffer, 0, (b, j) => this._resolveShapeParam(b, j));
   }
 
   _flatIndex(buffer, indices) {
@@ -496,25 +488,11 @@ export class CPUCodegen {
   }
 
   _computeDynamicStride(buffer, dimIdx) {
-    const parts = [];
-    for (let j = dimIdx + 1; j < buffer.shape.length; j++) {
-      const d = buffer.shape[j];
-      if (typeof d === 'number' && d >= 0) {
-        parts.push(String(d));
-      } else {
-        parts.push(this._resolveShapeParam(buffer, j));
-      }
-    }
-    return parts.length === 0 ? '1' : parts.join(' * ');
+    return dynamicDimProduct(buffer, dimIdx + 1, (b, j) => this._resolveShapeParam(b, j));
   }
 
   _resolveShapeParam(buffer, dimIdx) {
-    if (this._primFunc && this._primFunc.shapeParamMap) {
-      const key = `${buffer.name}:${dimIdx}`;
-      const v = this._primFunc.shapeParamMap.get(key);
-      if (v) return v.name;
-    }
-    throw new Error(`CPU codegen: missing shape param for ${buffer.name}:${dimIdx}`);
+    return resolveShapeParam(this._primFunc, buffer, dimIdx, (v) => v.name, 'CPU');
   }
 
   _cleanupSource(src) {
@@ -568,20 +546,7 @@ export class CPUCodegen {
   }
 
   _isZeroFillBody(body) {
-    let cur = body;
-    while (cur) {
-      if (cur.type === 'ForNode') {
-        cur = cur.body;
-        continue;
-      }
-      if (cur.type === 'BlockNode') { cur = cur.body; continue; }
-      if (cur.type === 'BufferStoreNode' || cur.type === 'LIRFlatStoreNode') {
-        const val = cur.value;
-        return (val.type === 'FloatImmNode' && val.value === 0) || (val.type === 'IntImmNode' && val.value === 0);
-      }
-      return false;
-    }
-    return false;
+    return isZeroFillBody(body);
   }
 
   _scanTree(root, usedBuffers, allocatedBuffers, readBuffers) {

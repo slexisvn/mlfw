@@ -4,7 +4,7 @@ import { UseDefAnalysis } from '../analysis/use_def.js';
 import { GradAccumulator, gradOrZero } from './grad_accumulator.js';
 import { getVJPRule, isGradientBarrier, requireVJPRuleOrBarrier } from './vjp_registry.js';
 import { RematPolicy } from './remat_policy.js';
-import { reduceGradToOperandShape, REGION_CONTROL_FLOW, backpropOps } from './backward_builder.js';
+import { REGION_CONTROL_FLOW, backpropOps } from './backward_builder.js';
 
 export class JointGraphBuilder {
   constructor(opts = {}) {
@@ -16,6 +16,44 @@ export class JointGraphBuilder {
     if (this._checkpointPolicy) {
       return this._buildCheckpointed(forwardFunc);
     }
+    const s = this._buildScaffold(forwardFunc);
+    backpropOps(s.topoOrder, {
+      accumulator: s.accumulator, builder: s.builder, needsGrad: s.needsGrad,
+      resolveValue: (v) => s.valueMap.get(v.id) || v,
+    });
+    return this._finish(s);
+  }
+
+  _buildCheckpointed(forwardFunc) {
+    const s = this._buildScaffold(forwardFunc);
+    const segments = this._checkpointPolicy.segment(s.topoOrder, forwardFunc);
+
+    for (let i = segments.length - 1; i >= 0; i--) {
+      const seg = segments[i];
+      const recomputeMap = new Map();
+
+      for (const op of seg.ops) {
+        const newOperands = new Array(op.numOperands);
+        for (let o = 0; o < op.numOperands; o++) {
+          const origVal = op.getOperand(o);
+          newOperands[o] = recomputeMap.get(origVal.id) || s.valueMap.get(origVal.id) || origVal;
+        }
+        const resultTypes = op.results.map(r => r.type);
+        const cloned = s.builder._buildOp(op.opName, newOperands, resultTypes, new Map(op.attributes), null);
+        for (let r = 0; r < op.numResults; r++) {
+          recomputeMap.set(op.getResult(r).id, cloned.getResult(r));
+        }
+      }
+
+      backpropOps(seg.ops, {
+        accumulator: s.accumulator, builder: s.builder, needsGrad: s.needsGrad,
+        resolveValue: (v) => recomputeMap.get(v.id) || s.valueMap.get(v.id) || v,
+      });
+    }
+    return this._finish(s);
+  }
+
+  _buildScaffold(forwardFunc) {
     const analysis = UseDefAnalysis.compute(forwardFunc);
     const topoOrder = analysis.topologicalOrder;
     this._assertNoRegionControlFlow(topoOrder);
@@ -28,18 +66,9 @@ export class JointGraphBuilder {
 
     const gradOutputTypes = forwardOutputs.map(v => v.type);
     const inputTypes = [...forwardFunc.inputTypes, ...gradOutputTypes];
+    const outputTypes = [...forwardFunc.outputTypes, ...forwardFunc.inputTypes];
 
-    const outputTypes = [
-      ...forwardFunc.outputTypes,
-      ...forwardFunc.inputTypes,
-    ];
-
-    const jointFunc = new GraphFunction(
-      `joint_${forwardFunc.name}`,
-      inputTypes,
-      outputTypes
-    );
-
+    const jointFunc = new GraphFunction(`joint_${forwardFunc.name}`, inputTypes, outputTypes);
     const builder = new IRBuilder(jointFunc);
     const jointArgs = jointFunc.args;
 
@@ -53,45 +82,37 @@ export class JointGraphBuilder {
 
     for (const op of topoOrder) {
       if (op.opName === 'return') continue;
-
       const newOperands = new Array(op.numOperands);
       for (let o = 0; o < op.numOperands; o++) {
         const origVal = op.getOperand(o);
         newOperands[o] = valueMap.get(origVal.id) || origVal;
       }
-
       const resultTypes = op.results.map(r => r.type);
       const cloned = builder._buildOp(op.opName, newOperands, resultTypes, new Map(op.attributes), null);
-
       for (let r = 0; r < op.numResults; r++) {
         valueMap.set(op.getResult(r).id, cloned.getResult(r));
       }
     }
 
     const fwdOutputValues = forwardOutputs.map(v => valueMap.get(v.id));
-
     const needsGrad = this._computeGradReachability(forwardFunc, topoOrder);
     const accumulator = new GradAccumulator(builder);
-
     for (let i = 0; i < forwardOutputs.length; i++) {
       accumulator.accumulate(forwardOutputs[i].id, gradOutputArgs[i]);
     }
 
-    backpropOps(topoOrder, {
-      accumulator, builder, needsGrad,
-      resolveValue: (v) => valueMap.get(v.id) || v,
-    });
+    return { topoOrder, forwardInputs, forwardOutputs, fwdOutputValues, valueMap, builder, needsGrad, accumulator, jointFunc };
+  }
 
+  _finish(s) {
     const gradInputValues = [];
-    for (let i = 0; i < forwardInputs.length; i++) {
-      gradInputValues.push(gradOrZero(builder, forwardInputs[i], accumulator));
+    for (let i = 0; i < s.forwardInputs.length; i++) {
+      gradInputValues.push(gradOrZero(s.builder, s.forwardInputs[i], s.accumulator));
     }
-
-    builder.returnOp([...fwdOutputValues, ...gradInputValues]);
-
+    s.builder.returnOp([...s.fwdOutputValues, ...gradInputValues]);
     return {
-      jointFunc,
-      numForwardOutputs: forwardOutputs.length,
+      jointFunc: s.jointFunc,
+      numForwardOutputs: s.forwardOutputs.length,
       numGradInputs: gradInputValues.length,
     };
   }
@@ -128,110 +149,5 @@ export class JointGraphBuilder {
         throw new Error(`JointGraphBuilder does not support region control-flow op '${op.opName}'; use BackwardGraphBuilder (separate mode) without a checkpointPolicy, which differentiates scan/if.`);
       }
     }
-  }
-
-  _buildCheckpointed(forwardFunc) {
-    const analysis = UseDefAnalysis.compute(forwardFunc);
-    const topoOrder = analysis.topologicalOrder;
-    this._assertNoRegionControlFlow(topoOrder);
-
-    const returnOp = forwardFunc.getReturnOp();
-    if (!returnOp) throw new Error('Forward function has no return op');
-
-    const forwardOutputs = returnOp.operands;
-    const forwardInputs = forwardFunc.args;
-
-    const gradOutputTypes = forwardOutputs.map(v => v.type);
-    const inputTypes = [...forwardFunc.inputTypes, ...gradOutputTypes];
-
-    const outputTypes = [
-      ...forwardFunc.outputTypes,
-      ...forwardFunc.inputTypes,
-    ];
-
-    const jointFunc = new GraphFunction(
-      `joint_${forwardFunc.name}`,
-      inputTypes,
-      outputTypes
-    );
-
-    const builder = new IRBuilder(jointFunc);
-    const jointArgs = jointFunc.args;
-
-    const fwdInputArgs = jointArgs.slice(0, forwardFunc.inputTypes.length);
-    const gradOutputArgs = jointArgs.slice(forwardFunc.inputTypes.length);
-
-    const valueMap = new Map();
-    for (let i = 0; i < forwardInputs.length; i++) {
-      valueMap.set(forwardInputs[i].id, fwdInputArgs[i]);
-    }
-
-    for (const op of topoOrder) {
-      if (op.opName === 'return') continue;
-
-      const newOperands = new Array(op.numOperands);
-      for (let o = 0; o < op.numOperands; o++) {
-        const origVal = op.getOperand(o);
-        newOperands[o] = valueMap.get(origVal.id) || origVal;
-      }
-
-      const resultTypes = op.results.map(r => r.type);
-      const cloned = builder._buildOp(op.opName, newOperands, resultTypes, new Map(op.attributes), null);
-
-      for (let r = 0; r < op.numResults; r++) {
-        valueMap.set(op.getResult(r).id, cloned.getResult(r));
-      }
-    }
-
-    const fwdOutputValues = forwardOutputs.map(v => valueMap.get(v.id));
-
-    const needsGrad = this._computeGradReachability(forwardFunc, topoOrder);
-    const segments = this._checkpointPolicy.segment(topoOrder, forwardFunc);
-    const accumulator = new GradAccumulator(builder);
-
-    for (let i = 0; i < forwardOutputs.length; i++) {
-      accumulator.accumulate(forwardOutputs[i].id, gradOutputArgs[i]);
-    }
-
-    for (let s = segments.length - 1; s >= 0; s--) {
-      const seg = segments[s];
-
-      const recomputeMap = new Map();
-
-      for (const op of seg.ops) {
-        const newOperands = new Array(op.numOperands);
-        for (let o = 0; o < op.numOperands; o++) {
-          const origVal = op.getOperand(o);
-          newOperands[o] = recomputeMap.get(origVal.id) ||
-                           valueMap.get(origVal.id) ||
-                           origVal;
-        }
-
-        const resultTypes = op.results.map(r => r.type);
-        const cloned = builder._buildOp(op.opName, newOperands, resultTypes, new Map(op.attributes), null);
-
-        for (let r = 0; r < op.numResults; r++) {
-          recomputeMap.set(op.getResult(r).id, cloned.getResult(r));
-        }
-      }
-
-      backpropOps(seg.ops, {
-        accumulator, builder, needsGrad,
-        resolveValue: (v) => recomputeMap.get(v.id) || valueMap.get(v.id) || v,
-      });
-    }
-
-    const gradInputValues = [];
-    for (let i = 0; i < forwardInputs.length; i++) {
-      gradInputValues.push(gradOrZero(builder, forwardInputs[i], accumulator));
-    }
-
-    builder.returnOp([...fwdOutputValues, ...gradInputValues]);
-
-    return {
-      jointFunc,
-      numForwardOutputs: forwardOutputs.length,
-      numGradInputs: gradInputValues.length,
-    };
   }
 }

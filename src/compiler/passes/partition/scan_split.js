@@ -3,11 +3,10 @@ import { GraphFunction } from '../../ir/graph/function.js';
 import { GraphModule } from '../../ir/graph/module.js';
 import { materializePartition, isConstantOp, TERMINATORS, splitGraphForNative, topoSortOps } from './cublas_split.js';
 import { dtypeBytes } from '../../../backend/dtype_map.js';
+import { shapeProduct } from '../../ir/graph/types.js';
 
 function numel(shape) {
-  let n = 1;
-  for (const d of shape) { if (typeof d !== 'number' || d < 0) return -1; n *= d; }
-  return n;
+  return shapeProduct(shape, -1);
 }
 
 function isScanOversized(scanOp, region, target) {

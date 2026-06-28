@@ -14,8 +14,7 @@ registerVJPRule('sub', (ctx) => {
 function _minMaxVJP(ctx, cmp) {
   const grad = ctx.gradOutputs[0];
   const [a, b] = ctx.operands;
-  const zero = ctx.builder.scalarConstant(0, a.type.dtype).getResult(0);
-  const zeroBr = ctx.builder.broadcast(zero, a.type.shape, []).getResult(0);
+  const zeroBr = ctx.full(0, a.type);
   const mask = ctx.builder.compare(a, b, cmp).getResult(0);
   const gradA = ctx.builder.select(mask, grad, zeroBr).getResult(0);
   const gradB = ctx.builder.select(mask, zeroBr, grad).getResult(0);
@@ -28,8 +27,7 @@ registerVJPRule('minimum', (ctx) => _minMaxVJP(ctx, 'le'));
 registerVJPRule('clamp', (ctx) => {
   const grad = ctx.gradOutputs[0];
   const [lo, x, hi] = ctx.operands;
-  const zero = ctx.builder.scalarConstant(0, x.type.dtype).getResult(0);
-  const zeroBr = ctx.builder.broadcast(zero, x.type.shape, []).getResult(0);
+  const zeroBr = ctx.full(0, x.type);
   const geLo = ctx.builder.compare(x, lo, 'ge').getResult(0);
   const gradAboveLo = ctx.builder.where(geLo, grad, zeroBr).getResult(0);
   const leHi = ctx.builder.compare(x, hi, 'le').getResult(0);
@@ -39,9 +37,8 @@ registerVJPRule('clamp', (ctx) => {
 
 function _whereVJP(ctx) {
   const grad = ctx.gradOutputs[0];
-  const [cond, a] = ctx.operands;
-  const zero = ctx.builder.scalarConstant(0, a.type.dtype).getResult(0);
-  const zeroBr = ctx.builder.broadcast(zero, grad.type.shape, []).getResult(0);
+  const [cond] = ctx.operands;
+  const zeroBr = ctx.full(0, grad.type);
   const gradA = ctx.builder.where(cond, grad, zeroBr).getResult(0);
   const gradB = ctx.builder.where(cond, zeroBr, grad).getResult(0);
   return [null, gradA, gradB];
@@ -77,8 +74,7 @@ registerVJPRule('neg', (ctx) => {
 registerVJPRule('pow', (ctx) => {
   const grad = ctx.gradOutputs[0];
   const [base, exp] = ctx.operands;
-  const one = ctx.builder.scalarConstant(1, base.type.dtype).getResult(0);
-  const oneBroadcast = ctx.builder.broadcast(one, base.type.shape, []).getResult(0);
+  const oneBroadcast = ctx.full(1, base.type);
   const expMinus1 = ctx.builder.sub(exp, oneBroadcast).getResult(0);
   const basePowExpM1 = ctx.builder.pow(base, expMinus1).getResult(0);
   const scaled = ctx.builder.mul(exp, basePowExpM1).getResult(0);

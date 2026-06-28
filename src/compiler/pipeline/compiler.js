@@ -20,6 +20,7 @@ import { TraceLog, TraceLevel, CompilationError } from './trace.js';
 import { IRPrinter } from '../ir/graph/printer.js';
 import { printTensorIR } from '../ir/tensor/printer.js';
 import { lowerToLIR } from '../passes/lowering/tensor_to_lir.js';
+import { simplifyPrimFunc } from '../passes/simplify/simplify_tir.js';
 import { verifyLIR } from '../ir/lir/verifier.js';
 
 export { CompilationError } from './trace.js';
@@ -217,6 +218,10 @@ export class Compiler {
         run: (ctx) => ctx.compiler._scheduleAll(ctx.primFuncs, ctx.trace, ctx.errors, ctx.failed, ctx.resilient),
       },
       {
+        name: 'simplify',
+        run: (ctx) => ctx.compiler._simplifyAll(ctx.primFuncs, ctx.trace, ctx.errors, ctx.failed, ctx.resilient),
+      },
+      {
         name: 'verify:tensor-full',
         when: (ctx) => ctx.compiler.config.verifyMode === 'full',
         run: (ctx) => ctx.compiler._verifyAll(ctx.primFuncs, ctx.errors, ctx.failed, ctx.resilient),
@@ -400,6 +405,17 @@ export class Compiler {
         if (!failed.has(pf.name)) trace.irDump('afterScheduling:' + pf.name, printTensorIR(pf));
       }
     }
+  }
+
+  _simplifyAll(primFuncs, trace, errors, failed, resilient) {
+    trace.phaseStart('simplify');
+    const t0 = performance.now();
+    this._eachFunc(primFuncs, 'simplify', trace, errors, failed, resilient, (pf) => {
+      const ft0 = performance.now();
+      simplifyPrimFunc(pf);
+      trace.functionEvent('simplify', pf.name, { durationMs: performance.now() - ft0 });
+    });
+    trace.phaseEnd('simplify', performance.now() - t0);
   }
 
   _planMemory(primFuncs, trace, errors, failed, resilient) {

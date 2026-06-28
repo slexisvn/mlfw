@@ -1,4 +1,5 @@
 import { registerVJPRule } from '../vjp_registry.js';
+import { broadcastDimsExcluding } from '../../ir/graph/builder.js';
 
 registerVJPRule('softmax', (ctx) => {
   const grad = ctx.gradOutputs[0];
@@ -10,10 +11,7 @@ registerVJPRule('softmax', (ctx) => {
   const gradTimesSoftmax = ctx.builder.mul(grad, result).getResult(0);
   const initConst = ctx.builder.scalarConstant(0, dtype).getResult(0);
   const sumGradSoftmax = ctx.builder.reduce(gradTimesSoftmax, initConst, [axis], 'sum').getResult(0);
-  const broadcastDims = [];
-  for (let i = 0; i < shape.length; i++) {
-    if (i !== axis) broadcastDims.push(i);
-  }
+  const broadcastDims = broadcastDimsExcluding(shape.length, axis);
   const sumBroadcast = ctx.builder.broadcast(sumGradSoftmax, shape, broadcastDims).getResult(0);
   const shifted = ctx.builder.sub(grad, sumBroadcast).getResult(0);
   return [ctx.builder.mul(result, shifted).getResult(0)];
@@ -30,10 +28,7 @@ registerVJPRule('log_softmax', (ctx) => {
   const softmaxVal = ctx.builder.exp(result).getResult(0);
   const initConst = ctx.builder.scalarConstant(0, dtype).getResult(0);
   const sumGrad = ctx.builder.reduce(grad, initConst, [axis], 'sum').getResult(0);
-  const broadcastDims = [];
-  for (let i = 0; i < shape.length; i++) {
-    if (i !== axis) broadcastDims.push(i);
-  }
+  const broadcastDims = broadcastDimsExcluding(shape.length, axis);
   const sumBroadcast = ctx.builder.broadcast(sumGrad, shape, broadcastDims).getResult(0);
   const softmaxTimesSum = ctx.builder.mul(softmaxVal, sumBroadcast).getResult(0);
   return [ctx.builder.sub(grad, softmaxTimesSum).getResult(0)];
@@ -49,10 +44,7 @@ registerVJPRule('layer_norm', (ctx) => {
   const normDims = [axis < 0 ? shape.length + axis : axis];
   const normSize = shape[normDims[0]];
 
-  const batchDims = [];
-  for (let i = 0; i < shape.length; i++) {
-    if (!normDims.includes(i)) batchDims.push(i);
-  }
+  const batchDims = broadcastDimsExcluding(shape.length, normDims[0]);
 
   const initConst = ctx.builder.scalarConstant(0, dtype).getResult(0);
   const mean = ctx.builder.reduce(input, initConst, normDims, 'mean').getResult(0);
@@ -60,8 +52,7 @@ registerVJPRule('layer_norm', (ctx) => {
   const centered = ctx.builder.sub(input, meanBr).getResult(0);
   const centeredSq = ctx.builder.mul(centered, centered).getResult(0);
   const variance = ctx.builder.reduce(centeredSq, initConst, normDims, 'mean').getResult(0);
-  const epsConst = ctx.builder.scalarConstant(epsilon, dtype).getResult(0);
-  const epsBr = ctx.builder.broadcast(epsConst, variance.type.shape, []).getResult(0);
+  const epsBr = ctx.full(epsilon, variance.type);
   const varPlusEps = ctx.builder.add(variance, epsBr).getResult(0);
   const rstd = ctx.builder.rsqrt(varPlusEps).getResult(0);
   const rstdBr = ctx.builder.broadcast(rstd, shape, batchDims).getResult(0);
@@ -73,8 +64,7 @@ registerVJPRule('layer_norm', (ctx) => {
   const gammaBr = ctx.builder.broadcast(gamma, shape, gammaBrDims).getResult(0);
 
   const gradTimesGamma = ctx.builder.mul(grad, gammaBr).getResult(0);
-  const nConst = ctx.builder.scalarConstant(normSize, dtype).getResult(0);
-  const nBr = ctx.builder.broadcast(nConst, shape, []).getResult(0);
+  const nBr = ctx.full(normSize, input.type);
 
   const term1 = ctx.builder.mul(nBr, gradTimesGamma).getResult(0);
   const sumGradGamma = ctx.builder.reduce(gradTimesGamma, initConst, normDims, 'sum').getResult(0);
@@ -107,9 +97,8 @@ registerVJPRule('scaled_dot_product_attention', (ctx) => {
   perm[rank - 2] = rank - 1; perm[rank - 1] = rank - 2;
   const lastT = (x) => b.transpose(x, perm).getResult(0);
 
-  const scaleBrTo = (shape) => b.broadcast(b.scalarConstant(scale, dtype).getResult(0), shape, []).getResult(0);
   const s = b.matmul(Q, lastT(K)).getResult(0);
-  const ss = b.mul(s, scaleBrTo(s.type.shape)).getResult(0);
+  const ss = b.mul(s, ctx.full(scale, s.type)).getResult(0);
   const p = b.softmax(ss, rank - 1).getResult(0);
 
   const dV = b.matmul(lastT(p), dO).getResult(0);
@@ -122,7 +111,7 @@ registerVJPRule('scaled_dot_product_attention', (ctx) => {
   for (let i = 0; i < rank - 1; i++) bcastDims.push(i);
   const sumBr = b.broadcast(sumDPP, p.type.shape, bcastDims).getResult(0);
   const dS = b.mul(p, b.sub(dP, sumBr).getResult(0)).getResult(0);
-  const dSraw = b.mul(dS, scaleBrTo(dS.type.shape)).getResult(0);
+  const dSraw = b.mul(dS, ctx.full(scale, dS.type)).getResult(0);
 
   const dQ = b.matmul(dSraw, K).getResult(0);
   const dK = b.matmul(lastT(dSraw), Q).getResult(0);
@@ -151,12 +140,12 @@ registerVJPRule('pool2d', (ctx) => {
   const upGrad = upsample(grad);
 
   if (poolType === 'avg') {
-    const cBr = b.broadcast(b.scalarConstant(kh * kw, input.type.dtype).getResult(0), fullShape, []).getResult(0);
+    const cBr = ctx.full(kh * kw, input.type);
     return [b.div(upGrad, cBr).getResult(0)];
   }
   const upOut = upsample(ctx.results[0]);
   const mask = b.compare(input, upOut, 'eq').getResult(0);
-  const zero = b.broadcast(b.scalarConstant(0, input.type.dtype).getResult(0), fullShape, []).getResult(0);
+  const zero = ctx.full(0, input.type);
   return [b.select(mask, upGrad, zero).getResult(0)];
 });
 
@@ -169,11 +158,10 @@ registerVJPRule('batch_norm', (ctx) => {
   const shape = input.type.shape;
   const b = ctx.builder;
 
-  const batchDims = [];
-  for (let i = 0; i < shape.length; i++) if (i !== axis) batchDims.push(i);
+  const batchDims = broadcastDimsExcluding(shape.length, axis);
 
   const init = b.scalarConstant(0, dtype).getResult(0);
-  const epsConst = b.broadcast(b.scalarConstant(eps, dtype).getResult(0), variance.type.shape, []).getResult(0);
+  const epsConst = ctx.full(eps, variance.type);
   const rstd = b.rsqrt(b.add(variance, epsConst).getResult(0)).getResult(0);
   const rstdBr = b.broadcast(rstd, shape, [axis]).getResult(0);
   const meanBr = b.broadcast(mean, shape, [axis]).getResult(0);
@@ -188,7 +176,7 @@ registerVJPRule('batch_norm', (ctx) => {
   const gradMean = b.neg(b.reduce(gradInput, init, batchDims, 'sum').getResult(0)).getResult(0);
 
   const rstd3 = b.mul(b.mul(rstdBr, rstdBr).getResult(0), rstdBr).getResult(0);
-  const negHalf = b.broadcast(b.scalarConstant(-0.5, dtype).getResult(0), shape, []).getResult(0);
+  const negHalf = ctx.full(-0.5, input.type);
   const gradVarFull = b.mul(b.mul(b.mul(gradGammaBr, centered).getResult(0), rstd3).getResult(0), negHalf).getResult(0);
   const gradVar = b.reduce(gradVarFull, init, batchDims, 'sum').getResult(0);
 
@@ -199,12 +187,10 @@ registerVJPRule('elu', (ctx) => {
   const grad = ctx.gradOutputs[0];
   const [x] = ctx.operands;
   const result = ctx.results[0];
-  const dtype = x.type.dtype;
-  const shape = x.type.shape;
   const alpha = ctx.op.getAttr('alpha') ?? 1.0;
-  const zero = ctx.builder.broadcast(ctx.builder.scalarConstant(0, dtype).getResult(0), shape, []).getResult(0);
-  const one = ctx.builder.broadcast(ctx.builder.scalarConstant(1, dtype).getResult(0), shape, []).getResult(0);
-  const alphaVal = ctx.builder.broadcast(ctx.builder.scalarConstant(alpha, dtype).getResult(0), shape, []).getResult(0);
+  const zero = ctx.full(0, x.type);
+  const one = ctx.full(1, x.type);
+  const alphaVal = ctx.full(alpha, x.type);
   const mask = ctx.builder.compare(x, zero, 'gt').getResult(0);
   const negDeriv = ctx.builder.add(result, alphaVal).getResult(0);
   const deriv = ctx.builder.select(mask, one, negDeriv).getResult(0);
@@ -214,12 +200,10 @@ registerVJPRule('elu', (ctx) => {
 registerVJPRule('leaky_relu', (ctx) => {
   const grad = ctx.gradOutputs[0];
   const [x] = ctx.operands;
-  const dtype = x.type.dtype;
-  const shape = x.type.shape;
   const slope = ctx.op.getAttr('negative_slope') ?? 0.01;
-  const zero = ctx.builder.broadcast(ctx.builder.scalarConstant(0, dtype).getResult(0), shape, []).getResult(0);
-  const one = ctx.builder.broadcast(ctx.builder.scalarConstant(1, dtype).getResult(0), shape, []).getResult(0);
-  const slopeVal = ctx.builder.broadcast(ctx.builder.scalarConstant(slope, dtype).getResult(0), shape, []).getResult(0);
+  const zero = ctx.full(0, x.type);
+  const one = ctx.full(1, x.type);
+  const slopeVal = ctx.full(slope, x.type);
   const mask = ctx.builder.compare(x, zero, 'gt').getResult(0);
   const deriv = ctx.builder.select(mask, one, slopeVal).getResult(0);
   return [ctx.builder.mul(grad, deriv).getResult(0)];
@@ -228,13 +212,11 @@ registerVJPRule('leaky_relu', (ctx) => {
 registerVJPRule('celu', (ctx) => {
   const grad = ctx.gradOutputs[0];
   const [x] = ctx.operands;
-  const dtype = x.type.dtype;
-  const shape = x.type.shape;
   const alpha = ctx.op.getAttr('alpha') ?? 1.0;
-  const zero = ctx.builder.broadcast(ctx.builder.scalarConstant(0, dtype).getResult(0), shape, []).getResult(0);
-  const one = ctx.builder.broadcast(ctx.builder.scalarConstant(1, dtype).getResult(0), shape, []).getResult(0);
+  const zero = ctx.full(0, x.type);
+  const one = ctx.full(1, x.type);
   const mask = ctx.builder.compare(x, zero, 'gt').getResult(0);
-  const alphaVal = ctx.builder.broadcast(ctx.builder.scalarConstant(alpha, dtype).getResult(0), shape, []).getResult(0);
+  const alphaVal = ctx.full(alpha, x.type);
   const xOverAlpha = ctx.builder.div(x, alphaVal).getResult(0);
   const negDeriv = ctx.builder.exp(xOverAlpha).getResult(0);
   const deriv = ctx.builder.select(mask, one, negDeriv).getResult(0);
@@ -244,14 +226,12 @@ registerVJPRule('celu', (ctx) => {
 registerVJPRule('selu', (ctx) => {
   const grad = ctx.gradOutputs[0];
   const [x] = ctx.operands;
-  const dtype = x.type.dtype;
-  const shape = x.type.shape;
   const lambda = 1.0507009873554805;
   const alphaConst = 1.6732632423543772;
-  const zero = ctx.builder.broadcast(ctx.builder.scalarConstant(0, dtype).getResult(0), shape, []).getResult(0);
-  const lambdaVal = ctx.builder.broadcast(ctx.builder.scalarConstant(lambda, dtype).getResult(0), shape, []).getResult(0);
+  const zero = ctx.full(0, x.type);
+  const lambdaVal = ctx.full(lambda, x.type);
   const mask = ctx.builder.compare(x, zero, 'gt').getResult(0);
-  const alphaVal = ctx.builder.broadcast(ctx.builder.scalarConstant(alphaConst, dtype).getResult(0), shape, []).getResult(0);
+  const alphaVal = ctx.full(alphaConst, x.type);
   const expX = ctx.builder.exp(x).getResult(0);
   const alphaExp = ctx.builder.mul(alphaVal, expX).getResult(0);
   const innerDeriv = ctx.builder.select(mask, lambdaVal, ctx.builder.mul(lambdaVal, alphaExp).getResult(0)).getResult(0);
@@ -261,14 +241,12 @@ registerVJPRule('selu', (ctx) => {
 registerVJPRule('hardswish', (ctx) => {
   const grad = ctx.gradOutputs[0];
   const [x] = ctx.operands;
-  const dtype = x.type.dtype;
-  const shape = x.type.shape;
-  const negThree = ctx.builder.broadcast(ctx.builder.scalarConstant(-3, dtype).getResult(0), shape, []).getResult(0);
-  const three = ctx.builder.broadcast(ctx.builder.scalarConstant(3, dtype).getResult(0), shape, []).getResult(0);
-  const zero = ctx.builder.broadcast(ctx.builder.scalarConstant(0, dtype).getResult(0), shape, []).getResult(0);
-  const one = ctx.builder.broadcast(ctx.builder.scalarConstant(1, dtype).getResult(0), shape, []).getResult(0);
-  const two = ctx.builder.broadcast(ctx.builder.scalarConstant(2, dtype).getResult(0), shape, []).getResult(0);
-  const six = ctx.builder.broadcast(ctx.builder.scalarConstant(6, dtype).getResult(0), shape, []).getResult(0);
+  const negThree = ctx.full(-3, x.type);
+  const three = ctx.full(3, x.type);
+  const zero = ctx.full(0, x.type);
+  const one = ctx.full(1, x.type);
+  const two = ctx.full(2, x.type);
+  const six = ctx.full(6, x.type);
   const maskLow = ctx.builder.compare(x, negThree, 'le').getResult(0);
   const maskHigh = ctx.builder.compare(x, three, 'ge').getResult(0);
   const twoXPlus3 = ctx.builder.add(ctx.builder.mul(two, x).getResult(0), three).getResult(0);
@@ -280,12 +258,10 @@ registerVJPRule('hardswish', (ctx) => {
 registerVJPRule('hardsigmoid', (ctx) => {
   const grad = ctx.gradOutputs[0];
   const [x] = ctx.operands;
-  const dtype = x.type.dtype;
-  const shape = x.type.shape;
-  const negThree = ctx.builder.broadcast(ctx.builder.scalarConstant(-3, dtype).getResult(0), shape, []).getResult(0);
-  const three = ctx.builder.broadcast(ctx.builder.scalarConstant(3, dtype).getResult(0), shape, []).getResult(0);
-  const zero = ctx.builder.broadcast(ctx.builder.scalarConstant(0, dtype).getResult(0), shape, []).getResult(0);
-  const sixth = ctx.builder.broadcast(ctx.builder.scalarConstant(1 / 6, dtype).getResult(0), shape, []).getResult(0);
+  const negThree = ctx.full(-3, x.type);
+  const three = ctx.full(3, x.type);
+  const zero = ctx.full(0, x.type);
+  const sixth = ctx.full(1 / 6, x.type);
   const maskLow = ctx.builder.compare(x, negThree, 'le').getResult(0);
   const maskHigh = ctx.builder.compare(x, three, 'ge').getResult(0);
   const deriv = ctx.builder.select(maskLow, zero, ctx.builder.select(maskHigh, zero, sixth).getResult(0)).getResult(0);
@@ -295,13 +271,9 @@ registerVJPRule('hardsigmoid', (ctx) => {
 registerVJPRule('embedding', (ctx) => {
   const grad = ctx.gradOutputs[0];
   const [weight, indices] = ctx.operands;
-  const weightShape = weight.type.shape;
-  const weightDtype = weight.type.dtype;
   const idxRank = indices.type.rank;
-  const idxShape = indices.type.shape;
 
-  const zeroScalar = ctx.builder.scalarConstant(0, weightDtype).getResult(0);
-  const zeroWeight = ctx.builder.broadcast(zeroScalar, weightShape, []).getResult(0);
+  const zeroWeight = ctx.full(0, weight.type);
 
   const gradWeight = ctx.builder.scatter(zeroWeight, indices, grad, {
     updateWindowDims: [idxRank],

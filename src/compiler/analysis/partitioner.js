@@ -1,6 +1,6 @@
 import { registry } from '../ir/graph/ops.js';
 import { TensorType } from '../ir/graph/types.js';
-import { buildPartitions } from '../passes/partition/partition_core.js';
+import { buildPartitions, computePartitionIO } from '../passes/partition/partition_core.js';
 
 export class Partition {
   constructor(id, target) {
@@ -34,32 +34,9 @@ export class Partition {
 
   computeIO() {
     if (this._inputValues && this._outputValues) return;
-    this._inputValues = [];
-    this._outputValues = [];
-    const inputSet = new Set();
-    const outputSet = new Set();
-
-    for (const op of this.ops) {
-      for (let i = 0; i < op.numOperands; i++) {
-        const operand = op.getOperand(i);
-        if (operand.definingOp && this.opSet.has(operand.definingOp)) continue;
-        if (!inputSet.has(operand)) {
-          inputSet.add(operand);
-          this._inputValues.push(operand);
-        }
-      }
-      for (let i = 0; i < op.numResults; i++) {
-        const result = op.getResult(i);
-        if (outputSet.has(result)) continue;
-        for (const use of result.uses()) {
-          if (!this.opSet.has(use.user)) {
-            outputSet.add(result);
-            this._outputValues.push(result);
-            break;
-          }
-        }
-      }
-    }
+    const { inputs, outputs } = computePartitionIO(this.opSet, this.ops);
+    this._inputValues = inputs;
+    this._outputValues = outputs;
   }
 
   getInputValues() {

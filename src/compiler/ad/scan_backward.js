@@ -95,6 +95,7 @@ function diffBodyStep(builder, bodyBlock, argVals, freeVarMap, gradYields, forwa
       results: op.results.map(r => map.get(r.id)),
       gradOutputs: gradOuts,
       attrs: op.attributes,
+      full: (value, type) => builder.broadcast(builder.scalarConstant(value, type.dtype).getResult(0), type.shape, []).getResult(0),
     };
     const gradIns = rule(ctx);
     if (!gradIns) continue;

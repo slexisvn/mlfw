@@ -1,5 +1,5 @@
 import { FunctionPass, PassResult } from '../pass.js';
-import { Operation, cloneRegion } from '../../ir/graph/operation.js';
+import { Operation } from '../../ir/graph/operation.js';
 import { Block, Region } from '../../ir/graph/block.js';
 import { TensorType, DYNAMIC } from '../../ir/graph/types.js';
 import { registry } from '../../ir/graph/ops.js';
@@ -7,7 +7,7 @@ import { TraceLevel } from '../../pipeline/trace.js';
 import { classifyFusionKind } from './fusion_analysis.js';
 import {
   getYieldOp, countInnerOps, countReductions,
-  allInnerOpsFusable, remapOperands
+  allInnerOpsFusable
 } from './fusion_utils.js';
 
 export class FusionMergerPass extends FunctionPass {
@@ -212,14 +212,7 @@ export class FusionMergerPass extends FunctionPass {
 
     for (const op of pBlock.ops()) {
       if (op.opName === 'yield') continue;
-      const mappedOperands = remapOperands(op, valueMap);
-      const resultTypes = op.results.map(r => r.type);
-      const clonedRegions = op.regions.length > 0 ? op.regions.map(r => cloneRegion(r)) : null;
-      const cloned = new Operation(op.opName, mappedOperands, resultTypes, new Map(op.attributes), clonedRegions);
-      mergedBlock.pushOp(cloned);
-      for (let i = 0; i < op.numResults; i++) {
-        valueMap.set(op.getResult(i), cloned.getResult(i));
-      }
+      mergedBlock.pushOp(op.clone(valueMap));
     }
 
     for (let i = 0; i < pYield.numOperands; i++) {
@@ -242,14 +235,7 @@ export class FusionMergerPass extends FunctionPass {
 
     for (const op of cBlock.ops()) {
       if (op.opName === 'yield') continue;
-      const mappedOperands = remapOperands(op, valueMap);
-      const resultTypes = op.results.map(r => r.type);
-      const clonedRegions = op.regions.length > 0 ? op.regions.map(r => cloneRegion(r)) : null;
-      const cloned = new Operation(op.opName, mappedOperands, resultTypes, new Map(op.attributes), clonedRegions);
-      mergedBlock.pushOp(cloned);
-      for (let i = 0; i < op.numResults; i++) {
-        valueMap.set(op.getResult(i), cloned.getResult(i));
-      }
+      mergedBlock.pushOp(op.clone(valueMap));
     }
 
     const mergedYieldOperands = [];

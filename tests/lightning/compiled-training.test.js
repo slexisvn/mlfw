@@ -1,6 +1,14 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { tensor, Linear, ReLU, MSELoss, Adam, TensorDataset, DataLoader, sum, sub, mul } from '../../src/index.js';
 import { LightningModule, Trainer } from '../../src/lightning/index.js';
+
+let _origRandom;
+beforeEach(() => {
+  _origRandom = Math.random;
+  let s = 2 >>> 0;
+  Math.random = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+});
+afterEach(() => { Math.random = _origRandom; });
 
 class Net extends LightningModule {
   constructor() {

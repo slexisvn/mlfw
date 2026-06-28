@@ -31,6 +31,16 @@ const INT_TYPES = new Set([ScalarType.I8, ScalarType.I16, ScalarType.I32, Scalar
 
 export const DYNAMIC = -1;
 
+export function shapeProduct(shape, dynamicValue) {
+  let n = 1;
+  for (let i = 0; i < shape.length; i++) {
+    const d = shape[i];
+    if (typeof d !== 'number' || d < 0) return dynamicValue;
+    n *= d;
+  }
+  return n;
+}
+
 export function scalarBytes(dtype) {
   const b = SCALAR_BYTES[dtype];
   if (b === undefined) throw new Error(`Unknown dtype: ${dtype}`);
@@ -161,10 +171,7 @@ export class TensorType {
   get hasDynamic() { return this.shape.some(d => d === DYNAMIC); }
 
   numel() {
-    if (this.hasDynamic) return DYNAMIC;
-    let n = 1;
-    for (let i = 0; i < this.shape.length; i++) n *= this.shape[i];
-    return n;
+    return shapeProduct(this.shape, DYNAMIC);
   }
 
   sizeInBytes() {

@@ -6,7 +6,7 @@ import {
 import { ScalarType, isFloatType } from '../../../ir/graph/types.js';
 import {
   registerLoweringRule, getLoweringRule, buildSpatialNest, buildDotGeometry,
-  parseLayout, bufRefs, computeBroadcastIndices, makeLoopNest, wrapInLoops
+  parseLayout, bufRefs, computeBroadcastIndices, makeLoopNest, wrapInLoops, buildConvNest, emitMatmulInitAcc
 } from '../lowering_registry.js';
 
 function asIndexValue(load, dtype) {
@@ -59,130 +59,26 @@ EPILOGUE_TAG_LOWERERS.set('activation', (expr) => expr);
 
 export function register() {
   registerLoweringRule('dot', (ctx, op, inputs, outputs) => {
-    const lhs = inputs[0];
-    const rhs = inputs[1];
-    const out = outputs[0];
-    const geo = buildDotGeometry(ctx, op, lhs, rhs);
-
-    const initNest = buildSpatialNest(ctx, 'di', Array.from({ length: out.shape.length }, (_, i) => i), out.shape, out);
-    const initStore = new BufferStoreNode(out, initNest.indices, new FloatImmNode(0));
-    const initBlock = new BlockNode(ctx.blockName('matmul_init'), initNest.ivs, [], [{ buffer: out }], initStore);
-    const initBody = initNest.wrap(initBlock);
-
-    const accExpr = new MathOpNode('+', new BufferLoadNode(out, geo.outIdx), new MathOpNode('*', new BufferLoadNode(lhs, geo.lhsIdx), new BufferLoadNode(rhs, geo.rhsIdx)));
-    const accStore = new BufferStoreNode(out, geo.outIdx, accExpr);
-    const accBlock = new BlockNode(ctx.blockName('matmul'), geo.allIvs, [{ buffer: lhs }, { buffer: rhs }], [{ buffer: out }], accStore);
-    const accBody = geo.wrapAccBody(accBlock);
-
+    const { initBody, accBody } = emitMatmulInitAcc(ctx, op, inputs[0], inputs[1], outputs[0], {
+      prefix: 'di',
+      initBlockName: 'matmul_init',
+      accBlockName: 'matmul',
+      initVal: () => new FloatImmNode(0),
+      accLeaf: (a, b) => new MathOpNode('*', a, b),
+    });
     return new SeqNode([initBody, accBody]);
   });
 
   registerLoweringRule('conv', (ctx, op, inputs, outputs) => {
     const inBuf = inputs[0];
     const kerBuf = inputs[1];
-    const outBuf = outputs[0];
-    const strides = op.getAttr('strides');
-    const padding = op.getAttr('padding');
-    const dilation = op.getAttr('dilation') || strides.map(() => 1);
-    const groups = op.getAttr('groups') || 1;
-    const iLayout = parseLayout(op.getAttr('input_layout'));
-    const kLayout = parseLayout(op.getAttr('kernel_layout'));
-    const spatialDims = strides.length;
-    const batch = inBuf.shape[iLayout['N']];
-    const outChannels = kerBuf.shape[kLayout['O']];
-    const inChannelsPerGroup = kerBuf.shape[kLayout['I']];
-    const outShape = outBuf.shape;
-
-    const initNest = buildSpatialNest(ctx, 'ci', Array.from({ length: outShape.length }, (_, i) => i), outShape, outBuf);
-    const initStore = new BufferStoreNode(outBuf, initNest.indices, new FloatImmNode(0));
-    const initBlock = new BlockNode(ctx.blockName('conv_init'), initNest.ivs, [], [{ buffer: outBuf }], initStore);
-    const initBody = initNest.wrap(initBlock);
-
-    const nVar = ctx.allocVar('cn');
-    const ocVar = ctx.allocVar('coc');
-    const icVar = ctx.allocVar('cic');
-    const spatialOutVars = ctx.allocVarArray('co', spatialDims);
-    const spatialKerVars = ctx.allocVarArray('ck', spatialDims);
-    const allVars = [nVar, ocVar, ...spatialOutVars, icVar, ...spatialKerVars];
-    const allBinds = ctx.allocBindArray('cv', allVars);
-
-    const bv = allBinds[0].iterVar;
-    const ocv = allBinds[1].iterVar;
-    const soBinds = allBinds.slice(2, 2 + spatialDims);
-    const icv = allBinds[2 + spatialDims].iterVar;
-    const skBinds = allBinds.slice(3 + spatialDims);
-
-    const outIdx = new Array(outShape.length);
-    outIdx[iLayout['N']] = bv;
-    outIdx[iLayout['C']] = ocv;
-    const spatialLayoutKeys = Object.keys(iLayout).filter(k => k !== 'N' && k !== 'C').sort();
-    for (let s = 0; s < spatialDims; s++) {
-      outIdx[iLayout[spatialLayoutKeys[s]]] = soBinds[s].iterVar;
-    }
-
-    const inIdx = new Array(inBuf.shape.length);
-    inIdx[iLayout['N']] = bv;
-    const groupSize = Math.floor(outChannels / groups);
-    if (groups > 1) {
-      inIdx[iLayout['C']] = new MathOpNode('+', new MathOpNode('*', new MathOpNode('//', ocv, new IntImmNode(groupSize)), new IntImmNode(inChannelsPerGroup)), icv);
-    } else {
-      inIdx[iLayout['C']] = icv;
-    }
-
-    const kerIdx = new Array(kerBuf.shape.length);
-    kerIdx[kLayout['O']] = ocv;
-    kerIdx[kLayout['I']] = icv;
-
-    let inBoundsExpr = null;
-    for (let s = 0; s < spatialDims; s++) {
-      const key = spatialLayoutKeys[s];
-      const kKey = key.toUpperCase();
-      const inSpatialIdx = mathOp('+',
-        mathOp('*', soBinds[s].iterVar, new IntImmNode(strides[s])),
-        mathOp('+',
-          mathOp('*', skBinds[s].iterVar, new IntImmNode(dilation[s])),
-          new IntImmNode(-padding[s][0])
-        )
-      );
-      inIdx[iLayout[key]] = inSpatialIdx;
-      kerIdx[kLayout[kKey]] = skBinds[s].iterVar;
-      if (padding[s][0] !== 0 || padding[s][1] !== 0) {
-        const ge = new CompareNode('ge', inSpatialIdx, new IntImmNode(0));
-        const lt = new CompareNode('lt', inSpatialIdx, new IntImmNode(inBuf.shape[iLayout[key]]));
-        const dimOk = new MathOpNode('*', ge, lt);
-        inBoundsExpr = inBoundsExpr ? new MathOpNode('*', inBoundsExpr, dimOk) : dimOk;
-      }
-    }
-
-    const loadIn = new BufferLoadNode(inBuf, inIdx);
-    const loadKer = new BufferLoadNode(kerBuf, kerIdx);
-    const loadOut = new BufferLoadNode(outBuf, outIdx);
-    const product = new MathOpNode('*', loadIn, loadKer);
-    const guardedProduct = inBoundsExpr ? new IfThenElseNode(inBoundsExpr, product, new FloatImmNode(0)) : product;
-    const accExpr = new MathOpNode('+', loadOut, guardedProduct);
-    const accStore = new BufferStoreNode(outBuf, outIdx, accExpr);
-    const accBlock = new BlockNode(ctx.blockName('conv_acc'), allBinds, [{ buffer: inBuf }, { buffer: kerBuf }], [{ buffer: outBuf }], accStore);
-
-    const kerSpatialSizes = new Array(spatialDims);
-    for (let s = 0; s < spatialDims; s++) {
-      const kKey = spatialLayoutKeys[s].toUpperCase();
-      kerSpatialSizes[s] = kerBuf.shape[kLayout[kKey]];
-    }
-
-    let accBody = accBlock;
-    for (let s = spatialDims - 1; s >= 0; s--) {
-      const kKey = spatialLayoutKeys[s].toUpperCase();
-      accBody = new ForNode(spatialKerVars[s], new IntImmNode(0), ctx.extentNode(kerSpatialSizes[s], kerBuf, kLayout[kKey]), ForKind.SERIAL, accBody);
-    }
-    accBody = new ForNode(icVar, new IntImmNode(0), ctx.extentNode(inChannelsPerGroup, kerBuf, kLayout['I']), ForKind.SERIAL, accBody);
-    for (let s = spatialDims - 1; s >= 0; s--) {
-      const dimIdx = iLayout[spatialLayoutKeys[s]];
-      accBody = new ForNode(spatialOutVars[s], new IntImmNode(0), ctx.extentNode(outShape[dimIdx], outBuf, dimIdx), ForKind.SERIAL, accBody);
-    }
-    accBody = new ForNode(ocVar, new IntImmNode(0), ctx.extentNode(outChannels, kerBuf, kLayout['O']), ForKind.SERIAL, accBody);
-    accBody = new ForNode(nVar, new IntImmNode(0), ctx.extentNode(batch, inBuf, iLayout['N']), ForKind.SERIAL, accBody);
-
-    return new SeqNode([initBody, accBody]);
+    return buildConvNest(ctx, op, inBuf, kerBuf, outputs[0], {
+      prefix: 'c',
+      blockPrefix: 'conv',
+      initVal: () => new FloatImmNode(0),
+      guardFill: () => new FloatImmNode(0),
+      leafBuilder: (inIdx, kerIdx) => new MathOpNode('*', new BufferLoadNode(inBuf, inIdx), new BufferLoadNode(kerBuf, kerIdx)),
+    });
   });
 
   registerLoweringRule('gather', (ctx, op, inputs, outputs) => {
@@ -292,17 +188,14 @@ export function register() {
     const extraInputs = inputs.slice(numDotOperands);
     const out = outputs[0];
     const epilogueTags = op.getAttr('epilogue_tags') || [];
-    const geo = buildDotGeometry(ctx, op, lhs, rhs);
 
-    const initNest = buildSpatialNest(ctx, 'ei', Array.from({ length: out.shape.length }, (_, i) => i), out.shape, out);
-    const initStore = new BufferStoreNode(out, initNest.indices, new FloatImmNode(0));
-    const initBlock = new BlockNode(ctx.blockName('matmul_init'), initNest.ivs, [], [{ buffer: out }], initStore);
-    const initBody = initNest.wrap(initBlock);
-
-    const accExpr = new MathOpNode('+', new BufferLoadNode(out, geo.outIdx), new MathOpNode('*', new BufferLoadNode(lhs, geo.lhsIdx), new BufferLoadNode(rhs, geo.rhsIdx)));
-    const accStore = new BufferStoreNode(out, geo.outIdx, accExpr);
-    const accBlock = new BlockNode(ctx.blockName('matmul_acc'), geo.allIvs, [{ buffer: lhs }, { buffer: rhs }], [{ buffer: out }], accStore);
-    const accBody = geo.wrapAccBody(accBlock);
+    const { initBody, accBody } = emitMatmulInitAcc(ctx, op, lhs, rhs, out, {
+      prefix: 'ei',
+      initBlockName: 'matmul_init',
+      accBlockName: 'matmul_acc',
+      initVal: () => new FloatImmNode(0),
+      accLeaf: (a, b) => new MathOpNode('*', a, b),
+    });
 
     if (epilogueTags.length === 0) {
       return new SeqNode([initBody, accBody]);

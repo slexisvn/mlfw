@@ -1,3 +1,24 @@
+import { Analyzer } from '../analysis/analyzer.js';
+import { SymInt } from '../analysis/sym_int.js';
+import { irBound, analyzerForLoops } from '../analysis/ir_arith.js';
+
+export { analyzerForLoops };
+
+export function classifyBufferIndex(analyzer, indexExpr, dimExtent) {
+  if (typeof dimExtent !== 'number' || dimExtent < 0) return 'unknown';
+  const b = irBound(analyzer, indexExpr);
+  if (b === null) return 'unknown';
+  if (b.min >= 0 && b.max <= dimExtent - 1) return 'in';
+  if (b.min > dimExtent - 1 || b.max < 0) return 'oob';
+  return 'unknown';
+}
+
+export function proveDivisible(extent, factor) {
+  if (!Number.isInteger(factor) || factor <= 0) return false;
+  const b = new Analyzer().constIntBound(SymInt.mod(extent, factor));
+  return b.min === 0 && b.max === 0;
+}
+
 export function collectVarsUsed(node, out) {
   if (!node || typeof node !== 'object') return;
   switch (node.type) {

@@ -20,7 +20,9 @@ const REDUCE_COMBINERS = {
   'mean': (a, b) => new MathOpNode('+', a, b),
   'prod': (a, b) => new MathOpNode('*', a, b),
   'max':  (a, b, dt) => new CallExternNode('max', [a, b], dt),
-  'min':  (a, b, dt) => new CallExternNode('min', [a, b], dt)
+  'min':  (a, b, dt) => new CallExternNode('min', [a, b], dt),
+  'and':  (a, b) => new MathOpNode('*', a, b),
+  'or':   (a, b, dt) => new CallExternNode('max', [a, b], dt)
 };
 
 export function register() {
@@ -51,7 +53,8 @@ export function register() {
     for (let i = 0; i < reduceDims.length; i++) inIndices[reduceDims[i]] = rIvs[i].iterVar;
     const loadA = new BufferLoadNode(outBuf, accNest.indices);
     const loadB = new BufferLoadNode(inBuf, inIndices);
-    const combiner = REDUCE_COMBINERS[rType] || REDUCE_COMBINERS['sum'];
+    const combiner = REDUCE_COMBINERS[rType];
+    if (!combiner) throw new Error(`reduction lowering: unsupported reduce_type '${rType}'`);
     const store = new BufferStoreNode(outBuf, accNest.indices, combiner(loadA, loadB, outBuf.dtype));
     const rExtentNodes = new Array(reduceDims.length);
     for (let i = 0; i < reduceDims.length; i++) rExtentNodes[i] = ctx.extentNode(inBuf.shape[reduceDims[i]], inBuf, reduceDims[i]);

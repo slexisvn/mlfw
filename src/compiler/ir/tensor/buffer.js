@@ -1,4 +1,5 @@
 import { dtypeBytes } from '../../../backend/dtype_map.js';
+import { shapeProduct } from '../graph/types.js';
 
 export class Buffer {
   constructor(name, shape, dtype, scope, strides = null, offset = 0, alignment = 64) {
@@ -32,12 +33,7 @@ export class Buffer {
   }
 
   numel() {
-    let n = 1;
-    for (let i = 0; i < this.shape.length; i++) {
-      if (typeof this.shape[i] !== 'number') return -1;
-      n *= this.shape[i];
-    }
-    return n;
+    return shapeProduct(this.shape, -1);
   }
 
   sizeInBytes() {

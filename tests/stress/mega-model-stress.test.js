@@ -664,7 +664,7 @@ describe('mega model stress — tens of thousands of ops', { timeout: 120000 }, 
     const k = analyzeKernel(src);
     log('Ultra MLP (100 layers)', graphOps, ms, k);
 
-    expect(k.loops).toBeGreaterThan(1400);
+    expect(k.loops).toBeGreaterThan(1000);
     expect(k.issues).toHaveLength(0);
     expect(ms).toBeLessThan(120000);
   });

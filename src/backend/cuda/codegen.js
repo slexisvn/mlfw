@@ -2,7 +2,7 @@ import { ForKind } from '../../compiler/ir/tensor/nodes.js';
 import { cType, cPtrType, cLiteralSuffix, cMathFunc, isDtypeInt, dtypeBytes, cCompareOp } from '../dtype_map.js';
 import { flattenRowMajorIndex } from '../index_emit.js';
 import { irChildNodes } from '../../compiler/ir/ir_visitor.js';
-import { parseThreadAxis, maxBindingExtent, visitStatements } from '../codegen_utils.js';
+import { parseThreadAxis, maxBindingExtent, visitStatements, estimateBufferSize, dynamicDimProduct, resolveShapeParam } from '../codegen_utils.js';
 
 
 export class CUDAKernel {
@@ -413,7 +413,7 @@ export class CUDACodegen {
       case 'IfThenElseNode': return `(${this._exprToC(node.condition)} ? ${this._exprToC(node.thenBody)} : ${this._exprToC(node.elseBody)})`;
       case 'CastNode': return `((${cType(node.toDtype)})(${this._exprToC(node.expr)}))`;
       case 'CallExternNode': return this._emitExternCall(node);
-      default: return '0';
+      default: throw new Error(`CUDA codegen: unhandled expr node '${node.type}'`);
     }
   }
 
@@ -454,29 +454,11 @@ export class CUDACodegen {
   }
 
   _computeDynamicStride(buffer, dimIdx) {
-    const parts = [];
-    for (let j = dimIdx + 1; j < buffer.shape.length; j++) {
-      const d = buffer.shape[j];
-      if (typeof d === 'number' && d >= 0) {
-        parts.push(String(d));
-      } else {
-        parts.push(this._resolveShapeParam(buffer, j));
-      }
-    }
-    return parts.length === 0 ? '1' : parts.join(' * ');
+    return dynamicDimProduct(buffer, dimIdx + 1, (b, j) => this._resolveShapeParam(b, j));
   }
 
   _dynamicNumel(buffer) {
-    const parts = [];
-    for (let d = 0; d < buffer.shape.length; d++) {
-      const dim = buffer.shape[d];
-      if (typeof dim === 'number' && dim >= 0) {
-        parts.push(String(dim));
-      } else {
-        parts.push(this._resolveShapeParam(buffer, d));
-      }
-    }
-    return parts.length === 0 ? '1' : parts.join(' * ');
+    return dynamicDimProduct(buffer, 0, (b, j) => this._resolveShapeParam(b, j));
   }
 
   _getMaxBindingExtent(tag) {
@@ -576,22 +558,15 @@ export class CUDACodegen {
     while (stack.length > 0) {
       const node = stack.pop();
       if (!node) continue;
-      if (node.type === 'AllocateNode' && node.scope !== 'shared') {
-        if (!storageNames.has(node.buffer.name)) {
-          const numel = node.buffer.numel();
-          const size = numel > 0 ? numel : this._estimateBufferSize(node.buffer);
-          if (size > 0) {
-            this._promotedBuffers.add(node.buffer.name);
-            this._promotedBufferDecls.push({ name: node.buffer.name, dtype: node.buffer.dtype, size });
-          }
+      if (node.type === 'AllocateNode' && node.scope !== 'shared' && !storageNames.has(node.buffer.name)) {
+        const numel = node.buffer.numel();
+        const size = numel > 0 ? numel : this._estimateBufferSize(node.buffer);
+        if (size > 0) {
+          this._promotedBuffers.add(node.buffer.name);
+          this._promotedBufferDecls.push({ name: node.buffer.name, dtype: node.buffer.dtype, size });
         }
-        stack.push(node.body);
-        continue;
       }
-      if (node.body) stack.push(node.body);
-      if (node.stmts) for (const s of node.stmts) stack.push(s);
-      if (node.thenBody) stack.push(node.thenBody);
-      if (node.elseBody) stack.push(node.elseBody);
+      for (const c of irChildNodes(node)) stack.push(c);
     }
 
     const refBuffers = new Map();
@@ -650,13 +625,7 @@ export class CUDACodegen {
       const n = stack.pop();
       if (!n) continue;
       if (n.type === 'AllocateNode' && n.scope !== 'shared') consider(n.buffer.name, n.buffer);
-      if (n.body) stack.push(n.body);
-      if (n.stmts) for (const s of n.stmts) stack.push(s);
-      if (n.thenBody) stack.push(n.thenBody);
-      if (n.elseBody) stack.push(n.elseBody);
-      if (n.loopBody) stack.push(n.loopBody);
-      if (n.condBody) stack.push(n.condBody);
-      if (n.initBody) stack.push(n.initBody);
+      for (const c of irChildNodes(n)) stack.push(c);
     }
     const refBuffers = new Map();
     this._scanBufferRefs(func.body, refBuffers);
@@ -691,20 +660,10 @@ export class CUDACodegen {
   }
 
   _estimateBufferSize(buffer) {
-    let n = 1;
-    for (const d of buffer.shape) {
-      if (typeof d === 'number' && d > 0) n *= d;
-      else n *= 1;
-    }
-    return n;
+    return estimateBufferSize(buffer);
   }
 
   _resolveShapeParam(buffer, dimIdx) {
-    if (this._primFunc && this._primFunc.shapeParamMap) {
-      const key = `${buffer.name}:${dimIdx}`;
-      const v = this._primFunc.shapeParamMap.get(key);
-      if (v) return v.name;
-    }
-    throw new Error(`CUDA codegen: missing shape param for ${buffer.name}:${dimIdx}`);
+    return resolveShapeParam(this._primFunc, buffer, dimIdx, (v) => v.name, 'CUDA');
   }
 }

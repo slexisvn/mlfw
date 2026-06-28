@@ -3,7 +3,7 @@ import { wgslType, wgslBytes, wgslMathFunc, hasWgslMathFunc, cCompareOp } from '
 import { flattenRowMajorIndex } from '../index_emit.js';
 import { MinHeap } from '../../util/min_heap.js';
 import { irChildNodes } from '../../compiler/ir/ir_visitor.js';
-import { parseThreadAxis, maxBindingExtent, visitStatements } from '../codegen_utils.js';
+import { parseThreadAxis, maxBindingExtent, visitStatements, estimateBufferSize, dynamicDimProduct, resolveShapeParam, walkStmtTree } from '../codegen_utils.js';
 
 
 const BOOL_OPS = new Set(['!', '&&', '||']);
@@ -275,10 +275,7 @@ export class WebGPUCodegen {
   }
 
   _scanBindings(root) {
-    const stack = [root];
-    while (stack.length > 0) {
-      const node = stack.pop();
-      if (!node) continue;
+    walkStmtTree(root, (node) => {
       if (node.type === 'ForNode' && node.kind === ForKind.THREAD_BINDING && node.threadTag) {
         const extent = node.extent.type === 'IntImmNode' ? node.extent.value : 0;
         const isDynamic = node.extent.type !== 'IntImmNode';
@@ -293,11 +290,7 @@ export class WebGPUCodegen {
       if (node.type === 'AllocateNode' && node.scope === 'shared') {
         this._sharedBuffers.push(node.buffer);
       }
-      if (node.body) stack.push(node.body);
-      if (node.stmts) for (const s of node.stmts) stack.push(s);
-      if (node.thenBody) stack.push(node.thenBody);
-      if (node.elseBody) stack.push(node.elseBody);
-    }
+    });
   }
 
   _applyBindingDim(tag, extent) {
@@ -312,15 +305,11 @@ export class WebGPUCodegen {
   }
 
   _hasRecurrence(func) {
-    const stack = [func.body];
-    while (stack.length > 0) {
-      const n = stack.pop();
-      if (!n || typeof n !== 'object') continue;
-      if (n.type === 'SyncThreadsNode') return true;
-      for (const k of ['body', 'loopBody', 'condBody', 'initBody', 'thenBody', 'elseBody']) if (n[k]) stack.push(n[k]);
-      if (n.stmts) for (const s of n.stmts) stack.push(s);
-    }
-    return false;
+    let found = false;
+    walkStmtTree(func.body, (n) => {
+      if (n.type === 'SyncThreadsNode') { found = true; return false; }
+    });
+    return found;
   }
 
   _analyzeSharing(func) {
@@ -384,24 +373,13 @@ export class WebGPUCodegen {
 
   _collectPromotionCandidates(func, storageNames) {
     const candidates = [];
-    const stack = [func.body];
-    while (stack.length > 0) {
-      const node = stack.pop();
-      if (!node) continue;
-      if (node.type === 'AllocateNode' && node.scope !== 'shared') {
-        if (!storageNames.has(node.buffer.name)) {
-          const numel = node.buffer.numel();
-          const size = numel > 0 ? numel : this._estimateBufferSize(node.buffer);
-          if (size > 0) candidates.push({ name: node.buffer.name, dtype: node.buffer.dtype, size });
-        }
-        stack.push(node.body);
-        continue;
+    walkStmtTree(func.body, (node) => {
+      if (node.type === 'AllocateNode' && node.scope !== 'shared' && !storageNames.has(node.buffer.name)) {
+        const numel = node.buffer.numel();
+        const size = numel > 0 ? numel : this._estimateBufferSize(node.buffer);
+        if (size > 0) candidates.push({ name: node.buffer.name, dtype: node.buffer.dtype, size });
       }
-      if (node.body) stack.push(node.body);
-      if (node.stmts) for (const s of node.stmts) stack.push(s);
-      if (node.thenBody) stack.push(node.thenBody);
-      if (node.elseBody) stack.push(node.elseBody);
-    }
+    });
 
     const refBuffers = new Map();
     this._scanBufferRefs(func.body, refBuffers);
@@ -419,17 +397,11 @@ export class WebGPUCodegen {
   }
 
   _findRecurrenceBody(root) {
-    const stack = [root];
-    while (stack.length > 0) {
-      const node = stack.pop();
-      if (!node) continue;
-      if (node.type === 'ForNode' && node.kind === ForKind.RECURRENCE) return node.body;
-      if (node.body) stack.push(node.body);
-      if (node.stmts) for (const s of node.stmts) stack.push(s);
-      if (node.thenBody) stack.push(node.thenBody);
-      if (node.elseBody) stack.push(node.elseBody);
-    }
-    return null;
+    let found = null;
+    walkStmtTree(root, (node) => {
+      if (!found && node.type === 'ForNode' && node.kind === ForKind.RECURRENCE) { found = node.body; return false; }
+    });
+    return found;
   }
 
   _namesTouchedOutside(root, skip, names) {
@@ -704,21 +676,11 @@ export class WebGPUCodegen {
       if (isLocal(name)) locals.set(name, buf);
     }
 
-    const stack = [func.body];
-    while (stack.length > 0) {
-      const node = stack.pop();
-      if (!node) continue;
+    walkStmtTree(func.body, (node) => {
       if (node.type === 'AllocateNode' && node.scope !== 'shared' && node.buffer && isLocal(node.buffer.name)) {
         locals.set(node.buffer.name, node.buffer);
       }
-      if (node.body) stack.push(node.body);
-      if (node.stmts) for (const s of node.stmts) stack.push(s);
-      if (node.thenBody) stack.push(node.thenBody);
-      if (node.elseBody) stack.push(node.elseBody);
-      if (node.loopBody) stack.push(node.loopBody);
-      if (node.condBody) stack.push(node.condBody);
-      if (node.initBody) stack.push(node.initBody);
-    }
+    });
     return locals;
   }
 
@@ -869,12 +831,7 @@ export class WebGPUCodegen {
   }
 
   _estimateBufferSize(buffer) {
-    let n = 1;
-    for (const d of buffer.shape) {
-      if (typeof d === 'number' && d > 0) n *= d;
-      else n *= 1;
-    }
-    return n;
+    return estimateBufferSize(buffer);
   }
 
   _visitAllocateNode(node) {
@@ -1011,7 +968,7 @@ export class WebGPUCodegen {
       case 'IfThenElseNode': return `select(${this._exprToWGSL(node.elseBody)}, ${this._exprToWGSL(node.thenBody)}, ${this._boolExpr(node.condition)})`;
       case 'CastNode': return `${wgslType(node.toDtype)}(${this._exprToWGSL(node.expr)})`;
       case 'CallExternNode': return this._emitExternCall(node);
-      default: return '0';
+      default: throw new Error(`WebGPU codegen: unhandled expr node '${node.type}'`);
     }
   }
 
@@ -1076,24 +1033,10 @@ export class WebGPUCodegen {
   }
 
   _computeDynamicStride(buffer, dimIdx) {
-    const parts = [];
-    for (let j = dimIdx + 1; j < buffer.shape.length; j++) {
-      const d = buffer.shape[j];
-      if (typeof d === 'number' && d >= 0) {
-        parts.push(String(d));
-      } else {
-        parts.push(this._resolveShapeParam(buffer, j));
-      }
-    }
-    return parts.length === 0 ? '1' : parts.join(' * ');
+    return dynamicDimProduct(buffer, dimIdx + 1, (b, j) => this._resolveShapeParam(b, j));
   }
 
   _resolveShapeParam(buffer, dimIdx) {
-    if (this._primFunc && this._primFunc.shapeParamMap) {
-      const key = `${buffer.name}:${dimIdx}`;
-      const v = this._primFunc.shapeParamMap.get(key);
-      if (v) return `i32(_shapes.${v.name})`;
-    }
-    throw new Error(`WebGPU codegen: missing shape param for ${buffer.name}:${dimIdx}`);
+    return resolveShapeParam(this._primFunc, buffer, dimIdx, (v) => `i32(_shapes.${v.name})`, 'WebGPU');
   }
 }

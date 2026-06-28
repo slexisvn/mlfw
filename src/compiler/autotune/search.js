@@ -1,3 +1,7 @@
+function nextLcg(state) {
+  return (state * 1664525 + 1013904223) & 0x7fffffff;
+}
+
 class SearchCandidate {
   constructor(sketchName, params, score) {
     this.sketchName = sketchName;
@@ -15,7 +19,7 @@ export class RandomSearch {
   }
 
   _rng(max) {
-    this._rngState = (this._rngState * 1664525 + 1013904223) & 0x7fffffff;
+    this._rngState = nextLcg(this._rngState);
     return this._rngState % max;
   }
 
@@ -55,12 +59,12 @@ export class EvolutionarySearch {
   }
 
   _rng(max) {
-    this._rngState = (this._rngState * 1664525 + 1013904223) & 0x7fffffff;
+    this._rngState = nextLcg(this._rngState);
     return this._rngState % max;
   }
 
   _rngFloat() {
-    this._rngState = (this._rngState * 1664525 + 1013904223) & 0x7fffffff;
+    this._rngState = nextLcg(this._rngState);
     return this._rngState / 0x7fffffff;
   }
 

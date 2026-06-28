@@ -1,5 +1,7 @@
 import { ForKind } from '../ir/tensor/nodes.js';
-import { collectVarsUsed, collectWriteIndexVars } from './legality.js';
+import { collectVarsUsed, collectWriteIndexVars, classifyBufferIndex } from './legality.js';
+import { Analyzer } from '../analysis/analyzer.js';
+import { irBound } from '../analysis/ir_arith.js';
 
 export class ScheduleValidator {
   static validate(primFunc) {
@@ -11,6 +13,8 @@ export class ScheduleValidator {
       parLoops: [],
       innermostLoopVar: null,
       loopStack: [],
+      analyzer: new Analyzer(),
+      condDepth: 0,
       errors
     };
 
@@ -49,8 +53,10 @@ export class ScheduleValidator {
         break;
       case 'IfThenElseNode':
         ScheduleValidator._visitExpr(node.condition, ctx);
+        ctx.condDepth++;
         ScheduleValidator._visitNode(node.thenBody, ctx);
         if (node.elseBody) ScheduleValidator._visitNode(node.elseBody, ctx);
+        ctx.condDepth--;
         break;
       case 'AllocateNode':
         ScheduleValidator._visitNode(node.body, ctx);
@@ -115,6 +121,12 @@ export class ScheduleValidator {
     if (tracksReduction) ctx.parLoops.push({ varName, kind: node.kind });
 
     ctx.boundVars.add(varName);
+    const prevBound = ctx.analyzer.getVarBound(varName);
+    if (node.extent && node.extent.type === 'IntImmNode' && node.extent.value > 0) {
+      ctx.analyzer.bind(varName, 0, node.extent.value - 1);
+    } else {
+      ctx.analyzer.setVarBound(varName, null);
+    }
     const prevInnermost = ctx.innermostLoopVar;
     ctx.innermostLoopVar = varName;
     ctx.loopStack.push(varName);
@@ -122,6 +134,7 @@ export class ScheduleValidator {
     ctx.loopStack.pop();
     ctx.innermostLoopVar = prevInnermost;
     ctx.boundVars.delete(varName);
+    ctx.analyzer.setVarBound(varName, prevBound);
 
     if (tracksReduction) ctx.parLoops.pop();
 
@@ -142,8 +155,13 @@ export class ScheduleValidator {
   }
 
   static _visitBlock(node, ctx) {
+    const savedBounds = [];
     for (const r of node.iterVars) {
-      if (r.iterVar) ctx.boundVars.add(r.iterVar.name);
+      if (r.iterVar) {
+        ctx.boundVars.add(r.iterVar.name);
+        savedBounds.push([r.iterVar.name, ctx.analyzer.getVarBound(r.iterVar.name)]);
+        ctx.analyzer.setVarBound(r.iterVar.name, r.binding ? irBound(ctx.analyzer, r.binding) : null);
+      }
     }
     if (node.initBody && ctx.innermostLoopVar) {
       const writtenIdx = new Set();
@@ -184,6 +202,7 @@ export class ScheduleValidator {
     for (const r of node.iterVars) {
       if (r.iterVar) ctx.boundVars.delete(r.iterVar.name);
     }
+    for (const [name, b] of savedBounds) ctx.analyzer.setVarBound(name, b);
   }
 
   static _validateBufferAccess(node, ctx) {
@@ -191,6 +210,7 @@ export class ScheduleValidator {
       ctx.errors.push('BufferStore with null buffer');
     } else {
       ScheduleValidator._checkRank(node, ctx);
+      ScheduleValidator._checkBounds(node, ctx);
     }
     if (node.indices) {
       for (const idx of node.indices) ScheduleValidator._visitExpr(idx, ctx);
@@ -209,6 +229,21 @@ export class ScheduleValidator {
     }
   }
 
+  static _checkBounds(node, ctx) {
+    if (ctx.condDepth > 0) return;
+    if (!node.buffer || !node.buffer.shape || !node.indices) return;
+    if (node.indices.length !== node.buffer.shape.length) return;
+    for (let i = 0; i < node.indices.length; i++) {
+      const dim = node.buffer.shape[i];
+      if (classifyBufferIndex(ctx.analyzer, node.indices[i], dim) === 'oob') {
+        ctx.errors.push(
+          `Buffer '${node.buffer.name}' access is out of bounds on axis ${i}: ` +
+          `index is provably outside [0, ${dim - 1}]`
+        );
+      }
+    }
+  }
+
   static _visitExpr(node, ctx) {
     if (!node || typeof node !== 'object') return;
     switch (node.type) {
@@ -217,6 +252,7 @@ export class ScheduleValidator {
           ctx.errors.push('BufferLoad with null buffer');
         } else {
           ScheduleValidator._checkRank(node, ctx);
+          ScheduleValidator._checkBounds(node, ctx);
         }
         if (node.indices) {
           for (const idx of node.indices) ScheduleValidator._visitExpr(idx, ctx);
@@ -238,8 +274,10 @@ export class ScheduleValidator {
         break;
       case 'IfThenElseNode':
         ScheduleValidator._visitExpr(node.condition, ctx);
+        ctx.condDepth++;
         ScheduleValidator._visitNode(node.thenBody, ctx);
         if (node.elseBody) ScheduleValidator._visitNode(node.elseBody, ctx);
+        ctx.condDepth--;
         break;
     }
   }

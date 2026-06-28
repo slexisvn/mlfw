@@ -33,7 +33,8 @@ export function backpropOps(orderedOps, { accumulator, builder, needsGrad, resol
     const resultValues = new Array(op.numResults);
     for (let r = 0; r < op.numResults; r++) resultValues[r] = resolveValue(op.getResult(r));
 
-    const gradInputs = rule({ builder, op, operands: operandValues, results: resultValues, gradOutputs: gradOuts, attrs: op.attributes });
+    const full = (value, type) => builder.broadcast(builder.scalarConstant(value, type.dtype).getResult(0), type.shape, []).getResult(0);
+    const gradInputs = rule({ builder, op, operands: operandValues, results: resultValues, gradOutputs: gradOuts, attrs: op.attributes, full });
     if (!gradInputs) continue;
 
     for (let o = 0; o < op.numOperands; o++) {

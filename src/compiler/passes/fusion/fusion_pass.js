@@ -1,5 +1,5 @@
 import { FunctionPass, PassResult } from '../pass.js';
-import { Operation, cloneRegion } from '../../ir/graph/operation.js';
+import { Operation } from '../../ir/graph/operation.js';
 import { Block, Region } from '../../ir/graph/block.js';
 import { topoSortByOperands } from '../../ir/graph/graph_algorithms.js';
 import { FusionLegality, FusionKind } from './fusion_analysis.js';
@@ -135,25 +135,7 @@ export class FusionPass extends FunctionPass {
     }
 
     for (const op of sortedOps) {
-      const mappedOperands = [];
-      for (let i = 0; i < op.numOperands; i++) {
-        const orig = op.getOperand(i);
-        const mapped = valueMap.get(orig);
-        mappedOperands.push(mapped !== undefined ? mapped : orig);
-      }
-      const resultTypes = op.results.map(r => r.type);
-      const clonedRegions = op.regions.length > 0 ? op.regions.map(r => cloneRegion(r)) : null;
-      const clonedOp = new Operation(
-        op.opName,
-        mappedOperands,
-        resultTypes,
-        new Map(op.attributes),
-        clonedRegions
-      );
-      bodyBlock.pushOp(clonedOp);
-      for (let i = 0; i < op.numResults; i++) {
-        valueMap.set(op.getResult(i), clonedOp.getResult(i));
-      }
+      bodyBlock.pushOp(op.clone(valueMap));
     }
 
     const yieldValues = outputValues.map(v => {

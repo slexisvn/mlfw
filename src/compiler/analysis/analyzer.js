@@ -37,6 +37,16 @@ export class Analyzer {
     return this;
   }
 
+  getVarBound(name) {
+    return this._varBounds.get(name) || null;
+  }
+
+  setVarBound(name, bound) {
+    if (bound) this._varBounds.set(name, bound);
+    else this._varBounds.delete(name);
+    return this;
+  }
+
   bindShape(shapeEnv) {
     for (const [name, extent] of shapeEnv) {
       if (typeof extent === 'number' && extent > 0) this.bind(name, 0, extent - 1);

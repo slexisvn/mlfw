@@ -3,6 +3,7 @@ import { wasmType, wasmLoad, wasmStore, wasmBytes, isDtypeFloat, wasmSimdEntry, 
 import { inferDtype } from '../../compiler/ir/lir/nodes.js';
 import { HALF_WASM_CONSTANTS } from '../../tensor/utils/half.js';
 import { irChildNodes } from '../../compiler/ir/ir_visitor.js';
+import { resolveShapeParam, isZeroFillBody } from '../codegen_utils.js';
 
 const _HALF_DTYPES = new Set(['f16', 'bf16']);
 
@@ -978,12 +979,7 @@ export class WasmCodegen {
   }
 
   _resolveShapeParam(buffer, dimIdx) {
-    if (this._primFunc && this._primFunc.shapeParamMap) {
-      const key = `${buffer.name}:${dimIdx}`;
-      const v = this._primFunc.shapeParamMap.get(key);
-      if (v) return v.name;
-    }
-    throw new Error(`WASM codegen: missing shape param for ${buffer.name}:${dimIdx}`);
+    return resolveShapeParam(this._primFunc, buffer, dimIdx, (v) => v.name, 'WASM');
   }
 
   _emitExpr(node) {
@@ -1172,7 +1168,9 @@ export class WasmCodegen {
     this._emitCoercedTo(node.a, prefix);
     this._emitCoercedTo(node.b, prefix);
     const ops = { eq: 'eq', ne: 'ne', lt: isFloat ? 'lt' : 'lt_s', le: isFloat ? 'le' : 'le_s', gt: isFloat ? 'gt' : 'gt_s', ge: isFloat ? 'ge' : 'ge_s' };
-    this._emit(prefix + '.' + (ops[node.direction] || 'eq'));
+    const cmp = ops[node.direction];
+    if (!cmp) throw new Error(`WASM codegen: unhandled compare direction '${node.direction}'`);
+    this._emit(prefix + '.' + cmp);
   }
 
   _emitCast(node) {
@@ -1357,17 +1355,7 @@ export class WasmCodegen {
   }
 
   _isZeroFillBody(body) {
-    let cur = body;
-    while (cur) {
-      if (cur.type === 'ForNode') { cur = cur.body; continue; }
-      if (cur.type === 'BlockNode') { cur = cur.body; continue; }
-      if (cur.type === 'BufferStoreNode' || cur.type === 'LIRFlatStoreNode') {
-        const val = cur.value;
-        return (val.type === 'FloatImmNode' && val.value === 0) || (val.type === 'IntImmNode' && val.value === 0);
-      }
-      return false;
-    }
-    return false;
+    return isZeroFillBody(body);
   }
 
   _collectBindings(root, out) {

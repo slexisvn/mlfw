@@ -136,8 +136,8 @@ describe('WebGPUCodegen._exprToWGSL', () => {
     expect(exprToWGSL(null)).toBe('0');
   });
 
-  it('returns 0 for unknown node types', () => {
-    expect(exprToWGSL({ type: 'UnknownNode' })).toBe('0');
+  it('throws on unknown node types', () => {
+    expect(() => exprToWGSL({ type: 'UnknownNode' })).toThrow(/unhandled expr node/);
   });
 });
 
