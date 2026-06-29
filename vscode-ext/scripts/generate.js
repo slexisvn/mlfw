@@ -17,7 +17,11 @@ const REPO_ROOT = resolve(EXT_ROOT, '..');
 const SOURCES = {
   parser: join(REPO_ROOT, 'src/cli/parser.js'),
   tokenizer: join(REPO_ROOT, 'src/cli/tokenizer.js'),
-  builtins: join(REPO_ROOT, 'src/cli/builtins.js'),
+  builtins: [
+    join(REPO_ROOT, 'src/cli/builtins.js'),
+    join(REPO_ROOT, 'src/cli/builtins-dataframe.js'),
+    join(REPO_ROOT, 'src/cli/builtins-quant.js'),
+  ],
   builtinDocs: join(EXT_ROOT, 'data/builtin-docs.md'),
 };
 

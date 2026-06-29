@@ -606,7 +606,7 @@ describe('Large matmul kernel quality', () => {
     const src = getSource(result, result.listKernels()[0]);
     checkKernelSanity(src);
     expect(findUndeclaredVars(src)).toEqual([]);
-    expect(src).toMatch(/for.*128/);
+    expect(src.includes('__shared__')).toBe(true);
   });
 
   it('tall-skinny matmul 512x4 @ 4x8 compiles', () => {

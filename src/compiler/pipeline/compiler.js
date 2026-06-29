@@ -13,6 +13,7 @@ import { verifyModule, verifyFunction } from '../ir/graph/verifier.js';
 import { CalibrationCollector } from '../analysis/calibration.js';
 import { GraphPartitionPass, PartitionMaterializationPass } from '../passes/partition/partition_pass.js';
 import { splitGraph } from './graph_split.js';
+import { detectPureConv } from '../schedule/conv_implicit_gemm.js';
 
 import { TraceLog, TraceLevel, CompilationError } from './trace.js';
 import { IRPrinter } from '../ir/graph/printer.js';
@@ -30,9 +31,11 @@ export class CompilerConfig {
     this.errorMode = opts.errorMode || 'strict';
 
     const isWebGPU = this.target && typeof this.target.isWebGPU === 'function' && this.target.isWebGPU();
+    const isGPU = this.target && typeof this.target.isGPU === 'function' && this.target.isGPU();
+    const isCuda = isGPU && !isWebGPU;
 
     this.fusion = { enabled: true, strategy: 'xla', epilogue: undefined, ...opts.fusion };
-    this.scheduling = { enabled: isWebGPU, autotune: false, ...opts.scheduling };
+    this.scheduling = { enabled: isWebGPU, autotune: false, gpuTiling: isCuda, ...opts.scheduling };
     this.matmulBackend = opts.matmulBackend || 'native';
     this.quantization = { enabled: false, ...opts.quantization };
     this.optimization = {
@@ -194,7 +197,11 @@ export class Compiler {
         run: (ctx) => {
           const cfg = ctx.compiler.config;
           const isWebGPU = typeof cfg.target.isWebGPU === 'function' && cfg.target.isWebGPU();
-          ctx.split = splitGraph(ctx.working, { config: cfg, target: cfg.target, cudaMatmulChain: ctx.cudaMatmulChain, isWebGPU });
+          const isCuda = typeof cfg.target.isGPU === 'function' && cfg.target.isGPU() && !isWebGPU;
+          let convCount = 0;
+          for (const func of ctx.working) for (const op of func.ops()) if (op.opName === 'conv' || op.opName === 'quantized_conv') convCount++;
+          const cudaConvChain = isCuda && convCount >= 2;
+          ctx.split = splitGraph(ctx.working, { config: cfg, target: cfg.target, cudaMatmulChain: ctx.cudaMatmulChain, cudaConvChain, isWebGPU });
         },
       },
       {
@@ -340,6 +347,9 @@ export class Compiler {
     this._eachFunc(graphModule, 'lowering', trace, errors, failed, resilient, (func) => {
       const ft0 = performance.now();
       const primFunc = lowerGraphToPrimFunc(func, this.config.target, this.context);
+      if (this.config.target.isGPU && this.config.target.isGPU() && !(this.config.target.isWebGPU && this.config.target.isWebGPU())) {
+        primFunc.convInfo = detectPureConv(func);
+      }
       trace.functionEvent('lowering', func.name, { durationMs: performance.now() - ft0 });
       primFuncs.push(primFunc);
       if (trace.shouldSnapshot('afterLowering')) {

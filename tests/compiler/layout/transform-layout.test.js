@@ -7,6 +7,11 @@ import { CPUTarget, CUDATarget, WasmTarget } from '../../../src/backend/target.j
 import { GraphFunction } from '../../../src/compiler/ir/graph/function.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
 
+const LAYOUT_AWARE = ['dot', 'conv', 'matmul', 'reduce'];
+const CPUTargetL = (o = {}) => CPUTarget({ layoutAwareOps: LAYOUT_AWARE, ...o });
+const CUDATargetL = (o = {}) => CUDATarget({ layoutAwareOps: LAYOUT_AWARE, ...o });
+const WasmTargetL = (o = {}) => WasmTarget({ layoutAwareOps: LAYOUT_AWARE, ...o });
+
 function run(func, target) {
   return new LayoutTransformPass({ target }).run(func);
 }
@@ -33,7 +38,7 @@ describe('LayoutTransformPass', () => {
     const func = buildFunction('f', [t, t], [t], (b, args) => {
       b.returnOp([b.add(args[0], args[1]).getResult(0)]);
     });
-    expect(run(func, CPUTarget())).toBe(PassResult.UNCHANGED);
+    expect(run(func, CPUTargetL())).toBe(PassResult.UNCHANGED);
   });
 
   it('inserts layout_transform for CPU dot RHS (row-major -> column-major)', () => {
@@ -44,7 +49,7 @@ describe('LayoutTransformPass', () => {
       b.returnOp([b.matmul(args[0], args[1]).getResult(0)]);
     });
 
-    expect(run(func, CPUTarget())).toBe(PassResult.CHANGED);
+    expect(run(func, CPUTargetL())).toBe(PassResult.CHANGED);
 
     const transforms = findOps(func, 'layout_transform');
     expect(transforms.length).toBe(1);
@@ -63,7 +68,7 @@ describe('LayoutTransformPass', () => {
       b.returnOp([b.matmul(args[0], args[1]).getResult(0)]);
     });
 
-    run(func, CPUTarget());
+    run(func, CPUTargetL());
 
     const dotOps = findOps(func, 'dot');
     expect(dotOps.length).toBe(1);
@@ -78,7 +83,7 @@ describe('LayoutTransformPass', () => {
       b.returnOp([b.matmul(args[0], args[1]).getResult(0)]);
     });
 
-    run(func, CPUTarget());
+    run(func, CPUTargetL());
 
     const transforms = findOps(func, 'layout_transform');
     const resultType = transforms[0].getResult(0).type;
@@ -95,7 +100,7 @@ describe('LayoutTransformPass', () => {
       b.returnOp([b.matmul(args[0], args[1]).getResult(0)]);
     });
 
-    expect(run(func, CUDATarget())).toBe(PassResult.UNCHANGED);
+    expect(run(func, CUDATargetL())).toBe(PassResult.UNCHANGED);
     expect(findOps(func, 'layout_transform').length).toBe(0);
   });
 
@@ -109,7 +114,7 @@ describe('LayoutTransformPass', () => {
       b.returnOp([d1.getResult(0), d2.getResult(0)]);
     });
 
-    run(func, CPUTarget());
+    run(func, CPUTargetL());
 
     const transforms = findOps(func, 'layout_transform');
     expect(transforms.length).toBe(1);
@@ -123,7 +128,7 @@ describe('LayoutTransformPass', () => {
       b.returnOp([b.conv(args[0], args[1], [1, 1], [0, 0, 0, 0]).getResult(0)]);
     });
 
-    expect(run(func, CUDATarget())).toBe(PassResult.CHANGED);
+    expect(run(func, CUDATargetL())).toBe(PassResult.CHANGED);
 
     const transforms = findOps(func, 'layout_transform');
     expect(transforms.length).toBeGreaterThanOrEqual(1);
@@ -145,7 +150,7 @@ describe('LayoutTransformPass', () => {
       b.returnOp([b.add(d.getResult(0), args[2]).getResult(0)]);
     });
 
-    run(func, CPUTarget());
+    run(func, CPUTargetL());
 
     const transforms = findOps(func, 'layout_transform');
     const addOp = findOps(func, 'add')[0];
@@ -167,7 +172,7 @@ describe('LayoutTransformPass — cost-benefit profitability', () => {
       b.returnOp([b.matmul(args[0], args[1]).getResult(0)]);
     });
 
-    expect(run(func, CPUTarget())).toBe(PassResult.CHANGED);
+    expect(run(func, CPUTargetL())).toBe(PassResult.CHANGED);
     expect(findOps(func, 'layout_transform').length).toBeGreaterThanOrEqual(1);
   });
 
@@ -179,7 +184,7 @@ describe('LayoutTransformPass — cost-benefit profitability', () => {
       b.returnOp([b.conv(args[0], args[1], [1, 1], [0, 0, 0, 0]).getResult(0)]);
     });
 
-    expect(run(func, CUDATarget())).toBe(PassResult.CHANGED);
+    expect(run(func, CUDATargetL())).toBe(PassResult.CHANGED);
     expect(findOps(func, 'layout_transform').length).toBeGreaterThanOrEqual(1);
   });
 
@@ -191,7 +196,7 @@ describe('LayoutTransformPass — cost-benefit profitability', () => {
       b.returnOp([b.matmul(args[0], args[1]).getResult(0)]);
     });
 
-    run(func, CPUTarget());
+    run(func, CPUTargetL());
     const transforms = findOps(func, 'layout_transform');
     expect(transforms.length).toBeLessThanOrEqual(2);
   });
@@ -218,7 +223,7 @@ describe('layout optimization is semantics-preserving: layout ON == layout OFF (
   let seed = 99;
   const rng = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
   for (const spec of LAYOUT_METAMORPHIC) {
-    for (const [tname, makeTarget] of [['cpu', CPUTarget], ['wasm', WasmTarget]]) {
+    for (const [tname, makeTarget] of [['cpu', CPUTargetL], ['wasm', WasmTargetL]]) {
       it(`${spec.name} on ${tname}`, () => {
         const inTypes = spec.inTypes.map((sh) => new TensorType(sh, F));
         const built = buildAuto(spec.name, inTypes, spec.build);

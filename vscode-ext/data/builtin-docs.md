@@ -322,6 +322,57 @@ Aggregate `Column` counting non-null values of a column within `agg(...)`.
 ## countStar() {function}
 Aggregate `Column` counting all rows (`COUNT(*)`) within `agg(...)`.
 
+## backtest(prices: DataFrame, signal: string = "momentum", portfolio: string = "long_short", lookback?: int, fraction?: float, cost?: float) {quant}
+Run a vectorized cross-sectional backtest over a price `DataFrame` shaped time × asset (numeric columns are the assets; a date/index column is dropped automatically). `signal` selects a trading signal (`"momentum"`, `"mean_reversion"`, `"zscore"`) and `portfolio` a position rule (`"equal_weight"`, `"cross_sectional"`, `"long_short"`); either may instead be a handle from `momentum(...)`, `long_short(...)`, etc. Returns a record with `.metrics` (a map of `sharpe`, `sortino`, `maxDrawdown`, `calmar`, `hitRate`, `turnover`), `.equity` and `.port_returns` (DataFrames), and `.weights`.
+
+## walk_forward(prices: DataFrame, signal: string = "momentum", portfolio: string = "long_short", folds: int = 4, min_train_fraction: float = 0.5, cost?: float) {quant}
+Walk-forward (out-of-sample) backtest: split the series into `folds` segments after an initial `min_train_fraction` training window and stitch the per-fold out-of-sample returns. Same arguments and result shape as `backtest`.
+
+## momentum(lookback: int = 20) {quant}
+Build a momentum signal handle (trailing return over `lookback` periods) to pass to `backtest`/`walk_forward` as `signal=`.
+
+## mean_reversion(lookback: int = 20) {quant}
+Build a mean-reversion signal handle (the negated `lookback` momentum) for use as `signal=`.
+
+## zscore(window: int = 20) {quant}
+Build a z-score signal handle (rolling standardized price over `window`) for use as `signal=`.
+
+## equal_weight() {quant}
+Portfolio handle weighting every active asset equally by sign, for use as `portfolio=`.
+
+## cross_sectional() {quant}
+Portfolio handle that demeans the signal across assets and scales to unit gross exposure, for use as `portfolio=`.
+
+## long_short(fraction: float = 0.2) {quant}
+Portfolio handle going long the top `fraction` and short the bottom `fraction` of ranked assets, for use as `portfolio=`.
+
+## sharpe(returns, periods_per_year: int = 252) {quant}
+Annualized Sharpe ratio of a returns array or a single-column returns `DataFrame`.
+
+## deflated_sharpe(returns, trial_sharpes: float[]) {quant}
+Deflated Sharpe ratio — the probability the strategy's Sharpe is real after accounting for the number and dispersion of `trial_sharpes` searched over (guards against selection bias).
+
+## pbo(trial_returns, partitions: int = 10) {quant}
+Probability of Backtest Overfitting via combinatorially symmetric cross-validation over a time × trial matrix (rows of returns, one column per candidate strategy). Accepts a matrix or a `DataFrame`.
+
+## min_track_record_length(returns, target_sharpe: float = 0, confidence: float = 0.95) {quant}
+Minimum number of observations needed before the observed Sharpe exceeds `target_sharpe` at the given `confidence`.
+
+## risk_parity(covariance) {quant}
+Equal-risk-contribution portfolio weights for a covariance matrix. Passing a returns `DataFrame` estimates the sample covariance first. Returns a weight array.
+
+## hrp(covariance) {quant}
+Hierarchical Risk Parity weights — cluster assets by correlation and allocate by recursive bisection. Accepts a covariance matrix or a returns `DataFrame`.
+
+## mean_variance(mu: float[], cov) {quant}
+Mean-variance optimal weights for expected returns `mu` and covariance `cov` (a matrix or a returns `DataFrame`), normalized to unit gross exposure.
+
+## quill(source: string) {quant}
+Parse and type-check a Quill product definition from a source string and return a product handle. Call `.price(rate=..., spot=..., vol=..., paths?=..., seed?=..., greeks?=...)` on it to run the Monte-Carlo pricer; the result has `.price`, `.standard_error`, and a `.greeks` map (`delta`, `vega`, `rho`, …). `greeks` is `"price-only"`, `"first-order"`, or `"full"`.
+
+## load_quill(path: string) {quant}
+Like `quill`, but read the Quill product definition from a file `path`. Returns the same product handle with a `.price(...)` method and a `.name` field.
+
 ## EarlyStopping(monitor, patience=3, mode="min")
 Stop training when a monitored metric stops improving for `patience` evaluations.
 

@@ -22,14 +22,16 @@ const KIND_RULES = [
   { kind: 'metric', match: name => /^(?:Accuracy|Precision|Recall|F1Score|ConfusionMatrix|MetricCollection)$/.test(name) },
   { kind: 'trainer', match: name => name === 'Trainer' },
   { kind: 'data', match: name => /^(?:DataLoader|TensorDataset|load_csv|encode|decode|normalize|train_test_split)$/.test(name) },
+  { kind: 'quant', match: name => /^(?:backtest|walk_forward|momentum|mean_reversion|zscore|equal_weight|cross_sectional|long_short|sharpe|deflated_sharpe|pbo|min_track_record_length|risk_parity|hrp|mean_variance|quill|load_quill)$/.test(name) },
   { kind: 'sequential', match: name => name === 'Sequential' },
   { kind: 'autograd', match: name => /^(?:requires_grad|grad|backward|detach)$/.test(name) },
   { kind: 'shape', match: name => /^(?:reshape|transpose|permute|expand|slice|unsqueeze|squeeze|narrow|select|contiguous)$/.test(name) },
   { kind: 'utility', match: name => /^(?:range|len|shape|dtype|print|trace|graph|compile|optim_config)$/.test(name) },
 ];
 
-export function extractBuiltins(builtinsSourcePath) {
-  const text = readFileSync(builtinsSourcePath, 'utf8');
+export function extractBuiltins(builtinsSource) {
+  const paths = Array.isArray(builtinsSource) ? builtinsSource : [builtinsSource];
+  const text = paths.map(path => readFileSync(path, 'utf8')).join('\n');
   const lists = collectLists(text);
   const defined = collectDefined(text);
   const builtins = [];

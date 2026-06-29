@@ -88,11 +88,9 @@ class Parser {
 
   parseBlock() {
     this.expectValue(':');
-    // One-line form: colon followed by statement on same line
     if (!this.at('newline') && !this.at('indent') && !this.at('eof')) {
       return [this.parseStatement()];
     }
-    // Multi-line form: colon + newline + INDENT ... DEDENT
     this.skipLines();
     this.expect('indent');
     const body = this.parseProgram('dedent').body;
@@ -315,7 +313,7 @@ class Parser {
 
   parsePrefix() {
     const token = this.current();
-    if (token.value === '-' || token.value === '+') {
+    if (token.type === 'symbol' && (token.value === '-' || token.value === '+')) {
       this.next();
       return this.locate({ type: 'Unary', op: token.value, value: this.parseExpression(7) }, token);
     }

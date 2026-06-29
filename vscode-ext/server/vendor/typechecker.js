@@ -23,8 +23,6 @@ export const TYPE_NAMES = Object.freeze([...Object.keys(NAME_TYPES), 'Record']);
 
 export const HOST_GLOBALS = Object.freeze(['chart']);
 
-// Names bound only inside a train/validate step (by checkModelBlock). Used outside,
-// they are reported with a scope-specific message instead of a generic undefined name.
 const STEP_SCOPED_BUILTINS = new Map([['log', 'log() can only be called inside a train or validate block']]);
 
 const TENSOR_MEMBERS = {

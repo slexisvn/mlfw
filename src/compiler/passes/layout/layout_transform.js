@@ -28,49 +28,53 @@ export class LayoutTransformPass extends FunctionPass {
 
     if (result.conversions.length === 0) return PassResult.UNCHANGED;
 
-    const insertedTransforms = new Map();
-
-    for (let i = 0; i < result.conversions.length; i++) {
-      const conv = result.conversions[i];
+    const groups = new Map();
+    for (const conv of result.conversions) {
       const { value, consumer, operandIdx, from, to } = conv;
-
       const key = valueLayoutKey(value, from, to);
-      let transformResult = insertedTransforms.get(key);
-
-      if (!transformResult) {
-        const convCost = this._policy.estimateConversionCost(from, to, value.type);
-        const useCount = value.uses ? [...value.uses()].length : 1;
-        const benefit = this._policy.estimateBenefit(consumer, value.type, useCount);
-        if (convCost > benefit) continue;
-
-        const srcOrder = from instanceof Layout ? from.order : Array.from({ length: value.type.rank }, (_, k) => k);
-        const dstOrder = to instanceof Layout ? to.order : Array.from({ length: value.type.rank }, (_, k) => k);
-
-        const resultType = new TensorType(value.type.shape, value.type.dtype, to);
-        const transformOp = new Operation('layout_transform', [value], [resultType], {
-          src_layout: [...srcOrder],
-          dst_layout: [...dstOrder]
-        });
-
-        const defOp = value.definingOp;
-        if (defOp && defOp.parentBlock) {
-          defOp.parentBlock.insertAfter(transformOp, defOp);
-        } else if (consumer.parentBlock) {
-          consumer.parentBlock.insertBefore(transformOp, consumer);
-        }
-
-        transformResult = transformOp.getResult(0);
-        insertedTransforms.set(key, transformResult);
+      let g = groups.get(key);
+      if (!g) {
+        g = { value, from, to, consumers: [], cost: this._policy.estimateConversionCost(from, to, value.type), benefit: 0 };
+        groups.set(key, g);
       }
+      g.consumers.push({ consumer, operandIdx });
+      const capable = this.target.layoutAwareOps && this.target.layoutAwareOps.has(consumer.opName);
+      g.benefit += capable ? this._policy.estimateBenefit(consumer, value.type, 1) : 0;
+    }
 
-      consumer.replaceOperand(operandIdx, transformResult);
+    let totalCost = 0, totalBenefit = 0;
+    const keep = [];
+    for (const g of groups.values()) {
+      if (g.benefit < g.cost) continue;
+      keep.push(g);
+      totalCost += g.cost;
+      totalBenefit += g.benefit;
+    }
+    if (keep.length === 0 || totalCost > totalBenefit) return PassResult.UNCHANGED;
+
+    for (const g of keep) {
+      const srcOrder = g.from instanceof Layout ? g.from.order : Array.from({ length: g.value.type.rank }, (_, k) => k);
+      const dstOrder = g.to instanceof Layout ? g.to.order : Array.from({ length: g.value.type.rank }, (_, k) => k);
+      const resultType = new TensorType(g.value.type.shape, g.value.type.dtype, g.to);
+      const transformOp = new Operation('layout_transform', [g.value], [resultType], {
+        src_layout: [...srcOrder],
+        dst_layout: [...dstOrder]
+      });
+      const defOp = g.value.definingOp;
+      if (defOp && defOp.parentBlock) {
+        defOp.parentBlock.insertAfter(transformOp, defOp);
+      } else if (g.consumers[0].consumer.parentBlock) {
+        g.consumers[0].consumer.parentBlock.insertBefore(transformOp, g.consumers[0].consumer);
+      }
+      const tr = transformOp.getResult(0);
+      for (const c of g.consumers) c.consumer.replaceOperand(c.operandIdx, tr);
     }
 
     if (this.trace && this.trace.level >= TraceLevel.DEBUG) {
       this.trace.emit({
         type: 'pass_detail', passName: this.name,
         conversions: result.conversions.length,
-        uniqueTransforms: insertedTransforms.size,
+        uniqueTransforms: keep.length,
         level: TraceLevel.DEBUG,
       });
     }

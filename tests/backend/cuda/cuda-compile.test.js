@@ -946,7 +946,7 @@ describe('GPU kernel quality — matmul contraction loop', () => {
     });
     const src = getSource(compile(func), 'q_mm_contract');
     expect(countForLoops(src)).toBeGreaterThanOrEqual(1);
-    expect(src).toMatch(/for.*32/);
+    expect(src.includes('__shared__')).toBe(true);
   });
 
   it('spatial dims use thread binding, not for loops', () => {

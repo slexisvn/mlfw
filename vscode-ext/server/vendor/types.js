@@ -2,8 +2,6 @@ export const ANY = Object.freeze({ kind: 'any' });
 export const UNKNOWN = Object.freeze({ kind: 'unknown' });
 export const INT = Object.freeze({ kind: 'number', num: 'int' });
 export const FLOAT = Object.freeze({ kind: 'number', num: 'float' });
-// Tera has a single numeric type at runtime; int/float are mutually assignable
-// display variants. NUMBER is the neutral numeric (renders as int).
 export const NUMBER = INT;
 export const STRING = Object.freeze({ kind: 'string' });
 export const BOOL = Object.freeze({ kind: 'bool' });

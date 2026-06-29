@@ -149,6 +149,10 @@
           "match": "\\b(?:avg|col|count|countStar|expr|lit|max|min|sum|name)\\b"
         },
         {
+          "name": "support.function.tera",
+          "match": "\\b(?:backtest|cross_sectional|deflated_sharpe|equal_weight|hrp|load_quill|long_short|mean_reversion|mean_variance|min_track_record_length|momentum|pbo|quill|risk_parity|sharpe|walk_forward|zscore)\\b"
+        },
+        {
           "name": "constant.language.dtype.tera",
           "match": "\\b(?:bool|f16|f32|f64|i32|i64)\\b"
         },

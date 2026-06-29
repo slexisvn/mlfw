@@ -33,6 +33,7 @@ export class TargetFeatures {
     this.libraryOps = config.libraryOps || new Set();
     this.enableEpilogueFusion = config.enableEpilogueFusion ?? false;
     this.preferredConvLayout = config.preferredConvLayout || null;
+    this.layoutAwareOps = config.layoutAwareOps instanceof Set ? config.layoutAwareOps : new Set(config.layoutAwareOps || []);
     this.preferredBlockFactor = config.preferredBlockFactor || 0;
     this.supportsBlockedLayout = config.supportsBlockedLayout ?? false;
     this.supportsInt8 = config.supportsInt8 ?? false;

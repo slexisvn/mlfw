@@ -2909,6 +2909,60 @@
       ]
     },
     {
+      "name": "backtest",
+      "kind": "quant",
+      "description": "Run a vectorized cross-sectional backtest over a price `DataFrame` shaped time × asset (numeric columns are the assets; a date/index column is dropped automatically). `signal` selects a trading signal (`\"momentum\"`, `\"mean_reversion\"`, `\"zscore\"`) and `portfolio` a position rule (`\"equal_weight\"`, `\"cross_sectional\"`, `\"long_short\"`); either may instead be a handle from `momentum(...)`, `long_short(...)`, etc. Returns a record with `.metrics` (a map of `sharpe`, `sortino`, `maxDrawdown`, `calmar`, `hitRate`, `turnover`), `.equity` and `.port_returns` (DataFrames), and `.weights`.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "prices",
+            "type": "DataFrame",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "signal",
+            "type": "string",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "\"momentum\""
+          },
+          {
+            "name": "portfolio",
+            "type": "string",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "\"long_short\""
+          },
+          {
+            "name": "lookback",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "fraction",
+            "type": "float",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "cost",
+            "type": "float",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "backtest(prices: DataFrame, signal: string = \"momentum\", portfolio: string = \"long_short\", lookback?: int, fraction?: float, cost?: float)"
+      },
+      "methods": []
+    },
+    {
       "name": "BatchNorm1d",
       "kind": "module",
       "description": "Batch normalization for 2-D `(N, C)` or 3-D `(N, C, L)` inputs.",
@@ -3709,6 +3763,17 @@
       "methods": []
     },
     {
+      "name": "cross_sectional",
+      "kind": "quant",
+      "description": "Portfolio handle that demeans the signal across assets and scales to unit gross exposure, for use as `portfolio=`.",
+      "returns": null,
+      "signature": {
+        "params": [],
+        "display": "cross_sectional()"
+      },
+      "methods": []
+    },
+    {
       "name": "CrossEntropyLoss",
       "kind": "module",
       "description": "Combined LogSoftmax + NLL loss — standard for multiclass classification. Pass `ignore_index` (e.g. a padding id) to exclude those target positions from the loss — useful for seq2seq with padded sequences.",
@@ -3955,6 +4020,32 @@
           }
         ],
         "display": "decode(indices, classes)"
+      },
+      "methods": []
+    },
+    {
+      "name": "deflated_sharpe",
+      "kind": "quant",
+      "description": "Deflated Sharpe ratio — the probability the strategy's Sharpe is real after accounting for the number and dispersion of `trial_sharpes` searched over (guards against selection bias).",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "returns",
+            "type": null,
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "trial_sharpes",
+            "type": "float[]",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "deflated_sharpe(returns, trial_sharpes: float[])"
       },
       "methods": []
     },
@@ -4406,6 +4497,17 @@
           }
         ],
         "display": "encode(data)"
+      },
+      "methods": []
+    },
+    {
+      "name": "equal_weight",
+      "kind": "quant",
+      "description": "Portfolio handle weighting every active asset equally by sign, for use as `portfolio=`.",
+      "returns": null,
+      "signature": {
+        "params": [],
+        "display": "equal_weight()"
       },
       "methods": []
     },
@@ -5129,6 +5231,25 @@
       ]
     },
     {
+      "name": "hrp",
+      "kind": "quant",
+      "description": "Hierarchical Risk Parity weights — cluster assets by correlation and allocate by recursive bisection. Accepts a covariance matrix or a returns `DataFrame`.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "covariance",
+            "type": null,
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "hrp(covariance)"
+      },
+      "methods": []
+    },
+    {
       "name": "i32",
       "kind": "dtype",
       "description": "32-bit signed integer dtype.",
@@ -5654,6 +5775,25 @@
       "methods": []
     },
     {
+      "name": "load_quill",
+      "kind": "quant",
+      "description": "Like `quill`, but read the Quill product definition from a file `path`. Returns the same product handle with a `.price(...)` method and a `.name` field.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "path",
+            "type": "string",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "load_quill(path: string)"
+      },
+      "methods": []
+    },
+    {
       "name": "load_tokenizer",
       "kind": "other",
       "description": "Load a tokenizer artifact saved with `tok.save(path)`. Returns a `Tokenizer`.",
@@ -5752,6 +5892,25 @@
           }
         }
       ]
+    },
+    {
+      "name": "long_short",
+      "kind": "quant",
+      "description": "Portfolio handle going long the top `fraction` and short the bottom `fraction` of ranked assets, for use as `portfolio=`.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "fraction",
+            "type": "float",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0.2"
+          }
+        ],
+        "display": "long_short(fraction: float = 0.2)"
+      },
+      "methods": []
     },
     {
       "name": "LSTM",
@@ -6072,6 +6231,51 @@
       ]
     },
     {
+      "name": "mean_reversion",
+      "kind": "quant",
+      "description": "Build a mean-reversion signal handle (the negated `lookback` momentum) for use as `signal=`.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "lookback",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "20"
+          }
+        ],
+        "display": "mean_reversion(lookback: int = 20)"
+      },
+      "methods": []
+    },
+    {
+      "name": "mean_variance",
+      "kind": "quant",
+      "description": "Mean-variance optimal weights for expected returns `mu` and covariance `cov` (a matrix or a returns `DataFrame`), normalized to unit gross exposure.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "mu",
+            "type": "float[]",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "cov",
+            "type": null,
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "mean_variance(mu: float[], cov)"
+      },
+      "methods": []
+    },
+    {
       "name": "MetricCollection",
       "kind": "metric",
       "description": "Group multiple metrics into one callable for convenience.",
@@ -6149,6 +6353,39 @@
           }
         ],
         "display": "min(column)"
+      },
+      "methods": []
+    },
+    {
+      "name": "min_track_record_length",
+      "kind": "quant",
+      "description": "Minimum number of observations needed before the observed Sharpe exceeds `target_sharpe` at the given `confidence`.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "returns",
+            "type": null,
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "target_sharpe",
+            "type": "float",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0"
+          },
+          {
+            "name": "confidence",
+            "type": "float",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0.95"
+          }
+        ],
+        "display": "min_track_record_length(returns, target_sharpe: float = 0, confidence: float = 0.95)"
       },
       "methods": []
     },
@@ -6281,6 +6518,25 @@
           }
         }
       ]
+    },
+    {
+      "name": "momentum",
+      "kind": "quant",
+      "description": "Build a momentum signal handle (trailing return over `lookback` periods) to pass to `backtest`/`walk_forward` as `signal=`.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "lookback",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "20"
+          }
+        ],
+        "display": "momentum(lookback: int = 20)"
+      },
+      "methods": []
     },
     {
       "name": "MSELoss",
@@ -6526,6 +6782,32 @@
       "methods": []
     },
     {
+      "name": "pbo",
+      "kind": "quant",
+      "description": "Probability of Backtest Overfitting via combinatorially symmetric cross-validation over a time × trial matrix (rows of returns, one column per candidate strategy). Accepts a matrix or a `DataFrame`.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "trial_returns",
+            "type": null,
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "partitions",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "10"
+          }
+        ],
+        "display": "pbo(trial_returns, partitions: int = 10)"
+      },
+      "methods": []
+    },
+    {
       "name": "Precision",
       "kind": "metric",
       "description": "Precision metric — fraction of positive predictions that are correct.",
@@ -6734,6 +7016,25 @@
           }
         }
       ]
+    },
+    {
+      "name": "quill",
+      "kind": "quant",
+      "description": "Parse and type-check a Quill product definition from a source string and return a product handle. Call `.price(rate=..., spot=..., vol=..., paths?=..., seed?=..., greeks?=...)` on it to run the Monte-Carlo pricer; the result has `.price`, `.standard_error`, and a `.greeks` map (`delta`, `vega`, `rho`, …). `greeks` is `\"price-only\"`, `\"first-order\"`, or `\"full\"`.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "source",
+            "type": "string",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "quill(source: string)"
+      },
+      "methods": []
     },
     {
       "name": "randn",
@@ -7075,6 +7376,25 @@
       ]
     },
     {
+      "name": "risk_parity",
+      "kind": "quant",
+      "description": "Equal-risk-contribution portfolio weights for a covariance matrix. Passing a returns `DataFrame` estimates the sample covariance first. Returns a weight array.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "covariance",
+            "type": null,
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "risk_parity(covariance)"
+      },
+      "methods": []
+    },
+    {
       "name": "Sequential",
       "kind": "sequential",
       "description": "Compose modules into a feed-forward pipeline. The output of each module is fed to the next.",
@@ -7205,6 +7525,32 @@
           }
         }
       ]
+    },
+    {
+      "name": "sharpe",
+      "kind": "quant",
+      "description": "Annualized Sharpe ratio of a returns array or a single-column returns `DataFrame`.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "returns",
+            "type": null,
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "periods_per_year",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "252"
+          }
+        ],
+        "display": "sharpe(returns, periods_per_year: int = 252)"
+      },
+      "methods": []
     },
     {
       "name": "Sigmoid",
@@ -8216,6 +8562,60 @@
       ]
     },
     {
+      "name": "walk_forward",
+      "kind": "quant",
+      "description": "Walk-forward (out-of-sample) backtest: split the series into `folds` segments after an initial `min_train_fraction` training window and stitch the per-fold out-of-sample returns. Same arguments and result shape as `backtest`.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "prices",
+            "type": "DataFrame",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "signal",
+            "type": "string",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "\"momentum\""
+          },
+          {
+            "name": "portfolio",
+            "type": "string",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "\"long_short\""
+          },
+          {
+            "name": "folds",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "4"
+          },
+          {
+            "name": "min_train_fraction",
+            "type": "float",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0.5"
+          },
+          {
+            "name": "cost",
+            "type": "float",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "walk_forward(prices: DataFrame, signal: string = \"momentum\", portfolio: string = \"long_short\", folds: int = 4, min_train_fraction: float = 0.5, cost?: float)"
+      },
+      "methods": []
+    },
+    {
       "name": "wasm",
       "kind": "device",
       "description": "WebAssembly execution backend.",
@@ -8306,6 +8706,25 @@
           }
         ],
         "display": "zerosLike(tensor) -> Tensor"
+      },
+      "methods": []
+    },
+    {
+      "name": "zscore",
+      "kind": "quant",
+      "description": "Build a z-score signal handle (rolling standardized price over `window`) for use as `signal=`.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "window",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "20"
+          }
+        ],
+        "display": "zscore(window: int = 20)"
       },
       "methods": []
     },

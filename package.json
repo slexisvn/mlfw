@@ -37,6 +37,10 @@
     "#plugins/query-engine": {
       "browser": "./plugins/query-engine/query-engine.browser.js",
       "default": "./plugins/query-engine/query-engine.node.js"
+    },
+    "#plugins/quantc": {
+      "browser": "./plugins/quantc/quantc.browser.js",
+      "default": "./plugins/quantc/quantc.node.js"
     }
   },
   "scripts": {

@@ -152,6 +152,26 @@ describe.skipIf(!cudaDeps)('CUDA compiled multi-kernel & cuBLAS plans', () => {
         expect(r.err, `width=${width} maxRelErr (${cudaDeps.arch})`).toBeLessThan(1e-2);
       }, 120000);
     }
+
+    async function deepConvErr(N, C, H) {
+      const rng = mulberry32(7000 + H);
+      const c1 = new nn.Conv2d(C, 16, 3); c1.eval();
+      const c2 = new nn.Conv2d(16, 16, 3); c2.eval();
+      const c3 = new nn.Conv2d(16, 8, 3); c3.eval();
+      const fwd = (x) => c3.forward(c2.forward(c1.forward(x).relu()).relu());
+      const x = tensor(data(rng, [N, C, H, H], -1, 1));
+      const cpu = flat(await compile({ forward: fwd }, [x], { target: CPUTarget() })(x));
+      const cf = compile({ forward: fwd }, [x], { target: CUDATarget(), verify: false });
+      let g = cf(x); if (g && g.then) g = await g; g = flat(g);
+      return { err: maxRelErr(cpu, g), split: !!cf.result().module.executionPlan, kernels: cf.result().module.listKernels().length };
+    }
+
+    it('3-conv chain native CUDA == CPU, splits + thread-bound by default (was hanging at 1-thread)', async () => {
+      const r = await deepConvErr(4, 3, 32);
+      expect(r.split, 'conv chain split into multiple kernels').toBe(true);
+      expect(r.kernels, 'multiple kernels').toBeGreaterThan(1);
+      expect(r.err, `conv maxRelErr (${cudaDeps.arch})`).toBeLessThan(1e-2);
+    }, 120000);
   });
 
   describe('device-resident multi-kernel executor', () => {

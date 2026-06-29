@@ -30,21 +30,76 @@ function pow2Range(min, max) {
   return out;
 }
 
-function matmulTileDims(primFunc, blockName) {
+function plainVars(idxArr) {
+  if (!idxArr) return null;
+  const out = [];
+  for (const ix of idxArr) {
+    if (!ix || ix.type !== 'VariableNode') return null;
+    out.push(ix.name);
+  }
+  return out;
+}
+
+function findAccStore(node, cName) {
+  const stack = [node];
+  while (stack.length > 0) {
+    const n = stack.pop();
+    if (!n || typeof n !== 'object') continue;
+    if (n.type === 'BufferStoreNode' && n.buffer && n.buffer.name === cName
+        && n.value && n.value.type === 'MathOpNode' && n.value.op === '+') {
+      return n;
+    }
+    if (n.body) stack.push(n.body);
+    if (n.stmts) for (const s of n.stmts) stack.push(s);
+    if (n.thenBody) stack.push(n.thenBody);
+    if (n.elseBody) stack.push(n.elseBody);
+  }
+  return null;
+}
+
+export function matmulTileDims(primFunc, blockName) {
   const info = classifyBlock(primFunc, blockName);
   if (!info) return null;
   const block = findBlock(primFunc.body, blockName);
   if (!block || block.reads.length < 2 || block.writes.length < 1) return null;
-  const A = block.reads[0].buffer;
-  const B = block.reads[1].buffer;
   const C = block.writes[0].buffer;
-  if (!A || !B || !C) return null;
-  if (A.shape.length !== 2 || B.shape.length !== 2 || C.shape.length !== 2) return null;
-  const M = C.shape[0], N = C.shape[1], K = A.shape[1];
+  if (!C || C.shape.length !== 2) return null;
+
+  const store = findAccStore(block.body, C.name);
+  if (!store) return null;
+  const ci = plainVars(store.indices);
+  if (!ci || ci.length !== 2) return null;
+  const v = store.value;
+  const isCLoad = (x) => x && x.type === 'BufferLoadNode' && x.buffer && x.buffer.name === C.name;
+  const prod = isCLoad(v.a) ? v.b : isCLoad(v.b) ? v.a : null;
+  if (!prod || prod.type !== 'MathOpNode' || prod.op !== '*') return null;
+  const loads = [prod.a, prod.b];
+  if (!loads.every(l => l && l.type === 'BufferLoadNode' && l.buffer)) return null;
+
+  const [vm, vn] = ci;
+  let A = null, vk = null;
+  for (const ld of loads) {
+    const idx = plainVars(ld.indices);
+    if (!idx || idx.length !== 2) return null;
+    if (idx[0] === vm) { A = ld; vk = idx[1]; }
+  }
+  if (!A) return null;
+  const B = loads[0] === A ? loads[1] : loads[0];
+  const bi = plainVars(B.indices);
+  let transB;
+  if (bi[0] === vk && bi[1] === vn) transB = false;
+  else if (bi[0] === vn && bi[1] === vk) transB = true;
+  else return null;
+
+  const Abuf = A.buffer, Bbuf = B.buffer;
+  if (Abuf.shape.length !== 2 || Bbuf.shape.length !== 2) return null;
+  const M = C.shape[0], N = C.shape[1], K = Abuf.shape[1];
   if (![M, N, K].every(d => typeof d === 'number' && d > 0)) return null;
-  if (B.shape[0] !== K || B.shape[1] !== N) return null;
-  if (A.dtype !== 'f32' || B.dtype !== 'f32' || C.dtype !== 'f32') return null;
-  return { A, B, C, M, N, K };
+  if (Abuf.shape[0] !== M) return null;
+  if (transB) { if (Bbuf.shape[0] !== N || Bbuf.shape[1] !== K) return null; }
+  else { if (Bbuf.shape[0] !== K || Bbuf.shape[1] !== N) return null; }
+  if (Abuf.dtype !== 'f32' || Bbuf.dtype !== 'f32' || C.dtype !== 'f32') return null;
+  return { A: Abuf, B: Bbuf, C, M, N, K, transB };
 }
 
 function enumerateRegisterBlockConfigs(target, dims, maxCandidates = 32) {
@@ -102,8 +157,15 @@ function goodness(c, warp) {
   return occ * 100 + reuse * 4 + squareTile * 6 + squareBlock * 4 + shallowK;
 }
 
-function buildRegisterBlockedMatmul(bufs, params) {
-  const { A, B, C, M, N, K } = bufs;
+export function pickFixedConfig(target, dims) {
+  if (!dims) return null;
+  const all = enumerateRegisterBlockConfigs(target, dims, 256);
+  const preferred = all.find(c => c.BM === 64 && c.BN === 64 && c.BK === 8 && c.TM === 4 && c.TN === 4);
+  return preferred || (all.length > 0 ? all[0] : null);
+}
+
+export function buildRegisterBlockedMatmul(bufs, params) {
+  const { A, B, C, M, N, K, transB } = bufs;
   const { BM, BN, BK, TM, TN } = params;
   const tX = BN / TN;
   const tY = BM / TM;
@@ -153,7 +215,7 @@ function buildRegisterBlockedMatmul(bufs, params) {
   const lb = IV('rb_lb'), bidx = IV('rb_bidx');
   const bRow = ADD(k0, DIV(bidx, I(BN)));
   const bCol = ADD(bcol, MOD(bidx, I(BN)));
-  let bVal = new BufferLoadNode(B, [bRow, bCol]);
+  let bVal = new BufferLoadNode(B, transB ? [bCol, bRow] : [bRow, bCol]);
   if (guardK || guardCol) {
     let cond = guardK ? LT(bRow, I(K)) : null;
     if (guardCol) cond = cond ? AND(cond, LT(bCol, I(N))) : LT(bCol, I(N));
@@ -229,7 +291,7 @@ function createMatmulRegisterBlockGPUSketch(configs) {
   return sketch;
 }
 
-function analyzePureMatmul(primFunc) {
+export function analyzePureMatmul(primFunc) {
   const names = collectAllBlockNames(primFunc.body);
   let reductionBlock = null;
   for (const name of names) {

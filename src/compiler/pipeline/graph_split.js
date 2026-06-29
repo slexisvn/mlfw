@@ -35,6 +35,13 @@ registerGraphSplitStrategy({
 });
 
 registerGraphSplitStrategy({
+  name: 'cuda-native-conv-chain',
+  priority: 25,
+  applies: (ctx) => ctx.cudaConvChain,
+  run: (graphModule) => splitGraphForNative(graphModule),
+});
+
+registerGraphSplitStrategy({
   name: 'webgpu',
   priority: 30,
   applies: (ctx) => ctx.isWebGPU,
