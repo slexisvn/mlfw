@@ -1,7 +1,7 @@
 import {
   ForNode, ForKind, SeqNode, AllocateNode, LetStmtNode, IfThenElseNode,
   BufferStoreNode, BufferLoadNode, VariableNode, IntImmNode, FloatImmNode,
-  MathOpNode, CompareNode, SyncThreadsNode,
+  MathOpNode, CompareNode, SyncThreadsNode, VecCopyNode,
 } from '../ir/tensor/nodes.js';
 import { Buffer } from '../ir/tensor/buffer.js';
 import { findBlock, collectAllBlockNames } from '../autotune/block_analysis.js';
@@ -147,7 +147,173 @@ export function buildImplicitGemmConv(bufs, ci, params) {
   return new AllocateNode(As, 'shared', new AllocateNode(Bs, 'shared', threadsNest));
 }
 
-export function applyImplicitGemmConv(schedule, target) {
+const VEC = 4;
+
+export function vectorizableConvConfig(target, ci, cfg) {
+  if (!validConvConfig(target, { M: ci.O, N: ci.N * ci.Oh * ci.Ow, K: ci.Cin * ci.Kh * ci.Kw }, cfg)) return false;
+  const { BM, BN, BK, TM, TN } = cfg;
+  const M = ci.O, GN = ci.N * ci.Oh * ci.Ow, K = ci.Cin * ci.Kh * ci.Kw;
+  if (M % BM !== 0 || GN % BN !== 0 || K % BK !== 0) return false;
+  if ([BM, BN, BK, TM, TN].some(v => v % VEC !== 0)) return false;
+  const numThreads = (BM / TM) * (BN / TN);
+  if ((BM * BK) % (VEC * numThreads) !== 0) return false;
+  if ((BK * BN) % numThreads !== 0) return false;
+  return true;
+}
+
+export function buildVectorizedImplicitGemmConv(bufs, ci, params) {
+  const { weight, input, output } = bufs;
+  const { N, Cin, H, W, O, Kh, Kw, Oh, Ow, sH, sW, pH, pW, dH, dW } = ci;
+  const { BM, BN, BK, TM, TN } = params;
+  const V = VEC;
+  const M = O, GN = N * Oh * Ow, K = Cin * Kh * Kw;
+  const KhKw = Kh * Kw, OhOw = Oh * Ow, HW = H * W, CHW = Cin * H * W;
+  const tX = BN / TN, tY = BM / TM, numThreads = tX * tY, numKTiles = K / BK;
+  const aTotal = BM * BK, bTotal = BK * BN;
+  const aRegs = aTotal / numThreads, bLoads = bTotal / numThreads;
+  const aLoadsV = aRegs / V;
+  const BKv = BK / V;
+
+  const maxIh = (Oh - 1) * sH + (Kh - 1) * dH - pH, maxIw = (Ow - 1) * sW + (Kw - 1) * dW - pW;
+  const needGuardH = pH > 0 || maxIh >= H, needGuardW = pW > 0 || maxIw >= W;
+
+  const weightFlat = new Buffer(weight.name, [M * K > 0 ? M * K : 1], weight.dtype, weight.scope);
+  const inputFlat = new Buffer(input.name, [N * CHW > 0 ? N * CHW : 1], input.dtype, input.scope);
+
+  const As = new Buffer('iv_As', [2 * aTotal], 'f32', 'shared'); As.align16 = true;
+  const Bs = new Buffer('iv_Bs', [2 * bTotal], 'f32', 'shared'); Bs.align16 = true;
+  const acc = new Buffer('iv_acc', [TM * TN], 'f32', 'local');
+  const af = new Buffer('iv_af', [TM], 'f32', 'local'); af.align16 = true;
+  const bf = new Buffer('iv_bf', [TN], 'f32', 'local'); bf.align16 = true;
+  const ra = new Buffer('iv_ra', [aRegs], 'f32', 'local'); ra.align16 = true;
+  const rb = new Buffer('iv_rb', [bLoads], 'f32', 'local');
+
+  const bx = IV('iv_bx'), by = IV('iv_by'), tx = IV('iv_tx'), ty = IV('iv_ty');
+  const tid = IV('iv_tid'), brow = IV('iv_brow'), bcol = IV('iv_bcol');
+  const accIdx = (mi, ni) => ADD(MUL(mi, I(TN)), ni);
+  let uid = 0;
+
+  const im = IV('iv_im'), inn = IV('iv_in');
+  const initAcc = forU(im, TM, forU(inn, TN, new BufferStoreNode(acc, [accIdx(im, inn)], FZERO())));
+
+  const prefetch = (k0e) => {
+    const u = uid++;
+    const la = IV('iv_la' + u), c = IV('iv_c' + u);
+    const m = DIV(c, I(BKv)), kc = MUL(MOD(c, I(BKv)), I(V));
+    const pa = forU(la, aLoadsV, new LetStmtNode(c, ADD(tid, MUL(la, I(numThreads))),
+      new VecCopyNode(ra, MUL(la, I(V)), weightFlat, ADD(MUL(ADD(brow, m), I(K)), ADD(k0e, kc)), V)));
+    const lb = IV('iv_lb' + u), e = IV('iv_e' + u);
+    const kRow = DIV(e, I(BN)), col = MOD(e, I(BN)), bN = ADD(bcol, col);
+    const bK = ADD(k0e, kRow);
+    const bCin = DIV(bK, I(KhKw)), bR = MOD(bK, I(KhKw)), bKh = DIV(bR, I(Kw)), bKw = MOD(bR, I(Kw));
+    const nB = DIV(bN, I(OhOw)), nR = MOD(bN, I(OhOw)), oh = DIV(nR, I(Ow)), ow = MOD(nR, I(Ow));
+    const ih = SUB(ADD(MUL(oh, I(sH)), MUL(bKh, I(dH))), I(pH));
+    const iw = SUB(ADD(MUL(ow, I(sW)), MUL(bKw, I(dW))), I(pW));
+    const off = ADD(ADD(ADD(MUL(nB, I(CHW)), MUL(bCin, I(HW))), MUL(ih, I(W))), iw);
+    let v = new BufferLoadNode(inputFlat, [off]);
+    let inb = null;
+    if (needGuardH) inb = AND(GE(ih, I(0)), LT(ih, I(H)));
+    if (needGuardW) { const cc = AND(GE(iw, I(0)), LT(iw, I(W))); inb = inb ? AND(inb, cc) : cc; }
+    if (inb) v = new IfThenElseNode(inb, v, FZERO());
+    const pb = forU(lb, bLoads, new LetStmtNode(e, ADD(tid, MUL(lb, I(numThreads))), new BufferStoreNode(rb, [lb], v)));
+    return new SeqNode([pa, pb]);
+  };
+
+  const commit = (offAe, offBe) => {
+    const u = uid++;
+    const la = IV('iv_la' + u), c = IV('iv_c' + u);
+    const m = DIV(c, I(BKv)), kc = MUL(MOD(c, I(BKv)), I(V));
+    const stores = [];
+    for (let i = 0; i < V; i++) {
+      stores.push(new BufferStoreNode(As, [ADD(offAe, ADD(MUL(ADD(kc, I(i)), I(BM)), m))], new BufferLoadNode(ra, [ADD(MUL(la, I(V)), I(i))])));
+    }
+    const ca = forU(la, aLoadsV, new LetStmtNode(c, ADD(tid, MUL(la, I(numThreads))), new SeqNode(stores)));
+    const lb = IV('iv_lb' + u), e = IV('iv_e' + u);
+    const cb = forU(lb, bLoads, new LetStmtNode(e, ADD(tid, MUL(lb, I(numThreads))),
+      new BufferStoreNode(Bs, [ADD(offBe, e)], new BufferLoadNode(rb, [lb]))));
+    return new SeqNode([ca, cb]);
+  };
+
+  const computeMMA = (offAe, offBe) => {
+    const u = uid++;
+    const kk = IV('iv_kk' + u);
+    const frags = [];
+    const aBase = ADD(offAe, ADD(MUL(kk, I(BM)), MUL(ty, I(TM))));
+    for (let q = 0; q < TM / V; q++) frags.push(new VecCopyNode(af, I(q * V), As, ADD(aBase, I(q * V)), V));
+    const bBaseE = ADD(offBe, ADD(MUL(kk, I(BN)), MUL(tx, I(TN))));
+    for (let q = 0; q < TN / V; q++) frags.push(new VecCopyNode(bf, I(q * V), Bs, ADD(bBaseE, I(q * V)), V));
+    const mi = IV('iv_mi' + u), ni = IV('iv_ni' + u);
+    const mma = forU(mi, TM, forU(ni, TN, new BufferStoreNode(acc, [accIdx(mi, ni)],
+      ADD(new BufferLoadNode(acc, [accIdx(mi, ni)]),
+          MUL(new BufferLoadNode(af, [mi]), new BufferLoadNode(bf, [ni]))))));
+    return forU(kk, BK, new SeqNode([...frags, mma]));
+  };
+
+  const ktVar = IV('iv_kt');
+  const p = IV('iv_p'), pN = IV('iv_pN');
+  const offA = MUL(p, I(aTotal)), offB = MUL(p, I(bTotal));
+  const offAn = MUL(pN, I(aTotal)), offBn = MUL(pN, I(bTotal));
+  const isNotLast = LT(ktVar, I(numKTiles - 1));
+  const preamble = new SeqNode([prefetch(I(0)), commit(I(0), I(0)), new SyncThreadsNode()]);
+  const ktBody = new LetStmtNode(p, MOD(ktVar, I(2)), new LetStmtNode(pN, MOD(ADD(ktVar, I(1)), I(2)),
+    new SeqNode([
+      new IfThenElseNode(isNotLast, prefetch(MUL(ADD(ktVar, I(1)), I(BK)))),
+      computeMMA(offA, offB),
+      new IfThenElseNode(isNotLast, new SeqNode([commit(offAn, offBn), new SyncThreadsNode()])),
+    ])));
+  const ktLoop = forS(ktVar, numKTiles, ktBody);
+
+  const wm = IV('iv_wm'), wn = IV('iv_wn');
+  const cM = ADD(ADD(brow, MUL(ty, I(TM))), wm);
+  const cN = ADD(ADD(bcol, MUL(tx, I(TN))), wn);
+  const wB = DIV(cN, I(OhOw)), wR = MOD(cN, I(OhOw)), wOh = DIV(wR, I(Ow)), wOw = MOD(wR, I(Ow));
+  const writeStore = new BufferStoreNode(output, [wB, cM, wOh, wOw], new BufferLoadNode(acc, [accIdx(wm, wn)]));
+  const writeLoop = forU(wm, TM, forU(wn, TN, writeStore));
+
+  const perThread = new SeqNode([initAcc, preamble, ktLoop, writeLoop]);
+  const locals = new AllocateNode(acc, 'local', new AllocateNode(af, 'local', new AllocateNode(bf, 'local',
+    new AllocateNode(ra, 'local', new AllocateNode(rb, 'local', perThread)))));
+  const letChain = new LetStmtNode(tid, ADD(MUL(ty, I(tX)), tx),
+    new LetStmtNode(brow, MUL(by, I(BM)), new LetStmtNode(bcol, MUL(bx, I(BN)), locals)));
+  const gridX = GN / BN, gridY = M / BM;
+  const threadsNest = forT(by, 'blockIdx.y', gridY,
+    forT(bx, 'blockIdx.x', gridX,
+      forT(ty, 'threadIdx.y', tY,
+        forT(tx, 'threadIdx.x', tX, letChain))));
+  return new AllocateNode(As, 'shared', new AllocateNode(Bs, 'shared', threadsNest));
+}
+
+function validConvConfig(target, dims, cfg) {
+  const { BM, BN, BK, TM, TN } = cfg;
+  if (![BM, BN, BK, TM, TN].every(v => typeof v === 'number' && v > 0)) return false;
+  if (BM % TM !== 0 || BN % TN !== 0) return false;
+  const tX = BN / TN, tY = BM / TM, threads = tX * tY;
+  const warp = target.warpSize || 32;
+  if (threads % warp !== 0) return false;
+  if (threads > (target.maxThreadsPerBlock || 1024)) return false;
+  const smem = (BM * BK + BK * BN) * 4 * 2;
+  if (smem > (target.sharedMemoryBytes || 49152)) return false;
+  const regs = TM * TN + TM + TN + warp;
+  if (regs > (target.registersPerThread || 255)) return false;
+  return true;
+}
+
+const VEC_CONFIGS = [
+  { BM: 128, BN: 64, BK: 8, TM: 8, TN: 8 },
+  { BM: 64, BN: 64, BK: 8, TM: 8, TN: 8 },
+  { BM: 64, BN: 64, BK: 8, TM: 4, TN: 8 },
+  { BM: 64, BN: 32, BK: 8, TM: 8, TN: 8 },
+  { BM: 32, BN: 64, BK: 8, TM: 4, TN: 8 },
+];
+
+function pickVectorizedConvConfig(target, ci) {
+  for (const cfg of VEC_CONFIGS) {
+    if (vectorizableConvConfig(target, ci, cfg)) return cfg;
+  }
+  return null;
+}
+
+export function applyImplicitGemmConv(schedule, target, sCfg) {
   const pf = schedule.func;
   const ci = pf.convInfo;
   if (!ci) return false;
@@ -160,9 +326,23 @@ export function applyImplicitGemmConv(schedule, target) {
   if (!input || !weight || !output) return false;
   const M = ci.O, GN = ci.N * ci.Oh * ci.Ow, K = ci.Cin * ci.Kh * ci.Kw;
   if (K < 128 || GN < 64) return false;
-  const cfg = pickFixedConfig(target, { M, N: GN, K });
-  if (!cfg) return false;
-  const body = buildImplicitGemmConv({ weight, input, output }, ci, cfg);
+  const override = sCfg && sCfg.convConfig;
+  const noVec = sCfg && sCfg.convNoVec;
+
+  let body = null;
+  if (!noVec) {
+    const vecCfg = override
+      ? (vectorizableConvConfig(target, ci, override) ? override : null)
+      : pickVectorizedConvConfig(target, ci);
+    if (vecCfg) body = buildVectorizedImplicitGemmConv({ weight, input, output }, ci, vecCfg);
+  }
+  if (!body) {
+    const cfg = override
+      ? (validConvConfig(target, { M, N: GN, K }, override) ? override : null)
+      : pickFixedConfig(target, { M, N: GN, K });
+    if (!cfg) return false;
+    body = buildImplicitGemmConv({ weight, input, output }, ci, cfg);
+  }
   schedule.func.body = body;
   if (schedule.func._setChild) schedule.func._setChild('body', body);
   schedule.func.gpuRegisterBlocked = true;

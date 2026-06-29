@@ -30,6 +30,7 @@ const SCHEMA = {
   ForNode: [field('min', 'expr'), field('extent', 'expr'), field('loopVar', 'expr', { bind: true }), field('body', 'stmt')],
   BlockNode: [field('iterVars', 'expr', { iterVarBinding: true }), field('reads', 'expr', { region: true, array: true }), field('writes', 'expr', { region: true, array: true }), field('initBody', 'stmt'), field('body', 'stmt')],
   SeqNode: [field('stmts', 'stmt', { array: true })],
+  VecCopyNode: [field('dstIndex', 'expr'), field('srcIndex', 'expr')],
   LetStmtNode: [field('value', 'expr'), field('variable', 'expr', { bind: true }), field('body', 'stmt')],
   AllocateNode: [field('body', 'stmt')],
   WhileNode: [field('condBody', 'stmt'), field('condVar', 'expr', { bind: true }), field('loopBody', 'stmt')],

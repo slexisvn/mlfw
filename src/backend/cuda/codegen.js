@@ -98,7 +98,8 @@ export class CUDACodegen {
 
     for (const buf of this._sharedBuffers) {
       const numel = buf.numel();
-      this._emit(`__shared__ ${cType(buf.dtype)} ${buf.name}[${numel > 0 ? numel : 1}];`);
+      const al = buf.align16 ? '__align__(16) ' : '';
+      this._emit(`__shared__ ${al}${cType(buf.dtype)} ${buf.name}[${numel > 0 ? numel : 1}];`);
     }
     for (const d of this._promotedBufferDecls) {
       this._emit(`__shared__ ${cType(d.dtype)} ${d.name}[${d.size}];`);
@@ -317,7 +318,8 @@ export class CUDACodegen {
       this._declaredLocals.add(node.buffer.name);
       const numel = node.buffer.numel();
       if (numel > 0) {
-        this._emit(`${cType(node.buffer.dtype)} ${node.buffer.name}[${numel}];`);
+        const al = node.buffer.align16 ? '__align__(16) ' : '';
+        this._emit(`${al}${cType(node.buffer.dtype)} ${node.buffer.name}[${numel}];`);
       } else {
         this._emit(`${cType(node.buffer.dtype)}* ${node.buffer.name} = (${cType(node.buffer.dtype)}*)alloca(${this._dynamicNumel(node.buffer)} * sizeof(${cType(node.buffer.dtype)}));`);
       }
@@ -357,6 +359,13 @@ export class CUDACodegen {
 
   _visitBufferStoreNode(node) {
     this._emit(`${node.buffer.name}[${this._flatIndex(node.buffer, node.indices)}] = ${this._exprToC(node.value)};`);
+  }
+
+  _visitVecCopyNode(node) {
+    const vt = `${cType(node.dstBuffer.dtype)}${node.width}`;
+    const d = `${node.dstBuffer.name}[${this._flatIndex(node.dstBuffer, [node.dstIndex])}]`;
+    const s = `${node.srcBuffer.name}[${this._flatIndex(node.srcBuffer, [node.srcIndex])}]`;
+    this._emit(`*reinterpret_cast<${vt}*>(&${d}) = *reinterpret_cast<const ${vt}*>(&${s});`);
   }
 
   _visitLIRFlatStore(node) {
@@ -477,6 +486,9 @@ export class CUDACodegen {
       if (!node) continue;
       if (node.type === 'BufferStoreNode' || node.type === 'LIRFlatStoreNode') {
         this._storeBuffers.add(node.buffer.name);
+      }
+      if (node.type === 'VecCopyNode') {
+        this._storeBuffers.add(node.dstBuffer.name);
       }
       if (node.type === 'LIRAccumulatorNode' && node.flushStore) {
         this._storeBuffers.add(node.flushStore.buffer.name);
@@ -602,6 +614,10 @@ export class CUDACodegen {
       if ((node.type === 'BufferLoadNode' || node.type === 'BufferStoreNode' ||
            node.type === 'LIRFlatLoadNode' || node.type === 'LIRFlatStoreNode') && node.buffer) {
         refs.set(node.buffer.name, node.buffer);
+      }
+      if (node.type === 'VecCopyNode') {
+        if (node.dstBuffer) refs.set(node.dstBuffer.name, node.dstBuffer);
+        if (node.srcBuffer) refs.set(node.srcBuffer.name, node.srcBuffer);
       }
       if (node.type === 'LIRAccumulatorNode') {
         if (node.flushStore && node.flushStore.buffer) refs.set(node.flushStore.buffer.name, node.flushStore.buffer);

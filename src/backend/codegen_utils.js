@@ -61,6 +61,7 @@ export function visitStatements(cg, start) {
       case 'LIRAccumulatorNode': cg._visitLIRAccumulator(cur); continue;
       case 'WhileNode': cg._visitWhileNode(cur); continue;
       case 'SyncThreadsNode': cg._emitSync(); continue;
+      case 'VecCopyNode': cg._visitVecCopyNode(cur); continue;
       case 'EvaluateNode': continue;
       default: throw new Error(`${cg.constructor.name}: unhandled statement node '${cur.type}'`);
     }

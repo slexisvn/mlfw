@@ -52,7 +52,7 @@ export class SchedulePass extends PrimFuncPass {
       let handled = false;
       if (this.target.isGPU() && !this.target.isWebGPU()) {
         handled = applyDeterministicGpuMatmul(sch, this.target, sCfg);
-        if (!handled) handled = applyImplicitGemmConv(sch, this.target);
+        if (!handled) handled = applyImplicitGemmConv(sch, this.target, sCfg);
         if (!handled) handled = applyDeterministicGpuConv(sch, this.target);
       }
       if (!handled && sCfg.enabled) {

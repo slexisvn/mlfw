@@ -185,6 +185,17 @@ export class SyncThreadsNode extends TensorNode {
   }
 }
 
+export class VecCopyNode extends TensorNode {
+  constructor(dstBuffer, dstIndex, srcBuffer, srcIndex, width) {
+    super();
+    this.dstBuffer = dstBuffer;
+    this.dstIndex = dstIndex;
+    this.srcBuffer = srcBuffer;
+    this.srcIndex = srcIndex;
+    this.width = width;
+  }
+}
+
 export class CallExternNode extends TensorNode {
   constructor(name, args, dtype) {
     super();
