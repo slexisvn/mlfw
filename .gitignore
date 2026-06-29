@@ -3,5 +3,5 @@ coverage
 dist/
 notebook/dist
 lightning_logs/
-plugins/query-engine/*
+plugins/*
 # *.ckpt
