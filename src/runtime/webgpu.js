@@ -656,10 +656,9 @@ fn rnn(@builtin(local_invocation_id) lid : vec3<u32>) {
   return k;
 }
 
-function lstmPackedWeights(cell, E, H) {
-  const tag = `${E}|${H}`;
+function rnnPackedWeights(cell, E, H, G) {
+  const tag = `${E}|${H}|${G}`;
   if (cell._webgpuPacked && cell._webgpuPackedTag === tag) return cell._webgpuPacked;
-  const G = 4 * H;
   const raw = t => t.contiguous()._impl.storage.rawData;
   const Wx = raw(cell.x2h.weight), Wh = raw(cell.h2h.weight);
   const bx = cell.x2h.bias ? raw(cell.x2h.bias) : new Float32Array(G);
@@ -674,7 +673,72 @@ function lstmPackedWeights(cell, E, H) {
   return packed;
 }
 
+function lstmPackedWeights(cell, E, H) { return rnnPackedWeights(cell, E, H, 4 * H); }
+
+function gruKernelWGSL(E, H, T) {
+  const key = `gru|${E}|${H}|${T}`;
+  let k = _rnnKernels.get(key);
+  if (k) return k;
+  const G = 3 * H;
+  const offWh = G * E, offBx = G * E + G * H, offBh = offBx + G;
+  const src =
+`fn sig(x: f32) -> f32 { return 1.0 / (1.0 + exp(-x)); }
+@group(0) @binding(0) var<storage, read> xin : array<f32>;
+@group(0) @binding(1) var<storage, read> w : array<f32>;
+@group(0) @binding(2) var<storage, read> h0 : array<f32>;
+@group(0) @binding(3) var<storage, read_write> ys : array<f32>;
+@group(0) @binding(4) var<storage, read_write> hn : array<f32>;
+var<workgroup> wh : array<f32, ${H}>;
+var<workgroup> wgx : array<f32, ${G}>;
+var<workgroup> wgh : array<f32, ${G}>;
+@compute @workgroup_size(${RNN_WG})
+fn rnn(@builtin(local_invocation_id) lid : vec3<u32>) {
+  let tid = lid.x;
+  for (var p = tid; p < ${H}u; p = p + ${RNN_WG}u) { wh[p] = h0[p]; }
+  workgroupBarrier();
+  for (var t = 0u; t < ${T}u; t = t + 1u) {
+    for (var j = tid; j < ${G}u; j = j + ${RNN_WG}u) {
+      var ax = w[${offBx}u + j];
+      var ah = w[${offBh}u + j];
+      let xb = t * ${E}u;
+      let wxb = j * ${E}u;
+      for (var e = 0u; e < ${E}u; e = e + 1u) { ax = ax + xin[xb + e] * w[wxb + e]; }
+      let whb = ${offWh}u + j * ${H}u;
+      for (var q = 0u; q < ${H}u; q = q + 1u) { ah = ah + wh[q] * w[whb + q]; }
+      wgx[j] = ax;
+      wgh[j] = ah;
+    }
+    workgroupBarrier();
+    for (var j = tid; j < ${H}u; j = j + ${RNN_WG}u) {
+      let rr = sig(wgx[j] + wgh[j]);
+      let zz = sig(wgx[${H}u + j] + wgh[${H}u + j]);
+      let nn = tanh(wgx[${2 * H}u + j] + rr * wgh[${2 * H}u + j]);
+      let nh = (1.0 - zz) * nn + zz * wh[j];
+      wh[j] = nh;
+      ys[t * ${H}u + j] = nh;
+    }
+    workgroupBarrier();
+  }
+  for (var p = tid; p < ${H}u; p = p + ${RNN_WG}u) { hn[p] = wh[p]; }
+}`;
+  k = {
+    name: 'rnn', source: src, metadata: {
+      bindings: [
+        { index: 0, name: 'xin', dtype: 'f32', mode: 'read' },
+        { index: 1, name: 'w', dtype: 'f32', mode: 'read' },
+        { index: 2, name: 'h0', dtype: 'f32', mode: 'read' },
+        { index: 3, name: 'ys', dtype: 'f32', mode: 'read_write' },
+        { index: 4, name: 'hn', dtype: 'f32', mode: 'read_write' },
+      ],
+      dispatchSize: [1, 1, 1],
+    },
+  };
+  _rnnKernels.set(key, k);
+  return k;
+}
+
 export function webgpuRNN(xs, cells, opts, h0, c0) {
+  if (opts.kind === 'gru') return webgpuGRU(xs, cells, opts, h0);
   if (opts.batch !== 1) return null;
   const H = opts.hiddenSize, T = opts.seqLen, L = cells.length;
   let layerRaw = webgpuEagerInput(xs);
@@ -701,4 +765,25 @@ export function webgpuRNN(xs, cells, opts, h0, c0) {
     ? wrapResult(arrs[0], [1, 1, H], 'f32', WEBGPU_DEVICE)
     : stack(arrs.map(a => wrapResult(a, [1, H], 'f32', WEBGPU_DEVICE)), 0);
   return [out, wrapState(hns), wrapState(cns)];
+}
+
+function webgpuGRU(xs, cells, opts, h0) {
+  if (opts.batch !== 1) return null;
+  const H = opts.hiddenSize, T = opts.seqLen, L = cells.length;
+  let layerRaw = webgpuEagerInput(xs);
+  const hns = [];
+  for (let l = 0; l < L; l++) {
+    const E = l === 0 ? opts.inputSize : H;
+    const packed = rnnPackedWeights(cells[l], E, H, 3 * H);
+    const h0Raw = h0 != null ? webgpuEagerInput(select(h0, 0, l)) : new Float32Array(H);
+    const ys = new Float32Array(T * H), hnA = new Float32Array(H);
+    recordWebGPUEager(gruKernelWGSL(E, H, T), [layerRaw, packed, h0Raw, ys, hnA], undefined);
+    layerRaw = ys;
+    hns.push(hnA);
+  }
+  const out = wrapResult(layerRaw, [T, 1, H], 'f32', WEBGPU_DEVICE);
+  const hy = L === 1
+    ? wrapResult(hns[0], [1, 1, H], 'f32', WEBGPU_DEVICE)
+    : stack(hns.map(a => wrapResult(a, [1, H], 'f32', WEBGPU_DEVICE)), 0);
+  return [out, hy];
 }

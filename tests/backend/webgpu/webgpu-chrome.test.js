@@ -140,6 +140,20 @@ window.runFusedLSTM = async (E, H, T, seed) => {
   await M.flushWebGPUEager();
   return { cpu, gpu: readDevice(og) };
 };
+window.runFusedGRU = async (E, H, T, L, seed) => {
+  await M.preloadWebGPU();
+  const r = seededRng(seed);
+  const f = []; for (let i = 0; i < T * E; i++) f.push(r() * 2 - 1);
+  const inp = tensor(nestArr(f, [1, T, E]));
+  const m = new M.GRU(E, H, L, true);
+  const cpuOut = m.forward(inp);
+  const cpu = flat(cpuOut[0]);
+  const cpuH = flat(cpuOut[1]);
+  m.to(M.WEBGPU_DEVICE);
+  const og = m.forward(inp.to(M.WEBGPU_DEVICE));
+  await M.flushWebGPUEager();
+  return { cpu, gpu: readDevice(og[0]), cpuH, gpuH: readDevice(og[1]) };
+};
 window.runTrainerPredict = async (arch, inF, outF, B, nb, seed) => {
   await M.preloadWebGPU();
   const r = seededRng(seed);
@@ -511,6 +525,15 @@ describe.skipIf(!deps)('webgpu via Chrome (differential vs CPU)', () => {
     for (const [E, H, T] of [[8, 12, 5], [64, 128, 20], [16, 256, 4]]) {
       const res = await page.evaluate((e, h, t) => window.runFusedLSTM(e, h, t, 31), E, H, T);
       await cmpEager(res, 3e-3, `fused LSTM ${E}x${H} T${T}`);
+    }
+  }, 60000);
+
+  it('fused eager GRU (B=1 persistent-RNN kernel, the webgpu cuDNN-equivalent) matches CPU', async () => {
+    if (!hasGpu) return;
+    for (const [E, H, T, L] of [[8, 12, 5, 1], [64, 128, 20, 1], [16, 256, 4, 1], [8, 12, 6, 2]]) {
+      const res = await page.evaluate((e, h, t, l) => window.runFusedGRU(e, h, t, l, 37), E, H, T, L);
+      await cmpEager({ cpu: res.cpu, gpu: res.gpu }, 3e-3, `fused GRU ${E}x${H} T${T} L${L} out`);
+      await cmpEager({ cpu: res.cpuH, gpu: res.gpuH }, 3e-3, `fused GRU ${E}x${H} T${T} L${L} hidden`);
     }
   }, 60000);
 

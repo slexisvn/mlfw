@@ -5,7 +5,7 @@ import { add, sub, mul, sigmoid, tanh, stack } from '../../tensor/ops/ops.js';
 import { select, split } from '../../tensor/view/view_ops.js';
 import { scan } from '../../tracing/scan.js';
 import { getActiveTracer } from '../../tracing/tracer.js';
-import { getCudnnGRU } from '../../dispatcher/jit_dispatch.js';
+import { getCudnnGRU, getWebgpuRNN } from '../../dispatcher/jit_dispatch.js';
 import { DeviceType } from '../../tensor/types/device.js';
 
 export class GRUCell extends Module {
@@ -52,6 +52,16 @@ export class GRU extends Module {
       const opts = { inputSize: this.inputSize, hiddenSize: this.hiddenSize, seqLen: xs.shape[0], batch: xs.shape[1] };
       const [out, hy] = cudnn(xs, this.cells, opts, h0);
       return [this.batchFirst ? out.transpose(0, 1) : out, hy];
+    }
+    const webgpuRnn = getWebgpuRNN();
+    if (webgpuRnn && input.device.type === DeviceType.WEBGPU && !getActiveTracer()) {
+      const xs = this.batchFirst ? input.transpose(0, 1) : input;
+      const opts = { kind: 'gru', inputSize: this.inputSize, hiddenSize: this.hiddenSize, seqLen: xs.shape[0], batch: xs.shape[1] };
+      const fused = webgpuRnn(xs, this.cells, opts, h0, null);
+      if (fused) {
+        const [out, hy] = fused;
+        return [this.batchFirst ? out.transpose(0, 1) : out, hy];
+      }
     }
     const x = this.batchFirst ? input.transpose(0, 1) : input;
     const batch = x.shape[1];
