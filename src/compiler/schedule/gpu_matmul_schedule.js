@@ -86,7 +86,7 @@ export function applyDeterministicGpuMatmul(schedule, target, sCfg = {}) {
   if (!plan) return false;
   const dims = plan.dims;
 
-  if (sCfg && sCfg.primitiveMatmul) {
+  if (sCfg && sCfg.primitiveMatmul && (dims.batch || 1) === 1) {
     const tcfg = pickTiledConfig(target, dims);
     if (tcfg) {
       const body = buildTiledSharedMatmul(dims, tcfg.BS, tcfg.BK);

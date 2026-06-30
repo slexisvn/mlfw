@@ -102,30 +102,56 @@ export function matmulTileDims(primFunc, blockName) {
   if (!A || vk == null) return null;
   const B = loads[0] === A ? loads[1] : loads[0];
   const bi = plainVars(B.indices);
-  if (!bi || bi.length !== 2) return null;
-  let transB;
-  if (bi[0] === vk && bi[1] === vn) transB = false;
-  else if (bi[0] === vn && bi[1] === vk) transB = true;
-  else return null;
+  if (!bi) return null;
 
   const Abuf = A.buffer, Bbuf = B.buffer;
-  if (Abuf.shape.length !== R || Bbuf.shape.length !== 2) return null;
+  if (Abuf.shape.length !== R) return null;
+  if (Abuf.dtype !== 'f32' || Bbuf.dtype !== 'f32' || C.dtype !== 'f32') return null;
   for (let i = 0; i < R - 1; i++) if (Abuf.shape[i] !== C.shape[i]) return null;
-  let M = 1;
-  for (let i = 0; i < R - 1; i++) { const d = C.shape[i]; if (typeof d !== 'number' || d <= 0) return null; M *= d; }
   const N = C.shape[R - 1], K = Abuf.shape[R - 1];
   if (![N, K].every(d => typeof d === 'number' && d > 0)) return null;
-  if (transB) { if (Bbuf.shape[0] !== N || Bbuf.shape[1] !== K) return null; }
-  else { if (Bbuf.shape[0] !== K || Bbuf.shape[1] !== N) return null; }
-  if (Abuf.dtype !== 'f32' || Bbuf.dtype !== 'f32' || C.dtype !== 'f32') return null;
-  if (R === 2) return { A: Abuf, B: Bbuf, C, M, N, K, transB };
-  if (!isContiguousRowMajor(Abuf) || !isContiguousRowMajor(C)) return null;
-  return {
-    A: new Buffer(Abuf.name, [M, K], Abuf.dtype, Abuf.scope),
-    B: Bbuf,
-    C: new Buffer(C.name, [M, N], C.dtype, C.scope),
-    M, N, K, transB,
-  };
+
+  if (bi.length === 2 && Bbuf.shape.length === 2) {
+    let transB;
+    if (bi[0] === vk && bi[1] === vn) transB = false;
+    else if (bi[0] === vn && bi[1] === vk) transB = true;
+    else return null;
+    if (transB) { if (Bbuf.shape[0] !== N || Bbuf.shape[1] !== K) return null; }
+    else { if (Bbuf.shape[0] !== K || Bbuf.shape[1] !== N) return null; }
+    let M = 1;
+    for (let i = 0; i < R - 1; i++) { const d = C.shape[i]; if (typeof d !== 'number' || d <= 0) return null; M *= d; }
+    if (R === 2) return { A: Abuf, B: Bbuf, C, M, N, K, transB, batch: 1 };
+    if (!isContiguousRowMajor(Abuf) || !isContiguousRowMajor(C)) return null;
+    return {
+      A: new Buffer(Abuf.name, [M, K], Abuf.dtype, Abuf.scope),
+      B: Bbuf,
+      C: new Buffer(C.name, [M, N], C.dtype, C.scope),
+      M, N, K, transB, batch: 1,
+    };
+  }
+
+  if (R >= 3 && bi.length === R && Bbuf.shape.length === R) {
+    const batchVars = ci.slice(0, R - 2);
+    for (let i = 0; i < R - 2; i++) if (bi[i] !== batchVars[i]) return null;
+    let transB;
+    if (bi[R - 2] === vk && bi[R - 1] === vn) transB = false;
+    else if (bi[R - 2] === vn && bi[R - 1] === vk) transB = true;
+    else return null;
+    for (let i = 0; i < R - 2; i++) if (Bbuf.shape[i] !== C.shape[i]) return null;
+    if (transB) { if (Bbuf.shape[R - 2] !== N || Bbuf.shape[R - 1] !== K) return null; }
+    else { if (Bbuf.shape[R - 2] !== K || Bbuf.shape[R - 1] !== N) return null; }
+    const M = C.shape[R - 2];
+    if (typeof M !== 'number' || M <= 0) return null;
+    let batch = 1;
+    for (let i = 0; i < R - 2; i++) { const d = C.shape[i]; if (typeof d !== 'number' || d <= 0) return null; batch *= d; }
+    if (!isContiguousRowMajor(Abuf) || !isContiguousRowMajor(Bbuf) || !isContiguousRowMajor(C)) return null;
+    const aV = new Buffer(Abuf.name, [batch, M, K], Abuf.dtype, Abuf.scope);
+    const bV = new Buffer(Bbuf.name, transB ? [batch, N, K] : [batch, K, N], Bbuf.dtype, Bbuf.scope);
+    const cV = new Buffer(C.name, [batch, M, N], C.dtype, C.scope);
+    return { A: aV, B: bV, C: cV, M, N, K, transB, batch };
+  }
+
+  return null;
 }
 
 function enumerateRegisterBlockConfigs(target, dims, maxCandidates = 32) {
@@ -192,6 +218,7 @@ export function pickFixedConfig(target, dims) {
 
 export function buildRegisterBlockedMatmul(bufs, params) {
   const { A, B, C, M, N, K, transB } = bufs;
+  const batch = bufs.batch || 1;
   const { BM, BN, BK, TM, TN } = params;
   const tX = BN / TN;
   const tY = BM / TM;
@@ -216,7 +243,9 @@ export function buildRegisterBlockedMatmul(bufs, params) {
 
   const bx = IV('rb_bx'), by = IV('rb_by'), tx = IV('rb_tx'), ty = IV('rb_ty');
   const tid = IV('rb_tid'), brow = IV('rb_brow'), bcol = IV('rb_bcol');
-  const k0 = IV('rb_k0');
+  const k0 = IV('rb_k0'), bz = IV('rb_bz');
+  const batched = batch > 1;
+  const gIdx = (r, c) => batched ? [bz, r, c] : [r, c];
 
   const accIdx = (mi, ni) => ADD(MUL(mi, I(TN)), ni);
 
@@ -227,7 +256,7 @@ export function buildRegisterBlockedMatmul(bufs, params) {
   const la = IV('rb_la'), aidx = IV('rb_aidx');
   const aRow = ADD(brow, DIV(aidx, I(BK)));
   const aCol = ADD(k0, MOD(aidx, I(BK)));
-  let aVal = new BufferLoadNode(A, [aRow, aCol]);
+  let aVal = new BufferLoadNode(A, gIdx(aRow, aCol));
   if (guardRow || guardK) {
     let cond = guardRow ? LT(aRow, I(M)) : null;
     if (guardK) cond = cond ? AND(cond, LT(aCol, I(K))) : LT(aCol, I(K));
@@ -241,7 +270,7 @@ export function buildRegisterBlockedMatmul(bufs, params) {
   const lb = IV('rb_lb'), bidx = IV('rb_bidx');
   const bRow = ADD(k0, DIV(bidx, I(BN)));
   const bCol = ADD(bcol, MOD(bidx, I(BN)));
-  let bVal = new BufferLoadNode(B, transB ? [bCol, bRow] : [bRow, bCol]);
+  let bVal = new BufferLoadNode(B, transB ? gIdx(bCol, bRow) : gIdx(bRow, bCol));
   if (guardK || guardCol) {
     let cond = guardK ? LT(bRow, I(K)) : null;
     if (guardCol) cond = cond ? AND(cond, LT(bCol, I(N))) : LT(bCol, I(N));
@@ -271,7 +300,7 @@ export function buildRegisterBlockedMatmul(bufs, params) {
   const wm = IV('rb_wm'), wn = IV('rb_wn');
   const rowC = ADD(ADD(brow, MUL(ty, I(TM))), wm);
   const colC = ADD(ADD(bcol, MUL(tx, I(TN))), wn);
-  let writeStore = new BufferStoreNode(C, [rowC, colC], new BufferLoadNode(acc, [accIdx(wm, wn)]));
+  let writeStore = new BufferStoreNode(C, gIdx(rowC, colC), new BufferLoadNode(acc, [accIdx(wm, wn)]));
   if (guardRow || guardCol) {
     let cond = guardRow ? LT(rowC, I(M)) : null;
     if (guardCol) cond = cond ? AND(cond, LT(colC, I(N))) : LT(colC, I(N));
@@ -291,10 +320,11 @@ export function buildRegisterBlockedMatmul(bufs, params) {
 
   const gridX = Math.ceil(N / BN);
   const gridY = Math.ceil(M / BM);
-  const threadsNest = forT(by, 'blockIdx.y', gridY,
+  let threadsNest = forT(by, 'blockIdx.y', gridY,
     forT(bx, 'blockIdx.x', gridX,
       forT(ty, 'threadIdx.y', tY,
         forT(tx, 'threadIdx.x', tX, letChain))));
+  if (batched) threadsNest = forT(bz, 'blockIdx.z', batch, threadsNest);
 
   return new AllocateNode(As, 'shared', new AllocateNode(Bs, 'shared', threadsNest));
 }

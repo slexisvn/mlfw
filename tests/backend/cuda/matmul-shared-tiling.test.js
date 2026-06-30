@@ -83,4 +83,29 @@ describe.skipIf(!cudaDeps)('CUDA native matmul shared-memory tiling', () => {
       expect(src.includes('rb_As')).toBe(true);
     });
   });
+
+  describe('true-batched matmul (batched rhs, attention-shaped) uses batched register-block (blockIdx.z)', () => {
+    function mkBmm(batch, M, K, N) {
+      return buildFunction('bmm', [new TensorType([...batch, M, K], 'f32'), new TensorType([...batch, K, N], 'f32')], [new TensorType([...batch, M, N], 'f32')],
+        (b, a) => b.returnOp([b.matmul(a[0], a[1]).getResult(0)]));
+    }
+    async function bmmErr(batch, M, K, N) {
+      const nb = batch.reduce((x, y) => x * y, 1);
+      const A = rnd(nb * M * K, 1), B = rnd(nb * K * N, 2);
+      const cpu = new Float32Array(nb * M * N), gpu = new Float32Array(nb * M * N);
+      compileGraph(mkBmm(batch, M, K, N), CPUTarget(), SCHED).run('bmm', A, B, cpu);
+      await compileGraph(mkBmm(batch, M, K, N), CUDATarget(), SCHED).runAsync('bmm', A, B, gpu);
+      let e = 0; for (let i = 0; i < cpu.length; i++) e = Math.max(e, Math.abs(cpu[i] - gpu[i]) / (1 + Math.abs(cpu[i])));
+      return e;
+    }
+    it('3D [4,32,16]@[4,16,32] matches CPU', async () => expect(await bmmErr([4], 32, 16, 32)).toBeLessThan(2e-3));
+    it('4D [2,4,32,16]@[2,4,16,48] matches CPU', async () => expect(await bmmErr([2, 4], 32, 16, 48)).toBeLessThan(2e-3));
+    it('attention-shaped [1,8,64,32]@[1,8,32,64] matches CPU', async () => expect(await bmmErr([1, 8], 64, 32, 64)).toBeLessThan(2e-3));
+    it('non-divisible 3D [3,40,24,56] matches CPU', async () => expect(await bmmErr([3], 40, 24, 56)).toBeLessThan(2e-3));
+    it('emits blockIdx.z batched register-block (rb_bz over the batch grid)', () => {
+      const src = compileGraph(mkBmm([4], 32, 16, 32), CUDATarget(), SCHED).getSource('bmm');
+      expect(src.includes('rb_bz')).toBe(true);
+      expect(src.includes('blockIdx.z')).toBe(true);
+    });
+  });
 });
