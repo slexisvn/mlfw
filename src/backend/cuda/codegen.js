@@ -516,19 +516,34 @@ export class CUDACodegen {
     const storageNames = new Set();
     for (const [, buf] of func.bufferMap) storageNames.add(buf.name);
     const sharedNames = new Set(this._sharedBuffers.map(b => b.name));
-    const isIntermediateArray = (buf) => buf && !storageNames.has(buf.name) && !sharedNames.has(buf.name)
-      && (typeof buf.numel !== 'function' || buf.numel() !== 1);
+    const isIntermediate = (buf) => buf && !storageNames.has(buf.name) && !sharedNames.has(buf.name);
+    const isMulti = (buf) => typeof buf.numel !== 'function' || buf.numel() !== 1;
     const localWritten = new Set();
     const localRead = new Set();
-    const walk = (node) => {
+    const narrowWritten = new Set();
+    const scalarRead = new Set();
+    const walk = (node, narrow) => {
       if (!node || typeof node !== 'object') return;
-      if ((node.type === 'BufferStoreNode' || node.type === 'LIRFlatStoreNode') && isIntermediateArray(node.buffer)) localWritten.add(node.buffer.name);
-      if ((node.type === 'BufferLoadNode' || node.type === 'LIRFlatLoadNode') && isIntermediateArray(node.buffer)) localRead.add(node.buffer.name);
-      for (const c of irChildNodes(node)) walk(c);
+      let n = narrow;
+      if (node.type === 'ForNode' && node.kind === ForKind.THREAD_BINDING && node.threadTag) {
+        const extent = node.extent && node.extent.type === 'IntImmNode' ? node.extent.value : 0;
+        const maxExtent = this._getMaxBindingExtent(node.threadTag);
+        if (extent > 0 && maxExtent > 0 && extent < maxExtent) n = true;
+      }
+      if ((node.type === 'BufferStoreNode' || node.type === 'LIRFlatStoreNode') && isIntermediate(node.buffer)) {
+        if (isMulti(node.buffer)) localWritten.add(node.buffer.name);
+        else if (n) narrowWritten.add(node.buffer.name);
+      }
+      if ((node.type === 'BufferLoadNode' || node.type === 'LIRFlatLoadNode') && isIntermediate(node.buffer)) {
+        if (isMulti(node.buffer)) localRead.add(node.buffer.name);
+        else scalarRead.add(node.buffer.name);
+      }
+      for (const c of irChildNodes(node)) walk(c, n);
     };
-    walk(func.body);
+    walk(func.body, false);
     const result = new Set();
     for (const name of localWritten) if (localRead.has(name)) result.add(name);
+    for (const name of narrowWritten) if (scalarRead.has(name)) result.add(name);
     return result;
   }
 

@@ -18,6 +18,8 @@ env:
   NODE_VERSION: 24
   QUERY_ENGINE_REPOSITORY: slexisvn/query_engine
   QUERY_ENGINE_PATH: plugins/query-engine
+  QUANTC_REPOSITORY: slexisvn/quantc
+  QUANTC_PATH: plugins/quantc
 
 jobs:
   build:
@@ -32,6 +34,12 @@ jobs:
         with:
           repository: ${{ env.QUERY_ENGINE_REPOSITORY }}
           path: ${{ env.QUERY_ENGINE_PATH }}
+
+      - name: Checkout quantc plugin
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ env.QUANTC_REPOSITORY }}
+          path: ${{ env.QUANTC_PATH }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v5
@@ -68,6 +76,33 @@ jobs:
           fi
 
           test -f query-engine.browser.js
+
+      - name: Build quantc plugin
+        working-directory: ${{ env.QUANTC_PATH }}
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          elif [ -f package.json ]; then
+            npm install
+          fi
+
+          if npm run | grep -qE '^  build$|^    build$| build$'; then
+            npm run build
+          fi
+
+          if [ -f dist/bundle/browser/quantc.browser.js ]; then
+            cp dist/bundle/browser/quantc.browser.js quantc.browser.js
+          elif [ -f dist/quantc.browser.js ]; then
+            cp dist/quantc.browser.js quantc.browser.js
+          fi
+
+          if [ -f dist/bundle/node/quantc.node.js ]; then
+            cp dist/bundle/node/quantc.node.js quantc.node.js
+          elif [ -f dist/quantc.node.js ]; then
+            cp dist/quantc.node.js quantc.node.js
+          fi
+
+          test -f quantc.browser.js
 
       - name: Build mlfw browser bundles
         run: npm run build

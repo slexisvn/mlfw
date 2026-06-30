@@ -9,13 +9,13 @@ import { destroyEagerGraph } from './cuda/eager_graph.js';
 import { cu } from './cuda/ffi.js';
 import { StorageImpl } from '../../tensor/core/storage_impl.js';
 import { registerMeasurer } from '../measurer_registry.js';
-import { setGpuContiguousFn, setGpuConcatFn, setCudnnLSTM, setGpuAdamFn, setGpuMatmul, wrapResult } from '../../dispatcher/jit_dispatch.js';
+import { setGpuContiguousFn, setGpuConcatFn, setCudnnLSTM, setCudnnGRU, setGpuAdamFn, setGpuMatmul, wrapResult } from '../../dispatcher/jit_dispatch.js';
 import { setGpuContiguousHook, contiguous as viewContiguous } from '../../tensor/view/view_ops.js';
 import { IndexSelectBackward } from '../../autograd/function/indexing.js';
 import { DeviceType } from '../../tensor/types/device.js';
 import { typedArrayCtor } from '../../tensor/types/dtype.js';
 import { cudnnAvailable } from './cuda/cudnn.js';
-import { cudnnLSTMOp } from './cuda/cudnn_lstm_op.js';
+import { cudnnLSTMOp, cudnnGRUOp } from './cuda/cudnn_rnn_op.js';
 import { gpuMatmul } from './cuda/cublas_matmul_op.js';
 
 export { runCudaPlan, setCudaGraphEnabled, isCudaGraphEnabled };
@@ -432,6 +432,6 @@ setGpuContiguousFn(deviceContiguous);
 setGpuConcatFn(deviceConcat);
 setGpuAdamFn(deviceAdam);
 setGpuMatmul(gpuMatmul);
-if (cudnnAvailable()) setCudnnLSTM(cudnnLSTMOp);
+if (cudnnAvailable()) { setCudnnLSTM(cudnnLSTMOp); setCudnnGRU(cudnnGRUOp); }
 
 registerMeasurer('cuda', measureCudaKernel);

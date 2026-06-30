@@ -4,6 +4,9 @@ import { zeros } from '../../tensor/factory/creation_ops.js';
 import { add, sub, mul, sigmoid, tanh, stack } from '../../tensor/ops/ops.js';
 import { select, split } from '../../tensor/view/view_ops.js';
 import { scan } from '../../tracing/scan.js';
+import { getActiveTracer } from '../../tracing/tracer.js';
+import { getCudnnGRU } from '../../dispatcher/jit_dispatch.js';
+import { DeviceType } from '../../tensor/types/device.js';
 
 export class GRUCell extends Module {
   constructor(inputSize, hiddenSize, bias = true) {
@@ -43,6 +46,13 @@ export class GRU extends Module {
   }
 
   forward(input, h0 = null) {
+    const cudnn = getCudnnGRU();
+    if (cudnn && input.device.type === DeviceType.GPU && !getActiveTracer()) {
+      const xs = this.batchFirst ? input.transpose(0, 1) : input;
+      const opts = { inputSize: this.inputSize, hiddenSize: this.hiddenSize, seqLen: xs.shape[0], batch: xs.shape[1] };
+      const [out, hy] = cudnn(xs, this.cells, opts, h0);
+      return [this.batchFirst ? out.transpose(0, 1) : out, hy];
+    }
     const x = this.batchFirst ? input.transpose(0, 1) : input;
     const batch = x.shape[1];
     let layerIn = x;

@@ -1,19 +1,16 @@
 embed_dim = 128
 hidden = 320
-num_layers = 4
-max_epochs = 160
-batch_size = 64
+num_layers = 2
+max_epochs = 60
+batch_size = 32
 
 train_rows = load_csv("examples/chat_train.csv").to_array()
-test_rows = load_csv("examples/chat_test.csv").to_array()
 
 train_q_text = [r.question for r in train_rows]
 train_a_text = [r.answer for r in train_rows]
-test_q_text = [r.question for r in test_rows]
-test_a_text = [r.answer for r in test_rows]
 
 tok = Tokenizer(mode="bpe", lowercase=true, num_merges=800)
-tok.fit(train_q_text + train_a_text + test_q_text + test_a_text)
+tok.fit(train_q_text + train_a_text)
 
 tok.save("examples/chatbot.tok")
 
@@ -85,7 +82,7 @@ model ChatBotLarge(vocab_size: int, embed_size: int, hidden_size: int, layers: i
     return loss
 
   optimizer:
-    return optim_config(Adam(ChatBotLarge.parameters(), lr=0.004))
+    return optim_config(Adam(ChatBotLarge.parameters(), lr=0.003))
 
 net = ChatBotLarge(tok.vocabSize, embed_dim, hidden, num_layers, tok.padId)
 

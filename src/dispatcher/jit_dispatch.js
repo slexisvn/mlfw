@@ -291,6 +291,9 @@ export function setGpuConcatFn(fn) { _gpuConcatFn = fn; }
 let _cudnnLSTM = null;
 export function setCudnnLSTM(fn) { _cudnnLSTM = fn; }
 export function getCudnnLSTM() { return _cudnnLSTM; }
+let _cudnnGRU = null;
+export function setCudnnGRU(fn) { _cudnnGRU = fn; }
+export function getCudnnGRU() { return _cudnnGRU; }
 let _webgpuRNN = null;
 export function setWebgpuRNN(fn) { _webgpuRNN = fn; }
 export function getWebgpuRNN() { return _webgpuRNN; }

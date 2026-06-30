@@ -48,7 +48,8 @@ function ensure() {
 }
 export function cudnnAvailable() { return ensure(); }
 
-const FLOAT = 0, ALGO_STANDARD = 0, LSTM = 2, DOUBLE_BIAS = 2, UNIDIR = 0, LINEAR_INPUT = 0, ALLOW_CONVERSION = 2;
+const FLOAT = 0, ALGO_STANDARD = 0, LSTM = 2, GRU = 3, DOUBLE_BIAS = 2, UNIDIR = 0, LINEAR_INPUT = 0, ALLOW_CONVERSION = 2;
+export const CELL_LSTM = LSTM, CELL_GRU = GRU;
 const LAYOUT_SEQ_MAJOR_UNPACKED = 0;
 const FWD_TRAINING = 1, FWD_INFERENCE = 0, WGRAD_ADD = 0;
 
@@ -91,13 +92,13 @@ function dataDesc(seqLen, batch, vec, seqArr) {
 }
 
 const _descCache = new Map();
-function plan({ inputSize, hiddenSize, seqLen, batch, numLayers }) {
-  const key = `${inputSize}_${hiddenSize}_${seqLen}_${batch}_${numLayers}`;
+function plan({ inputSize, hiddenSize, seqLen, batch, numLayers, cellMode = LSTM, gates = 4 }) {
+  const key = `${cellMode}_${inputSize}_${hiddenSize}_${seqLen}_${batch}_${numLayers}`;
   let p = _descCache.get(key);
   if (p) return p;
   const h = handle();
   const rnnDesc = o2(); ck('createRNN', c.createRNNDesc(rnnDesc));
-  ck('setRNN', c.setRNNDesc(rnnDesc[0], ALGO_STANDARD, LSTM, DOUBLE_BIAS, UNIDIR, LINEAR_INPUT, FLOAT, FLOAT, ALLOW_CONVERSION, inputSize, hiddenSize, hiddenSize, numLayers, dropoutDesc(), 0));
+  ck('setRNN', c.setRNNDesc(rnnDesc[0], ALGO_STANDARD, cellMode, DOUBLE_BIAS, UNIDIR, LINEAR_INPUT, FLOAT, FLOAT, ALLOW_CONVERSION, inputSize, hiddenSize, hiddenSize, numLayers, dropoutDesc(), 0));
   const rd = rnnDesc[0];
   const seqArr = new Int32Array(batch).fill(seqLen);
   const xDesc = dataDesc(seqLen, batch, inputSize, seqArr);
@@ -110,7 +111,7 @@ function plan({ inputSize, hiddenSize, seqLen, batch, numLayers }) {
   cu.memcpyHtoD(devSeq, seqArr, batch * 4);
   p = { rd, xDesc, yDesc, hDesc, devSeq, wss: wssP[0], wssN: Number(wssP[0]),
     workSize: workP[0], workN: Math.max(Number(workP[0]), 1), reserveSize: resvP[0], reserveN: Math.max(Number(resvP[0]), 1),
-    inputSize, hiddenSize, seqLen, batch, numLayers };
+    inputSize, hiddenSize, seqLen, batch, numLayers, gates };
   _descCache.set(key, p);
   return p;
 }
@@ -119,12 +120,12 @@ function packWeights(p, weightSpace, layerDevs, download) {
   const h = handle();
   const mDesc = o2(), bDesc = o2();
   ck('cwm', c.createTensorDesc(mDesc)); ck('cwb', c.createTensorDesc(bDesc));
-  const { numLayers, hiddenSize, inputSize, wss } = p;
+  const { numLayers, hiddenSize, inputSize, wss, gates } = p;
   for (let l = 0; l < numLayers; l++) {
     const inF = l === 0 ? inputSize : hiddenSize;
     const ld = layerDevs[l];
-    for (let id = 0; id < 8; id++) {
-      const isInput = id < 4, gate = id % 4;
+    for (let id = 0; id < 2 * gates; id++) {
+      const isInput = id < gates, gate = id % gates;
       const mAddr = [0n], bAddr = [0n];
       ck('wparam', c.getRNNWeightParams(h, p.rd, l, wss, weightSpace, id, mDesc[0], mAddr, bDesc[0], bAddr));
       const wLen = isInput ? hiddenSize * inF : hiddenSize * hiddenSize;
@@ -142,7 +143,7 @@ function packWeights(p, weightSpace, layerDevs, download) {
   }
 }
 
-export function cudnnLSTMForward(xDev, layerDevs, opts, hxDev, cxDev, yDev, hyDev, cyDev, training = true) {
+export function cudnnRNNForward(xDev, layerDevs, opts, hxDev, cxDev, yDev, hyDev, cyDev, training = true) {
   const h = handle();
   const p = plan({ ...opts, numLayers: layerDevs.length });
   const weightSpace = acquire(p.wssN);
@@ -155,14 +156,14 @@ export function cudnnLSTMForward(xDev, layerDevs, opts, hxDev, cxDev, yDev, hyDe
   return { p, weightSpace, workSpace, reserveSpace, training };
 }
 
-export function releaseLSTMForward(ctx) {
+export function releaseRNNForward(ctx) {
   if (!ctx) return;
   release(ctx.weightSpace, ctx.p.wssN);
   release(ctx.workSpace, ctx.p.workN);
   if (ctx.reserveSpace && ctx.reserveSpace !== 0n) release(ctx.reserveSpace, ctx.p.reserveN);
 }
 
-export function cudnnLSTMBackward(ctx, xDev, yDev, hxDev, cxDev, dyDev, dhyDev, dcyDev, dxDev, dhxDev, dcxDev, gradLayerDevs) {
+export function cudnnRNNBackward(ctx, xDev, yDev, hxDev, cxDev, dyDev, dhyDev, dcyDev, dxDev, dhxDev, dcxDev, gradLayerDevs) {
   const { p, weightSpace, workSpace, reserveSpace } = ctx;
   const h = handle();
   const dweight = acquire(p.wssN);
