@@ -2,8 +2,7 @@ import { PrimFuncPass } from '../tir_pass.js';
 import { Schedule } from '../../schedule/schedule.js';
 import { SchedulePolicy } from '../../schedule/rules.js';
 import { Autotuner } from '../../autotune/autotuner.js';
-import { applyDeterministicGpuMatmul, applyDeterministicGpuConv } from '../../schedule/gpu_matmul_schedule.js';
-import { applyImplicitGemmConv } from '../../schedule/conv_implicit_gemm.js';
+import { applyDeterministicGpuSchedule } from '../../schedule/gpu_matmul_schedule.js';
 
 export class SchedulePass extends PrimFuncPass {
   constructor(config) {
@@ -49,12 +48,7 @@ export class SchedulePass extends PrimFuncPass {
       if (pf.cublasInfo || pf._tensorIntrin) return;
       const ft0 = performance.now();
       const sch = new Schedule(pf);
-      let handled = false;
-      if (this.target.isGPU() && !this.target.isWebGPU()) {
-        handled = applyDeterministicGpuMatmul(sch, this.target, sCfg);
-        if (!handled) handled = applyImplicitGemmConv(sch, this.target, sCfg);
-        if (!handled) handled = applyDeterministicGpuConv(sch, this.target);
-      }
+      const handled = applyDeterministicGpuSchedule(sch, this.target, sCfg);
       if (!handled && sCfg.enabled) {
         this._policy.applyToAllBlocks(sch);
       }

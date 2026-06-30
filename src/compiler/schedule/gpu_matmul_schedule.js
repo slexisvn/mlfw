@@ -2,6 +2,7 @@ import {
   analyzePureMatmul, pickFixedConfig, buildRegisterBlockedMatmul,
 } from '../autotune/gpu_matmul_sketch.js';
 import { collectAllBlockNames } from '../autotune/block_analysis.js';
+import { applyImplicitGemmConv } from './conv_implicit_gemm.js';
 import { SchedulePolicy } from './rules.js';
 import {
   ForNode, ForKind, SeqNode, AllocateNode,
@@ -104,4 +105,12 @@ export function applyDeterministicGpuMatmul(schedule, target, sCfg = {}) {
   if (schedule.func._setChild) schedule.func._setChild('body', body);
   schedule.func.gpuRegisterBlocked = true;
   return true;
+}
+
+export function applyDeterministicGpuSchedule(schedule, target, sCfg = {}) {
+  if (!target.isGPU() || (target.isWebGPU && target.isWebGPU())) return false;
+  let handled = applyDeterministicGpuMatmul(schedule, target, sCfg);
+  if (!handled) handled = applyImplicitGemmConv(schedule, target, sCfg);
+  if (!handled) handled = applyDeterministicGpuConv(schedule, target);
+  return handled;
 }

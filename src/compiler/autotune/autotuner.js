@@ -8,6 +8,7 @@ import { buildBlockMap, computeWorkloadKey } from './workload_key.js';
 import { collectAllBlockNames } from './block_analysis.js';
 import { buildBlockDAG, findFusibleConsumer } from './block_dag.js';
 import { classifyBlock, SchedulePolicy } from '../schedule/rules.js';
+import { applyDeterministicGpuSchedule } from '../schedule/gpu_matmul_schedule.js';
 import { BlockTuningSession, gpuThreadBlockSize } from './session.js';
 import { clonePrimFunc } from './tune_ir.js';
 import { ForKind } from '../ir/tensor/nodes.js';
@@ -161,21 +162,39 @@ export class Autotuner {
   }
 
   _applyBestSchedule(primFunc, tuneResults) {
+    const baseline = this._buildDefaultSchedule(primFunc);
+    const baselineValid = !!baseline && this._scheduleIsValid(baseline);
+    const baselineStrong = baselineValid && this._isStrongBackendSchedule(baseline);
+
     const tuned = this._buildTunedSchedule(primFunc, tuneResults);
-    if (tuned && this._scheduleIsValid(tuned)) {
+    const tunedValid = !!tuned && this._scheduleIsValid(tuned);
+
+    const mayDisplaceBaseline = !baselineStrong || this.config.measurer != null;
+    if (tunedValid && mayDisplaceBaseline) {
       this._adoptSchedule(primFunc, tuned);
       return { func: primFunc };
     }
-    if (tuned) {
+
+    if (tuned && !tunedValid) {
       this._warn('tuned-schedule-invalid', null, new Error('tuned schedule exceeds target thread-block limit; falling back to default'));
+    } else if (tunedValid && baselineStrong) {
+      this._warn('baseline-preferred', null, new Error('cost-model-only tuning cannot displace the deterministic GPU schedule without hardware measurement; keeping the deterministic kernel'));
     }
-    const fallback = this._buildDefaultSchedule(primFunc);
-    if (fallback && this._scheduleIsValid(fallback)) {
-      this._adoptSchedule(primFunc, fallback);
+
+    if (baselineValid) {
+      this._adoptSchedule(primFunc, baseline);
+      return { func: primFunc };
+    }
+    if (tunedValid) {
+      this._adoptSchedule(primFunc, tuned);
       return { func: primFunc };
     }
     this._warn('no-valid-schedule', null, new Error('neither tuned nor default schedule is valid; leaving function unscheduled'));
     return null;
+  }
+
+  _isStrongBackendSchedule(func) {
+    return !!func && func.gpuRegisterBlocked === true;
   }
 
   _buildTunedSchedule(primFunc, tuneResults) {
@@ -249,7 +268,10 @@ export class Autotuner {
   _buildDefaultSchedule(primFunc) {
     try {
       const work = clonePrimFunc(primFunc);
-      new SchedulePolicy(this.target).applyToAllBlocks(new Schedule(work));
+      const sch = new Schedule(work);
+      if (!applyDeterministicGpuSchedule(sch, this.target, this.config)) {
+        new SchedulePolicy(this.target).applyToAllBlocks(sch);
+      }
       return work;
     } catch (e) {
       this._warn('build-default-schedule', null, e);
