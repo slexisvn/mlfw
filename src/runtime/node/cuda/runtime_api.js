@@ -11,6 +11,9 @@ const cudaDeviceSynchronize = rt.func('int cudaDeviceSynchronize()');
 
 const H2D = 1, D2H = 2;
 
+let _h2dObserver = null;
+export function setH2DObserver(fn) { _h2dObserver = fn; }
+
 export function setDevice() {
   cudaSetDevice(0);
 }
@@ -34,6 +37,7 @@ export function devFree(ptr) {
 export function devH2D(dptr, hostView) {
   const status = cudaMemcpy(dptr, hostView, hostView.byteLength, H2D);
   if (status !== 0) throw new Error('cudaMemcpy H2D failed: ' + status);
+  if (_h2dObserver) _h2dObserver(hostView.byteLength);
 }
 
 export function devD2H(hostView, dptr) {

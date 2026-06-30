@@ -138,7 +138,12 @@ function _prepareExecution(compiled, inputs, shapeEnv) {
   const allArgs = new Array(inputArrays.length + paramArrays.length + outputArrays.length);
   let idx = 0;
   for (let i = 0; i < inputArrays.length; i++) allArgs[idx++] = new RuntimeTensor(inputArrays[i], inputs[i].shape, inputs[i].dtype);
-  for (let i = 0; i < paramArrays.length; i++) allArgs[idx++] = new RuntimeTensor(paramArrays[i], params[i].shape, params[i].dtype);
+  for (let i = 0; i < paramArrays.length; i++) {
+    const rt = new RuntimeTensor(paramArrays[i], params[i].shape, params[i].dtype);
+    const impl = params[i]._impl;
+    if (impl) rt.resident = { key: impl.storage.rawData, version: impl.version };
+    allArgs[idx++] = rt;
+  }
   for (let i = 0; i < outputArrays.length; i++) allArgs[idx++] = new RuntimeTensor(outputArrays[i], outputShapes[i], outputTypes[i].dtype);
 
   return { funcName, device, outputTypes, outputArrays, outputShapes, allArgs };
@@ -161,7 +166,7 @@ export function executeCompiled(compiled, inputs, shapeEnv) {
 
   const plan = compiled.result.module.executionPlan;
   if (plan) {
-    return compiled.result.module.runPlanAsync(plan, allArgs)
+    return compiled.result.module.runPlanAsync(plan, allArgs, { resident: true })
       .then(() => _wrapOutputs(device, outputTypes, outputArrays, outputShapes));
   }
 

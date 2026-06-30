@@ -176,7 +176,7 @@ export class RuntimeModule {
     return entry.backend.isAsync(inst);
   }
 
-  async runPlanAsync(plan, args) {
+  async runPlanAsync(plan, args, opts) {
     const slots = new Array(plan.numSlots).fill(null);
     for (let i = 0; i < args.length; i++) {
       const a = args[i];
@@ -203,7 +203,7 @@ export class RuntimeModule {
         const { shapeValues } = this._prepareArgs(step.name, stepArgs);
         return { name: step.name, inputSlots: step.inputSlots, outputSlots: step.outputSlots, kernel: this.kernels.get(step.name), shapeValues };
       });
-      await planBackend.runPlan(plan, slots, steps);
+      await planBackend.runPlan(plan, slots, steps, opts);
       _applyReturnFixups(plan, slots);
       return;
     }

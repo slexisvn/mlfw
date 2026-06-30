@@ -10,6 +10,7 @@ import { buildGpt2 } from '../../shared/gpt2_model.js';
 import { getBackend } from '../../../src/runtime/backend_registry.js';
 import { setCudaGraphEnabled } from '../../../src/runtime/node/cuda/device_plan.js';
 import { cu } from '../../../src/runtime/node/cuda/ffi.js';
+import { setH2DObserver } from '../../../src/runtime/node/cuda/runtime_api.js';
 import { cudaDeps } from './cuda-setup.js';
 
 const flat = (v) => Array.from(v && typeof v.contiguous === 'function' ? v.contiguous().data : v.data);
@@ -237,6 +238,61 @@ describe.skipIf(!cudaDeps)('CUDA compiled multi-kernel & cuBLAS plans', () => {
       expect(maxRelErr(cpu, deviceResident), `gpt2 device-resident vs CPU (${cudaDeps.arch})`).toBeLessThan(1e-2);
       expect(maxRelErr(perStep, deviceResident), 'gpt2 device-resident vs per-step').toBeLessThan(1e-5);
     }, 180000);
+  });
+
+  describe('compiled inference weight residency (resident params)', () => {
+    async function measureH2D(run) {
+      let bytes = 0;
+      setH2DObserver((n) => { bytes += n; });
+      try { await run(); } finally { setH2DObserver(null); }
+      return bytes;
+    }
+
+    it('small GPT-2 uploads weights once across repeated inference, stays correct', async () => {
+      const dims = { V: 96, D: 64, H: 4, FF: 128, L: 2, SEQ: 12 };
+      const { fwd, ids } = buildGpt2(nn, tensor, dims);
+      const cpu = flat(await compile({ forward: fwd }, [ids], { target: CPUTarget() })(ids));
+      const cf = compile({ forward: fwd }, [ids], { target: CUDATarget(), matmulBackend: 'cublas' });
+
+      let out0;
+      const first = await measureH2D(async () => { out0 = flat(await cf(ids)); });
+      let out1;
+      const second = await measureH2D(async () => { out1 = flat(await cf(ids)); });
+      let out2;
+      const third = await measureH2D(async () => { out2 = flat(await cf(ids)); });
+
+      expect(maxRelErr(cpu, out0), `call0 vs CPU (${cudaDeps.arch})`).toBeLessThan(2e-2);
+      expect(maxRelErr(cpu, out1), 'call1 vs CPU').toBeLessThan(2e-2);
+      expect(maxRelErr(cpu, out2), 'call2 vs CPU').toBeLessThan(2e-2);
+      expect(maxAbsErr(out0, out1), 'repeated inference is deterministic').toBe(0);
+      expect(first, 'first call uploads weights').toBeGreaterThan(1000);
+      expect(second, 'later calls skip weight re-upload').toBeLessThan(first * 0.1);
+      expect(third, 'residency persists across calls').toBeLessThan(first * 0.1);
+    }, 180000);
+
+    it('re-uploads a weight after in-place mutation between calls (no staleness)', async () => {
+      const M = 8, K = 64, N = 48;
+      const lin = new nn.Linear(K, N); lin.eval();
+      const fwd = (inp) => lin.forward(inp).relu();
+      const x = tensor(Array.from({ length: M }, (_, i) =>
+        Array.from({ length: K }, (_, j) => Math.sin(i * 0.17 + j * 0.013))));
+
+      const cf = compile({ forward: fwd }, [x], { target: CUDATarget(), matmulBackend: 'cublas' });
+      const before = flat(await cf(x));
+      const steady = await measureH2D(async () => { await cf(x); });
+
+      const w = lin.weight._impl.storage.data;
+      for (let i = 0; i < w.length; i++) w[i] += 0.5;
+      lin.weight._impl.bumpVersion();
+
+      const afterMutateBytes = await measureH2D(async () => { await cf(x); });
+      const after = flat(await cf(x));
+      const cpu = flat(await compile({ forward: fwd }, [x], { target: CPUTarget() })(x));
+
+      expect(maxAbsErr(before, after), 'mutated weight changes output').toBeGreaterThan(0);
+      expect(maxRelErr(cpu, after), 'mutated inference matches CPU recompute').toBeLessThan(2e-2);
+      expect(afterMutateBytes, 'mutation forces weight re-upload').toBeGreaterThan(steady * 4);
+    }, 120000);
   });
 
   describe('cuda graph capture of compiled plans (driver stream, includes cuBLAS)', () => {
