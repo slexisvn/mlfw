@@ -150,6 +150,26 @@ function collectChainAndAnalyze(dotOp) {
   return { chain, chainSet, tags, lastOp, extras };
 }
 
+function collectPrologue(dotOp) {
+  let lhsCast = null, rhsCast = null, lhsInput = null, rhsInput = null;
+  const removed = new Set();
+  for (let i = 0; i < 2; i++) {
+    const operand = dotOp.getOperand(i);
+    const def = operand.definingOp;
+    if (!def || def.opName !== 'convert') continue;
+    let externalUse = false;
+    for (const use of operand.uses()) {
+      if (use.user !== dotOp) { externalUse = true; break; }
+    }
+    if (externalUse) continue;
+    const targetDtype = def.getAttr('target_dtype') || def.getResult(0).type.dtype;
+    if (i === 0) { lhsCast = targetDtype; lhsInput = def.getOperand(0); }
+    else { rhsCast = targetDtype; rhsInput = def.getOperand(0); }
+    removed.add(def);
+  }
+  return { lhsCast, rhsCast, lhsInput, rhsInput, removed };
+}
+
 export class EpilogueFusionPass extends FunctionPass {
   constructor(config = {}) {
     super('EpilogueFusionPass');
@@ -172,10 +192,14 @@ export class EpilogueFusionPass extends FunctionPass {
 
     for (const dotOp of dots) {
       const analysis = collectChainAndAnalyze(dotOp);
-      if (analysis.chain.length === 0) continue;
       if (analysis.chain.length > this.maxEpilogueOps) continue;
 
-      const { chain, tags, lastOp, extras } = analysis;
+      const prologue = collectPrologue(dotOp);
+      const hasEpilogue = analysis.chain.length > 0;
+      const hasPrologue = prologue.lhsCast !== null || prologue.rhsCast !== null;
+      if (!hasEpilogue && !hasPrologue) continue;
+
+      const { chain, tags, extras } = analysis;
 
       let extrasConsumed = 0;
       for (const tag of tags) {
@@ -184,7 +208,10 @@ export class EpilogueFusionPass extends FunctionPass {
       }
       if (extrasConsumed !== extras.length) continue;
 
-      const allInputs = [dotOp.getOperand(0), dotOp.getOperand(1), ...extras];
+      const lhsOperand = prologue.lhsInput || dotOp.getOperand(0);
+      const rhsOperand = prologue.rhsInput || dotOp.getOperand(1);
+      const allInputs = [lhsOperand, rhsOperand, ...extras];
+      const lastOp = hasEpilogue ? analysis.lastOp : dotOp;
       const outputType = lastOp.getResult(0).type;
 
       const attrs = new Map(dotOp.attributes);
@@ -192,6 +219,8 @@ export class EpilogueFusionPass extends FunctionPass {
       attrs.set('epilogue_tags', tags);
       attrs.set('num_dot_operands', 2);
       attrs.set('num_extra_inputs', extras.length);
+      if (prologue.lhsCast) attrs.set('lhs_prologue_cast', prologue.lhsCast);
+      if (prologue.rhsCast) attrs.set('rhs_prologue_cast', prologue.rhsCast);
 
       const fusedOp = new Operation(
         'fused_dot_epilogue',
@@ -205,6 +234,7 @@ export class EpilogueFusionPass extends FunctionPass {
 
       const removedSet = new Set(chain);
       removedSet.add(dotOp);
+      for (const r of prologue.removed) removedSet.add(r);
 
       if (hasEscapingUse(removedSet, lastOp)) continue;
 
@@ -230,6 +260,10 @@ export class EpilogueFusionPass extends FunctionPass {
       }
       dotOp.dropAllOperands();
       if (dotOp.parentBlock) dotOp.parentBlock.removeOp(dotOp);
+      for (const r of prologue.removed) {
+        r.dropAllOperands();
+        if (r.parentBlock) r.parentBlock.removeOp(r);
+      }
 
       changed = true;
     }

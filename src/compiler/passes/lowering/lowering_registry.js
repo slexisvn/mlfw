@@ -3,7 +3,7 @@ import { SymInt, symVarName } from '../../analysis/sym_int.js';
 import { MemoryScope } from '../../ir/tensor/tensor_types.js';
 import { Buffer } from '../../ir/tensor/buffer.js';
 import { isDtypeInt } from '../../../util/dtype_map.js';
-import { ForNode, BlockNode, SeqNode, BufferStoreNode, BufferLoadNode, VariableNode, IntImmNode, FloatImmNode, BlockRealizeNode, ForKind, MathOpNode, CompareNode, IfThenElseNode, mathOp } from '../../ir/tensor/nodes.js';
+import { ForNode, BlockNode, SeqNode, BufferStoreNode, BufferLoadNode, VariableNode, IntImmNode, FloatImmNode, BlockRealizeNode, ForKind, MathOpNode, CompareNode, IfThenElseNode, CastNode, mathOp } from '../../ir/tensor/nodes.js';
 import { symIntToNode } from '../../ir/tensor/sym_lower.js';
 
 import { isConstantOp } from '../../ir/graph/op_traits.js';
@@ -194,7 +194,13 @@ export function emitMatmulInitAcc(ctx, op, lhs, rhs, out, { prefix, initBlockNam
   const initBlock = new BlockNode(ctx.blockName(initBlockName), initNest.ivs, [], [{ buffer: out }], initStore);
   const initBody = initNest.wrap(initBlock);
 
-  const product = accLeaf(new BufferLoadNode(lhs, geo.lhsIdx), new BufferLoadNode(rhs, geo.rhsIdx));
+  let lhsLoad = new BufferLoadNode(lhs, geo.lhsIdx);
+  let rhsLoad = new BufferLoadNode(rhs, geo.rhsIdx);
+  const lhsCast = op.getAttr('lhs_prologue_cast');
+  const rhsCast = op.getAttr('rhs_prologue_cast');
+  if (lhsCast) lhsLoad = new CastNode(lhsLoad, lhs.dtype, lhsCast);
+  if (rhsCast) rhsLoad = new CastNode(rhsLoad, rhs.dtype, rhsCast);
+  const product = accLeaf(lhsLoad, rhsLoad);
   const accExpr = new MathOpNode('+', new BufferLoadNode(out, geo.outIdx), product);
   const accStore = new BufferStoreNode(out, geo.outIdx, accExpr);
   const accBlock = new BlockNode(ctx.blockName(accBlockName), geo.allIvs, [{ buffer: lhs }, { buffer: rhs }], [{ buffer: out }], accStore);

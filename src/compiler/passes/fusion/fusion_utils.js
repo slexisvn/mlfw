@@ -1,5 +1,8 @@
 import { registry } from '../../ir/graph/ops.js';
 import { canInlineFuse } from '../lowering/graph_to_tensor.js';
+import { Operation } from '../../ir/graph/operation.js';
+import { Block, Region } from '../../ir/graph/block.js';
+import { topoSortByOperands } from '../../ir/graph/graph_algorithms.js';
 
 export function getYieldOp(block) {
   let last = null;
@@ -60,4 +63,77 @@ export function remapOperands(op, valueMap) {
     mapped[i] = valueMap.get(orig) || orig;
   }
   return mapped;
+}
+
+export function materializeFusionGroup(group, fallbackKind) {
+  const sortedOps = topoSortByOperands(group.ops, (op) => group.hasOp(op), 'null');
+  if (sortedOps === null || sortedOps.length === 0) return null;
+
+  group._inputValues = null;
+  group._outputValues = null;
+  const inputValues = group.getInputValues();
+  const outputValues = group.getOutputValues();
+
+  const inputTypes = inputValues.map(v => v.type);
+  const outputTypes = outputValues.map(v => v.type);
+
+  const bodyRegion = new Region();
+  const bodyBlock = new Block(inputTypes);
+  bodyRegion.addBlock(bodyBlock);
+
+  const valueMap = new Map();
+  for (let i = 0; i < inputValues.length; i++) {
+    valueMap.set(inputValues[i], bodyBlock.arguments[i]);
+  }
+
+  for (const op of sortedOps) {
+    bodyBlock.pushOp(op.clone(valueMap));
+  }
+
+  const yieldValues = outputValues.map(v => {
+    const mapped = valueMap.get(v);
+    if (mapped === undefined) {
+      throw new Error('Fusion materialization: output value not found in valueMap');
+    }
+    return mapped;
+  });
+  bodyBlock.pushOp(new Operation('yield', yieldValues, []));
+
+  const fusionOp = new Operation(
+    'fusion',
+    inputValues,
+    outputTypes,
+    { fusion_kind: group.kind || fallbackKind },
+    [bodyRegion]
+  );
+
+  const block = sortedOps[0].parentBlock;
+  if (!block) return null;
+
+  const comesBefore = makeComesBefore(block);
+  let insertAfter = null;
+  for (const val of inputValues) {
+    const producer = val.definingOp;
+    if (!producer || group.hasOp(producer)) continue;
+    if (!insertAfter || !comesBefore(producer, insertAfter)) {
+      insertAfter = producer;
+    }
+  }
+
+  if (insertAfter && insertAfter.parentBlock === block) {
+    block.insertAfter(fusionOp, insertAfter);
+  } else {
+    block.insertBefore(fusionOp, sortedOps[0]);
+  }
+
+  for (let i = 0; i < outputValues.length; i++) {
+    outputValues[i].replaceAllUsesWith(fusionOp.getResult(i));
+  }
+
+  for (const op of sortedOps) {
+    op.dropAllOperands();
+    if (op.parentBlock) op.parentBlock.removeOp(op);
+  }
+
+  return fusionOp;
 }

@@ -146,6 +146,7 @@ function lowerFusion(ctx, op) {
       if (!cseVars.has(val)) {
         const exprDtype = expr.type === 'CompareNode' ? 'i32'
           : expr.type === 'CastNode' ? expr.toDtype
+          : (val.type && val.type.dtype) ? val.type.dtype
           : outBuf.dtype;
         const v = ctx.allocVar(`cse${cseCounter++}`, exprDtype);
         cseVars.set(val, v);
@@ -185,7 +186,8 @@ function lowerFusion(ctx, op) {
 
     const args = new Array(innerOp.numOperands);
     for (let i = 0; i < innerOp.numOperands; i++) args[i] = getExpr(innerOp.getOperand(i));
-    exprMap.set(innerOp.getResult(0), builder(innerOp, args, outBuf.dtype));
+    const innerDtype = innerOp.getResult(0).type.dtype;
+    exprMap.set(innerOp.getResult(0), builder(innerOp, args, innerDtype));
   }
 
   let storeBody = stores.length === 1 ? stores[0] : new SeqNode(stores);

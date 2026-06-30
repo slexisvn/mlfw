@@ -1,11 +1,8 @@
 import { FunctionPass, PassResult } from '../pass.js';
-import { Operation } from '../../ir/graph/operation.js';
-import { Block, Region } from '../../ir/graph/block.js';
-import { topoSortByOperands } from '../../ir/graph/graph_algorithms.js';
 import { FusionLegality, FusionKind } from './fusion_analysis.js';
 import { FusionGroupBuilder } from './fusion_groups.js';
 import { FusionCostModel } from './fusion_cost.js';
-import { makeComesBefore } from './fusion_utils.js';
+import { materializeFusionGroup } from './fusion_utils.js';
 import { TraceLevel } from '../../pipeline/trace.js';
 
 export class FusionPass extends FunctionPass {
@@ -58,7 +55,7 @@ export class FusionPass extends FunctionPass {
     if (filteredGroups.length === 0) return PassResult.UNCHANGED;
 
     for (const group of filteredGroups) {
-      this._materializeFusion(func, group);
+      materializeFusionGroup(group, FusionKind.ELEMENTWISE);
     }
 
     return PassResult.CHANGED;
@@ -111,84 +108,6 @@ export class FusionPass extends FunctionPass {
     }
 
     return false;
-  }
-
-  _materializeFusion(func, group) {
-    const sortedOps = this._topologicalSort(group);
-    if (sortedOps === null || sortedOps.length === 0) return;
-
-    group._inputValues = null;
-    group._outputValues = null;
-    const inputValues = group.getInputValues();
-    const outputValues = group.getOutputValues();
-
-    const inputTypes = inputValues.map(v => v.type);
-    const outputTypes = outputValues.map(v => v.type);
-
-    const bodyRegion = new Region();
-    const bodyBlock = new Block(inputTypes);
-    bodyRegion.addBlock(bodyBlock);
-
-    const valueMap = new Map();
-    for (let i = 0; i < inputValues.length; i++) {
-      valueMap.set(inputValues[i], bodyBlock.arguments[i]);
-    }
-
-    for (const op of sortedOps) {
-      bodyBlock.pushOp(op.clone(valueMap));
-    }
-
-    const yieldValues = outputValues.map(v => {
-      const mapped = valueMap.get(v);
-      if (mapped === undefined) {
-        throw new Error('Fusion materialization: output value not found in valueMap');
-      }
-      return mapped;
-    });
-    const yieldOp = new Operation('yield', yieldValues, []);
-    bodyBlock.pushOp(yieldOp);
-
-    const comesBefore = makeComesBefore(sortedOps[0].parentBlock);
-    let insertAfter = null;
-    for (const val of inputValues) {
-      const producer = val.definingOp;
-      if (!producer || group.hasOp(producer)) continue;
-      if (!insertAfter || !comesBefore(producer, insertAfter)) {
-        insertAfter = producer;
-      }
-    }
-
-    const fusionOp = new Operation(
-      'fusion',
-      inputValues,
-      outputTypes,
-      { fusion_kind: group.kind || FusionKind.ELEMENTWISE },
-      [bodyRegion]
-    );
-
-    const block = sortedOps[0].parentBlock;
-    if (!block) return;
-
-    if (insertAfter) {
-      block.insertAfter(fusionOp, insertAfter);
-    } else {
-      block.insertBefore(fusionOp, sortedOps[0]);
-    }
-
-    for (let i = 0; i < outputValues.length; i++) {
-      outputValues[i].replaceAllUsesWith(fusionOp.getResult(i));
-    }
-
-    for (const op of sortedOps) {
-      op.dropAllOperands();
-      if (op.parentBlock) {
-        op.parentBlock.removeOp(op);
-      }
-    }
-  }
-
-  _topologicalSort(group) {
-    return topoSortByOperands(group.ops, (op) => group.hasOp(op), 'null');
   }
 }
 

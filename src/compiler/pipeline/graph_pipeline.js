@@ -9,6 +9,7 @@ import { EpilogueFusionPass } from '../passes/fusion/epilogue_fusion.js';
 import { FusionMergerPass } from '../passes/fusion/fusion_merger.js';
 import { MultiOutputFusionPass } from '../passes/fusion/multi_output_fusion.js';
 import { DominatorFusionPass } from '../passes/fusion/dominator_fusion.js';
+import { PriorityFusionPass } from '../passes/fusion/priority_fusion.js';
 import { LayoutTransformPass } from '../passes/layout/layout_transform.js';
 import { QuantizationPass } from '../passes/quantization/quantization_pass.js';
 import { DecompositionPass } from '../passes/decompose/decomposition_pass.js';
@@ -58,10 +59,13 @@ export function buildGraphPipeline(config, target, { cudaMatmulChain = false, co
 
   if (config.fusion.enabled) {
     const fCfg = config.fusion;
+    const launchOverheadUs = fCfg.launchOverheadUs ?? DEFAULT_LAUNCH_OVERHEAD_US;
     if (fCfg.strategy === 'dominator') {
       passes.push(new DominatorFusionPass({ target, ...fCfg }));
+    } else if (fCfg.strategy === 'priority') {
+      passes.push(new PriorityFusionPass({ target, cost: { launchOverheadUs }, ...fCfg }));
+      passes.push(new MultiOutputFusionPass({ maxFusionSize: target?.maxFusionSize, ...fCfg }));
     } else {
-      const launchOverheadUs = fCfg.launchOverheadUs ?? DEFAULT_LAUNCH_OVERHEAD_US;
       passes.push(new FusionPass({ target, cost: { launchOverheadUs }, ...fCfg }));
       passes.push(new FusionMergerPass({ maxFusionSize: target?.maxFusionSize, ...fCfg }));
       passes.push(new MultiOutputFusionPass({ maxFusionSize: target?.maxFusionSize, ...fCfg }));

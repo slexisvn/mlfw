@@ -1,6 +1,11 @@
 import { TensorType, DYNAMIC } from '../../ir/graph/types.js';
 import { registry } from '../../ir/graph/ops.js';
 
+const DEFAULT_BENEFIT_WEIGHTS = Object.freeze({
+  memory: 1,
+  launch: 1000,
+});
+
 export class FusionCostModel {
   constructor(config = {}) {
     this.memoryBandwidthGBs = config.memoryBandwidthGBs || 900;
@@ -13,6 +18,12 @@ export class FusionCostModel {
     this.libraryOps = config.libraryOps || new Set();
     this.registerBytesPerOp = config.registerBytesPerOp || 8;
     this.policy = config.policy || null;
+    this.benefitWeights = { ...DEFAULT_BENEFIT_WEIGHTS, ...(config.benefitWeights || {}) };
+  }
+
+  edgeBenefit(bytes) {
+    const w = this.benefitWeights;
+    return w.launch * this.launchOverheadUs + w.memory * bytes;
   }
 
   estimateOpCost(op) {

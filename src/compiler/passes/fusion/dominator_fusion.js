@@ -1,7 +1,4 @@
 import { FunctionPass, PassResult } from '../pass.js';
-import { Operation } from '../../ir/graph/operation.js';
-import { Block, Region } from '../../ir/graph/block.js';
-import { topoSortByOperands } from '../../ir/graph/graph_algorithms.js';
 import { registry } from '../../ir/graph/ops.js';
 import { FusionKind, classifyOpPattern, canFusePatterns } from './fusion_analysis.js';
 import { FusionGroup } from './fusion_groups.js';
@@ -9,7 +6,7 @@ import { FusionCostModel } from './fusion_cost.js';
 import { PostDominanceAnalysis } from '../../analysis/dominance.js';
 import { TraceLevel } from '../../pipeline/trace.js';
 import { UseDefAnalysis } from '../../analysis/use_def.js';
-import { makeComesBefore } from './fusion_utils.js';
+import { materializeFusionGroup } from './fusion_utils.js';
 import { isConstantOp, isTerminatorOp } from '../../ir/graph/op_traits.js';
 
 function isSkipOp(opName) {
@@ -59,7 +56,7 @@ export class DominatorFusionPass extends FunctionPass {
     if (filtered.length === 0) return PassResult.UNCHANGED;
 
     for (const group of filtered) {
-      this._materialize(func, group);
+      materializeFusionGroup(group, FusionKind.ELEMENTWISE);
     }
 
     if (this.trace && this.trace.level >= TraceLevel.DEBUG) {
@@ -269,72 +266,4 @@ export class DominatorFusionPass extends FunctionPass {
     return count < this.maxReductions;
   }
 
-  _materialize(func, group) {
-    const sorted = this._topoSort(group);
-    if (!sorted || sorted.length === 0) return;
-
-    const inputValues = group.getInputValues();
-    const outputValues = group.getOutputValues();
-
-    const inputTypes = inputValues.map(v => v.type);
-    const outputTypes = outputValues.map(v => v.type);
-
-    const bodyRegion = new Region();
-    const bodyBlock = new Block(inputTypes);
-    bodyRegion.addBlock(bodyBlock);
-
-    const valueMap = new Map();
-    for (let i = 0; i < inputValues.length; i++) {
-      valueMap.set(inputValues[i], bodyBlock.arguments[i]);
-    }
-
-    for (const op of sorted) {
-      bodyBlock.pushOp(op.clone(valueMap));
-    }
-
-    const yieldValues = outputValues.map(v => {
-      const mapped = valueMap.get(v);
-      if (mapped === undefined) throw new Error('DominatorFusion: output not found in valueMap');
-      return mapped;
-    });
-    bodyBlock.pushOp(new Operation('yield', yieldValues, []));
-
-    const fusionOp = new Operation(
-      'fusion', inputValues, outputTypes,
-      { fusion_kind: group.kind || FusionKind.ELEMENTWISE },
-      [bodyRegion]
-    );
-
-    const block = sorted[0].parentBlock;
-    if (!block) return;
-
-    const comesBefore = makeComesBefore(block);
-    let insertAfter = null;
-    for (const val of inputValues) {
-      const producer = val.definingOp;
-      if (!producer || group.hasOp(producer)) continue;
-      if (!insertAfter || !comesBefore(producer, insertAfter)) {
-        insertAfter = producer;
-      }
-    }
-
-    if (insertAfter && insertAfter.parentBlock === block) {
-      block.insertAfter(fusionOp, insertAfter);
-    } else {
-      block.insertBefore(fusionOp, sorted[0]);
-    }
-
-    for (let i = 0; i < outputValues.length; i++) {
-      outputValues[i].replaceAllUsesWith(fusionOp.getResult(i));
-    }
-
-    for (const op of sorted) {
-      op.dropAllOperands();
-      if (op.parentBlock) op.parentBlock.removeOp(op);
-    }
-  }
-
-  _topoSort(group) {
-    return topoSortByOperands(group.ops, (op) => group.hasOp(op), 'null');
-  }
 }
