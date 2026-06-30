@@ -168,8 +168,9 @@ export class Autotuner {
 
     const tuned = this._buildTunedSchedule(primFunc, tuneResults);
     const tunedValid = !!tuned && this._scheduleIsValid(tuned);
+    const tunedStrong = tunedValid && this._isStrongBackendSchedule(tuned);
 
-    const mayDisplaceBaseline = !baselineStrong || this.config.measurer != null;
+    const mayDisplaceBaseline = !baselineStrong || (tunedStrong && this.config.measurer != null);
     if (tunedValid && mayDisplaceBaseline) {
       this._adoptSchedule(primFunc, tuned);
       return { func: primFunc };

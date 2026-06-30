@@ -67,7 +67,20 @@ describe('Autotuner._applyBestSchedule validity gate', () => {
     expect(warnings.map((w) => w.stage)).toContain('baseline-preferred');
   });
 
-  it('adopts a hardware-measured tuned schedule over the deterministic baseline', () => {
+  it('adopts a hardware-measured register-block tuned schedule over the deterministic baseline', () => {
+    const at = makeAutotuner(null);
+    at.config.measurer = {};
+    let adopted = null;
+    at._buildTunedSchedule = () => ({ marker: 'tuned', gpuRegisterBlocked: true });
+    at._buildDefaultSchedule = () => ({ marker: 'baseline', gpuRegisterBlocked: true });
+    at._scheduleIsValid = () => true;
+    at._adoptSchedule = (_target, src) => { adopted = src; };
+
+    at._applyBestSchedule(PRISTINE(), new Map());
+    expect(adopted.marker).toBe('tuned');
+  });
+
+  it('does not let a measured generic tuned schedule displace a register-block baseline', () => {
     const at = makeAutotuner(null);
     at.config.measurer = {};
     let adopted = null;
@@ -77,7 +90,7 @@ describe('Autotuner._applyBestSchedule validity gate', () => {
     at._adoptSchedule = (_target, src) => { adopted = src; };
 
     at._applyBestSchedule(PRISTINE(), new Map());
-    expect(adopted.marker).toBe('tuned');
+    expect(adopted.marker).toBe('baseline');
   });
 
   it('does not adopt the default schedule if it is also invalid', () => {

@@ -195,7 +195,11 @@ export class RuntimeModule {
     }
 
     const planBackend = this._uniformPlanBackend(plan);
-    if (planBackend && planBackend.runPlan) {
+    const anyScratch = plan.steps.some(step => {
+      const k = this.kernels.get(step.name);
+      return k && k.metadata && k.metadata.scratch && k.metadata.scratch.length > 0;
+    });
+    if (planBackend && planBackend.runPlan && !anyScratch) {
       const steps = plan.steps.map(step => {
         const stepArgs = [];
         for (const s of step.inputSlots) stepArgs.push(slots[s]);

@@ -1,5 +1,5 @@
 import {
-  analyzePureMatmul, pickFixedConfig, buildRegisterBlockedMatmul,
+  analyzeMatmulEpilogue, pickFixedConfig, buildRegisterBlockedMatmul,
 } from '../autotune/gpu_matmul_sketch.js';
 import { collectAllBlockNames } from '../autotune/block_analysis.js';
 import { applyImplicitGemmConv } from './conv_implicit_gemm.js';
@@ -83,11 +83,11 @@ export function applyDeterministicGpuConv(schedule, target) {
 
 export function applyDeterministicGpuMatmul(schedule, target, sCfg = {}) {
   if (!target.isGPU()) return false;
-  const plan = analyzePureMatmul(schedule.func);
+  const plan = analyzeMatmulEpilogue(schedule.func);
   if (!plan) return false;
   const dims = plan.dims;
 
-  if (sCfg && sCfg.primitiveMatmul && (dims.batch || 1) === 1) {
+  if (sCfg && sCfg.primitiveMatmul && (dims.batch || 1) === 1 && !plan.epilogue) {
     const tcfg = pickTiledConfig(target, dims);
     if (tcfg) {
       const body = buildTiledSharedMatmul(dims, tcfg.BS, tcfg.BK);
@@ -100,7 +100,7 @@ export function applyDeterministicGpuMatmul(schedule, target, sCfg = {}) {
 
   const cfg = pickFixedConfig(target, dims);
   if (!cfg) return false;
-  const body = buildRegisterBlockedMatmul(dims, cfg);
+  const body = buildRegisterBlockedMatmul(dims, cfg, plan.epilogue);
   schedule.func.body = body;
   if (schedule.func._setChild) schedule.func._setChild('body', body);
   schedule.func.gpuRegisterBlocked = true;

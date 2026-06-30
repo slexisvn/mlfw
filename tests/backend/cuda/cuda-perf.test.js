@@ -31,7 +31,7 @@ async function timeConfig(N, opts, reps) {
 describe.skipIf(!cudaDeps)('CUDA performance: scheduling speeds up matmul on real GPU', () => {
   it('scheduled matmul is much faster than unscheduled baseline (1-thread)', async () => {
     const N = 128;
-    const base = await timeConfig(N, {}, 5);
+    const base = await timeConfig(N, { scheduling: { enabled: false, gpuTiling: false } }, 5);
     const sched = await timeConfig(N, { scheduling: { enabled: true } }, 20);
     const autotune = await timeConfig(N, { scheduling: { enabled: true, autotune: true, seed: 7 } }, 20);
     process.stdout.write(`\n  matmul+relu ${N}x${N} on ${cudaDeps.arch}: baseline=${base.toFixed(3)}ms sched=${sched.toFixed(3)}ms (${(base / sched).toFixed(1)}x) autotune=${autotune.toFixed(3)}ms (${(base / autotune).toFixed(1)}x vs base, ${(sched / autotune).toFixed(2)}x vs sched)\n`);

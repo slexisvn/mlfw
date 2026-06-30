@@ -7,6 +7,8 @@ import { Buffer } from '../ir/tensor/buffer.js';
 import { classifyBlock } from '../schedule/rules.js';
 import { ScheduleSketch, SearchVariable } from './sketch.js';
 import { findBlock, collectAllBlockNames, analyzeBlockStructure } from './block_analysis.js';
+import { walk, transform, STOP } from '../ir/ir_visitor.js';
+import { cloneTensorIR } from './tune_ir.js';
 
 const I = (v) => new IntImmNode(v);
 const FZERO = () => new FloatImmNode(0);
@@ -216,7 +218,24 @@ export function pickFixedConfig(target, dims) {
   return preferred || (all.length > 0 ? all[0] : null);
 }
 
-export function buildRegisterBlockedMatmul(bufs, params) {
+function foldEpilogue(ep, accLoad, rowC, colC) {
+  const cloned = cloneTensorIR(ep.storeValue);
+  return transform(cloned, (n) => {
+    if (n.type === 'BufferLoadNode' && n.buffer) {
+      if (n.buffer.name === ep.inputName) return accLoad;
+      if (ep.scalarConsts.has(n.buffer.name)) return cloneTensorIR(ep.scalarConsts.get(n.buffer.name));
+      return n;
+    }
+    if (n.type === 'VariableNode') {
+      if (n.name === ep.iv0) return cloneTensorIR(rowC);
+      if (n.name === ep.iv1) return cloneTensorIR(colC);
+      return n;
+    }
+    return n;
+  });
+}
+
+export function buildRegisterBlockedMatmul(bufs, params, epilogue = null) {
   const { A, B, C, M, N, K, transB } = bufs;
   const batch = bufs.batch || 1;
   const { BM, BN, BK, TM, TN } = params;
@@ -300,7 +319,10 @@ export function buildRegisterBlockedMatmul(bufs, params) {
   const wm = IV('rb_wm'), wn = IV('rb_wn');
   const rowC = ADD(ADD(brow, MUL(ty, I(TM))), wm);
   const colC = ADD(ADD(bcol, MUL(tx, I(TN))), wn);
-  let writeStore = new BufferStoreNode(C, gIdx(rowC, colC), new BufferLoadNode(acc, [accIdx(wm, wn)]));
+  const accLoad = new BufferLoadNode(acc, [accIdx(wm, wn)]);
+  const outBuf = epilogue ? epilogue.outBuffer : C;
+  const storeValue = epilogue ? foldEpilogue(epilogue, accLoad, rowC, colC) : accLoad;
+  let writeStore = new BufferStoreNode(outBuf, gIdx(rowC, colC), storeValue);
   if (guardRow || guardCol) {
     let cond = guardRow ? LT(rowC, I(M)) : null;
     if (guardCol) cond = cond ? AND(cond, LT(colC, I(N))) : LT(colC, I(N));
@@ -369,6 +391,105 @@ export function analyzePureMatmul(primFunc) {
     for (const w of info.writeBuffers) if (w !== dims.C.name) return null;
   }
   return { reductionBlock, dims };
+}
+
+function collectScalarConstBuffers(body) {
+  const consts = new Map();
+  const writeCount = new Map();
+  walk(body, (n) => {
+    if (n.type === 'BufferStoreNode' && n.buffer) {
+      const bn = n.buffer.name;
+      writeCount.set(bn, (writeCount.get(bn) || 0) + 1);
+      if ((!n.indices || n.indices.length === 0) && n.value &&
+          (n.value.type === 'FloatImmNode' || n.value.type === 'IntImmNode')) {
+        consts.set(bn, n.value);
+      }
+    }
+  });
+  for (const bn of [...consts.keys()]) if ((writeCount.get(bn) || 0) !== 1) consts.delete(bn);
+  return consts;
+}
+
+function findEpilogueStore(node, outName) {
+  let found = null;
+  walk(node, (n) => {
+    if (n.type === 'BufferStoreNode' && n.buffer && n.buffer.name === outName) { found = n; return STOP; }
+  });
+  return found;
+}
+
+function singleBufferLoad(expr, name) {
+  let found = null, count = 0;
+  walk(expr, (n) => { if (n.type === 'BufferLoadNode' && n.buffer && n.buffer.name === name) { count++; found = n; } });
+  return count === 1 ? found : null;
+}
+
+export function analyzeMatmulEpilogue(primFunc) {
+  const names = collectAllBlockNames(primFunc.body);
+  let reductionBlock = null;
+  for (const name of names) {
+    const s = analyzeBlockStructure(primFunc, name);
+    if (s.hasReduction && s.spatial >= 2 && s.reads >= 2) {
+      if (reductionBlock) return null;
+      reductionBlock = name;
+    }
+  }
+  if (!reductionBlock) return null;
+  const dims = matmulTileDims(primFunc, reductionBlock);
+  if (!dims) return null;
+  const Cm = dims.C.name;
+
+  const allWrites = new Set();
+  for (const name of names) {
+    const info = classifyBlock(primFunc, name);
+    if (!info) return null;
+    for (const w of info.writeBuffers) allWrites.add(w);
+  }
+
+  const epilogueBlocks = [];
+  for (const name of names) {
+    if (name === reductionBlock) continue;
+    const info = classifyBlock(primFunc, name);
+    if (info.hasReduction) return null;
+    if (info.readBuffers.length === 0) {
+      if (info.writeBuffers.every((w) => w === Cm)) continue;
+      return null;
+    }
+    epilogueBlocks.push({ name, info });
+  }
+
+  if (epilogueBlocks.length === 0) return { reductionBlock, dims, epilogue: null };
+  if (epilogueBlocks.length !== 1) return null;
+  if ((dims.batch || 1) !== 1) return null;
+
+  const ep = epilogueBlocks[0];
+  if (ep.info.writeBuffers.length !== 1) return null;
+  const outName = ep.info.writeBuffers[0];
+
+  const scalarConsts = collectScalarConstBuffers(primFunc.body);
+  let readsCm = 0;
+  for (const rb of ep.info.readBuffers) {
+    if (rb === Cm) { readsCm++; continue; }
+    if (allWrites.has(rb) && !scalarConsts.has(rb)) return null;
+  }
+  if (readsCm !== 1) return null;
+
+  const block = findBlock(primFunc.body, ep.name);
+  if (!block) return null;
+  const store = findEpilogueStore(block.body, outName);
+  if (!store) return null;
+  const iv = plainVars(store.indices);
+  if (!iv || iv.length !== 2) return null;
+  const cmLoad = singleBufferLoad(store.value, Cm);
+  if (!cmLoad) return null;
+  const cmIdx = plainVars(cmLoad.indices);
+  if (!cmIdx || cmIdx.length !== iv.length || cmIdx.some((v, k) => v !== iv[k])) return null;
+
+  return {
+    reductionBlock,
+    dims,
+    epilogue: { outBuffer: store.buffer, storeValue: store.value, inputName: Cm, iv0: iv[0], iv1: iv[1], scalarConsts },
+  };
 }
 
 const matmulSketchCache = new WeakMap();

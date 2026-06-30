@@ -5,6 +5,7 @@ import { irChildNodes } from '../../compiler/ir/ir_visitor.js';
 import { parseThreadAxis, maxBindingExtent, visitStatements, estimateBufferSize, dynamicDimProduct, resolveShapeParam } from '../codegen_utils.js';
 import { getCudaIntrin } from './tensor_intrin.js';
 
+const LOCAL_MEMORY_BUDGET_BYTES = 256 * 1024;
 
 export class CUDAKernel {
   constructor(name, source, blockDim, gridDim, sharedMemBytes, params, outputIndices, scratch) {
@@ -531,15 +532,21 @@ export class CUDACodegen {
     return result;
   }
 
-  _hasRecurrence(func) {
-    const stack = [func.body];
-    while (stack.length > 0) {
-      const node = stack.pop();
-      if (!node) continue;
-      if (node.type === 'ForNode' && node.kind === ForKind.RECURRENCE) return true;
-      for (const c of irChildNodes(node)) stack.push(c);
-    }
-    return false;
+  _crossThreadBuffersAreBlockLocal(func, crossThread) {
+    let blockLocal = true;
+    const walk = (node, underGrid) => {
+      if (!node || typeof node !== 'object') return;
+      let g = underGrid;
+      if (node.type === 'ForNode' && node.kind === ForKind.THREAD_BINDING && node.threadTag) {
+        const p = parseThreadAxis(node.threadTag);
+        if (p && p.space === 'block') g = true;
+      }
+      if (g && (node.type === 'BufferStoreNode' || node.type === 'LIRFlatStoreNode')
+        && node.buffer && crossThread.has(node.buffer.name)) blockLocal = false;
+      for (const c of irChildNodes(node)) walk(c, g);
+    };
+    walk(func.body, false);
+    return blockLocal;
   }
 
   _promoteCrossThreadToShared(func, crossThread) {
@@ -580,7 +587,7 @@ export class CUDACodegen {
       const gridThreads = this._gridDim[0] * this._gridDim[1] * this._gridDim[2];
       const crossThread = this._findCrossThreadBuffers(func);
       if (blockThreads * gridThreads > 1 && crossThread.size > 0) {
-        if (gridThreads === 1 && this._hasRecurrence(func) && this._promoteCrossThreadToShared(func, crossThread)) {
+        if (this._crossThreadBuffersAreBlockLocal(func, crossThread) && this._promoteCrossThreadToShared(func, crossThread)) {
           this._needsBarriers = true;
           return;
         }
@@ -660,15 +667,20 @@ export class CUDACodegen {
   }
 
   _collectGlobalScratch(func) {
-    if (this._threadBindings.size > 0) return;
+    const serialized = this._serializeThreads;
+    if (this._threadBindings.size > 0 && !serialized) return;
     const THRESHOLD = 32768;
     const storageNames = new Set();
     for (const [, buf] of func.bufferMap) storageNames.add(buf.name);
+    const candidates = [];
+    const seen = new Set();
     const consider = (name, buf) => {
-      if (!buf || storageNames.has(name) || this._promotedBuffers.has(name) || this._scratchNames.has(name)) return;
+      if (!buf || storageNames.has(name) || this._promotedBuffers.has(name) || this._scratchNames.has(name) || seen.has(name)) return;
       const numel = typeof buf.numel === 'function' ? buf.numel() : 0;
       const size = numel > 0 ? numel : this._estimateBufferSize(buf);
-      if (size > THRESHOLD) { this._scratchNames.add(name); this._globalScratch.push({ name, dtype: buf.dtype, size }); }
+      if (size <= 0) return;
+      seen.add(name);
+      candidates.push({ name, dtype: buf.dtype, size, bytes: size * dtypeBytes(buf.dtype) });
     };
     const stack = [func.body];
     while (stack.length > 0) {
@@ -680,6 +692,19 @@ export class CUDACodegen {
     const refBuffers = new Map();
     this._scanBufferRefs(func.body, refBuffers);
     for (const [name, buf] of refBuffers) consider(name, buf);
+
+    const offload = (c) => { this._scratchNames.add(c.name); this._globalScratch.push({ name: c.name, dtype: c.dtype, size: c.size }); };
+    if (!serialized) {
+      for (const c of candidates) if (c.size > THRESHOLD) offload(c);
+      return;
+    }
+    let localBytes = candidates.reduce((s, c) => s + c.bytes, 0);
+    if (localBytes <= LOCAL_MEMORY_BUDGET_BYTES) return;
+    for (const c of [...candidates].sort((a, b) => b.bytes - a.bytes)) {
+      if (localBytes <= LOCAL_MEMORY_BUDGET_BYTES) break;
+      offload(c);
+      localBytes -= c.bytes;
+    }
   }
 
   _scanAllocateNodes(root, names) {

@@ -11,6 +11,7 @@ import { RuntimeModule } from '../../runtime/runtime.js';
 import { TensorVerifier } from '../ir/tensor/verifier.js';
 import { verifyModule, verifyFunction } from '../ir/graph/verifier.js';
 import { CalibrationCollector } from '../analysis/calibration.js';
+import { collectCalibration } from '../analysis/calibrate_exec.js';
 import { GraphPartitionPass, PartitionMaterializationPass } from '../passes/partition/partition_pass.js';
 import { splitGraph } from './graph_split.js';
 import { detectPureConv } from '../schedule/conv_implicit_gemm.js';
@@ -184,6 +185,14 @@ export class Compiler {
         run: (ctx) => ctx.compiler._verifyGraph(ctx.working, 'before graph passes', ctx.trace, ctx.errors, ctx.failed, ctx.resilient),
       },
       {
+        name: 'calibrate',
+        when: (ctx) => {
+          const q = ctx.compiler.config.quantization;
+          return q.enabled && q.calibrationData && !q.calibration;
+        },
+        run: (ctx) => ctx.compiler._runCalibration(ctx.working, ctx.trace),
+      },
+      {
         name: 'graphPasses',
         run: (ctx) => { ctx.cudaMatmulChain = ctx.compiler._runGraphPasses(ctx.working, ctx.original, ctx.trace, ctx.errors, ctx.failed, ctx.resilient); },
       },
@@ -255,6 +264,25 @@ export class Compiler {
       collector.attach(func);
     }
     return collector;
+  }
+
+  _runCalibration(graphModule, trace) {
+    const q = this.config.quantization;
+    const entry = graphModule.functionNames()[0];
+    const func = graphModule.getFunction(entry);
+    if (!func) return;
+
+    trace.phaseStart('calibrate');
+    const t0 = performance.now();
+    const target = this.config.target;
+    const compileFn = (mod, tgt) => new Compiler({ target: tgt, verify: this.config.verify }).compile(mod);
+    const result = collectCalibration(func, target, q.calibrationData, {
+      mode: q.calibrationMode || 'minmax',
+      quantizableOps: q.quantizableOps,
+      compileFn,
+    });
+    this.config.quantization = { ...q, calibration: result };
+    trace.phaseEnd('calibrate', performance.now() - t0);
   }
 
   _runGraphPasses(graphModule, original, trace, errors, failed, resilient) {

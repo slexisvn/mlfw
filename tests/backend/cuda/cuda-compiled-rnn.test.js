@@ -60,4 +60,34 @@ describe.skipIf(!cudaDeps)('compiled scan RNN (LSTM/GRU) on CUDA matches CPU', (
     expect(total).toBeGreaterThan(1);
     expect(md.sharedMemBytes).toBeGreaterThan(0);
   });
+
+  it('LSTM hidden=256 batch=16 matches CPU (serialized scan, large batch)', async () => {
+    expect(await err(new nn.LSTM(8, 256, 1, false, true), [5, 16, 8])).toBeLessThan(2e-3);
+  }, 60000);
+  it('LSTM input=32 hidden=256 batch=16 matches CPU', async () => {
+    expect(await err(new nn.LSTM(32, 256, 1, false, true), [5, 16, 32])).toBeLessThan(2e-3);
+  }, 60000);
+  it('LSTM input=64 hidden=256 batch=16 matches CPU', async () => {
+    expect(await err(new nn.LSTM(64, 256, 1, false, true), [5, 16, 64])).toBeLessThan(2e-3);
+  }, 60000);
+  it('LSTM hidden=256 batch=32 matches CPU (heavy serialized scan)', async () => {
+    expect(await err(new nn.LSTM(8, 256, 1, false, true), [5, 32, 8])).toBeLessThan(2e-3);
+  }, 60000);
+  it('GRU hidden=256 batch=16 matches CPU', async () => {
+    expect(await err(new nn.GRU(8, 256, 1, false, true), [5, 16, 8])).toBeLessThan(2e-3);
+  }, 60000);
+
+  it('large-batch serialized scan offloads oversized buffers to global scratch (no per-thread local-mem overflow)', () => {
+    const model = new nn.LSTM(8, 256, 1, false, true);
+    model.eval();
+    const x = tensor(data(rng(7), [5, 16, 8]));
+    const g = compile({ forward: (a) => model.forward(a)[0] }, [x], { target: CUDATarget(), verify: false, scheduling: { enabled: true } });
+    const k = g.result().module.kernels.get(g.result().module.listKernels()[0]);
+    expect(k.metadata.blockDim.reduce((a, b) => a * b, 1)).toBe(1);
+    expect(k.metadata.scratch.length).toBeGreaterThan(0);
+    let localBytes = 0;
+    const re = /\b(float|int|double)\s+\w+\[(\d+)\];/g;
+    for (let m; (m = re.exec(k.source));) localBytes += Number(m[2]) * (m[1] === 'double' ? 8 : 4);
+    expect(localBytes).toBeLessThan(512 * 1024);
+  });
 });

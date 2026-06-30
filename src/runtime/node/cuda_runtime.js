@@ -87,14 +87,16 @@ export function runCudaKernelSync(compiledKernel, tensorArgs, shapeValues) {
     copyHostToDevice(dptr, host);
     ptrs.push(dptr);
   }
+  const scratch = _acquireScratch(meta.scratch);
 
-  launch(func, meta.gridDim, meta.blockDim, 0, ptrs, scalars);
+  launch(func, meta.gridDim, meta.blockDim, 0, [...ptrs, ...scratch.ptrs], scalars);
 
   const outputSet = new Set(outputs);
   for (let i = 0; i < buffers.length; i++) {
     if (outputSet.has(i)) copyDeviceToHost(buffers[i], ptrs[i]);
   }
   for (let i = 0; i < ptrs.length; i++) release(ptrs[i], buffers[i].byteLength);
+  _releaseScratch(scratch);
 }
 
 export function runCudaKernelResident(compiledKernel, tensorArgs, shapeValues) {
