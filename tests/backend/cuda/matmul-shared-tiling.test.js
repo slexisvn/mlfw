@@ -59,4 +59,28 @@ describe.skipIf(!cudaDeps)('CUDA native matmul shared-memory tiling', () => {
       expect(src.includes('ts_As')).toBe(false);
     });
   });
+
+  describe('batched-lhs / shared-2D-rhs matmul is register-blocked (flattened to B*M x N)', () => {
+    function mkBatched(batch, M, K, N) {
+      return buildFunction('bmm', [new TensorType([...batch, M, K], 'f32'), new TensorType([K, N], 'f32')], [new TensorType([...batch, M, N], 'f32')],
+        (b, a) => b.returnOp([b.matmul(a[0], a[1]).getResult(0)]));
+    }
+    async function batchedErr(batch, M, K, N) {
+      const nb = batch.reduce((x, y) => x * y, 1);
+      const A = rnd(nb * M * K, 1), B = rnd(K * N, 2);
+      const cpu = new Float32Array(nb * M * N), gpu = new Float32Array(nb * M * N);
+      compileGraph(mkBatched(batch, M, K, N), CPUTarget(), SCHED).run('bmm', A, B, cpu);
+      await compileGraph(mkBatched(batch, M, K, N), CUDATarget(), SCHED).runAsync('bmm', A, B, gpu);
+      let e = 0; for (let i = 0; i < cpu.length; i++) e = Math.max(e, Math.abs(cpu[i] - gpu[i]) / (1 + Math.abs(cpu[i])));
+      return e;
+    }
+    it('3D [1,64,256]@[256,256] matches CPU', async () => expect(await batchedErr([1], 64, 256, 256)).toBeLessThan(2e-3));
+    it('3D batch>1 [4,64,256]@[256,256] matches CPU', async () => expect(await batchedErr([4], 64, 256, 256)).toBeLessThan(2e-3));
+    it('4D [2,4,32,64]@[64,64] matches CPU', async () => expect(await batchedErr([2, 4], 32, 64, 64)).toBeLessThan(2e-3));
+    it('non-divisible 3D [3,50,130]@[130,70] matches CPU', async () => expect(await batchedErr([3], 50, 130, 70)).toBeLessThan(2e-3));
+    it('emits register-blocked kernel (rb_As) for the 3D case', () => {
+      const src = compileGraph(mkBatched([2], 64, 256, 256), CUDATarget(), SCHED).getSource('bmm');
+      expect(src.includes('rb_As')).toBe(true);
+    });
+  });
 });

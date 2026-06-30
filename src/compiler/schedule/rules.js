@@ -30,7 +30,7 @@ export function classifyBlock(primFunc, blockName) {
   return cache.has(blockName) ? cache.get(blockName) : null;
 }
 
-function invalidateClassifyCache(primFunc) {
+export function invalidateClassifyCache(primFunc) {
   if (primFunc) _classifyCacheByFunc.delete(primFunc);
 }
 

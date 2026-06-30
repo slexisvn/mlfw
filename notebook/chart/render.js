@@ -1,5 +1,6 @@
 import { renderAxes, renderRightAxis } from './axis.js';
 import { renderLegend } from './legend.js';
+import { renderReferenceLines, labeledRuleExtras } from './rules.js';
 import { createZoomInteraction } from './interaction.js';
 import { colorAt } from './palette.js';
 import { getRenderer, registerRenderer } from './registry.js';
@@ -16,6 +17,11 @@ import { renderRegression } from './renderers/regression.js';
 import { renderBubble } from './renderers/bubble.js';
 import { renderPayloadChart } from './payload_renderers.js';
 import { domainsEqual } from './zoom.js';
+import { shouldAnimate, createAnimationController, revealPoints, prefersReducedMotion, isBrowserAnimation } from './animate.js';
+import { getEasing, indexMarks, segmentAt, tweenLinePath, tweenMark, unionKeys } from './interpolate.js';
+
+const ANIMATABLE_TYPES = new Set(['line', 'area', 'scatter']);
+const SCATTER_RADIUS = 4;
 
 registerRenderer('line', renderLine);
 registerRenderer('bar', renderBar);
@@ -28,10 +34,30 @@ registerRenderer('hexbin', renderHexbin);
 registerRenderer('regression', renderRegression);
 registerRenderer('bubble', renderBubble);
 
+export function renderStaticChart(host, spec) {
+  if (!isChartSpec(spec)) throw new Error('renderStaticChart expects a ChartSpec');
+  return renderChart(host, toStaticSpec(spec));
+}
+
+function toStaticSpec(spec) {
+  if (spec.animation?.mode === 'morph') {
+    const last = spec.animation.frames.at(-1);
+    return { ...spec, animation: undefined, series: last?.series ?? spec.series };
+  }
+  if (spec.options?.animate) return { ...spec, options: { ...spec.options, animate: false } };
+  return spec;
+}
+
+function revealFraction(animation, anim) {
+  if (!animation) return 1;
+  return getEasing(anim.easing)(animation.fraction());
+}
+
 export function renderChart(host, spec) {
   if (!isChartSpec(spec)) throw new Error('renderChart expects a ChartSpec');
   if (spec.type === 'figure') return renderFigure(host, spec);
   if (spec.payload != null) return renderPayloadChart(host, spec);
+  if (spec.animation?.mode === 'morph' && isBrowserAnimation()) return renderMorph(host, spec);
   const hidden = new Set();
   const initialSeries = layoutSeries(spec.series, spec);
   const allSpecPoints = initialSeries.flatMap(series => series.points);
@@ -42,6 +68,11 @@ export function renderChart(host, spec) {
   const zoomEnabled = spec.options.zoom && ['line', 'scatter', 'histogram', 'area', 'density', 'hexbin', 'regression', 'ecdf', 'bubble'].includes(spec.type) && baseX.type === 'linear' && baseY.type === 'linear';
   const bounds = zoomEnabled ? { x: baseX.domain, y: baseY.domain } : null;
   let domains = zoomEnabled ? { x: [...bounds.x], y: [...bounds.y] } : null;
+  const anim = spec.options.anim;
+  const animation = shouldAnimate(spec.options.animate, spec.type, ANIMATABLE_TYPES)
+    ? createAnimationController(host, { duration: anim.durationMs, loop: anim.loop, speed: anim.speed, autoplay: anim.autoplay })
+    : null;
+  const surface = animation ? animation.stage : host;
   let interactionContext = null;
   let observer = null;
   let tooltip = null;
@@ -54,7 +85,7 @@ export function renderChart(host, spec) {
 
   const draw = () => {
     tooltip?.remove();
-    host.innerHTML = '';
+    surface.innerHTML = '';
     host.className = 'chart-view';
     host.classList.toggle('chart-zoom-enabled', zoomEnabled);
     const width = spec.options.width ?? Math.max(320, host.clientWidth || 720);
@@ -62,8 +93,10 @@ export function renderChart(host, spec) {
     const compact = width < 520;
     host.classList.toggle('chart-compact', compact);
     const layout = { width, height, left: compact ? 44 : 58, right: width - 16, top: spec.options.title ? 42 : 20, bottom: height - (compact ? 42 : 48) };
-    const selected = spec.series.map((series, index) => ({ ...series, index, color: colorAt(index) })).filter(series => !hidden.has(series.index));
+    const selected = spec.series.map((series, index) => ({ ...series, index, color: colorAt(index), dash: spec.options.dash })).filter(series => !hidden.has(series.index));
     const visible = layoutSeries(selected, spec);
+    const fraction = revealFraction(animation, anim);
+    const drawn = animation ? visible.map(series => ({ ...series, points: revealPoints(series.points, fraction, baseX) })) : visible;
     const svg = svgElement('svg', { class: 'chart-svg', viewBox: `0 0 ${width} ${height}`, role: 'img' });
     if (spec.options.title) svg.append(svgText(spec.options.title, { class: 'chart-title', x: layout.left, y: 24 }));
     const x = createScale(xValues, layout.left, layout.right, { padding: spec.type === 'bar' ? 0 : 0.03, domain: domains?.x });
@@ -81,16 +114,18 @@ export function renderChart(host, spec) {
     const renderer = getRenderer(spec.type);
     const visibleSeriesCount = Math.max(1, visible.length);
     const maxSeriesPoints = Math.max(1, ...visible.map(series => series.points.length));
-    visible.forEach((series, visibleIndex) => {
+    drawn.forEach((series, visibleIndex) => {
       const group = svgElement('g', { class: `chart-series chart-series-${series.index}` });
       const groupWidth = x.type === 'category' ? x.step * 0.78 : Math.max(4, (layout.right - layout.left) / maxSeriesPoints) * 0.78;
       const stacked = spec.options.mode === 'stacked';
       const seriesOffset = visibleSeriesCount === 1 || stacked ? 0 : (visibleIndex - (visibleSeriesCount - 1) / 2) * (groupWidth / visibleSeriesCount);
-      renderer(group, series, { x, y, layout, tooltip, visibleSeriesCount, maxSeriesPoints, seriesOffset, stacked, allPoints: visible.flatMap(item => item.points) });
+      renderer(group, series, { x, y, layout, tooltip, visibleSeriesCount, maxSeriesPoints, seriesOffset, stacked, allPoints: drawn.flatMap(item => item.points) });
       marks.append(group);
     });
     svg.append(marks);
-    host.append(svg);
+    renderReferenceLines(svg, layout, y, spec.options.hlines, 'h');
+    renderReferenceLines(svg, layout, x, spec.options.vlines, 'v');
+    surface.append(svg);
     interactionContext = {
       enabled: zoomEnabled,
       bounds,
@@ -100,9 +135,10 @@ export function renderChart(host, spec) {
       x,
       y,
     };
-    if (zoomEnabled) renderZoomControls(host, isZoomed(), resetZoom);
-    if (spec.options.legend && spec.series.length > 1) {
-      renderLegend(host, spec.series.map((series, index) => ({ ...series, color: colorAt(index) })), hidden, drawSoon);
+    if (zoomEnabled) renderZoomControls(surface, isZoomed(), resetZoom);
+    const ruleExtras = labeledRuleExtras(spec.options);
+    if (spec.options.legend && (spec.series.length > 1 || ruleExtras.length)) {
+      renderLegend(surface, spec.series.map((series, index) => ({ ...series, color: colorAt(index) })), hidden, drawSoon, ruleExtras);
     }
   };
 
@@ -115,7 +151,9 @@ export function renderChart(host, spec) {
     drawSoon();
   };
   const interactionCleanup = createZoomInteraction(host, () => interactionContext, changeZoom, resetZoom);
+  animation?.setRedraw(drawSoon);
   draw();
+  animation?.start();
   if (typeof ResizeObserver !== 'undefined' && spec.options.width == null) {
     observer = new ResizeObserver(drawSoon);
     observer.observe(host);
@@ -124,6 +162,7 @@ export function renderChart(host, spec) {
     cancelAnimationFrame(frame);
     observer?.disconnect();
     interactionCleanup();
+    animation?.cleanup();
     tooltip?.remove();
   };
 
@@ -138,6 +177,11 @@ export function renderFigure(host, spec) {
   if (Array.isArray(spec.panels)) return renderFacet(host, spec);
   const items = flattenFigureItems(spec.layers);
   const hidden = new Set();
+  const anim = spec.options.anim;
+  const animation = shouldAnimate(spec.options.animate, 'figure', FIGURE_ANIMATABLE_TYPES)
+    ? createAnimationController(host, { duration: anim.durationMs, loop: anim.loop, speed: anim.speed, autoplay: anim.autoplay })
+    : null;
+  const surface = animation ? animation.stage : host;
   let observer = null;
   let tooltip = null;
   let frame = 0;
@@ -148,7 +192,7 @@ export function renderFigure(host, spec) {
 
   const draw = () => {
     tooltip?.remove();
-    host.innerHTML = '';
+    surface.innerHTML = '';
     host.className = 'chart-view';
     const width = spec.options.width ?? Math.max(320, host.clientWidth || 720);
     const height = chartHeight(width, spec.options.height);
@@ -172,14 +216,19 @@ export function renderFigure(host, spec) {
     const scales = figureScales(visible, layout);
     renderAxes(svg, layout, scales.x, scales.y, { x: spec.options.xLabel, y: spec.options.yLabel });
     if (scales.yRight) renderRightAxis(svg, layout, scales.yRight, spec.options.y2Label);
-    paintFigurePanel(svg, layout, visible, scales, tooltip);
-    host.append(svg);
-    if (spec.options.legend && items.length > 1) {
-      renderLegend(host, items.map(item => ({ name: item.series.name, color: item.color })), hidden, drawSoon);
+    paintFigurePanel(svg, layout, visible, scales, tooltip, revealFraction(animation, anim));
+    renderReferenceLines(svg, layout, scales.y, spec.options.hlines, 'h');
+    renderReferenceLines(svg, layout, scales.x, spec.options.vlines, 'v');
+    surface.append(svg);
+    const ruleExtras = labeledRuleExtras(spec.options);
+    if (spec.options.legend && (items.length > 1 || ruleExtras.length)) {
+      renderLegend(surface, items.map(item => ({ name: item.series.name, color: item.color })), hidden, drawSoon, ruleExtras);
     }
   };
 
+  animation?.setRedraw(drawSoon);
   draw();
+  animation?.start();
   if (typeof ResizeObserver !== 'undefined' && spec.options.width == null) {
     observer = new ResizeObserver(drawSoon);
     observer.observe(host);
@@ -187,9 +236,12 @@ export function renderFigure(host, spec) {
   return () => {
     cancelAnimationFrame(frame);
     observer?.disconnect();
+    animation?.cleanup();
     tooltip?.remove();
   };
 }
+
+const FIGURE_ANIMATABLE_TYPES = new Set(['figure']);
 
 function renderFacet(host, spec) {
   const panels = spec.panels.map(panel => ({ label: panel.label, items: flattenFigureItems(panel.layers) }));
@@ -245,6 +297,8 @@ function renderFacet(host, spec) {
       renderAxes(cell, layout, scales.x, scales.y, { x: col === 0 ? spec.options.xLabel : null, y: col === 0 ? spec.options.yLabel : null });
       if (scales.yRight) renderRightAxis(cell, layout, scales.yRight, col === cols - 1 ? spec.options.y2Label : null);
       paintFigurePanel(cell, layout, visible, scales, tooltip);
+      renderReferenceLines(cell, layout, scales.y, spec.options.hlines, 'h');
+      renderReferenceLines(cell, layout, scales.x, spec.options.vlines, 'v');
       svg.append(cell);
     });
     host.append(svg);
@@ -279,7 +333,7 @@ function figureScales(domainItems, layout) {
   return { x, y, yRight };
 }
 
-function paintFigurePanel(svg, layout, visible, scales, tooltip) {
+function paintFigurePanel(svg, layout, visible, scales, tooltip, fraction = 1) {
   const clipId = `chart-clip-${nextChartId++}`;
   const defs = svgElement('defs');
   const clip = svgElement('clipPath', { id: clipId });
@@ -299,7 +353,7 @@ function paintFigurePanel(svg, layout, visible, scales, tooltip) {
       const groupWidth = scales.x.type === 'category' ? scales.x.step * 0.78 : Math.max(4, (layout.right - layout.left) / maxBarPoints) * 0.78;
       seriesOffset = (barItems.indexOf(item) - (barCount - 1) / 2) * (groupWidth / barCount);
     }
-    getRenderer(item.mark)(group, { ...item.series, color: item.color, index: item.index }, {
+    getRenderer(item.mark)(group, { ...item.series, points: revealPoints(item.series.points, fraction, scales.x), color: item.color, index: item.index }, {
       x: scales.x,
       y: item.axis === 'right' ? scales.yRight : scales.y,
       layout,
@@ -336,6 +390,161 @@ function chartHeight(width, explicit) {
   if (width < 420) return 260;
   if (width < 720) return 310;
   return 360;
+}
+
+function renderMorph(host, spec) {
+  const anim = spec.animation;
+  const frames = anim.frames;
+  const isLine = spec.type === 'line';
+  const allPoints = frames.flatMap(frame => frame.series.flatMap(series => series.points));
+  const xValues = allPoints.map(point => point.x);
+  const yValues = allPoints.map(point => point.y);
+  const maxSize = Math.max(1, ...allPoints.map(point => Math.abs(point.size ?? point.value ?? 1)));
+  const frameValues = frames.map(frame => frame.value);
+  const reduced = prefersReducedMotion();
+  const ease = getEasing(anim.easing);
+  const controller = createAnimationController(host, {
+    duration: Math.max(1, anim.durationMs) * Math.max(1, frames.length - 1),
+    loop: anim.loop,
+    speed: anim.speed,
+    autoplay: anim.autoplay,
+    frameValues,
+  });
+  const surface = controller.stage;
+  let observer = null;
+  let tooltip = null;
+  let context = null;
+
+  const tick = fraction => {
+    if (!context) return;
+    const { from, to, t } = segmentAt(frames.length, fraction);
+    const eased = reduced ? Math.round(t) : ease(t);
+    if (isLine) tickLines(context, from, to, eased);
+    else tickPoints(context, from, to, eased, maxSize, spec.type);
+  };
+
+  const build = () => {
+    tooltip?.remove();
+    surface.innerHTML = '';
+    const width = spec.options.width ?? Math.max(320, host.clientWidth || 720);
+    const height = chartHeight(width, spec.options.height);
+    const compact = width < 520;
+    host.classList.toggle('chart-compact', compact);
+    const layout = { width, height, left: compact ? 44 : 58, right: width - 16, top: spec.options.title ? 42 : 20, bottom: height - (compact ? 42 : 48) };
+    const svg = svgElement('svg', { class: 'chart-svg', viewBox: `0 0 ${width} ${height}`, role: 'img' });
+    if (spec.options.title) svg.append(svgText(spec.options.title, { class: 'chart-title', x: layout.left, y: 24 }));
+    if (spec.options.width != null) svg.style.width = `${width}px`;
+    const x = createScale(xValues, layout.left, layout.right, { padding: 0.04 });
+    const y = createScale(yValues, layout.bottom, layout.top, { padding: 0.08 });
+    renderAxes(svg, layout, x, y, { x: spec.options.xLabel, y: spec.options.yLabel });
+    tooltip = createTooltip(host);
+    const clipId = `chart-clip-${nextChartId++}`;
+    const defs = svgElement('defs');
+    const clip = svgElement('clipPath', { id: clipId });
+    clip.append(svgElement('rect', { x: layout.left, y: layout.top, width: layout.right - layout.left, height: layout.bottom - layout.top }));
+    defs.append(clip);
+    svg.append(defs);
+    const marks = svgElement('g', { class: 'chart-marks', 'clip-path': `url(#${clipId})` });
+    const built = isLine ? buildLineNodes(frames, marks) : buildPointNodes(frames, marks, tooltip, spec.type);
+    svg.append(marks);
+    renderReferenceLines(svg, layout, y, spec.options.hlines, 'h');
+    renderReferenceLines(svg, layout, x, spec.options.vlines, 'v');
+    surface.append(svg);
+    const baseSeries = frames[0]?.series ?? [];
+    const ruleExtras = labeledRuleExtras(spec.options);
+    if (spec.options.legend && (baseSeries.length > 1 || ruleExtras.length)) {
+      renderLegend(surface, baseSeries.map((series, index) => ({ name: series.name, color: series.color ?? colorAt(index) })), new Set(), () => {}, ruleExtras);
+    }
+    const radius = compact ? { min: 3, max: 14 } : { min: 4, max: 22 };
+    context = { x, y, markMaps: built.maps, nodeMap: built.nodes, radius };
+    tick(controller.fraction());
+  };
+
+  controller.setRedraw(() => tick(controller.fraction()));
+  build();
+  controller.start();
+  if (typeof ResizeObserver !== 'undefined' && spec.options.width == null) {
+    observer = new ResizeObserver(build);
+    observer.observe(host);
+  }
+  return () => {
+    observer?.disconnect();
+    controller.cleanup();
+    tooltip?.remove();
+  };
+}
+
+function buildPointNodes(frames, marks, tooltip, type) {
+  const maps = frames.map(frame => indexMarks(frame.series));
+  const className = type === 'bubble' ? 'chart-bubble-point' : 'chart-scatter-point';
+  const nodes = new Map();
+  for (const key of unionKeys(maps)) {
+    const circle = svgElement('circle', { class: className, r: 0, 'fill-opacity': 0 });
+    const live = { x: 0, y: 0 };
+    const series = { name: '' };
+    tooltip.bind(circle, live, series);
+    marks.append(circle);
+    nodes.set(key, { circle, live, series });
+  }
+  return { maps, nodes };
+}
+
+function buildLineNodes(frames, marks) {
+  const maps = frames.map(frame => {
+    const map = new Map();
+    frame.series.forEach((series, index) => map.set(series.name, { points: series.points, color: series.color ?? colorAt(index) }));
+    return map;
+  });
+  const nodes = new Map();
+  for (const name of unionKeys(maps)) {
+    const path = svgElement('path', { class: 'chart-line', fill: 'none', 'stroke-opacity': 0 });
+    marks.append(path);
+    nodes.set(name, { path });
+  }
+  return { maps, nodes };
+}
+
+function tickPoints(context, from, to, t, maxSize, type) {
+  const { x, y, markMaps, nodeMap, radius } = context;
+  const fromMap = markMaps[from];
+  const toMap = markMaps[to];
+  for (const [key, node] of nodeMap) {
+    const mark = tweenMark(fromMap.get(key), toMap.get(key), t);
+    if (mark.opacity <= 0) {
+      node.circle.setAttribute('fill-opacity', 0);
+      node.circle.setAttribute('r', 0);
+      continue;
+    }
+    const r = type === 'bubble' ? radius.min + Math.sqrt(Math.abs(mark.size) / maxSize) * (radius.max - radius.min) : SCATTER_RADIUS;
+    node.circle.setAttribute('cx', x.scale(mark.x));
+    node.circle.setAttribute('cy', y.scale(mark.y));
+    node.circle.setAttribute('r', r);
+    node.circle.setAttribute('fill', mark.color);
+    node.circle.setAttribute('fill-opacity', mark.opacity);
+    node.live.x = mark.x;
+    node.live.y = mark.y;
+    node.live.tooltip = type === 'bubble' ? `x: ${mark.x}  y: ${mark.y}  size: ${mark.point?.value ?? mark.size}` : null;
+    node.series.name = mark.name ?? '';
+  }
+}
+
+function tickLines(context, from, to, t) {
+  const { x, y, markMaps, nodeMap } = context;
+  const fromMap = markMaps[from];
+  const toMap = markMaps[to];
+  for (const [name, node] of nodeMap) {
+    const a = fromMap.get(name);
+    const b = toMap.get(name);
+    if (!a && !b) {
+      node.path.setAttribute('stroke-opacity', 0);
+      continue;
+    }
+    const source = a ?? b;
+    const target = b ?? a;
+    node.path.setAttribute('d', tweenLinePath(source.points, target.points, t, x, y));
+    node.path.setAttribute('stroke', a && b ? source.color : target.color);
+    node.path.setAttribute('stroke-opacity', a && b ? 1 : a ? 1 - t : t);
+  }
 }
 
 export function layoutSeries(series, spec) {

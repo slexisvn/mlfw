@@ -4,12 +4,15 @@ import { MemoryPlanPass } from '../passes/memory/memory_plan_pass.js';
 import { LoopPartitionPass } from '../passes/loop_partition/loop_partition.js';
 import { AccumulatorDetectionPass } from '../passes/lowering/accumulator_pass.js';
 import { AutoTensorizePass } from '../passes/schedule/tensorize_pass.js';
+import { InlineReindexPass } from '../passes/schedule/inline_reindex_pass.js';
 import { tirPassesForPhase } from './tir_pass_registry.js';
 
 export function buildTirPipeline(config) {
   const passes = [];
 
   for (const p of tirPassesForPhase('pre', config)) passes.push(p);
+
+  passes.push(new InlineReindexPass(config));
 
   if (config.optimization.tensorize) passes.push(new AutoTensorizePass(config));
 

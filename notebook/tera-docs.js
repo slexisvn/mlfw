@@ -11,6 +11,7 @@ const SECTION_ORDER = [
   'Models & layers',
   'DataFrame',
   'Data utilities',
+  'Quant',
   'Training',
   'Tokenizer & files',
   'Runtime',
@@ -23,6 +24,22 @@ const DATAFRAME_BUILTINS = new Set([
   'sum', 'avg', 'min', 'max', 'count', 'countStar',
 ]);
 const DATA_UTILITY_BUILTINS = new Set(['TensorDataset', 'DataLoader', 'encode', 'decode', 'normalize', 'train_test_split']);
+const QUANT_BUILTINS = new Set([
+  'backtest', 'walk_forward',
+  'momentum', 'mean_reversion', 'zscore',
+  'equal_weight', 'cross_sectional', 'long_short',
+  'sharpe', 'deflated_sharpe', 'pbo', 'min_track_record_length',
+  'risk_parity', 'hrp', 'mean_variance',
+  'quill', 'load_quill',
+]);
+const QUANT_ORDER = [
+  'backtest', 'walk_forward',
+  'momentum', 'mean_reversion', 'zscore',
+  'equal_weight', 'cross_sectional', 'long_short',
+  'sharpe', 'deflated_sharpe', 'pbo', 'min_track_record_length',
+  'risk_parity', 'hrp', 'mean_variance',
+  'quill', 'load_quill',
+];
 const TENSOR_BUILTINS = new Set(['cat', 'stack', 'where']);
 const TRAINING_BUILTINS = new Set([
   'SGD', 'Adam', 'AdamW', 'StepLR', 'CosineAnnealingLR', 'ReduceLROnPlateau',
@@ -109,6 +126,24 @@ const EXAMPLES = {
   MetricCollection: 'metrics = MetricCollection(Accuracy(task="multiclass", num_classes=3))\nmetrics',
   TensorDataset: 'x = randn([8, 2])\ny = randn([8, 1])\nTensorDataset(x, y)',
   DataLoader: 'x = randn([8, 2])\ny = randn([8, 1])\nDataLoader(TensorDataset(x, y), batch_size=4)',
+
+  backtest: 'prices = DataFrame(tech=[100, 102, 101, 105, 108, 107, 110, 113, 111, 115], bank=[50, 49, 51, 50, 48, 49, 47, 48, 46, 45], energy=[30, 31, 33, 32, 34, 36, 35, 37, 39, 38])\nresult = backtest(prices, signal="momentum", portfolio="long_short", lookback=3)\nresult.metrics',
+  walk_forward: 'prices = DataFrame(tech=[100, 102, 101, 105, 108, 107, 110, 113, 111, 115, 118, 116], bank=[50, 49, 51, 50, 48, 49, 47, 48, 46, 45, 46, 44])\nwalk_forward(prices, signal="momentum", portfolio="long_short", folds=2).metrics',
+  momentum: 'prices = DataFrame(a=[100, 101, 103, 102, 104, 106, 105, 108], b=[50, 49, 48, 47, 46, 45, 46, 47])\nbacktest(prices, signal=momentum(lookback=2), portfolio="equal_weight").metrics',
+  mean_reversion: 'prices = DataFrame(a=[100, 101, 103, 102, 104, 106, 105, 108], b=[50, 49, 48, 47, 46, 45, 46, 47])\nbacktest(prices, signal=mean_reversion(lookback=2), portfolio="cross_sectional").metrics',
+  zscore: 'prices = DataFrame(a=[100, 101, 103, 102, 104, 106, 105, 108], b=[50, 49, 48, 47, 46, 45, 46, 47])\nbacktest(prices, signal=zscore(window=3), portfolio="long_short").metrics',
+  equal_weight: 'prices = DataFrame(a=[100, 101, 103, 102, 104, 106], b=[50, 49, 48, 47, 46, 45], c=[20, 21, 22, 23, 24, 25])\nbacktest(prices, signal="momentum", portfolio=equal_weight(), lookback=2).metrics',
+  cross_sectional: 'prices = DataFrame(a=[100, 101, 103, 102, 104, 106], b=[50, 49, 48, 47, 46, 45], c=[20, 21, 22, 23, 24, 25])\nbacktest(prices, signal="momentum", portfolio=cross_sectional(), lookback=2).metrics',
+  long_short: 'prices = DataFrame(a=[100, 101, 103, 102, 104, 106], b=[50, 49, 48, 47, 46, 45], c=[20, 21, 22, 23, 24, 25])\nbacktest(prices, signal="momentum", portfolio=long_short(fraction=0.34), lookback=2).metrics',
+  sharpe: 'returns = [0.012, -0.004, 0.008, 0.015, -0.006, 0.010, 0.003, -0.002]\nsharpe(returns)',
+  deflated_sharpe: 'returns = [0.012, -0.004, 0.008, 0.015, -0.006, 0.010, 0.003, -0.002]\ntrial_sharpes = [0.5, 0.8, 1.2, 0.3, 0.9]\ndeflated_sharpe(returns, trial_sharpes)',
+  pbo: 'trial_returns = [[0.01, 0.02, -0.01], [0.03, -0.01, 0.02], [-0.02, 0.04, 0.01], [0.02, 0.0, 0.03], [0.01, 0.02, -0.02], [0.0, 0.03, 0.01], [0.02, 0.01, 0.0], [0.01, -0.01, 0.02]]\npbo(trial_returns, partitions=4)',
+  min_track_record_length: 'returns = [0.012, -0.004, 0.008, 0.015, -0.006, 0.010, 0.003, -0.002]\nmin_track_record_length(returns, target_sharpe=0.5)',
+  risk_parity: 'cov = [[0.04, 0.01, 0.0], [0.01, 0.09, 0.02], [0.0, 0.02, 0.16]]\nrisk_parity(cov)',
+  hrp: 'cov = [[0.04, 0.01, 0.0], [0.01, 0.09, 0.02], [0.0, 0.02, 0.16]]\nhrp(cov)',
+  mean_variance: 'mu = [0.10, 0.06, 0.03]\ncov = [[0.04, 0.01, 0.0], [0.01, 0.09, 0.02], [0.0, 0.02, 0.16]]\nmean_variance(mu, cov)',
+  quill: 'call = quill("product Call { underlying S model gbm param strike = 100 event T = 1.0 { pay max(S(T) - strike, 0) at T } }")\ncall.price(spot=100, rate=0.03, vol=0.2, paths=20000, seed=1, greeks="price-only")',
+  load_quill: 'put = quill("product Put { underlying S model gbm param strike = 100 event T = 1.0 { pay max(strike - S(T), 0) at T } }")\nput.price(spot=100, rate=0.03, vol=0.2, paths=20000, seed=1, greeks="first-order")',
 };
 
 const KEYWORD_EXAMPLES = {
@@ -244,6 +279,7 @@ function sectionForBuiltin(builtin) {
   if (kind === 'module' || kind === 'sequential') return 'Models & layers';
   if (DATAFRAME_BUILTINS.has(name)) return 'DataFrame';
   if (DATA_UTILITY_BUILTINS.has(name)) return 'Data utilities';
+  if (kind === 'quant' || QUANT_BUILTINS.has(name)) return 'Quant';
   if (TRAINING_BUILTINS.has(name) || ['optimizer', 'scheduler', 'trainer', 'callback', 'logger', 'metric', 'step'].includes(kind)) return 'Training';
   if (TOKENIZER_FILE_BUILTINS.has(name)) return 'Tokenizer & files';
   if (RUNTIME_BUILTINS.has(name) || kind === 'device' || kind === 'utility') return 'Runtime';
@@ -308,6 +344,7 @@ function docOrder(item) {
   if (item.name === 'DataFrame') return 10;
   if (DATAFRAME_BUILTINS.has(item.name) && item.name !== 'load_csv') return 20;
   if (item.name === 'load_csv') return 80;
+  if (QUANT_BUILTINS.has(item.name)) return QUANT_ORDER.indexOf(item.name);
   if (item.kind === 'sequential') return 10;
   if (item.kind === 'module') return 20;
   if (item.kind === 'trainer') return 10;
@@ -483,13 +520,16 @@ function exampleForDoc(item) {
 
 function chartExample(name) {
   if (name === 'line') {
-    return 'data = DataFrame(epoch=[1, 2, 3, 4], loss=[1.0, 0.7, 0.5, 0.3])\nchart.line(data, x="epoch", y="loss", title="Loss")';
+    return 'data = DataFrame(epoch=[1, 2, 3, 4, 5, 6, 7, 8], loss=[1.0, 0.72, 0.55, 0.43, 0.34, 0.29, 0.25, 0.22])\nchart.line(data, x="epoch", y="loss", title="Training loss", animate=true, easing="cubic", loop=true, speed=2)';
   }
   if (name === 'bar') {
     return 'data = DataFrame(region=["APAC", "EU", "US"], revenue=[120, 80, 95])\nchart.bar(data, x="region", y="revenue", title="Revenue")';
   }
-  if (name === 'scatter' || name === 'hexbin') {
-    return `data = DataFrame(x=[1, 2, 3, 4, 5], y=[1.2, 1.8, 3.1, 3.8, 5.2])\nchart.${name}(data, x="x", y="y", title="Points")`;
+  if (name === 'scatter') {
+    return 'data = DataFrame(year=[2000, 2000, 2010, 2010, 2020, 2020], gdp=[5, 9, 12, 15, 20, 24], life=[60, 72, 66, 76, 71, 80], country=["A", "B", "A", "B", "A", "B"])\nchart.scatter(data, x="gdp", y="life", color="country", frame="year", key="country", title="GDP vs life expectancy", easing="ease-in-out", loop=true)';
+  }
+  if (name === 'hexbin') {
+    return 'data = DataFrame(x=[1, 2, 3, 4, 5], y=[1.2, 1.8, 3.1, 3.8, 5.2])\nchart.hexbin(data, x="x", y="y", title="Points")';
   }
   if (name === 'histogram' || name === 'density' || name === 'box' || name === 'violin') {
     return `data = DataFrame(score=[2, 3, 3, 4, 4, 4, 5, 5, 6, 6, 7, 8])\nchart.${name}(data, x="score", title="Scores")`;

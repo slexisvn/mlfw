@@ -1,23 +1,23 @@
 export const CHART_METHOD_DOCS = new Map([
   ['line', doc(
-    'chart.line(data, x?, y?, color?, title?, x_label?, y_label?, zoom=true)',
-    'Draw a line chart for ordered values or trends. Use y=[...] for multiple series and color= to group DataFrame rows.'
+    'chart.line(data, x?, y?, color?, title?, x_label?, y_label?, hline?, vline?, dash?, animate=false, frame?, key?, easing="cubic", loop=false, speed=1, autoplay=false, zoom=true)',
+    'Draw a line chart for ordered values or trends. Use y=[...] for multiple series and color= to group DataFrame rows. Add a dashed reference line with hline=3.5 (horizontal) or vline=100 (vertical) — pass a number or list, and label/color them with hline_label="μ = 3.5", hline_color="#e06c75". Use dash=true to dash every series. Pass animate=true to reveal the line left→right with Play/Pause, a scrubber, loop, and speed controls (honours reduced-motion). Pass frame="step" to morph the curve between keyframes (one per distinct frame value), tweening vertices over time with a frame scrubber. Pace the motion with easing="linear"|"ease"|"ease-in-out"|"cubic", repeat with loop=true, run faster/slower with speed=0.5|1|2|4, and auto-start with autoplay=true (otherwise the chart rests on its final frame as a static poster until you press Play, so exports and screenshots stay complete).'
   )],
   ['bar', doc(
     'chart.bar(data, x?, y?, color?, mode="grouped", title?)',
     'Compare values across categories. Use mode="stacked" to stack multiple series; aggregate DataFrame rows before charting.'
   )],
   ['scatter', doc(
-    'chart.scatter(data, x?, y?, color?, title?, zoom=true)',
-    'Plot numeric X/Y observations to inspect relationships, clusters, and outliers. Use color= to split DataFrame groups.'
+    'chart.scatter(data, x?, y?, size?, color?, title?, animate=false, frame?, key?, duration?, easing="cubic", loop=true, speed=1, autoplay=false, zoom=true)',
+    'Plot numeric X/Y observations to inspect relationships, clusters, and outliers. Use color= to split DataFrame groups. Pass animate=true to reveal points left→right with transport controls. Pass frame="year" with key="country" to morph the marks between keyframes (Gapminder-style): each distinct frame value becomes a keyframe, marks matched by key smoothly interpolate their x/y (and size/color), and marks that enter or leave fade in/out. The transport label shows the current frame value and the scrubber seeks by frame; reduced-motion snaps between frames without tweening. Tune the motion with easing="linear"|"ease"|"ease-in-out"|"cubic", loop=true/false, and speed=0.5|1|2|4; until you press Play (or set autoplay=true) the chart holds its last frame as a static poster so exports stay complete.'
   )],
   ['histogram', doc(
     'chart.histogram(data, x?, color?, bins=20, title?, zoom=true)',
     'Show the frequency distribution of numeric values. Bins are computed automatically and can be grouped with color=.'
   )],
   ['area', doc(
-    'chart.area(data, x?, y?, color?, mode="overlay", title?, zoom=true)',
-    'Show trends with the area below each series filled. Use mode="stacked" when aligned series should accumulate.'
+    'chart.area(data, x?, y?, color?, mode="overlay", title?, animate=false, easing="cubic", loop=false, speed=1, autoplay=false, zoom=true)',
+    'Show trends with the area below each series filled. Use mode="stacked" when aligned series should accumulate. Pass animate=true to reveal the area left→right with transport controls; pace it with easing="linear"|"ease"|"ease-in-out"|"cubic", loop=true, and speed=0.5|1|2|4. The chart rests on its filled final frame until you press Play (or set autoplay=true).'
   )],
   ['box', doc(
     'chart.box(data, x?, color?, whisker=1.5, title?)',
@@ -52,8 +52,8 @@ export const CHART_METHOD_DOCS = new Map([
     'Draw an empirical cumulative distribution function for comparing numeric distributions without binning.'
   )],
   ['bubble', doc(
-    'chart.bubble(data, x?, y?, size?, color?, title?, zoom=true)',
-    'Plot X/Y observations with marker area scaled by a third numeric variable. Useful for spend, revenue, or segment size.'
+    'chart.bubble(data, x?, y?, size?, color?, title?, frame?, key?, duration?, easing="cubic", loop=true, speed=1, autoplay=false, zoom=true)',
+    'Plot X/Y observations with marker area scaled by a third numeric variable. Useful for spend, revenue, or segment size. Pass frame="year" with key="country" to morph the bubbles between keyframes: marks matched by key interpolate their x/y/size/color over time, entering/leaving marks fade, and the transport scrubber seeks by frame value (reduced-motion snaps without tweening). Pace it with easing="linear"|"ease"|"ease-in-out"|"cubic", loop=true/false, and speed=0.5|1|2|4; the chart holds its last frame as a static poster until you press Play (or set autoplay=true).'
   )],
   ['funnel', doc(
     'chart.funnel(data, step?, value?, title?)',

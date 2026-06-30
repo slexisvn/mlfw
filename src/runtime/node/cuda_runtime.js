@@ -32,7 +32,7 @@ export function measureCudaKernel(compiledKernel, bufferByteSizes, shapeValues =
   const maxWarmup = opts.maxWarmup ?? 100000;
   const grid = meta.gridDim;
   const block = meta.blockDim;
-  const smem = meta.sharedMemBytes || 0;
+  const smem = 0;
   const sizes = bufferByteSizes.map(bytes => Math.max(bytes, 1));
   const ptrs = sizes.map(bytes => acquire(bytes));
   try {
@@ -88,7 +88,7 @@ export function runCudaKernelSync(compiledKernel, tensorArgs, shapeValues) {
     ptrs.push(dptr);
   }
 
-  launch(func, meta.gridDim, meta.blockDim, meta.sharedMemBytes || 0, ptrs, scalars);
+  launch(func, meta.gridDim, meta.blockDim, 0, ptrs, scalars);
 
   const outputSet = new Set(outputs);
   for (let i = 0; i < buffers.length; i++) {
@@ -119,13 +119,13 @@ export function runCudaKernelResident(compiledKernel, tensorArgs, shapeValues) {
     for (let i = 0; i < buffers.length; i++) {
       ptrs[i] = outputSet.has(i) ? deviceBufferForOutput(buffers[i]) : deviceBufferForInput(buffers[i]);
     }
-    launch(func, meta.gridDim, meta.blockDim, meta.sharedMemBytes || 0, [...ptrs, ...scratch.ptrs], scalars, false);
+    launch(func, meta.gridDim, meta.blockDim, 0, [...ptrs, ...scratch.ptrs], scalars, false);
     _releaseScratch(scratch);
     return;
   }
 
   for (let i = 0; i < buffers.length; i++) ptrs[i] = uploadIfStale(buffers[i]);
-  launch(func, meta.gridDim, meta.blockDim, meta.sharedMemBytes || 0, [...ptrs, ...scratch.ptrs], scalars, false);
+  launch(func, meta.gridDim, meta.blockDim, 0, [...ptrs, ...scratch.ptrs], scalars, false);
   for (let i = 0; i < buffers.length; i++) {
     if (outputSet.has(i)) downloadAndValidate(buffers[i], ptrs[i]);
   }

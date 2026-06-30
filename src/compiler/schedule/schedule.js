@@ -35,6 +35,20 @@ function loadsBuffer(node, bufName) {
   return irSome(node, (n) => n.type === 'BufferLoadNode' && n.buffer && n.buffer.name === bufName);
 }
 
+function usesBufferInIndex(node, bufName) {
+  if (!node || typeof node !== 'object') return false;
+  if ((node.type === 'BufferLoadNode' || node.type === 'BufferStoreNode') && node.indices) {
+    for (const ix of node.indices) if (loadsBuffer(ix, bufName)) return true;
+  }
+  for (const k of ['a', 'b', 'expr', 'value', 'condition', 'thenBody', 'elseBody', 'body', 'initBody']) {
+    if (node[k] && usesBufferInIndex(node[k], bufName)) return true;
+  }
+  if (node.args) for (const a of node.args) if (usesBufferInIndex(a, bufName)) return true;
+  if (node.indices) for (const ix of node.indices) if (usesBufferInIndex(ix, bufName)) return true;
+  if (node.stmts) for (const s of node.stmts) if (usesBufferInIndex(s, bufName)) return true;
+  return false;
+}
+
 function cloneExprTree(node) {
   return cloneIRShared(node, cloneExprTree, (n, copy, rec) => {
     if (n.type === 'BlockRealizeNode') {
@@ -48,6 +62,47 @@ function cloneExprTree(node) {
     }
     return copy;
   });
+}
+
+function collectStores(node, out) {
+  if (!node) return;
+  if (node.type === 'BufferStoreNode') { out.push(node); return; }
+  if (node.type === 'SeqNode') { for (const s of node.stmts) collectStores(s, out); return; }
+  if (node.type === 'ForNode' || node.type === 'BlockNode') collectStores(node.body, out);
+}
+
+function storeIndexNames(store) {
+  return store.indices.map((ix) => (ix && ix.type === 'VariableNode') ? ix.name : null);
+}
+
+function inlineStoreValue(funcBody, store, tag) {
+  const idxNames = store.indices.map((ix) => ix.name);
+  const tmpNames = idxNames.map((_, k) => `__inl_${tag}_${k}`);
+  const counter = { n: 0 };
+  replaceBufferLoads(funcBody, store.buffer.name, (load) => {
+    let expr = cloneExprTree(store.value);
+    for (let k = 0; k < idxNames.length; k++) expr = substituteVar(expr, idxNames[k], () => new VariableNode(tmpNames[k], 'int32'));
+    for (let k = 0; k < idxNames.length; k++) expr = substituteVar(expr, tmpNames[k], () => cloneExprTree(load.indices[k]));
+    return expr;
+  }, counter);
+  return counter.n;
+}
+
+function dropBufferReads(funcBody, bufName) {
+  const stack = [funcBody];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (!node || typeof node !== 'object') continue;
+    if (node.type === 'BlockNode' && node.reads) {
+      const kept = node.reads.filter((r) => !(r.buffer && r.buffer.name === bufName));
+      if (kept.length !== node.reads.length) node.reads = kept;
+    }
+    if (node.body) stack.push(node.body);
+    if (node.stmts) for (const s of node.stmts) stack.push(s);
+    if (node.thenBody) stack.push(node.thenBody);
+    if (node.elseBody) stack.push(node.elseBody);
+    if (node.initBody) stack.push(node.initBody);
+  }
 }
 
 function getConstExtent(node) {
@@ -622,65 +677,60 @@ export class Schedule {
     if (!this._replaying) this.trace.record('storageAlign', [blockName, bufferName, axis, factor, offset || 0]);
   }
 
+  _removeBlockNest(producerName, prod) {
+    const loops = this.getLoops(producerName);
+    const root = loops.length > 0 ? loops[0] : prod;
+    const empty = new SeqNode([]);
+    this.mutator.replaceNode(root, empty);
+    this._replaceInTree(root, empty);
+  }
+
   computeInline(producerName) {
     const prod = this.getBlock(producerName);
     if (!prod) throw new Error(`computeInline: block '${producerName}' not found`);
     if (prod.initBody) throw new Error('computeInline: cannot inline a reduction block (has init)');
 
-    let store = null;
-    const findStore = (n) => {
-      if (!n || store) return;
-      if (n.type === 'BufferStoreNode') { store = n; return; }
-      if (n.type === 'SeqNode') { for (const s of n.stmts) findStore(s); return; }
-      if (n.type === 'BlockNode' || n.type === 'ForNode') findStore(n.body);
-    };
-    findStore(prod.body);
+    const stores = [];
+    collectStores(prod.body, stores);
+    const store = stores[0];
     if (!store) throw new Error('computeInline: producer has no single store to inline');
 
     const B = store.buffer;
-    const pIdxNames = store.indices.map((ix) => (ix && ix.type === 'VariableNode') ? ix.name : null);
-    if (pIdxNames.some((n) => n === null)) throw new Error('computeInline: producer indices must be simple loop variables');
+    if (storeIndexNames(store).some((n) => n === null)) throw new Error('computeInline: producer indices must be simple loop variables');
     if (loadsBuffer(store.value, B.name)) throw new Error('computeInline: producer is self-referential (recurrence), cannot inline');
+    if (usesBufferInIndex(this.func.body, B.name)) throw new Error(`computeInline: buffer '${B.name}' is used inside an index expression (indirect), cannot safely inline`);
 
-    const usesBInIndex = (node) => {
-      if (!node || typeof node !== 'object') return false;
-      if ((node.type === 'BufferLoadNode' || node.type === 'BufferStoreNode') && node.indices) {
-        for (const ix of node.indices) if (loadsBuffer(ix, B.name)) return true;
-      }
-      for (const k of ['a', 'b', 'expr', 'value', 'condition', 'thenBody', 'elseBody', 'body', 'initBody']) {
-        if (node[k] && usesBInIndex(node[k])) return true;
-      }
-      if (node.args) for (const a of node.args) if (usesBInIndex(a)) return true;
-      if (node.indices) for (const ix of node.indices) if (usesBInIndex(ix)) return true;
-      if (node.stmts) for (const s of node.stmts) if (usesBInIndex(s)) return true;
-      return false;
-    };
-    if (usesBInIndex(this.func.body)) throw new Error(`computeInline: buffer '${B.name}' is used inside an index expression (indirect), cannot safely inline`);
-
-    const valExpr = store.value;
-    const counter = { n: 0 };
-    const tmpNames = pIdxNames.map((_, k) => `__inl_${producerName}_${k}`);
-    const makeRepl = (load) => {
-      let expr = cloneExprTree(valExpr);
-      for (let k = 0; k < pIdxNames.length; k++) {
-        const tn = tmpNames[k];
-        expr = substituteVar(expr, pIdxNames[k], () => new VariableNode(tn, 'int32'));
-      }
-      for (let k = 0; k < pIdxNames.length; k++) {
-        const idx = load.indices[k];
-        expr = substituteVar(expr, tmpNames[k], () => cloneExprTree(idx));
-      }
-      return expr;
-    };
-    replaceBufferLoads(this.func.body, B.name, makeRepl, counter);
-    if (counter.n === 0) throw new Error(`computeInline: buffer '${B.name}' has no consumers to inline into`);
-
-    const loops = this.getLoops(producerName);
-    const root = loops.length > 0 ? loops[0] : prod;
-    const inlineEmpty = new SeqNode([]);
-    this.mutator.replaceNode(root, inlineEmpty);
-    this._replaceInTree(root, inlineEmpty);
+    if (inlineStoreValue(this.func.body, store, producerName) === 0) throw new Error(`computeInline: buffer '${B.name}' has no consumers to inline into`);
+    dropBufferReads(this.func.body, B.name);
+    this._removeBlockNest(producerName, prod);
     if (!this._replaying) this.trace.record('computeInline', [producerName]);
+  }
+
+  computeInlineBlock(producerName) {
+    const prod = this.getBlock(producerName);
+    if (!prod) throw new Error(`computeInlineBlock: block '${producerName}' not found`);
+    if (prod.initBody) throw new Error('computeInlineBlock: cannot inline a reduction block (has init)');
+
+    const stores = [];
+    collectStores(prod.body, stores);
+    if (stores.length === 0) throw new Error('computeInlineBlock: producer has no stores to inline');
+
+    const outNames = new Set(stores.map((s) => s.buffer.name));
+    if (outNames.size !== stores.length) throw new Error('computeInlineBlock: buffer written more than once in block');
+
+    for (const store of stores) {
+      if (storeIndexNames(store).some((n) => n === null)) throw new Error('computeInlineBlock: producer indices must be simple loop variables');
+      for (const name of outNames) if (loadsBuffer(store.value, name)) throw new Error('computeInlineBlock: producer store depends on a co-produced buffer');
+      if (usesBufferInIndex(this.func.body, store.buffer.name)) throw new Error(`computeInlineBlock: buffer '${store.buffer.name}' is used inside an index expression (indirect), cannot safely inline`);
+    }
+
+    let total = 0;
+    for (const store of stores) total += inlineStoreValue(this.func.body, store, `${producerName}_${store.buffer.name}`);
+    if (total === 0) throw new Error(`computeInlineBlock: block '${producerName}' has no consumers to inline into`);
+
+    for (const name of outNames) dropBufferReads(this.func.body, name);
+    this._removeBlockNest(producerName, prod);
+    if (!this._replaying) this.trace.record('computeInlineBlock', [producerName]);
   }
 
   _relocateBlockToLoop(blockName, targetLoopRef, atStart) {

@@ -57,18 +57,31 @@ function findAccStore(node, cName) {
   return null;
 }
 
+function isContiguousRowMajor(buf) {
+  if (!buf || buf.broadcastDims || (buf.offset && buf.offset !== 0)) return false;
+  const sh = buf.shape, st = buf.strides;
+  if (!st || st.length !== sh.length) return false;
+  let s = 1;
+  for (let i = sh.length - 1; i >= 0; i--) {
+    if (typeof sh[i] !== 'number' || sh[i] <= 0 || st[i] !== s) return false;
+    s *= sh[i];
+  }
+  return true;
+}
+
 export function matmulTileDims(primFunc, blockName) {
   const info = classifyBlock(primFunc, blockName);
   if (!info) return null;
   const block = findBlock(primFunc.body, blockName);
   if (!block || block.reads.length < 2 || block.writes.length < 1) return null;
   const C = block.writes[0].buffer;
-  if (!C || C.shape.length !== 2) return null;
+  if (!C || C.shape.length < 2) return null;
+  const R = C.shape.length;
 
   const store = findAccStore(block.body, C.name);
   if (!store) return null;
   const ci = plainVars(store.indices);
-  if (!ci || ci.length !== 2) return null;
+  if (!ci || ci.length !== R) return null;
   const v = store.value;
   const isCLoad = (x) => x && x.type === 'BufferLoadNode' && x.buffer && x.buffer.name === C.name;
   const prod = isCLoad(v.a) ? v.b : isCLoad(v.b) ? v.a : null;
@@ -76,30 +89,43 @@ export function matmulTileDims(primFunc, blockName) {
   const loads = [prod.a, prod.b];
   if (!loads.every(l => l && l.type === 'BufferLoadNode' && l.buffer)) return null;
 
-  const [vm, vn] = ci;
+  const vn = ci[R - 1];
+  const rowVars = ci.slice(0, R - 1);
   let A = null, vk = null;
   for (const ld of loads) {
     const idx = plainVars(ld.indices);
-    if (!idx || idx.length !== 2) return null;
-    if (idx[0] === vm) { A = ld; vk = idx[1]; }
+    if (!idx || idx.length !== R) continue;
+    let leadMatch = true;
+    for (let i = 0; i < R - 1; i++) if (idx[i] !== rowVars[i]) { leadMatch = false; break; }
+    if (leadMatch) { A = ld; vk = idx[R - 1]; break; }
   }
-  if (!A) return null;
+  if (!A || vk == null) return null;
   const B = loads[0] === A ? loads[1] : loads[0];
   const bi = plainVars(B.indices);
+  if (!bi || bi.length !== 2) return null;
   let transB;
   if (bi[0] === vk && bi[1] === vn) transB = false;
   else if (bi[0] === vn && bi[1] === vk) transB = true;
   else return null;
 
   const Abuf = A.buffer, Bbuf = B.buffer;
-  if (Abuf.shape.length !== 2 || Bbuf.shape.length !== 2) return null;
-  const M = C.shape[0], N = C.shape[1], K = Abuf.shape[1];
-  if (![M, N, K].every(d => typeof d === 'number' && d > 0)) return null;
-  if (Abuf.shape[0] !== M) return null;
+  if (Abuf.shape.length !== R || Bbuf.shape.length !== 2) return null;
+  for (let i = 0; i < R - 1; i++) if (Abuf.shape[i] !== C.shape[i]) return null;
+  let M = 1;
+  for (let i = 0; i < R - 1; i++) { const d = C.shape[i]; if (typeof d !== 'number' || d <= 0) return null; M *= d; }
+  const N = C.shape[R - 1], K = Abuf.shape[R - 1];
+  if (![N, K].every(d => typeof d === 'number' && d > 0)) return null;
   if (transB) { if (Bbuf.shape[0] !== N || Bbuf.shape[1] !== K) return null; }
   else { if (Bbuf.shape[0] !== K || Bbuf.shape[1] !== N) return null; }
   if (Abuf.dtype !== 'f32' || Bbuf.dtype !== 'f32' || C.dtype !== 'f32') return null;
-  return { A: Abuf, B: Bbuf, C, M, N, K, transB };
+  if (R === 2) return { A: Abuf, B: Bbuf, C, M, N, K, transB };
+  if (!isContiguousRowMajor(Abuf) || !isContiguousRowMajor(C)) return null;
+  return {
+    A: new Buffer(Abuf.name, [M, K], Abuf.dtype, Abuf.scope),
+    B: Bbuf,
+    C: new Buffer(C.name, [M, N], C.dtype, C.scope),
+    M, N, K, transB,
+  };
 }
 
 function enumerateRegisterBlockConfigs(target, dims, maxCandidates = 32) {
@@ -296,7 +322,7 @@ export function analyzePureMatmul(primFunc) {
   let reductionBlock = null;
   for (const name of names) {
     const s = analyzeBlockStructure(primFunc, name);
-    if (s.hasReduction && s.spatial === 2 && s.reads >= 2) {
+    if (s.hasReduction && s.spatial >= 2 && s.reads >= 2) {
       if (reductionBlock) return null;
       reductionBlock = name;
     }

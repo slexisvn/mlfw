@@ -615,3 +615,55 @@ describe('QuantizationPass auto-detects per-channel weight (constant rhs of dot)
     for (let i = 0; i < pc.out.length; i++) expect(wasm[i]).toBeCloseTo(pc.out[i], 5);
   });
 });
+
+describe('compiled elementwise quantization stays numerically correct (not raw int8 codes)', () => {
+  const F = ScalarType.F32;
+  const T = (s) => new TensorType(s, F);
+  const SH = [8, 8];
+  const n = SH[0] * SH[1];
+
+  const make = (seed) => {
+    const a = new Float32Array(n);
+    for (let i = 0; i < n; i++) a[i] = Math.sin(i * 0.31 + seed) * 1.3;
+    return a;
+  };
+  const A = make(1), B = make(2), C = make(3), D = make(4);
+
+  const errOf = (build, inputs, ref) => {
+    const r = compileGraph(build(), CPUTarget(), { quantization: { enabled: true } });
+    const out = new Float32Array(n);
+    r.run('q', ...inputs, out);
+    let e = 0, den = 0;
+    for (let i = 0; i < n; i++) { e = Math.max(e, Math.abs(out[i] - ref[i])); den = Math.max(den, Math.abs(ref[i])); }
+    return e / (1 + den);
+  };
+
+  it('add of two activations round-trips through dequantize', () => {
+    const ref = new Float32Array(n);
+    for (let i = 0; i < n; i++) ref[i] = A[i] + B[i];
+    const build = () => buildFunction('q', [T(SH), T(SH)], [T(SH)], (b, a) => {
+      b.returnOp([b.add(a[0], a[1]).getResult(0)]);
+    });
+    expect(errOf(build, [A, B], ref)).toBeLessThan(0.05);
+  });
+
+  it('mul of two activations round-trips through dequantize', () => {
+    const ref = new Float32Array(n);
+    for (let i = 0; i < n; i++) ref[i] = A[i] * B[i];
+    const build = () => buildFunction('q', [T(SH), T(SH)], [T(SH)], (b, a) => {
+      b.returnOp([b.mul(a[0], a[1]).getResult(0)]);
+    });
+    expect(errOf(build, [A, B], ref)).toBeLessThan(0.05);
+  });
+
+  it('nested add chain (quantized values feeding another op) stays correct', () => {
+    const ref = new Float32Array(n);
+    for (let i = 0; i < n; i++) ref[i] = (A[i] + B[i]) + (C[i] + D[i]);
+    const build = () => buildFunction('q', [T(SH), T(SH), T(SH), T(SH)], [T(SH)], (b, a) => {
+      const l = b.add(a[0], a[1]).getResult(0);
+      const r = b.add(a[2], a[3]).getResult(0);
+      b.returnOp([b.add(l, r).getResult(0)]);
+    });
+    expect(errOf(build, [A, B, C, D], ref)).toBeLessThan(0.05);
+  });
+});

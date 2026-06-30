@@ -36,6 +36,7 @@ export class CUDACodegen {
     this._needsBarriers = false;
     this._globalScratch = [];
     this._scratchNames = new Set();
+    this._serializeThreads = false;
   }
 
   generate(func) {
@@ -54,6 +55,7 @@ export class CUDACodegen {
     this._needsBarriers = false;
     this._globalScratch = [];
     this._scratchNames = new Set();
+    this._serializeThreads = false;
 
     const isLIR = func.type === 'LIRFunc';
 
@@ -106,11 +108,13 @@ export class CUDACodegen {
     }
 
     const declaredVars = new Set();
-    for (const [tag, bindings] of this._threadBindings) {
-      for (const info of bindings) {
-        if (!declaredVars.has(info.varName)) {
-          this._emit(`const int ${info.varName} = ${tag};`);
-          declaredVars.add(info.varName);
+    if (!this._serializeThreads) {
+      for (const [tag, bindings] of this._threadBindings) {
+        for (const info of bindings) {
+          if (!declaredVars.has(info.varName)) {
+            this._emit(`const int ${info.varName} = ${tag};`);
+            declaredVars.add(info.varName);
+          }
         }
       }
     }
@@ -127,12 +131,12 @@ export class CUDACodegen {
     this._emit('}');
 
     const t = this.target;
-    const blockDim = [
+    const blockDim = this._serializeThreads ? [1, 1, 1] : [
       Math.min(this._blockDim[0], t.maxBlockDimX),
       Math.min(this._blockDim[1], t.maxBlockDimY),
       Math.min(this._blockDim[2], t.maxBlockDimZ),
     ];
-    const gridDim = [
+    const gridDim = this._serializeThreads ? [1, 1, 1] : [
       Math.min(this._gridDim[0], t.maxGridDimX),
       Math.min(this._gridDim[1], t.maxGridDimY),
       Math.min(this._gridDim[2], t.maxGridDimZ),
@@ -268,6 +272,16 @@ export class CUDACodegen {
   }
 
   _visitForNode(node) {
+    if (node.kind === ForKind.THREAD_BINDING && this._serializeThreads) {
+      const varName = node.loopVar.name;
+      const extent = this._exprToC(node.extent);
+      this._emit(`for (int ${varName} = 0; ${varName} < ${extent}; ${varName}++) {`);
+      this._indent++;
+      this._visitNode(node.body);
+      this._indent--;
+      this._emit('}');
+      return;
+    }
     if (node.kind === ForKind.THREAD_BINDING) {
       const extent = node.extent.type === 'IntImmNode' ? node.extent.value : 0;
       const tag = node.threadTag;
@@ -497,11 +511,83 @@ export class CUDACodegen {
     }
   }
 
+  _findCrossThreadBuffers(func) {
+    const storageNames = new Set();
+    for (const [, buf] of func.bufferMap) storageNames.add(buf.name);
+    const sharedNames = new Set(this._sharedBuffers.map(b => b.name));
+    const isIntermediateArray = (buf) => buf && !storageNames.has(buf.name) && !sharedNames.has(buf.name)
+      && (typeof buf.numel !== 'function' || buf.numel() !== 1);
+    const localWritten = new Set();
+    const localRead = new Set();
+    const walk = (node) => {
+      if (!node || typeof node !== 'object') return;
+      if ((node.type === 'BufferStoreNode' || node.type === 'LIRFlatStoreNode') && isIntermediateArray(node.buffer)) localWritten.add(node.buffer.name);
+      if ((node.type === 'BufferLoadNode' || node.type === 'LIRFlatLoadNode') && isIntermediateArray(node.buffer)) localRead.add(node.buffer.name);
+      for (const c of irChildNodes(node)) walk(c);
+    };
+    walk(func.body);
+    const result = new Set();
+    for (const name of localWritten) if (localRead.has(name)) result.add(name);
+    return result;
+  }
+
+  _hasRecurrence(func) {
+    const stack = [func.body];
+    while (stack.length > 0) {
+      const node = stack.pop();
+      if (!node) continue;
+      if (node.type === 'ForNode' && node.kind === ForKind.RECURRENCE) return true;
+      for (const c of irChildNodes(node)) stack.push(c);
+    }
+    return false;
+  }
+
+  _promoteCrossThreadToShared(func, crossThread) {
+    const storageNames = new Set();
+    for (const [, buf] of func.bufferMap) storageNames.add(buf.name);
+    const refBuffers = new Map();
+    this._scanBufferRefs(func.body, refBuffers);
+
+    const limit = this.target.sharedMemoryBytes || 49152;
+    let used = this._sharedBuffers.reduce((sum, b) => sum + Math.max(b.sizeInBytes(), 0), 0);
+    const decls = [];
+    for (const name of crossThread) {
+      if (storageNames.has(name) || this._promotedBuffers.has(name)) continue;
+      const buf = refBuffers.get(name);
+      if (!buf) return false;
+      const numel = buf.numel();
+      const size = numel > 0 ? numel : this._estimateBufferSize(buf);
+      if (size <= 0) return false;
+      used += size * dtypeBytes(buf.dtype);
+      if (used > limit) return false;
+      decls.push({ name, dtype: buf.dtype, size });
+    }
+    for (const d of decls) {
+      this._promotedBuffers.add(d.name);
+      this._promotedBufferDecls.push(d);
+    }
+    return true;
+  }
+
   _analyzeSharing(func) {
     if (func._tensorIntrin) { this._needsBarriers = false; return; }
     if (func.gpuRegisterBlocked) {
       this._needsBarriers = false;
       return;
+    }
+    if (this._threadBindings.size > 0) {
+      const blockThreads = this._blockDim[0] * this._blockDim[1] * this._blockDim[2];
+      const gridThreads = this._gridDim[0] * this._gridDim[1] * this._gridDim[2];
+      const crossThread = this._findCrossThreadBuffers(func);
+      if (blockThreads * gridThreads > 1 && crossThread.size > 0) {
+        if (gridThreads === 1 && this._hasRecurrence(func) && this._promoteCrossThreadToShared(func, crossThread)) {
+          this._needsBarriers = true;
+          return;
+        }
+        this._serializeThreads = true;
+        this._needsBarriers = false;
+        return;
+      }
     }
     let crossThreadShared = false;
     for (const [, entries] of this._threadBindings) {

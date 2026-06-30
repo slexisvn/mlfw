@@ -91,6 +91,43 @@ describe('schedule: compute_inline / compute_at / reverse_compute_at', () => {
     expect(() => sch.computeAt('pb', 'ci')).toThrow(/extent/);
   });
 
+  it('computeInlineBlock inlines a multi-output producer and deletes the block', () => {
+    resetVarCounter();
+    const A = new Buffer('A', [8], 'float32', 'global');
+    const P = new Buffer('P', [8], 'float32', 'local');
+    const Q = new Buffer('Q', [8], 'float32', 'local');
+    const OP = new Buffer('OP', [8], 'float32', 'global');
+    const OQ = new Buffer('OQ', [8], 'float32', 'global');
+
+    const pi = new VariableNode('pi', 'int32');
+    const body = new SeqNode([
+      new BufferStoreNode(P, [pi], new MathOpNode('*', new BufferLoadNode(A, [pi]), new IntImmNode(2))),
+      new BufferStoreNode(Q, [pi], new MathOpNode('+', new BufferLoadNode(A, [pi]), new IntImmNode(1))),
+    ]);
+    const prod = new BlockNode('fuse', [{ iterVar: pi, binding: pi }], [{ buffer: A }], [{ buffer: P }, { buffer: Q }], body);
+    const prodNest = new ForNode(pi, new IntImmNode(0), new IntImmNode(8), ForKind.SERIAL, prod);
+
+    const ci = new VariableNode('ci', 'int32');
+    const cP = new BlockNode('cp', [{ iterVar: ci, binding: ci }], [{ buffer: P }], [{ buffer: OP }],
+      new BufferStoreNode(OP, [ci], new BufferLoadNode(P, [ci])));
+    const cPNest = new ForNode(ci, new IntImmNode(0), new IntImmNode(8), ForKind.SERIAL, cP);
+    const di = new VariableNode('di', 'int32');
+    const cQ = new BlockNode('cq', [{ iterVar: di, binding: di }], [{ buffer: Q }], [{ buffer: OQ }],
+      new BufferStoreNode(OQ, [di], new BufferLoadNode(Q, [di])));
+    const cQNest = new ForNode(di, new IntImmNode(0), new IntImmNode(8), ForKind.SERIAL, cQ);
+
+    const sch = new Schedule(new PrimFunc('f', [], new SeqNode([prodNest, cPNest, cQNest])));
+    expect(countLoads(sch.func.body, 'P')).toBe(1);
+    expect(countLoads(sch.func.body, 'Q')).toBe(1);
+
+    sch.computeInlineBlock('fuse');
+
+    expect(countLoads(sch.func.body, 'P')).toBe(0);
+    expect(countLoads(sch.func.body, 'Q')).toBe(0);
+    expect(countLoads(sch.func.body, 'A')).toBe(2);
+    expect(() => sch.getBlock('fuse')).toThrow();
+  });
+
   it('refuses to inline a self-referential (recurrence) producer', () => {
     resetVarCounter();
     const B = new Buffer('B', [8], 'float32', 'global');

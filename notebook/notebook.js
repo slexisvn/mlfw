@@ -28,6 +28,7 @@ const SEED = [
   `metrics = DataFrame(epoch=[1, 2, 3, 4], loss=[1.0, 0.72, 0.48, 0.31], val_loss=[1.1, 0.81, 0.6, 0.44])\nchart.line(metrics, x="epoch", y=["loss", "val_loss"], title="Training")`,
   `model MLP(input: int, hidden: int, output: int):\n  fc1 = Linear(input, hidden)\n  fc2 = Linear(hidden, output)\n\n  forward (x: Tensor) -> Tensor:\n    x = fc1(x).relu()\n    return fc2(x)\n\nnet = MLP(2, 4, 1)\nnet(randn([8, 2]))`,
   `fn fib(n: int) -> int:\n  if n < 2:\n    return n\n  return fib(n - 1) + fib(n - 2)\n\nfib(12)`,
+  `prices = DataFrame(\n  tech=[100, 102, 101, 105, 108, 107, 110, 113, 111, 115],\n  bank=[50, 49, 51, 50, 48, 49, 47, 48, 46, 45],\n  energy=[30, 31, 33, 32, 34, 36, 35, 37, 39, 38],\n)\nresult = backtest(prices, signal="momentum", portfolio="long_short", lookback=3)\nresult.metrics`,
 ];
 
 const listEl = document.getElementById('cells');

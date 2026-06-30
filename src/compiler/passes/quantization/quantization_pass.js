@@ -2,7 +2,6 @@ import { FunctionPass, PassResult } from '../pass.js';
 import { Operation } from '../../ir/graph/operation.js';
 import { TensorType, ScalarType, isFloatType, scalarBytes } from '../../ir/graph/types.js';
 import { registry } from '../../ir/graph/ops.js';
-import { OpTrait } from '../../ir/graph/op_registry.js';
 import { UseDefAnalysis } from '../../analysis/use_def.js';
 import { QuantizationScheme, QuantizationParams } from '../../ir/graph/quantization_types.js';
 import { TraceLevel } from '../../pipeline/trace.js';
@@ -48,6 +47,7 @@ export class QuantizationPass extends FunctionPass {
 
     const topo = useDef.topologicalOrder;
     const quantizedValues = new Set();
+    this._paramsByValue = new Map();
     const cfg = this.config;
     let changed = false;
 
@@ -78,15 +78,6 @@ export class QuantizationPass extends FunctionPass {
           changed = this._replacePerChannelDot(op, cfg) || changed;
         } else {
           changed = this._replaceWithNativeQuantized(op, nativeVariant, quantizedValues, cfg) || changed;
-        }
-        continue;
-      }
-
-      const def = registry.get(op.opName);
-      const isEW = def && def.hasTrait(OpTrait.ELEMENTWISE);
-      if (isEW && allOperandsQuantized(op, quantizedValues)) {
-        for (let r = 0; r < op.numResults; r++) {
-          quantizedValues.add(op.getResult(r));
         }
         continue;
       }
@@ -132,6 +123,21 @@ export class QuantizationPass extends FunctionPass {
     return null;
   }
 
+  _resolveQuantParams(val, cfg) {
+    const tracked = this._paramsByValue.get(val);
+    if (tracked) return tracked;
+    const defOp = val.definingOp;
+    if (defOp && defOp.opName === 'quantize') {
+      return new QuantizationParams({
+        scheme: defOp.getAttr('scheme') || cfg.scheme,
+        scale: defOp.getAttr('scale'),
+        zeroPoint: defOp.getAttr('zero_point') || 0,
+        dtype: defOp.getAttr('target_dtype') || cfg.targetDtype,
+      });
+    }
+    return this._getQuantParams(val, cfg);
+  }
+
   _insertQuantizeAfter(op, resultIdx, cfg) {
     const val = op.getResult(resultIdx);
     const qp = this._getQuantParams(val, cfg);
@@ -150,11 +156,13 @@ export class QuantizationPass extends FunctionPass {
       op.parentBlock.insertAfter(quantOp, op);
     }
 
-    return quantOp.getResult(0);
+    const result = quantOp.getResult(0);
+    this._paramsByValue.set(result, qp);
+    return result;
   }
 
   _insertDequantBefore(consumer, operandIdx, val, cfg) {
-    const qp = this._getQuantParams(val, cfg);
+    const qp = this._resolveQuantParams(val, cfg);
     if (!qp) return false;
 
     const outputDtype = ScalarType.F32;
@@ -214,7 +222,7 @@ export class QuantizationPass extends FunctionPass {
       const operand = op.getOperand(i);
       if (quantizedValues.has(operand)) {
         quantizedInputs.push(operand);
-        const qp = this._getQuantParams(operand, cfg);
+        const qp = this._resolveQuantParams(operand, cfg);
         if (qp) {
           const prefix = i === 0 ? 'lhs' : 'rhs';
           if (nativeOpName === 'quantized_dot') {
@@ -384,13 +392,6 @@ function hasConstantOperand(op) {
     if (def && def.opName === 'constant') return true;
   }
   return false;
-}
-
-function allOperandsQuantized(op, quantizedValues) {
-  for (let i = 0; i < op.numOperands; i++) {
-    if (!quantizedValues.has(op.getOperand(i))) return false;
-  }
-  return op.numOperands > 0;
 }
 
 function allOperandsCanQuantize(op, quantizedValues, cfg) {

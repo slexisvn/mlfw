@@ -1,4 +1,4 @@
-export function renderLegend(host, series, hidden, onChange) {
+export function renderLegend(host, series, hidden, onChange, extras = []) {
   const legend = document.createElement('div');
   legend.className = 'chart-legend';
   series.forEach((item, index) => {
@@ -18,5 +18,17 @@ export function renderLegend(host, series, hidden, onChange) {
     });
     legend.append(button);
   });
+  for (const extra of extras) {
+    const chip = document.createElement('span');
+    chip.className = 'chart-legend-item chart-legend-static';
+    const swatch = document.createElement('span');
+    swatch.className = extra.dash ? 'chart-legend-swatch chart-legend-swatch-dash' : 'chart-legend-swatch';
+    if (extra.dash) swatch.style.borderTopColor = extra.color;
+    else swatch.style.background = extra.color;
+    const label = document.createElement('span');
+    label.textContent = extra.name;
+    chip.append(swatch, label);
+    legend.append(chip);
+  }
   host.append(legend);
 }

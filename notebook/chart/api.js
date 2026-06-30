@@ -1,7 +1,8 @@
 import { adaptHistogram, adaptSeries } from './adapters.js';
 import { adaptBubble, adaptCorrelation, adaptDensity, adaptDistribution, adaptEcdf, adaptFunnel, adaptHeatmap, adaptHexbin, adaptRegression, adaptWaterfall, prepareSeriesMode } from './advanced_adapters.js';
 import { createFigure } from './figure.js';
-import { createPayloadSpec, createSpec } from './spec.js';
+import { adaptFrames } from './frames.js';
+import { createMorphSpec, createPayloadSpec, createSpec, MORPHABLE_TYPES } from './spec.js';
 
 export function createChartApi() {
   return Object.freeze({
@@ -32,9 +33,16 @@ function createFigureBuilder(args) {
 
 async function createSeriesChart(type, args) {
   const { data, options } = splitArgs(args);
+  if (options.frame != null && MORPHABLE_TYPES.has(type)) return createMorphChart(type, data, options);
   const raw = await adaptSeries(data, options);
   const prepared = type === 'bar' || type === 'area' ? prepareSeriesMode(raw, type, options.mode) : { mode: null, series: raw };
   return createSpec(type, prepared.series, { ...options, mode: prepared.mode });
+}
+
+async function createMorphChart(type, data, options) {
+  const { frames, key } = await adaptFrames(type, data, options);
+  if (frames.length < 2) return createSpec(type, frames[0]?.series ?? [], options);
+  return createMorphSpec(type, frames, key, options);
 }
 
 async function createDistribution(type, args) {
@@ -76,6 +84,7 @@ async function createEcdf(args) {
 
 async function createBubble(args) {
   const { data, options } = splitArgs(args);
+  if (options.frame != null) return createMorphChart('bubble', data, options);
   return createSpec('bubble', await adaptBubble(data, options), options);
 }
 

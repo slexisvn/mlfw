@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "notebook",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8780"],
+      "port": 8780
+    },
+    {
+      "name": "notebook-p3",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8783"],
+      "port": 8783
+    }
+  ]
+}

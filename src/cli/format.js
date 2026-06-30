@@ -37,8 +37,19 @@ export function formatValue(value) {
   if (Array.isArray(value)) return JSON.stringify(value);
   if (value === undefined) return '';
   if (typeof value === 'string') return value;
+  if (value instanceof Map) {
+    const entries = [...value.entries()].map(([key, item]) => `${key}: ${formatInline(item)}`);
+    return `{${entries.join(', ')}}`;
+  }
   if (value && value.constructor === Object) return JSON.stringify(value);
   return String(value);
+}
+
+function formatInline(value) {
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (value instanceof Map || Array.isArray(value)) return formatValue(value);
+  if (value instanceof Tensor && value.ndim === 0 && value.data) return String(value.item());
+  return formatValue(value);
 }
 
 export class CompiledProgramView {
