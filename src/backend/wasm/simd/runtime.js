@@ -8,22 +8,33 @@ export const LANE_SHIFT = Math.log2(F64_LANES);
 
 const PAGE_BYTES = 65536;
 const ALIGN_BYTES = VEC_BYTES;
+const RELEASE_ABOVE_BYTES = 64 * 1024 * 1024;
 
 function alignUp(n, a) {
   return Math.ceil(n / a) * a;
 }
 
 class SimdModule {
-  constructor(wat, exportName) {
-    const binary = encodeWat(wat);
-    this._instance = new WebAssembly.Instance(new WebAssembly.Module(binary), {});
+  constructor(module, exportName) {
+    this._module = module;
+    this._exportName = exportName;
+    this._instantiate();
+  }
+
+  _instantiate() {
+    this._instance = new WebAssembly.Instance(this._module, {});
     this._memory = this._instance.exports.memory;
-    this._fn = this._instance.exports[exportName];
+    this._fn = this._instance.exports[this._exportName];
     this._top = 0;
   }
 
   reset() {
     this._top = 0;
+  }
+
+  reclaim() {
+    if (this._memory.buffer.byteLength > RELEASE_ABOVE_BYTES) this._instantiate();
+    else this._top = 0;
   }
 
   _ensure(bytes) {
@@ -69,9 +80,9 @@ const _cache = new Map();
 export function simdModule(key, buildWat, exportName) {
   let mod = _cache.get(key);
   if (!mod) {
-    mod = new SimdModule(buildWat(), exportName);
+    mod = new SimdModule(new WebAssembly.Module(encodeWat(buildWat())), exportName);
     _cache.set(key, mod);
   }
-  mod.reset();
+  mod.reclaim();
   return mod;
 }

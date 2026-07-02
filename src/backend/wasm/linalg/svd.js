@@ -2,13 +2,12 @@ import { hostMatrix, toHostTensor } from '../../../tensor/utils/host_matrix.js';
 import { svdHost } from '../../cpu/linalg/svd.js';
 import { cpuSvd } from '../../cpu/linalg/ops.js';
 import { simdModule } from '../simd/runtime.js';
-import { gramSymWat } from '../simd/kernels.js';
+import { gramSymWat, matmulRowsWat } from '../simd/kernels.js';
 
 const GRAM_MIN_WORK = 500000;
 
 function gramSym(mat, m, len) {
   const mod = simdModule('gram_sym', gramSymWat, 'gram_sym');
-  mod.reset();
   const mp = mod.allocF64(m * len);
   const gp = mod.allocF64(m * m);
   mod.writeF64(mp, mat);
@@ -27,11 +26,22 @@ function wasmGram(a, rows, cols, transposeLeft) {
   return gramSym(a, rows, cols);
 }
 
+function wasmMatmulRows(a, m, len, b, p) {
+  const mod = simdModule('matmul_rows', matmulRowsWat, 'matmul_rows');
+  const ap = mod.allocF64(m * len);
+  const bp = mod.allocF64(p * len);
+  const op = mod.allocF64(m * p);
+  mod.writeF64(ap, a);
+  mod.writeF64(bp, b);
+  mod.run(ap, m, len, bp, p, op);
+  return Float64Array.from(mod.f64(op, m * p));
+}
+
 export function wasmSvd(_keySet, a) {
   const { data, rows, cols } = hostMatrix(a);
   const gramWork = Math.max(rows, cols) * Math.min(rows, cols) * Math.min(rows, cols);
   if (gramWork < GRAM_MIN_WORK) return cpuSvd(_keySet, a);
-  const { U, S, V, k } = svdHost(data, rows, cols, undefined, wasmGram);
+  const { U, S, V, k } = svdHost(data, rows, cols, undefined, wasmGram, wasmMatmulRows);
   return [
     toHostTensor(U, [rows, k], a.dtype, a.device),
     toHostTensor(S, [k], a.dtype, a.device),

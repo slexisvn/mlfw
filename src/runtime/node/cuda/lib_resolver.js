@@ -106,6 +106,10 @@ export const CUBLAS_SPEC = {
   win: { pattern: /^cublas64_\d+\.dll$/, fallback: 'cublas64_12.dll' },
   linux: { pattern: /^libcublas\.so(\.\d+)*$/, fallback: 'libcublas.so.12' },
 };
+export const CUSOLVER_SPEC = {
+  win: { pattern: /^cusolver64_\d+\.dll$/, fallback: 'cusolver64_11.dll' },
+  linux: { pattern: /^libcusolver\.so(\.\d+)*$/, fallback: 'libcusolver.so.11' },
+};
 function winCudnnDirs() {
   const dirs = [];
   const root = 'C:/Program Files/NVIDIA/CUDNN';

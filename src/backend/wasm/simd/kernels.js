@@ -182,6 +182,34 @@ ${reduceDotSnippet('gs', 'rowI', 'rowJ', 'len', 'd', dot)}
   );
 }
 
+export function matmulRowsWat() {
+  const dot = { j: 'kk', nmain: 'nm', acc: 'acc' };
+  const body = `
+    (i32.const 0) local.set $i
+    (block $ie (loop $il
+      (local.get $i) (local.get $m) i32.ge_s br_if $ie
+      (local.get $a) (local.get $i) (local.get $len) i32.mul (i32.const ${F64_BYTES}) i32.mul i32.add local.set $rowA
+      (i32.const 0) local.set $c
+      (block $ce (loop $cl
+        (local.get $c) (local.get $p) i32.ge_s br_if $ce
+        (local.get $b) (local.get $c) (local.get $len) i32.mul (i32.const ${F64_BYTES}) i32.mul i32.add local.set $rowB
+${reduceDotSnippet('mm', 'rowA', 'rowB', 'len', 'd', dot)}
+        (local.get $out) (local.get $i) (local.get $p) i32.mul (local.get $c) i32.add (i32.const ${F64_BYTES}) i32.mul i32.add (local.get $d) f64.store
+        (local.get $c) (i32.const 1) i32.add local.set $c
+        br $cl))
+      (local.get $i) (i32.const 1) i32.add local.set $i
+      br $il))`;
+  return moduleWrap(
+    'matmul_rows',
+    [['a', 'i32'], ['m', 'i32'], ['len', 'i32'], ['b', 'i32'], ['p', 'i32'], ['out', 'i32']],
+    [
+      ['i', 'i32'], ['c', 'i32'], ['rowA', 'i32'], ['rowB', 'i32'], ['d', 'f64'],
+      ['kk', 'i32'], ['nm', 'i32'], ['acc', 'v128'],
+    ],
+    body,
+  );
+}
+
 export function coordDescentWat() {
   const dot = { j: 'j', nmain: 'nmain', acc: 'acc' };
   const ax = { j: 'j2', nmain: 'nmain2', sv: 'sv', ya: 'ya', vy: 'vy' };
