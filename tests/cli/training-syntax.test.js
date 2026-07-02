@@ -362,23 +362,25 @@ y, classes = data.select("species").encode("species")
     expect(classes).toEqual(['setosa', 'versicolor', 'virginica']);
   });
 
-  it('encode works on arrays', async () => {
+  it('LabelEncoder encodes label tensors', async () => {
     const runtime = new TeraRuntime({ output: () => {} });
     await runtime.execute(`
-labels = ["cat", "dog", "cat", "bird", "dog"]
-y, classes = encode(labels)
+labels = tensor([2, 5, 2, 9, 5])
+le = LabelEncoder()
+y = le.fit_transform(labels)
+classes = le.classes_
 `);
     const y = runtime.getVariable('y');
     const classes = runtime.getVariable('classes');
     expect(y.toArray()).toEqual([0, 1, 0, 2, 1]);
-    expect(classes).toEqual(['cat', 'dog', 'bird']);
+    expect(classes).toEqual([2, 5, 9]);
   });
 
-  it('normalize standardizes tensor', async () => {
+  it('StandardScaler standardizes tensor', async () => {
     const runtime = new TeraRuntime({ output: () => {} });
     const result = await runtime.execute(`
 x = tensor([[1.0, 100.0], [2.0, 200.0], [3.0, 300.0]])
-normalize(x)
+StandardScaler().fit_transform(x)
 `);
     expect(result.shape).toEqual([3, 2]);
     const col0 = [result.toArray()[0][0], result.toArray()[1][0], result.toArray()[2][0]];
@@ -526,7 +528,7 @@ trainer.fit(net, loader)
     const runtime = new TeraRuntime({ output: () => {} });
     await runtime.execute(`
 data = load_csv("tests/cli/fixtures/iris_sample.csv")
-x = normalize(data.drop("species").to_tensor())
+x = StandardScaler().fit_transform(data.drop("species").to_tensor())
 y, classes = data.select("species").encode("species")
 loader = DataLoader(TensorDataset(x, y), batch_size=10)
 

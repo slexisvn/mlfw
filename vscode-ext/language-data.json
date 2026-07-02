@@ -2538,6 +2538,32 @@
       ]
     },
     {
+      "name": "accuracy_score",
+      "kind": "ml_metric",
+      "description": "Classification accuracy.",
+      "returns": "float",
+      "signature": {
+        "params": [
+          {
+            "name": "y_true",
+            "type": "Tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "y_pred",
+            "type": "Tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "accuracy_score(y_true: Tensor, y_pred: Tensor) -> float"
+      },
+      "methods": []
+    },
+    {
       "name": "Adam",
       "kind": "optimizer",
       "description": "Adaptive moment estimation optimizer. Standard default for deep learning.",
@@ -3260,6 +3286,25 @@
       "methods": []
     },
     {
+      "name": "cholesky",
+      "kind": "linalg",
+      "description": "Cholesky factor `L` (lower-triangular) of a symmetric positive-definite matrix.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "input",
+            "type": "Tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "cholesky(input: Tensor) -> Tensor"
+      },
+      "methods": []
+    },
+    {
       "name": "col",
       "kind": "function",
       "description": "Reference a column by name in a `DataFrame` expression, returning a `Column`\nthat can be transformed and compared. Use a dotted name (`\"t.id\"`) to qualify a\ntable alias.",
@@ -3329,6 +3374,32 @@
           }
         ],
         "display": "compile(model, input?, target=cpu, fusion?, scheduling?, debug?)"
+      },
+      "methods": []
+    },
+    {
+      "name": "confusion_matrix",
+      "kind": "ml_metric",
+      "description": "Confusion matrix as a nested array.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "y_true",
+            "type": "Tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "y_pred",
+            "type": "Tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "confusion_matrix(y_true: Tensor, y_pred: Tensor)"
       },
       "methods": []
     },
@@ -3755,6 +3826,25 @@
       "methods": []
     },
     {
+      "name": "cov",
+      "kind": "linalg",
+      "description": "Covariance matrix of the columns of `input`.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "input",
+            "type": "Tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "cov(input: Tensor) -> Tensor"
+      },
+      "methods": []
+    },
+    {
       "name": "cpu",
       "kind": "device",
       "description": "CPU execution backend.",
@@ -3770,6 +3860,46 @@
       "signature": {
         "params": [],
         "display": "cross_sectional()"
+      },
+      "methods": []
+    },
+    {
+      "name": "cross_val_score",
+      "kind": "ml_function",
+      "description": "Cross-validated scores for an estimator constructor over `cv` folds.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "estimator",
+            "type": null,
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "X",
+            "type": "Tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "y",
+            "type": "Tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "cv",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "5"
+          }
+        ],
+        "display": "cross_val_score(estimator, X: Tensor, y: Tensor, cv: int = 5)"
       },
       "methods": []
     },
@@ -3998,30 +4128,230 @@
       ]
     },
     {
-      "name": "decode",
-      "kind": "data",
-      "description": "Map integer ids back to original class labels using the `classes` array from `encode`.",
-      "returns": null,
+      "name": "DecisionTreeClassifier",
+      "kind": "ml_model",
+      "description": "CART decision-tree classifier (Gini impurity).",
+      "returns": "DecisionTreeClassifier",
       "signature": {
         "params": [
           {
-            "name": "indices",
-            "type": null,
-            "optional": false,
+            "name": "max_depth",
+            "type": "int",
+            "optional": true,
             "rest": false,
             "defaultValue": null
           },
           {
-            "name": "classes",
-            "type": null,
-            "optional": false,
+            "name": "min_samples_split",
+            "type": "int",
+            "optional": true,
             "rest": false,
-            "defaultValue": null
+            "defaultValue": "2"
+          },
+          {
+            "name": "min_samples_leaf",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "1"
+          },
+          {
+            "name": "max_features",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0"
+          },
+          {
+            "name": "random_state",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0"
           }
         ],
-        "display": "decode(indices, classes)"
+        "display": "DecisionTreeClassifier(max_depth?: int, min_samples_split: int = 2, min_samples_leaf: int = 1, max_features: int = 0, random_state: int = 0) -> DecisionTreeClassifier"
       },
-      "methods": []
+      "methods": [
+        {
+          "name": "fit",
+          "description": "Fit the estimator to training features `X` and targets `y`. Returns the fitted model.",
+          "returns": "Model",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "y",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "fit(X: Tensor, y: Tensor) -> Model"
+          }
+        },
+        {
+          "name": "predict",
+          "description": "Predict targets/labels for the rows of `X`.",
+          "returns": "Tensor",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "predict(X: Tensor) -> Tensor"
+          }
+        },
+        {
+          "name": "score",
+          "description": "Return the model's default score (R² for regressors, accuracy for classifiers).",
+          "returns": "float",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "y",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "score(X: Tensor, y: Tensor) -> float"
+          }
+        }
+      ]
+    },
+    {
+      "name": "DecisionTreeRegressor",
+      "kind": "ml_model",
+      "description": "CART decision-tree regressor (variance reduction).",
+      "returns": "DecisionTreeRegressor",
+      "signature": {
+        "params": [
+          {
+            "name": "max_depth",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "min_samples_split",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "2"
+          },
+          {
+            "name": "min_samples_leaf",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "1"
+          },
+          {
+            "name": "max_features",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0"
+          },
+          {
+            "name": "random_state",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0"
+          }
+        ],
+        "display": "DecisionTreeRegressor(max_depth?: int, min_samples_split: int = 2, min_samples_leaf: int = 1, max_features: int = 0, random_state: int = 0) -> DecisionTreeRegressor"
+      },
+      "methods": [
+        {
+          "name": "fit",
+          "description": "Fit the estimator to training features `X` and targets `y`. Returns the fitted model.",
+          "returns": "Model",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "y",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "fit(X: Tensor, y: Tensor) -> Model"
+          }
+        },
+        {
+          "name": "predict",
+          "description": "Predict targets/labels for the rows of `X`.",
+          "returns": "Tensor",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "predict(X: Tensor) -> Tensor"
+          }
+        },
+        {
+          "name": "score",
+          "description": "Return the model's default score (R² for regressors, accuracy for classifiers).",
+          "returns": "float",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "y",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "score(X: Tensor, y: Tensor) -> float"
+          }
+        }
+      ]
     },
     {
       "name": "deflated_sharpe",
@@ -4046,6 +4376,25 @@
           }
         ],
         "display": "deflated_sharpe(returns, trial_sharpes: float[])"
+      },
+      "methods": []
+    },
+    {
+      "name": "det",
+      "kind": "linalg",
+      "description": "Determinant (scalar).",
+      "returns": "float",
+      "signature": {
+        "params": [
+          {
+            "name": "input",
+            "type": "Tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "det(input: Tensor) -> float"
       },
       "methods": []
     },
@@ -4256,6 +4605,131 @@
               }
             ],
             "display": "on_epoch_end(trainer, model)"
+          }
+        }
+      ]
+    },
+    {
+      "name": "eigh",
+      "kind": "linalg",
+      "description": "Symmetric eigendecomposition. Returns `{values, vectors}` (ascending eigenvalues).",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "input",
+            "type": "Tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "eigh(input: Tensor)"
+      },
+      "methods": []
+    },
+    {
+      "name": "ElasticNet",
+      "kind": "ml_model",
+      "description": "Combined L1/L2 linear regression via coordinate descent.",
+      "returns": "ElasticNet",
+      "signature": {
+        "params": [
+          {
+            "name": "alpha",
+            "type": "float",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "1.0"
+          },
+          {
+            "name": "l1_ratio",
+            "type": "float",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0.5"
+          },
+          {
+            "name": "fit_intercept",
+            "type": "boolean",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "true"
+          },
+          {
+            "name": "max_iter",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "1000"
+          }
+        ],
+        "display": "ElasticNet(alpha: float = 1.0, l1_ratio: float = 0.5, fit_intercept: boolean = true, max_iter: int = 1000) -> ElasticNet"
+      },
+      "methods": [
+        {
+          "name": "fit",
+          "description": "Fit the estimator to training features `X` and targets `y`. Returns the fitted model.",
+          "returns": "Model",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "y",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "fit(X: Tensor, y: Tensor) -> Model"
+          }
+        },
+        {
+          "name": "predict",
+          "description": "Predict targets/labels for the rows of `X`.",
+          "returns": "Tensor",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "predict(X: Tensor) -> Tensor"
+          }
+        },
+        {
+          "name": "score",
+          "description": "Return the model's default score (R² for regressors, accuracy for classifiers).",
+          "returns": "float",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "y",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "score(X: Tensor, y: Tensor) -> float"
           }
         }
       ]
@@ -4478,25 +4952,6 @@
           }
         ],
         "display": "emptyLike(tensor) -> Tensor"
-      },
-      "methods": []
-    },
-    {
-      "name": "encode",
-      "kind": "data",
-      "description": "Encode categorical values to integer ids. Returns `[encoded_tensor, classes_array]`.",
-      "returns": null,
-      "signature": {
-        "params": [
-          {
-            "name": "data",
-            "type": null,
-            "optional": false,
-            "rest": false,
-            "defaultValue": null
-          }
-        ],
-        "display": "encode(data)"
       },
       "methods": []
     },
@@ -4811,6 +5266,83 @@
       "methods": []
     },
     {
+      "name": "GaussianNB",
+      "kind": "ml_model",
+      "description": "Gaussian Naive Bayes classifier.",
+      "returns": "GaussianNB",
+      "signature": {
+        "params": [],
+        "display": "GaussianNB() -> GaussianNB"
+      },
+      "methods": [
+        {
+          "name": "fit",
+          "description": "Fit the estimator to training features `X` and targets `y`. Returns the fitted model.",
+          "returns": "Model",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "y",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "fit(X: Tensor, y: Tensor) -> Model"
+          }
+        },
+        {
+          "name": "predict",
+          "description": "Predict targets/labels for the rows of `X`.",
+          "returns": "Tensor",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "predict(X: Tensor) -> Tensor"
+          }
+        },
+        {
+          "name": "score",
+          "description": "Return the model's default score (R² for regressors, accuracy for classifiers).",
+          "returns": "float",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "y",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "score(X: Tensor, y: Tensor) -> float"
+          }
+        }
+      ]
+    },
+    {
       "name": "GELU",
       "kind": "module",
       "description": "Gaussian Error Linear Unit activation module — commonly used in Transformers.",
@@ -5008,6 +5540,218 @@
       ]
     },
     {
+      "name": "GradientBoostingClassifier",
+      "kind": "ml_model",
+      "description": "Stage-wise gradient boosting for classification (multinomial deviance).",
+      "returns": "GradientBoostingClassifier",
+      "signature": {
+        "params": [
+          {
+            "name": "n_estimators",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "100"
+          },
+          {
+            "name": "learning_rate",
+            "type": "float",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0.1"
+          },
+          {
+            "name": "max_depth",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "3"
+          },
+          {
+            "name": "random_state",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0"
+          }
+        ],
+        "display": "GradientBoostingClassifier(n_estimators: int = 100, learning_rate: float = 0.1, max_depth: int = 3, random_state: int = 0) -> GradientBoostingClassifier"
+      },
+      "methods": [
+        {
+          "name": "fit",
+          "description": "Fit the estimator to training features `X` and targets `y`. Returns the fitted model.",
+          "returns": "Model",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "y",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "fit(X: Tensor, y: Tensor) -> Model"
+          }
+        },
+        {
+          "name": "predict",
+          "description": "Predict targets/labels for the rows of `X`.",
+          "returns": "Tensor",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "predict(X: Tensor) -> Tensor"
+          }
+        },
+        {
+          "name": "score",
+          "description": "Return the model's default score (R² for regressors, accuracy for classifiers).",
+          "returns": "float",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "y",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "score(X: Tensor, y: Tensor) -> float"
+          }
+        }
+      ]
+    },
+    {
+      "name": "GradientBoostingRegressor",
+      "kind": "ml_model",
+      "description": "Stage-wise gradient boosting for regression (squared-error residuals).",
+      "returns": "GradientBoostingRegressor",
+      "signature": {
+        "params": [
+          {
+            "name": "n_estimators",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "100"
+          },
+          {
+            "name": "learning_rate",
+            "type": "float",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0.1"
+          },
+          {
+            "name": "max_depth",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "3"
+          },
+          {
+            "name": "random_state",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0"
+          }
+        ],
+        "display": "GradientBoostingRegressor(n_estimators: int = 100, learning_rate: float = 0.1, max_depth: int = 3, random_state: int = 0) -> GradientBoostingRegressor"
+      },
+      "methods": [
+        {
+          "name": "fit",
+          "description": "Fit the estimator to training features `X` and targets `y`. Returns the fitted model.",
+          "returns": "Model",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "y",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "fit(X: Tensor, y: Tensor) -> Model"
+          }
+        },
+        {
+          "name": "predict",
+          "description": "Predict targets/labels for the rows of `X`.",
+          "returns": "Tensor",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "predict(X: Tensor) -> Tensor"
+          }
+        },
+        {
+          "name": "score",
+          "description": "Return the model's default score (R² for regressors, accuracy for classifiers).",
+          "returns": "float",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "y",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "score(X: Tensor, y: Tensor) -> float"
+          }
+        }
+      ]
+    },
+    {
       "name": "graph",
       "kind": "utility",
       "description": "Print the IR graph of a compiled program or module.",
@@ -5025,6 +5769,81 @@
         "display": "graph(compiled) -> string"
       },
       "methods": []
+    },
+    {
+      "name": "GridSearchCV",
+      "kind": "grid_search",
+      "description": "Exhaustive hyperparameter search with cross-validation. Pass an estimator constructor and a grid of parameter lists.",
+      "returns": "GridSearchCV",
+      "signature": {
+        "params": [
+          {
+            "name": "estimator",
+            "type": null,
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "param_grid",
+            "type": "Record",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "cv",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "5"
+          }
+        ],
+        "display": "GridSearchCV(estimator, param_grid: Record, cv: int = 5) -> GridSearchCV"
+      },
+      "methods": [
+        {
+          "name": "fit",
+          "description": "Search all parameter combinations and refit the best on the full data. Sets `bestParams_`, `bestScore_`, `bestEstimator_`.",
+          "returns": "GridSearchCV",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "y",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "fit(X: Tensor, y: Tensor) -> GridSearchCV"
+          }
+        },
+        {
+          "name": "predict",
+          "description": "Predict using the best found estimator.",
+          "returns": "Tensor",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "predict(X: Tensor) -> Tensor"
+          }
+        }
+      ]
     },
     {
       "name": "GRU",
@@ -5264,6 +6083,517 @@
       "returns": null,
       "signature": null,
       "methods": []
+    },
+    {
+      "name": "inv",
+      "kind": "linalg",
+      "description": "Matrix inverse.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "input",
+            "type": "Tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "inv(input: Tensor) -> Tensor"
+      },
+      "methods": []
+    },
+    {
+      "name": "KFold",
+      "kind": "ml_split",
+      "description": "K-fold cross-validation splitter.",
+      "returns": "KFold",
+      "signature": {
+        "params": [
+          {
+            "name": "n_splits",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "5"
+          },
+          {
+            "name": "shuffle",
+            "type": "boolean",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "false"
+          },
+          {
+            "name": "random_state",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0"
+          }
+        ],
+        "display": "KFold(n_splits: int = 5, shuffle: boolean = false, random_state: int = 0) -> KFold"
+      },
+      "methods": [
+        {
+          "name": "split",
+          "description": "Return `n_splits` `{train, test}` index partitions for `n` samples.",
+          "returns": "Record[]",
+          "signature": {
+            "params": [
+              {
+                "name": "n",
+                "type": "int",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "split(n: int) -> Record[]"
+          }
+        }
+      ]
+    },
+    {
+      "name": "KMeans",
+      "kind": "ml_cluster",
+      "description": "k-means clustering (k-means++ init). Exposes `clusterCenters_`, `labels_`, `inertia_`.",
+      "returns": "KMeans",
+      "signature": {
+        "params": [
+          {
+            "name": "n_clusters",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "8"
+          },
+          {
+            "name": "max_iter",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "300"
+          },
+          {
+            "name": "n_init",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "10"
+          },
+          {
+            "name": "random_state",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0"
+          }
+        ],
+        "display": "KMeans(n_clusters: int = 8, max_iter: int = 300, n_init: int = 10, random_state: int = 0) -> KMeans"
+      },
+      "methods": [
+        {
+          "name": "fit",
+          "description": "Compute cluster centers from `X`.",
+          "returns": "KMeans",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "fit(X: Tensor) -> KMeans"
+          }
+        },
+        {
+          "name": "predict",
+          "description": "Assign each row of `X` to its nearest cluster.",
+          "returns": "Tensor",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "predict(X: Tensor) -> Tensor"
+          }
+        },
+        {
+          "name": "fit_predict",
+          "description": "Fit then return the training labels.",
+          "returns": "Tensor",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "fit_predict(X: Tensor) -> Tensor"
+          }
+        }
+      ]
+    },
+    {
+      "name": "KNeighborsClassifier",
+      "kind": "ml_model",
+      "description": "k-nearest-neighbors classifier (majority vote over Euclidean neighbors).",
+      "returns": "KNeighborsClassifier",
+      "signature": {
+        "params": [
+          {
+            "name": "n_neighbors",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "5"
+          }
+        ],
+        "display": "KNeighborsClassifier(n_neighbors: int = 5) -> KNeighborsClassifier"
+      },
+      "methods": [
+        {
+          "name": "fit",
+          "description": "Fit the estimator to training features `X` and targets `y`. Returns the fitted model.",
+          "returns": "Model",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "y",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "fit(X: Tensor, y: Tensor) -> Model"
+          }
+        },
+        {
+          "name": "predict",
+          "description": "Predict targets/labels for the rows of `X`.",
+          "returns": "Tensor",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "predict(X: Tensor) -> Tensor"
+          }
+        },
+        {
+          "name": "score",
+          "description": "Return the model's default score (R² for regressors, accuracy for classifiers).",
+          "returns": "float",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "y",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "score(X: Tensor, y: Tensor) -> float"
+          }
+        }
+      ]
+    },
+    {
+      "name": "KNeighborsRegressor",
+      "kind": "ml_model",
+      "description": "k-nearest-neighbors regressor (mean of neighbor targets).",
+      "returns": "KNeighborsRegressor",
+      "signature": {
+        "params": [
+          {
+            "name": "n_neighbors",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "5"
+          }
+        ],
+        "display": "KNeighborsRegressor(n_neighbors: int = 5) -> KNeighborsRegressor"
+      },
+      "methods": [
+        {
+          "name": "fit",
+          "description": "Fit the estimator to training features `X` and targets `y`. Returns the fitted model.",
+          "returns": "Model",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "y",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "fit(X: Tensor, y: Tensor) -> Model"
+          }
+        },
+        {
+          "name": "predict",
+          "description": "Predict targets/labels for the rows of `X`.",
+          "returns": "Tensor",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "predict(X: Tensor) -> Tensor"
+          }
+        },
+        {
+          "name": "score",
+          "description": "Return the model's default score (R² for regressors, accuracy for classifiers).",
+          "returns": "float",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "y",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "score(X: Tensor, y: Tensor) -> float"
+          }
+        }
+      ]
+    },
+    {
+      "name": "LabelEncoder",
+      "kind": "ml_transform",
+      "description": "Encode categorical labels to integer ids. `inverse_transform` returns the original labels.",
+      "returns": "LabelEncoder",
+      "signature": {
+        "params": [],
+        "display": "LabelEncoder() -> LabelEncoder"
+      },
+      "methods": [
+        {
+          "name": "fit",
+          "description": "Learn the transform parameters from `X`.",
+          "returns": "Transformer",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "fit(X: Tensor) -> Transformer"
+          }
+        },
+        {
+          "name": "transform",
+          "description": "Apply the learned transform to `X`.",
+          "returns": "Tensor",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "transform(X: Tensor) -> Tensor"
+          }
+        },
+        {
+          "name": "fit_transform",
+          "description": "Fit then transform `X` in one call.",
+          "returns": "Tensor",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "fit_transform(X: Tensor) -> Tensor"
+          }
+        },
+        {
+          "name": "inverse_transform",
+          "description": "Map transformed data back to the original space (where supported).",
+          "returns": "Tensor",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "inverse_transform(X: Tensor) -> Tensor"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Lasso",
+      "kind": "ml_model",
+      "description": "L1-regularized linear regression via coordinate descent (sparse coefficients).",
+      "returns": "Lasso",
+      "signature": {
+        "params": [
+          {
+            "name": "alpha",
+            "type": "float",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "1.0"
+          },
+          {
+            "name": "fit_intercept",
+            "type": "boolean",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "true"
+          },
+          {
+            "name": "max_iter",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "1000"
+          }
+        ],
+        "display": "Lasso(alpha: float = 1.0, fit_intercept: boolean = true, max_iter: int = 1000) -> Lasso"
+      },
+      "methods": [
+        {
+          "name": "fit",
+          "description": "Fit the estimator to training features `X` and targets `y`. Returns the fitted model.",
+          "returns": "Model",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "y",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "fit(X: Tensor, y: Tensor) -> Model"
+          }
+        },
+        {
+          "name": "predict",
+          "description": "Predict targets/labels for the rows of `X`.",
+          "returns": "Tensor",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "predict(X: Tensor) -> Tensor"
+          }
+        },
+        {
+          "name": "score",
+          "description": "Return the model's default score (R² for regressors, accuracy for classifiers).",
+          "returns": "float",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "y",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "score(X: Tensor, y: Tensor) -> float"
+          }
+        }
+      ]
     },
     {
       "name": "LayerNorm",
@@ -5638,6 +6968,91 @@
       ]
     },
     {
+      "name": "LinearRegression",
+      "kind": "ml_model",
+      "description": "Ordinary least-squares linear regression (solved via `lstsq`).",
+      "returns": "LinearRegression",
+      "signature": {
+        "params": [
+          {
+            "name": "fit_intercept",
+            "type": "boolean",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "true"
+          }
+        ],
+        "display": "LinearRegression(fit_intercept: boolean = true) -> LinearRegression"
+      },
+      "methods": [
+        {
+          "name": "fit",
+          "description": "Fit the estimator to training features `X` and targets `y`. Returns the fitted model.",
+          "returns": "Model",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "y",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "fit(X: Tensor, y: Tensor) -> Model"
+          }
+        },
+        {
+          "name": "predict",
+          "description": "Predict targets/labels for the rows of `X`.",
+          "returns": "Tensor",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "predict(X: Tensor) -> Tensor"
+          }
+        },
+        {
+          "name": "score",
+          "description": "Return the model's default score (R² for regressors, accuracy for classifiers).",
+          "returns": "float",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "y",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "score(X: Tensor, y: Tensor) -> float"
+          }
+        }
+      ]
+    },
+    {
       "name": "linspace",
       "kind": "factory",
       "description": "Evenly spaced values between `start` and `end`, inclusive, with `steps` points.",
@@ -5811,6 +7226,105 @@
         "display": "load_tokenizer(path: string) -> Tokenizer"
       },
       "methods": []
+    },
+    {
+      "name": "LogisticRegression",
+      "kind": "ml_model",
+      "description": "Multinomial logistic regression (softmax) trained by gradient descent. Also exposes `predict_proba(X) -> Tensor`.",
+      "returns": "LogisticRegression",
+      "signature": {
+        "params": [
+          {
+            "name": "C",
+            "type": "float",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "1.0"
+          },
+          {
+            "name": "lr",
+            "type": "float",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0.5"
+          },
+          {
+            "name": "max_iter",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "1000"
+          }
+        ],
+        "display": "LogisticRegression(C: float = 1.0, lr: float = 0.5, max_iter: int = 1000) -> LogisticRegression"
+      },
+      "methods": [
+        {
+          "name": "fit",
+          "description": "Fit the estimator to training features `X` and targets `y`. Returns the fitted model.",
+          "returns": "Model",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "y",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "fit(X: Tensor, y: Tensor) -> Model"
+          }
+        },
+        {
+          "name": "predict",
+          "description": "Predict targets/labels for the rows of `X`.",
+          "returns": "Tensor",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "predict(X: Tensor) -> Tensor"
+          }
+        },
+        {
+          "name": "score",
+          "description": "Return the model's default score (R² for regressors, accuracy for classifiers).",
+          "returns": "float",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "y",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "score(X: Tensor, y: Tensor) -> float"
+          }
+        }
+      ]
     },
     {
       "name": "LogSoftmax",
@@ -6117,6 +7631,32 @@
       ]
     },
     {
+      "name": "lstsq",
+      "kind": "linalg",
+      "description": "Least-squares solution to `a @ x ≈ b` (via pseudo-inverse).",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "a",
+            "type": "Tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "b",
+            "type": "Tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "lstsq(a: Tensor, b: Tensor) -> Tensor"
+      },
+      "methods": []
+    },
+    {
       "name": "max",
       "kind": "function",
       "description": "Aggregate `Column` computing the maximum of a column within a `groupBy(...).agg(...)`.",
@@ -6231,6 +7771,32 @@
       ]
     },
     {
+      "name": "mean_absolute_error",
+      "kind": "ml_metric",
+      "description": "Mean absolute error.",
+      "returns": "float",
+      "signature": {
+        "params": [
+          {
+            "name": "y_true",
+            "type": "Tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "y_pred",
+            "type": "Tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "mean_absolute_error(y_true: Tensor, y_pred: Tensor) -> float"
+      },
+      "methods": []
+    },
+    {
       "name": "mean_reversion",
       "kind": "quant",
       "description": "Build a mean-reversion signal handle (the negated `lookback` momentum) for use as `signal=`.",
@@ -6246,6 +7812,32 @@
           }
         ],
         "display": "mean_reversion(lookback: int = 20)"
+      },
+      "methods": []
+    },
+    {
+      "name": "mean_squared_error",
+      "kind": "ml_metric",
+      "description": "Mean squared error.",
+      "returns": "float",
+      "signature": {
+        "params": [
+          {
+            "name": "y_true",
+            "type": "Tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "y_pred",
+            "type": "Tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "mean_squared_error(y_true: Tensor, y_pred: Tensor) -> float"
       },
       "methods": []
     },
@@ -6388,6 +7980,94 @@
         "display": "min_track_record_length(returns, target_sharpe: float = 0, confidence: float = 0.95)"
       },
       "methods": []
+    },
+    {
+      "name": "MinMaxScaler",
+      "kind": "ml_transform",
+      "description": "Scale features to a given range per column.",
+      "returns": "MinMaxScaler",
+      "signature": {
+        "params": [
+          {
+            "name": "feature_range",
+            "type": "float[]",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "[0, 1]"
+          }
+        ],
+        "display": "MinMaxScaler(feature_range: float[] = [0, 1]) -> MinMaxScaler"
+      },
+      "methods": [
+        {
+          "name": "fit",
+          "description": "Learn the transform parameters from `X`.",
+          "returns": "Transformer",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "fit(X: Tensor) -> Transformer"
+          }
+        },
+        {
+          "name": "transform",
+          "description": "Apply the learned transform to `X`.",
+          "returns": "Tensor",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "transform(X: Tensor) -> Tensor"
+          }
+        },
+        {
+          "name": "fit_transform",
+          "description": "Fit then transform `X` in one call.",
+          "returns": "Tensor",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "fit_transform(X: Tensor) -> Tensor"
+          }
+        },
+        {
+          "name": "inverse_transform",
+          "description": "Map transformed data back to the original space (where supported).",
+          "returns": "Tensor",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "inverse_transform(X: Tensor) -> Tensor"
+          }
+        }
+      ]
     },
     {
       "name": "ModelCheckpoint",
@@ -6685,30 +8365,84 @@
       ]
     },
     {
-      "name": "normalize",
-      "kind": "data",
-      "description": "Standardize a tensor along `axis`: subtract mean and divide by standard deviation.",
-      "returns": "Tensor",
+      "name": "OneHotEncoder",
+      "kind": "ml_transform",
+      "description": "Encode categorical labels to one-hot rows.",
+      "returns": "OneHotEncoder",
       "signature": {
-        "params": [
-          {
-            "name": "tensor",
-            "type": "Tensor",
-            "optional": false,
-            "rest": false,
-            "defaultValue": null
-          },
-          {
-            "name": "axis",
-            "type": "int",
-            "optional": true,
-            "rest": false,
-            "defaultValue": "0"
-          }
-        ],
-        "display": "normalize(tensor: Tensor, axis: int = 0) -> Tensor"
+        "params": [],
+        "display": "OneHotEncoder() -> OneHotEncoder"
       },
-      "methods": []
+      "methods": [
+        {
+          "name": "fit",
+          "description": "Learn the transform parameters from `X`.",
+          "returns": "Transformer",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "fit(X: Tensor) -> Transformer"
+          }
+        },
+        {
+          "name": "transform",
+          "description": "Apply the learned transform to `X`.",
+          "returns": "Tensor",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "transform(X: Tensor) -> Tensor"
+          }
+        },
+        {
+          "name": "fit_transform",
+          "description": "Fit then transform `X` in one call.",
+          "returns": "Tensor",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "fit_transform(X: Tensor) -> Tensor"
+          }
+        },
+        {
+          "name": "inverse_transform",
+          "description": "Map transformed data back to the original space (where supported).",
+          "returns": "Tensor",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "inverse_transform(X: Tensor) -> Tensor"
+          }
+        }
+      ]
     },
     {
       "name": "ones",
@@ -6804,6 +8538,113 @@
           }
         ],
         "display": "pbo(trial_returns, partitions: int = 10)"
+      },
+      "methods": []
+    },
+    {
+      "name": "PCA",
+      "kind": "ml_transform",
+      "description": "Principal component analysis (via `svd`). Exposes `components_`, `explainedVariance_`, `explainedVarianceRatio_`.",
+      "returns": "PCA",
+      "signature": {
+        "params": [
+          {
+            "name": "n_components",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "PCA(n_components?: int) -> PCA"
+      },
+      "methods": [
+        {
+          "name": "fit",
+          "description": "Learn the transform parameters from `X`.",
+          "returns": "Transformer",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "fit(X: Tensor) -> Transformer"
+          }
+        },
+        {
+          "name": "transform",
+          "description": "Apply the learned transform to `X`.",
+          "returns": "Tensor",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "transform(X: Tensor) -> Tensor"
+          }
+        },
+        {
+          "name": "fit_transform",
+          "description": "Fit then transform `X` in one call.",
+          "returns": "Tensor",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "fit_transform(X: Tensor) -> Tensor"
+          }
+        },
+        {
+          "name": "inverse_transform",
+          "description": "Map transformed data back to the original space (where supported).",
+          "returns": "Tensor",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "inverse_transform(X: Tensor) -> Tensor"
+          }
+        }
+      ]
+    },
+    {
+      "name": "pinv",
+      "kind": "linalg",
+      "description": "Moore-Penrose pseudo-inverse.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "input",
+            "type": "Tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "pinv(input: Tensor) -> Tensor"
       },
       "methods": []
     },
@@ -7018,6 +8859,50 @@
       ]
     },
     {
+      "name": "PurgedKFold",
+      "kind": "ml_split",
+      "description": "Leakage-free k-fold with an embargo gap around each test fold (for financial time series).",
+      "returns": "PurgedKFold",
+      "signature": {
+        "params": [
+          {
+            "name": "n_splits",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "5"
+          },
+          {
+            "name": "embargo",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0"
+          }
+        ],
+        "display": "PurgedKFold(n_splits: int = 5, embargo: int = 0) -> PurgedKFold"
+      },
+      "methods": [
+        {
+          "name": "split",
+          "description": "Return purged `{train, test}` index partitions.",
+          "returns": "Record[]",
+          "signature": {
+            "params": [
+              {
+                "name": "n",
+                "type": "int",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "split(n: int) -> Record[]"
+          }
+        }
+      ]
+    },
+    {
       "name": "quill",
       "kind": "quant",
       "description": "Parse and type-check a Quill product definition from a source string and return a product handle. Call `.price(rate=..., spot=..., vol=..., paths?=..., seed?=..., greeks?=...)` on it to run the Monte-Carlo pricer; the result has `.price`, `.standard_error`, and a `.greeks` map (`delta`, `vega`, `rho`, …). `greeks` is `\"price-only\"`, `\"first-order\"`, or `\"full\"`.",
@@ -7033,6 +8918,32 @@
           }
         ],
         "display": "quill(source: string)"
+      },
+      "methods": []
+    },
+    {
+      "name": "r2_score",
+      "kind": "ml_metric",
+      "description": "Coefficient of determination (R²).",
+      "returns": "float",
+      "signature": {
+        "params": [
+          {
+            "name": "y_true",
+            "type": "Tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "y_pred",
+            "type": "Tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "r2_score(y_true: Tensor, y_pred: Tensor) -> float"
       },
       "methods": []
     },
@@ -7080,6 +8991,218 @@
         "display": "randnLike(tensor) -> Tensor"
       },
       "methods": []
+    },
+    {
+      "name": "RandomForestClassifier",
+      "kind": "ml_model",
+      "description": "Bagged ensemble of decision trees (majority vote).",
+      "returns": "RandomForestClassifier",
+      "signature": {
+        "params": [
+          {
+            "name": "n_estimators",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "100"
+          },
+          {
+            "name": "max_depth",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "max_features",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0"
+          },
+          {
+            "name": "random_state",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0"
+          }
+        ],
+        "display": "RandomForestClassifier(n_estimators: int = 100, max_depth?: int, max_features: int = 0, random_state: int = 0) -> RandomForestClassifier"
+      },
+      "methods": [
+        {
+          "name": "fit",
+          "description": "Fit the estimator to training features `X` and targets `y`. Returns the fitted model.",
+          "returns": "Model",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "y",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "fit(X: Tensor, y: Tensor) -> Model"
+          }
+        },
+        {
+          "name": "predict",
+          "description": "Predict targets/labels for the rows of `X`.",
+          "returns": "Tensor",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "predict(X: Tensor) -> Tensor"
+          }
+        },
+        {
+          "name": "score",
+          "description": "Return the model's default score (R² for regressors, accuracy for classifiers).",
+          "returns": "float",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "y",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "score(X: Tensor, y: Tensor) -> float"
+          }
+        }
+      ]
+    },
+    {
+      "name": "RandomForestRegressor",
+      "kind": "ml_model",
+      "description": "Bagged ensemble of decision trees (mean prediction).",
+      "returns": "RandomForestRegressor",
+      "signature": {
+        "params": [
+          {
+            "name": "n_estimators",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "100"
+          },
+          {
+            "name": "max_depth",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "max_features",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0"
+          },
+          {
+            "name": "random_state",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0"
+          }
+        ],
+        "display": "RandomForestRegressor(n_estimators: int = 100, max_depth?: int, max_features: int = 0, random_state: int = 0) -> RandomForestRegressor"
+      },
+      "methods": [
+        {
+          "name": "fit",
+          "description": "Fit the estimator to training features `X` and targets `y`. Returns the fitted model.",
+          "returns": "Model",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "y",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "fit(X: Tensor, y: Tensor) -> Model"
+          }
+        },
+        {
+          "name": "predict",
+          "description": "Predict targets/labels for the rows of `X`.",
+          "returns": "Tensor",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "predict(X: Tensor) -> Tensor"
+          }
+        },
+        {
+          "name": "score",
+          "description": "Return the model's default score (R² for regressors, accuracy for classifiers).",
+          "returns": "float",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "y",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "score(X: Tensor, y: Tensor) -> float"
+          }
+        }
+      ]
     },
     {
       "name": "randperm",
@@ -7371,6 +9494,98 @@
               }
             ],
             "display": "to(device: string) -> Module"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Ridge",
+      "kind": "ml_model",
+      "description": "L2-regularized linear regression, closed-form via `solve`.",
+      "returns": "Ridge",
+      "signature": {
+        "params": [
+          {
+            "name": "alpha",
+            "type": "float",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "1.0"
+          },
+          {
+            "name": "fit_intercept",
+            "type": "boolean",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "true"
+          }
+        ],
+        "display": "Ridge(alpha: float = 1.0, fit_intercept: boolean = true) -> Ridge"
+      },
+      "methods": [
+        {
+          "name": "fit",
+          "description": "Fit the estimator to training features `X` and targets `y`. Returns the fitted model.",
+          "returns": "Model",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "y",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "fit(X: Tensor, y: Tensor) -> Model"
+          }
+        },
+        {
+          "name": "predict",
+          "description": "Predict targets/labels for the rows of `X`.",
+          "returns": "Tensor",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "predict(X: Tensor) -> Tensor"
+          }
+        },
+        {
+          "name": "score",
+          "description": "Return the model's default score (R² for regressors, accuracy for classifiers).",
+          "returns": "float",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              },
+              {
+                "name": "y",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "score(X: Tensor, y: Tensor) -> float"
           }
         }
       ]
@@ -7780,6 +9995,32 @@
       ]
     },
     {
+      "name": "solve",
+      "kind": "linalg",
+      "description": "Solve the linear system `a @ x = b` for `x`.",
+      "returns": "Tensor",
+      "signature": {
+        "params": [
+          {
+            "name": "a",
+            "type": "Tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "b",
+            "type": "Tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "solve(a: Tensor, b: Tensor) -> Tensor"
+      },
+      "methods": []
+    },
+    {
       "name": "stack",
       "kind": "other",
       "description": "Stack tensors along a new dimension.",
@@ -7804,6 +10045,101 @@
         "display": "stack(tensors: Tensor[], axis: int = 0) -> Tensor"
       },
       "methods": []
+    },
+    {
+      "name": "StandardScaler",
+      "kind": "ml_transform",
+      "description": "Standardize features to zero mean and unit variance per column.",
+      "returns": "StandardScaler",
+      "signature": {
+        "params": [
+          {
+            "name": "with_mean",
+            "type": "boolean",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "true"
+          },
+          {
+            "name": "with_std",
+            "type": "boolean",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "true"
+          }
+        ],
+        "display": "StandardScaler(with_mean: boolean = true, with_std: boolean = true) -> StandardScaler"
+      },
+      "methods": [
+        {
+          "name": "fit",
+          "description": "Learn the transform parameters from `X`.",
+          "returns": "Transformer",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "fit(X: Tensor) -> Transformer"
+          }
+        },
+        {
+          "name": "transform",
+          "description": "Apply the learned transform to `X`.",
+          "returns": "Tensor",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "transform(X: Tensor) -> Tensor"
+          }
+        },
+        {
+          "name": "fit_transform",
+          "description": "Fit then transform `X` in one call.",
+          "returns": "Tensor",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "fit_transform(X: Tensor) -> Tensor"
+          }
+        },
+        {
+          "name": "inverse_transform",
+          "description": "Map transformed data back to the original space (where supported).",
+          "returns": "Tensor",
+          "signature": {
+            "params": [
+              {
+                "name": "X",
+                "type": "Tensor",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "inverse_transform(X: Tensor) -> Tensor"
+          }
+        }
+      ]
     },
     {
       "name": "StepLR",
@@ -7881,6 +10217,25 @@
           }
         ],
         "display": "sum(column)"
+      },
+      "methods": []
+    },
+    {
+      "name": "svd",
+      "kind": "linalg",
+      "description": "Reduced singular value decomposition. Returns `{U, S, V}` with `input ≈ U diag(S) Vᵀ`.",
+      "returns": null,
+      "signature": {
+        "params": [
+          {
+            "name": "input",
+            "type": "Tensor",
+            "optional": false,
+            "rest": false,
+            "defaultValue": null
+          }
+        ],
+        "display": "svd(input: Tensor)"
       },
       "methods": []
     },
@@ -8106,6 +10461,43 @@
               }
             ],
             "display": "on_epoch_end(trainer, model)"
+          }
+        }
+      ]
+    },
+    {
+      "name": "TimeSeriesSplit",
+      "kind": "ml_split",
+      "description": "Expanding-window splitter for time-ordered data.",
+      "returns": "TimeSeriesSplit",
+      "signature": {
+        "params": [
+          {
+            "name": "n_splits",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "5"
+          }
+        ],
+        "display": "TimeSeriesSplit(n_splits: int = 5) -> TimeSeriesSplit"
+      },
+      "methods": [
+        {
+          "name": "split",
+          "description": "Return forward-chaining `{train, test}` index partitions.",
+          "returns": "Record[]",
+          "signature": {
+            "params": [
+              {
+                "name": "n",
+                "type": "int",
+                "optional": false,
+                "rest": false,
+                "defaultValue": null
+              }
+            ],
+            "display": "split(n: int) -> Record[]"
           }
         }
       ]
@@ -8358,15 +10750,22 @@
     },
     {
       "name": "train_test_split",
-      "kind": "data",
-      "description": "Split a tensor into train/test partitions along the first dimension.",
+      "kind": "ml_function",
+      "description": "Split data into train/test partitions. With `y`, returns `[X_train, X_test, y_train, y_test]`; with only `X`, returns `[X_train, X_test]`.",
       "returns": null,
       "signature": {
         "params": [
           {
-            "name": "data",
+            "name": "X",
             "type": "Tensor",
             "optional": false,
+            "rest": false,
+            "defaultValue": null
+          },
+          {
+            "name": "y",
+            "type": "Tensor",
+            "optional": true,
             "rest": false,
             "defaultValue": null
           },
@@ -8375,10 +10774,17 @@
             "type": "float",
             "optional": true,
             "rest": false,
-            "defaultValue": "0.2"
+            "defaultValue": "0.25"
+          },
+          {
+            "name": "random_state",
+            "type": "int",
+            "optional": true,
+            "rest": false,
+            "defaultValue": "0"
           }
         ],
-        "display": "train_test_split(data: Tensor, test_size: float = 0.2)"
+        "display": "train_test_split(X: Tensor, y?: Tensor, test_size: float = 0.25, random_state: int = 0)"
       },
       "methods": []
     },

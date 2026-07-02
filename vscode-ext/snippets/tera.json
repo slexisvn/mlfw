@@ -125,13 +125,6 @@
     ],
     "description": "data: DataLoader"
   },
-  "decode": {
-    "prefix": "decode",
-    "body": [
-      "decode(${1:indices}, ${2:classes})$0"
-    ],
-    "description": "data: decode"
-  },
   "Dropout": {
     "prefix": "Dropout",
     "body": [
@@ -173,13 +166,6 @@
       "emptyLike(${1:tensor})$0"
     ],
     "description": "factory: emptyLike"
-  },
-  "encode": {
-    "prefix": "encode",
-    "body": [
-      "encode(${1:data})$0"
-    ],
-    "description": "data: encode"
   },
   "eye": {
     "prefix": "eye",
@@ -342,13 +328,6 @@
     ],
     "description": "module: NLLLoss"
   },
-  "normalize": {
-    "prefix": "normalize",
-    "body": [
-      "normalize(${1:tensor})$0"
-    ],
-    "description": "data: normalize"
-  },
   "ones": {
     "prefix": "ones",
     "body": [
@@ -481,13 +460,6 @@
       "Timer()"
     ],
     "description": "callback: Timer"
-  },
-  "train_test_split": {
-    "prefix": "train_test_split",
-    "body": [
-      "train_test_split(${1:data})$0"
-    ],
-    "description": "data: train_test_split"
   },
   "Trainer": {
     "prefix": "Trainer",

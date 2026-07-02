@@ -1,9 +1,17 @@
 import { registerNativeOps } from './tensor/native/registration.js';
+import { registerCpuLinalg } from './backend/cpu/linalg/register.js';
+import { registerCpuMl } from './backend/cpu/ml/register.js';
+import { registerWasmLinalg } from './backend/wasm/linalg/register.js';
+import { registerWasmMl } from './backend/wasm/ml/register.js';
 import { registerAutogradKernels } from './autograd/dispatch.js';
 import { installOps } from './tensor/ops/install.js';
 import { Tensor } from './tensor/core/tensor.js';
 
 registerNativeOps();
+registerCpuLinalg();
+registerCpuMl();
+registerWasmLinalg();
+registerWasmMl();
 registerAutogradKernels();
 installOps(Tensor);
 
@@ -90,3 +98,10 @@ export {
   Accuracy, Precision, Recall, F1Score, ConfusionMatrix,
 } from './lightning/index.js';
 export * as lightning from './lightning/index.js';
+
+export { TeraRuntime } from './cli/runtime.js';
+export { formatValue } from './cli/format.js';
+export { fs as memfs } from '#io/fs';
+
+export * as linalg from './tensor/ops/linalg.js';
+export * as ml from './ml/index.js';

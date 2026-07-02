@@ -1,10 +1,13 @@
 import { join } from 'node:path';
 import { window, workspace } from 'vscode';
 import { LanguageClient, TransportKind } from 'vscode-languageclient/node.js';
+import { registerTeraNotebook } from './notebook.js';
 
 let client;
 
 export async function activate(context) {
+  registerTeraNotebook(context);
+
   const serverModule = context.asAbsolutePath(join('server', 'index.js'));
   const serverOptions = {
     run: { module: serverModule, transport: TransportKind.ipc },
@@ -14,6 +17,7 @@ export async function activate(context) {
     documentSelector: [
       { scheme: 'file', language: 'tera' },
       { scheme: 'untitled', language: 'tera' },
+      { scheme: 'vscode-notebook-cell', language: 'tera' },
     ],
     synchronize: {
       fileEvents: workspace.createFileSystemWatcher('**/*.tera'),

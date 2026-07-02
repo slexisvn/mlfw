@@ -8,7 +8,7 @@ function _asTensor(value, ref) {
   return scalar(value, { dtype: ref.dtype, device: ref.device });
 }
 
-function _dispatch(name, ...args) {
+export function _dispatch(name, ...args) {
   const handle = getHandle(name);
   if (!handle) return dispatcher.callOp(name, ...args);
   const ks = computeKeySet(args, handle.schema);

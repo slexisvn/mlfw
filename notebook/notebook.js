@@ -4,6 +4,7 @@ import { CHART_METHOD_DOCS, chartMethodOwner } from './chart/docs.js';
 import { highlightHtml, TYPE_SET } from './highlight.js';
 import { initNotebookDocs, setNotebookDocsError, updateNotebookDocs } from './tera-docs.js';
 import { appendInlineCode } from './format.js';
+import { serializeNotebook, parseNotebook } from './tenb.js';
 
 const STORAGE_KEY = 'mlfw-notebook-v1';
 const THEME_KEY = 'mlfw-notebook-theme';
@@ -224,7 +225,8 @@ async function uploadGenericFile(file) {
 async function uploadFiles(fileList) {
   for (const file of fileList) {
     try {
-      if (fileExt(file.name) === 'csv') await uploadCsv(file);
+      if (fileExt(file.name) === 'tenb') await importNotebook(file);
+      else if (fileExt(file.name) === 'csv') await uploadCsv(file);
       else await uploadGenericFile(file);
     } catch (err) {
       setKernel(`error in ${file.name}: ${err.message || err}`);
@@ -232,6 +234,28 @@ async function uploadFiles(fileList) {
     }
   }
   setKernel('ready');
+}
+
+async function importNotebook(file) {
+  const sources = parseNotebook(await file.text());
+  for (const cell of cells.slice()) {
+    clearCellOutput(cell);
+    cell.root.remove();
+  }
+  cells.length = 0;
+  for (const src of sources) createCell(src);
+  if (cells.length === 0) createCell('', { focus: true });
+  save();
+}
+
+function exportNotebook() {
+  const text = serializeNotebook(cells.map((c) => c.editor.value));
+  const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'notebook.tenb';
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 async function removeFile(name) {
@@ -1163,6 +1187,7 @@ function onEditorHover(e, cell) {
 const csvInput = document.getElementById('csv-file');
 document.getElementById('upload-csv').addEventListener('click', () => csvInput.click());
 csvInput.addEventListener('change', () => { uploadFiles([...csvInput.files]); csvInput.value = ''; });
+document.getElementById('export-tenb').addEventListener('click', exportNotebook);
 
 const sidebarEl = document.querySelector('.sidebar');
 const hasFiles = (e) => e.dataTransfer && [...e.dataTransfer.types].includes('Files');

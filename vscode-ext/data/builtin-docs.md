@@ -282,18 +282,6 @@ Reserved id of the `<bos>` (begin-of-sequence) token.
 ### eosId -> int
 Reserved id of the `<eos>` (end-of-sequence) token.
 
-## encode(data)
-Encode categorical values to integer ids. Returns `[encoded_tensor, classes_array]`.
-
-## decode(indices, classes)
-Map integer ids back to original class labels using the `classes` array from `encode`.
-
-## normalize(tensor: Tensor, axis: int = 0)
-Standardize a tensor along `axis`: subtract mean and divide by standard deviation.
-
-## train_test_split(data: Tensor, test_size: float = 0.2)
-Split a tensor into train/test partitions along the first dimension.
-
 ## DataFrame(columns) {data}
 Build a lazy `DataFrame` from named column arrays, one named argument per
 column: `DataFrame(name=["a", "b"], age=[30, 40])`. Column types are inferred
@@ -1006,3 +994,172 @@ True when `key` is present in the dictionary.
 
 ### remove(key) -> none
 Remove `key` and its value from the dictionary. Does nothing if absent.
+
+## @kind/ml_model
+
+### fit(X: Tensor, y: Tensor) -> Model
+Fit the estimator to training features `X` and targets `y`. Returns the fitted model.
+
+### predict(X: Tensor) -> Tensor
+Predict targets/labels for the rows of `X`.
+
+### score(X: Tensor, y: Tensor) -> float
+Return the model's default score (R² for regressors, accuracy for classifiers).
+
+## @kind/ml_transform
+
+### fit(X: Tensor) -> Transformer
+Learn the transform parameters from `X`.
+
+### transform(X: Tensor) -> Tensor
+Apply the learned transform to `X`.
+
+### fit_transform(X: Tensor) -> Tensor
+Fit then transform `X` in one call.
+
+### inverse_transform(X: Tensor) -> Tensor
+Map transformed data back to the original space (where supported).
+
+## LinearRegression(fit_intercept: boolean = true) {ml_model}
+Ordinary least-squares linear regression (solved via `lstsq`).
+
+## Ridge(alpha: float = 1.0, fit_intercept: boolean = true) {ml_model}
+L2-regularized linear regression, closed-form via `solve`.
+
+## Lasso(alpha: float = 1.0, fit_intercept: boolean = true, max_iter: int = 1000) {ml_model}
+L1-regularized linear regression via coordinate descent (sparse coefficients).
+
+## ElasticNet(alpha: float = 1.0, l1_ratio: float = 0.5, fit_intercept: boolean = true, max_iter: int = 1000) {ml_model}
+Combined L1/L2 linear regression via coordinate descent.
+
+## LogisticRegression(C: float = 1.0, lr: float = 0.5, max_iter: int = 1000) {ml_model}
+Multinomial logistic regression (softmax) trained by gradient descent. Also exposes `predict_proba(X) -> Tensor`.
+
+## KNeighborsClassifier(n_neighbors: int = 5) {ml_model}
+k-nearest-neighbors classifier (majority vote over Euclidean neighbors).
+
+## KNeighborsRegressor(n_neighbors: int = 5) {ml_model}
+k-nearest-neighbors regressor (mean of neighbor targets).
+
+## GaussianNB() {ml_model}
+Gaussian Naive Bayes classifier.
+
+## DecisionTreeClassifier(max_depth?: int, min_samples_split: int = 2, min_samples_leaf: int = 1, max_features: int = 0, random_state: int = 0) {ml_model}
+CART decision-tree classifier (Gini impurity).
+
+## DecisionTreeRegressor(max_depth?: int, min_samples_split: int = 2, min_samples_leaf: int = 1, max_features: int = 0, random_state: int = 0) {ml_model}
+CART decision-tree regressor (variance reduction).
+
+## RandomForestClassifier(n_estimators: int = 100, max_depth?: int, max_features: int = 0, random_state: int = 0) {ml_model}
+Bagged ensemble of decision trees (majority vote).
+
+## RandomForestRegressor(n_estimators: int = 100, max_depth?: int, max_features: int = 0, random_state: int = 0) {ml_model}
+Bagged ensemble of decision trees (mean prediction).
+
+## GradientBoostingClassifier(n_estimators: int = 100, learning_rate: float = 0.1, max_depth: int = 3, random_state: int = 0) {ml_model}
+Stage-wise gradient boosting for classification (multinomial deviance).
+
+## GradientBoostingRegressor(n_estimators: int = 100, learning_rate: float = 0.1, max_depth: int = 3, random_state: int = 0) {ml_model}
+Stage-wise gradient boosting for regression (squared-error residuals).
+
+## StandardScaler(with_mean: boolean = true, with_std: boolean = true) {ml_transform}
+Standardize features to zero mean and unit variance per column.
+
+## MinMaxScaler(feature_range: float[] = [0, 1]) {ml_transform}
+Scale features to a given range per column.
+
+## LabelEncoder() {ml_transform}
+Encode categorical labels to integer ids. `inverse_transform` returns the original labels.
+
+## OneHotEncoder() {ml_transform}
+Encode categorical labels to one-hot rows.
+
+## PCA(n_components?: int) {ml_transform}
+Principal component analysis (via `svd`). Exposes `components_`, `explainedVariance_`, `explainedVarianceRatio_`.
+
+## KMeans(n_clusters: int = 8, max_iter: int = 300, n_init: int = 10, random_state: int = 0) {ml_cluster}
+k-means clustering (k-means++ init). Exposes `clusterCenters_`, `labels_`, `inertia_`.
+
+### fit(X: Tensor) -> KMeans
+Compute cluster centers from `X`.
+
+### predict(X: Tensor) -> Tensor
+Assign each row of `X` to its nearest cluster.
+
+### fit_predict(X: Tensor) -> Tensor
+Fit then return the training labels.
+
+## KFold(n_splits: int = 5, shuffle: boolean = false, random_state: int = 0) {ml_split}
+K-fold cross-validation splitter.
+
+### split(n: int) -> Record[]
+Return `n_splits` `{train, test}` index partitions for `n` samples.
+
+## TimeSeriesSplit(n_splits: int = 5) {ml_split}
+Expanding-window splitter for time-ordered data.
+
+### split(n: int) -> Record[]
+Return forward-chaining `{train, test}` index partitions.
+
+## PurgedKFold(n_splits: int = 5, embargo: int = 0) {ml_split}
+Leakage-free k-fold with an embargo gap around each test fold (for financial time series).
+
+### split(n: int) -> Record[]
+Return purged `{train, test}` index partitions.
+
+## GridSearchCV(estimator, param_grid: Record, cv: int = 5) {grid_search}
+Exhaustive hyperparameter search with cross-validation. Pass an estimator constructor and a grid of parameter lists.
+
+### fit(X: Tensor, y: Tensor) -> GridSearchCV
+Search all parameter combinations and refit the best on the full data. Sets `bestParams_`, `bestScore_`, `bestEstimator_`.
+
+### predict(X: Tensor) -> Tensor
+Predict using the best found estimator.
+
+## train_test_split(X: Tensor, y?: Tensor, test_size: float = 0.25, random_state: int = 0) {ml_function}
+Split data into train/test partitions. With `y`, returns `[X_train, X_test, y_train, y_test]`; with only `X`, returns `[X_train, X_test]`.
+
+## cross_val_score(estimator, X: Tensor, y: Tensor, cv: int = 5) {ml_function}
+Cross-validated scores for an estimator constructor over `cv` folds.
+
+## r2_score(y_true: Tensor, y_pred: Tensor) {ml_metric}
+Coefficient of determination (R²).
+
+## mean_squared_error(y_true: Tensor, y_pred: Tensor) {ml_metric}
+Mean squared error.
+
+## mean_absolute_error(y_true: Tensor, y_pred: Tensor) {ml_metric}
+Mean absolute error.
+
+## accuracy_score(y_true: Tensor, y_pred: Tensor) {ml_metric}
+Classification accuracy.
+
+## confusion_matrix(y_true: Tensor, y_pred: Tensor) {ml_metric}
+Confusion matrix as a nested array.
+
+## svd(input: Tensor) {linalg}
+Reduced singular value decomposition. Returns `{U, S, V}` with `input ≈ U diag(S) Vᵀ`.
+
+## eigh(input: Tensor) {linalg}
+Symmetric eigendecomposition. Returns `{values, vectors}` (ascending eigenvalues).
+
+## cholesky(input: Tensor) {linalg}
+Cholesky factor `L` (lower-triangular) of a symmetric positive-definite matrix.
+
+## solve(a: Tensor, b: Tensor) {linalg}
+Solve the linear system `a @ x = b` for `x`.
+
+## lstsq(a: Tensor, b: Tensor) {linalg}
+Least-squares solution to `a @ x ≈ b` (via pseudo-inverse).
+
+## inv(input: Tensor) {linalg}
+Matrix inverse.
+
+## pinv(input: Tensor) {linalg}
+Moore-Penrose pseudo-inverse.
+
+## det(input: Tensor) {linalg}
+Determinant (scalar).
+
+## cov(input: Tensor) {linalg}
+Covariance matrix of the columns of `input`.

@@ -11,6 +11,7 @@ const TARGETS = [
   { svg: 'assets/logo-mark.svg', png: 'assets/logo-mark-512.png', width: 512 },
   { svg: 'assets/logo-wordmark.svg', png: 'assets/logo-wordmark-1024.png', width: 1024 },
   { svg: 'assets/file-icon.svg', png: 'icons/file-icon.png', width: 128 },
+  { svg: 'assets/file-icon-tenb.svg', png: 'icons/file-icon-tenb.png', width: 128 },
 ];
 
 for (const target of TARGETS) {

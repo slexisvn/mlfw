@@ -21,6 +21,7 @@ const SOURCES = {
     join(REPO_ROOT, 'src/cli/builtins.js'),
     join(REPO_ROOT, 'src/cli/builtins-dataframe.js'),
     join(REPO_ROOT, 'src/cli/builtins-quant.js'),
+    join(REPO_ROOT, 'src/cli/builtins-ml.js'),
   ],
   builtinDocs: join(EXT_ROOT, 'data/builtin-docs.md'),
 };
@@ -103,10 +104,6 @@ const RETURNS_OVERRIDE = {
   Tokenizer: 'Tokenizer',
   load_tokenizer: 'Tokenizer',
   load_csv: 'DataFrame',
-  normalize: 'Tensor',
-  encode: null,
-  decode: null,
-  train_test_split: null,
   DataFrame: 'DataFrame',
   col: 'Column',
   lit: 'Column',
@@ -114,7 +111,25 @@ const RETURNS_OVERRIDE = {
   avg: 'Column',
   count: 'Column',
   countStar: 'Column',
+  train_test_split: null,
+  cross_val_score: null,
+  cholesky: 'Tensor',
+  solve: 'Tensor',
+  lstsq: 'Tensor',
+  inv: 'Tensor',
+  pinv: 'Tensor',
+  cov: 'Tensor',
+  det: 'float',
+  svd: null,
+  eigh: null,
+  r2_score: 'float',
+  mean_squared_error: 'float',
+  mean_absolute_error: 'float',
+  accuracy_score: 'float',
+  confusion_matrix: null,
 };
+
+const ML_SELF_RETURN_KINDS = new Set(['ml_model', 'ml_transform', 'ml_cluster', 'ml_split', 'grid_search']);
 
 const DEFAULT_DOC_BUILTIN_KIND = 'function';
 
@@ -123,6 +138,9 @@ function inferReturns(builtin) {
   // Modules construct an instance of their own nominal type (Embedding(...) -> Embedding),
   // not the generic `Module`, so variables bound to them infer precisely.
   if (builtin.kind === 'module' || builtin.kind === 'sequential') return builtin.name;
+  // ml estimators/transformers/splitters construct their own nominal type so `.fit()`/`.predict()`
+  // resolve against the object's methods.
+  if (ML_SELF_RETURN_KINDS.has(builtin.kind)) return builtin.name;
   return RETURNS_BY_KIND[builtin.kind] ?? null;
 }
 

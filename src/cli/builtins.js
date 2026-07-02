@@ -23,6 +23,7 @@ import {
   installQueryBuiltins, QUERY_SIGNATURES, COLUMN_AGGREGATES,
 } from './builtins-dataframe.js';
 import { installQuantBuiltins, QUANT_SIGNATURES } from './builtins-quant.js';
+import { installMlBuiltins, ML_SIGNATURES } from './builtins-ml.js';
 
 export { takeNamed, createDataFrameFromColumns, setUploadedCsv, beginUploadedCsv, removeUploadedCsv, COLUMN_AGGREGATES };
 
@@ -180,74 +181,7 @@ export function installBuiltins(runtime, define) {
     return result;
   });
 
-  define('encode', (...args) => {
-    const data = args[0];
-    if (data instanceof DataFrame) {
-      return data.encode(...args.slice(1));
-    }
-    if (Array.isArray(data)) {
-      const classMap = new Map();
-      const classes = [];
-      const encoded = new Float32Array(data.length);
-      for (let i = 0; i < data.length; i++) {
-        const key = String(data[i]);
-        let idx = classMap.get(key);
-        if (idx === undefined) {
-          idx = classes.length;
-          classMap.set(key, idx);
-          classes.push(data[i]);
-        }
-        encoded[i] = idx;
-      }
-      return [fw.tensor(encoded, { shape: [encoded.length] }), classes];
-    }
-    throw new Error('encode() expects a DataFrame or array');
-  });
-
-  define('decode', (...args) => {
-    const indices = args[0];
-    const classes = args[1];
-    if (!Array.isArray(classes)) throw new Error('decode() expects (indices, classes) — classes must be an array');
-    if (indices instanceof Tensor) {
-      return indices.contiguous().data.reduce((result, raw) => {
-        const idx = Math.round(raw);
-        result.push(idx >= 0 && idx < classes.length ? classes[idx] : `<unknown:${idx}>`);
-        return result;
-      }, []);
-    }
-    if (typeof indices === 'number') {
-      const idx = Math.round(indices);
-      return idx >= 0 && idx < classes.length ? classes[idx] : `<unknown:${idx}>`;
-    }
-    throw new Error('decode() expects a tensor or number as first argument');
-  });
-
-  define('normalize', (...args) => {
-    const t = args[0];
-    if (!(t instanceof Tensor)) throw new Error('normalize() expects a tensor');
-    const named = takeNamed(args);
-    delete named.__named;
-    const axis = named.axis ?? 0;
-    const mu = fw.mean(t, axis, true);
-    const diff = fw.sub(t, mu);
-    const variance = fw.mean(fw.mul(diff, diff), axis, true);
-    const std = fw.sqrt(fw.add(variance, fw.tensor(1e-8)));
-    return fw.div(diff, std);
-  });
-
-  define('train_test_split', (...args) => {
-    const named = takeNamed(args);
-    delete named.__named;
-    const data = args[0];
-    const ratio = named.test_size ?? named.ratio ?? 0.2;
-    if (data instanceof Tensor) {
-      const n = data.shape[0];
-      const splitIdx = Math.round(n * (1 - ratio));
-      return [data.slice(0, 0, splitIdx), data.slice(0, splitIdx, n)];
-    }
-    throw new Error('train_test_split() expects a tensor');
-  });
-
+  installMlBuiltins(define);
   installQuantBuiltins(define, { takeNamed, DataFrame, createDataFrame, fs });
 }
 
@@ -287,7 +221,7 @@ function snakeToCamel(name) {
   return name.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
 }
 
-function snakeNamedToCamel(named) {
+export function snakeNamedToCamel(named) {
   const result = {};
   for (const key of Object.keys(named)) {
     result[snakeToCamel(key)] = named[key];
@@ -389,10 +323,6 @@ export const TRAINING_SIGNATURES = {
   optim_config: [{ name: 'optimizer' }, { name: 'lr_scheduler', isOptional: true }],
   read_text: [{ name: 'path' }],
   load_json: [{ name: 'path' }],
-  encode: [{ name: 'data' }],
-  decode: [{ name: 'indices' }, { name: 'classes' }],
-  normalize: [{ name: 'tensor' }, { name: 'axis', defaultValue: '0', isOptional: true }],
-  train_test_split: [{ name: 'data' }, { name: 'test_size', defaultValue: '0.2', isOptional: true }],
 };
 
 export const BUILTIN_SIGNATURES = {
@@ -442,4 +372,5 @@ export function installSignatures(registry) {
   for (const [name, params] of Object.entries(TRAINING_SIGNATURES)) registry.register(name, params);
   for (const [name, params] of Object.entries(QUERY_SIGNATURES)) registry.register(name, params);
   for (const [name, params] of Object.entries(QUANT_SIGNATURES)) registry.register(name, params);
+  for (const [name, params] of Object.entries(ML_SIGNATURES)) registry.register(name, params);
 }

@@ -133,6 +133,10 @@
           "match": "\\b(?:Accuracy|ConfusionMatrix|F1Score|MetricCollection|Precision|Recall)\\b"
         },
         {
+          "name": "support.function.tera",
+          "match": "\\b(?:accuracy_score|confusion_matrix|mean_absolute_error|mean_squared_error|r2_score)\\b"
+        },
+        {
           "name": "support.class.optimizer.tera",
           "match": "\\b(?:Adam|AdamW|SGD)\\b"
         },
@@ -161,6 +165,10 @@
           "match": "\\b(?:cat|load_json|load_model|load_tokenizer|read_text|stack|Tokenizer|where)\\b"
         },
         {
+          "name": "support.function.tera",
+          "match": "\\b(?:cholesky|cov|det|eigh|inv|lstsq|pinv|solve|svd)\\b"
+        },
+        {
           "name": "support.function.utility.tera",
           "match": "\\b(?:compile|graph|optim_config|print|range|trace)\\b"
         },
@@ -177,12 +185,36 @@
           "match": "\\b(?:cpu|gpu|wasm|webgpu)\\b"
         },
         {
+          "name": "support.function.tera",
+          "match": "\\b(?:cross_val_score|train_test_split)\\b"
+        },
+        {
           "name": "support.function.data.tera",
-          "match": "\\b(?:DataFrame|DataLoader|decode|encode|load_csv|normalize|TensorDataset|train_test_split)\\b"
+          "match": "\\b(?:DataFrame|DataLoader|load_csv|TensorDataset)\\b"
+        },
+        {
+          "name": "support.function.tera",
+          "match": "\\b(?:DecisionTreeClassifier|DecisionTreeRegressor|ElasticNet|GaussianNB|GradientBoostingClassifier|GradientBoostingRegressor|KNeighborsClassifier|KNeighborsRegressor|Lasso|LinearRegression|LogisticRegression|RandomForestClassifier|RandomForestRegressor|Ridge)\\b"
         },
         {
           "name": "support.class.callback.tera",
           "match": "\\b(?:EarlyStopping|GradientAccumulationScheduler|LearningRateMonitor|ModelCheckpoint|ProgressCallback|Timer)\\b"
+        },
+        {
+          "name": "support.function.tera",
+          "match": "\\b(?:GridSearchCV)\\b"
+        },
+        {
+          "name": "support.function.tera",
+          "match": "\\b(?:KFold|PurgedKFold|TimeSeriesSplit)\\b"
+        },
+        {
+          "name": "support.function.tera",
+          "match": "\\b(?:KMeans)\\b"
+        },
+        {
+          "name": "support.function.tera",
+          "match": "\\b(?:LabelEncoder|MinMaxScaler|OneHotEncoder|PCA|StandardScaler)\\b"
         },
         {
           "name": "support.class.sequential.tera",

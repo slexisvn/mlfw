@@ -63,6 +63,16 @@ const INSTR = new Map([
   ['i32x4.lt_s', [0xfd, ...uleb(0x39)]], ['i32x4.gt_s', [0xfd, ...uleb(0x3a)]],
   ['i32x4.le_s', [0xfd, ...uleb(0x3b)]], ['i32x4.ge_s', [0xfd, ...uleb(0x3c)]],
   ['i32x4.extract_lane', [0xfd, ...uleb(0x1b)]], ['i32x4.replace_lane', [0xfd, ...uleb(0x1c)]],
+  ['f64x2.splat', [0xfd, ...uleb(0x14)]],
+  ['f64x2.add', [0xfd, ...uleb(0xf0)]], ['f64x2.sub', [0xfd, ...uleb(0xf1)]],
+  ['f64x2.mul', [0xfd, ...uleb(0xf2)]], ['f64x2.div', [0xfd, ...uleb(0xf3)]],
+  ['f64x2.neg', [0xfd, ...uleb(0xed)]], ['f64x2.abs', [0xfd, ...uleb(0xec)]],
+  ['f64x2.sqrt', [0xfd, ...uleb(0xef)]],
+  ['f64x2.min', [0xfd, ...uleb(0xf4)]], ['f64x2.max', [0xfd, ...uleb(0xf5)]],
+  ['f64x2.eq', [0xfd, ...uleb(0x47)]], ['f64x2.ne', [0xfd, ...uleb(0x48)]],
+  ['f64x2.lt', [0xfd, ...uleb(0x49)]], ['f64x2.gt', [0xfd, ...uleb(0x4a)]],
+  ['f64x2.le', [0xfd, ...uleb(0x4b)]], ['f64x2.ge', [0xfd, ...uleb(0x4c)]],
+  ['f64x2.extract_lane', [0xfd, ...uleb(0x21)]], ['f64x2.replace_lane', [0xfd, ...uleb(0x22)]],
 ]);
 
 function tokenize(wat) {
@@ -93,6 +103,7 @@ function parseModule(tokens) {
   let memMin = 1, memMax = 256;
   let funcExportName = '';
   const funcParams = [];
+  const funcParamNames = [];
   const funcLocals = [];
   const funcLocalNames = [];
   let bodyStart = -1, bodyEnd = -1;
@@ -129,7 +140,17 @@ function parseModule(tokens) {
         p++;
         const inner = eat();
         if (inner === 'export') { funcExportName = eat().replace(/"/g, ''); expect(')'); }
-        else if (inner === 'param') { while (peek() !== ')') { const t = eat(); if (t === 'i32') funcParams.push(T_I32); else if (t === 'i64') funcParams.push(T_I64); else if (t === 'f32') funcParams.push(T_F32); else if (t === 'f64') funcParams.push(T_F64); else if (t === 'v128') funcParams.push(T_V128); } expect(')'); }
+        else if (inner === 'param') {
+          let pendingName = '';
+          while (peek() !== ')') {
+            const t = eat();
+            if (t.startsWith('$')) { pendingName = t.replace('$', ''); continue; }
+            let ty = null;
+            if (t === 'i32') ty = T_I32; else if (t === 'i64') ty = T_I64; else if (t === 'f32') ty = T_F32; else if (t === 'f64') ty = T_F64; else if (t === 'v128') ty = T_V128;
+            if (ty !== null) { funcParams.push(ty); funcParamNames.push(pendingName); pendingName = ''; }
+          }
+          expect(')');
+        }
         else if (inner === 'result') { while (peek() !== ')') eat(); expect(')'); }
         else if (inner === 'local') {
           while (peek() !== ')') {
@@ -159,7 +180,7 @@ function parseModule(tokens) {
     do { const t = eat(); if (t === '(') d++; else if (t === ')') d--; } while (d > 0);
   }
 
-  return { imports, memMin, memMax, funcExportName, funcParams, funcLocals, funcLocalNames, bodyTokens: tokens.slice(bodyStart, bodyEnd) };
+  return { imports, memMin, memMax, funcExportName, funcParams, funcParamNames, funcLocals, funcLocalNames, bodyTokens: tokens.slice(bodyStart, bodyEnd) };
 }
 
 function encodeBody(bodyTokens, localMap, importMap) {
@@ -299,6 +320,9 @@ export function encodeWat(wat) {
 
   const localMap = new Map();
   const paramCount = mod.funcParams.length;
+  for (let i = 0; i < mod.funcParamNames.length; i++) {
+    if (mod.funcParamNames[i]) localMap.set(mod.funcParamNames[i], i);
+  }
   for (let i = 0; i < mod.funcLocalNames.length; i++) {
     localMap.set(mod.funcLocalNames[i], paramCount + i);
   }

@@ -2,7 +2,7 @@
   "name": "tera-language",
   "displayName": "Tera Language",
   "description": "Syntax highlighting, diagnostics and IntelliSense for Tera (.tera) — tensor algebra & neural network DSL.",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "icon": "icons/icon.png",
   "publisher": "slexisvn",
   "license": "MIT",
@@ -24,7 +24,8 @@
   ],
   "main": "./client/extension.js",
   "activationEvents": [
-    "onLanguage:tera"
+    "onLanguage:tera",
+    "onNotebook:tera-notebook"
   ],
   "contributes": {
     "languages": [
@@ -42,6 +43,40 @@
           "light": "./icons/file-icon.png",
           "dark": "./icons/file-icon.png"
         }
+      },
+      {
+        "id": "tera-notebook-file",
+        "aliases": [
+          "Tera Notebook"
+        ],
+        "extensions": [
+          ".tenb"
+        ],
+        "icon": {
+          "light": "./icons/file-icon-tenb.png",
+          "dark": "./icons/file-icon-tenb.png"
+        }
+      }
+    ],
+    "notebooks": [
+      {
+        "type": "tera-notebook",
+        "displayName": "Tera Notebook",
+        "selector": [
+          {
+            "filenamePattern": "*.tenb"
+          }
+        ]
+      }
+    ],
+    "notebookRenderer": [
+      {
+        "id": "tera-chart-renderer",
+        "displayName": "Tera Chart",
+        "entrypoint": "./media/chart-renderer.mjs",
+        "mimeTypes": [
+          "application/x-tera-chart+json"
+        ]
       }
     ],
     "grammars": [
@@ -90,9 +125,11 @@
   "scripts": {
     "generate": "node scripts/generate.js",
     "build:icon": "node scripts/build_icon.js",
+    "build:kernel": "node scripts/build-kernel.js",
     "test": "vitest run"
   },
   "dependencies": {
+    "koffi": "^3.0.2",
     "vscode-languageclient": "^9.0.1",
     "vscode-languageserver": "^9.0.1",
     "vscode-languageserver-textdocument": "^1.0.11"

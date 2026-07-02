@@ -2,7 +2,7 @@
 data = load_csv("examples/iris.csv")
 print("columns:", data.columns(), "| rows:", data.count())
 
-x = normalize(data.drop("species").to_tensor())
+x = StandardScaler().fit_transform(data.drop("species").to_tensor())
 y, classes = data.select("species").encode("species")
 print("classes:", classes)
 
@@ -72,4 +72,5 @@ confusion(logits, y)
 print("=== Iris results ===")
 print("accuracy:", final_acc.compute())
 print("confusion matrix:", confusion.compute())
-print("predictions:", decode(preds, classes))
+print("classes:", classes)
+print("predictions:", preds)
