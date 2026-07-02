@@ -1,12 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { tensor, ml } from '../../src/index.js';
 import { WASM_DEVICE, CPU_DEVICE } from '../../src/tensor/types/device.js';
-import { cpuKmeans, cpuKmeansPredict } from '../../src/backend/cpu/ml/kmeans.js';
-import { wasmKmeans, wasmKmeansPredict } from '../../src/backend/wasm/ml/kmeans.js';
-import { cpuKnnPredict } from '../../src/backend/cpu/ml/knn.js';
-import { wasmKnnPredict } from '../../src/backend/wasm/ml/knn.js';
-import { cpuElasticNet } from '../../src/backend/cpu/ml/elastic_net.js';
-import { wasmElasticNet } from '../../src/backend/wasm/ml/elastic_net.js';
+import { cpuKmeans, cpuKmeansPredict } from '../../src/kernels/cpu/ml/kmeans.js';
+import { wasmKmeans, wasmKmeansPredict } from '../../src/kernels/wasm/ml/kmeans.js';
+import { cpuKnnPredict } from '../../src/kernels/cpu/ml/knn.js';
+import { wasmKnnPredict } from '../../src/kernels/wasm/ml/knn.js';
+import { cpuElasticNet } from '../../src/kernels/cpu/ml/elastic_net.js';
+import { wasmElasticNet } from '../../src/kernels/wasm/ml/elastic_net.js';
 import { makeRng } from '../../src/ml/_random.js';
 
 function flatWasm(data, shape) {

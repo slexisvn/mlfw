@@ -1,4 +1,4 @@
-import { Library } from '../dispatcher/library.js';
+import { Library } from '../../dispatcher/library.js';
 
 export const ML_SCHEMAS = [
   'kmeans(Tensor x, int n_clusters, int max_iter, int n_init, int seed) -> (Tensor, Tensor, Tensor)',

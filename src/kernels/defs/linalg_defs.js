@@ -1,4 +1,4 @@
-import { Library } from '../dispatcher/library.js';
+import { Library } from '../../dispatcher/library.js';
 
 export const LINALG_SCHEMAS = [
   'svd(Tensor input) -> (Tensor, Tensor, Tensor)',

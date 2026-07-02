@@ -17,6 +17,7 @@ import { typedArrayCtor } from '../../tensor/types/dtype.js';
 import { cudnnAvailable } from './cuda/cudnn.js';
 import { cudnnLSTMOp, cudnnGRUOp } from './cuda/cudnn_rnn_op.js';
 import { gpuMatmul } from './cuda/cublas_matmul_op.js';
+import { registerCudaLinalg } from '../../kernels/cuda/linalg/register.js';
 
 export { runCudaPlan, setCudaGraphEnabled, isCudaGraphEnabled };
 
@@ -433,5 +434,6 @@ setGpuConcatFn(deviceConcat);
 setGpuAdamFn(deviceAdam);
 setGpuMatmul(gpuMatmul);
 if (cudnnAvailable()) { setCudnnLSTM(cudnnLSTMOp); setCudnnGRU(cudnnGRUOp); }
+registerCudaLinalg();
 
 registerMeasurer('cuda', measureCudaKernel);

@@ -1,6 +1,6 @@
 import { Library } from '../../../dispatcher/library.js';
 import { DispatchKey } from '../../../dispatcher/dispatch_key.js';
-import { ensureLinalgSchemas } from '../../linalg_defs.js';
+import { ensureLinalgSchemas } from '../../defs/linalg_defs.js';
 import {
   cpuCholesky, cpuSolve, cpuLstsq, cpuInv, cpuPinv, cpuDet, cpuCov, cpuEigh, cpuSvd,
 } from './ops.js';

@@ -1,8 +1,8 @@
 import { registerNativeOps } from './tensor/native/registration.js';
-import { registerCpuLinalg } from './backend/cpu/linalg/register.js';
-import { registerCpuMl } from './backend/cpu/ml/register.js';
-import { registerWasmLinalg } from './backend/wasm/linalg/register.js';
-import { registerWasmMl } from './backend/wasm/ml/register.js';
+import { registerCpuLinalg } from './kernels/cpu/linalg/register.js';
+import { registerCpuMl } from './kernels/cpu/ml/register.js';
+import { registerWasmLinalg } from './kernels/wasm/linalg/register.js';
+import { registerWasmMl } from './kernels/wasm/ml/register.js';
 import { registerAutogradKernels } from './autograd/dispatch.js';
 import { installOps } from './tensor/ops/install.js';
 import { Tensor } from './tensor/core/tensor.js';

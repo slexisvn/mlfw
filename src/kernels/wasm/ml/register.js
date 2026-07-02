@@ -1,6 +1,6 @@
 import { Library } from '../../../dispatcher/library.js';
 import { DispatchKey } from '../../../dispatcher/dispatch_key.js';
-import { ensureMlSchemas } from '../../ml_defs.js';
+import { ensureMlSchemas } from '../../defs/ml_defs.js';
 import { wasmKmeans, wasmKmeansPredict } from './kmeans.js';
 import { wasmKnnPredict } from './knn.js';
 import { wasmElasticNet } from './elastic_net.js';

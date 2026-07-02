@@ -1,6 +1,6 @@
 import { Library } from '../../../dispatcher/library.js';
 import { DispatchKey } from '../../../dispatcher/dispatch_key.js';
-import { ensureLinalgSchemas } from '../../linalg_defs.js';
+import { ensureLinalgSchemas } from '../../defs/linalg_defs.js';
 import { wasmSvd } from './svd.js';
 
 const _SIMD_KERNELS = {

@@ -1,4 +1,4 @@
-import { encodeWat } from '../wat_encoder.js';
+import { encodeWat } from '../../../backend/wasm/wat_encoder.js';
 
 export const F64_BYTES = 8;
 export const I32_BYTES = 4;

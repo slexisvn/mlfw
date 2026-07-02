@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { tensor, linalg } from '../../src/index.js';
 import { WASM_DEVICE, CPU_DEVICE } from '../../src/tensor/types/device.js';
-import { cpuSvd } from '../../src/backend/cpu/linalg/ops.js';
-import { wasmSvd } from '../../src/backend/wasm/linalg/svd.js';
+import { cpuSvd } from '../../src/kernels/cpu/linalg/ops.js';
+import { wasmSvd } from '../../src/kernels/wasm/linalg/svd.js';
 import { makeRng } from '../../src/ml/_random.js';
 
 function randMat(rows, cols, seed, device) {
