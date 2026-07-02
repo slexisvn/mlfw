@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { tensor, linalg, ml, matmul } from '../../../src/index.js';
-import { GPU_DEVICE } from '../../../src/tensor/types/device.js';
-import { preloadCudaRuntime } from '../../../src/runtime/backend_registry.js';
-import { cudaDeps } from './cuda-setup.js';
+import { tensor, linalg, ml, matmul } from '../../src/index.js';
+import { GPU_DEVICE } from '../../src/tensor/types/device.js';
+import { preloadCudaRuntime } from '../../src/runtime/backend_registry.js';
+import { cudaDeps } from '../backend/cuda/cuda-setup.js';
 
 const flat = (t) => Array.from((t && t.contiguous ? t.contiguous() : t).data);
 const maxAbsErr = (a, b) => {
