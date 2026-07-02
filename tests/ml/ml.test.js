@@ -140,11 +140,4 @@ describe('model_selection', () => {
     const gs = new ml.GridSearchCV((p) => new ml.DecisionTreeClassifier(p), { maxDepth: [1, 3, 5] }, { cv: 3 }).fit(X, y);
     expect(gs.bestScore_).toBeGreaterThan(0.9);
   });
-  it('PurgedKFold embargo removes neighbors', () => {
-    const folds = new ml.PurgedKFold({ nSplits: 5, embargo: 2 }).split(50);
-    for (const { train, test } of folds) {
-      const lo = test[0]; const hi = test[test.length - 1];
-      for (const t of train) expect(t < lo - 2 || t > hi + 2).toBe(true);
-    }
-  });
 });

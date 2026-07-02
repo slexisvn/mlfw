@@ -8859,50 +8859,6 @@
       ]
     },
     {
-      "name": "PurgedKFold",
-      "kind": "ml_split",
-      "description": "Leakage-free k-fold with an embargo gap around each test fold (for financial time series).",
-      "returns": "PurgedKFold",
-      "signature": {
-        "params": [
-          {
-            "name": "n_splits",
-            "type": "int",
-            "optional": true,
-            "rest": false,
-            "defaultValue": "5"
-          },
-          {
-            "name": "embargo",
-            "type": "int",
-            "optional": true,
-            "rest": false,
-            "defaultValue": "0"
-          }
-        ],
-        "display": "PurgedKFold(n_splits: int = 5, embargo: int = 0) -> PurgedKFold"
-      },
-      "methods": [
-        {
-          "name": "split",
-          "description": "Return purged `{train, test}` index partitions.",
-          "returns": "Record[]",
-          "signature": {
-            "params": [
-              {
-                "name": "n",
-                "type": "int",
-                "optional": false,
-                "rest": false,
-                "defaultValue": null
-              }
-            ],
-            "display": "split(n: int) -> Record[]"
-          }
-        }
-      ]
-    },
-    {
       "name": "quill",
       "kind": "quant",
       "description": "Parse and type-check a Quill product definition from a source string and return a product handle. Call `.price(rate=..., spot=..., vol=..., paths?=..., seed?=..., greeks?=...)` on it to run the Monte-Carlo pricer; the result has `.price`, `.standard_error`, and a `.greeks` map (`delta`, `vega`, `rho`, …). `greeks` is `\"price-only\"`, `\"first-order\"`, or `\"full\"`.",

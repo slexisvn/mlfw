@@ -1101,12 +1101,6 @@ Expanding-window splitter for time-ordered data.
 ### split(n: int) -> Record[]
 Return forward-chaining `{train, test}` index partitions.
 
-## PurgedKFold(n_splits: int = 5, embargo: int = 0) {ml_split}
-Leakage-free k-fold with an embargo gap around each test fold (for financial time series).
-
-### split(n: int) -> Record[]
-Return purged `{train, test}` index partitions.
-
 ## GridSearchCV(estimator, param_grid: Record, cv: int = 5) {grid_search}
 Exhaustive hyperparameter search with cross-validation. Pass an estimator constructor and a grid of parameter lists.
 

@@ -13,7 +13,7 @@ export const ML_MODELS = [
 ];
 export const ML_TRANSFORMS = ['StandardScaler', 'MinMaxScaler', 'LabelEncoder', 'OneHotEncoder', 'PCA'];
 export const ML_CLUSTERS = ['KMeans'];
-export const ML_SPLITTERS = ['KFold', 'TimeSeriesSplit', 'PurgedKFold'];
+export const ML_SPLITTERS = ['KFold', 'TimeSeriesSplit'];
 export const LINALG_FUNCS = ['svd', 'eigh', 'cholesky', 'solve', 'lstsq', 'inv', 'pinv', 'det', 'cov'];
 export const ML_METRICS = ['r2_score', 'mean_squared_error', 'mean_absolute_error', 'accuracy_score', 'confusion_matrix'];
 
@@ -94,7 +94,6 @@ export const ML_SIGNATURES = {
   OneHotEncoder: [],
   KFold: [OPT('n_splits', '5'), OPT('shuffle', 'false'), OPT('random_state', '0')],
   TimeSeriesSplit: [OPT('n_splits', '5')],
-  PurgedKFold: [OPT('n_splits', '5'), OPT('embargo', '0')],
   GridSearchCV: [{ name: 'estimator' }, { name: 'param_grid' }, OPT('cv', '5')],
   train_test_split: [{ name: 'X' }, { name: 'y', isOptional: true }, OPT('test_size', '0.25'), OPT('random_state', '0')],
   cross_val_score: [{ name: 'estimator' }, { name: 'X' }, { name: 'y' }, OPT('cv', '5')],

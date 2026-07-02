@@ -54,28 +54,6 @@ export class TimeSeriesSplit {
   }
 }
 
-export class PurgedKFold {
-  constructor({ nSplits = 5, embargo = 0 } = {}) {
-    this.nSplits = nSplits;
-    this.embargo = embargo;
-  }
-
-  split(n) {
-    const base = new KFold({ nSplits: this.nSplits }).split(n);
-    return base.map(({ test }) => {
-      const lo = test[0];
-      const hi = test[test.length - 1];
-      const banLo = lo - this.embargo;
-      const banHi = hi + this.embargo;
-      const train = [];
-      for (let i = 0; i < n; i++) {
-        if (i < banLo || i > banHi) train.push(i);
-      }
-      return { train, test };
-    });
-  }
-}
-
 export function cross_val_score(makeEstimator, X, y, { cv = 5, scoring = null, shuffle = true, randomState = 0 } = {}) {
   const folds = new KFold({ nSplits: cv, shuffle, randomState }).split(X.shape[0]);
   const scores = [];

@@ -206,7 +206,7 @@
         },
         {
           "name": "support.function.tera",
-          "match": "\\b(?:KFold|PurgedKFold|TimeSeriesSplit)\\b"
+          "match": "\\b(?:KFold|TimeSeriesSplit)\\b"
         },
         {
           "name": "support.function.tera",
