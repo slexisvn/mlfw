@@ -66,7 +66,7 @@ function dictMethodResult(prop, type) {
 }
 
 const COMPARISONS = new Set(['==', '!=', '<', '<=', '>', '>=']);
-const ARITHMETIC = new Set(['-', '*', '/', '**']);
+const ARITHMETIC = new Set(['-', '*', '/', '%', '**']);
 const NON_CALLABLE = new Set(['number', 'string', 'bool', 'list', 'dict', 'tensor', 'null', 'none']);
 
 class TypeEnv {

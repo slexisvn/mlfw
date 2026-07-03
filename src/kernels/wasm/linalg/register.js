@@ -25,13 +25,5 @@ export function registerWasmLinalg() {
   for (const [name, fn] of Object.entries(_SIMD_KERNELS)) {
     implLib.impl(name, DispatchKey.WASM, fn);
   }
-  if (process.env.MLFW_WASM_SIMD) {
-    for (const name of summary.enabled) {
-      console.info(`[mlfw] linalg.${name}: WASM+SIMD (Gram) kernel registered on WASM device`);
-    }
-    for (const [name, why] of Object.entries(_SKIPPED)) {
-      console.info(`[mlfw] linalg.${name}: WASM+SIMD skipped (${why}); JS kernel kept on WASM device`);
-    }
-  }
   return summary;
 }

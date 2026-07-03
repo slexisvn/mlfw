@@ -1,16 +1,13 @@
 import { cat, add, index_select, minimum, maximum, where, pad, eq, gt, scatter_add } from './ops.js';
 import { zeros, ones } from '../factory/creation_ops.js';
 import { tensor } from '../factory/from_ops.js';
+import { normalizeAxis as _normDim } from '../utils/shape_utils.js';
 
 export function scatter(self, dim, index, src) {
   const z = zeros(self.shape, { dtype: self.dtype });
   const scattered = scatter_add(z, dim, index, src);
   const counts = scatter_add(z, dim, index, ones(src.shape, { dtype: self.dtype }));
   return where(gt(counts, zeros(counts.shape, { dtype: counts.dtype })), scattered, self);
-}
-
-function _normDim(d, rank) {
-  return d < 0 ? rank + d : d;
 }
 
 export function roll(self, shift, dim = 0) {

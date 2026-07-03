@@ -98,7 +98,11 @@ function makeOptsCall(fn) {
 function toTeraRecord(value) {
   if (value && typeof value === 'object' && value.constructor === Object) {
     const m = new Map();
-    for (const k of Object.keys(value)) m.set(k, value[k]);
+    for (const k of Object.keys(value)) {
+      const wrapped = toTeraRecord(value[k]);
+      m.set(k, wrapped);
+      m[k] = wrapped;
+    }
     return m;
   }
   return value;

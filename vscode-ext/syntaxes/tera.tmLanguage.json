@@ -110,11 +110,11 @@
       "patterns": [
         {
           "name": "keyword.operator.compound.tera",
-          "match": "\\*\\*=|\\*\\*|==|!=|<=|>=|\\+=|-=|\\*=|/=|@=|->"
+          "match": "\\*\\*=|\\*\\*|==|!=|<=|>=|\\+=|-=|\\*=|/=|%=|@=|->"
         },
         {
           "name": "keyword.operator.tera",
-          "match": "=|:|\\+|-|\\*|/|@|<|>|\\{|\\}|\\|"
+          "match": "=|:|\\+|-|\\*|/|%|@|<|>|\\{|\\}|\\|"
         },
         {
           "name": "punctuation.separator.tera",

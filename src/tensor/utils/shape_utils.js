@@ -1,3 +1,7 @@
+export function normalizeAxis(axis, rank) {
+  return axis < 0 ? rank + axis : axis;
+}
+
 export function computeStrides(sizes) {
   const ndim = sizes.length;
   const strides = new Array(ndim);

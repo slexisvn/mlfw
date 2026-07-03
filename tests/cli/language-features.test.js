@@ -115,6 +115,29 @@ a, b = [10, 20]
   });
 });
 
+describe('Tera modulo operator', () => {
+  it('computes remainder with correct precedence and sign', async () => {
+    expect(await run('[7 % 3, 10 % 2, 2 + 7 % 3, 8 % 5 % 2]')).toEqual([1, 0, 3, 1]);
+  });
+
+  it('negative operands follow truncated semantics', async () => {
+    expect(await run('[-7 % 3, 7 % -3]')).toEqual([-1, 1]);
+  });
+
+  it('%= compound assignment', async () => {
+    const r = await run(`
+x = 17
+x %= 5
+x
+`);
+    expect(r).toBe(2);
+  });
+
+  it('modulo in a list comprehension', async () => {
+    expect(await run('[x % 3 for x in range(6)]')).toEqual([0, 1, 2, 0, 1, 2]);
+  });
+});
+
 describe('Tera list methods', () => {
   it('append / extend / insert / pop / remove mutate in place', async () => {
     const r = await run(`

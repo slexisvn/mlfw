@@ -1,4 +1,5 @@
 import { Stage } from '../state.js';
+import { resolveLimit, noGradAsync } from './utils.js';
 
 export class PredictionLoop {
   async run(model, dataLoader, trainer) {
@@ -33,26 +34,4 @@ export class PredictionLoop {
     state.stage = prevStage;
     return predictions;
   }
-}
-
-async function noGradAsync(fn) {
-  const { GradMode } = await import('../../../autograd/grad_mode.js');
-  const prev = GradMode.isEnabled();
-  GradMode.setEnabled(false);
-  try {
-    await fn();
-  } finally {
-    GradMode.setEnabled(prev);
-  }
-}
-
-function resolveLimit(limitConfig, totalBatches) {
-  if (limitConfig === null || limitConfig === undefined) return totalBatches;
-  if (typeof limitConfig === 'number') {
-    if (limitConfig > 0 && limitConfig <= 1) {
-      return Math.max(1, Math.round(limitConfig * totalBatches));
-    }
-    return Math.min(limitConfig, totalBatches);
-  }
-  return totalBatches;
 }

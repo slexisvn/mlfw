@@ -3,6 +3,7 @@ import { clipGradNorm_, clipGradValue_ } from '../../../optim/utils.js';
 import { div } from '../../../tensor/ops/ops.js';
 import { eagerFlush, setCudaGraphArmed } from '../../../dispatcher/eager_mode.js';
 import { GradMode } from '../../../autograd/grad_mode.js';
+import { resolveLimit } from './utils.js';
 
 export class TrainingLoop {
   async run(model, dataLoader, trainer, optimizers, schedulerConfigs) {
@@ -200,7 +201,7 @@ export class TrainingLoop {
         resident.clearCapturePins();
         r.phase = 'disabled';
         r.captureError = e && e.message;
-        if (process.env.MLFW_DEBUG_CUDAGRAPH) throw e;
+        
         return this._eagerTrainStepCore(model, batch, optimizers, strategy, trainer);
       }
       r.exec = r.captured.exec;
@@ -276,15 +277,4 @@ function _flattenTensors(batch, out = []) {
   if (Array.isArray(batch)) { for (const b of batch) _flattenTensors(b, out); return out; }
   if (typeof batch === 'object') { for (const k of Object.keys(batch)) _flattenTensors(batch[k], out); return out; }
   return out;
-}
-
-function resolveLimit(limitConfig, totalBatches) {
-  if (limitConfig === null || limitConfig === undefined) return totalBatches;
-  if (typeof limitConfig === 'number') {
-    if (limitConfig > 0 && limitConfig <= 1) {
-      return Math.max(1, Math.round(limitConfig * totalBatches));
-    }
-    return Math.min(limitConfig, totalBatches);
-  }
-  return totalBatches;
 }

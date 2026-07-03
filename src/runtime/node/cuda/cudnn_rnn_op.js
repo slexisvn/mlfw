@@ -1,7 +1,7 @@
 import { AutogradNode } from '../../../autograd/node.js';
 import { AutogradMeta } from '../../../tensor/core/autograd_meta.js';
 import { GradMode } from '../../../autograd/grad_mode.js';
-import { GradAccumulator } from '../../../autograd/accumulator.js';
+import { wireInputEdges } from '../../../autograd/accumulator.js';
 import { wrapResult, gpuContiguousArray } from '../../../dispatcher/jit_dispatch.js';
 import { isEagerDeferred, deviceBufferForInput, deviceBufferForOutput, uploadIfStale } from './resident.js';
 import { acquire, release, copyDeviceToHost } from './memory.js';
@@ -123,14 +123,7 @@ function cudnnRNNOp(kindName, input, cells, opts, hx = null, cx = null) {
       weightShapes: cells.map((c) => ({ x2hW: [...c.x2h.weight.shape], x2hB: [...c.x2h.bias.shape], h2hW: [...c.h2h.weight.shape], h2hB: [...c.h2h.bias.shape] })),
     };
     const node = new CudnnRNNBackward(fwd, info, inputs.length);
-    for (let i = 0; i < inputs.length; i++) {
-      node.saveInputMetadata(i, [...inputs[i].shape], inputs[i].dtype);
-      const m = inputs[i]._impl.autogradMeta;
-      if (m && m.requiresGrad) {
-        if (m.gradFn) node.setNextEdge(i, m.gradFn, m.outputNr || 0);
-        else { let acc = m.getGradAccumulator(); if (!acc) { acc = new GradAccumulator(inputs[i]); m.setGradAccumulator(acc); } node.setNextEdge(i, acc, 0); }
-      } else node.setNextEdge(i, null, 0);
-    }
+    wireInputEdges(node, inputs);
     attach(node, out, 0); attach(node, hyT, 1);
     if (cyT) attach(node, cyT, 2);
   } else {

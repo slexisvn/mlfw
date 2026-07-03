@@ -28,3 +28,18 @@ export class GradAccumulator extends AutogradNode {
     return 'GradAccumulator';
   }
 }
+
+export function wireInputEdges(node, inputs) {
+  for (let i = 0; i < inputs.length; i++) {
+    node.saveInputMetadata(i, [...inputs[i].shape], inputs[i].dtype);
+    const m = inputs[i]._impl.autogradMeta;
+    if (m && m.requiresGrad) {
+      if (m.gradFn) node.setNextEdge(i, m.gradFn, m.outputNr || 0);
+      else {
+        let acc = m.getGradAccumulator();
+        if (!acc) { acc = new GradAccumulator(inputs[i]); m.setGradAccumulator(acc); }
+        node.setNextEdge(i, acc, 0);
+      }
+    } else node.setNextEdge(i, null, 0);
+  }
+}

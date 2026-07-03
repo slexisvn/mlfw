@@ -5,11 +5,11 @@ const PRECEDENCE = {
   'and': 2,
   '==': 3, '!=': 3, '<': 3, '<=': 3, '>': 3, '>=': 3,
   '+': 4, '-': 4,
-  '*': 5, '/': 5, '@': 5,
+  '*': 5, '/': 5, '%': 5, '@': 5,
   '**': 6,
 };
 
-const COMPOUND_OPS = { '+=': '+', '-=': '-', '*=': '*', '/=': '/', '**=': '**', '@=': '@' };
+const COMPOUND_OPS = { '+=': '+', '-=': '-', '*=': '*', '/=': '/', '%=': '%', '**=': '**', '@=': '@' };
 
 export function parse(source) {
   return new Parser(tokenize(source)).parseProgram();

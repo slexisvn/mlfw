@@ -218,6 +218,7 @@ export class TeraRuntime {
       if (op === '-') return left - right;
       if (op === '*') return left * right;
       if (op === '/') return left / right;
+      if (op === '%') return left % right;
       if (op === '**') return left ** right;
       if (op === '==') return left === right;
       if (op === '!=') return left !== right;
@@ -231,6 +232,10 @@ export class TeraRuntime {
     [left, right] = promoteScalars(left, right);
     const fn = {
       '+': fw.add, '-': fw.sub, '*': fw.mul, '/': fw.div, '**': fw.pow, '@': fw.matmul,
+      '%': (a, b) => {
+        const q = fw.div(a, b);
+        return fw.sub(a, fw.mul(fw.mul(fw.sign(q), fw.floor(fw.abs(q))), b));
+      },
       '==': fw.eq, '!=': fw.ne, '<': fw.lt, '<=': fw.le, '>': fw.gt, '>=': fw.ge,
       'and': fw.mul,
       'or': (a, b) => fw.sub(fw.add(a, b), fw.mul(a, b)),

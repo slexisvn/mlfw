@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import {
   notebooks, workspace, NotebookCellData, NotebookCellKind, NotebookData,
   NotebookCellOutput, NotebookCellOutputItem,
@@ -68,19 +68,20 @@ function dataframeHtml(value) {
 }
 
 function outputForValue(prints, value) {
-  const items = [];
-  if (prints && prints.length) items.push(NotebookCellOutputItem.stdout(prints.join('\n')));
+  const outputs = [];
+  if (prints && prints.length) outputs.push(new NotebookCellOutput([NotebookCellOutputItem.stdout(prints.join('\n'))]));
   if (value) {
-    if (value.kind === 'text') items.push(NotebookCellOutputItem.text(value.text));
-    else if (value.kind === 'chart') items.push(NotebookCellOutputItem.json(value.spec, CHART_MIME));
-    else if (value.kind === 'dataframe') items.push(NotebookCellOutputItem.text(dataframeHtml(value), 'text/html'));
+    if (value.kind === 'text') outputs.push(new NotebookCellOutput([NotebookCellOutputItem.text(value.text)]));
+    else if (value.kind === 'chart') outputs.push(new NotebookCellOutput([NotebookCellOutputItem.json(value.spec, CHART_MIME)]));
+    else if (value.kind === 'dataframe') outputs.push(new NotebookCellOutput([NotebookCellOutputItem.text(dataframeHtml(value), 'text/html')]));
   }
-  return items.length ? [new NotebookCellOutput(items)] : [];
+  return outputs;
 }
 
 class KernelProcess {
-  constructor(serverPath) {
+  constructor(serverPath, cwd) {
     this.serverPath = serverPath;
+    this.cwd = cwd;
     this.proc = null;
     this.nextId = 1;
     this.pending = new Map();
@@ -92,6 +93,7 @@ class KernelProcess {
     if (this.proc) return this.ready;
     this.ready = new Promise((resolve, reject) => {
       const proc = spawn(process.execPath, [this.serverPath], {
+        cwd: this.cwd,
         stdio: ['pipe', 'pipe', 'pipe'],
         env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
       });
@@ -148,7 +150,11 @@ export function registerTeraNotebook(context) {
 
   function kernelFor(uri) {
     const key = uri.toString();
-    if (!kernels.has(key)) kernels.set(key, new KernelProcess(serverPath));
+    if (!kernels.has(key)) {
+      const folder = workspace.getWorkspaceFolder(uri);
+      const cwd = folder ? folder.uri.fsPath : dirname(uri.fsPath);
+      kernels.set(key, new KernelProcess(serverPath, cwd));
+    }
     return kernels.get(key);
   }
 

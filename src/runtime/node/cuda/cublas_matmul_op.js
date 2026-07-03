@@ -1,7 +1,7 @@
 import { AutogradNode } from '../../../autograd/node.js';
 import { AutogradMeta } from '../../../tensor/core/autograd_meta.js';
 import { GradMode } from '../../../autograd/grad_mode.js';
-import { GradAccumulator } from '../../../autograd/accumulator.js';
+import { wireInputEdges } from '../../../autograd/accumulator.js';
 import { wrapResult, getGpuContiguousFn } from '../../../dispatcher/jit_dispatch.js';
 import { contiguous } from '../../../tensor/view/view_ops.js';
 import { DeviceType } from '../../../tensor/types/device.js';
@@ -98,15 +98,7 @@ export function gpuMatmul(A, B) {
 
   if (GradMode.isEnabled() && ((A._impl.autogradMeta && A.requiresGrad) || (B._impl.autogradMeta && B.requiresGrad))) {
     const node = new MatmulBackward(A, B);
-    const inputs = [A, B];
-    for (let i = 0; i < 2; i++) {
-      node.saveInputMetadata(i, [...inputs[i].shape], inputs[i].dtype);
-      const m = inputs[i]._impl.autogradMeta;
-      if (m && m.requiresGrad) {
-        if (m.gradFn) node.setNextEdge(i, m.gradFn, m.outputNr || 0);
-        else { let acc = m.getGradAccumulator(); if (!acc) { acc = new GradAccumulator(inputs[i]); m.setGradAccumulator(acc); } node.setNextEdge(i, acc, 0); }
-      } else node.setNextEdge(i, null, 0);
-    }
+    wireInputEdges(node, [A, B]);
     attach(node, out);
   }
   return out;

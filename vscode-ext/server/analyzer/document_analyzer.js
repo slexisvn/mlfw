@@ -27,6 +27,16 @@ export class DocumentAnalyzer {
   drop(uri) {
     this._cache.delete(uri);
   }
+
+  uris() {
+    return [...this._cache.keys()];
+  }
+
+  declaredNames(uri) {
+    const doc = this._cache.get(uri);
+    if (!doc || !doc.symbols || !doc.symbols.flat) return [];
+    return doc.symbols.flat.map(s => s.name);
+  }
 }
 
 function analyze(text, builtinEnv) {

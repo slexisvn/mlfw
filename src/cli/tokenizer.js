@@ -98,12 +98,12 @@ function tokenizeRaw(source) {
       continue;
     }
     const two = source.slice(i, i + 2);
-    if (['**', '==', '!=', '<=', '>=', '+=', '-=', '*=', '/=', '@=', '->'].includes(two)) {
+    if (['**', '==', '!=', '<=', '>=', '+=', '-=', '*=', '/=', '%=', '@=', '->'].includes(two)) {
       advance(); advance();
       push('symbol', two, l, c);
       continue;
     }
-    if ('()[],.=:+-*/@<>{}|'.includes(ch)) {
+    if ('()[],.=:+-*/%@<>{}|'.includes(ch)) {
       advance();
       push('symbol', ch, l, c);
       continue;

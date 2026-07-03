@@ -12,6 +12,15 @@ export function _calculateFanInFanOut(tensor) {
   };
 }
 
+export function resetLinearParameters(weight, bias) {
+  kaiming_uniform_(weight, Math.sqrt(5));
+  if (bias) {
+    const { fanIn } = _calculateFanInFanOut(weight);
+    const bound = 1 / Math.sqrt(fanIn);
+    uniform_(bias, -bound, bound);
+  }
+}
+
 export function uniform_(tensor, a = 0, b = 1) {
   const data = tensor._impl.storage.data;
   if (!data) return tensor;

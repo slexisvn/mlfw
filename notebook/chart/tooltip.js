@@ -30,6 +30,9 @@ export function createTooltip(host) {
         show(event, point, series);
       });
     },
+    track(event, point, series) {
+      if (!pinned) show(event, point, series);
+    },
     hide,
     remove() {
       document.removeEventListener('pointerdown', outside, true);
