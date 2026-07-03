@@ -24,6 +24,7 @@ import {
 } from './builtins-dataframe.js';
 import { installQuantBuiltins, QUANT_SIGNATURES } from './builtins-quant.js';
 import { installMlBuiltins, ML_SIGNATURES } from './builtins-ml.js';
+import { installNumericBuiltins, NUMERIC_SIGNATURES } from './builtins-numeric.js';
 
 export { takeNamed, createDataFrameFromColumns, setUploadedCsv, beginUploadedCsv, removeUploadedCsv, COLUMN_AGGREGATES };
 
@@ -182,7 +183,8 @@ export function installBuiltins(runtime, define) {
   });
 
   installMlBuiltins(define);
-  installQuantBuiltins(define, { takeNamed, DataFrame, createDataFrame, fs });
+  installNumericBuiltins(define);
+  installQuantBuiltins(define, { takeNamed, DataFrame, createDataFrame, fs, snakeNamedToCamel });
 }
 
 function callWithOptions(fn, args) {
@@ -373,4 +375,5 @@ export function installSignatures(registry) {
   for (const [name, params] of Object.entries(QUERY_SIGNATURES)) registry.register(name, params);
   for (const [name, params] of Object.entries(QUANT_SIGNATURES)) registry.register(name, params);
   for (const [name, params] of Object.entries(ML_SIGNATURES)) registry.register(name, params);
+  for (const [name, params] of Object.entries(NUMERIC_SIGNATURES)) registry.register(name, params);
 }

@@ -10,6 +10,11 @@ export function eigh(a) {
   return { values, vectors };
 }
 
+export function qr(a) {
+  const [Q, R] = _dispatch('qr', a);
+  return { Q, R };
+}
+
 export const cholesky = (a) => _dispatch('cholesky', a);
 export const inv = (a) => _dispatch('inv', a);
 export const pinv = (a) => _dispatch('pinv', a);

@@ -22,6 +22,7 @@ const SOURCES = {
     join(REPO_ROOT, 'src/cli/builtins-dataframe.js'),
     join(REPO_ROOT, 'src/cli/builtins-quant.js'),
     join(REPO_ROOT, 'src/cli/builtins-ml.js'),
+    join(REPO_ROOT, 'src/cli/builtins-numeric.js'),
   ],
   builtinDocs: join(EXT_ROOT, 'data/builtin-docs.md'),
 };
@@ -86,6 +87,10 @@ const RETURNS_BY_KIND = {
   metric: 'Metric',
   callback: 'Callback',
   logger: 'Logger',
+  numeric_stats_test: 'Record',
+  numeric_timeseries: 'Tensor',
+  numeric_array_op: 'Tensor',
+  numeric_random: 'Tensor',
 };
 
 const RETURNS_OVERRIDE = {
@@ -127,6 +132,29 @@ const RETURNS_OVERRIDE = {
   mean_absolute_error: 'float',
   accuracy_score: 'float',
   confusion_matrix: null,
+  normal_cdf: 'Tensor',
+  normal_ppf: 'Tensor',
+  normal_pdf: 'Tensor',
+  t_cdf: 'Tensor',
+  t_ppf: 'Tensor',
+  t_pdf: 'Tensor',
+  chi2_cdf: 'Tensor',
+  chi2_ppf: 'Tensor',
+  chi2_pdf: 'Tensor',
+  f_cdf: 'Tensor',
+  f_ppf: 'Tensor',
+  f_pdf: 'Tensor',
+  erf: 'Tensor',
+  erfc: 'Tensor',
+  lgamma: 'Tensor',
+  gamma: 'Tensor',
+  fft: 'Tensor',
+  ifft: 'Tensor',
+  qr: null,
+  linear_interp: null,
+  cubic_spline: null,
+  ljung_box: 'Record',
+  durbin_watson: 'float',
 };
 
 const ML_SELF_RETURN_KINDS = new Set(['ml_model', 'ml_transform', 'ml_cluster', 'ml_split', 'grid_search']);

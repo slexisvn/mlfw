@@ -6,9 +6,43 @@ import { irChildNodes } from '../../compiler/ir/ir_visitor.js';
 import { parseThreadAxis, maxBindingExtent, visitStatements, estimateBufferSize, dynamicDimProduct, resolveShapeParam, walkStmtTree } from '../codegen_utils.js';
 
 
+import { LANCZOS_G, LANCZOS_COEFFS, ERF_A, ERF_P } from '../../util/special_math.js';
+
 const BOOL_OPS = new Set(['!', '&&', '||']);
 const CMP_OPS = new Set(['<', '>', '<=', '>=', '==', '!=']);
 const COMPARE_DIRS = new Set(['eq', 'ne', 'lt', 'le', 'gt', 'ge']);
+
+function _wgslFloat(v) {
+  const s = String(v);
+  return /[.e]/.test(s) ? s : `${s}.0`;
+}
+
+function _wgslErf(x) {
+  const t = `(1.0 / (1.0 + ${_wgslFloat(ERF_P)} * abs(${x})))`;
+  const poly = ERF_A.slice().reverse().reduce((acc, c) => `(${_wgslFloat(c)} + ${t} * ${acc})`, '0.0');
+  return `((select(-1.0, 1.0, ${x} >= 0.0)) * (1.0 - ${t} * ${poly} * exp(-${x} * ${x})))`;
+}
+
+function _wgslLanczosCore(u) {
+  const zz = `(${u} - 1.0)`;
+  const sum = LANCZOS_COEFFS
+    .map((c, i) => (i === 0 ? _wgslFloat(c) : `${_wgslFloat(c)} / (${zz} + ${_wgslFloat(i)})`))
+    .join(' + ');
+  const t = `(${zz} + ${_wgslFloat(LANCZOS_G + 0.5)})`;
+  return `(${_wgslFloat(0.5 * Math.log(2 * Math.PI))} + (${zz} + 0.5) * log(${t}) - ${t} + log(${sum}))`;
+}
+
+const _WGSL_PI = _wgslFloat(Math.PI);
+
+function _wgslLgamma(x) {
+  const reflected = `(log(${_WGSL_PI} / abs(sin(${_WGSL_PI} * ${x}))) - ${_wgslLanczosCore(`(1.0 - ${x})`)})`;
+  return `(select(${_wgslLanczosCore(x)}, ${reflected}, ${x} < 0.5))`;
+}
+
+function _wgslGamma(x) {
+  const reflected = `(${_WGSL_PI} / (sin(${_WGSL_PI} * ${x}) * exp(${_wgslLanczosCore(`(1.0 - ${x})`)})))`;
+  return `(select(exp(${_wgslLanczosCore(x)}), ${reflected}, ${x} < 0.5))`;
+}
 
 const FULL_WALK_KEYS = ['body', 'loopBody', 'condBody', 'initBody', 'thenBody', 'elseBody', 'value', 'a', 'b', 'condition', 'expr', 'offsetExpr'];
 function walkFullChildren(node, visit) {
@@ -995,7 +1029,16 @@ export class WebGPUCodegen {
       return `(${args[0]} % ${args[1]})`;
     }
     if (node.externName === 'erf') {
-      return `((select(-1.0, 1.0, ${args[0]} >= 0.0)) * (1.0 - (1.0 / (1.0 + 0.3275911 * abs(${args[0]}))) * (0.254829592 + (1.0 / (1.0 + 0.3275911 * abs(${args[0]}))) * (-0.284496736 + (1.0 / (1.0 + 0.3275911 * abs(${args[0]}))) * (1.421413741 + (1.0 / (1.0 + 0.3275911 * abs(${args[0]}))) * (-1.453152027 + (1.0 / (1.0 + 0.3275911 * abs(${args[0]}))) * 1.061405429)))) * exp(-${args[0]} * ${args[0]})))`;
+      return _wgslErf(args[0]);
+    }
+    if (node.externName === 'erfc') {
+      return `(1.0 - ${_wgslErf(args[0])})`;
+    }
+    if (node.externName === 'lgamma') {
+      return _wgslLgamma(args[0]);
+    }
+    if (node.externName === 'gamma') {
+      return _wgslGamma(args[0]);
     }
     if (node.externName === 'log10') {
       return `(log(${args[0]}) * ${1 / Math.LN10})`;

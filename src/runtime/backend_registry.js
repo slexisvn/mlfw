@@ -1,4 +1,5 @@
 import { encodeWat } from '../backend/wasm/wat_encoder.js';
+import { erfScalar, erfcScalar, lgammaScalar, gammaScalar, digammaScalar } from '../util/special_math.js';
 import { registerMeasurer } from './measurer_registry.js';
 
 const _registry = new Map();
@@ -52,6 +53,7 @@ const MATH_IMPORTS = {
   exp: Math.exp, log: Math.log, sin: Math.sin, cos: Math.cos,
   tan: Math.tan, tanh: Math.tanh, pow: Math.pow, fmod: (a, b) => a % b,
   rsqrt: x => 1 / Math.sqrt(x), sign: Math.sign, round: Math.round,
+  erf: erfScalar, erfc: erfcScalar, lgamma: lgammaScalar, gamma: gammaScalar, digamma: digammaScalar,
 };
 
 function instantiateWasm(kernel) {

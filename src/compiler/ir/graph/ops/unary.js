@@ -26,7 +26,7 @@ export function register(registry) {
     verify: verifyUnaryFloat
   }));
 
-  for (const name of ['log', 'sqrt', 'rsqrt', 'tanh', 'sin', 'cos', 'erf', 'log2', 'log10', 'exp2']) {
+  for (const name of ['log', 'sqrt', 'rsqrt', 'tanh', 'sin', 'cos', 'erf', 'erfc', 'lgamma', 'gamma', 'log2', 'log10', 'exp2']) {
     registry.register(new OpDef({
       name,
       numOperands: 1,

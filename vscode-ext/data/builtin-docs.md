@@ -361,6 +361,75 @@ Parse and type-check a Quill product definition from a source string and return 
 ## load_quill(path: string) {quant}
 Like `quill`, but read the Quill product definition from a file `path`. Returns the same product handle with a `.price(...)` method and a `.name` field.
 
+## adf_test(series, lags: int = 0, trend: string = "constant") {quant}
+Augmented Dickey-Fuller unit-root test. Returns a record with `statistic`, `criticalValues`, and `stationary` (true when the statistic is below the critical value).
+
+## kpss_test(series, trend: string = "constant", lags?: int) {quant}
+KPSS stationarity test (null hypothesis: the series is stationary). Returns `statistic`, `criticalValues`, `stationary`. Complements `adf_test`.
+
+## hurst_exponent(series, min_window: int = 10, max_window?: int, growth: float = 1.5) {quant}
+Hurst exponent from rescaled-range analysis. `< 0.5` mean-reverting, `~0.5` random walk, `> 0.5` trending.
+
+## half_life(series) {quant}
+Ornstein-Uhlenbeck mean-reversion half-life (in periods) estimated by regressing the change on the lagged level.
+
+## engle_granger(dependent, regressors, lags: int = 0) {quant}
+Engle-Granger two-step cointegration test: regress `dependent` on `regressors`, then ADF-test the residual. Returns `statistic`, `criticalValues`, `cointegrated`, `hedgeRatio`, and `spread`.
+
+## johansen(levels, lags: int = 1) {quant}
+Johansen cointegration test on a matrix of price levels. Returns `eigenvalues`, `traceStatistics`, `maxEigenStatistics`, and the estimated cointegration `rank`.
+
+## cusum_events(series, threshold, drift: float = 0) {quant}
+Symmetric CUSUM filter — returns the indices where the cumulative deviation exceeds `threshold`, used to sample structural-shift events.
+
+## sadf(series, min_window: int = 20, lags: int = 0, trend: string = "constant") {quant}
+Supremum ADF statistic — the max ADF over expanding windows, a test for explosive (bubble) behavior.
+
+## bsadf(series, min_window: int = 20, lags: int = 0, trend: string = "constant") {quant}
+Backward-SADF series — the running SADF at each point, for dating the start/end of explosive regimes.
+
+## kalman_filter(observations, observation_vectors, spec) {quant}
+Linear Kalman filter over a state-space `spec` (transition, observation, process/measurement noise). Returns filtered `states`, `covariances`, and one-step innovations.
+
+## kalman_smoother(observations, observation_vectors, spec) {quant}
+Rauch-Tung-Striebel smoother — the full-sample smoothed state matrix for the same state-space `spec` as `kalman_filter`.
+
+## dynamic_beta(dependent, regressors, config?) {quant}
+Time-varying hedge ratio / beta via a Kalman filter (random-walk coefficients). Returns the per-period `states` (betas) — the workhorse for dynamic pairs trading.
+
+## fit_garch(returns, options?) {quant}
+Fit a GARCH(1,1) volatility model by maximum likelihood. Returns a record with `params` (`omega`, `alpha`, `beta`), `log_likelihood`, and fitted `variances`.
+
+## garch_forecast(returns, params, horizon: int, initial_variance?: float) {quant}
+Forecast conditional variance `horizon` steps ahead from GARCH `params` (as returned by `fit_garch`).
+
+## garch_volatility(returns, params, initial_variance?: float) {quant}
+In-sample conditional volatility path (standard deviation per period) for the given GARCH `params`.
+
+## tick_bars(ticks, ticks_per_bar: int) {quant}
+Aggregate a `ticks` DataFrame (`price`, `volume`) into OHLC bars of fixed tick count. Returns a bar `DataFrame`.
+
+## volume_bars(ticks, volume_per_bar: float) {quant}
+Information-driven bars sampled every fixed traded `volume_per_bar`. Returns a bar `DataFrame`.
+
+## dollar_bars(ticks, dollar_per_bar: float) {quant}
+Bars sampled every fixed traded dollar value — the most sample-stationary bar type. Returns a bar `DataFrame`.
+
+## tick_rule(prices) {quant}
+Lee-Ready tick rule — signs each trade `+1`/`-1` by price change to infer aggressor side.
+
+## roll_spread(prices) {quant}
+Roll's implied effective bid-ask spread from the serial covariance of price changes.
+
+## amihud(returns, dollar_volumes) {quant}
+Amihud illiquidity — average of `|return| / dollar_volume`, a price-impact-per-dollar measure.
+
+## kyle_lambda(prices, volumes) {quant}
+Kyle's lambda — price impact per signed volume, estimated by regressing price changes on signed order flow.
+
+## vpin(ticks, bucket_volume, window: int = 50) {quant}
+Volume-synchronized Probability of Informed Trading — order-flow-toxicity series over volume buckets.
+
 ## EarlyStopping(monitor, patience=3, mode="min")
 Stop training when a monitored metric stops improving for `patience` evaluations.
 
@@ -1157,3 +1226,165 @@ Determinant (scalar).
 
 ## cov(input: Tensor) {linalg}
 Covariance matrix of the columns of `input`.
+
+## normal_cdf(x: Tensor, loc: float = 0, scale: float = 1) {numeric_dist}
+Normal distribution cumulative distribution function, applied elementwise.
+
+## normal_ppf(p: Tensor, loc: float = 0, scale: float = 1) {numeric_dist}
+Normal distribution quantile function (inverse CDF), applied elementwise.
+
+## normal_pdf(x: Tensor, loc: float = 0, scale: float = 1) {numeric_dist}
+Normal distribution probability density function, applied elementwise.
+
+## t_cdf(x: Tensor, df: float) {numeric_dist}
+Student's t cumulative distribution function with `df` degrees of freedom, applied elementwise.
+
+## t_ppf(p: Tensor, df: float) {numeric_dist}
+Student's t quantile function (inverse CDF) with `df` degrees of freedom, applied elementwise.
+
+## t_pdf(x: Tensor, df: float) {numeric_dist}
+Student's t probability density function with `df` degrees of freedom, applied elementwise.
+
+## chi2_cdf(x: Tensor, df: float) {numeric_dist}
+Chi-squared cumulative distribution function with `df` degrees of freedom, applied elementwise.
+
+## chi2_ppf(p: Tensor, df: float) {numeric_dist}
+Chi-squared quantile function (inverse CDF) with `df` degrees of freedom, applied elementwise.
+
+## chi2_pdf(x: Tensor, df: float) {numeric_dist}
+Chi-squared probability density function with `df` degrees of freedom, applied elementwise.
+
+## f_cdf(x: Tensor, d1: float, d2: float) {numeric_dist}
+F distribution cumulative distribution function with `d1` and `d2` degrees of freedom, applied elementwise.
+
+## f_ppf(p: Tensor, d1: float, d2: float) {numeric_dist}
+F distribution quantile function (inverse CDF) with `d1` and `d2` degrees of freedom, applied elementwise.
+
+## f_pdf(x: Tensor, d1: float, d2: float) {numeric_dist}
+F distribution probability density function with `d1` and `d2` degrees of freedom, applied elementwise.
+
+## erf(input: Tensor) {numeric_func}
+Error function, applied elementwise.
+
+## erfc(input: Tensor) {numeric_func}
+Complementary error function, applied elementwise.
+
+## lgamma(input: Tensor) {numeric_func}
+Natural logarithm of the absolute value of the gamma function, applied elementwise.
+
+## gamma(input: Tensor) {numeric_func}
+Gamma function, applied elementwise.
+
+## fft(input: Tensor) {numeric_transform}
+Discrete Fourier transform of a 1-D real or `[n, 2]` complex signal. Returns an `[n, 2]` Tensor of real/imaginary pairs.
+
+## ifft(input: Tensor) {numeric_transform}
+Inverse discrete Fourier transform of a 1-D real or `[n, 2]` complex signal. Returns an `[n, 2]` Tensor of real/imaginary pairs.
+
+## qr(input: Tensor) {numeric_transform}
+QR decomposition. Returns `{Q, R}` with `input = Q @ R`.
+
+## linear_interp(xs: float[], ys: float[], xq) {numeric_func}
+Piecewise-linear interpolation of the points `(xs, ys)` evaluated at `xq` (a number or a list of numbers).
+
+## cubic_spline(xs: float[], ys: float[]) {numeric_func}
+Natural cubic spline interpolant through the points `(xs, ys)`.
+
+### evaluate(xq) -> float
+Evaluate the spline at a query point or a list of query points.
+
+## t_test_1samp(x: Tensor, popmean: float = 0) {numeric_stats_test}
+One-sample t-test of the mean of `x` against `popmean`. Returns a record with `statistic`, `pvalue`, `df`.
+
+## t_test_ind(x: Tensor, y: Tensor, equal_var: boolean = true) {numeric_stats_test}
+Two-sample independent t-test. `equal_var=true` pools variances; `equal_var=false` uses the Welch unequal-variance form. Returns a record with `statistic`, `pvalue`, `df`.
+
+## t_test_paired(x: Tensor, y: Tensor) {numeric_stats_test}
+Paired t-test on matched samples `x` and `y`. Returns a record with `statistic`, `pvalue`, `df`.
+
+## chi2_gof(observed: Tensor, expected?: Tensor, ddof: int = 0) {numeric_stats_test}
+Chi-square goodness-of-fit test of `observed` counts against `expected` counts (uniform when omitted). Returns a record with `statistic`, `pvalue`, `df`.
+
+## chi2_independence(table: Tensor) {numeric_stats_test}
+Chi-square test of independence on a 2-D contingency `table`. Returns a record with `statistic`, `pvalue`, `df`.
+
+## ks_test_1samp(x: Tensor, cdf?, loc: float = 0, scale: float = 1) {numeric_stats_test}
+One-sample Kolmogorov-Smirnov test of `x` against a reference CDF (normal with `loc`/`scale` by default). Returns a record with `statistic`, `pvalue`.
+
+## ks_test_2samp(x: Tensor, y: Tensor) {numeric_stats_test}
+Two-sample Kolmogorov-Smirnov test comparing the empirical distributions of `x` and `y`. Returns a record with `statistic`, `pvalue`.
+
+## jarque_bera(x: Tensor) {numeric_stats_test}
+Jarque-Bera normality test built from sample skewness and kurtosis. Returns a record with `statistic`, `pvalue`, `df`.
+
+## dagostino_k2(x: Tensor) {numeric_stats_test}
+D'Agostino K-squared normality test combining skewness and kurtosis z-scores. Returns a record with `statistic`, `pvalue`, `df`.
+
+## anderson_darling(x: Tensor) {numeric_stats_test}
+Anderson-Darling normality test with the small-sample corrected p-value. Returns a record with `statistic`, `pvalue`.
+
+## mann_whitney_u(x: Tensor, y: Tensor) {numeric_stats_test}
+Mann-Whitney U rank-sum test with normal approximation, tie correction, and continuity correction. Returns a record with `statistic`, `pvalue`.
+
+## acf(x: Tensor, nlags?: int) {numeric_timeseries}
+Sample autocorrelation function of `x` up to `nlags` (FFT-based). Returns a Tensor of length `nlags + 1` with lag 0 equal to 1.
+
+## pacf(x: Tensor, nlags?: int) {numeric_timeseries}
+Partial autocorrelation function of `x` via Levinson-Durbin recursion. Returns a Tensor of length `nlags + 1` with lag 0 equal to 1.
+
+## ljung_box(x: Tensor, lags?: int, model_df: int = 0) {numeric_timeseries}
+Ljung-Box test for autocorrelation up to `lags`. Returns a record with `statistic`, `pvalue`, `df`.
+
+## durbin_watson(x: Tensor) {numeric_timeseries}
+Durbin-Watson statistic of a residual series; values near 2 indicate no first-order autocorrelation.
+
+## periodogram(x: Tensor, detrend: boolean = true) {numeric_timeseries}
+Power spectrum of `x` at frequencies `k / n` for `k = 0..n/2`. Returns a Tensor of length `n/2 + 1`.
+
+## convolve(a: Tensor, b: Tensor, mode: string = "full") {numeric_array_op}
+FFT-based linear convolution of two 1-D signals. `mode` is `"full"`, `"same"`, or `"valid"`.
+
+## correlate(a: Tensor, b: Tensor, mode: string = "full") {numeric_array_op}
+FFT-based cross-correlation of two 1-D signals. `mode` is `"full"`, `"same"`, or `"valid"`.
+
+## rolling_mean(x: Tensor, window: int) {numeric_array_op}
+Rolling mean over each length-`window` slice of `x`. Returns a Tensor of length `n - window + 1`.
+
+## rolling_std(x: Tensor, window: int, ddof: int = 1) {numeric_array_op}
+Rolling standard deviation over each length-`window` slice of `x`. Returns a Tensor of length `n - window + 1`.
+
+## rolling_sum(x: Tensor, window: int) {numeric_array_op}
+Rolling sum over each length-`window` slice of `x`. Returns a Tensor of length `n - window + 1`.
+
+## rolling_min(x: Tensor, window: int) {numeric_array_op}
+Rolling minimum over each length-`window` slice of `x`. Returns a Tensor of length `n - window + 1`.
+
+## rolling_max(x: Tensor, window: int) {numeric_array_op}
+Rolling maximum over each length-`window` slice of `x`. Returns a Tensor of length `n - window + 1`.
+
+## polyfit(x: Tensor, y: Tensor, deg: int) {numeric_array_op}
+Least-squares polynomial fit of degree `deg` to the points `(x, y)`. Returns coefficients ordered from the highest degree down.
+
+## polyval(coeffs: Tensor, x) {numeric_array_op}
+Evaluate a polynomial with coefficients ordered from the highest degree down at `x` (a number, list, or Tensor).
+
+## polyroots(coeffs: Tensor) {numeric_array_op}
+All complex roots of a polynomial via Durand-Kerner iteration. Returns a `[deg, 2]` Tensor of real/imaginary pairs.
+
+## random_uniform(shape: int[], low: float = 0, high: float = 1, seed?: int) {numeric_random}
+Seeded uniform samples on `[low, high)` with the given shape.
+
+## random_normal(shape: int[], loc: float = 0, scale: float = 1, seed?: int) {numeric_random}
+Seeded normal samples with mean `loc` and standard deviation `scale`.
+
+## random_t(shape: int[], df: float, seed?: int) {numeric_random}
+Seeded Student t samples with `df` degrees of freedom.
+
+## random_chi2(shape: int[], df: float, seed?: int) {numeric_random}
+Seeded chi-square samples with `df` degrees of freedom.
+
+## random_exponential(shape: int[], scale: float = 1, seed?: int) {numeric_random}
+Seeded exponential samples with the given `scale` (mean).
+
+## multivariate_normal(mean: float[], cov: Tensor, n: int = 1, seed?: int) {numeric_random}
+Seeded multivariate normal samples via the Cholesky factor of `cov`. Returns an `[n, d]` Tensor.

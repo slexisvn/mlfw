@@ -33,6 +33,10 @@ export function abs(self) { return _dispatch('abs', self); }
 export function sin(self) { return _dispatch('sin', self); }
 export function cos(self) { return _dispatch('cos', self); }
 export function tanh(self) { return _dispatch('tanh', self); }
+export function erf(self) { return _dispatch('erf', self); }
+export function erfc(self) { return _dispatch('erfc', self); }
+export function lgamma(self) { return _dispatch('lgamma', self); }
+export function gamma(self) { return _dispatch('gamma', self); }
 export function sigmoid(self) { return _dispatch('sigmoid', self); }
 export function relu(self) { return _dispatch('relu', self); }
 export function gelu(self) { return _dispatch('gelu', self); }

@@ -24,7 +24,7 @@ const ELEMENTWISE_SCALAR_OPS = {
   'maximum': 'max', 'minimum': 'min',
   'sin': 'sin', 'cos': 'cos', 'round': 'round', 'sign': 'sign',
   'pow': 'pow', 'rem': 'fmod',
-  'erf': 'erf', 'log2': 'log2', 'log10': 'log10', 'exp2': 'exp2',
+  'erf': 'erf', 'erfc': 'erfc', 'lgamma': 'lgamma', 'gamma': 'gamma', 'log2': 'log2', 'log10': 'log10', 'exp2': 'exp2',
   'square': 'square', 'reciprocal': 'reciprocal',
   'logical_not': '!', 'logical_and': '&&', 'logical_or': '||'
 };

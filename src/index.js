@@ -1,6 +1,7 @@
 import { registerNativeOps } from './tensor/native/registration.js';
 import { registerCpuLinalg } from './kernels/cpu/linalg/register.js';
 import { registerCpuMl } from './kernels/cpu/ml/register.js';
+import { registerCpuNumeric } from './kernels/cpu/numeric/register.js';
 import { registerWasmLinalg } from './kernels/wasm/linalg/register.js';
 import { registerWasmMl } from './kernels/wasm/ml/register.js';
 import { registerAutogradKernels } from './autograd/dispatch.js';
@@ -10,6 +11,7 @@ import { Tensor } from './tensor/core/tensor.js';
 registerNativeOps();
 registerCpuLinalg();
 registerCpuMl();
+registerCpuNumeric();
 registerWasmLinalg();
 registerWasmMl();
 registerAutogradKernels();
@@ -32,6 +34,7 @@ export {
 export {
   add, sub, mul, div, neg, pow, maximum, minimum,
   exp, log, sqrt, rsqrt, abs, sin, cos, tanh, sigmoid,
+  erf, erfc, lgamma, gamma,
   relu, gelu, silu, sign, floor, ceil,
   eq, ne, lt, le, gt, ge, where, clamp, pad, one_hot, index_select, gather, scatter_add,
   sum, mean, max, min, argmax, argmin, prod,
@@ -105,3 +108,4 @@ export { fs as memfs } from '#io/fs';
 
 export * as linalg from './tensor/ops/linalg.js';
 export * as ml from './ml/index.js';
+export * as numeric from './numeric/index.js';

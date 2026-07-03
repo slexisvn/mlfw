@@ -31,6 +31,10 @@ export function installOps(TensorClass) {
   proto.sin = function() { return ops.sin(this); };
   proto.cos = function() { return ops.cos(this); };
   proto.tanh = function() { return ops.tanh(this); };
+  proto.erf = function() { return ops.erf(this); };
+  proto.erfc = function() { return ops.erfc(this); };
+  proto.lgamma = function() { return ops.lgamma(this); };
+  proto.gamma = function() { return ops.gamma(this); };
   proto.sigmoid = function() { return ops.sigmoid(this); };
   proto.relu = function() { return ops.relu(this); };
   proto.gelu = function() { return ops.gelu(this); };

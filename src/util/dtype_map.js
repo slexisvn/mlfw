@@ -122,7 +122,7 @@ const C_MATH_BASES = {
   'abs': 'fabs', 'sin': 'sin', 'cos': 'cos', 'ceil': 'ceil',
   'floor': 'floor', 'max': 'fmax', 'min': 'fmin', 'pow': 'pow',
   'round': 'round', 'fmod': 'fmod', 'rsqrt': 'rsqrt',
-  'erf': 'erf', 'log2': 'log2', 'log10': 'log10', 'exp2': 'exp2'
+  'erf': 'erf', 'erfc': 'erfc', 'lgamma': 'lgamma', 'gamma': 'tgamma', 'log2': 'log2', 'log10': 'log10', 'exp2': 'exp2'
 };
 
 export function cMathFunc(name, dtype) {

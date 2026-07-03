@@ -4,10 +4,32 @@ import { flattenRowMajorIndex } from '../index_emit.js';
 import { irChildNodes } from '../../compiler/ir/ir_visitor.js';
 import { dynamicDimProduct, resolveShapeParam, isZeroFillBody } from '../codegen_utils.js';
 
+import { LANCZOS_G, LANCZOS_COEFFS, ERF_A, ERF_P } from '../../util/special_math.js';
+
 import '../../tensor/utils/half.js';
 
 const _HALF_EXPAND = { f16: '__mlfw_f16_to_f32', bf16: '__mlfw_bf16_to_f32' };
 const _HALF_ROUND = { f16: '__mlfw_f32_to_f16', bf16: '__mlfw_f32_to_bf16' };
+
+const _ERF_POLY = ERF_A.slice().reverse().reduce((acc, c) => `(${c} + t * ${acc})`, '0');
+const _ERF_BODY = `const t = 1.0 / (1.0 + ${ERF_P} * Math.abs(x_erf)); const p = t * ${_ERF_POLY}; return (x_erf >= 0 ? 1 : -1) * (1.0 - p * Math.exp(-x_erf * x_erf));`;
+
+function _erfExpr(arg) {
+  return `((x_erf => { ${_ERF_BODY} })(${arg}))`;
+}
+
+const _LANCZOS_SUM = LANCZOS_COEFFS
+  .map((c, i) => (i === 0 ? `${c}` : `${c} / (zz + ${i})`))
+  .join(' + ');
+const _LGAMMA_CORE = `(zg => { const zz = zg - 1; const s = ${_LANCZOS_SUM}; const t = zz + ${LANCZOS_G} + 0.5; return ${0.5 * Math.log(2 * Math.PI)} + (zz + 0.5) * Math.log(t) - t + Math.log(s); })`;
+
+function _lgammaExpr(arg) {
+  return `((x_lg => { const lg = ${_LGAMMA_CORE}; return x_lg < 0.5 ? Math.log(Math.PI / Math.abs(Math.sin(Math.PI * x_lg))) - lg(1 - x_lg) : lg(x_lg); })(${arg}))`;
+}
+
+function _gammaExpr(arg) {
+  return `((x_g => { const lg = ${_LGAMMA_CORE}; return x_g < 0.5 ? Math.PI / (Math.sin(Math.PI * x_g) * Math.exp(lg(1 - x_g))) : Math.exp(lg(x_g)); })(${arg}))`;
+}
 
 export class CPUCodegen {
   constructor(target) {
@@ -466,7 +488,10 @@ export class CPUCodegen {
             else if (node.externName === 'rsqrt') vals.push(`(1.0 / Math.sqrt(${joined}))`);
             else if (node.externName === 'fmod') vals.push(`((${args[0]} % ${args[1]} + ${args[1]}) % ${args[1]})`);
             else if (node.externName === 'exp2') vals.push(`Math.pow(2, ${joined})`);
-            else if (node.externName === 'erf') vals.push(`((x_erf => { const t = 1.0 / (1.0 + 0.3275911 * Math.abs(x_erf)); const p = t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429)))); return (x_erf >= 0 ? 1 : -1) * (1.0 - p * Math.exp(-x_erf * x_erf)); })(${joined}))`);
+            else if (node.externName === 'erf') vals.push(_erfExpr(joined));
+            else if (node.externName === 'erfc') vals.push(`(1.0 - ${_erfExpr(joined)})`);
+            else if (node.externName === 'lgamma') vals.push(_lgammaExpr(joined));
+            else if (node.externName === 'gamma') vals.push(_gammaExpr(joined));
             else if (node.externName === 'log10') vals.push(`(Math.log(${joined}) * ${1 / Math.LN10})`);
             else throw new Error(`CPU codegen: unsupported extern function "${node.externName}"`);
           }

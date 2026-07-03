@@ -1,8 +1,24 @@
 import { Worker } from 'node:worker_threads';
 import os from 'node:os';
+import {
+  LANCZOS_G, LANCZOS_COEFFS, ERF_A, ERF_P, DIGAMMA_SHIFT, DIGAMMA_SERIES,
+  erfScalar, erfcScalar, lgammaScalar, gammaScalar, digammaScalar,
+} from '../../util/special_math.js';
 
 const WORKER_SRC = `
 const { parentPort } = require('node:worker_threads');
+
+const LANCZOS_G = ${LANCZOS_G};
+const LANCZOS_COEFFS = ${JSON.stringify(LANCZOS_COEFFS)};
+const ERF_A = ${JSON.stringify(ERF_A)};
+const ERF_P = ${ERF_P};
+const DIGAMMA_SHIFT = ${DIGAMMA_SHIFT};
+const DIGAMMA_SERIES = ${JSON.stringify(DIGAMMA_SERIES)};
+const erfScalar = ${erfScalar.toString()};
+const erfcScalar = ${erfcScalar.toString()};
+const lgammaScalar = ${lgammaScalar.toString()};
+const gammaScalar = ${gammaScalar.toString()};
+const digammaScalar = ${digammaScalar.toString()};
 
 const MATH = {
   exp: Math.exp, log: Math.log, sin: Math.sin, cos: Math.cos,
@@ -10,6 +26,7 @@ const MATH = {
   fmod: (a, b) => a % b,
   rsqrt: x => 1 / Math.sqrt(x),
   sign: Math.sign, round: Math.round,
+  erf: erfScalar, erfc: erfcScalar, lgamma: lgammaScalar, gamma: gammaScalar, digamma: digammaScalar,
 };
 
 parentPort.on('message', (msg) => {

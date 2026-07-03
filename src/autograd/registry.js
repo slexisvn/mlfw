@@ -1,6 +1,6 @@
 import { AddBackward, SubBackward, MulBackward, DivBackward, NegBackward, PowBackward } from './function/basic.js';
 
-import { ExpBackward, LogBackward, SqrtBackward, TanhBackward, SigmoidBackward, ReluBackward, GeluBackward, SiluBackward, SoftmaxBackward, LogSoftmaxBackward } from './function/unary.js';
+import { ExpBackward, LogBackward, SqrtBackward, TanhBackward, SigmoidBackward, ReluBackward, GeluBackward, SiluBackward, SoftmaxBackward, LogSoftmaxBackward, ErfBackward, ErfcBackward, LgammaBackward, GammaBackward } from './function/unary.js';
 
 import { SumBackward, MeanBackward } from './function/reduction.js';
 import { MatmulBackward, DotBackward } from './function/linalg.js';
@@ -25,6 +25,10 @@ _register('exp', () => new ExpBackward());
 _register('log', () => new LogBackward());
 _register('sqrt', () => new SqrtBackward());
 _register('tanh', () => new TanhBackward());
+_register('erf', () => new ErfBackward());
+_register('erfc', () => new ErfcBackward());
+_register('lgamma', () => new LgammaBackward());
+_register('gamma', () => new GammaBackward());
 _register('sigmoid', () => new SigmoidBackward());
 _register('relu', () => new ReluBackward());
 _register('softmax', () => new SoftmaxBackward());

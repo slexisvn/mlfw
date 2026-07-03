@@ -1,4 +1,5 @@
 import { registerVJPRule } from '../vjp_registry.js';
+import { DIGAMMA_SHIFT, DIGAMMA_SERIES } from '../../../util/special_math.js';
 
 registerVJPRule('exp', (ctx) => {
   const grad = ctx.gradOutputs[0];
@@ -90,14 +91,58 @@ registerVJPRule('abs', (ctx) => {
   return [ctx.builder.mul(grad, signX).getResult(0)];
 });
 
-registerVJPRule('erf', (ctx) => {
-  const grad = ctx.gradOutputs[0];
-  const [x] = ctx.operands;
+function _erfDerivIR(ctx, x) {
   const coeff = ctx.full(2.0 / Math.sqrt(Math.PI), x.type);
   const xSq = ctx.builder.mul(x, x).getResult(0);
   const negXSq = ctx.builder.neg(xSq).getResult(0);
   const expNegXSq = ctx.builder.exp(negXSq).getResult(0);
-  const deriv = ctx.builder.mul(coeff, expNegXSq).getResult(0);
+  return ctx.builder.mul(coeff, expNegXSq).getResult(0);
+}
+
+function _digammaIR(ctx, x) {
+  const b = ctx.builder;
+  const one = ctx.full(1, x.type);
+  const z = b.add(x, ctx.full(DIGAMMA_SHIFT, x.type)).getResult(0);
+  const invZ = b.div(one, z).getResult(0);
+  const logZ = b.log(z).getResult(0);
+  let acc = b.sub(logZ, b.mul(ctx.full(0.5, x.type), invZ).getResult(0)).getResult(0);
+  const inv2 = b.mul(invZ, invZ).getResult(0);
+  let p = inv2;
+  for (const c of DIGAMMA_SERIES) {
+    acc = b.add(acc, b.mul(ctx.full(c, x.type), p).getResult(0)).getResult(0);
+    p = b.mul(p, inv2).getResult(0);
+  }
+  for (let j = 0; j < DIGAMMA_SHIFT; j++) {
+    const xj = b.add(x, ctx.full(j, x.type)).getResult(0);
+    acc = b.sub(acc, b.div(one, xj).getResult(0)).getResult(0);
+  }
+  return acc;
+}
+
+registerVJPRule('erf', (ctx) => {
+  const grad = ctx.gradOutputs[0];
+  const [x] = ctx.operands;
+  return [ctx.builder.mul(grad, _erfDerivIR(ctx, x)).getResult(0)];
+});
+
+registerVJPRule('erfc', (ctx) => {
+  const grad = ctx.gradOutputs[0];
+  const [x] = ctx.operands;
+  const deriv = ctx.builder.neg(_erfDerivIR(ctx, x)).getResult(0);
+  return [ctx.builder.mul(grad, deriv).getResult(0)];
+});
+
+registerVJPRule('lgamma', (ctx) => {
+  const grad = ctx.gradOutputs[0];
+  const [x] = ctx.operands;
+  return [ctx.builder.mul(grad, _digammaIR(ctx, x)).getResult(0)];
+});
+
+registerVJPRule('gamma', (ctx) => {
+  const grad = ctx.gradOutputs[0];
+  const [x] = ctx.operands;
+  const result = ctx.results[0];
+  const deriv = ctx.builder.mul(result, _digammaIR(ctx, x)).getResult(0);
   return [ctx.builder.mul(grad, deriv).getResult(0)];
 });
 
