@@ -28,6 +28,13 @@ registerGraphSplitStrategy({
 });
 
 registerGraphSplitStrategy({
+  name: 'cuda-attention',
+  priority: 15,
+  applies: (ctx) => ctx.cudaAttention,
+  run: (graphModule) => splitGraphForNative(graphModule, 1),
+});
+
+registerGraphSplitStrategy({
   name: 'cuda-native-matmul-chain',
   priority: 20,
   applies: (ctx) => ctx.cudaMatmulChain,

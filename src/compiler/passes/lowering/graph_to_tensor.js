@@ -63,6 +63,7 @@ function topologicalOps(graphFunc) {
 
 export function lowerGraphToPrimFunc(graphFunc, target = null, context = null) {
   const ctx = new LoweringContext();
+  ctx.target = target;
   const params = [];
   const bufferMap = new Map();
 

@@ -5,6 +5,7 @@ import {
 } from '../../../ir/tensor/nodes.js';
 import { Buffer } from '../../../ir/tensor/buffer.js';
 import { registerLoweringRule, registerTargetLoweringRule } from '../lowering_registry.js';
+import { dtypeBytes } from '../../../../util/dtype_map.js';
 
 const Z = new IntImmNode(0);
 const I = (n) => new IntImmNode(n);
@@ -192,10 +193,12 @@ export function register() {
   registerLoweringRule('scaled_dot_product_attention', buildNaive);
 
   registerTargetLoweringRule('scaled_dot_product_attention', 'cuda', (ctx, op, inputs, outputs) => {
-    const { Lq, Dk, Dv, causal } = dims(op, inputs);
-    const budget = 32 * 1024;
-    const TPB = Math.min(128, Lq, Math.floor(budget / ((Dk + Dv) * 4 * 2)));
-    if (!causal || TPB < 8) return buildNaive(ctx, op, inputs, outputs);
+    const { Lq, Dk, Dv, dtype } = dims(op, inputs);
+    const target = ctx.target;
+    const budget = (target && target.sharedMemoryBytes) || 0;
+    const maxTPB = (target && target.maxThreadsPerBlock) || 1024;
+    const TPB = Math.min(maxTPB, Lq, Math.floor(budget / ((Dk + Dv) * dtypeBytes(dtype) * 2)));
+    if (TPB < 8) return buildNaive(ctx, op, inputs, outputs);
     return buildTiled(ctx, op, inputs, outputs, TPB);
   });
 }

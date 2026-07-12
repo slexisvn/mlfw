@@ -207,10 +207,14 @@ export class Compiler {
           const cfg = ctx.compiler.config;
           const isWebGPU = typeof cfg.target.isWebGPU === 'function' && cfg.target.isWebGPU();
           const isCuda = typeof cfg.target.isGPU === 'function' && cfg.target.isGPU() && !isWebGPU;
-          let convCount = 0;
-          for (const func of ctx.working) for (const op of func.ops()) if (op.opName === 'conv' || op.opName === 'quantized_conv') convCount++;
+          let convCount = 0, attentionCount = 0;
+          for (const func of ctx.working) for (const op of func.ops()) {
+            if (op.opName === 'conv' || op.opName === 'quantized_conv') convCount++;
+            else if (op.opName === 'scaled_dot_product_attention') attentionCount++;
+          }
           const cudaConvChain = isCuda && convCount >= 2;
-          ctx.split = splitGraph(ctx.working, { config: cfg, target: cfg.target, cudaMatmulChain: ctx.cudaMatmulChain, cudaConvChain, isWebGPU });
+          const cudaAttention = isCuda && attentionCount > 0;
+          ctx.split = splitGraph(ctx.working, { config: cfg, target: cfg.target, cudaMatmulChain: ctx.cudaMatmulChain, cudaConvChain, cudaAttention, isWebGPU });
         },
       },
       {

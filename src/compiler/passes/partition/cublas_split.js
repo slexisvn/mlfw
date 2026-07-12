@@ -102,7 +102,7 @@ export function materializePartition(part, name, dotInfoMap) {
   return { part, subFunc, inputs, outputs, dotOp };
 }
 
-const BOUNDARY_OP_NAMES = new Set(['dot', 'cublas_gemm', 'reduce', 'conv', 'quantized_conv']);
+const BOUNDARY_OP_NAMES = new Set(['dot', 'cublas_gemm', 'reduce', 'conv', 'quantized_conv', 'scaled_dot_product_attention']);
 
 function containsBoundaryOp(op) {
   if (BOUNDARY_OP_NAMES.has(op.opName)) return true;
@@ -286,6 +286,7 @@ export function splitGraphForCublas(graphModule) {
   const opTarget = new Map();
   const dotInfoMap = new Map();
   let dotCount = 0;
+  let boundaryCount = 0;
 
   for (const op of func.ops()) {
     if (isTerminatorOp(op.opName)) continue;
@@ -295,13 +296,15 @@ export function splitGraphForCublas(graphModule) {
       opTarget.set(op, 'cublas#' + dotCount);
       dotInfoMap.set(op, info);
       dotCount++;
+    } else if (containsBoundaryOp(op)) {
+      opTarget.set(op, 'boundary#' + boundaryCount++);
     } else {
       opTarget.set(op, 'native');
     }
     partitionOps.push(op);
   }
 
-  if (dotCount === 0 || partitionOps.length === 0) return null;
+  if (dotCount + boundaryCount === 0 || partitionOps.length === 0) return null;
 
   const { partitions, preds } = buildPartitions(partitionOps, bufferLimitedConfig(opTarget));
   if (partitions.length < 2) return null;
