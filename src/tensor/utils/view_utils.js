@@ -42,9 +42,7 @@ export function computeExpand(sizes, strides, targetShape) {
       newSizes[i] = sizes[srcIdx];
       newStrides[i] = strides[srcIdx];
     } else {
-      throw new Error(
-        `Cannot expand size ${sizes[srcIdx]} to ${targetShape[i]} at dim ${i}`
-      );
+      throw new Error(`Cannot expand size ${sizes[srcIdx]} to ${targetShape[i]} at dim ${i}`);
     }
   }
 
@@ -81,11 +79,9 @@ export function computeUnsqueeze(sizes, strides, dim) {
   const d = dim < 0 ? ndim + 1 + dim : dim;
   const newSizes = [...sizes];
   const newStrides = [...strides];
-
   const insertStride = d < ndim ? sizes[d] * strides[d] : 1;
   newSizes.splice(d, 0, 1);
   newStrides.splice(d, 0, insertStride);
-
   return { sizes: newSizes, strides: newStrides };
 }
 

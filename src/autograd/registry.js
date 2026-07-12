@@ -7,6 +7,7 @@ import { MatmulBackward, DotBackward } from './function/linalg.js';
 
 
 import { CatBackward, StackBackward, ClampBackward, PadBackward, IndexSelectBackward, WhereBackward } from './function/indexing.js';
+import { ReshapeBackward, TransposeBackward, PermuteBackward, SliceBackward, ExpandBackward, SelectBackward } from './function/view.js';
 
 const _registry = new Map();
 
@@ -48,10 +49,20 @@ _register('clamp', () => new ClampBackward());
 _register('pad', () => new PadBackward());
 _register('index_select', () => new IndexSelectBackward());
 _register('where', () => new WhereBackward());
+_register('reshape', () => new ReshapeBackward());
+_register('transpose', (args) => new TransposeBackward(args[1], args[2]));
+_register('permute', (args) => new PermuteBackward(args[1]));
+_register('broadcast_in_dim', () => new ExpandBackward());
+_register('expand', () => new ExpandBackward());
+_register('slice', (args) => new SliceBackward(args[1], args[2], args[3], args[4]));
+_register('narrow', (args) => new SliceBackward(args[1], args[2], args[2] + args[3], 1));
+_register('select', (args) => new SelectBackward(args[1], args[2]));
+_register('unsqueeze', () => new ReshapeBackward());
+_register('squeeze', () => new ReshapeBackward());
 
-export function getGradFn(opName) {
+export function getGradFn(opName, args = null) {
   const factory = _registry.get(opName);
-  return factory ? factory() : null;
+  return factory ? factory(args) : null;
 }
 
 export function hasGradFn(opName) {

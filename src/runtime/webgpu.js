@@ -3,7 +3,7 @@ import { bf16ToF32, f32ToBf16 } from '../tensor/utils/half.js';
 import { wrapResult } from '../dispatcher/jit_dispatch.js';
 import { WEBGPU_DEVICE } from '../tensor/types/device.js';
 import { stack } from '../tensor/ops/ops.js';
-import { select } from '../tensor/view/view_ops.js';
+import { select } from '../tensor/ops/ops.js';
 
 let _gpuDevice = null;
 let _gpuInitPromise = null;

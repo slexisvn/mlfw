@@ -54,7 +54,7 @@ describe('dispatch scalar arg spec parsing', () => {
 });
 
 describe('recordOp fallback chain', () => {
-  it('add goes through builder method (not in _BUILDER_METHOD_MAP)', () => {
+  it('add goes through shared IR mapping fallback', () => {
     const a = tensor([1, 2]);
     const b = tensor([3, 4]);
     const func = getFunc(trace((x, y) => x.add(y), [a, b]));

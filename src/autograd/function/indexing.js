@@ -1,7 +1,7 @@
 import { AutogradNode } from '../node.js';
 import * as ops from '../../tensor/ops/ops.js';
 import { zeros } from '../../tensor/factory/creation_ops.js';
-import { narrow, contiguous, select } from '../../tensor/view/view_ops.js';
+import { narrow, contiguous, select } from '../../tensor/ops/ops.js';
 import { normalizeAxis as _normDim } from '../../tensor/utils/shape_utils.js';
 
 export class CatBackward extends AutogradNode {

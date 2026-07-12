@@ -1,5 +1,5 @@
 import * as ops from '../../tensor/ops/ops.js';
-import { reshape, unsqueeze, squeeze } from '../../tensor/view/view_ops.js';
+import { reshape, unsqueeze, squeeze } from '../../tensor/ops/ops.js';
 
 export function conv2d(input, weight, bias, stride = [1, 1], padding = [[0, 0], [0, 0]], dilation = [1, 1], groups = 1) {
   const s = Array.isArray(stride) ? stride : [stride, stride];

@@ -11,14 +11,8 @@ import { DeviceType } from '../tensor/types/device.js';
 import { isEagerDeferred } from '../dispatcher/eager_mode.js';
 import { setAutogradEngine } from '../tensor/core/tensor.js';
 import { backward } from './engine.js';
-import { _initViewAutograd } from '../tensor/view/view_ops.js';
-import { ReshapeBackward, TransposeBackward, PermuteBackward, SliceBackward, ExpandBackward, SelectBackward } from './function/view.js';
 
 setAutogradEngine({ backward });
-_initViewAutograd({
-  GradMode, ReshapeBackward, TransposeBackward, PermuteBackward,
-  SliceBackward, ExpandBackward, SelectBackward, GradAccumulator,
-});
 
 function _snapshotTensor(t) {
   const impl = t._impl;
@@ -94,7 +88,7 @@ export function wrapWithAutograd(opName, handle) {
       return dispatcher.redispatch(handle, stripped, ...args);
     }
 
-    const gradFn = getGradFn(opName);
+    const gradFn = getGradFn(opName, args);
     if (!gradFn) {
       const stripped = keySet.subtract(AUTOGRAD_KEY_SET);
       return dispatcher.redispatch(handle, stripped, ...args);
@@ -125,9 +119,7 @@ export function wrapWithAutograd(opName, handle) {
     const result = dispatcher.redispatch(handle, stripped, ...args);
 
     if (result && result._impl) {
-      if (!result._impl.autogradMeta) {
-        result._impl.setAutogradMeta(new AutogradMeta());
-      }
+      result._impl.setAutogradMeta(new AutogradMeta());
       const meta = result._impl.autogradMeta;
       meta.setGradFn(gradFn, 0);
       meta.requiresGrad = true;

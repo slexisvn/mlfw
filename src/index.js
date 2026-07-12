@@ -36,13 +36,13 @@ export {
   exp, log, sqrt, rsqrt, abs, sin, cos, tanh, sigmoid,
   erf, erfc, lgamma, gamma,
   relu, gelu, silu, sign, floor, ceil,
-  eq, ne, lt, le, gt, ge, where, clamp, pad, one_hot, index_select, gather, scatter_add,
+  eq, ne, lt, le, gt, ge, where, clamp, pad, one_hot, index_select, gather, scatter_add, scatter,
   sum, mean, max, min, argmax, argmin, prod,
   matmul, dot, cat, stack, clone,
+  reshape, transpose, permute, broadcast_in_dim, expand, slice, unsqueeze, squeeze, narrow, select, contiguous,
+  repeat, tile, split, chunk, roll, flip, cumsum, sort, topk, argsort,
   softmax, log_softmax,
 } from './tensor/ops/ops.js';
-
-export { roll, flip, cumsum, sort, topk, argsort, scatter } from './tensor/ops/composite.js';
 
 export { noGrad, enableGrad } from './autograd/grad_mode.js';
 

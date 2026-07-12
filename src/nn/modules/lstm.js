@@ -2,7 +2,7 @@ import { Module } from '../module.js';
 import { Linear } from './linear.js';
 import { zeros } from '../../tensor/factory/creation_ops.js';
 import { add, mul, sigmoid, tanh, stack } from '../../tensor/ops/ops.js';
-import { select, split } from '../../tensor/view/view_ops.js';
+import { select, split } from '../../tensor/ops/ops.js';
 import { scan } from '../../tracing/scan.js';
 import { getActiveTracer } from '../../tracing/tracer.js';
 import { getCudnnLSTM, getWebgpuRNN } from '../../dispatcher/jit_dispatch.js';

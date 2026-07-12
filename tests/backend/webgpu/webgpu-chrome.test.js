@@ -226,7 +226,7 @@ describe.skipIf(!deps)('webgpu via Chrome (differential vs CPU)', () => {
           + "export { layer_norm } from './src/nn/functional/normalization.js';\n"
           + "export { conv2d } from './src/nn/functional/conv.js';\n"
           + "export { max_pool2d, avg_pool2d } from './src/nn/functional/pooling.js';\n"
-          + "export { split } from './src/tensor/view/view_ops.js';\n"
+          + "export { split } from './src/tensor/ops/ops.js';\n"
           + "export { WEBGPU_DEVICE } from './src/tensor/types/device.js';\n"
           + "export { preloadWebGPU } from './src/runtime/backend_registry.js';\n"
           + "export { flushWebGPUEager } from './src/runtime/webgpu.js';\n",

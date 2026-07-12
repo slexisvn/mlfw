@@ -1,6 +1,6 @@
 import { AutogradNode } from '../node.js';
 import * as ops from '../../tensor/ops/ops.js';
-import { transpose, unsqueeze, squeeze } from '../../tensor/view/view_ops.js';
+import { transpose, unsqueeze, squeeze } from '../../tensor/ops/ops.js';
 
 function _sumToShape(tensor, targetShape) {
   let t = tensor;

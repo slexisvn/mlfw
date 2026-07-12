@@ -10,6 +10,7 @@ import { typedArrayCtor } from '../tensor/types/dtype.js';
 import { computeNumel } from '../tensor/utils/shape_utils.js';
 
 import { foldWeightParams } from './fold_params.js';
+import { compileWithBackward } from './compile_backward.js';
 
 let _tracingRegistered = false;
 
@@ -181,7 +182,7 @@ export function executeCompiled(compiled, inputs, shapeEnv) {
 
 export function compile(model, exampleInputs, opts) {
   if (opts?.backward) {
-    return _compileWithBackward(model, exampleInputs, opts);
+    return compileWithBackward(model, exampleInputs, opts);
   }
 
   const target = opts?.target ?? CPUTarget();

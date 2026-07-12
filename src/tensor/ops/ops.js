@@ -58,6 +58,7 @@ export function one_hot(indices, depth) { return _dispatch('one_hot', indices, d
 export function index_select(self, dim, index) { return _dispatch('index_select', self, index, dim); }
 export function gather(self, dim, index) { return _dispatch('gather', self, index, dim); }
 export function scatter_add(self, dim, index, src) { return _dispatch('scatter_add', self, index, src, dim); }
+export function scatter(self, dim, index, src) { return _dispatch('scatter', self, dim, index, src); }
 
 export function sum(self, dim, keepdim) { return _dispatch('sum', self, dim, keepdim); }
 export function mean(self, dim, keepdim) { return _dispatch('mean', self, dim, keepdim); }
@@ -80,7 +81,35 @@ export function stack(tensors, dim) { return _dispatch('stack', tensors, dim); }
 export function clone(self) { return _dispatch('clone', self); }
 export function fill(self, value) { return _dispatch('fill', self, value); }
 
-export function transpose_op(self, dim0, dim1) { return _dispatch('transpose', self, dim0, dim1); }
+export function reshape(self, shape) { return _dispatch('reshape', self, shape); }
+export function transpose(self, dim0, dim1) { return _dispatch('transpose', self, dim0, dim1); }
+export function permute(self, dims) { return _dispatch('permute', self, dims); }
+export function broadcast_in_dim(self, resultShape, broadcastDimensions) { return _dispatch('broadcast_in_dim', self, resultShape, broadcastDimensions); }
+export function expand(self, shape) { return _dispatch('expand', self, shape); }
+export function slice(self, dim, start, end = null, step = 1) { return _dispatch('slice', self, dim, start, end, step); }
+export function unsqueeze(self, dim) { return _dispatch('unsqueeze', self, dim); }
+export function squeeze(self, dim = null) { return _dispatch('squeeze', self, dim); }
+export function narrow(self, dim, start, length) { return _dispatch('narrow', self, dim, start, length); }
+export function select(self, dim, index) { return _dispatch('select', self, dim, index); }
+export function contiguous(self) { return _dispatch('contiguous', self); }
+export function repeat(self, reps) { return _dispatch('repeat', self, reps); }
+export function tile(self, reps) { return _dispatch('tile', self, reps); }
+export function split(self, sizeOrSizes, dim = 0) {
+  if (Array.isArray(sizeOrSizes)) return _dispatch('split', self, sizeOrSizes, dim);
+  const rank = self.shape.length;
+  const d = dim < 0 ? rank + dim : dim;
+  const n = self.shape[d];
+  const sizes = [];
+  for (let off = 0; off < n; off += sizeOrSizes) sizes.push(Math.min(sizeOrSizes, n - off));
+  return _dispatch('split', self, sizes, dim);
+}
+export function chunk(self, chunks, dim = 0) { return _dispatch('chunk', self, chunks, dim); }
+export function roll(self, shift, dim = 0) { return _dispatch('roll', self, shift, dim); }
+export function flip(self, dims) { return _dispatch('flip', self, Array.isArray(dims) ? dims : [dims]); }
+export function cumsum(self, dim = 0) { return _dispatch('cumsum', self, dim); }
+export function sort(self, dim = -1, descending = false) { return _dispatch('sort', self, dim, descending); }
+export function argsort(self, dim = -1, descending = false) { return _dispatch('argsort', self, dim, descending); }
+export function topk(self, k, dim = -1, largest = true) { return _dispatch('topk', self, k, dim, largest); }
 
 export function softmax(self, dim) { return _dispatch('softmax', self, dim); }
 export function log_softmax(self, dim) { return _dispatch('log_softmax', self, dim); }

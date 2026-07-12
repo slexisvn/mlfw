@@ -99,7 +99,10 @@ export class CUDACodegen {
     this._emit(`__global__ void ${func.name}(${paramParts.join(', ')}) {`);
     this._indent++;
 
+    const emittedShared = new Set();
     for (const buf of this._sharedBuffers) {
+      if (emittedShared.has(buf.name)) continue;
+      emittedShared.add(buf.name);
       const numel = buf.numel();
       const al = buf.align16 ? '__align__(16) ' : '';
       this._emit(`__shared__ ${al}${cType(buf.dtype)} ${buf.name}[${numel > 0 ? numel : 1}];`);
@@ -512,11 +515,27 @@ export class CUDACodegen {
     }
   }
 
+  _findThreadPrivateAllocs(root, names) {
+    const walk = (node, underThread) => {
+      if (!node || typeof node !== 'object') return;
+      let t = underThread;
+      if (node.type === 'ForNode' && node.kind === ForKind.THREAD_BINDING && node.threadTag) {
+        const p = parseThreadAxis(node.threadTag);
+        if (p && p.space === 'thread') t = true;
+      }
+      if (t && node.type === 'AllocateNode' && node.buffer) names.add(node.buffer.name);
+      for (const c of irChildNodes(node)) walk(c, t);
+    };
+    walk(root, false);
+  }
+
   _findCrossThreadBuffers(func) {
     const storageNames = new Set();
     for (const [, buf] of func.bufferMap) storageNames.add(buf.name);
     const sharedNames = new Set(this._sharedBuffers.map(b => b.name));
-    const isIntermediate = (buf) => buf && !storageNames.has(buf.name) && !sharedNames.has(buf.name);
+    const threadPrivate = new Set();
+    this._findThreadPrivateAllocs(func.body, threadPrivate);
+    const isIntermediate = (buf) => buf && !storageNames.has(buf.name) && !sharedNames.has(buf.name) && !threadPrivate.has(buf.name);
     const isMulti = (buf) => typeof buf.numel !== 'function' || buf.numel() !== 1;
     const localWritten = new Set();
     const localRead = new Set();
@@ -571,10 +590,11 @@ export class CUDACodegen {
     this._scanBufferRefs(func.body, refBuffers);
 
     const limit = this.target.sharedMemoryBytes || 49152;
+    const alreadyShared = new Set(this._sharedBuffers.map(b => b.name));
     let used = this._sharedBuffers.reduce((sum, b) => sum + Math.max(b.sizeInBytes(), 0), 0);
     const decls = [];
     for (const name of crossThread) {
-      if (storageNames.has(name) || this._promotedBuffers.has(name)) continue;
+      if (storageNames.has(name) || this._promotedBuffers.has(name) || alreadyShared.has(name)) continue;
       const buf = refBuffers.get(name);
       if (!buf) return false;
       const numel = buf.numel();

@@ -1,88 +1,11 @@
-import { IRBuilder, indexSelectGatherOpts } from '../compiler/ir/graph/builder.js';
+import { IRBuilder } from '../compiler/ir/graph/builder.js';
 import { GraphModule } from '../compiler/ir/graph/module.js';
 import { GraphFunction } from '../compiler/ir/graph/function.js';
-import { TensorType, ScalarType, DYNAMIC } from '../compiler/ir/graph/types.js';
+import { TensorType, DYNAMIC } from '../compiler/ir/graph/types.js';
 import { registry } from '../compiler/ir/graph/ops.js';
 import { SymbolicTensor } from './symbolic_tensor.js';
 import { ShapeEnv } from './shape_env.js';
-import { reduceInitValue } from '../util/dtype_map.js';
-
-function _traceReduce(b, args, a, reduceType) {
-  const rank = args[0].type.rank;
-  const dims = a?.dim;
-  const dimensions = dims !== undefined && dims !== null
-    ? (Array.isArray(dims) ? dims : [dims]).map(d => d < 0 ? rank + d : d)
-    : Array.from({ length: rank }, (_, i) => i);
-  const initConst = b.scalarConstant(reduceInitValue(reduceType, args[0].type.dtype), args[0].type.dtype);
-  const reduced = b.reduce(args[0], initConst.getResult(0), dimensions, reduceType);
-  if (!a?.keepdim) return reduced;
-  const dimSet = new Set(dimensions);
-  const newShape = args[0].type.shape.map((d, i) => dimSet.has(i) ? 1 : d);
-  return b.reshape(reduced.getResult(0), newShape);
-}
-
-const _BUILDER_METHOD_MAP = {
-  matmul: (b, args) => b.matmul(args[0], args[1]),
-  softmax: (b, args, a) => b.softmax(args[0], a?.dim ?? -1),
-  log_softmax: (b, args, a) => b.logSoftmax(args[0], a?.dim ?? -1),
-  layer_norm: (b, args, a) => b.layernorm(args[0], args[1], args[2], a?.axis ?? -1, a?.eps ?? 1e-5),
-  batch_norm: (b, args, a) => b.batchnorm(args[0], args[1], args[2], args[3], args[4], a?.axis ?? 1, a?.eps ?? 1e-5),
-  embedding: (b, args) => b.embedding(args[0], args[1]),
-  relu: (b, args) => b.relu(args[0]),
-  sigmoid: (b, args) => b.sigmoid(args[0]),
-  gelu: (b, args) => b.gelu(args[0]),
-  silu: (b, args) => b.silu(args[0]),
-  conv2d: (b, args, a) => b.conv(args[0], args[1], a?.strides ?? [1,1], a?.padding ?? [[0,0],[0,0]], { dilation: a?.dilation, groups: a?.groups }),
-  pool2d: (b, args, a) => b.pool2d(args[0], a?.pool_type ?? 'max', a?.kernel_size ?? [2,2], a?.strides ?? [2,2], a?.padding ?? [[0,0],[0,0]]),
-  maximum: (b, args) => b.maximum(args[0], args[1]),
-  minimum: (b, args) => b.minimum(args[0], args[1]),
-  sum: (b, args, a) => _traceReduce(b, args, a, 'sum'),
-  mean: (b, args, a) => _traceReduce(b, args, a, 'mean'),
-  max: (b, args, a) => _traceReduce(b, args, a, 'max'),
-  min: (b, args, a) => _traceReduce(b, args, a, 'min'),
-  prod: (b, args, a) => _traceReduce(b, args, a, 'prod'),
-  argmax: (b, args, a) => b.argmax(args[0], a?.dim ?? 0, a?.keepdim ?? false),
-  argmin: (b, args, a) => b.argmin(args[0], a?.dim ?? 0, a?.keepdim ?? false),
-  eq: (b, args) => b.compare(args[0], args[1], 'eq'),
-  ne: (b, args) => b.compare(args[0], args[1], 'ne'),
-  lt: (b, args) => b.compare(args[0], args[1], 'lt'),
-  le: (b, args) => b.compare(args[0], args[1], 'le'),
-  gt: (b, args) => b.compare(args[0], args[1], 'gt'),
-  ge: (b, args) => b.compare(args[0], args[1], 'ge'),
-  transpose: (b, args, a) => {
-    const rank = args[0].type.rank;
-    const d0 = a?.dim0 ?? 0;
-    const d1 = a?.dim1 ?? 1;
-    const perm = Array.from({ length: rank }, (_, i) => i);
-    perm[d0] = d1;
-    perm[d1] = d0;
-    return b.transpose(args[0], perm);
-  },
-  clamp: (b, args) => b.clamp(args[1], args[0], args[2]),
-  pad: (b, args, a) => b.pad(args[0], args[1], a.low, a.high),
-  one_hot: (b, args, a) => b.oneHot(args[0], a.depth, { dtype: ScalarType.F32 }),
-  index_select: (b, args, a) => b.gather(args[0], args[1], indexSelectGatherOpts(args[0].type, a?.dim ?? 0, args[1].type.rank)),
-  gather: (b, args, a) => b.gatherDim(args[0], args[1], a?.dim ?? 0),
-  scatter_add: (b, args, a) => b.scatterAddDim(args[0], args[1], args[2], a?.dim ?? 0),
-  cat: (b, args, a) => {
-    const rank = args[0].type.rank;
-    const dim = (a?.dim ?? 0) < 0 ? rank + (a?.dim ?? 0) : (a?.dim ?? 0);
-    return b.concat(args, dim);
-  },
-  stack: (b, args, a) => {
-    const rank = args[0].type.rank;
-    const dim = (a?.dim ?? 0) < 0 ? rank + 1 + (a?.dim ?? 0) : (a?.dim ?? 0);
-    const expanded = args.map(arg => {
-      const newShape = [...arg.type.shape];
-      newShape.splice(dim, 0, 1);
-      return b.reshape(arg, newShape).getResult(0);
-    });
-    return b.concat(expanded, dim);
-  },
-  permute: (b, args, a) => b.transpose(args[0], a.dims),
-  reshape: (b, args, a) => b.reshape(args[0], a.new_shape),
-  slice: (b, args, a) => b.slice(args[0], a.starts, a.limits, a.strides),
-};
+import { buildMappedOp } from '../tensor/ops/ir_mapping.js';
 
 let _activeTracer = null;
 
@@ -155,31 +78,21 @@ export class Tracer {
       }
     }
 
-    let op;
-    const alias = _BUILDER_METHOD_MAP[opName];
-    if (alias) {
-      op = alias(this._builder, irOperands, attrs);
-    } else if (typeof this._builder[opName] === 'function') {
-      op = this._builder[opName](...irOperands);
-    } else {
-      op = this._builder._inferAndBuild(opName, irOperands, attrs || null);
+    const op = buildMappedOp(this._builder, opName, irOperands, attrs);
+
+    const results = [];
+    for (let i = 0; i < op.numResults; i++) {
+      const resultValue = op.getResult(i);
+      const resultType = resultValue.type;
+      const resultSymShape = this._propagateSymbolicShape(opName, op, tensorArgs, resultType, i);
+      resultValue.symbolicShape = resultSymShape;
+      results.push(new SymbolicTensor(resultValue, resultType.shape, resultType.dtype, this, resultSymShape));
     }
 
-    const resultValue = op.getResult(0);
-    const resultType = resultValue.type;
-    const resultSymShape = this._propagateSymbolicShape(opName, op, tensorArgs, resultType);
-    resultValue.symbolicShape = resultSymShape;
-
-    return new SymbolicTensor(
-      resultValue,
-      resultType.shape,
-      resultType.dtype,
-      this,
-      resultSymShape
-    );
+    return results.length === 1 ? results[0] : results;
   }
 
-  _propagateSymbolicShape(opName, op, tensorArgs, resultType) {
+  _propagateSymbolicShape(opName, op, tensorArgs, resultType, resultIndex = 0) {
     const symTensorArgs = tensorArgs.filter(a => a instanceof SymbolicTensor);
 
     const def = registry.get(op.opName || opName);
@@ -189,7 +102,7 @@ export class Tracer {
         shapeMap.set(arg.irValue, arg.symbolicShape);
       }
       const propagated = def.propagateSymbolicShapes(op, shapeMap);
-      if (propagated && propagated[0]) return propagated[0];
+      if (propagated && propagated[resultIndex]) return propagated[resultIndex];
     }
 
     const resultShape = resultType.shape;

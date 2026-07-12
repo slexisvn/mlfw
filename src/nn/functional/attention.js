@@ -1,6 +1,7 @@
 import * as ops from '../../tensor/ops/ops.js';
-import { transpose as viewTranspose } from '../../tensor/view/view_ops.js';
+import { transpose as viewTranspose } from '../../tensor/ops/ops.js';
 import { SymbolicTensor } from '../../tracing/symbolic_tensor.js';
+import { getActiveTracer } from '../../tracing/tracer.js';
 import { empty, full } from '../../tensor/factory/creation_ops.js';
 import { dropout } from './dropout.js';
 
@@ -20,7 +21,7 @@ function _softmax(x, dim) {
 function _transposeLastTwo(t) {
   const nd = t.ndim;
   if (t instanceof SymbolicTensor || t.isSymbolic) {
-    return ops.transpose_op(t, nd - 2, nd - 1);
+    return ops.transpose(t, nd - 2, nd - 1);
   }
   return viewTranspose(t, nd - 2, nd - 1);
 }
@@ -41,6 +42,14 @@ export function scaled_dot_product_attention(query, key, value, attnMask = null,
   const E = query.shape[query.ndim - 1];
   const L = query.shape[query.ndim - 2];
   const S = key.shape[key.ndim - 2];
+
+  const tracer = getActiveTracer();
+  const fusable = tracer && !attnMask && !(dropoutP > 0 && training)
+    && query instanceof SymbolicTensor && key instanceof SymbolicTensor && value instanceof SymbolicTensor
+    && query.ndim === 4;
+  if (fusable) {
+    return tracer.recordOp('scaled_dot_product_attention', [query, key, value], { scale: 1 / Math.sqrt(E), causal: isCausal });
+  }
 
   const scale = full([], 1 / Math.sqrt(E));
   const kT = _transposeLastTwo(key);

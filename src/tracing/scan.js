@@ -1,5 +1,5 @@
 import { getActiveTracer } from './tracer.js';
-import { select } from '../tensor/view/view_ops.js';
+import { select } from '../tensor/ops/ops.js';
 import { stack } from '../tensor/ops/ops.js';
 
 function stackSteps(steps) {

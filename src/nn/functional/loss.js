@@ -1,6 +1,6 @@
 import * as ops from '../../tensor/ops/ops.js';
 import { full } from '../../tensor/factory/creation_ops.js';
-import { select } from '../../tensor/view/view_ops.js';
+import { select } from '../../tensor/ops/ops.js';
 import { computeNumel } from '../../tensor/utils/shape_utils.js';
 
 export function mse_loss(input, target, reduction = 'mean') {

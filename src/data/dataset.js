@@ -1,4 +1,4 @@
-import { select } from '../tensor/view/view_ops.js';
+import { select } from '../tensor/ops/ops.js';
 
 export class Dataset {
   get length() {

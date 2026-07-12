@@ -1,5 +1,5 @@
 import { Module } from '../module.js';
-import { reshape } from '../../tensor/view/view_ops.js';
+import { reshape } from '../../tensor/ops/ops.js';
 
 export class Flatten extends Module {
   constructor(startDim = 1, endDim = -1) {

@@ -1,7 +1,7 @@
 import { AutogradNode } from '../node.js';
 import * as ops from '../../tensor/ops/ops.js';
 import { zeros } from '../../tensor/factory/creation_ops.js';
-import { reshape, transpose, permute, unsqueeze } from '../../tensor/view/view_ops.js';
+import { reshape, transpose, permute, unsqueeze } from '../../tensor/ops/ops.js';
 
 export class ReshapeBackward extends AutogradNode {
   constructor() { super(1); }
@@ -39,12 +39,16 @@ export class SliceBackward extends AutogradNode {
     const dim = this._dim;
     const size = meta.shape[dim];
     const step = this._step || 1;
+    let start = this._start < 0 ? this._start + size : this._start;
+    let end = this._end < 0 ? this._end + size : this._end;
+    start = Math.max(0, Math.min(start, size));
+    end = Math.max(0, Math.min(end, size));
 
     if (step === 1) {
       const low = meta.shape.map(() => 0);
       const high = meta.shape.map(() => 0);
-      low[dim] = this._start;
-      high[dim] = size - this._end;
+      low[dim] = start;
+      high[dim] = size - end;
       return [ops.pad(g, low, high, 0)];
     }
 
@@ -62,7 +66,7 @@ export class SliceBackward extends AutogradNode {
     for (let i = 0; i < g.numel; i++) {
       let oi = 0;
       for (let d = 0; d < ndim; d++) {
-        const idx = d === dim ? this._start + indices[d] * step : indices[d];
+        const idx = d === dim ? start + indices[d] * step : indices[d];
         oi += idx * resultStrides[d];
       }
       outData[oi] += gData[gi];
@@ -91,11 +95,12 @@ export class SelectBackward extends AutogradNode {
     const meta = this.inputMetadata(0);
     const dim = this._dim;
     const size = meta.shape[dim];
+    const index = this._index < 0 ? this._index + size : this._index;
     const expanded = unsqueeze(g, dim);
     const low = meta.shape.map(() => 0);
     const high = meta.shape.map(() => 0);
-    low[dim] = this._index;
-    high[dim] = size - 1 - this._index;
+    low[dim] = index;
+    high[dim] = size - 1 - index;
     return [ops.pad(expanded, low, high, 0)];
   }
 }
@@ -134,9 +139,11 @@ export class PermuteBackward extends AutogradNode {
   }
 
   apply(gradOutputs) {
-    const inversePerm = new Array(this._dims.length);
-    for (let i = 0; i < this._dims.length; i++) {
-      inversePerm[this._dims[i]] = i;
+    const rank = this._dims.length;
+    const inversePerm = new Array(rank);
+    for (let i = 0; i < rank; i++) {
+      const d = this._dims[i] < 0 ? rank + this._dims[i] : this._dims[i];
+      inversePerm[d] = i;
     }
     return [permute(gradOutputs[0], inversePerm)];
   }

@@ -9,6 +9,7 @@ import { TensorImpl } from '../tensor/core/tensor_impl.js';
 import { Storage } from '../tensor/core/storage.js';
 import { computeStrides, computeNumel, broadcastShapes, matmulOutputShape } from '../tensor/utils/shape_utils.js';
 import { resultDtype, typedArrayCtor } from '../tensor/types/dtype.js';
+import { scalarArgNames } from '../tensor/ops/metadata.js';
 
 let _cpuTarget, _cudaTarget, _wasmTarget, _webgpuTarget;
 const _TARGET_FOR_KEY = {
@@ -21,34 +22,10 @@ const _TARGET_FOR_KEY = {
 let _webgpuEagerFn = null;
 export function setWebGPUEagerFn(fn) { _webgpuEagerFn = fn; }
 
-const _SCALAR_ARG_SPEC = {
-  sum: ['dim', 'keepdim'],
-  mean: ['dim', 'keepdim'],
-  max: ['dim', 'keepdim'],
-  min: ['dim', 'keepdim'],
-  prod: ['dim', 'keepdim'],
-  argmax: ['dim', 'keepdim'],
-  argmin: ['dim', 'keepdim'],
-  transpose: ['dim0', 'dim1'],
-  softmax: ['dim'],
-  log_softmax: ['dim'],
-  layer_norm: ['axis', 'eps'],
-  batch_norm: ['axis', 'eps'],
-  conv2d: ['strides', 'padding', 'dilation', 'groups'],
-  pool2d: ['pool_type', 'kernel_size', 'strides', 'padding'],
-  pad: ['low', 'high'],
-  one_hot: ['depth'],
-  index_select: ['dim'],
-  gather: ['dim'],
-  scatter_add: ['dim'],
-  cat: ['dim'],
-  stack: ['dim'],
-};
-
 function _extractTensorsAndScalars(opName, args) {
   const tensors = [];
   const scalars = {};
-  const spec = _SCALAR_ARG_SPEC[opName];
+  const spec = scalarArgNames(opName);
   let scalarIdx = 0;
 
   for (let i = 0; i < args.length; i++) {

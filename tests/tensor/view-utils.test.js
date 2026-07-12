@@ -8,7 +8,7 @@ import {
   computeSqueeze,
   computeNarrow,
   computeSelect,
-} from '../../src/tensor/view/view_utils.js';
+} from '../../src/tensor/utils/view_utils.js';
 
 describe('computeTranspose', () => {
   it('swaps sizes and strides at given dims', () => {

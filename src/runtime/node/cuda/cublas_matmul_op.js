@@ -3,7 +3,7 @@ import { AutogradMeta } from '../../../tensor/core/autograd_meta.js';
 import { GradMode } from '../../../autograd/grad_mode.js';
 import { wireInputEdges } from '../../../autograd/accumulator.js';
 import { wrapResult, getGpuContiguousFn } from '../../../dispatcher/jit_dispatch.js';
-import { contiguous } from '../../../tensor/view/view_ops.js';
+import { contiguous } from '../../../tensor/ops/ops.js';
 import { DeviceType } from '../../../tensor/types/device.js';
 import { isEagerDeferred, deviceBufferForInput, deviceBufferForOutput, uploadIfStale } from './resident.js';
 import { acquire, release, copyDeviceToHost } from './memory.js';

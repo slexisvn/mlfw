@@ -3,30 +3,12 @@ import { KernelFunction } from '../dispatcher/boxing.js';
 import { dispatcher } from '../dispatcher/dispatcher.js';
 import { getActiveTracer } from './tracer.js';
 import { SymbolicTensor } from './symbolic_tensor.js';
+import { scalarArgNames } from '../tensor/ops/metadata.js';
 
-const _SCALAR_ARG_SPEC = {
-  sum: ['dim', 'keepdim'],
-  mean: ['dim', 'keepdim'],
-  max: ['dim', 'keepdim'],
-  min: ['dim', 'keepdim'],
-  prod: ['dim', 'keepdim'],
-  argmax: ['dim', 'keepdim'],
-  argmin: ['dim', 'keepdim'],
-  transpose: ['dim0', 'dim1'],
-  softmax: ['dim'],
-  log_softmax: ['dim'],
-  layer_norm: ['axis', 'eps'],
-  batch_norm: ['axis', 'eps'],
-  conv2d: ['strides', 'padding', 'dilation', 'groups'],
-  pool2d: ['pool_type', 'kernel_size', 'strides', 'padding'],
-  pad: ['low', 'high'],
-  one_hot: ['depth'],
-  index_select: ['dim'],
-  gather: ['dim'],
-  scatter_add: ['dim'],
-  cat: ['dim'],
-  stack: ['dim'],
-};
+const _TRACE_BY_DECOMPOSITION = new Set([
+  'scatter', 'repeat', 'tile', 'split', 'chunk', 'roll',
+  'flip', 'cumsum', 'sort', 'argsort', 'topk',
+]);
 
 function _tracingKernel(opName) {
   return (keySet, ...args) => {
@@ -35,9 +17,13 @@ function _tracingKernel(opName) {
       throw new Error(`TRACING dispatch key active but no tracer is set for op '${opName}'`);
     }
 
+    if (_TRACE_BY_DECOMPOSITION.has(opName)) {
+      return dispatcher.redispatch(dispatcher.findOp(opName), keySet, ...args);
+    }
+
     const tensorArgs = [];
     const scalarArgs = {};
-    const spec = _SCALAR_ARG_SPEC[opName];
+    const spec = scalarArgNames(opName);
     let scalarIdx = 0;
 
     const isTensor = (a) => (a instanceof SymbolicTensor) || (a && a._impl);

@@ -45,42 +45,6 @@ function _metaReduction(keySet, self, dim, keepdim) {
   return _metaTensor(result, self.dtype);
 }
 
-export const metaAdd = _metaBinary;
-export const metaSub = _metaBinary;
-export const metaMul = _metaBinary;
-export const metaDiv = _metaBinary;
-export const metaPow = _metaBinary;
-export const metaRem = _metaBinary;
-export const metaMaximum = _metaBinary;
-export const metaMinimum = _metaBinary;
-
-export const metaNeg = _metaUnary;
-export const metaExp = _metaUnary;
-export const metaLog = _metaUnary;
-export const metaSqrt = _metaUnary;
-export const metaRsqrt = _metaUnary;
-export const metaAbs = _metaUnary;
-export const metaSin = _metaUnary;
-export const metaCos = _metaUnary;
-export const metaTanh = _metaUnary;
-export const metaErf = _metaUnary;
-export const metaErfc = _metaUnary;
-export const metaLgamma = _metaUnary;
-export const metaGamma = _metaUnary;
-export const metaSigmoid = _metaUnary;
-export const metaRelu = _metaUnary;
-export const metaGelu = _metaUnary;
-export const metaSilu = _metaUnary;
-export const metaSign = _metaUnary;
-export const metaFloor = _metaUnary;
-export const metaCeil = _metaUnary;
-
-export const metaSum = _metaReduction;
-export const metaMean = _metaReduction;
-export const metaMax = _metaReduction;
-export const metaMin = _metaReduction;
-export const metaProd = _metaReduction;
-
 export function metaMatmul(keySet, self, other) {
   const shape = matmulOutputShape(self.shape, other.shape);
   if (shape === null) throw new Error(`metaMatmul: unsupported shapes`);
@@ -90,3 +54,19 @@ export function metaMatmul(keySet, self, other) {
 export function metaClone(keySet, self) {
   return _metaTensor([...self.shape], self.dtype);
 }
+
+function mapKernel(names, kernel) {
+  return Object.fromEntries(names.map(name => [name, kernel]));
+}
+
+export const META_KERNELS = Object.freeze({
+  ...mapKernel(['add', 'sub', 'mul', 'div', 'pow', 'rem', 'maximum', 'minimum'], _metaBinary),
+  ...mapKernel([
+    'neg', 'exp', 'log', 'sqrt', 'rsqrt', 'abs', 'sin', 'cos', 'tanh',
+    'erf', 'erfc', 'lgamma', 'gamma', 'sigmoid', 'relu', 'gelu', 'silu',
+    'sign', 'floor', 'ceil',
+  ], _metaUnary),
+  ...mapKernel(['sum', 'mean', 'max', 'min', 'prod'], _metaReduction),
+  matmul: metaMatmul,
+  clone: metaClone,
+});
