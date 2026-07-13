@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { zeros } from '../../src/index.js';
+import { tensor, zeros } from '../../src/index.js';
 import { Flatten } from '../../src/nn/modules/flatten.js';
 
 describe('Flatten forward', () => {
@@ -32,7 +32,6 @@ describe('Flatten forward', () => {
   });
 
   it('preserves data values', () => {
-    const { tensor } = require('../../src/index.js');
     const input = tensor([[1, 2, 3], [4, 5, 6]]);
     const flatten = new Flatten(0, -1);
     const out = flatten.forward(input);

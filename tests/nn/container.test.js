@@ -1,18 +1,18 @@
 import { describe, it, expect } from 'vitest';
 import { tensor, Linear, Sequential, ModuleList, ModuleDict } from '../../src/index.js';
+import { full } from '../../src/tensor/factory/creation_ops.js';
+import { add, mul } from '../../src/tensor/ops/ops.js';
 import { constant_ } from '../../src/nn/init.js';
 import { Module } from '../../src/nn/module.js';
 
 class DoubleModule extends Module {
   forward(input) {
-    const { mul, full } = require('../../src/index.js');
     return mul(input, full(input.shape, 2, { dtype: input.dtype }));
   }
 }
 
 class AddOneModule extends Module {
   forward(input) {
-    const { add, full } = require('../../src/index.js');
     return add(input, full(input.shape, 1, { dtype: input.dtype }));
   }
 }

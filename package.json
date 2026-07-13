@@ -58,6 +58,7 @@
     "@vitest/coverage-v8": "^4.1.8",
     "esbuild": "^0.28.0",
     "puppeteer-core": "^25.1.0",
+    "typescript": "^5.9.3",
     "vitest": "^4.1.8"
   },
   "dependencies": {
