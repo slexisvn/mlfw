@@ -22,6 +22,7 @@
     "src/tensor/native/**/*.ts",
     "src/autograd/**/*.ts",
     "src/numeric/**/*.ts",
-    "src/optim/**/*.ts"
+    "src/optim/**/*.ts",
+    "src/nn/**/*.ts"
   ]
 }

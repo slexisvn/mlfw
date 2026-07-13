@@ -1,4 +1,10 @@
-export function _calculateFanInFanOut(tensor) {
+import type { Tensor } from '../tensor/core/tensor.js';
+import type { NumericTypedArray } from '../tensor/types/dtype.js';
+
+type KaimingMode = 'fan_in' | 'fan_out';
+type NumericFillArray = Exclude<NumericTypedArray, BigInt64Array>;
+
+export function _calculateFanInFanOut(tensor: Tensor): { fanIn: number; fanOut: number } {
   const shape = tensor.shape;
   const ndim = shape.length;
   if (ndim < 2) throw new Error('Fan in/out requires at least 2D tensor');
@@ -12,7 +18,7 @@ export function _calculateFanInFanOut(tensor) {
   };
 }
 
-export function resetLinearParameters(weight, bias) {
+export function resetLinearParameters(weight: Tensor, bias?: Tensor | null): void {
   kaiming_uniform_(weight, Math.sqrt(5));
   if (bias) {
     const { fanIn } = _calculateFanInFanOut(weight);
@@ -21,7 +27,7 @@ export function resetLinearParameters(weight, bias) {
   }
 }
 
-export function uniform_(tensor, a = 0, b = 1) {
+export function uniform_<T extends Tensor>(tensor: T, a = 0, b = 1): T {
   const data = tensor._impl.storage.data;
   if (!data) return tensor;
   const range = b - a;
@@ -30,7 +36,7 @@ export function uniform_(tensor, a = 0, b = 1) {
   return tensor;
 }
 
-export function normal_(tensor, mean = 0, std = 1) {
+export function normal_<T extends Tensor>(tensor: T, mean = 0, std = 1): T {
   const data = tensor._impl.storage.data;
   if (!data) return tensor;
   for (let i = 0; i < data.length; i += 2) {
@@ -45,41 +51,41 @@ export function normal_(tensor, mean = 0, std = 1) {
   return tensor;
 }
 
-export function zeros_(tensor) {
+export function zeros_<T extends Tensor>(tensor: T): T {
   const data = tensor._impl.storage.data;
-  if (data) data.fill(0);
+  if (data) (data as NumericFillArray).fill(0);
   tensor._impl.bumpVersion();
   return tensor;
 }
 
-export function ones_(tensor) {
+export function ones_<T extends Tensor>(tensor: T): T {
   const data = tensor._impl.storage.data;
-  if (data) data.fill(1);
+  if (data) (data as NumericFillArray).fill(1);
   tensor._impl.bumpVersion();
   return tensor;
 }
 
-export function constant_(tensor, val) {
+export function constant_<T extends Tensor>(tensor: T, val: number): T {
   const data = tensor._impl.storage.data;
-  if (data) data.fill(val);
+  if (data) (data as NumericFillArray).fill(val);
   tensor._impl.bumpVersion();
   return tensor;
 }
 
-export function xavier_uniform_(tensor, gain = 1.0) {
+export function xavier_uniform_<T extends Tensor>(tensor: T, gain = 1.0): T {
   const { fanIn, fanOut } = _calculateFanInFanOut(tensor);
   const std = gain * Math.sqrt(2.0 / (fanIn + fanOut));
   const a = Math.sqrt(3.0) * std;
   return uniform_(tensor, -a, a);
 }
 
-export function xavier_normal_(tensor, gain = 1.0) {
+export function xavier_normal_<T extends Tensor>(tensor: T, gain = 1.0): T {
   const { fanIn, fanOut } = _calculateFanInFanOut(tensor);
   const std = gain * Math.sqrt(2.0 / (fanIn + fanOut));
   return normal_(tensor, 0, std);
 }
 
-export function kaiming_uniform_(tensor, a = 0, mode = 'fan_in', nonlinearity = 'leaky_relu') {
+export function kaiming_uniform_<T extends Tensor>(tensor: T, a = 0, mode: KaimingMode = 'fan_in', nonlinearity = 'leaky_relu'): T {
   const { fanIn, fanOut } = _calculateFanInFanOut(tensor);
   const fan = mode === 'fan_in' ? fanIn : fanOut;
   const gain = _calculateGain(nonlinearity, a);
@@ -88,7 +94,7 @@ export function kaiming_uniform_(tensor, a = 0, mode = 'fan_in', nonlinearity = 
   return uniform_(tensor, -bound, bound);
 }
 
-export function kaiming_normal_(tensor, a = 0, mode = 'fan_in', nonlinearity = 'leaky_relu') {
+export function kaiming_normal_<T extends Tensor>(tensor: T, a = 0, mode: KaimingMode = 'fan_in', nonlinearity = 'leaky_relu'): T {
   const { fanIn, fanOut } = _calculateFanInFanOut(tensor);
   const fan = mode === 'fan_in' ? fanIn : fanOut;
   const gain = _calculateGain(nonlinearity, a);
@@ -96,7 +102,7 @@ export function kaiming_normal_(tensor, a = 0, mode = 'fan_in', nonlinearity = '
   return normal_(tensor, 0, std);
 }
 
-function _calculateGain(nonlinearity, param = 0.01) {
+function _calculateGain(nonlinearity: string, param = 0.01): number {
   switch (nonlinearity) {
     case 'linear': case 'sigmoid': return 1;
     case 'tanh': return 5.0 / 3;

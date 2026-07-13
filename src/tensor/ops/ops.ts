@@ -5,6 +5,7 @@ import { getGpuMatmul } from '../../dispatcher/jit_dispatch.js';
 import type { Tensor } from '../core/tensor.js';
 
 type TensorInput = Tensor | number;
+type PaddingArg = readonly number[] | readonly (readonly number[])[];
 
 function hasTensorImpl(value: unknown): value is Tensor {
   return typeof value === 'object' && value !== null && '_impl' in value;
@@ -130,6 +131,6 @@ export function softmax(self: Tensor, dim: number): Tensor { return _dispatchTen
 export function log_softmax(self: Tensor, dim: number): Tensor { return _dispatchTensor('log_softmax', self, dim); }
 export function layer_norm(input: Tensor, weight: Tensor, bias: Tensor, axis: number, eps: number): Tensor { return _dispatchTensor('layer_norm', input, weight, bias, axis, eps); }
 export function batch_norm(input: Tensor, weight: Tensor, bias: Tensor, mean: Tensor, variance: Tensor, axis: number, eps: number): Tensor { return _dispatchTensor('batch_norm', input, weight, bias, mean, variance, axis, eps); }
-export function conv2d(input: Tensor, weight: Tensor, strides: readonly number[], padding: readonly number[], dilation: readonly number[], groups: number): Tensor { return _dispatchTensor('conv2d', input, weight, strides, padding, dilation, groups); }
-export function pool2d(input: Tensor, poolType: string, kernelSize: readonly number[], strides: readonly number[], padding: readonly number[]): Tensor { return _dispatchTensor('pool2d', input, poolType, kernelSize, strides, padding); }
+export function conv2d(input: Tensor, weight: Tensor, strides: readonly number[], padding: PaddingArg, dilation: readonly number[], groups: number): Tensor { return _dispatchTensor('conv2d', input, weight, strides, padding, dilation, groups); }
+export function pool2d(input: Tensor, poolType: string, kernelSize: readonly number[], strides: readonly number[], padding: PaddingArg): Tensor { return _dispatchTensor('pool2d', input, poolType, kernelSize, strides, padding); }
 export function embedding(weight: Tensor, indices: Tensor): Tensor { return _dispatchTensor('embedding', weight, indices); }

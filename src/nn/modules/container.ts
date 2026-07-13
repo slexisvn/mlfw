@@ -1,7 +1,9 @@
 import { Module } from '../module.js';
 
 export class Sequential extends Module {
-  constructor(...modules) {
+  private _length: number;
+
+  constructor(...modules: Module[]) {
     super();
     for (let i = 0; i < modules.length; i++) {
       this[String(i)] = modules[i];
@@ -10,25 +12,25 @@ export class Sequential extends Module {
     this._length = modules.length;
   }
 
-  forward(input) {
+  forward(input: unknown): unknown {
     let x = input;
     for (let i = 0; i < this._length; i++) {
-      x = this[String(i)].forward(x);
+      x = (this[String(i)] as Module).forward(x);
     }
     return x;
   }
 
-  get length() {
+  get length(): number {
     return this._length;
   }
 
-  *[Symbol.iterator]() {
+  *[Symbol.iterator](): Generator<Module> {
     for (let i = 0; i < this._length; i++) {
-      yield this[String(i)];
+      yield this[String(i)] as Module;
     }
   }
 
-  push(module) {
+  push(module: Module): this {
     const idx = this._length;
     this[String(idx)] = module;
     this.registerModule(String(idx), module);
@@ -38,7 +40,9 @@ export class Sequential extends Module {
 }
 
 export class ModuleList extends Module {
-  constructor(modules) {
+  private _list: Module[];
+
+  constructor(modules?: Module[]) {
     super();
     this._list = [];
     if (modules) {
@@ -49,32 +53,34 @@ export class ModuleList extends Module {
     }
   }
 
-  get length() {
+  get length(): number {
     return this._list.length;
   }
 
-  get(i) {
+  get(i: number): Module | undefined {
     return this._list[i];
   }
 
-  push(module) {
+  push(module: Module): this {
     const idx = this._list.length;
     this._list.push(module);
     this.registerModule(String(idx), module);
     return this;
   }
 
-  *[Symbol.iterator]() {
+  *[Symbol.iterator](): Generator<Module> {
     for (const m of this._list) yield m;
   }
 
-  forward() {
+  forward(): never {
     throw new Error('ModuleList does not implement forward()');
   }
 }
 
 export class ModuleDict extends Module {
-  constructor(modules) {
+  private _dict: Map<string, Module>;
+
+  constructor(modules?: Record<string, Module>) {
     super();
     this._dict = new Map();
     if (modules) {
@@ -85,37 +91,37 @@ export class ModuleDict extends Module {
     }
   }
 
-  get(key) {
+  get(key: string): Module | undefined {
     return this._dict.get(key);
   }
 
-  set(key, module) {
+  set(key: string, module: Module): this {
     this._dict.set(key, module);
     this.registerModule(key, module);
     return this;
   }
 
-  has(key) {
+  has(key: string): boolean {
     return this._dict.has(key);
   }
 
-  get size() {
+  get size(): number {
     return this._dict.size;
   }
 
-  *keys() {
+  *keys(): Generator<string> {
     yield* this._dict.keys();
   }
 
-  *values() {
+  *values(): Generator<Module> {
     yield* this._dict.values();
   }
 
-  *[Symbol.iterator]() {
+  *[Symbol.iterator](): Generator<[string, Module]> {
     yield* this._dict.entries();
   }
 
-  forward() {
+  forward(): never {
     throw new Error('ModuleDict does not implement forward()');
   }
 }
