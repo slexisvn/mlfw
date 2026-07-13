@@ -61,17 +61,17 @@ export class KernelFunction {
   private readonly _boxed: BoxedFn | null;
   private readonly _unboxed: UnboxedFn | null;
 
-  constructor(boxed?: BoxedFn | null, unboxed?: UnboxedFn | null) {
+  constructor(boxed?: BoxedFn, unboxed?: UnboxedFn) {
     this._boxed = boxed || null;
     this._unboxed = unboxed || null;
   }
 
   static fromBoxed(fn: BoxedFn) {
-    return new KernelFunction(fn, null);
+    return new KernelFunction(fn);
   }
 
   static fromUnboxed(fn: UnboxedFn) {
-    return new KernelFunction(null, fn);
+    return new KernelFunction(undefined, fn);
   }
 
   static fromBoth(boxed: BoxedFn, unboxed: UnboxedFn) {

@@ -7,7 +7,7 @@ describe('guardStack apply', () => {
     const ks = DispatchKeySet.fromKeys(DispatchKey.CPU, DispatchKey.AUTOGRAD);
     const exclude = DispatchKeySet.fromKey(DispatchKey.AUTOGRAD);
 
-    guardStack.push(exclude, null);
+    guardStack.push(exclude);
     const result = guardStack.apply(ks);
     guardStack.pop();
 
@@ -19,7 +19,7 @@ describe('guardStack apply', () => {
     const ks = DispatchKeySet.fromKey(DispatchKey.CPU);
     const include = DispatchKeySet.fromKey(DispatchKey.TRACING);
 
-    guardStack.push(null, include);
+    guardStack.push(undefined, include);
     const result = guardStack.apply(ks);
     guardStack.pop();
 
@@ -29,8 +29,8 @@ describe('guardStack apply', () => {
 
   it('applies multiple frames in stack order', () => {
     const ks = DispatchKeySet.fromKeys(DispatchKey.CPU, DispatchKey.AUTOGRAD);
-    guardStack.push(DispatchKeySet.fromKey(DispatchKey.AUTOGRAD), null);
-    guardStack.push(null, DispatchKeySet.fromKey(DispatchKey.TRACING));
+    guardStack.push(DispatchKeySet.fromKey(DispatchKey.AUTOGRAD));
+    guardStack.push(undefined, DispatchKeySet.fromKey(DispatchKey.TRACING));
 
     const result = guardStack.apply(ks);
 

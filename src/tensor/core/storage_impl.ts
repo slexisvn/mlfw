@@ -18,7 +18,7 @@ class MetaAllocator {
     return null;
   }
 
-  free(_data?: NumericTypedArray | null) {}
+  free(_data?: NumericTypedArray) {}
 }
 
 type Allocator = CPUAllocator | MetaAllocator;

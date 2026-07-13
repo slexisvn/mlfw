@@ -13,7 +13,7 @@ class GuardStack {
     this._frames = [];
   }
 
-  push(excludeKeys?: DispatchKeySet | null, includeKeys?: DispatchKeySet | null): void {
+  push(excludeKeys?: DispatchKeySet, includeKeys?: DispatchKeySet): void {
     this._frames.push({
       exclude: excludeKeys || EMPTY_KEY_SET,
       include: includeKeys || EMPTY_KEY_SET,
@@ -46,7 +46,7 @@ class GuardStack {
 export const guardStack = new GuardStack();
 
 export function withExcludedKeys<T>(keys: DispatchKeySet, fn: () => T): T {
-  guardStack.push(keys, null);
+  guardStack.push(keys);
   try {
     return fn();
   } finally {
@@ -66,7 +66,7 @@ function isThenable<T>(value: T | Thenable<T>): value is Thenable<T> {
 }
 
 export function withIncludedKeys<T>(keys: DispatchKeySet, fn: () => T): T | PromiseLike<T> {
-  guardStack.push(null, keys);
+  guardStack.push(undefined, keys);
   let result: T;
   try {
     result = fn();

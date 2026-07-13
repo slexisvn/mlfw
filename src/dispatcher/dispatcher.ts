@@ -131,7 +131,7 @@ function _unionArg(ks: DispatchKeySet, arg: unknown): DispatchKeySet {
   return ks;
 }
 
-export function computeKeySet(args: readonly unknown[], schema?: OperatorSchema | null): DispatchKeySet {
+export function computeKeySet(args: readonly unknown[], schema?: OperatorSchema): DispatchKeySet {
   let ks = EMPTY_KEY_SET;
   if (schema) {
     const indices = schema.tensorArgIndices;

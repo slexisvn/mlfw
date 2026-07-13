@@ -62,13 +62,13 @@ describe('computeKeySet', () => {
   it('unions dispatch key sets from tensor arguments', () => {
     const a = tensor([1]);
     const b = tensor([2]);
-    const ks = computeKeySet([a, b], null);
+    const ks = computeKeySet([a, b]);
     expect(ks.has(DispatchKey.CPU)).toBe(true);
   });
 
   it('skips non-tensor arguments', () => {
     const a = tensor([1]);
-    const ks = computeKeySet([a, 42, 'hello'], null);
+    const ks = computeKeySet([a, 42, 'hello']);
     expect(ks.has(DispatchKey.CPU)).toBe(true);
     expect(ks.count()).toBeGreaterThanOrEqual(1);
   });

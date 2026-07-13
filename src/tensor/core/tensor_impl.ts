@@ -91,7 +91,7 @@ export class TensorImpl {
     return false;
   }
 
-  setSizesAndStrides(sizes: readonly number[], strides?: readonly number[] | null) {
+  setSizesAndStrides(sizes: readonly number[], strides?: readonly number[]) {
     this._sizes = Object.freeze([...sizes]);
     this._strides = strides ? Object.freeze([...strides]) : Object.freeze(computeStrides(sizes));
     this._numel = computeNumel(sizes);

@@ -49,7 +49,7 @@ describe('TensorImpl.isContiguous caching', () => {
   it('setSizesAndStrides updates numel', () => {
     const impl = makeImpl([2, 3], [3, 1]);
     expect(impl.numel()).toBe(6);
-    impl.setSizesAndStrides([4, 5], null);
+    impl.setSizesAndStrides([4, 5]);
     expect(impl.numel()).toBe(20);
   });
 });

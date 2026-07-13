@@ -26,7 +26,7 @@ export class SchemaArg {
   readonly defaultValue: string | null;
   readonly isOut: boolean;
 
-  constructor(name: string, kind: ArgKindValue, defaultValue?: string | null, isOut?: boolean) {
+  constructor(name: string, kind: ArgKindValue, defaultValue?: string, isOut?: boolean) {
     this.name = name;
     this.kind = kind;
     this.defaultValue = defaultValue ?? null;
@@ -134,7 +134,7 @@ function _parseArgs(str: string): SchemaArg[] {
     const trimmed = part.trim();
     const eqIdx = trimmed.indexOf('=');
     let mainPart = trimmed;
-    let defaultValue: string | null = null;
+    let defaultValue: string | undefined;
     if (eqIdx >= 0) {
       mainPart = trimmed.substring(0, eqIdx).trim();
       defaultValue = trimmed.substring(eqIdx + 1).trim();
