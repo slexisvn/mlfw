@@ -2,6 +2,7 @@ import { typedArrayCtor, dtypeSize } from '../types/dtype.js';
 import type { DType, NumericTypedArray } from '../types/dtype.js';
 import { DeviceType } from '../types/device.js';
 import type { Device, DeviceTypeName } from '../types/device.js';
+import type { NumericSettable } from '../types/options.js';
 
 class CPUAllocator {
   allocate(count: number, dtype: DType): NumericTypedArray {
@@ -21,7 +22,6 @@ class MetaAllocator {
 }
 
 type Allocator = CPUAllocator | MetaAllocator;
-type NumericSettable = { set(array: ArrayLike<number | bigint>, offset?: number): void };
 
 const _ALLOCATORS = new Map<DeviceTypeName, Allocator>([
   [DeviceType.CPU, new CPUAllocator()],

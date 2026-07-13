@@ -61,7 +61,7 @@ export class KernelFunction {
   private readonly _boxed: BoxedFn | null;
   private readonly _unboxed: UnboxedFn | null;
 
-  constructor(boxed: BoxedFn | null | undefined, unboxed: UnboxedFn | null | undefined) {
+  constructor(boxed?: BoxedFn | null, unboxed?: UnboxedFn | null) {
     this._boxed = boxed || null;
     this._unboxed = unboxed || null;
   }

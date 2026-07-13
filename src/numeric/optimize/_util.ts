@@ -52,7 +52,7 @@ export function numericGradient(f: VectorFn, x: readonly number[], step: number)
   return g;
 }
 
-export function clampToBounds(x: readonly number[], bounds: Bounds | null | undefined): number[] {
+export function clampToBounds(x: readonly number[], bounds?: Bounds | null): number[] {
   if (!bounds) return x.slice();
   return x.map((v, j) => {
     const b = bounds[j];

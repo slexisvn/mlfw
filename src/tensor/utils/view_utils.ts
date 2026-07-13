@@ -55,7 +55,7 @@ export function computeExpand(sizes: Shape, strides: Shape, targetShape: Shape):
   return { sizes: newSizes, strides: newStrides };
 }
 
-export function computeSlice(sizes: Shape, strides: Shape, dim: number, start: number | null | undefined, end: number | null | undefined, step: number | null | undefined): OffsetViewResult {
+export function computeSlice(sizes: Shape, strides: Shape, dim: number, start?: number | null, end?: number | null, step?: number | null): OffsetViewResult {
   const ndim = sizes.length;
   const d = dim < 0 ? ndim + dim : dim;
   const dimSize = sizes[d]!;

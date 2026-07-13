@@ -22,7 +22,7 @@ export class TensorImpl {
   private _version: number;
   private _contiguousCache: boolean | null;
 
-  constructor(storage: Storage, storageOffset: number, sizes: readonly number[], strides: readonly number[] | null | undefined, dtype: DType, device: Device) {
+  constructor(storage: Storage, storageOffset: number, sizes: readonly number[], strides: readonly number[] | null, dtype: DType, device: Device) {
     this._storage = storage;
     this._storageOffset = storageOffset;
     this._sizes = Object.freeze([...sizes]);

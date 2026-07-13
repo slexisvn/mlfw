@@ -12,15 +12,13 @@
   },
   "include": [
     "src/compiler/ir/graph/types.ts",
-    "src/dispatcher/dispatch_key.ts",
-    "src/dispatcher/boxing.ts",
-    "src/dispatcher/library.ts",
-    "src/dispatcher/jit_dispatch.ts",
+    "src/dispatcher/**/*.ts",
     "src/tensor/types/**/*.ts",
     "src/tensor/core/**/*.ts",
     "src/tensor/utils/**/*.ts",
-    "src/tensor/factory/from_ops.ts",
-    "src/tensor/ops/linalg.ts",
+    "src/tensor/factory/**/*.ts",
+    "src/tensor/ops/**/*.ts",
+    "src/tensor/native/**/*.ts",
     "src/numeric/**/*.ts"
   ]
 }

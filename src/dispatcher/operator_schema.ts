@@ -1,49 +1,68 @@
-export const ArgKind = Object.freeze({
-  TENSOR: 'Tensor',
-  SCALAR: 'Scalar',
-  INT: 'int',
-  FLOAT: 'float',
-  BOOL: 'bool',
-  INT_LIST: 'int[]',
-  TENSOR_LIST: 'Tensor[]',
-  DTYPE: 'Dtype',
-  DEVICE: 'Device',
-  STRING: 'str',
-  MEMORY_FORMAT: 'MemoryFormat',
-});
+export enum ArgKind {
+  TENSOR = 'Tensor',
+  SCALAR = 'Scalar',
+  INT = 'int',
+  FLOAT = 'float',
+  BOOL = 'bool',
+  INT_LIST = 'int[]',
+  TENSOR_LIST = 'Tensor[]',
+  DTYPE = 'Dtype',
+  DEVICE = 'Device',
+  STRING = 'str',
+  MEMORY_FORMAT = 'MemoryFormat',
+}
 
-const _TENSOR_KINDS = new Set([ArgKind.TENSOR, ArgKind.TENSOR_LIST]);
+export type ArgKindValue = `${ArgKind}`;
+
+export type ReturnSpec = Readonly<{
+  kind: ArgKindValue;
+}>;
+
+const _TENSOR_KINDS: ReadonlySet<ArgKindValue> = new Set([ArgKind.TENSOR, ArgKind.TENSOR_LIST]);
 
 export class SchemaArg {
-  constructor(name, kind, defaultValue, isOut) {
+  readonly name: string;
+  readonly kind: ArgKindValue;
+  readonly defaultValue: string | null;
+  readonly isOut: boolean;
+
+  constructor(name: string, kind: ArgKindValue, defaultValue?: string | null, isOut?: boolean) {
     this.name = name;
     this.kind = kind;
     this.defaultValue = defaultValue ?? null;
     this.isOut = isOut ?? false;
   }
 
-  get isTensor() {
+  get isTensor(): boolean {
     return _TENSOR_KINDS.has(this.kind);
   }
 }
 
 export class OperatorSchema {
-  constructor(namespace, name, overload, args, returns) {
+  readonly namespace: string;
+  readonly name: string;
+  readonly overload: string;
+  readonly args: readonly SchemaArg[];
+  readonly returns: readonly ReturnSpec[];
+  private _key: string | null;
+  private _tensorArgIndices: readonly number[] | null;
+
+  constructor(namespace: string, name: string, overload: string, args: readonly SchemaArg[], returns: readonly ReturnSpec[]) {
     this.namespace = namespace;
     this.name = name;
     this.overload = overload || '';
-    this.args = Object.freeze(args);
-    this.returns = Object.freeze(returns);
+    this.args = Object.freeze([...args]);
+    this.returns = Object.freeze([...returns]);
 
     this._key = null;
     this._tensorArgIndices = null;
   }
 
-  qualifiedName() {
+  qualifiedName(): string {
     return `${this.namespace}::${this.name}`;
   }
 
-  key() {
+  key(): string {
     if (!this._key) {
       this._key = this.overload
         ? `${this.namespace}::${this.name}.${this.overload}`
@@ -52,9 +71,9 @@ export class OperatorSchema {
     return this._key;
   }
 
-  get tensorArgIndices() {
+  get tensorArgIndices(): readonly number[] {
     if (!this._tensorArgIndices) {
-      const indices = [];
+      const indices: number[] = [];
       for (let i = 0; i < this.args.length; i++) {
         if (this.args[i].isTensor) indices.push(i);
       }
@@ -63,12 +82,12 @@ export class OperatorSchema {
     return this._tensorArgIndices;
   }
 
-  get numTensorArgs() {
+  get numTensorArgs(): number {
     return this.tensorArgIndices.length;
   }
 }
 
-const _KIND_MAP = new Map([
+const _KIND_MAP: ReadonlyMap<string, ArgKindValue> = new Map([
   ['Tensor', ArgKind.TENSOR],
   ['Scalar', ArgKind.SCALAR],
   ['int', ArgKind.INT],
@@ -82,7 +101,7 @@ const _KIND_MAP = new Map([
   ['MemoryFormat', ArgKind.MEMORY_FORMAT],
 ]);
 
-export function parseSchema(str, namespace) {
+export function parseSchema(str: string, namespace?: string): OperatorSchema {
   const ns = namespace || 'mlc';
   const arrowIdx = str.indexOf('->');
   const sigPart = arrowIdx >= 0 ? str.substring(0, arrowIdx).trim() : str.trim();
@@ -91,7 +110,7 @@ export function parseSchema(str, namespace) {
   const parenOpen = sigPart.indexOf('(');
   const parenClose = sigPart.lastIndexOf(')');
 
-  let name, overload = '';
+  let name: string, overload = '';
   const namePart = sigPart.substring(0, parenOpen).trim();
   const dotIdx = namePart.indexOf('.');
   if (dotIdx >= 0) {
@@ -109,13 +128,13 @@ export function parseSchema(str, namespace) {
   return new OperatorSchema(ns, name, overload, args, returns);
 }
 
-function _parseArgs(str) {
+function _parseArgs(str: string): SchemaArg[] {
   const parts = _splitTopLevel(str, ',');
   return parts.map(part => {
     const trimmed = part.trim();
     const eqIdx = trimmed.indexOf('=');
     let mainPart = trimmed;
-    let defaultValue = null;
+    let defaultValue: string | null = null;
     if (eqIdx >= 0) {
       mainPart = trimmed.substring(0, eqIdx).trim();
       defaultValue = trimmed.substring(eqIdx + 1).trim();
@@ -125,7 +144,7 @@ function _parseArgs(str) {
     if (isOut) mainPart = mainPart.substring(0, mainPart.length - 1).trim();
 
     const spaceIdx = mainPart.lastIndexOf(' ');
-    let typePart, namePart;
+    let typePart: string, namePart: string;
     if (spaceIdx >= 0) {
       typePart = mainPart.substring(0, spaceIdx).trim();
       namePart = mainPart.substring(spaceIdx + 1).trim();
@@ -140,7 +159,7 @@ function _parseArgs(str) {
   });
 }
 
-function _parseReturns(str) {
+function _parseReturns(str: string): ReturnSpec[] {
   const trimmed = str.trim();
   if (trimmed.startsWith('(') && trimmed.endsWith(')')) {
     const inner = trimmed.substring(1, trimmed.length - 1);
@@ -155,8 +174,8 @@ function _parseReturns(str) {
   return [{ kind }];
 }
 
-function _splitTopLevel(str, sep) {
-  const parts = [];
+function _splitTopLevel(str: string, sep: string): string[] {
+  const parts: string[] = [];
   let depth = 0;
   let start = 0;
   for (let i = 0; i < str.length; i++) {

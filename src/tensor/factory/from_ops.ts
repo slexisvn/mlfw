@@ -5,19 +5,12 @@ import { ScalarType, typedArrayCtor } from '../types/dtype.js';
 import type { DType, NumericTypedArray } from '../types/dtype.js';
 import { getDefaultDevice } from '../types/device.js';
 import type { Device } from '../types/device.js';
+import type { MutableNumericArray, TensorOptions } from '../types/options.js';
 import { computeStrides } from '../utils/shape_utils.js';
 import { coerceForStorage } from '../utils/half.js';
 
-type TensorOptions = {
-  shape?: readonly number[];
-  dtype?: DType;
-  device?: Device;
-  requiresGrad?: boolean;
-  offset?: number;
-};
 type NestedNumberArray = readonly (number | NestedNumberArray)[];
 type TensorInput = number | ArrayLike<number> | NestedNumberArray | NumericTypedArray;
-type MutableNumericArray = { length: number; [index: number]: number | bigint };
 
 export function tensor(data: TensorInput, opts?: TensorOptions): Tensor {
   const dtype = opts?.dtype ?? ScalarType.F32;

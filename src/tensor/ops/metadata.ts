@@ -1,4 +1,22 @@
-export const TENSOR_OPS = Object.freeze([
+type TensorOpReturnSpec =
+  | { kind: 'tensor'; arity: 1 }
+  | { kind: 'tensor_list' }
+  | { kind: 'tuple'; arity: number }
+  | { kind: 'value'; arity: 1 };
+
+type TensorOpSpec = Readonly<{
+  schema: string;
+  ir?: string;
+  scalarArgs?: readonly string[];
+  returns?: TensorOpReturnSpec;
+}>;
+
+type TensorOpMetadata = TensorOpSpec & Readonly<{
+  name: string;
+  returns: TensorOpReturnSpec;
+}>;
+
+export const TENSOR_OPS: readonly TensorOpSpec[] = Object.freeze([
   { schema: 'add(Tensor self, Tensor other) -> Tensor' },
   { schema: 'sub(Tensor self, Tensor other) -> Tensor' },
   { schema: 'mul(Tensor self, Tensor other) -> Tensor' },
@@ -93,40 +111,40 @@ export const TENSOR_OPS = Object.freeze([
   { schema: 'embedding(Tensor weight, Tensor indices) -> Tensor' },
 ]);
 
-const _ARG_OVERRIDES = new Map(TENSOR_OPS.filter(op => op.scalarArgs).map(op => [opNameFromSchema(op.schema), op.scalarArgs]));
-const _SCALAR_ARG_NAMES = new Map(TENSOR_OPS.map(op => [opNameFromSchema(op.schema), _ARG_OVERRIDES.get(opNameFromSchema(op.schema)) || scalarArgNamesFromSchema(op.schema)]));
-const _METADATA = new Map(TENSOR_OPS.map(op => {
+const _ARG_OVERRIDES = new Map<string, readonly string[]>(TENSOR_OPS.filter(op => op.scalarArgs).map(op => [opNameFromSchema(op.schema), op.scalarArgs!]));
+const _SCALAR_ARG_NAMES = new Map<string, readonly string[]>(TENSOR_OPS.map(op => [opNameFromSchema(op.schema), _ARG_OVERRIDES.get(opNameFromSchema(op.schema)) || scalarArgNamesFromSchema(op.schema)]));
+const _METADATA = new Map<string, TensorOpMetadata>(TENSOR_OPS.map(op => {
   const name = opNameFromSchema(op.schema);
   return [name, Object.freeze({ ...op, name, returns: op.returns || returnsFromSchema(op.schema) })];
 }));
 
-export function opNameFromSchema(schema) {
+export function opNameFromSchema(schema: string): string {
   return schema.slice(0, schema.indexOf('(')).split('.')[0].trim();
 }
 
-export function tensorOpSchemas() {
+export function tensorOpSchemas(): string[] {
   return TENSOR_OPS.map(op => op.schema);
 }
 
-export function scalarArgNames(opName) {
+export function scalarArgNames(opName: string): readonly string[] | null {
   return _SCALAR_ARG_NAMES.get(opName) || null;
 }
 
-export function tensorOpMetadata(opName) {
+export function tensorOpMetadata(opName: string): TensorOpMetadata | null {
   return _METADATA.get(opName) || null;
 }
 
-export function returnSpec(opName) {
+export function returnSpec(opName: string): TensorOpReturnSpec | null {
   const meta = tensorOpMetadata(opName);
   return meta ? meta.returns : null;
 }
 
-function scalarArgNamesFromSchema(schema) {
+function scalarArgNamesFromSchema(schema: string): string[] {
   const argsStart = schema.indexOf('(') + 1;
   const argsEnd = schema.lastIndexOf(')');
   const args = schema.slice(argsStart, argsEnd).trim();
   if (!args) return [];
-  const names = [];
+  const names: string[] = [];
   for (const part of splitTopLevel(args)) {
     const trimmed = part.trim();
     const space = trimmed.lastIndexOf(' ');
@@ -139,8 +157,8 @@ function scalarArgNamesFromSchema(schema) {
   return names;
 }
 
-function splitTopLevel(str) {
-  const out = [];
+function splitTopLevel(str: string): string[] {
+  const out: string[] = [];
   let depth = 0;
   let start = 0;
   for (let i = 0; i < str.length; i++) {
@@ -156,7 +174,7 @@ function splitTopLevel(str) {
   return out;
 }
 
-function returnsFromSchema(schema) {
+function returnsFromSchema(schema: string): TensorOpReturnSpec {
   const marker = '->';
   const idx = schema.lastIndexOf(marker);
   const text = idx >= 0 ? schema.slice(idx + marker.length).trim() : 'Tensor';

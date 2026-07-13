@@ -1,5 +1,6 @@
 import { Library } from '../../dispatcher/library.js';
 import { DispatchKey } from '../../dispatcher/dispatch_key.js';
+import type { DispatchKeyValue } from '../../dispatcher/dispatch_key.js';
 import { registerJITKernels } from '../../dispatcher/jit_dispatch.js';
 import { tensorOpSchemas } from '../ops/metadata.js';
 import { META_KERNELS } from './meta/meta_ops.js';
@@ -10,7 +11,7 @@ const META = DispatchKey.META;
 
 let _registered = false;
 
-const _KERNEL_DISPATCH_KEYS = [
+const _KERNEL_DISPATCH_KEYS: DispatchKeyValue[] = [
   DispatchKey.CPU,
   DispatchKey.GPU,
   DispatchKey.WASM,
@@ -18,7 +19,7 @@ const _KERNEL_DISPATCH_KEYS = [
   DispatchKey.CUSTOM_0,
 ];
 
-export function registerNativeOps() {
+export function registerNativeOps(): void {
   if (_registered) return;
   _registered = true;
 

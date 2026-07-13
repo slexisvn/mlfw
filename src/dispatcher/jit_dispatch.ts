@@ -3,6 +3,7 @@ import type { DispatchKeyValue, DispatchKeySet } from './dispatch_key.js';
 import { KernelFunction } from './boxing.js';
 import { dispatcher } from './dispatcher.js';
 import { jitCompile } from './jit_cache.js';
+import type { TargetLike } from './jit_cache.js';
 import { isEagerDeferred } from './eager_mode.js';
 import { CPUTarget, CUDATarget, WasmTarget, WebGPUTarget } from '../backend/target.js';
 import { Tensor } from '../tensor/core/tensor.js';
@@ -12,20 +13,19 @@ import { computeStrides, computeNumel, broadcastShapes, matmulOutputShape } from
 import { resultDtype, typedArrayCtor } from '../tensor/types/dtype.js';
 import type { DType, NumericTypedArray } from '../tensor/types/dtype.js';
 import type { Device } from '../tensor/types/device.js';
+import type { MutableNumericArray, NumericSettable } from '../tensor/types/options.js';
 import { scalarArgNames } from '../tensor/ops/metadata.js';
 
 type ScalarMap = Record<string, unknown>;
-type TargetFactory = () => unknown;
+type TargetFactory = () => TargetLike;
 type GpuContiguousFn = (data: NumericTypedArray | null, shape: readonly number[], strides: readonly number[], offset: number, dtype: DType) => NumericTypedArray;
 type GpuConcatFn = (opName: string, inputs: NumericTypedArray[], shapes: readonly number[][], dim: unknown, outShape: readonly number[], outData: NumericTypedArray, dtype: DType) => void;
 type DynamicFn = (...args: unknown[]) => unknown;
-type MutableNumericArray = { length: number; [index: number]: number | bigint };
-type NumericSettable = { set(array: ArrayLike<number | bigint>, offset?: number): void };
 
-let _cpuTarget: unknown;
-let _cudaTarget: unknown;
-let _wasmTarget: unknown;
-let _webgpuTarget: unknown;
+let _cpuTarget: TargetLike | undefined;
+let _cudaTarget: TargetLike | undefined;
+let _wasmTarget: TargetLike | undefined;
+let _webgpuTarget: TargetLike | undefined;
 const _TARGET_FOR_KEY: Partial<Record<DispatchKeyValue, TargetFactory>> = {
   [DispatchKey.CPU]: () => (_cpuTarget ??= CPUTarget()),
   [DispatchKey.GPU]: () => (_cudaTarget ??= CUDATarget()),
