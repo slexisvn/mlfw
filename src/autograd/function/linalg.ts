@@ -1,8 +1,10 @@
 import { AutogradNode } from '../node.js';
 import * as ops from '../../tensor/ops/ops.js';
 import { transpose, unsqueeze, squeeze } from '../../tensor/ops/ops.js';
+import type { Tensor } from '../../tensor/core/tensor.js';
+import type { GradInputList, GradOutputList } from '../types.js';
 
-function _sumToShape(tensor, targetShape) {
+function _sumToShape(tensor: Tensor, targetShape: readonly number[]): Tensor {
   let t = tensor;
   while (t.ndim > targetShape.length) {
     t = ops.sum(t, 0, false);
@@ -18,7 +20,7 @@ function _sumToShape(tensor, targetShape) {
 export class MatmulBackward extends AutogradNode {
   constructor() { super(2); }
 
-  apply(gradOutputs) {
+  apply(gradOutputs: GradOutputList): GradInputList {
     const g = gradOutputs[0];
     const [self, other] = this.savedTensors();
     const a = self.detach();
@@ -55,7 +57,7 @@ export class MatmulBackward extends AutogradNode {
 export class DotBackward extends AutogradNode {
   constructor() { super(2); }
 
-  apply(gradOutputs) {
+  apply(gradOutputs: GradOutputList): GradInputList {
     const g = gradOutputs[0];
     const [self, other] = this.savedTensors();
     return [ops.mul(g, other.detach()), ops.mul(g, self.detach())];

@@ -19,6 +19,7 @@
     "src/tensor/factory/**/*.ts",
     "src/tensor/ops/**/*.ts",
     "src/tensor/native/**/*.ts",
+    "src/autograd/**/*.ts",
     "src/numeric/**/*.ts"
   ]
 }

@@ -2,30 +2,48 @@ import { AutogradNode } from '../node.js';
 import * as ops from '../../tensor/ops/ops.js';
 import { zeros } from '../../tensor/factory/creation_ops.js';
 import { reshape, transpose, permute, unsqueeze } from '../../tensor/ops/ops.js';
+import type { NumericTypedArray } from '../../tensor/types/dtype.js';
+import type { GradInputList, GradOutputList } from '../types.js';
+
+function _addAt(data: NumericTypedArray, index: number, value: number | bigint): void {
+  if (typeof value === 'bigint') {
+    (data as BigInt64Array)[index] += value;
+  } else {
+    (data as Exclude<NumericTypedArray, BigInt64Array>)[index] += value;
+  }
+}
 
 export class ReshapeBackward extends AutogradNode {
   constructor() { super(1); }
 
-  apply(gradOutputs) {
+  apply(gradOutputs: GradOutputList): GradInputList {
     const meta = this.inputMetadata(0);
-    return [reshape(gradOutputs[0], meta.shape)];
+    return [reshape(gradOutputs[0], meta!.shape)];
   }
 }
 
 export class TransposeBackward extends AutogradNode {
-  constructor(dim0, dim1) {
+  private readonly _dim0: number;
+  private readonly _dim1: number;
+
+  constructor(dim0: number, dim1: number) {
     super(1);
     this._dim0 = dim0;
     this._dim1 = dim1;
   }
 
-  apply(gradOutputs) {
+  apply(gradOutputs: GradOutputList): GradInputList {
     return [transpose(gradOutputs[0], this._dim0, this._dim1)];
   }
 }
 
 export class SliceBackward extends AutogradNode {
-  constructor(dim, start, end, step) {
+  private readonly _dim: number;
+  private readonly _start: number;
+  private readonly _end: number;
+  private readonly _step: number;
+
+  constructor(dim: number, start: number, end: number, step: number) {
     super(1);
     this._dim = dim;
     this._start = start;
@@ -33,11 +51,11 @@ export class SliceBackward extends AutogradNode {
     this._step = step;
   }
 
-  apply(gradOutputs) {
+  apply(gradOutputs: GradOutputList): GradInputList {
     const g = gradOutputs[0];
     const meta = this.inputMetadata(0);
     const dim = this._dim;
-    const size = meta.shape[dim];
+    const size = meta!.shape[dim];
     const step = this._step || 1;
     let start = this._start < 0 ? this._start + size : this._start;
     let end = this._end < 0 ? this._end + size : this._end;
@@ -45,16 +63,16 @@ export class SliceBackward extends AutogradNode {
     end = Math.max(0, Math.min(end, size));
 
     if (step === 1) {
-      const low = meta.shape.map(() => 0);
-      const high = meta.shape.map(() => 0);
+      const low = meta!.shape.map(() => 0);
+      const high = meta!.shape.map(() => 0);
       low[dim] = start;
       high[dim] = size - end;
       return [ops.pad(g, low, high, 0)];
     }
 
-    const result = zeros(meta.shape, { dtype: g.dtype, device: g.device });
-    const outData = result._impl.storage.data;
-    const gData = g._impl.storage.data;
+    const result = zeros(meta!.shape, { dtype: g.dtype, device: g.device });
+    const outData = result._impl.storage.data!;
+    const gData = g._impl.storage.data!;
     const gOff = g._impl.storageOffset;
     const gShape = g.shape;
     const gStrides = g.strides;
@@ -69,7 +87,7 @@ export class SliceBackward extends AutogradNode {
         const idx = d === dim ? start + indices[d] * step : indices[d];
         oi += idx * resultStrides[d];
       }
-      outData[oi] += gData[gi];
+      _addAt(outData, oi, gData[gi]);
 
       for (let d = ndim - 1; d >= 0; d--) {
         indices[d]++;
@@ -84,21 +102,24 @@ export class SliceBackward extends AutogradNode {
 }
 
 export class SelectBackward extends AutogradNode {
-  constructor(dim, index) {
+  private readonly _dim: number;
+  private readonly _index: number;
+
+  constructor(dim: number, index: number) {
     super(1);
     this._dim = dim;
     this._index = index;
   }
 
-  apply(gradOutputs) {
+  apply(gradOutputs: GradOutputList): GradInputList {
     const g = gradOutputs[0];
     const meta = this.inputMetadata(0);
     const dim = this._dim;
-    const size = meta.shape[dim];
+    const size = meta!.shape[dim];
     const index = this._index < 0 ? this._index + size : this._index;
     const expanded = unsqueeze(g, dim);
-    const low = meta.shape.map(() => 0);
-    const high = meta.shape.map(() => 0);
+    const low = meta!.shape.map(() => 0);
+    const high = meta!.shape.map(() => 0);
     low[dim] = index;
     high[dim] = size - 1 - index;
     return [ops.pad(expanded, low, high, 0)];
@@ -108,10 +129,10 @@ export class SelectBackward extends AutogradNode {
 export class ExpandBackward extends AutogradNode {
   constructor() { super(1); }
 
-  apply(gradOutputs) {
+  apply(gradOutputs: GradOutputList): GradInputList {
     const g = gradOutputs[0];
     const meta = this.inputMetadata(0);
-    const inputShape = meta.shape;
+    const inputShape = meta!.shape;
     const gradShape = g.shape;
 
     const dimsToReduce = [];
@@ -133,14 +154,16 @@ export class ExpandBackward extends AutogradNode {
 }
 
 export class PermuteBackward extends AutogradNode {
-  constructor(dims) {
+  private readonly _dims: readonly number[];
+
+  constructor(dims: readonly number[]) {
     super(1);
     this._dims = dims;
   }
 
-  apply(gradOutputs) {
+  apply(gradOutputs: GradOutputList): GradInputList {
     const rank = this._dims.length;
-    const inversePerm = new Array(rank);
+    const inversePerm = new Array<number>(rank);
     for (let i = 0; i < rank; i++) {
       const d = this._dims[i] < 0 ? rank + this._dims[i] : this._dims[i];
       inversePerm[d] = i;

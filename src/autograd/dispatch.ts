@@ -11,10 +11,13 @@ import { DeviceType } from '../tensor/types/device.js';
 import { isEagerDeferred } from '../dispatcher/eager_mode.js';
 import { setAutogradEngine } from '../tensor/core/tensor.js';
 import { backward } from './engine.js';
+import type { DispatchKeySet } from '../dispatcher/dispatch_key.js';
+import type { OperatorHandle } from '../dispatcher/operator_handle.js';
+import type { AutogradNode } from './node.js';
 
 setAutogradEngine({ backward });
 
-function _snapshotTensor(t) {
+function _snapshotTensor(t: Tensor): Tensor {
   const impl = t._impl;
   if (isEagerDeferred() && impl.device && impl.device.type === DeviceType.GPU) {
     impl.storage.retain();
@@ -40,38 +43,42 @@ function _snapshotTensor(t) {
   return new Tensor(newImpl);
 }
 
-function _anyRequiresGrad(args) {
+function _isTensor(value: unknown): value is Tensor {
+  return typeof value === 'object' && value !== null && '_impl' in value;
+}
+
+function _anyRequiresGrad(args: readonly unknown[]): boolean {
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
-    if (a && a._impl && a.requiresGrad) return true;
+    if (_isTensor(a) && a.requiresGrad) return true;
     if (Array.isArray(a)) {
       for (let j = 0; j < a.length; j++) {
-        if (a[j] && a[j]._impl && a[j].requiresGrad) return true;
+        if (_isTensor(a[j]) && a[j].requiresGrad) return true;
       }
     }
   }
   return false;
 }
 
-function _extractTensors(args) {
-  const tensors = [];
+function _extractTensors(args: readonly unknown[]): Tensor[] {
+  const tensors: Tensor[] = [];
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
-    if (a && a._impl) {
+    if (_isTensor(a)) {
       tensors.push(a);
     } else if (Array.isArray(a)) {
       for (let j = 0; j < a.length; j++) {
-        if (a[j] && a[j]._impl) tensors.push(a[j]);
+        if (_isTensor(a[j])) tensors.push(a[j]);
       }
     }
   }
   return tensors;
 }
 
-function _getOrCreateAccumulator(tensor) {
+function _getOrCreateAccumulator(tensor: Tensor): AutogradNode | null {
   const meta = tensor._impl.autogradMeta;
   if (!meta) return null;
-  let acc = meta.getGradAccumulator();
+  let acc = meta.getGradAccumulator() as unknown as AutogradNode | null;
   if (!acc) {
     acc = new GradAccumulator(tensor);
     meta.setGradAccumulator(acc);
@@ -79,18 +86,19 @@ function _getOrCreateAccumulator(tensor) {
   return acc;
 }
 
-export function wrapWithAutograd(opName, handle) {
+export function wrapWithAutograd(opName: string, handle: OperatorHandle) {
   const origDispatch = dispatcher.dispatch.bind(dispatcher);
 
-  return (keySet, ...args) => {
+  return (keySet: unknown, ...args: unknown[]) => {
+    const ks = keySet as DispatchKeySet;
     if (!GradMode.isEnabled() || !_anyRequiresGrad(args)) {
-      const stripped = keySet.subtract(AUTOGRAD_KEY_SET);
+      const stripped = ks.subtract(AUTOGRAD_KEY_SET);
       return dispatcher.redispatch(handle, stripped, ...args);
     }
 
     const gradFn = getGradFn(opName, args);
     if (!gradFn) {
-      const stripped = keySet.subtract(AUTOGRAD_KEY_SET);
+      const stripped = ks.subtract(AUTOGRAD_KEY_SET);
       return dispatcher.redispatch(handle, stripped, ...args);
     }
 
@@ -104,7 +112,7 @@ export function wrapWithAutograd(opName, handle) {
     for (let i = 0; i < tensorArgs.length; i++) {
       const t = tensorArgs[i];
       if (t.requiresGrad) {
-        const fn = t.gradFn;
+          const fn = t.gradFn as AutogradNode | null;
         if (fn) {
           const outputNr = t._impl.autogradMeta ? t._impl.autogradMeta.outputNr : 0;
           gradFn.setNextEdge(i, fn, outputNr);
@@ -115,14 +123,14 @@ export function wrapWithAutograd(opName, handle) {
       }
     }
 
-    const stripped = keySet.subtract(AUTOGRAD_KEY_SET);
+    const stripped = ks.subtract(AUTOGRAD_KEY_SET);
     const result = dispatcher.redispatch(handle, stripped, ...args);
 
-    if (result && result._impl) {
+    if (_isTensor(result)) {
       result._impl.setAutogradMeta(new AutogradMeta());
       const meta = result._impl.autogradMeta;
-      meta.setGradFn(gradFn, 0);
-      meta.requiresGrad = true;
+      meta!.setGradFn(gradFn, 0);
+      meta!.requiresGrad = true;
       result._impl._updateKeySet();
     }
 
@@ -130,14 +138,14 @@ export function wrapWithAutograd(opName, handle) {
   };
 }
 
-function _makePassthrough(handle) {
-  return (keySet, ...args) => {
-    const stripped = keySet.subtract(AUTOGRAD_KEY_SET);
+function _makePassthrough(handle: OperatorHandle) {
+  return (keySet: unknown, ...args: unknown[]) => {
+    const stripped = (keySet as DispatchKeySet).subtract(AUTOGRAD_KEY_SET);
     return dispatcher.redispatch(handle, stripped, ...args);
   };
 }
 
-export function registerAutogradKernels() {
+export function registerAutogradKernels(): void {
   const ops = dispatcher.listOps();
   const keys = [DispatchKey.AUTOGRAD, DispatchKey.AUTOGRAD_CPU, DispatchKey.AUTOGRAD_GPU, DispatchKey.AUTOGRAD_WASM];
 

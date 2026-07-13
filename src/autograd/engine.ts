@@ -1,9 +1,12 @@
 
 import { ones as _ones } from '../tensor/factory/creation_ops.js';
 import { add as _add, sum as _sum } from '../tensor/ops/ops.js';
+import type { Tensor } from '../tensor/core/tensor.js';
+import type { AutogradNode } from './node.js';
+import type { GradInputList, GradOutputList } from './types.js';
 
-export function backward(rootTensor, gradOutput) {
-  const rootGradFn = rootTensor.gradFn;
+export function backward(rootTensor: Tensor, gradOutput?: Tensor): void {
+  const rootGradFn = rootTensor.gradFn as AutogradNode | null;
   if (!rootGradFn) {
     throw new Error('Cannot call backward on a tensor that does not require grad');
   }
@@ -16,40 +19,40 @@ export function backward(rootTensor, gradOutput) {
     rootGrad = _ones(rootTensor.shape, { dtype: rootTensor.dtype, device: rootTensor.device });
   }
 
-  const depCount = new Map();
-  const visited = new Set();
+  const depCount = new Map<AutogradNode, number>();
+  const visited = new Set<number>();
 
   _countDeps(rootGradFn, depCount, visited);
 
-  const gradMap = new Map();
+  const gradMap = new Map<number, GradInputList>();
   gradMap.set(rootGradFn.id, [rootGrad]);
 
-  const ready = [];
+  const ready: AutogradNode[] = [];
   for (const [node, count] of depCount) {
     if (count === 0) ready.push(node);
   }
 
-  const order = [];
+  const order: AutogradNode[] = [];
   while (ready.length > 0) {
     const node = ready.pop();
+    if (!node) continue;
     order.push(node);
 
     for (const edge of node.nextEdges) {
       if (!edge || !edge.node) continue;
       const child = edge.node;
-      const newCount = depCount.get(child) - 1;
+      const newCount = depCount.get(child)! - 1;
       depCount.set(child, newCount);
       if (newCount === 0) ready.push(child);
     }
   }
 
   for (const node of order) {
-    const grads = gradMap.get(node.id);
+    const grads = gradMap.get(node.id) as GradOutputList | undefined;
     if (!grads) continue;
 
     const rawGradInputs = node.apply(grads);
 
-    // Reduce gradients to match input shapes (handle broadcasting)
     let gradInputs = rawGradInputs;
     if (rawGradInputs) {
       gradInputs = rawGradInputs.map((g, i) => {
@@ -69,44 +72,38 @@ export function backward(rootTensor, gradOutput) {
       const edge = edges[i];
       if (!edge || !edge.node) continue;
       if (i >= gradInputs.length || !gradInputs[i]) continue;
+      const gradInput = gradInputs[i]!;
 
       const childId = edge.node.id;
       const existing = gradMap.get(childId);
       if (existing) {
+        const existingGrad = existing[edge.inputNr];
         existing[edge.inputNr] = existing[edge.inputNr]
-          ? _add(existing[edge.inputNr], gradInputs[i])
-          : gradInputs[i];
+          ? _add(existingGrad!, gradInput)
+          : gradInput;
       } else {
-        const arr = [];
-        arr[edge.inputNr] = gradInputs[i];
+        const arr: GradInputList = [];
+        arr[edge.inputNr] = gradInput;
         gradMap.set(childId, arr);
       }
     }
   }
 }
 
-/**
- * Reduce gradient to match the input shape when broadcasting was used.
- * e.g., grad shape [2,3] → input shape [2,1]: sum along axis 1, keepdim.
- * e.g., grad shape [3,4] → input shape [4]: sum along axis 0.
- */
-function _reduceBroadcastGrad(grad, inputShape) {
+function _reduceBroadcastGrad(grad: Tensor, inputShape: readonly number[]): Tensor {
   const gradShape = grad.shape;
   if (gradShape.length === inputShape.length &&
       gradShape.every((s, i) => s === inputShape[i])) {
-    return grad; // shapes match, no reduction needed
+    return grad;
   }
 
   let result = grad;
 
-  // If input has fewer dimensions, sum leading dims
   const dimDiff = gradShape.length - inputShape.length;
   for (let i = 0; i < dimDiff; i++) {
     result = _sum(result, 0, false);
   }
 
-  // Now same rank — sum along dims where input was 1 (broadcast dims)
-  // Must go from last to first to keep indices stable
   for (let i = inputShape.length - 1; i >= 0; i--) {
     if (inputShape[i] === 1 && result.shape[i] !== 1) {
       result = _sum(result, i, true);
@@ -116,12 +113,12 @@ function _reduceBroadcastGrad(grad, inputShape) {
   return result;
 }
 
-function _countDeps(root, depCount, visited) {
+function _countDeps(root: AutogradNode, depCount: Map<AutogradNode, number>, visited: Set<number>): void {
   const queue = [root];
   depCount.set(root, 0);
 
   while (queue.length > 0) {
-    const node = queue.shift();
+    const node = queue.shift()!;
     if (visited.has(node.id)) continue;
     visited.add(node.id);
 
@@ -131,7 +128,7 @@ function _countDeps(root, depCount, visited) {
       if (!depCount.has(child)) {
         depCount.set(child, 0);
       }
-      depCount.set(child, depCount.get(child) + 1);
+      depCount.set(child, depCount.get(child)! + 1);
 
       if (!visited.has(child.id)) {
         queue.push(child);

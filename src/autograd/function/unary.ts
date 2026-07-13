@@ -2,15 +2,17 @@ import { AutogradNode } from '../node.js';
 import * as ops from '../../tensor/ops/ops.js';
 import { ones, full } from '../../tensor/factory/creation_ops.js';
 import { DIGAMMA_SHIFT, DIGAMMA_SERIES } from '../../util/special_math.js';
+import type { Tensor } from '../../tensor/core/tensor.js';
+import type { GradInputList, GradOutputList } from '../types.js';
 
 const _TWO_OVER_SQRT_PI = 2 / Math.sqrt(Math.PI);
 
-function _erfDeriv(x) {
+function _erfDeriv(x: Tensor): Tensor {
   const coeff = full(x.shape, _TWO_OVER_SQRT_PI, { dtype: x.dtype, device: x.device });
   return ops.mul(coeff, ops.exp(ops.neg(ops.mul(x, x))));
 }
 
-function _digammaTensor(x) {
+function _digammaTensor(x: Tensor): Tensor {
   const z = ops.add(x, DIGAMMA_SHIFT);
   const invZ = ops.pow(z, -1);
   let acc = ops.sub(ops.log(z), ops.mul(invZ, 0.5));
@@ -28,7 +30,7 @@ function _digammaTensor(x) {
 
 export class ErfBackward extends AutogradNode {
   constructor() { super(1); }
-  apply(gradOutputs) {
+  apply(gradOutputs: GradOutputList): GradInputList {
     const [input] = this.savedTensors();
     return [ops.mul(gradOutputs[0], _erfDeriv(input.detach()))];
   }
@@ -36,7 +38,7 @@ export class ErfBackward extends AutogradNode {
 
 export class ErfcBackward extends AutogradNode {
   constructor() { super(1); }
-  apply(gradOutputs) {
+  apply(gradOutputs: GradOutputList): GradInputList {
     const [input] = this.savedTensors();
     return [ops.neg(ops.mul(gradOutputs[0], _erfDeriv(input.detach())))];
   }
@@ -44,7 +46,7 @@ export class ErfcBackward extends AutogradNode {
 
 export class LgammaBackward extends AutogradNode {
   constructor() { super(1); }
-  apply(gradOutputs) {
+  apply(gradOutputs: GradOutputList): GradInputList {
     const [input] = this.savedTensors();
     return [ops.mul(gradOutputs[0], _digammaTensor(input.detach()))];
   }
@@ -52,7 +54,7 @@ export class LgammaBackward extends AutogradNode {
 
 export class GammaBackward extends AutogradNode {
   constructor() { super(1); }
-  apply(gradOutputs) {
+  apply(gradOutputs: GradOutputList): GradInputList {
     const [input] = this.savedTensors();
     const x = input.detach();
     return [ops.mul(gradOutputs[0], ops.mul(ops.gamma(x), _digammaTensor(x)))];
@@ -61,7 +63,7 @@ export class GammaBackward extends AutogradNode {
 
 export class ExpBackward extends AutogradNode {
   constructor() { super(1); }
-  apply(gradOutputs) {
+  apply(gradOutputs: GradOutputList): GradInputList {
     const [input] = this.savedTensors();
     return [ops.mul(gradOutputs[0], ops.exp(input.detach()))];
   }
@@ -69,7 +71,7 @@ export class ExpBackward extends AutogradNode {
 
 export class LogBackward extends AutogradNode {
   constructor() { super(1); }
-  apply(gradOutputs) {
+  apply(gradOutputs: GradOutputList): GradInputList {
     const [input] = this.savedTensors();
     return [ops.div(gradOutputs[0], input.detach())];
   }
@@ -77,7 +79,7 @@ export class LogBackward extends AutogradNode {
 
 export class SqrtBackward extends AutogradNode {
   constructor() { super(1); }
-  apply(gradOutputs) {
+  apply(gradOutputs: GradOutputList): GradInputList {
     const [input] = this.savedTensors();
     const x = input.detach();
     const sqrtX = ops.sqrt(x);
@@ -88,7 +90,7 @@ export class SqrtBackward extends AutogradNode {
 
 export class TanhBackward extends AutogradNode {
   constructor() { super(1); }
-  apply(gradOutputs) {
+  apply(gradOutputs: GradOutputList): GradInputList {
     const [input] = this.savedTensors();
     const x = input.detach();
     const th = ops.tanh(x);
@@ -99,7 +101,7 @@ export class TanhBackward extends AutogradNode {
 
 export class SigmoidBackward extends AutogradNode {
   constructor() { super(1); }
-  apply(gradOutputs) {
+  apply(gradOutputs: GradOutputList): GradInputList {
     const [input] = this.savedTensors();
     const x = input.detach();
     const sig = ops.sigmoid(x);
@@ -110,10 +112,10 @@ export class SigmoidBackward extends AutogradNode {
 
 export class SoftmaxBackward extends AutogradNode {
   constructor() { super(1); }
-  apply(gradOutputs) {
+  apply(gradOutputs: GradOutputList): GradInputList {
     const [input] = this.savedTensors();
     const args = this.opArgs();
-    const dim = (args && args.length > 1 && args[1] != null) ? args[1] : -1;
+    const dim = (args && args.length > 1 && args[1] != null) ? args[1] as number : -1;
     const g = gradOutputs[0];
     const y = ops.softmax(input.detach(), dim);
     const inner = ops.sum(ops.mul(g, y), dim, true);
@@ -123,10 +125,10 @@ export class SoftmaxBackward extends AutogradNode {
 
 export class LogSoftmaxBackward extends AutogradNode {
   constructor() { super(1); }
-  apply(gradOutputs) {
+  apply(gradOutputs: GradOutputList): GradInputList {
     const [input] = this.savedTensors();
     const args = this.opArgs();
-    const dim = (args && args.length > 1 && args[1] != null) ? args[1] : -1;
+    const dim = (args && args.length > 1 && args[1] != null) ? args[1] as number : -1;
     const g = gradOutputs[0];
     const sm = ops.softmax(input.detach(), dim);
     const gsum = ops.sum(g, dim, true);
@@ -136,7 +138,7 @@ export class LogSoftmaxBackward extends AutogradNode {
 
 export class ReluBackward extends AutogradNode {
   constructor() { super(1); }
-  apply(gradOutputs) {
+  apply(gradOutputs: GradOutputList): GradInputList {
     const [input] = this.savedTensors();
     const x = input.detach();
     return [ops.mul(gradOutputs[0], ops.sign(ops.relu(x)))];
@@ -145,7 +147,7 @@ export class ReluBackward extends AutogradNode {
 
 export class GeluBackward extends AutogradNode {
   constructor() { super(1); }
-  apply(gradOutputs) {
+  apply(gradOutputs: GradOutputList): GradInputList {
     const g = gradOutputs[0];
     const [input] = this.savedTensors();
     const x = input.detach();
@@ -164,7 +166,7 @@ export class GeluBackward extends AutogradNode {
 
 export class SiluBackward extends AutogradNode {
   constructor() { super(1); }
-  apply(gradOutputs) {
+  apply(gradOutputs: GradOutputList): GradInputList {
     const g = gradOutputs[0];
     const [input] = this.savedTensors();
     const x = input.detach();

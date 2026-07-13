@@ -1,11 +1,12 @@
 import { AutogradNode } from '../node.js';
 import * as ops from '../../tensor/ops/ops.js';
 import { ones } from '../../tensor/factory/creation_ops.js';
+import type { GradInputList, GradOutputList } from '../types.js';
 
 export class AddBackward extends AutogradNode {
   constructor() { super(2); }
 
-  apply(gradOutputs) {
+  apply(gradOutputs: GradOutputList): GradInputList {
     const g = gradOutputs[0];
     return [g, g];
   }
@@ -14,7 +15,7 @@ export class AddBackward extends AutogradNode {
 export class SubBackward extends AutogradNode {
   constructor() { super(2); }
 
-  apply(gradOutputs) {
+  apply(gradOutputs: GradOutputList): GradInputList {
     const g = gradOutputs[0];
     return [g, ops.neg(g)];
   }
@@ -23,7 +24,7 @@ export class SubBackward extends AutogradNode {
 export class MulBackward extends AutogradNode {
   constructor() { super(2); }
 
-  apply(gradOutputs) {
+  apply(gradOutputs: GradOutputList): GradInputList {
     const g = gradOutputs[0];
     const [self, other] = this.savedTensors();
     return [ops.mul(g, other.detach()), ops.mul(g, self.detach())];
@@ -33,7 +34,7 @@ export class MulBackward extends AutogradNode {
 export class DivBackward extends AutogradNode {
   constructor() { super(2); }
 
-  apply(gradOutputs) {
+  apply(gradOutputs: GradOutputList): GradInputList {
     const g = gradOutputs[0];
     const [self, other] = this.savedTensors();
     const gradSelf = ops.div(g, other.detach());
@@ -45,7 +46,7 @@ export class DivBackward extends AutogradNode {
 export class NegBackward extends AutogradNode {
   constructor() { super(1); }
 
-  apply(gradOutputs) {
+  apply(gradOutputs: GradOutputList): GradInputList {
     const g = gradOutputs[0];
     return [ops.neg(g)];
   }
@@ -54,7 +55,7 @@ export class NegBackward extends AutogradNode {
 export class PowBackward extends AutogradNode {
   constructor() { super(2); }
 
-  apply(gradOutputs) {
+  apply(gradOutputs: GradOutputList): GradInputList {
     const g = gradOutputs[0];
     const [self, exponent] = this.savedTensors();
     const one = ones(exponent.shape, { dtype: exponent.dtype, device: exponent.device });

@@ -8,10 +8,14 @@ import { MatmulBackward, DotBackward } from './function/linalg.js';
 
 import { CatBackward, StackBackward, ClampBackward, PadBackward, IndexSelectBackward, WhereBackward } from './function/indexing.js';
 import { ReshapeBackward, TransposeBackward, PermuteBackward, SliceBackward, ExpandBackward, SelectBackward } from './function/view.js';
+import type { AutogradNode } from './node.js';
+import type { OpArgs } from './types.js';
 
-const _registry = new Map();
+type GradFactory = (args: OpArgs) => AutogradNode;
 
-function _register(name, factory) {
+const _registry = new Map<string, GradFactory>();
+
+function _register(name: string, factory: GradFactory) {
   _registry.set(name, factory);
 }
 
@@ -50,21 +54,21 @@ _register('pad', () => new PadBackward());
 _register('index_select', () => new IndexSelectBackward());
 _register('where', () => new WhereBackward());
 _register('reshape', () => new ReshapeBackward());
-_register('transpose', (args) => new TransposeBackward(args[1], args[2]));
-_register('permute', (args) => new PermuteBackward(args[1]));
+_register('transpose', (args) => new TransposeBackward(args![1] as number, args![2] as number));
+_register('permute', (args) => new PermuteBackward(args![1] as readonly number[]));
 _register('broadcast_in_dim', () => new ExpandBackward());
 _register('expand', () => new ExpandBackward());
-_register('slice', (args) => new SliceBackward(args[1], args[2], args[3], args[4]));
-_register('narrow', (args) => new SliceBackward(args[1], args[2], args[2] + args[3], 1));
-_register('select', (args) => new SelectBackward(args[1], args[2]));
+_register('slice', (args) => new SliceBackward(args![1] as number, args![2] as number, args![3] as number, args![4] as number));
+_register('narrow', (args) => new SliceBackward(args![1] as number, args![2] as number, (args![2] as number) + (args![3] as number), 1));
+_register('select', (args) => new SelectBackward(args![1] as number, args![2] as number));
 _register('unsqueeze', () => new ReshapeBackward());
 _register('squeeze', () => new ReshapeBackward());
 
-export function getGradFn(opName, args = null) {
+export function getGradFn(opName: string, args: OpArgs = null): AutogradNode | null {
   const factory = _registry.get(opName);
   return factory ? factory(args) : null;
 }
 
-export function hasGradFn(opName) {
+export function hasGradFn(opName: string): boolean {
   return _registry.has(opName);
 }

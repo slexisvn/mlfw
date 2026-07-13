@@ -2,18 +2,20 @@ import { AutogradNode } from '../node.js';
 import * as ops from '../../tensor/ops/ops.js';
 import { full, zeros } from '../../tensor/factory/creation_ops.js';
 import { unsqueeze } from '../../tensor/ops/ops.js';
+import type { Tensor } from '../../tensor/core/tensor.js';
+import type { GradInputList, GradOutputList } from '../types.js';
 
-function _normalizeDims(dim, rank) {
+function _normalizeDims(dim: unknown, rank: number): number[] {
   if (dim === undefined || dim === null) {
     const all = [];
     for (let i = 0; i < rank; i++) all.push(i);
     return all;
   }
   const list = Array.isArray(dim) ? dim : [dim];
-  return list.map((d) => (d < 0 ? d + rank : d)).sort((a, b) => a - b);
+  return list.map((d) => (d as number) < 0 ? (d as number) + rank : d as number).sort((a, b) => a - b);
 }
 
-function _unreduce(grad, inputShape, dims, keepdim) {
+function _unreduce(grad: Tensor, inputShape: readonly number[], dims: readonly number[], keepdim: unknown): Tensor {
   let g = grad;
   if (!keepdim) {
     for (const d of dims) {
@@ -27,10 +29,10 @@ function _unreduce(grad, inputShape, dims, keepdim) {
 export class SumBackward extends AutogradNode {
   constructor() { super(1); }
 
-  apply(gradOutputs) {
+  apply(gradOutputs: GradOutputList): GradInputList {
     const g = gradOutputs[0];
     const meta = this.inputMetadata(0);
-    const inputShape = meta.shape;
+    const inputShape = meta!.shape;
     const args = this.opArgs();
     const dim = args ? args[1] : undefined;
     const keepdim = args ? args[2] : false;
@@ -42,10 +44,10 @@ export class SumBackward extends AutogradNode {
 export class MeanBackward extends AutogradNode {
   constructor() { super(1); }
 
-  apply(gradOutputs) {
+  apply(gradOutputs: GradOutputList): GradInputList {
     const g = gradOutputs[0];
     const meta = this.inputMetadata(0);
-    const inputShape = meta.shape;
+    const inputShape = meta!.shape;
     const args = this.opArgs();
     const dim = args ? args[1] : undefined;
     const keepdim = args ? args[2] : false;
