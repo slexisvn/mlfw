@@ -515,6 +515,43 @@ export class CUDACodegen {
     }
   }
 
+  _hasCrossBlockGlobalRAW(func) {
+    const storageNames = new Set();
+    for (const [, buf] of func.bufferMap) storageNames.add(buf.name);
+    if (storageNames.size === 0) return false;
+    const storedSigs = new Map();
+    const loadedSigs = new Map();
+    const record = (map, name, sig) => {
+      let s = map.get(name);
+      if (!s) { s = new Set(); map.set(name, s); }
+      s.add(sig);
+    };
+    const walk = (node, bindings) => {
+      if (!node || typeof node !== 'object') return;
+      let next = bindings;
+      if (node.type === 'ForNode' && node.kind === ForKind.THREAD_BINDING && node.threadTag) {
+        const extent = node.extent && node.extent.type === 'IntImmNode' ? node.extent.value : 0;
+        next = bindings.concat(`${node.threadTag}:${extent}`);
+      }
+      if (node.type === 'BufferStoreNode' || node.type === 'LIRFlatStoreNode') {
+        if (node.buffer && storageNames.has(node.buffer.name)) record(storedSigs, node.buffer.name, [...next].sort().join(','));
+      }
+      if (node.type === 'BufferLoadNode' || node.type === 'LIRFlatLoadNode') {
+        if (node.buffer && storageNames.has(node.buffer.name)) record(loadedSigs, node.buffer.name, [...next].sort().join(','));
+      }
+      for (const c of irChildNodes(node)) walk(c, next);
+    };
+    walk(func.body, []);
+    for (const [name, stores] of storedSigs) {
+      const loads = loadedSigs.get(name);
+      if (!loads) continue;
+      const sigs = new Set(stores);
+      for (const s of loads) sigs.add(s);
+      if (sigs.size > 1) return true;
+    }
+    return false;
+  }
+
   _findThreadPrivateAllocs(root, names) {
     const walk = (node, underThread) => {
       if (!node || typeof node !== 'object') return;
@@ -617,9 +654,14 @@ export class CUDACodegen {
       this._needsBarriers = false;
       return;
     }
+    const gridThreads = this._gridDim[0] * this._gridDim[1] * this._gridDim[2];
+    if (gridThreads > 1 && this._hasCrossBlockGlobalRAW(func)) {
+      this._serializeThreads = true;
+      this._needsBarriers = false;
+      return;
+    }
     if (this._threadBindings.size > 0) {
       const blockThreads = this._blockDim[0] * this._blockDim[1] * this._blockDim[2];
-      const gridThreads = this._gridDim[0] * this._gridDim[1] * this._gridDim[2];
       const crossThread = this._findCrossThreadBuffers(func);
       if (blockThreads * gridThreads > 1 && crossThread.size > 0) {
         if (this._crossThreadBuffersAreBlockLocal(func, crossThread) && this._promoteCrossThreadToShared(func, crossThread)) {
@@ -632,12 +674,19 @@ export class CUDACodegen {
       }
     }
     let crossThreadShared = false;
-    for (const [, entries] of this._threadBindings) {
+    for (const [tag, entries] of this._threadBindings) {
       const perTag = new Set();
       for (const e of entries) {
         if (e.extent > 0) perTag.add(e.extent);
       }
-      if (perTag.size > 1) { crossThreadShared = true; break; }
+      if (perTag.size <= 1) continue;
+      const p = parseThreadAxis(tag);
+      if (p && p.space === 'block') {
+        this._serializeThreads = true;
+        this._needsBarriers = false;
+        return;
+      }
+      crossThreadShared = true;
     }
     if (!crossThreadShared) return;
 

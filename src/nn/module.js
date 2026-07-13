@@ -146,6 +146,7 @@ export class Module {
   }
 
   train(mode = true) {
+    this._autoDetect();
     this._training = mode;
     for (const [, m] of this._modules) {
       if (m !== null) m.train(mode);
@@ -182,6 +183,7 @@ export class Module {
   }
 
   apply(fn) {
+    this._autoDetect();
     for (const [, m] of this._modules) {
       if (m !== null) m.apply(fn);
     }
