@@ -1,16 +1,20 @@
-export class Sampler {
-  *[Symbol.iterator]() {
+type Sized = { length: number };
+
+export class Sampler implements Iterable<number | number[]> {
+  *[Symbol.iterator](): Generator<number | number[]> {
     throw new Error('Subclass must implement [Symbol.iterator]()');
   }
 }
 
-export class SequentialSampler extends Sampler {
-  constructor(dataSource) {
+export class SequentialSampler extends Sampler implements Iterable<number> {
+  private readonly _dataSource: Sized;
+
+  constructor(dataSource: Sized) {
     super();
     this._dataSource = dataSource;
   }
 
-  *[Symbol.iterator]() {
+  *[Symbol.iterator](): Generator<number> {
     const n = this._dataSource.length;
     for (let i = 0; i < n; i++) {
       yield i;
@@ -18,13 +22,15 @@ export class SequentialSampler extends Sampler {
   }
 }
 
-export class RandomSampler extends Sampler {
-  constructor(dataSource) {
+export class RandomSampler extends Sampler implements Iterable<number> {
+  private readonly _dataSource: Sized;
+
+  constructor(dataSource: Sized) {
     super();
     this._dataSource = dataSource;
   }
 
-  *[Symbol.iterator]() {
+  *[Symbol.iterator](): Generator<number> {
     const n = this._dataSource.length;
     const indices = new Int32Array(n);
     for (let i = 0; i < n; i++) indices[i] = i;
@@ -40,16 +46,20 @@ export class RandomSampler extends Sampler {
   }
 }
 
-export class BatchSampler extends Sampler {
-  constructor(sampler, batchSize, dropLast = false) {
+export class BatchSampler extends Sampler implements Iterable<number[]> {
+  readonly _dropLast: boolean;
+  private readonly _sampler: Iterable<number>;
+  private readonly _batchSize: number;
+
+  constructor(sampler: Iterable<number>, batchSize: number, dropLast = false) {
     super();
     this._sampler = sampler;
     this._batchSize = batchSize;
     this._dropLast = dropLast;
   }
 
-  *[Symbol.iterator]() {
-    let batch = [];
+  *[Symbol.iterator](): Generator<number[]> {
+    let batch: number[] = [];
     for (const idx of this._sampler) {
       batch.push(idx);
       if (batch.length === this._batchSize) {

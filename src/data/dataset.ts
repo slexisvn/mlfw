@@ -1,15 +1,16 @@
 import { select } from '../tensor/ops/ops.js';
+import type { Tensor } from '../tensor/core/tensor.js';
 
-export class Dataset {
-  get length() {
+export class Dataset<T = unknown> implements Iterable<T> {
+  get length(): number {
     throw new Error('Subclass must implement get length()');
   }
 
-  get(index) {
+  get(index: number): T {
     throw new Error('Subclass must implement get(index)');
   }
 
-  *[Symbol.iterator]() {
+  *[Symbol.iterator](): Generator<T> {
     const n = this.length;
     for (let i = 0; i < n; i++) {
       yield this.get(i);
@@ -17,8 +18,11 @@ export class Dataset {
   }
 }
 
-export class TensorDataset extends Dataset {
-  constructor(...tensors) {
+export class TensorDataset extends Dataset<Tensor[]> {
+  private readonly _tensors: Tensor[];
+  private readonly _length: number;
+
+  constructor(...tensors: Tensor[]) {
     super();
     if (tensors.length === 0) {
       throw new Error('TensorDataset requires at least one tensor');
@@ -35,11 +39,11 @@ export class TensorDataset extends Dataset {
     this._length = size;
   }
 
-  get length() {
+  get length(): number {
     return this._length;
   }
 
-  get(index) {
+  get(index: number): Tensor[] {
     const result = new Array(this._tensors.length);
     for (let i = 0; i < this._tensors.length; i++) {
       result[i] = select(this._tensors[i], 0, index);
@@ -48,18 +52,21 @@ export class TensorDataset extends Dataset {
   }
 }
 
-export class MapDataset extends Dataset {
-  constructor(dataset, transform) {
+export class MapDataset<TIn, TOut> extends Dataset<TOut> {
+  private readonly _dataset: Dataset<TIn>;
+  private readonly _transform: (sample: TIn) => TOut;
+
+  constructor(dataset: Dataset<TIn>, transform: (sample: TIn) => TOut) {
     super();
     this._dataset = dataset;
     this._transform = transform;
   }
 
-  get length() {
+  get length(): number {
     return this._dataset.length;
   }
 
-  get(index) {
+  get(index: number): TOut {
     return this._transform(this._dataset.get(index));
   }
 }

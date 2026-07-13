@@ -1,11 +1,14 @@
 export class Vocab {
-  constructor(specials = []) {
+  private readonly _tokenToId: Map<string, number>;
+  private readonly _idToToken: string[];
+
+  constructor(specials: readonly string[] = []) {
     this._tokenToId = new Map();
     this._idToToken = [];
     for (const token of specials) this.add(token);
   }
 
-  add(token) {
+  add(token: string): number {
     let id = this._tokenToId.get(token);
     if (id === undefined) {
       id = this._idToToken.length;
@@ -15,28 +18,28 @@ export class Vocab {
     return id;
   }
 
-  getId(token, fallback = -1) {
+  getId(token: string, fallback = -1): number {
     const id = this._tokenToId.get(token);
     return id === undefined ? fallback : id;
   }
 
-  getToken(id) {
+  getToken(id: number): string | undefined {
     return id >= 0 && id < this._idToToken.length ? this._idToToken[id] : undefined;
   }
 
-  has(token) {
+  has(token: string): boolean {
     return this._tokenToId.has(token);
   }
 
-  get size() {
+  get size(): number {
     return this._idToToken.length;
   }
 
-  tokens() {
+  tokens(): string[] {
     return this._idToToken.slice();
   }
 
-  static fromTokens(tokens) {
+  static fromTokens(tokens: unknown): Vocab {
     if (!Array.isArray(tokens)) throw new Error('mlfw tokenizer: vocab must be an array');
     const vocab = new Vocab();
     const seen = new Set();
