@@ -12,6 +12,7 @@
   },
   "include": [
     "src/compiler/ir/graph/types.ts",
+    "src/util/**/*.ts",
     "src/dispatcher/**/*.ts",
     "src/tensor/types/**/*.ts",
     "src/tensor/core/**/*.ts",
@@ -20,6 +21,7 @@
     "src/tensor/ops/**/*.ts",
     "src/tensor/native/**/*.ts",
     "src/autograd/**/*.ts",
-    "src/numeric/**/*.ts"
+    "src/numeric/**/*.ts",
+    "src/optim/**/*.ts"
   ]
 }

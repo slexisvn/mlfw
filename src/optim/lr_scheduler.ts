@@ -1,24 +1,31 @@
+import type { Optimizer } from './optimizer.js';
+
 export class LRScheduler {
-  constructor(optimizer, lastEpoch = -1) {
+  protected readonly _optimizer: Optimizer;
+  protected readonly _baseLRs: number[];
+  protected _lastEpoch: number;
+  protected _lastLR: number[] | null;
+
+  constructor(optimizer: Optimizer, lastEpoch = -1) {
     this._optimizer = optimizer;
-    this._baseLRs = optimizer.paramGroups.map(g => g.lr);
+    this._baseLRs = optimizer.paramGroups.map(g => g.lr as number);
     this._lastEpoch = lastEpoch;
     this._lastLR = null;
   }
 
-  _init() {
+  _init(): void {
     this.step();
   }
 
-  getLR() {
+  getLR(): number[] {
     throw new Error(`${this.constructor.name}.getLR() not implemented`);
   }
 
-  getLastLR() {
+  getLastLR(): number[] | null {
     return this._lastLR;
   }
 
-  step() {
+  step(): void {
     this._lastEpoch++;
     const lrs = this.getLR();
     this._lastLR = lrs;
@@ -30,35 +37,54 @@ export class LRScheduler {
 }
 
 export class StepLR extends LRScheduler {
-  constructor(optimizer, stepSize, gamma = 0.1, lastEpoch = -1) {
+  private readonly _stepSize: number;
+  private readonly _gamma: number;
+
+  constructor(optimizer: Optimizer, stepSize: number, gamma = 0.1, lastEpoch = -1) {
     super(optimizer, lastEpoch);
     this._stepSize = stepSize;
     this._gamma = gamma;
     this._init();
   }
 
-  getLR() {
+  override getLR(): number[] {
     const factor = Math.pow(this._gamma, Math.floor(this._lastEpoch / this._stepSize));
     return this._baseLRs.map(base => base * factor);
   }
 }
 
 export class CosineAnnealingLR extends LRScheduler {
-  constructor(optimizer, tMax, etaMin = 0, lastEpoch = -1) {
+  private readonly _tMax: number;
+  private readonly _etaMin: number;
+
+  constructor(optimizer: Optimizer, tMax: number, etaMin = 0, lastEpoch = -1) {
     super(optimizer, lastEpoch);
     this._tMax = tMax;
     this._etaMin = etaMin;
     this._init();
   }
 
-  getLR() {
+  override getLR(): number[] {
     const ratio = (1 + Math.cos(Math.PI * this._lastEpoch / this._tMax)) / 2;
     return this._baseLRs.map(base => this._etaMin + (base - this._etaMin) * ratio);
   }
 }
 
 export class ReduceLROnPlateau {
-  constructor(optimizer, {
+  private readonly _optimizer: Optimizer;
+  private readonly _mode: string;
+  private readonly _factor: number;
+  private readonly _patience: number;
+  private readonly _threshold: number;
+  private readonly _thresholdMode: string;
+  private readonly _cooldown: number;
+  private readonly _minLR: number;
+  private readonly _eps: number;
+  private _best: number;
+  private _numBadEpochs: number;
+  private _cooldownCounter: number;
+
+  constructor(optimizer: Optimizer, {
     mode = 'min',
     factor = 0.1,
     patience = 10,
@@ -67,6 +93,15 @@ export class ReduceLROnPlateau {
     cooldown = 0,
     minLR = 0,
     eps = 1e-8,
+  }: {
+    mode?: string;
+    factor?: number;
+    patience?: number;
+    threshold?: number;
+    thresholdMode?: string;
+    cooldown?: number;
+    minLR?: number;
+    eps?: number;
   } = {}) {
     this._optimizer = optimizer;
     this._mode = mode;
@@ -82,7 +117,7 @@ export class ReduceLROnPlateau {
     this._cooldownCounter = 0;
   }
 
-  step(metric) {
+  step(metric?: number): void {
     if (metric === undefined) throw new Error('ReduceLROnPlateau.step() requires a metric value');
     if (this._cooldownCounter > 0) {
       this._cooldownCounter--;
@@ -101,7 +136,7 @@ export class ReduceLROnPlateau {
     }
   }
 
-  _isBetter(current) {
+  _isBetter(current: number): boolean {
     if (this._mode === 'min') {
       return this._thresholdMode === 'rel'
         ? current < this._best * (1 - this._threshold)
@@ -112,10 +147,11 @@ export class ReduceLROnPlateau {
       : current > this._best + this._threshold;
   }
 
-  _reduceAllLRs() {
+  _reduceAllLRs(): void {
     for (const group of this._optimizer.paramGroups) {
-      const newLR = Math.max(group.lr * this._factor, this._minLR);
-      if (group.lr - newLR > this._eps) {
+      const lr = group.lr as number;
+      const newLR = Math.max(lr * this._factor, this._minLR);
+      if (lr - newLR > this._eps) {
         group.lr = newLR;
       }
     }

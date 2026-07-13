@@ -1,5 +1,24 @@
+import type { Tensor } from '../tensor/core/tensor.js';
+import type { Optimizer } from './optimizer.js';
+import type { NumberTypedArray } from './types.js';
+
 export class GradScaler {
-  constructor(opts = {}) {
+  enabled: boolean;
+  private _scale: number;
+  private readonly _growthFactor: number;
+  private readonly _backoffFactor: number;
+  private readonly _growthInterval: number;
+  private _growthTracker: number;
+  _foundInf: boolean;
+  private _unscaled: WeakSet<Optimizer>;
+
+  constructor(opts: {
+    enabled?: boolean;
+    initScale?: number;
+    growthFactor?: number;
+    backoffFactor?: number;
+    growthInterval?: number;
+  } = {}) {
     this.enabled = opts.enabled !== false;
     this._scale = opts.initScale ?? 65536;
     this._growthFactor = opts.growthFactor ?? 2.0;
@@ -10,30 +29,30 @@ export class GradScaler {
     this._unscaled = new WeakSet();
   }
 
-  getScale() {
+  getScale(): number {
     return this.enabled ? this._scale : 1.0;
   }
 
-  get growthTracker() {
+  get growthTracker(): number {
     return this._growthTracker;
   }
 
-  scale(loss) {
+  scale(loss: Tensor): Tensor {
     if (!this.enabled) return loss;
-    const d = loss._impl.storage.data;
+    const d = loss._impl.storage.data! as NumberTypedArray;
     for (let i = 0; i < d.length; i++) d[i] *= this._scale;
     if (loss._impl.bumpVersion) loss._impl.bumpVersion();
     return loss;
   }
 
-  unscale_(optimizer) {
+  unscale_(optimizer: Optimizer): boolean {
     if (!this.enabled) return false;
     const inv = 1 / this._scale;
     let foundInf = false;
     for (const group of optimizer.paramGroups) {
       for (const p of group.params) {
         if (p.grad === null || p.grad === undefined) continue;
-        const g = p.grad._impl.storage.data;
+        const g = p.grad._impl.storage.data! as NumberTypedArray;
         for (let i = 0; i < g.length; i++) {
           const v = g[i] * inv;
           if (!Number.isFinite(v)) foundInf = true;
@@ -46,7 +65,7 @@ export class GradScaler {
     return foundInf;
   }
 
-  step(optimizer) {
+  step(optimizer: Optimizer): boolean {
     if (!this.enabled) {
       optimizer.step();
       return true;
@@ -57,7 +76,7 @@ export class GradScaler {
     return true;
   }
 
-  update(newScale) {
+  update(newScale?: number): void {
     if (!this.enabled) return;
     if (newScale !== undefined) {
       this._scale = newScale;

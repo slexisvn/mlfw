@@ -17,7 +17,7 @@ export const ERF_P = 0.3275911;
 export const DIGAMMA_SHIFT = 6;
 export const DIGAMMA_SERIES = [-1 / 12, 1 / 120, -1 / 252, 1 / 240, -1 / 132];
 
-export function erfScalar(x) {
+export function erfScalar(x: number): number {
   const sign = x >= 0 ? 1 : -1;
   const ax = Math.abs(x);
   const t = 1 / (1 + ERF_P * ax);
@@ -26,11 +26,11 @@ export function erfScalar(x) {
   return sign * (1 - poly * t * Math.exp(-ax * ax));
 }
 
-export function erfcScalar(x) {
+export function erfcScalar(x: number): number {
   return 1 - erfScalar(x);
 }
 
-export function lgammaScalar(x) {
+export function lgammaScalar(x: number): number {
   if (x < 0.5) {
     return Math.log(Math.PI / Math.abs(Math.sin(Math.PI * x))) - lgammaScalar(1 - x);
   }
@@ -41,14 +41,14 @@ export function lgammaScalar(x) {
   return 0.5 * Math.log(2 * Math.PI) + (z + 0.5) * Math.log(t) - t + Math.log(sum);
 }
 
-export function gammaScalar(x) {
+export function gammaScalar(x: number): number {
   if (x < 0.5) {
     return Math.PI / (Math.sin(Math.PI * x) * gammaScalar(1 - x));
   }
   return Math.exp(lgammaScalar(x));
 }
 
-export function digammaScalar(x) {
+export function digammaScalar(x: number): number {
   let result = 0;
   let z = x;
   while (z < DIGAMMA_SHIFT) {

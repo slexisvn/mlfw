@@ -1,14 +1,17 @@
-export class MinHeap {
-  constructor(compare) {
+export class MinHeap<T> {
+  private readonly _items: T[];
+  private readonly _compare: (a: T, b: T) => number;
+
+  constructor(compare: (a: T, b: T) => number) {
     this._items = [];
     this._compare = compare;
   }
 
-  get size() { return this._items.length; }
+  get size(): number { return this._items.length; }
 
-  peek() { return this._items.length > 0 ? this._items[0] : null; }
+  peek(): T | null { return this._items.length > 0 ? this._items[0] : null; }
 
-  push(item) {
+  push(item: T): void {
     const items = this._items;
     items.push(item);
     let i = items.length - 1;
@@ -20,11 +23,11 @@ export class MinHeap {
     }
   }
 
-  pop() {
+  pop(): T | null {
     const items = this._items;
     if (items.length === 0) return null;
     const top = items[0];
-    const last = items.pop();
+    const last = items.pop()!;
     if (items.length > 0) {
       items[0] = last;
       let i = 0;
