@@ -1,9 +1,16 @@
 
 import { Stage } from '../state.js';
 import { resolveLimit, noGradAsync } from './utils.js';
+import type { DataLoaderLike, LightningModuleLike, NumericMetricRecord, TrainerCoreLike } from '../../types.js';
+import type { SchedulerConfig } from '../module.js';
 
 export class ValidationLoop {
-  async run(model, dataLoader, trainer, schedulerConfigs) {
+  async run(
+    model: LightningModuleLike,
+    dataLoader: DataLoaderLike,
+    trainer: TrainerCoreLike,
+    schedulerConfigs: Array<SchedulerConfig | null> | null
+  ): Promise<NumericMetricRecord> {
     const state = trainer.state;
     const callbacks = trainer.callbackConnector;
     const loggerConnector = trainer.loggerConnector;
@@ -40,7 +47,7 @@ export class ValidationLoop {
     return metrics;
   }
 
-  _stepPlateauSchedulers(schedulerConfigs, metrics) {
+  private _stepPlateauSchedulers(schedulerConfigs: Array<SchedulerConfig | null> | null, metrics: NumericMetricRecord): void {
     if (!schedulerConfigs) return;
     for (let i = 0; i < schedulerConfigs.length; i++) {
       const cfg = schedulerConfigs[i];

@@ -8,8 +8,48 @@ import { ConsoleLogger } from '../loggers/console.js';
 import { ProgressCallback } from '../callbacks/progress.js';
 import { ModelCheckpoint } from '../callbacks/checkpoint.js';
 import { CPU_DEVICE, GPU_DEVICE, WASM_DEVICE, WEBGPU_DEVICE } from '../../tensor/types/device.js';
+import type { Device } from '../../tensor/types/device.js';
+import type { Callback } from '../callbacks/callback.js';
+import type { Logger } from '../loggers/logger.js';
+import type {
+  DataLoaderLike,
+  HyperparameterRecord,
+  LightningModuleLike,
+  NumericMetricRecord,
+  OptimizerLike,
+  TrainerOptions,
+} from '../types.js';
+import type { SchedulerConfig } from './module.js';
 
 export class Trainer {
+  private _state: TrainerState;
+  private _compile: boolean;
+  private _compileMode: string;
+  private _cudaGraph: boolean;
+  private _cudaGraphWarmupSteps: number;
+  private _accelerator: TrainerOptions['accelerator'];
+  private _precision: string;
+  private _gradientClipVal: number | null;
+  private _gradientClipAlgorithm: string;
+  private _accumulateGradBatches: number;
+  private _limitTrainBatches: number | null;
+  private _limitValBatches: number | null;
+  private _limitTestBatches: number | null;
+  private _valCheckInterval: number;
+  private _checkValEveryNEpoch: number;
+  private _logEveryNSteps: number;
+  private _deterministic: boolean;
+  private _defaultRootDir: string;
+  private _loggers: Logger[];
+  private _strategy: SingleDeviceStrategy;
+  private _fitLoop: FitLoop;
+  private _evaluationLoop: EvaluationLoop;
+  private _predictionLoop: PredictionLoop;
+  private _callbackConnector: CallbackConnector;
+  private _loggerConnector: LoggerConnector;
+  private _model: LightningModuleLike | null;
+  private _webgpuMod: { flushWebGPUEager(): Promise<void> } | null;
+
   constructor({
     maxEpochs = 10,
     maxSteps = -1,
@@ -35,7 +75,7 @@ export class Trainer {
     compileMode = 'separate',
     cudaGraph = false,
     cudaGraphWarmupSteps = 3,
-  } = {}) {
+  }: TrainerOptions = {}) {
     this._state = new TrainerState();
     this._state.maxEpochs = maxEpochs;
     this._state.maxSteps = maxSteps;
@@ -85,35 +125,35 @@ export class Trainer {
     this._webgpuMod = null;
   }
 
-  get state() { return this._state; }
-  get strategy() { return this._strategy; }
-  get callbackConnector() { return this._callbackConnector; }
-  get loggerConnector() { return this._loggerConnector; }
-  get fitLoop() { return this._fitLoop; }
-  get gradientClipVal() { return this._gradientClipVal; }
-  get gradientClipAlgorithm() { return this._gradientClipAlgorithm; }
-  get compile() { return this._compile; }
-  get compileMode() { return this._compileMode; }
-  get cudaGraph() { return this._cudaGraph; }
-  get cudaGraphWarmupSteps() { return this._cudaGraphWarmupSteps; }
-  get accumulateGradBatches() { return this._accumulateGradBatches; }
-  set accumulateGradBatches(v) { this._accumulateGradBatches = v; }
-  get limitTrainBatches() { return this._limitTrainBatches; }
-  get limitValBatches() { return this._limitValBatches; }
-  get limitTestBatches() { return this._limitTestBatches; }
-  get checkValEveryNEpoch() { return this._checkValEveryNEpoch; }
-  get logEveryNSteps() { return this._logEveryNSteps; }
-  get shouldStop() { return this._state.shouldStop; }
-  set shouldStop(v) { this._state.shouldStop = v; }
-  get currentEpoch() { return this._state.epoch; }
-  get globalStep() { return this._state.globalStep; }
-  get logger() { return this._loggers[0] || null; }
-  get loggers() { return this._loggers; }
-  get callbacks() { return this._callbackConnector.callbacks; }
-  get model() { return this._model; }
-  get defaultRootDir() { return this._defaultRootDir; }
+  get state(): TrainerState { return this._state; }
+  get strategy(): SingleDeviceStrategy { return this._strategy; }
+  get callbackConnector(): CallbackConnector { return this._callbackConnector; }
+  get loggerConnector(): LoggerConnector { return this._loggerConnector; }
+  get fitLoop(): FitLoop { return this._fitLoop; }
+  get gradientClipVal(): number | null { return this._gradientClipVal; }
+  get gradientClipAlgorithm(): string { return this._gradientClipAlgorithm; }
+  get compile(): boolean { return this._compile; }
+  get compileMode(): string { return this._compileMode; }
+  get cudaGraph(): boolean { return this._cudaGraph; }
+  get cudaGraphWarmupSteps(): number { return this._cudaGraphWarmupSteps; }
+  get accumulateGradBatches(): number { return this._accumulateGradBatches; }
+  set accumulateGradBatches(v: number) { this._accumulateGradBatches = v; }
+  get limitTrainBatches(): number | null { return this._limitTrainBatches; }
+  get limitValBatches(): number | null { return this._limitValBatches; }
+  get limitTestBatches(): number | null { return this._limitTestBatches; }
+  get checkValEveryNEpoch(): number { return this._checkValEveryNEpoch; }
+  get logEveryNSteps(): number { return this._logEveryNSteps; }
+  get shouldStop(): boolean { return this._state.shouldStop; }
+  set shouldStop(v: boolean) { this._state.shouldStop = v; }
+  get currentEpoch(): number { return this._state.epoch; }
+  get globalStep(): number { return this._state.globalStep; }
+  get logger(): Logger | null { return this._loggers[0] || null; }
+  get loggers(): Logger[] { return this._loggers; }
+  get callbacks(): Callback[] { return this._callbackConnector.callbacks; }
+  get model(): LightningModuleLike | null { return this._model; }
+  get defaultRootDir(): string { return this._defaultRootDir; }
 
-  async fit(model, trainLoader, valLoader = null) {
+  async fit(model: LightningModuleLike, trainLoader: DataLoaderLike, valLoader: DataLoaderLike | null = null): Promise<void> {
     this._model = model;
     model._trainer = this;
     const device = this._resolveDevice();
@@ -152,7 +192,7 @@ export class Trainer {
     }
   }
 
-  async validate(model, dataLoader) {
+  async validate(model: LightningModuleLike, dataLoader: DataLoaderLike): Promise<NumericMetricRecord> {
     model._trainer = this;
     this._model = model;
     const device = this._resolveDevice();
@@ -167,7 +207,7 @@ export class Trainer {
     return metrics;
   }
 
-  async test(model, dataLoader) {
+  async test(model: LightningModuleLike, dataLoader: DataLoaderLike): Promise<NumericMetricRecord> {
     model._trainer = this;
     this._model = model;
     const device = this._resolveDevice();
@@ -182,7 +222,7 @@ export class Trainer {
     return metrics;
   }
 
-  async predict(model, dataLoader) {
+  async predict(model: LightningModuleLike, dataLoader: DataLoaderLike): Promise<unknown[]> {
     model._trainer = this;
     this._model = model;
     const device = this._resolveDevice();
@@ -192,7 +232,7 @@ export class Trainer {
     return await this._predictionLoop.run(model, dataLoader, this);
   }
 
-  _resolveDevice() {
+  _resolveDevice(): Device {
     if (this._accelerator === 'gpu') return GPU_DEVICE;
     if (this._accelerator === 'wasm') return WASM_DEVICE;
     if (this._accelerator === 'webgpu') return WEBGPU_DEVICE;
@@ -200,7 +240,7 @@ export class Trainer {
     return CPU_DEVICE;
   }
 
-  _guardEagerWebGPU(device, stage, hasValidation = false) {
+  _guardEagerWebGPU(device: Device, stage: string, hasValidation = false): void {
     if (device.type !== 'webgpu') return;
     if (stage === 'fit') {
       if (!this._compile) {
@@ -214,7 +254,7 @@ export class Trainer {
     throw new Error(`Trainer(accelerator="webgpu"): ${stage}() reads scalar metrics synchronously via .item(), which WebGPU's asynchronous readback cannot serve eagerly. Use predict() for eager WebGPU inference, or train via compile=true.`);
   }
 
-  _guardCudaGraph(device, hasValidation = false) {
+  _guardCudaGraph(device: Device, hasValidation = false): void {
     if (!this._cudaGraph) return;
     if (device.type !== 'gpu') {
       throw new Error('Trainer(cudaGraph=true) requires accelerator="gpu" (eager CUDA whole-step capture/replay).');
@@ -233,29 +273,29 @@ export class Trainer {
     }
   }
 
-  async _prepareDevice(device) {
+  async _prepareDevice(device: Device): Promise<void> {
     if (device.type === 'gpu') {
       const { preloadCudaRuntime } = await import('../../runtime/backend_registry.js');
       await preloadCudaRuntime();
     } else if (device.type === 'webgpu') {
       const { preloadWebGPU } = await import('../../runtime/backend_registry.js');
-      this._webgpuMod = await preloadWebGPU();
+      this._webgpuMod = await preloadWebGPU() as { flushWebGPUEager(): Promise<void> };
     }
   }
 
-  async _flushEagerInference() {
+  async _flushEagerInference(): Promise<void> {
     if (this._webgpuMod) await this._webgpuMod.flushWebGPUEager();
   }
 
-  _resolveLoggers(loggerConfig) {
+  _resolveLoggers(loggerConfig: TrainerOptions['logger']): Logger[] {
     if (loggerConfig === false || loggerConfig === null) return [];
     if (loggerConfig === true) return [new ConsoleLogger()];
     if (Array.isArray(loggerConfig)) return loggerConfig;
-    return [loggerConfig];
+    return [loggerConfig as Logger];
   }
 
-  _extractHyperparams(model, optimizers) {
-    const params = {
+  _extractHyperparams(model: LightningModuleLike, optimizers: OptimizerLike[]): HyperparameterRecord {
+    const params: HyperparameterRecord = {
       maxEpochs: this._state.maxEpochs,
       maxSteps: this._state.maxSteps,
       accelerator: this._accelerator,
@@ -264,7 +304,7 @@ export class Trainer {
     };
     for (let i = 0; i < optimizers.length; i++) {
       const opt = optimizers[i];
-      const defaults = opt.defaults;
+      const defaults = opt.defaults || {};
       const prefix = optimizers.length > 1 ? `optimizer_${i}_` : '';
       params[prefix + 'optimizer'] = opt.constructor.name;
       if (defaults.lr !== undefined) params[prefix + 'lr'] = defaults.lr;

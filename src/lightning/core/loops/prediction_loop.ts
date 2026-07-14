@@ -1,8 +1,9 @@
 import { Stage } from '../state.js';
 import { resolveLimit, noGradAsync } from './utils.js';
+import type { DataLoaderLike, LightningModuleLike, TrainerCoreLike } from '../../types.js';
 
 export class PredictionLoop {
-  async run(model, dataLoader, trainer) {
+  async run(model: LightningModuleLike, dataLoader: DataLoaderLike, trainer: TrainerCoreLike): Promise<unknown[]> {
     const state = trainer.state;
     const callbacks = trainer.callbackConnector;
     const strategy = trainer.strategy;
@@ -12,7 +13,7 @@ export class PredictionLoop {
     model.eval();
     callbacks.dispatch('onPredictStart', trainer, model);
 
-    const predictions = [];
+    const predictions: unknown[] = [];
     const limit = resolveLimit(trainer.limitTestBatches, dataLoader.length);
     let batchIdx = 0;
 

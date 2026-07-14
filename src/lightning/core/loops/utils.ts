@@ -1,4 +1,4 @@
-export function resolveLimit(limitConfig, totalBatches) {
+export function resolveLimit(limitConfig: number | null | undefined, totalBatches: number): number {
   if (limitConfig === null || limitConfig === undefined) return totalBatches;
   if (typeof limitConfig === 'number') {
     if (limitConfig > 0 && limitConfig <= 1) {
@@ -9,7 +9,7 @@ export function resolveLimit(limitConfig, totalBatches) {
   return totalBatches;
 }
 
-export async function noGradAsync(fn) {
+export async function noGradAsync(fn: () => Promise<void>): Promise<void> {
   const { GradMode } = await import('../../../autograd/grad_mode.js');
   const prev = GradMode.isEnabled();
   GradMode.setEnabled(false);

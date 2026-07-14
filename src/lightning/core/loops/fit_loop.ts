@@ -1,21 +1,33 @@
 import { TrainingLoop } from './training_loop.js';
 import { ValidationLoop } from './validation_loop.js';
+import type { DataLoaderLike, LightningModuleLike, NumericMetricRecord, OptimizerLike, TrainerCoreLike } from '../../types.js';
+import type { SchedulerConfig } from '../module.js';
 
 export class FitLoop {
+  private _trainingLoop: TrainingLoop;
+  private _validationLoop: ValidationLoop;
+
   constructor() {
     this._trainingLoop = new TrainingLoop();
     this._validationLoop = new ValidationLoop();
   }
 
-  get trainingLoop() {
+  get trainingLoop(): TrainingLoop {
     return this._trainingLoop;
   }
 
-  get validationLoop() {
+  get validationLoop(): ValidationLoop {
     return this._validationLoop;
   }
 
-  async run(model, trainLoader, valLoader, trainer, optimizers, schedulerConfigs) {
+  async run(
+    model: LightningModuleLike,
+    trainLoader: DataLoaderLike,
+    valLoader: DataLoaderLike | null,
+    trainer: TrainerCoreLike,
+    optimizers: OptimizerLike[],
+    schedulerConfigs: Array<SchedulerConfig | null>
+  ): Promise<void> {
     const state = trainer.state;
     const callbacks = trainer.callbackConnector;
 
@@ -41,7 +53,7 @@ export class FitLoop {
     callbacks.dispatch('onTrainEnd', trainer, model);
   }
 
-  _shouldRunValidation(epoch, trainer) {
+  _shouldRunValidation(epoch: number, trainer: TrainerCoreLike): boolean {
     const interval = trainer.checkValEveryNEpoch;
     return (epoch + 1) % interval === 0;
   }

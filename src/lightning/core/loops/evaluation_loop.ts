@@ -1,8 +1,9 @@
 import { Stage } from '../state.js';
 import { resolveLimit, noGradAsync } from './utils.js';
+import type { DataLoaderLike, LightningModuleLike, NumericMetricRecord, TrainerCoreLike } from '../../types.js';
 
 export class EvaluationLoop {
-  async run(model, dataLoader, trainer) {
+  async run(model: LightningModuleLike, dataLoader: DataLoaderLike, trainer: TrainerCoreLike): Promise<NumericMetricRecord> {
     const state = trainer.state;
     const callbacks = trainer.callbackConnector;
     const loggerConnector = trainer.loggerConnector;

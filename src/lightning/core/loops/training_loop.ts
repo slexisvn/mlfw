@@ -4,9 +4,49 @@ import { div } from '../../../tensor/ops/ops.js';
 import { eagerFlush, setCudaGraphArmed } from '../../../dispatcher/eager_mode.js';
 import { GradMode } from '../../../autograd/grad_mode.js';
 import { resolveLimit } from './utils.js';
+import type { Tensor } from '../../../tensor/core/tensor.js';
+import type { CallbackConnector } from '../hooks.js';
+import type { SchedulerConfig } from '../module.js';
+import type {
+  CompiledTrainStep,
+  DataLoaderLike,
+  EagerGraphRunner,
+  LightningModuleLike,
+  NumericMetricRecord,
+  OptimizerLike,
+  TrainerCoreLike,
+} from '../../types.js';
+import type { SingleDeviceStrategy } from '../state.js';
+
+type LossLike = {
+  shape?: readonly number[];
+  backward(): void;
+  _impl: {
+    storage: {
+      rawData: unknown;
+    };
+  };
+};
+
+type TrainingOutput = unknown;
+type TensorLikeForFlatten = {
+  shape?: unknown;
+  contiguous?: () => unknown;
+  _impl: {
+    storage: {
+      rawData: unknown;
+    };
+  };
+};
 
 export class TrainingLoop {
-  async run(model, dataLoader, trainer, optimizers, schedulerConfigs) {
+  async run(
+    model: LightningModuleLike,
+    dataLoader: DataLoaderLike,
+    trainer: TrainerCoreLike,
+    optimizers: OptimizerLike[],
+    schedulerConfigs: Array<SchedulerConfig | null>
+  ): Promise<NumericMetricRecord> {
     const state = trainer.state;
     const callbacks = trainer.callbackConnector;
     const loggerConnector = trainer.loggerConnector;
@@ -65,7 +105,17 @@ export class TrainingLoop {
     return epochMetrics;
   }
 
-  async _automaticStep(model, batch, batchIdx, trainer, optimizers, schedulerConfigs, strategy, accumGrad, callbacks) {
+  async _automaticStep(
+    model: LightningModuleLike,
+    batch: unknown,
+    batchIdx: number,
+    trainer: TrainerCoreLike,
+    optimizers: OptimizerLike[],
+    schedulerConfigs: Array<SchedulerConfig | null>,
+    strategy: SingleDeviceStrategy,
+    accumGrad: number,
+    callbacks: CallbackConnector
+  ): Promise<TrainingOutput> {
     if (trainer.compile) {
       return this._compiledStep(model, batch, batchIdx, trainer, optimizers, schedulerConfigs, accumGrad);
     }
@@ -75,17 +125,17 @@ export class TrainingLoop {
     const result = await Promise.resolve(model.trainingStep(batch, batchIdx));
     let loss = result;
     let output = result;
-    if (result && typeof result === 'object' && !(result.backward)) {
+    if (isLossObject(result)) {
       loss = result.loss;
       output = result;
     }
 
     if (accumGrad > 1) {
-      loss = div(loss, accumGrad);
+      loss = div(loss as Tensor, accumGrad);
     }
 
     callbacks.dispatch('onBeforeBackward', trainer, model, loss);
-    strategy.backward(loss);
+    strategy.backward(loss as LossLike);
     callbacks.dispatch('onAfterBackward', trainer, model);
 
     const isAccumBoundary = (batchIdx + 1) % accumGrad === 0;
@@ -103,30 +153,39 @@ export class TrainingLoop {
     return output;
   }
 
-  async _compiledStep(model, batch, batchIdx, trainer, optimizers, schedulerConfigs, accumGrad) {
+  async _compiledStep(
+    model: LightningModuleLike,
+    batch: unknown,
+    batchIdx: number,
+    trainer: TrainerCoreLike,
+    optimizers: OptimizerLike[],
+    schedulerConfigs: Array<SchedulerConfig | null>,
+    accumGrad: number
+  ): Promise<unknown> {
     const elems = Array.isArray(batch) ? batch : [batch];
-    const callForward = (...xs) => model.trainingStep(Array.isArray(batch) ? xs : xs[0], 0);
+    const callForward = (...xs: unknown[]) => model.trainingStep(Array.isArray(batch) ? xs : xs[0], 0);
     let loss;
     if (!model.__compiledTrainStep) {
       const { compileWithBackward } = await import('../../../tracing/compile_backward.js');
       const { CPUTarget, CUDATarget, WebGPUTarget } = await import('../../../backend/target.js');
       const deviceType = model._device && model._device.type;
       const target = deviceType === 'webgpu' ? WebGPUTarget() : deviceType === 'gpu' ? CUDATarget() : CPUTarget();
-      model.__compiledTrainStep = compileWithBackward({ forward: callForward }, elems, { target, mode: trainer.compileMode });
+      model.__compiledTrainStep = (compileWithBackward as unknown as (module: unknown, inputs: unknown[], options: unknown) => CompiledTrainStep)({ forward: callForward }, elems, { target, mode: trainer.compileMode });
       const origLog = model.log;
       model.log = () => {};
-      try { loss = model.__compiledTrainStep(...elems); if (loss && loss.then) loss = await loss; }
+      try { loss = model.__compiledTrainStep(...elems); if (isThenable(loss)) loss = await loss; }
       finally { model.log = origLog; }
     } else {
-      loss = model.__compiledTrainStep(...elems); if (loss && loss.then) loss = await loss;
+      loss = model.__compiledTrainStep(...elems); if (isThenable(loss)) loss = await loss;
     }
 
-    const step = model.__compiledTrainStep;
+    const step = model.__compiledTrainStep!;
     const params = step.capturedParams();
     const { ones } = await import('../../../tensor/factory/creation_ops.js');
-    let grads = step.backward(ones(loss.shape)); if (grads && grads.then) grads = await grads;
-    const off = grads.length - params.length;
-    for (let i = 0; i < params.length; i++) { const g = grads[off + i]; if (g) params[i].grad = g; }
+    let grads = step.backward(ones((loss as { shape: readonly number[] }).shape)); if (isThenable(grads)) grads = await grads;
+    const gradList = grads as unknown[];
+    const off = gradList.length - params.length;
+    for (let i = 0; i < params.length; i++) { const g = gradList[off + i]; if (g) params[i].grad = g; }
 
     if ((batchIdx + 1) % accumGrad === 0) {
       for (let i = 0; i < optimizers.length; i++) {
@@ -141,14 +200,20 @@ export class TrainingLoop {
     return loss;
   }
 
-  async _eagerTrainStepCore(model, batch, optimizers, strategy, trainer) {
+  async _eagerTrainStepCore(
+    model: LightningModuleLike,
+    batch: unknown,
+    optimizers: OptimizerLike[],
+    strategy: SingleDeviceStrategy,
+    trainer: TrainerCoreLike | null
+  ): Promise<unknown> {
     const result = await Promise.resolve(model.trainingStep(batch, 0));
     let loss = result;
-    if (result && typeof result === 'object' && !(result.backward)) loss = result.loss;
-    strategy.backward(loss);
+    if (isLossObject(result)) loss = result.loss;
+    strategy.backward(loss as LossLike);
     if (trainer && trainer.gradientClipVal) {
       const { deviceClipGradNorm } = await import('#io/cuda_runtime');
-      deviceClipGradNorm([...model.parameters()], trainer.gradientClipVal);
+      deviceClipGradNorm([...model.parameters!()], trainer.gradientClipVal);
     }
     for (let i = 0; i < optimizers.length; i++) {
       strategy.optimizerStep(optimizers[i]);
@@ -157,7 +222,14 @@ export class TrainingLoop {
     return loss;
   }
 
-  async _graphedStep(model, batch, trainer, optimizers, schedulerConfigs, strategy) {
+  async _graphedStep(
+    model: LightningModuleLike,
+    batch: unknown,
+    trainer: TrainerCoreLike,
+    optimizers: OptimizerLike[],
+    schedulerConfigs: Array<SchedulerConfig | null>,
+    strategy: SingleDeviceStrategy
+  ): Promise<unknown> {
     const eg = await import('#io/cuda/eager_graph.js');
     const resident = await import('#io/cuda/resident.js');
     const mem = await import('#io/cuda/memory.js');
@@ -200,53 +272,53 @@ export class TrainingLoop {
         model.log = origLog;
         resident.clearCapturePins();
         r.phase = 'disabled';
-        r.captureError = e && e.message;
+        r.captureError = e && typeof e === 'object' && 'message' in e ? e.message : e;
         
         return this._eagerTrainStepCore(model, batch, optimizers, strategy, trainer);
       }
-      r.exec = r.captured.exec;
-      r.lossDptr = resident.deviceBufferDptr(loss._impl.storage.rawData);
+      r.exec = r.captured!.exec;
+      r.lossDptr = resident.deviceBufferDptr((loss as LossLike)._impl.storage.rawData);
       r.lossScratch = new Float32Array(1);
       r.phase = 'replay';
       eg.replay(r.exec);
       eg.syncStream();
-      mem.copyDeviceToHost(r.lossScratch, r.lossDptr);
+      mem.copyDeviceToHost(r.lossScratch, r.lossDptr!);
       const v = r.lossScratch[0];
       this._logGraphLoss(trainer, v);
       this._stepStepSchedulers(schedulerConfigs, trainer.state.globalStep);
       return v;
     }
 
-    for (let i = 0; i < r.inputs.length && i < inputs.length; i++) {
-      if (r.inputs[i].dptr) mem.copyHostToDeviceAsync(r.inputs[i].dptr, inputs[i]._impl.storage.rawData);
+    for (let i = 0; i < r.inputs!.length && i < inputs.length; i++) {
+      if (r.inputs![i].dptr) mem.copyHostToDeviceAsync(r.inputs![i].dptr, inputs[i]._impl.storage.rawData);
     }
-    eg.replay(r.exec);
+    eg.replay(r.exec!);
     eg.syncStream();
-    mem.copyDeviceToHost(r.lossScratch, r.lossDptr);
-    const v = r.lossScratch[0];
+    mem.copyDeviceToHost(r.lossScratch!, r.lossDptr!);
+    const v = r.lossScratch![0];
     this._logGraphLoss(trainer, v);
     this._stepStepSchedulers(schedulerConfigs, trainer.state.globalStep);
     return v;
   }
 
-  _logGraphLoss(trainer, value) {
+  _logGraphLoss(trainer: TrainerCoreLike, value: number): void {
     trainer.state.stepMetrics.update('train_loss', value);
     trainer.state.epochMetrics.update('train_loss', value);
     if (!trainer.state._progBarMetrics) trainer.state._progBarMetrics = new Map();
     trainer.state._progBarMetrics.set('train_loss', value);
   }
 
-  _clipGradients(model, trainer) {
+  _clipGradients(model: LightningModuleLike, trainer: TrainerCoreLike): void {
     if (!trainer.gradientClipVal) return;
-    const params = [...model.parameters()];
+    const params = [...model.parameters!()];
     if (trainer.gradientClipAlgorithm === 'norm') {
-      clipGradNorm_(params, trainer.gradientClipVal);
+      clipGradNorm_(params as Tensor[], trainer.gradientClipVal);
     } else {
-      clipGradValue_(params, trainer.gradientClipVal);
+      clipGradValue_(params as Tensor[], trainer.gradientClipVal);
     }
   }
 
-  _stepStepSchedulers(schedulerConfigs, globalStep) {
+  _stepStepSchedulers(schedulerConfigs: Array<SchedulerConfig | null> | null, globalStep: number): void {
     if (!schedulerConfigs) return;
     for (let i = 0; i < schedulerConfigs.length; i++) {
       const cfg = schedulerConfigs[i];
@@ -258,7 +330,7 @@ export class TrainingLoop {
     }
   }
 
-  _stepEpochSchedulers(schedulerConfigs, epoch) {
+  _stepEpochSchedulers(schedulerConfigs: Array<SchedulerConfig | null> | null, epoch: number): void {
     if (!schedulerConfigs) return;
     for (let i = 0; i < schedulerConfigs.length; i++) {
       const cfg = schedulerConfigs[i];
@@ -271,10 +343,28 @@ export class TrainingLoop {
   }
 }
 
-function _flattenTensors(batch, out = []) {
+function _flattenTensors(batch: unknown, out: TensorLikeForFlatten[] = []): TensorLikeForFlatten[] {
   if (batch == null) return out;
-  if (batch.shape !== undefined && typeof batch.contiguous === 'function') { out.push(batch); return out; }
+  if (isFlattenTensor(batch)) { out.push(batch); return out; }
   if (Array.isArray(batch)) { for (const b of batch) _flattenTensors(b, out); return out; }
-  if (typeof batch === 'object') { for (const k of Object.keys(batch)) _flattenTensors(batch[k], out); return out; }
+  if (typeof batch === 'object') { const record = batch as Record<string, unknown>; for (const k of Object.keys(record)) _flattenTensors(record[k], out); return out; }
   return out;
+}
+
+function isThenable(value: unknown): value is PromiseLike<unknown> {
+  return typeof value === 'object' && value !== null && typeof (value as { then?: unknown }).then === 'function';
+}
+
+function isLossObject(value: unknown): value is { loss: unknown } {
+  return typeof value === 'object'
+    && value !== null
+    && !('backward' in value)
+    && 'loss' in value;
+}
+
+function isFlattenTensor(value: unknown): value is TensorLikeForFlatten {
+  return typeof value === 'object'
+    && value !== null
+    && 'shape' in value
+    && typeof (value as { contiguous?: unknown }).contiguous === 'function';
 }
