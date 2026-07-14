@@ -1,13 +1,22 @@
 import { Metric } from './metric.js';
+import type { NumericTypedArray } from '../../tensor/types/dtype.js';
+import type { TensorLike } from '../types.js';
+
+type ConfusionMatrixOptions = {
+  numClasses: number;
+};
 
 export class ConfusionMatrix extends Metric {
-  constructor({ numClasses }) {
+  private _numClasses: number;
+  private _matrix: Int32Array;
+
+  constructor({ numClasses }: ConfusionMatrixOptions) {
     super();
     this._numClasses = numClasses;
     this._matrix = new Int32Array(numClasses * numClasses);
   }
 
-  update(preds, target) {
+  update(preds: TensorLike, target: TensorLike): void {
     const predData = preds._impl.storage.data;
     const targetData = target._impl.storage.data;
     const batchSize = targetData.length;
@@ -15,20 +24,20 @@ export class ConfusionMatrix extends Metric {
     const hasMultipleCols = preds.shape.length >= 2 && preds.shape[1] > 1;
 
     for (let i = 0; i < batchSize; i++) {
-      const t = targetData[i] | 0;
+      const t = (targetData[i] as number) | 0;
       let p;
       if (hasMultipleCols) {
         p = argmaxRow(predData, i, nc);
       } else {
-        p = predData[i] | 0;
+        p = (predData[i] as number) | 0;
       }
       this._matrix[t * nc + p]++;
     }
   }
 
-  compute() {
+  compute(): number[][] {
     const nc = this._numClasses;
-    const result = [];
+    const result: number[][] = [];
     for (let i = 0; i < nc; i++) {
       const row = new Array(nc);
       for (let j = 0; j < nc; j++) {
@@ -39,13 +48,13 @@ export class ConfusionMatrix extends Metric {
     return result;
   }
 
-  reset() {
+  reset(): void {
     super.reset();
     this._matrix.fill(0);
   }
 }
 
-function argmaxRow(data, row, cols) {
+function argmaxRow(data: NumericTypedArray, row: number, cols: number): number {
   let best = 0;
   let bestVal = data[row * cols];
   for (let j = 1; j < cols; j++) {

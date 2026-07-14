@@ -1,14 +1,29 @@
 import { fs } from '#io/fs';
 import { joinPath } from '../../runtime/path.js';
 import { Logger } from './logger.js';
+import type { HyperparameterRecord, LoggerOptions, NumericMetricRecord } from '../types.js';
+
+type CSVLoggerOptions = LoggerOptions & {
+  saveDir?: string;
+  flushInterval?: number;
+};
 
 export class CSVLogger extends Logger {
+  private _saveDir: string;
+  private _flushInterval: number;
+  private _columns: string[];
+  private _columnSet: Set<string>;
+  private _buffer: NumericMetricRecord[];
+  private _filePath: string | null;
+  private _headerWritten: boolean;
+  protected _version: number | null;
+
   constructor({
     saveDir = './lightning_logs',
     name = 'default',
     version = null,
     flushInterval = 10,
-  } = {}) {
+  }: CSVLoggerOptions = {}) {
     super({ name, version: version || 0 });
     this._saveDir = saveDir;
     this._flushInterval = flushInterval;
@@ -20,13 +35,13 @@ export class CSVLogger extends Logger {
     this._version = version;
   }
 
-  get logDir() {
+  get logDir(): string {
     const ver = this._version !== null ? this._version : this._resolveVersion();
     return joinPath(this._saveDir, this._name, `version_${ver}`);
   }
 
-  logMetrics(metrics, step) {
-    const row = { step };
+  logMetrics(metrics: NumericMetricRecord, step: number): void {
+    const row: NumericMetricRecord = { step };
     const keys = Object.keys(metrics);
     for (let i = 0; i < keys.length; i++) {
       const k = keys[i];
@@ -43,17 +58,17 @@ export class CSVLogger extends Logger {
     }
   }
 
-  logHyperparams(params) {
+  logHyperparams(params: HyperparameterRecord): void {
     this._ensureDir();
     const path = joinPath(this.logDir, 'hparams.json');
     fs.writeFile(path, JSON.stringify(params, null, 2));
   }
 
-  finalize() {
+  finalize(): void {
     if (this._buffer.length > 0) this._flush();
   }
 
-  _flush() {
+  private _flush(): void {
     this._ensureDir();
     const path = this._getFilePath();
 
@@ -78,21 +93,21 @@ export class CSVLogger extends Logger {
     this._buffer.length = 0;
   }
 
-  _getFilePath() {
+  private _getFilePath(): string {
     if (!this._filePath) {
       this._filePath = joinPath(this.logDir, 'metrics.csv');
     }
     return this._filePath;
   }
 
-  _ensureDir() {
+  private _ensureDir(): void {
     const dir = this.logDir;
     if (!fs.exists(dir)) {
       fs.mkdir(dir);
     }
   }
 
-  _resolveVersion() {
+  private _resolveVersion(): number {
     if (this._version !== null) return this._version;
     const baseDir = joinPath(this._saveDir, this._name);
     if (!fs.exists(baseDir)) {

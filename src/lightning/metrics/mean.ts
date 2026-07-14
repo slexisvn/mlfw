@@ -1,23 +1,27 @@
 import { Metric } from './metric.js';
+import type { MetricValue } from '../types.js';
 
 export class MeanMetric extends Metric {
+  private _sum: number;
+  private _count: number;
+
   constructor() {
     super();
     this._sum = 0;
     this._count = 0;
   }
 
-  update(value, weight = 1) {
+  update(value: MetricValue, weight = 1): void {
     const v = typeof value === 'number' ? value : value.item();
-    this._sum += v * weight;
+    this._sum += (v as number) * weight;
     this._count += weight;
   }
 
-  compute() {
+  compute(): number {
     return this._count === 0 ? 0 : this._sum / this._count;
   }
 
-  reset() {
+  reset(): void {
     super.reset();
     this._sum = 0;
     this._count = 0;
@@ -25,20 +29,22 @@ export class MeanMetric extends Metric {
 }
 
 export class SumMetric extends Metric {
+  private _sum: number;
+
   constructor() {
     super();
     this._sum = 0;
   }
 
-  update(value) {
-    this._sum += typeof value === 'number' ? value : value.item();
+  update(value: MetricValue): void {
+    this._sum += (typeof value === 'number' ? value : value.item()) as number;
   }
 
-  compute() {
+  compute(): number {
     return this._sum;
   }
 
-  reset() {
+  reset(): void {
     super.reset();
     this._sum = 0;
   }

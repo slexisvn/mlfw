@@ -26,6 +26,13 @@
     "src/tracing/**/*.ts",
     "src/nn/**/*.ts",
     "src/ml/**/*.ts",
+    "src/runtime/path.ts",
+    "src/runtime/runtime.ts",
+    "src/runtime/measurer_registry.ts",
+    "src/notebook/browser.ts",
+    "src/lightning/types.ts",
+    "src/lightning/metrics/**/*.ts",
+    "src/lightning/loggers/**/*.ts",
     "src/tokenizer/**/*.ts",
     "src/data/**/*.ts",
     "src/index.ts"

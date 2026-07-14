@@ -1,5 +1,12 @@
+import type { Metric } from './metric.js';
+import type { MetricResult, TensorLike } from '../types.js';
+
+type MetricMap = Record<string, Metric>;
+
 export class MetricCollection {
-  constructor(metrics = {}) {
+  private _metrics: Map<string, Metric>;
+
+  constructor(metrics: MetricMap = {}) {
     this._metrics = new Map();
     const keys = Object.keys(metrics);
     for (let i = 0; i < keys.length; i++) {
@@ -7,49 +14,49 @@ export class MetricCollection {
     }
   }
 
-  add(name, metric) {
+  add(name: string, metric: Metric): this {
     this._metrics.set(name, metric);
     return this;
   }
 
-  update(preds, target) {
+  update(preds: TensorLike, target: TensorLike): void {
     for (const [, metric] of this._metrics) {
       metric.update(preds, target);
     }
   }
 
-  compute() {
-    const result = {};
+  compute(): Record<string, MetricResult> {
+    const result: Record<string, MetricResult> = {};
     for (const [name, metric] of this._metrics) {
       result[name] = metric.compute();
     }
     return result;
   }
 
-  reset() {
+  reset(): void {
     for (const [, metric] of this._metrics) {
       metric.reset();
     }
   }
 
-  forward(preds, target) {
+  forward(preds: TensorLike, target: TensorLike): Record<string, MetricResult> {
     this.update(preds, target);
     return this.compute();
   }
 
-  get(name) {
+  get(name: string): Metric | undefined {
     return this._metrics.get(name);
   }
 
-  has(name) {
+  has(name: string): boolean {
     return this._metrics.has(name);
   }
 
-  get size() {
+  get size(): number {
     return this._metrics.size;
   }
 
-  [Symbol.iterator]() {
+  [Symbol.iterator](): MapIterator<[string, Metric]> {
     return this._metrics.entries();
   }
 }
