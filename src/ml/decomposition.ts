@@ -1,8 +1,16 @@
 import { svd } from '../tensor/ops/linalg.js';
 import { matmul, add, sub, mean } from '../tensor/ops/ops.js';
+import type { MLTensor } from './types.js';
 
 export class PCA {
-  constructor({ nComponents = null } = {}) {
+  nComponents: number | null;
+  components_: MLTensor | null;
+  mean_: MLTensor | null;
+  explainedVariance_: number[] | null;
+  explainedVarianceRatio_: number[] | null;
+  private _nc?: number;
+
+  constructor({ nComponents = null }: { nComponents?: number | null } = {}) {
     this.nComponents = nComponents;
     this.components_ = null;
     this.mean_ = null;
@@ -10,18 +18,18 @@ export class PCA {
     this.explainedVarianceRatio_ = null;
   }
 
-  fit(X) {
+  fit(X: MLTensor): this {
     const n = X.shape[0];
     const d = X.shape[1];
-    this.mean_ = mean(X, [0], true);
-    const Xc = sub(X, this.mean_);
-    const { S, V } = svd(Xc);
+    this.mean_ = mean(X, [0], true) as MLTensor;
+    const Xc = sub(X, this.mean_) as MLTensor;
+    const { S, V } = svd(Xc) as unknown as { S: MLTensor; V: MLTensor };
     const k = V.shape[1];
     const nc = Math.min(this.nComponents ?? Math.min(n, d), k);
     this.components_ = V.narrow(1, 0, nc);
     this._nc = nc;
 
-    const svals = S.toArray();
+    const svals = S.toArray() as ArrayLike<number>;
     const denom = n > 1 ? n - 1 : 1;
     let total = 0;
     for (let c = 0; c < svals.length; c++) total += (svals[c] * svals[c]) / denom;
@@ -35,15 +43,15 @@ export class PCA {
     return this;
   }
 
-  transform(X) {
-    return matmul(sub(X, this.mean_), this.components_);
+  transform(X: MLTensor): MLTensor {
+    return matmul(sub(X, this.mean_!) as MLTensor, this.components_!) as MLTensor;
   }
 
-  fit_transform(X) {
+  fit_transform(X: MLTensor): MLTensor {
     return this.fit(X).transform(X);
   }
 
-  inverse_transform(Xr) {
-    return add(matmul(Xr, this.components_.transpose(0, 1)), this.mean_);
+  inverse_transform(Xr: MLTensor): MLTensor {
+    return add(matmul(Xr, this.components_!.transpose(0, 1)), this.mean_!) as MLTensor;
   }
 }

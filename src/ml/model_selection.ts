@@ -1,7 +1,13 @@
 import { takeRows } from './_util.js';
 import { makeRng, shuffledIndices } from './_random.js';
+import type { FitPredictEstimator, MLTensor } from './types.js';
 
-export function train_test_split(X, y, { testSize = 0.25, shuffle = true, randomState = 0 } = {}) {
+type SplitOptions = { testSize?: number; shuffle?: boolean; randomState?: number };
+type Fold = { train: number[]; test: number[] };
+type ScoringFn = (yTrue: MLTensor, yPred: MLTensor) => number;
+type EstimatorFactory<T extends FitPredictEstimator = FitPredictEstimator> = (params?: Record<string, unknown> | null) => T;
+
+export function train_test_split(X: MLTensor, y: MLTensor, { testSize = 0.25, shuffle = true, randomState = 0 }: SplitOptions = {}): [MLTensor, MLTensor, MLTensor, MLTensor] {
   const n = X.shape[0];
   const idx = shuffle ? shuffledIndices(n, makeRng(randomState)) : Array.from({ length: n }, (_, i) => i);
   const nTest = Math.max(1, Math.round(n * testSize));
@@ -11,15 +17,19 @@ export function train_test_split(X, y, { testSize = 0.25, shuffle = true, random
 }
 
 export class KFold {
-  constructor({ nSplits = 5, shuffle = false, randomState = 0 } = {}) {
+  nSplits: number;
+  shuffle: boolean;
+  randomState: number;
+
+  constructor({ nSplits = 5, shuffle = false, randomState = 0 }: { nSplits?: number; shuffle?: boolean; randomState?: number } = {}) {
     this.nSplits = nSplits;
     this.shuffle = shuffle;
     this.randomState = randomState;
   }
 
-  split(n) {
+  split(n: number): Fold[] {
     const idx = this.shuffle ? shuffledIndices(n, makeRng(this.randomState)) : Array.from({ length: n }, (_, i) => i);
-    const folds = [];
+    const folds: Fold[] = [];
     const base = Math.floor(n / this.nSplits);
     let rem = n % this.nSplits;
     let start = 0;
@@ -36,13 +46,15 @@ export class KFold {
 }
 
 export class TimeSeriesSplit {
-  constructor({ nSplits = 5 } = {}) {
+  nSplits: number;
+
+  constructor({ nSplits = 5 }: { nSplits?: number } = {}) {
     this.nSplits = nSplits;
   }
 
-  split(n) {
+  split(n: number): Fold[] {
     const size = Math.floor(n / (this.nSplits + 1));
-    const folds = [];
+    const folds: Fold[] = [];
     for (let k = 1; k <= this.nSplits; k++) {
       const trainEnd = size * k;
       const testEnd = k === this.nSplits ? n : size * (k + 1);
@@ -54,7 +66,7 @@ export class TimeSeriesSplit {
   }
 }
 
-export function cross_val_score(makeEstimator, X, y, { cv = 5, scoring = null, shuffle = true, randomState = 0 } = {}) {
+export function cross_val_score(makeEstimator: EstimatorFactory, X: MLTensor, y: MLTensor, { cv = 5, scoring = null, shuffle = true, randomState = 0 }: { cv?: number; scoring?: ScoringFn | null; shuffle?: boolean; randomState?: number } = {}): number[] {
   const folds = new KFold({ nSplits: cv, shuffle, randomState }).split(X.shape[0]);
   const scores = [];
   for (const { train, test } of folds) {
@@ -63,16 +75,16 @@ export function cross_val_score(makeEstimator, X, y, { cv = 5, scoring = null, s
     const Xte = takeRows(X, test);
     const yte = takeRows(y, test);
     const est = makeEstimator().fit(Xtr, ytr);
-    scores.push(scoring ? scoring(yte, est.predict(Xte)) : est.score(Xte, yte));
+    scores.push(scoring ? scoring(yte, est.predict(Xte)) : est.score!(Xte, yte));
   }
   return scores;
 }
 
-function cartesian(grid) {
+function cartesian(grid: Record<string, readonly unknown[]>): Array<Record<string, unknown>> {
   const keys = Object.keys(grid);
-  let combos = [{}];
+  let combos: Array<Record<string, unknown>> = [{}];
   for (const key of keys) {
-    const next = [];
+    const next: Array<Record<string, unknown>> = [];
     for (const combo of combos) {
       for (const value of grid[key]) next.push({ ...combo, [key]: value });
     }
@@ -82,7 +94,15 @@ function cartesian(grid) {
 }
 
 export class GridSearchCV {
-  constructor(makeEstimator, paramGrid, { cv = 5, scoring = null } = {}) {
+  makeEstimator: EstimatorFactory;
+  paramGrid: Record<string, readonly unknown[]>;
+  cv: number;
+  scoring: ScoringFn | null;
+  bestParams_: Record<string, unknown> | null;
+  bestScore_: number;
+  bestEstimator_: FitPredictEstimator | null;
+
+  constructor(makeEstimator: EstimatorFactory, paramGrid: Record<string, readonly unknown[]>, { cv = 5, scoring = null }: { cv?: number; scoring?: ScoringFn | null } = {}) {
     this.makeEstimator = makeEstimator;
     this.paramGrid = paramGrid;
     this.cv = cv;
@@ -92,7 +112,7 @@ export class GridSearchCV {
     this.bestEstimator_ = null;
   }
 
-  fit(X, y) {
+  fit(X: MLTensor, y: MLTensor): this {
     for (const params of cartesian(this.paramGrid)) {
       const scores = cross_val_score(() => this.makeEstimator(params), X, y, { cv: this.cv, scoring: this.scoring });
       const mean = scores.reduce((a, b) => a + b, 0) / scores.length;
@@ -105,7 +125,7 @@ export class GridSearchCV {
     return this;
   }
 
-  predict(X) {
-    return this.bestEstimator_.predict(X);
+  predict(X: MLTensor): MLTensor {
+    return this.bestEstimator_!.predict(X);
   }
 }

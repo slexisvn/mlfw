@@ -15,7 +15,7 @@ registerCpuNumeric();
 registerWasmLinalg();
 registerWasmMl();
 registerAutogradKernels();
-installOps(Tensor);
+installOps(Tensor as unknown as Parameters<typeof installOps>[0]);
 
 export { Tensor } from './tensor/core/tensor.js';
 

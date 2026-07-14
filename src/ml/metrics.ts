@@ -1,6 +1,7 @@
 import { vectorOf } from './_util.js';
+import type { MLTensor } from './types.js';
 
-export function mean_squared_error(yTrue, yPred) {
+export function mean_squared_error(yTrue: MLTensor, yPred: MLTensor): number {
   const a = vectorOf(yTrue);
   const b = vectorOf(yPred);
   let s = 0;
@@ -11,7 +12,7 @@ export function mean_squared_error(yTrue, yPred) {
   return s / a.n;
 }
 
-export function mean_absolute_error(yTrue, yPred) {
+export function mean_absolute_error(yTrue: MLTensor, yPred: MLTensor): number {
   const a = vectorOf(yTrue);
   const b = vectorOf(yPred);
   let s = 0;
@@ -19,7 +20,7 @@ export function mean_absolute_error(yTrue, yPred) {
   return s / a.n;
 }
 
-export function r2_score(yTrue, yPred) {
+export function r2_score(yTrue: MLTensor, yPred: MLTensor): number {
   const a = vectorOf(yTrue);
   const b = vectorOf(yPred);
   let mean = 0;
@@ -36,7 +37,7 @@ export function r2_score(yTrue, yPred) {
   return ssTot === 0 ? 0 : 1 - ssRes / ssTot;
 }
 
-export function accuracy_score(yTrue, yPred) {
+export function accuracy_score(yTrue: MLTensor, yPred: MLTensor): number {
   const a = vectorOf(yTrue);
   const b = vectorOf(yPred);
   let correct = 0;
@@ -44,13 +45,13 @@ export function accuracy_score(yTrue, yPred) {
   return correct / a.n;
 }
 
-export function confusion_matrix(yTrue, yPred) {
+export function confusion_matrix(yTrue: MLTensor, yPred: MLTensor): number[][] {
   const a = vectorOf(yTrue);
   const b = vectorOf(yPred);
   let maxLabel = 0;
   for (let i = 0; i < a.n; i++) maxLabel = Math.max(maxLabel, a.data[i], b.data[i]);
   const k = maxLabel + 1;
-  const cm = Array.from({ length: k }, () => new Array(k).fill(0));
+  const cm = Array.from({ length: k }, () => new Array<number>(k).fill(0));
   for (let i = 0; i < a.n; i++) cm[a.data[i]][b.data[i]]++;
   return cm;
 }

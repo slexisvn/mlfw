@@ -1,14 +1,21 @@
 import { matrixOf, matrix, vectorOf, vector, encodeLabels } from './_util.js';
+import type { MLTensor } from './types.js';
 
 export class StandardScaler {
-  constructor({ withMean = true, withStd = true } = {}) {
+  withMean: boolean;
+  withStd: boolean;
+  mean_: Float64Array | null;
+  scale_: Float64Array | null;
+  private _cols?: number;
+
+  constructor({ withMean = true, withStd = true }: { withMean?: boolean; withStd?: boolean } = {}) {
     this.withMean = withMean;
     this.withStd = withStd;
     this.mean_ = null;
     this.scale_ = null;
   }
 
-  fit(X) {
+  fit(X: MLTensor): this {
     const m = matrixOf(X);
     this.mean_ = new Float64Array(m.cols);
     this.scale_ = new Float64Array(m.cols);
@@ -30,27 +37,31 @@ export class StandardScaler {
     return this;
   }
 
-  transform(X) {
+  transform(X: MLTensor): MLTensor {
     const m = matrixOf(X);
+    const mean = this.mean_!;
+    const scale = this.scale_!;
     const out = new Float64Array(m.rows * m.cols);
     for (let i = 0; i < m.rows; i++) {
       for (let j = 0; j < m.cols; j++) {
-        out[i * m.cols + j] = (m.data[i * m.cols + j] - this.mean_[j]) / this.scale_[j];
+        out[i * m.cols + j] = (m.data[i * m.cols + j] - mean[j]) / scale[j];
       }
     }
     return matrix(out, m.rows, m.cols, X.dtype);
   }
 
-  fit_transform(X) {
+  fit_transform(X: MLTensor): MLTensor {
     return this.fit(X).transform(X);
   }
 
-  inverse_transform(X) {
+  inverse_transform(X: MLTensor): MLTensor {
     const m = matrixOf(X);
+    const mean = this.mean_!;
+    const scale = this.scale_!;
     const out = new Float64Array(m.rows * m.cols);
     for (let i = 0; i < m.rows; i++) {
       for (let j = 0; j < m.cols; j++) {
-        out[i * m.cols + j] = m.data[i * m.cols + j] * this.scale_[j] + this.mean_[j];
+        out[i * m.cols + j] = m.data[i * m.cols + j] * scale[j] + mean[j];
       }
     }
     return matrix(out, m.rows, m.cols, X.dtype);
@@ -58,12 +69,15 @@ export class StandardScaler {
 }
 
 export class LabelEncoder {
+  classes_: number[] | null;
+  private _lookup: Map<number, number> | null;
+
   constructor() {
     this.classes_ = null;
     this._lookup = null;
   }
 
-  fit(y) {
+  fit(y: MLTensor): this {
     const yv = vectorOf(y);
     const { classes } = encodeLabels(yv.data, yv.n);
     this.classes_ = classes;
@@ -71,18 +85,19 @@ export class LabelEncoder {
     return this;
   }
 
-  transform(y) {
+  transform(y: MLTensor): MLTensor {
     const yv = vectorOf(y);
+    const lookup = this._lookup!;
     const out = new Float64Array(yv.n);
     for (let i = 0; i < yv.n; i++) {
-      const idx = this._lookup.get(yv.data[i]);
+      const idx = lookup.get(yv.data[i]);
       if (idx === undefined) throw new Error(`LabelEncoder: unseen label ${yv.data[i]}`);
       out[i] = idx;
     }
     return vector(out, yv.n, y.dtype);
   }
 
-  fit_transform(y) {
+  fit_transform(y: MLTensor): MLTensor {
     const yv = vectorOf(y);
     const { y: encoded, classes } = encodeLabels(yv.data, yv.n);
     this.classes_ = classes;
@@ -92,27 +107,31 @@ export class LabelEncoder {
     return vector(out, yv.n, y.dtype);
   }
 
-  inverse_transform(y) {
+  inverse_transform(y: MLTensor): number[] {
     const yv = vectorOf(y);
-    return Array.from({ length: yv.n }, (_, i) => this.classes_[Math.round(yv.data[i])]);
+    const classes = this.classes_!;
+    return Array.from({ length: yv.n }, (_, i) => classes[Math.round(yv.data[i])]);
   }
 }
 
 export class OneHotEncoder {
+  classes_: number[] | null;
+
   constructor() {
     this.classes_ = null;
   }
 
-  fit(y) {
+  fit(y: MLTensor): this {
     const yv = vectorOf(y);
     this.classes_ = encodeLabels(yv.data, yv.n).classes;
     return this;
   }
 
-  transform(y) {
+  transform(y: MLTensor): MLTensor {
     const yv = vectorOf(y);
-    const lookup = new Map(this.classes_.map((c, i) => [c, i]));
-    const K = this.classes_.length;
+    const classes = this.classes_!;
+    const lookup = new Map(classes.map((c, i) => [c, i]));
+    const K = classes.length;
     const out = new Float64Array(yv.n * K);
     for (let i = 0; i < yv.n; i++) {
       const idx = lookup.get(yv.data[i]);
@@ -122,20 +141,25 @@ export class OneHotEncoder {
     return matrix(out, yv.n, K, y.dtype);
   }
 
-  fit_transform(y) {
+  fit_transform(y: MLTensor): MLTensor {
     return this.fit(y).transform(y);
   }
 }
 
 export class MinMaxScaler {
-  constructor({ featureRange = [0, 1] } = {}) {
+  featureRange: readonly [number, number];
+  min_: null;
+  dataMin_: Float64Array | null;
+  dataRange_: Float64Array | null;
+
+  constructor({ featureRange = [0, 1] }: { featureRange?: readonly [number, number] } = {}) {
     this.featureRange = featureRange;
     this.min_ = null;
     this.dataMin_ = null;
     this.dataRange_ = null;
   }
 
-  fit(X) {
+  fit(X: MLTensor): this {
     const m = matrixOf(X);
     this.dataMin_ = new Float64Array(m.cols);
     this.dataRange_ = new Float64Array(m.cols);
@@ -153,21 +177,23 @@ export class MinMaxScaler {
     return this;
   }
 
-  transform(X) {
+  transform(X: MLTensor): MLTensor {
     const m = matrixOf(X);
     const [lo, hi] = this.featureRange;
+    const dataMin = this.dataMin_!;
+    const dataRange = this.dataRange_!;
     const span = hi - lo;
     const out = new Float64Array(m.rows * m.cols);
     for (let i = 0; i < m.rows; i++) {
       for (let j = 0; j < m.cols; j++) {
-        const scaled = (m.data[i * m.cols + j] - this.dataMin_[j]) / this.dataRange_[j];
+        const scaled = (m.data[i * m.cols + j] - dataMin[j]) / dataRange[j];
         out[i * m.cols + j] = scaled * span + lo;
       }
     }
     return matrix(out, m.rows, m.cols, X.dtype);
   }
 
-  fit_transform(X) {
+  fit_transform(X: MLTensor): MLTensor {
     return this.fit(X).transform(X);
   }
 }

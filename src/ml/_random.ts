@@ -1,6 +1,8 @@
+import type { Rng } from './types.js';
+
 const DEFAULT_SEED = 0x9e3779b9;
 
-export function makeRng(seed) {
+export function makeRng(seed?: number): Rng {
   let a = (seed ?? DEFAULT_SEED) >>> 0;
   return function next() {
     a |= 0;
@@ -11,11 +13,11 @@ export function makeRng(seed) {
   };
 }
 
-export function randInt(rng, n) {
+export function randInt(rng: Rng, n: number): number {
   return Math.floor(rng() * n);
 }
 
-export function shuffledIndices(n, rng) {
+export function shuffledIndices(n: number, rng: Rng): number[] {
   const idx = Array.from({ length: n }, (_, i) => i);
   for (let i = n - 1; i > 0; i--) {
     const j = randInt(rng, i + 1);
