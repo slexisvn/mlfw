@@ -2,10 +2,53 @@ import { fs } from '#io/fs';
 import { joinPath } from '../../runtime/path.js';
 import { Callback } from './callback.js';
 import { serializeCheckpoint, deserializeCheckpoint } from '../io/checkpoint_format.js';
+import type { LightningModuleLike, TrainerLike } from '../types.js';
 
 const CKPT_EXT = '.ckpt';
 
+type CheckpointMode = 'min' | 'max';
+type BestKEntry = {
+  score: number;
+  path: string;
+};
+type ModelCheckpointOptions = {
+  dirpath?: string;
+  filename?: string;
+  monitor?: string | null;
+  mode?: CheckpointMode;
+  saveTopK?: number;
+  saveLast?: boolean;
+  everyNEpochs?: number;
+};
+type CheckpointModel = Omit<LightningModuleLike, '_currentOptimizers'> & {
+  stateDict(): unknown;
+  _currentOptimizers?: CheckpointOptimizer[];
+};
+type CheckpointOptimizer = {
+  stateDict(): unknown;
+  loadStateDict(state: unknown): void;
+};
+type CheckpointPayload = {
+  epoch: number;
+  globalStep: number;
+  modelState: unknown;
+  optimizerStates?: unknown[];
+};
+
 export class ModelCheckpoint extends Callback {
+  private _dirpath: string;
+  private _filename: string;
+  private _monitor: string | null;
+  private _mode: CheckpointMode;
+  private _saveTopK: number;
+  private _saveLast: boolean;
+  private _everyNEpochs: number;
+  private _bestK: BestKEntry[];
+  private _recent: string[];
+  private _compareFn: (a: number, b: number) => number;
+  private _bestModelPath: string | null;
+  private _lastModelPath: string | null;
+
   constructor({
     dirpath = './lightning_logs/checkpoints',
     filename = 'epoch={epoch}-step={step}',
@@ -14,7 +57,7 @@ export class ModelCheckpoint extends Callback {
     saveTopK = 1,
     saveLast = true,
     everyNEpochs = 1,
-  } = {}) {
+  }: ModelCheckpointOptions = {}) {
     super();
     this._dirpath = dirpath;
     this._filename = filename;
@@ -32,11 +75,11 @@ export class ModelCheckpoint extends Callback {
     this._lastModelPath = null;
   }
 
-  get bestModelPath() { return this._bestModelPath; }
-  get lastModelPath() { return this._lastModelPath; }
-  get bestKModels() { return this._bestK; }
+  get bestModelPath(): string | null { return this._bestModelPath; }
+  get lastModelPath(): string | null { return this._lastModelPath; }
+  get bestKModels(): BestKEntry[] { return this._bestK; }
 
-  onTrainEpochEnd(trainer, model) {
+  onTrainEpochEnd(trainer: TrainerLike, model: CheckpointModel): void {
     const state = trainer.state;
     if ((state.epoch + 1) % this._everyNEpochs !== 0) return;
 
@@ -59,7 +102,7 @@ export class ModelCheckpoint extends Callback {
       return;
     }
 
-    const metrics = state.epochMetrics.computeAll();
+    const metrics = state.epochMetrics!.computeAll();
     const current = metrics[this._monitor];
     if (current === undefined) return;
 
@@ -79,13 +122,13 @@ export class ModelCheckpoint extends Callback {
       this._bestK.splice(insertIdx, 0, entry);
       if (this._bestK.length > this._saveTopK) {
         const removed = this._bestK.pop();
-        this._tryDelete(removed.path);
+        this._tryDelete(removed!.path);
       }
       this._updateBest();
     }
   }
 
-  _findInsertIndex(score) {
+  private _findInsertIndex(score: number): number {
     let lo = 0;
     let hi = this._bestK.length;
     while (lo < hi) {
@@ -99,14 +142,14 @@ export class ModelCheckpoint extends Callback {
     return lo;
   }
 
-  _updateBest() {
+  private _updateBest(): void {
     if (this._bestK.length > 0) {
       this._bestModelPath = this._bestK[0].path;
     }
   }
 
-  _saveCheckpoint(model, trainer, path) {
-    const checkpoint = {
+  private _saveCheckpoint(model: CheckpointModel, trainer: TrainerLike, path: string): void {
+    const checkpoint: CheckpointPayload = {
       epoch: trainer.state.epoch,
       globalStep: trainer.state.globalStep,
       modelState: model.stateDict(),
@@ -117,39 +160,40 @@ export class ModelCheckpoint extends Callback {
       checkpoint.optimizerStates = optimizers.map((opt) => opt.stateDict());
     }
 
-    trainer.callbackConnector.dispatch('onSaveCheckpoint', trainer, model, checkpoint);
+    trainer.callbackConnector!.dispatch('onSaveCheckpoint', trainer, model, checkpoint);
 
     const tmp = path + '.tmp';
     fs.writeBinary(tmp, serializeCheckpoint(checkpoint));
     fs.rename(tmp, path);
   }
 
-  _fillTemplate(state) {
+  private _fillTemplate(state: TrainerLike['state']): string {
     return this._filename
-      .replace('{epoch}', state.epoch)
-      .replace('{step}', state.globalStep);
+      .replace('{epoch}', String(state.epoch))
+      .replace('{step}', String(state.globalStep));
   }
 
-  _ensureDir() {
+  private _ensureDir(): void {
     if (!fs.exists(this._dirpath)) {
       fs.mkdir(this._dirpath);
     }
   }
 
-  _tryDelete(path) {
+  private _tryDelete(path: string | undefined): void {
     try { fs.remove(path); } catch { /* noop */ }
   }
 }
 
-export function loadCheckpoint(path) {
+export function loadCheckpoint(path: string): unknown {
   return deserializeCheckpoint(fs.readBinary(path));
 }
 
-export function applyCheckpoint(checkpoint, model, optimizers = []) {
-  if (checkpoint.modelState) model.loadStateDict(checkpoint.modelState);
-  if (checkpoint.optimizerStates) {
-    const n = Math.min(optimizers.length, checkpoint.optimizerStates.length);
-    for (let i = 0; i < n; i++) optimizers[i].loadStateDict(checkpoint.optimizerStates[i]);
+export function applyCheckpoint(checkpoint: unknown, model: LightningModuleLike, optimizers: CheckpointOptimizer[] = []): unknown {
+  const payload = checkpoint as Partial<CheckpointPayload>;
+  if (payload.modelState) model.loadStateDict!(payload.modelState);
+  if (payload.optimizerStates) {
+    const n = Math.min(optimizers.length, payload.optimizerStates.length);
+    for (let i = 0; i < n; i++) optimizers[i].loadStateDict(payload.optimizerStates[i]);
   }
   return checkpoint;
 }

@@ -1,17 +1,30 @@
 import { Callback } from './callback.js';
+import type { LightningModuleLike, TrainerLike } from '../types.js';
+
+type LearningRateMonitorOptions = {
+  logMomentum?: boolean;
+};
+
+type LRHistoryEntry = {
+  step: number;
+  lr: number;
+};
 
 export class LearningRateMonitor extends Callback {
-  constructor({ logMomentum = false } = {}) {
+  private _logMomentum: boolean;
+  private _lrHistory: Record<string, LRHistoryEntry[]>;
+
+  constructor({ logMomentum = false }: LearningRateMonitorOptions = {}) {
     super();
     this._logMomentum = logMomentum;
     this._lrHistory = {};
   }
 
-  get lrHistory() {
+  get lrHistory(): Record<string, LRHistoryEntry[]> {
     return this._lrHistory;
   }
 
-  onTrainBatchStart(trainer, model, _batch, _batchIdx) {
+  onTrainBatchStart(trainer: TrainerLike, model: LightningModuleLike, _batch: unknown, _batchIdx: unknown): void {
     const optimizers = model._currentOptimizers;
     if (!optimizers) return;
 

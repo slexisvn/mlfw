@@ -1,9 +1,25 @@
 import { Callback } from './callback.js';
+import type { TrainerLike } from '../types.js';
 
 const PARTIAL_BLOCKS = ['▏', '▎', '▍', '▌', '▋', '▊', '▉'];
 
+type ProgressOptions = {
+  barLength?: number;
+};
+
+function stdoutWrite(text: string): void {
+  (globalThis as unknown as { process: { stdout: { write(value: string): void } } }).process.stdout.write(text);
+}
+
 export class ProgressCallback extends Callback {
-  constructor({ barLength = 24 } = {}) {
+  private _barLength: number;
+  private _trainBatchCount: number;
+  private _valBatchCount: number;
+  private _epochStartTime: number;
+  private _lastLen: number;
+  private _active: boolean;
+
+  constructor({ barLength = 24 }: ProgressOptions = {}) {
     super();
     this._barLength = barLength;
     this._trainBatchCount = 0;
@@ -13,55 +29,55 @@ export class ProgressCallback extends Callback {
     this._active = false;
   }
 
-  onTrainEpochStart(trainer, _model) {
+  onTrainEpochStart(trainer: TrainerLike, _model: unknown): void {
     this._trainBatchCount = 0;
     this._epochStartTime = Date.now();
     const total = this._trainTotal(trainer);
     if (total) this._render('Epoch', trainer.state.epoch + 1, trainer.state.maxEpochs, 0, total, trainer.state);
   }
 
-  onTrainBatchEnd(trainer, _model, _outputs, _batch, _batchIdx) {
+  onTrainBatchEnd(trainer: TrainerLike, _model: unknown, _outputs: unknown, _batch: unknown, _batchIdx: unknown): void {
     this._trainBatchCount++;
     const total = this._trainTotal(trainer);
     if (total) this._render('Epoch', trainer.state.epoch + 1, trainer.state.maxEpochs, this._trainBatchCount, total, trainer.state);
   }
 
-  onTrainEpochEnd(trainer, _model) {
+  onTrainEpochEnd(trainer: TrainerLike, _model: unknown): void {
     const total = this._trainTotal(trainer);
     if (total) this._render('Epoch', trainer.state.epoch + 1, trainer.state.maxEpochs, total, total, trainer.state);
   }
 
-  onTrainEnd(_trainer, _model) {
-    if (this._active) process.stdout.write('\n');
+  onTrainEnd(_trainer: unknown, _model: unknown): void {
+    if (this._active) stdoutWrite('\n');
     this._active = false;
     this._lastLen = 0;
   }
 
-  onValidationEpochStart(_trainer, _model) {
+  onValidationEpochStart(_trainer: unknown, _model: unknown): void {
     this._valBatchCount = 0;
     this._epochStartTime = Date.now();
   }
 
-  onValidationBatchEnd(trainer, _model, _outputs, _batch, _batchIdx) {
+  onValidationBatchEnd(trainer: TrainerLike, _model: unknown, _outputs: unknown, _batch: unknown, _batchIdx: unknown): void {
     this._valBatchCount++;
     const total = this._valTotal(trainer);
     if (total) this._render('Validation', null, null, this._valBatchCount, total, trainer.state);
   }
 
-  onValidationEnd(trainer, _model) {
+  onValidationEnd(trainer: TrainerLike, _model: unknown): void {
     const total = this._valTotal(trainer);
     if (total) this._render('Validation', null, null, total, total, trainer.state);
   }
 
-  _trainTotal(trainer) {
+  private _trainTotal(trainer: TrainerLike): number | null {
     return trainer.state.numTrainingBatches ?? resolveTotal(trainer.limitTrainBatches);
   }
 
-  _valTotal(trainer) {
+  private _valTotal(trainer: TrainerLike): number | null {
     return trainer.state.numValBatches ?? resolveTotal(trainer.limitValBatches);
   }
 
-  _render(label, epoch, maxEpochs, current, total, state) {
+  private _render(label: string, epoch: number | null, maxEpochs: number | null | undefined, current: number, total: number, state: TrainerLike['state']): void {
     const frac = total > 0 ? Math.min(current / total, 1) : 0;
     const pct = String(Math.round(frac * 100)).padStart(3, ' ');
     const bar = this._bar(frac);
@@ -73,12 +89,12 @@ export class ProgressCallback extends Callback {
     const metrics = this._formatProgBarMetrics(state);
     const line = `${head}: ${pct}%|${bar}| ${current}/${total} [${timing}${metrics}]`;
     const pad = Math.max(0, this._lastLen - line.length);
-    process.stdout.write('\r' + line + ' '.repeat(pad));
+    stdoutWrite('\r' + line + ' '.repeat(pad));
     this._lastLen = line.length;
     this._active = true;
   }
 
-  _bar(frac) {
+  private _bar(frac: number): string {
     const width = this._barLength;
     const exact = frac * width;
     let whole = Math.floor(exact);
@@ -90,7 +106,7 @@ export class ProgressCallback extends Callback {
     return '█'.repeat(whole) + partial + ' '.repeat(pad);
   }
 
-  _formatProgBarMetrics(state) {
+  private _formatProgBarMetrics(state: TrainerLike['state']): string {
     const pbm = state._progBarMetrics;
     if (!pbm || pbm.size === 0) return '';
     const parts = [];
@@ -99,13 +115,13 @@ export class ProgressCallback extends Callback {
   }
 }
 
-function resolveTotal(limitConfig) {
+function resolveTotal(limitConfig: number | null | undefined): number | null {
   if (limitConfig === null || limitConfig === undefined) return null;
   if (typeof limitConfig === 'number' && limitConfig > 1) return limitConfig;
   return null;
 }
 
-function fmtTime(seconds) {
+function fmtTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) seconds = 0;
   const total = Math.round(seconds);
   const m = Math.floor(total / 60);
@@ -113,7 +129,7 @@ function fmtTime(seconds) {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
-function formatNum(v) {
+function formatNum(v: unknown): string {
   if (typeof v !== 'number') return String(v);
   if (Number.isInteger(v)) return String(v);
   return v.toFixed(4);

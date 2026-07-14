@@ -1,7 +1,15 @@
 import { Callback } from './callback.js';
+import type { TrainerLike } from '../types.js';
+
+type GradientAccumulationOptions = {
+  scheduling: Record<string, number>;
+};
 
 export class GradientAccumulationScheduler extends Callback {
-  constructor({ scheduling }) {
+  private _scheduling: Map<number, number>;
+  private _sortedEpochs: number[];
+
+  constructor({ scheduling }: GradientAccumulationOptions) {
     super();
     this._scheduling = new Map();
     const entries = Object.entries(scheduling);
@@ -11,18 +19,18 @@ export class GradientAccumulationScheduler extends Callback {
     this._sortedEpochs = [...this._scheduling.keys()].sort((a, b) => a - b);
   }
 
-  onTrainEpochStart(trainer, _model) {
+  onTrainEpochStart(trainer: TrainerLike, _model?: unknown): void {
     const epoch = trainer.state.epoch;
     if (this._scheduling.has(epoch)) {
       trainer.accumulateGradBatches = this._scheduling.get(epoch);
     }
   }
 
-  getCurrentAccumulation(epoch) {
+  getCurrentAccumulation(epoch: number): number {
     let result = 1;
     for (let i = 0; i < this._sortedEpochs.length; i++) {
       if (this._sortedEpochs[i] <= epoch) {
-        result = this._scheduling.get(this._sortedEpochs[i]);
+        result = this._scheduling.get(this._sortedEpochs[i])!;
       } else {
         break;
       }

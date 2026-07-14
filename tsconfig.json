@@ -33,6 +33,8 @@
     "src/lightning/types.ts",
     "src/lightning/metrics/**/*.ts",
     "src/lightning/loggers/**/*.ts",
+    "src/lightning/callbacks/**/*.ts",
+    "src/lightning/io/**/*.ts",
     "src/tokenizer/**/*.ts",
     "src/data/**/*.ts",
     "src/index.ts"
