@@ -23,6 +23,7 @@
     "src/autograd/**/*.ts",
     "src/numeric/**/*.ts",
     "src/optim/**/*.ts",
+    "src/tracing/**/*.ts",
     "src/nn/**/*.ts",
     "src/tokenizer/**/*.ts",
     "src/data/**/*.ts"

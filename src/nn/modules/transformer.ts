@@ -8,14 +8,28 @@ import * as ops from '../../tensor/ops/ops.js';
 import { full } from '../../tensor/factory/creation_ops.js';
 import { empty } from '../../tensor/factory/creation_ops.js';
 import { relu, gelu } from '../functional/activation.js';
+import type { NNTensor, OptionalTensor } from '../types.js';
 
-function _getActivation(name) {
-  if (name === 'gelu') return gelu;
-  return relu;
+type ActivationName = 'relu' | 'gelu' | string;
+type ActivationFn = (input: NNTensor) => NNTensor;
+
+function _getActivation(name: ActivationName): ActivationFn {
+  if (name === 'gelu') return gelu as unknown as ActivationFn;
+  return relu as unknown as ActivationFn;
 }
 
 export class MultiheadAttention extends Module {
-  constructor(embedDim, numHeads, dropout = 0, bias = true, kdim = null, vdim = null, batchFirst = true) {
+  embedDim: number;
+  numHeads: number;
+  headDim: number;
+  batchFirst: boolean;
+  dropout: number;
+  qProj: Linear;
+  kProj: Linear;
+  vProj: Linear;
+  outProj: Linear;
+
+  constructor(embedDim: number, numHeads: number, dropout = 0, bias = true, kdim: number | null = null, vdim: number | null = null, batchFirst = true) {
     super();
     this.embedDim = embedDim;
     this.numHeads = numHeads;
@@ -28,7 +42,7 @@ export class MultiheadAttention extends Module {
     this.outProj = new Linear(embedDim, embedDim, bias);
   }
 
-  forward(query, key, value, attnMask = null, keyPaddingMask = null, isCausal = false) {
+  forward(query: NNTensor, key: NNTensor, value: NNTensor, attnMask: OptionalTensor = null, keyPaddingMask: OptionalTensor = null, isCausal = false): NNTensor {
     if (!this.batchFirst) {
       query = query.transpose(0, 1);
       key = key.transpose(0, 1);
@@ -50,9 +64,9 @@ export class MultiheadAttention extends Module {
     if (keyPaddingMask) {
       const negInf = full(keyPaddingMask.shape, -Infinity);
       const zero = full(keyPaddingMask.shape, 0);
-      let paddingMask = ops.where(keyPaddingMask, negInf, zero);
+      let paddingMask = ops.where(keyPaddingMask, negInf, zero) as NNTensor;
       paddingMask = paddingMask.unsqueeze(1).unsqueeze(2);
-      attnMask = attnMask ? ops.add(attnMask, paddingMask) : paddingMask;
+      attnMask = attnMask ? ops.add(attnMask, paddingMask) as NNTensor : paddingMask;
     }
 
     let attnOut = scaled_dot_product_attention(q, k, v, attnMask, this.dropout, isCausal, this.training);
@@ -69,7 +83,25 @@ export class MultiheadAttention extends Module {
 }
 
 export class TransformerEncoderLayer extends Module {
-  constructor(dModel, nhead, dimFeedforward = 2048, dropout = 0.1, activation = 'relu', layerNormEps = 1e-5, batchFirst = true, normFirst = false) {
+  selfAttn: MultiheadAttention;
+  linear1: Linear;
+  linear2: Linear;
+  norm1: LayerNorm;
+  norm2: LayerNorm;
+  dropout1: Dropout;
+  dropout2: Dropout;
+  dropoutFFN: Dropout;
+  _activation: ActivationFn;
+  _activationName: ActivationName;
+  normFirst: boolean;
+  _dModel: number;
+  _nhead: number;
+  _dimFeedforward: number;
+  _dropout: number;
+  _layerNormEps: number;
+  _batchFirst: boolean;
+
+  constructor(dModel: number, nhead: number, dimFeedforward = 2048, dropout = 0.1, activation: ActivationName = 'relu', layerNormEps = 1e-5, batchFirst = true, normFirst = false) {
     super();
     this.selfAttn = new MultiheadAttention(dModel, nhead, dropout, true, null, null, batchFirst);
     this.linear1 = new Linear(dModel, dimFeedforward);
@@ -90,35 +122,56 @@ export class TransformerEncoderLayer extends Module {
     this._batchFirst = batchFirst;
   }
 
-  forward(src, srcMask = null, srcKeyPaddingMask = null, isCausal = false) {
+  forward(src: NNTensor, srcMask: OptionalTensor = null, srcKeyPaddingMask: OptionalTensor = null, isCausal = false): NNTensor {
     if (this.normFirst) {
       return this._forwardPreNorm(src, srcMask, srcKeyPaddingMask, isCausal);
     }
     return this._forwardPostNorm(src, srcMask, srcKeyPaddingMask, isCausal);
   }
 
-  _forwardPostNorm(src, srcMask, srcKeyPaddingMask, isCausal) {
+  _forwardPostNorm(src: NNTensor, srcMask: OptionalTensor, srcKeyPaddingMask: OptionalTensor, isCausal: boolean): NNTensor {
     let x = this.selfAttn.forward(src, src, src, srcMask, srcKeyPaddingMask, isCausal);
-    x = this.norm1.forward(ops.add(src, this.dropout1.forward(x)));
+    x = this.norm1.forward(ops.add(src, this.dropout1.forward(x) as NNTensor) as NNTensor);
     let ff = this._activation(this.linear1.forward(x));
-    ff = this.linear2.forward(this.dropoutFFN.forward(ff));
-    x = this.norm2.forward(ops.add(x, this.dropout2.forward(ff)));
+    ff = this.linear2.forward(this.dropoutFFN.forward(ff) as NNTensor);
+    x = this.norm2.forward(ops.add(x, this.dropout2.forward(ff) as NNTensor) as NNTensor);
     return x;
   }
 
-  _forwardPreNorm(src, srcMask, srcKeyPaddingMask, isCausal) {
+  _forwardPreNorm(src: NNTensor, srcMask: OptionalTensor, srcKeyPaddingMask: OptionalTensor, isCausal: boolean): NNTensor {
     let normed = this.norm1.forward(src);
     let x = this.selfAttn.forward(normed, normed, normed, srcMask, srcKeyPaddingMask, isCausal);
-    x = ops.add(src, this.dropout1.forward(x));
+    x = ops.add(src, this.dropout1.forward(x) as NNTensor) as NNTensor;
     let ff = this._activation(this.linear1.forward(this.norm2.forward(x)));
-    ff = this.linear2.forward(this.dropoutFFN.forward(ff));
-    x = ops.add(x, this.dropout2.forward(ff));
+    ff = this.linear2.forward(this.dropoutFFN.forward(ff) as NNTensor);
+    x = ops.add(x, this.dropout2.forward(ff) as NNTensor) as NNTensor;
     return x;
   }
 }
 
 export class TransformerDecoderLayer extends Module {
-  constructor(dModel, nhead, dimFeedforward = 2048, dropout = 0.1, activation = 'relu', layerNormEps = 1e-5, batchFirst = true, normFirst = false) {
+  selfAttn: MultiheadAttention;
+  crossAttn: MultiheadAttention;
+  linear1: Linear;
+  linear2: Linear;
+  norm1: LayerNorm;
+  norm2: LayerNorm;
+  norm3: LayerNorm;
+  dropout1: Dropout;
+  dropout2: Dropout;
+  dropout3: Dropout;
+  dropoutFFN: Dropout;
+  _activation: ActivationFn;
+  _activationName: ActivationName;
+  normFirst: boolean;
+  _dModel: number;
+  _nhead: number;
+  _dimFeedforward: number;
+  _dropout: number;
+  _layerNormEps: number;
+  _batchFirst: boolean;
+
+  constructor(dModel: number, nhead: number, dimFeedforward = 2048, dropout = 0.1, activation: ActivationName = 'relu', layerNormEps = 1e-5, batchFirst = true, normFirst = false) {
     super();
     this.selfAttn = new MultiheadAttention(dModel, nhead, dropout, true, null, null, batchFirst);
     this.crossAttn = new MultiheadAttention(dModel, nhead, dropout, true, null, null, batchFirst);
@@ -142,39 +195,39 @@ export class TransformerDecoderLayer extends Module {
     this._batchFirst = batchFirst;
   }
 
-  forward(tgt, memory, tgtMask = null, memoryMask = null, tgtKeyPaddingMask = null, memoryKeyPaddingMask = null, isCausal = false) {
+  forward(tgt: NNTensor, memory: NNTensor, tgtMask: OptionalTensor = null, memoryMask: OptionalTensor = null, tgtKeyPaddingMask: OptionalTensor = null, memoryKeyPaddingMask: OptionalTensor = null, isCausal = false): NNTensor {
     if (this.normFirst) {
       return this._forwardPreNorm(tgt, memory, tgtMask, memoryMask, tgtKeyPaddingMask, memoryKeyPaddingMask, isCausal);
     }
     return this._forwardPostNorm(tgt, memory, tgtMask, memoryMask, tgtKeyPaddingMask, memoryKeyPaddingMask, isCausal);
   }
 
-  _forwardPostNorm(tgt, memory, tgtMask, memoryMask, tgtKeyPaddingMask, memoryKeyPaddingMask, isCausal) {
+  _forwardPostNorm(tgt: NNTensor, memory: NNTensor, tgtMask: OptionalTensor, memoryMask: OptionalTensor, tgtKeyPaddingMask: OptionalTensor, memoryKeyPaddingMask: OptionalTensor, isCausal: boolean): NNTensor {
     let x = this.selfAttn.forward(tgt, tgt, tgt, tgtMask, tgtKeyPaddingMask, isCausal);
-    x = this.norm1.forward(ops.add(tgt, this.dropout1.forward(x)));
+    x = this.norm1.forward(ops.add(tgt, this.dropout1.forward(x) as NNTensor) as NNTensor);
     let x2 = this.crossAttn.forward(x, memory, memory, memoryMask, memoryKeyPaddingMask);
-    x = this.norm2.forward(ops.add(x, this.dropout2.forward(x2)));
+    x = this.norm2.forward(ops.add(x, this.dropout2.forward(x2) as NNTensor) as NNTensor);
     let ff = this._activation(this.linear1.forward(x));
-    ff = this.linear2.forward(this.dropoutFFN.forward(ff));
-    x = this.norm3.forward(ops.add(x, this.dropout3.forward(ff)));
+    ff = this.linear2.forward(this.dropoutFFN.forward(ff) as NNTensor);
+    x = this.norm3.forward(ops.add(x, this.dropout3.forward(ff) as NNTensor) as NNTensor);
     return x;
   }
 
-  _forwardPreNorm(tgt, memory, tgtMask, memoryMask, tgtKeyPaddingMask, memoryKeyPaddingMask, isCausal) {
+  _forwardPreNorm(tgt: NNTensor, memory: NNTensor, tgtMask: OptionalTensor, memoryMask: OptionalTensor, tgtKeyPaddingMask: OptionalTensor, memoryKeyPaddingMask: OptionalTensor, isCausal: boolean): NNTensor {
     let normed = this.norm1.forward(tgt);
     let x = this.selfAttn.forward(normed, normed, normed, tgtMask, tgtKeyPaddingMask, isCausal);
-    x = ops.add(tgt, this.dropout1.forward(x));
+    x = ops.add(tgt, this.dropout1.forward(x) as NNTensor) as NNTensor;
     let normed2 = this.norm2.forward(x);
     let x2 = this.crossAttn.forward(normed2, memory, memory, memoryMask, memoryKeyPaddingMask);
-    x = ops.add(x, this.dropout2.forward(x2));
+    x = ops.add(x, this.dropout2.forward(x2) as NNTensor) as NNTensor;
     let ff = this._activation(this.linear1.forward(this.norm3.forward(x)));
-    ff = this.linear2.forward(this.dropoutFFN.forward(ff));
-    x = ops.add(x, this.dropout3.forward(ff));
+    ff = this.linear2.forward(this.dropoutFFN.forward(ff) as NNTensor);
+    x = ops.add(x, this.dropout3.forward(ff) as NNTensor) as NNTensor;
     return x;
   }
 }
 
-function _cloneEncoderLayer(layer) {
+function _cloneEncoderLayer(layer: TransformerEncoderLayer): TransformerEncoderLayer {
   return new TransformerEncoderLayer(
     layer._dModel, layer._nhead, layer._dimFeedforward,
     layer._dropout, layer._activationName, layer._layerNormEps,
@@ -182,7 +235,7 @@ function _cloneEncoderLayer(layer) {
   );
 }
 
-function _cloneDecoderLayer(layer) {
+function _cloneDecoderLayer(layer: TransformerDecoderLayer): TransformerDecoderLayer {
   return new TransformerDecoderLayer(
     layer._dModel, layer._nhead, layer._dimFeedforward,
     layer._dropout, layer._activationName, layer._layerNormEps,
@@ -191,7 +244,10 @@ function _cloneDecoderLayer(layer) {
 }
 
 export class TransformerEncoder extends Module {
-  constructor(encoderLayer, numLayers, norm = null) {
+  layers: ModuleList;
+  norm: LayerNorm | null;
+
+  constructor(encoderLayer: TransformerEncoderLayer, numLayers: number, norm: LayerNorm | null = null) {
     super();
     this.layers = new ModuleList(
       Array.from({ length: numLayers }, () => _cloneEncoderLayer(encoderLayer))
@@ -199,10 +255,10 @@ export class TransformerEncoder extends Module {
     this.norm = norm;
   }
 
-  forward(src, mask = null, srcKeyPaddingMask = null, isCausal = false) {
+  forward(src: NNTensor, mask: OptionalTensor = null, srcKeyPaddingMask: OptionalTensor = null, isCausal = false): NNTensor {
     let output = src;
     for (const layer of this.layers) {
-      output = layer.forward(output, mask, srcKeyPaddingMask, isCausal);
+      output = (layer as TransformerEncoderLayer).forward(output, mask, srcKeyPaddingMask, isCausal);
     }
     if (this.norm) output = this.norm.forward(output);
     return output;
@@ -210,7 +266,10 @@ export class TransformerEncoder extends Module {
 }
 
 export class TransformerDecoder extends Module {
-  constructor(decoderLayer, numLayers, norm = null) {
+  layers: ModuleList;
+  norm: LayerNorm | null;
+
+  constructor(decoderLayer: TransformerDecoderLayer, numLayers: number, norm: LayerNorm | null = null) {
     super();
     this.layers = new ModuleList(
       Array.from({ length: numLayers }, () => _cloneDecoderLayer(decoderLayer))
@@ -218,10 +277,10 @@ export class TransformerDecoder extends Module {
     this.norm = norm;
   }
 
-  forward(tgt, memory, tgtMask = null, memoryMask = null, tgtKeyPaddingMask = null, memoryKeyPaddingMask = null, isCausal = false) {
+  forward(tgt: NNTensor, memory: NNTensor, tgtMask: OptionalTensor = null, memoryMask: OptionalTensor = null, tgtKeyPaddingMask: OptionalTensor = null, memoryKeyPaddingMask: OptionalTensor = null, isCausal = false): NNTensor {
     let output = tgt;
     for (const layer of this.layers) {
-      output = layer.forward(output, memory, tgtMask, memoryMask, tgtKeyPaddingMask, memoryKeyPaddingMask, isCausal);
+      output = (layer as TransformerDecoderLayer).forward(output, memory, tgtMask, memoryMask, tgtKeyPaddingMask, memoryKeyPaddingMask, isCausal);
     }
     if (this.norm) output = this.norm.forward(output);
     return output;
@@ -229,6 +288,10 @@ export class TransformerDecoder extends Module {
 }
 
 export class Transformer extends Module {
+  encoder: TransformerEncoder;
+  decoder: TransformerDecoder;
+  dModel: number;
+
   constructor({
     dModel = 512,
     nhead = 8,
@@ -240,6 +303,17 @@ export class Transformer extends Module {
     batchFirst = true,
     normFirst = false,
     layerNormEps = 1e-5,
+  }: {
+    dModel?: number;
+    nhead?: number;
+    numEncoderLayers?: number;
+    numDecoderLayers?: number;
+    dimFeedforward?: number;
+    dropout?: number;
+    activation?: ActivationName;
+    batchFirst?: boolean;
+    normFirst?: boolean;
+    layerNormEps?: number;
   } = {}) {
     super();
     const encLayer = new TransformerEncoderLayer(dModel, nhead, dimFeedforward, dropout, activation, layerNormEps, batchFirst, normFirst);
@@ -249,19 +323,19 @@ export class Transformer extends Module {
     this.dModel = dModel;
   }
 
-  forward(src, tgt, srcMask = null, tgtMask = null, memoryMask = null, srcKeyPaddingMask = null, tgtKeyPaddingMask = null, memoryKeyPaddingMask = null) {
+  forward(src: NNTensor, tgt: NNTensor, srcMask: OptionalTensor = null, tgtMask: OptionalTensor = null, memoryMask: OptionalTensor = null, srcKeyPaddingMask: OptionalTensor = null, tgtKeyPaddingMask: OptionalTensor = null, memoryKeyPaddingMask: OptionalTensor = null): NNTensor {
     const memory = this.encoder.forward(src, srcMask, srcKeyPaddingMask);
     return this.decoder.forward(tgt, memory, tgtMask, memoryMask, tgtKeyPaddingMask, memoryKeyPaddingMask);
   }
 
-  static generateSquareSubsequentMask(sz) {
+  static generateSquareSubsequentMask(sz: number): NNTensor {
     const mask = empty([sz, sz]);
-    const data = mask._impl.storage.data;
+    const data = mask._impl.storage.data!;
     for (let i = 0; i < sz; i++) {
       for (let j = 0; j < sz; j++) {
         data[i * sz + j] = j <= i ? 0 : -Infinity;
       }
     }
-    return mask;
+    return mask as NNTensor;
   }
 }

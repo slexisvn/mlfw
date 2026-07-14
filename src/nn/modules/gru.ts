@@ -7,9 +7,15 @@ import { scan } from '../../tracing/scan.js';
 import { getActiveTracer } from '../../tracing/tracer.js';
 import { getCudnnGRU, getWebgpuRNN } from '../../dispatcher/jit_dispatch.js';
 import { DeviceType } from '../../tensor/types/device.js';
+import type { NNTensor } from '../types.js';
 
 export class GRUCell extends Module {
-  constructor(inputSize, hiddenSize, bias = true) {
+  inputSize: number;
+  hiddenSize: number;
+  x2h: Linear;
+  h2h: Linear;
+
+  constructor(inputSize: number, hiddenSize: number, bias = true) {
     super();
     this.inputSize = inputSize;
     this.hiddenSize = hiddenSize;
@@ -17,8 +23,8 @@ export class GRUCell extends Module {
     this.h2h = new Linear(hiddenSize, 3 * hiddenSize, bias);
   }
 
-  forward(input, hidden = null) {
-    const h = hidden !== null ? hidden : zeros([input.shape[0], this.hiddenSize], { device: input.device });
+  forward(input: NNTensor, hidden: NNTensor | null = null): NNTensor {
+    const h = hidden !== null ? hidden : zeros([input.shape[0], this.hiddenSize], { device: input.device }) as NNTensor;
     const gx = this.x2h.forward(input);
     const gh = this.h2h.forward(h);
     const [xr, xz, xn] = split(gx, this.hiddenSize, -1);
@@ -26,12 +32,18 @@ export class GRUCell extends Module {
     const r = sigmoid(add(xr, hr));
     const z = sigmoid(add(xz, hz));
     const n = tanh(add(xn, mul(r, hn)));
-    return add(n, mul(z, sub(h, n)));
+    return add(n, mul(z, sub(h, n))) as NNTensor;
   }
 }
 
 export class GRU extends Module {
-  constructor(inputSize, hiddenSize, numLayers = 1, batchFirst = false, bias = true) {
+  inputSize: number;
+  hiddenSize: number;
+  numLayers: number;
+  batchFirst: boolean;
+  cells: GRUCell[];
+
+  constructor(inputSize: number, hiddenSize: number, numLayers = 1, batchFirst = false, bias = true) {
     super();
     this.inputSize = inputSize;
     this.hiddenSize = hiddenSize;
@@ -45,19 +57,19 @@ export class GRU extends Module {
     }
   }
 
-  forward(input, h0 = null) {
+  forward(input: NNTensor, h0: NNTensor | null = null): [NNTensor, NNTensor] {
     const cudnn = getCudnnGRU();
     if (cudnn && input.device.type === DeviceType.GPU && !getActiveTracer()) {
       const xs = this.batchFirst ? input.transpose(0, 1) : input;
       const opts = { inputSize: this.inputSize, hiddenSize: this.hiddenSize, seqLen: xs.shape[0], batch: xs.shape[1] };
-      const [out, hy] = cudnn(xs, this.cells, opts, h0);
+      const [out, hy] = cudnn(xs, this.cells, opts, h0) as [NNTensor, NNTensor];
       return [this.batchFirst ? out.transpose(0, 1) : out, hy];
     }
     const webgpuRnn = getWebgpuRNN();
     if (webgpuRnn && input.device.type === DeviceType.WEBGPU && !getActiveTracer()) {
       const xs = this.batchFirst ? input.transpose(0, 1) : input;
       const opts = { kind: 'gru', inputSize: this.inputSize, hiddenSize: this.hiddenSize, seqLen: xs.shape[0], batch: xs.shape[1] };
-      const fused = webgpuRnn(xs, this.cells, opts, h0, null);
+      const fused = webgpuRnn(xs, this.cells, opts, h0, null) as [NNTensor, NNTensor] | null;
       if (fused) {
         const [out, hy] = fused;
         return [this.batchFirst ? out.transpose(0, 1) : out, hy];
@@ -66,19 +78,19 @@ export class GRU extends Module {
     const x = this.batchFirst ? input.transpose(0, 1) : input;
     const batch = x.shape[1];
     let layerIn = x;
-    const finalHs = [];
+    const finalHs: NNTensor[] = [];
     for (let l = 0; l < this.numLayers; l++) {
-      const hInit = h0 !== null ? select(h0, 0, l) : zeros([batch, this.hiddenSize], { device: x.device });
+      const hInit = h0 !== null ? select(h0, 0, l) as NNTensor : zeros([batch, this.hiddenSize], { device: x.device }) as NNTensor;
       const cell = this.cells[l];
       const [hN, ys] = scan((h, xt) => {
-        const h2 = cell.forward(xt, h);
+        const h2 = cell.forward(xt as NNTensor, h as NNTensor);
         return [h2, h2];
-      }, hInit, layerIn);
+      }, hInit, layerIn) as [NNTensor, NNTensor];
       finalHs.push(hN);
       layerIn = ys;
     }
     let output = layerIn;
     if (this.batchFirst) output = output.transpose(0, 1);
-    return [output, stack(finalHs, 0)];
+    return [output, stack(finalHs, 0) as NNTensor];
   }
 }

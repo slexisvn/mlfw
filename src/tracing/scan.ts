@@ -1,17 +1,22 @@
 import { getActiveTracer } from './tracer.js';
 import { select } from '../tensor/ops/ops.js';
 import { stack } from '../tensor/ops/ops.js';
+import type { TensorOutput } from './types.js';
 
-function stackSteps(steps) {
+type StepValue = TensorOutput | TensorOutput[];
+type ScanFn = (carry: StepValue, xs: StepValue) => [StepValue, StepValue];
+
+function stackSteps(steps: StepValue[]): StepValue {
   if (Array.isArray(steps[0])) {
-    const out = new Array(steps[0].length);
-    for (let i = 0; i < out.length; i++) out[i] = stack(steps.map(s => s[i]), 0);
+    const first = steps[0];
+    const out = new Array<TensorOutput>(first.length);
+    for (let i = 0; i < out.length; i++) out[i] = stack(steps.map(s => (s as TensorOutput[])[i]), 0);
     return out;
   }
-  return stack(steps, 0);
+  return stack(steps as TensorOutput[], 0);
 }
 
-export function scan(fn, initCarry, xs) {
+export function scan(fn: ScanFn, initCarry: StepValue, xs: StepValue): [StepValue, StepValue] {
   const carryIsArr = Array.isArray(initCarry);
   const xsIsArr = Array.isArray(xs);
   const xsArr = xsIsArr ? xs : [xs];
@@ -32,11 +37,14 @@ export function scan(fn, initCarry, xs) {
   }
 
   let yIsArr = false;
-  const step = (carrySym, xtSym) => {
+  const step = (carrySym: TensorOutput[], xtSym: TensorOutput[]) => {
     const [newCarry, y] = fn(carryIsArr ? carrySym : carrySym[0], xsIsArr ? xtSym : xtSym[0]);
     yIsArr = Array.isArray(y);
-    return [carryIsArr ? newCarry : [newCarry], yIsArr ? y : [y]];
+    return [
+      (carryIsArr ? newCarry : [newCarry]) as TensorOutput[],
+      (yIsArr ? y : [y]) as TensorOutput[],
+    ];
   };
-  const [finalCarryArr, ysArr] = tracer.scan(xsArr, carryArr, step);
+  const [finalCarryArr, ysArr] = tracer.scan(xsArr, carryArr, step as Parameters<typeof tracer.scan>[2]);
   return [carryIsArr ? finalCarryArr : finalCarryArr[0], yIsArr ? ysArr : ysArr[0]];
 }
