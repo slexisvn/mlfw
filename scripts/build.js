@@ -5,7 +5,7 @@ import { copyFileSync, readFileSync, rmSync } from "node:fs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
-const entry = resolve(root, "src/index.js");
+const entry = resolve(root, "src/index.ts");
 const outdir = resolve(root, "dist");
 
 const pkg = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"));

@@ -20,6 +20,19 @@ installOps(Tensor as unknown as Parameters<typeof installOps>[0]);
 export { Tensor } from './tensor/core/tensor.js';
 
 export {
+  CPU_DEVICE, GPU_DEVICE, WASM_DEVICE, WEBGPU_DEVICE,
+  getDefaultDevice, setDefaultDevice,
+} from './tensor/types/device.js';
+
+export { GradMode, noGrad, enableGrad } from './autograd/grad_mode.js';
+export { SymbolicTensor } from './tracing/symbolic_tensor.js';
+export { TraceLevel } from './compiler/pipeline/trace.js';
+export { printModule } from './compiler/ir/graph/printer.js';
+export { preloadWebGPU, preloadCudaRuntime } from './runtime/backend_registry.js';
+export { flushWebGPUEager } from './runtime/webgpu.js';
+export { dispatcher } from './dispatcher/dispatcher.js';
+
+export {
   zeros, ones, empty, full, randn, arange, eye, linspace, randperm,
 } from './tensor/factory/creation_ops.js';
 
@@ -43,8 +56,6 @@ export {
   repeat, tile, split, chunk, roll, flip, cumsum, sort, topk, argsort,
   softmax, log_softmax,
 } from './tensor/ops/ops.js';
-
-export { noGrad, enableGrad } from './autograd/grad_mode.js';
 
 export {
   Module, Parameter, F,
@@ -93,7 +104,7 @@ export { CPUTarget, CUDATarget, WasmTarget, WebGPUTarget } from './backend/targe
 
 export {
   LightningModule, Trainer, Callback,
-  ModelCheckpoint, loadCheckpoint, applyCheckpoint,
+  ModelCheckpoint, loadCheckpoint, applyCheckpoint, serializeCheckpoint,
   EarlyStopping, ProgressCallback,
   LearningRateMonitor, Timer, GradientAccumulationScheduler,
   Logger, ConsoleLogger, CSVLogger,
@@ -104,6 +115,7 @@ export * as lightning from './lightning/index.js';
 
 export { fs as memfs } from '#io/fs';
 
+export * as ops from './tensor/ops/ops.js';
 export * as linalg from './tensor/ops/linalg.js';
 export * as ml from './ml/index.js';
 export * as numeric from './numeric/index.js';
