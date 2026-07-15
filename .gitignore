@@ -1,8 +1,4 @@
 node_modules
 coverage
 dist/
-notebook/dist
 lightning_logs/
-plugins/*
-vscode-ext/media/*
-# *.ckpt

@@ -102,8 +102,6 @@ export {
 } from './lightning/index.js';
 export * as lightning from './lightning/index.js';
 
-export { TeraRuntime } from './cli/runtime.js';
-export { formatValue } from './cli/format.js';
 export { fs as memfs } from '#io/fs';
 
 export * as linalg from './tensor/ops/linalg.js';
