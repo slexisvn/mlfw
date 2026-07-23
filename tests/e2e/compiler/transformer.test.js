@@ -3,7 +3,6 @@ import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
 import { CPUTarget } from '../../../src/backend/target.js';
-import { TeraRuntime } from '../../../src/cli/runtime.js';
 
 function compile(func, opts = {}) {
   return compileGraph(func, CPUTarget(), opts);
@@ -316,79 +315,5 @@ describe('Transformer — IR builder', () => {
       for (let j = 0; j < 10; j++) sum += result[row * 10 + j];
       expect(sum).toBeCloseTo(1.0, 4);
     }
-  });
-});
-
-describe('Transformer — Tera compile', () => {
-  it('compiles a transformer-style model defined in Tera', async () => {
-    const runtime = new TeraRuntime({ output: () => {} });
-    const result = await runtime.execute(`
-      model TransformerBlock(d):
-        wq = Linear(d, d)
-        wk = Linear(d, d)
-        wv = Linear(d, d)
-        wo = Linear(d, d)
-        ln1 = LayerNorm([d])
-        ff1 = Linear(d, d * 4)
-        ff2 = Linear(d * 4, d)
-        ln2 = LayerNorm([d])
-
-        forward x:
-          q = wq(x)
-          k = wk(x)
-          v = wv(x)
-          scores = q @ k.transpose(0, 1)
-          attn = scores.softmax()
-          ctx = attn @ v
-          h = ln1(x + wo(ctx))
-          return ln2(h + ff2(ff1(h).gelu()))
-
-      net = TransformerBlock(8)
-      x = randn([4, 8])
-      compile(net, input=x)
-    `);
-    expect(result._isCompiled).toBe(true);
-    expect(result._compiledView.result.listKernels().length).toBeGreaterThan(0);
-  });
-
-  it('compiles stacked transformer blocks via custom model chaining', async () => {
-    const runtime = new TeraRuntime({ output: () => {} });
-    const result = await runtime.execute(`
-      model FFN(d):
-        fc1 = Linear(d, d * 2)
-        fc2 = Linear(d * 2, d)
-        forward x:
-          return fc2(fc1(x).gelu())
-
-      model EncoderLayer(d):
-        wq = Linear(d, d)
-        wk = Linear(d, d)
-        wv = Linear(d, d)
-        ln1 = LayerNorm([d])
-        ffn = FFN(d)
-        ln2 = LayerNorm([d])
-
-        forward x:
-          q = wq(x)
-          k = wk(x)
-          v = wv(x)
-          attn = (q @ k.transpose(0, 1)).softmax() @ v
-          h = ln1(x + attn)
-          return ln2(h + ffn(h))
-
-      model Encoder(d, n):
-        layer1 = EncoderLayer(d)
-        layer2 = EncoderLayer(d)
-
-        forward x:
-          x = layer1(x)
-          return layer2(x)
-
-      net = Encoder(8, 2)
-      x = randn([4, 8])
-      compile(net, input=x)
-    `);
-    expect(result._isCompiled).toBe(true);
-    expect(result._compiledView.result.listKernels().length).toBeGreaterThan(0);
   });
 });

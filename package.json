@@ -3,8 +3,10 @@
   "version": "0.1.2",
   "type": "module",
   "main": "./dist/index.node.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "browser": "./dist/index.browser.js",
       "default": "./dist/index.node.js"
     },
@@ -32,7 +34,7 @@
     }
   },
   "scripts": {
-    "build": "node scripts/build.js",
+    "build": "tsup",
     "test": "vitest run --exclude '**/node_modules/**' --exclude '**/stress/**' --exclude '**/backend/cuda/**' --exclude '**/cuda-linalg.test.js' --exclude '**/backend/webgpu/**' --exclude '**/vscode-ext/**'",
     "test:webgpu": "vitest run tests/backend/webgpu/",
     "test:cuda": "vitest run tests/backend/cuda/ tests/linalg/cuda-linalg.test.js"
@@ -41,6 +43,7 @@
     "@vitest/coverage-v8": "^4.1.8",
     "esbuild": "^0.28.0",
     "puppeteer-core": "^25.1.0",
+    "tsup": "^8.5.1",
     "typescript": "^5.9.3",
     "vitest": "^4.1.8"
   },
