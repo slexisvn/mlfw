@@ -1,5 +1,4 @@
-
-import { getCodegenEntry, getSnippetBuilder } from './codegen_registry.js';
+import { getCodegenEntry } from './codegen_registry.js';
 
 export function detectPureMatmul(primFunc) {
   const blocks = [];
@@ -40,12 +39,6 @@ export class CompiledKernel {
     this.source = source;
     this.target = target;
     this.metadata = metadata;
-  }
-
-  snippet() {
-    const builder = getSnippetBuilder(this.metadata.kind);
-    if (!builder) throw new Error(`No snippet for kind: ${this.metadata.kind}`);
-    return builder(this);
   }
 }
 

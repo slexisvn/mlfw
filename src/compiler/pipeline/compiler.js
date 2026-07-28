@@ -121,10 +121,6 @@ export class CompilationResult {
     return this.module.getKernelSource(funcName);
   }
 
-  getSnippet(funcName) {
-    return this.module.getKernelSnippet(funcName);
-  }
-
   listKernels() {
     return this.module.listKernels();
   }

@@ -356,13 +356,6 @@ export function compile(model: CompilableModel, exampleInputs?: Tensor[], opts: 
     return _cacheEntries[0].result.listKernels();
   };
 
-  typedForward.snippet = () => {
-    if (_cacheEntries.length === 0) return null;
-    const compiled = _cacheEntries[0];
-    const kernels = compiled.result.listKernels();
-    return kernels.length > 0 ? compiled.result.getSnippet(kernels[0]) : null;
-  };
-
   typedForward.result = () => _cacheEntries.length > 0 ? _cacheEntries[0].result : null;
   typedForward._ready = _ready;
 

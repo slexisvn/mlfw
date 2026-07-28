@@ -23,7 +23,6 @@ type RuntimeKernel = {
     parallel?: { extent: number; poolSafe?: boolean } | null;
     [key: string]: unknown;
   };
-  snippet(): string | null;
 };
 type RuntimeBackend = {
   instantiate(kernel: RuntimeKernel): unknown | Promise<unknown>;
@@ -338,11 +337,6 @@ export class RuntimeModule {
   getKernelSource(name: string): string | null {
     const kernel = this.kernels.get(name);
     return kernel ? kernel.source : null;
-  }
-
-  getKernelSnippet(name: string): string | null {
-    const kernel = this.kernels.get(name);
-    return kernel ? kernel.snippet() : null;
   }
 
   listKernels(): string[] {
