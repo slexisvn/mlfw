@@ -140,8 +140,9 @@ registerBackend('wasm', {
     }
     this.runSync(inst, tensorArgs, shapeValues);
   },
-  isAsync(inst) {
-    return !!(inst && inst.parallel && inst.parallel.poolSafe);
+  isAsync(inst, kernel) {
+    const parallel = inst ? inst.parallel : kernel && kernel.metadata && kernel.metadata.parallel;
+    return !!(parallel && parallel.poolSafe);
   },
 });
 

@@ -29,7 +29,7 @@ type RuntimeBackend = {
   runSync(instance: unknown, tensorArgs: unknown[], shapeValues: number[] | null): unknown;
   runAsync(instance: unknown, tensorArgs: unknown[], shapeValues: number[] | null): Promise<unknown>;
   runPlan?: (plan: ExecutionPlan, slots: Array<RuntimeTensor | null>, steps: PlanStepRuntime[], opts?: Record<string, unknown>) => Promise<unknown>;
-  isAsync(instance: unknown): boolean;
+  isAsync(instance: unknown, kernel?: RuntimeKernel): boolean;
 };
 type KernelInstanceEntry = { backend: RuntimeBackend; instance: unknown | Promise<unknown> };
 type ReturnFixup = { pos: number; kind: 'copy'; srcSlot: number } | { pos: number; kind: 'const'; value: number };
@@ -180,9 +180,24 @@ export class RuntimeModule {
 
   addCompiledKernel(compiledKernel: RuntimeKernel): void {
     this.kernels.register(compiledKernel.name, compiledKernel);
-    const backend = getBackend(compiledKernel.metadata.kind) as RuntimeBackend | null;
-    if (!backend) throw new Error('No runtime backend registered for kind: ' + compiledKernel.metadata.kind);
-    this._instances.set(compiledKernel.name, { backend, instance: backend.instantiate(compiledKernel) });
+  }
+
+  private _createInstance(name: string): KernelInstanceEntry {
+    const kernel = this.kernels.get(name);
+    if (!kernel) throw new Error('Kernel \'' + name + '\' not found');
+    const backend = getBackend(kernel.metadata.kind) as RuntimeBackend | null;
+    if (!backend) throw new Error('No runtime backend registered for kind: ' + kernel.metadata.kind);
+    const entry = { backend, instance: backend.instantiate(kernel) };
+    this._instances.set(name, entry);
+    return entry;
+  }
+
+  private _getInstance(name: string): KernelInstanceEntry {
+    return this._instances.get(name) || this._createInstance(name);
+  }
+
+  instantiate(name: string): unknown | Promise<unknown> {
+    return this._getInstance(name).instance;
   }
 
   setShapeParamMap(name: string, shapeParamMap: ShapeParamMap, bufferMap?: BufferMap): void {
@@ -216,8 +231,7 @@ export class RuntimeModule {
   }
 
   run(name: string, ...args: RuntimeArg[]): unknown {
-    const entry = this._instances.get(name);
-    if (!entry) throw new Error('Kernel \'' + name + '\' not found or not executable');
+    const entry = this._getInstance(name);
     if (entry.instance instanceof Promise) {
       throw new Error('Kernel \'' + name + '\' requires async execution — use runAsync()');
     }
@@ -226,8 +240,7 @@ export class RuntimeModule {
   }
 
   async runAsync(name: string, ...args: RuntimeArg[]): Promise<unknown> {
-    const entry = this._instances.get(name);
-    if (!entry) throw new Error('Kernel \'' + name + '\' not found or not executable');
+    const entry = this._getInstance(name);
     const { tensorArgs, shapeValues } = this._prepareArgs(name, args);
     const instance = await entry.instance;
     return entry.backend.runAsync(instance, tensorArgs, shapeValues);
@@ -235,9 +248,15 @@ export class RuntimeModule {
 
   isAsync(name: string): boolean {
     const entry = this._instances.get(name);
-    if (!entry) return false;
+    if (!entry) {
+      const kernel = this.kernels.get(name);
+      if (!kernel) return false;
+      const backend = getBackend(kernel.metadata.kind) as RuntimeBackend | null;
+      return backend ? backend.isAsync(null, kernel) : false;
+    }
+    const kernel = this.kernels.get(name) || undefined;
     const inst = entry.instance instanceof Promise ? null : entry.instance;
-    return entry.backend.isAsync(inst);
+    return entry.backend.isAsync(inst, kernel);
   }
 
   async runPlanAsync(plan: ExecutionPlan, args: RuntimeArg[], opts?: Record<string, unknown>): Promise<void> {
@@ -254,7 +273,7 @@ export class RuntimeModule {
     }
 
     for (const step of plan.steps) {
-      const entry = this._instances.get(step.name);
+      const entry = this._getInstance(step.name);
       if (entry && entry.instance instanceof Promise) entry.instance = await entry.instance;
     }
 

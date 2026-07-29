@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { RuntimeModule } from '../../src/runtime/runtime.js';
+import { registerBackend } from '../../src/runtime/backend_registry.js';
 import { buildFunction } from '../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../src/compiler/pipeline/compiler.js';
@@ -25,6 +26,75 @@ describe('RuntimeModule AOT serialize/deserialize (no recompile)', () => {
 
     expect([...o2]).toEqual([...o1]);
     expect(JSON.stringify(restored.serialize())).toBe(JSON.stringify(blob));
+  });
+});
+
+describe('RuntimeModule lazy instantiation', () => {
+  it('keeps compiled kernels as source artifacts until execution', () => {
+    let instantiateCount = 0;
+    registerBackend('lazy-test', {
+      instantiate(kernel) {
+        instantiateCount++;
+        return { kernel };
+      },
+      runSync(inst, tensorArgs) {
+        tensorArgs[1].set(tensorArgs[0]);
+        return inst;
+      },
+      async runAsync(inst, tensorArgs) {
+        tensorArgs[1].set(tensorArgs[0]);
+        return inst;
+      },
+      isAsync(inst, kernel) { return !!(kernel && kernel.metadata.async); },
+    });
+
+    const mod = new RuntimeModule('lazy');
+    mod.addCompiledKernel({
+      name: 'copy',
+      source: 'source',
+      target: { name: 'lazy' },
+      metadata: { kind: 'lazy-test' },
+    });
+
+    expect(instantiateCount).toBe(0);
+    expect(mod.listKernels()).toEqual(['copy']);
+    expect(mod.getKernelSource('copy')).toBe('source');
+    expect(mod.serialize().kernels).toHaveLength(1);
+    expect(instantiateCount).toBe(0);
+
+    const input = new Float32Array([1, 2]);
+    const output = new Float32Array(2);
+    mod.run('copy', input, output);
+
+    expect([...output]).toEqual([1, 2]);
+    expect(instantiateCount).toBe(1);
+
+    mod.run('copy', input, output);
+    expect(instantiateCount).toBe(1);
+  });
+
+  it('answers async capability from kernel metadata without instantiating', () => {
+    let instantiateCount = 0;
+    registerBackend('lazy-async-test', {
+      instantiate(kernel) {
+        instantiateCount++;
+        return { kernel };
+      },
+      runSync() {},
+      async runAsync() {},
+      isAsync(inst, kernel) { return !!(kernel && kernel.metadata.async); },
+    });
+
+    const mod = new RuntimeModule('lazy-async');
+    mod.addCompiledKernel({
+      name: 'asyncKernel',
+      source: 'source',
+      target: { name: 'lazy' },
+      metadata: { kind: 'lazy-async-test', async: true },
+    });
+
+    expect(mod.isAsync('asyncKernel')).toBe(true);
+    expect(instantiateCount).toBe(0);
   });
 });
 
