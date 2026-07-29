@@ -59,7 +59,7 @@ describe('prologue fusion — convert folded into dot', () => {
       b.returnOp([b.matmul(xf.getResult(0), args[1]).getResult(0)]);
     });
 
-    const res = compileGraph(func, CPUTarget(), { fusion: { epilogue: true } });
+    const res = compileGraph(func, CPUTarget({ enableEpilogueFusion: true }));
 
     const x = new Int32Array(24);
     for (let i = 0; i < 24; i++) x[i] = (i % 5) - 2;

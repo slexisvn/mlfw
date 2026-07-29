@@ -173,7 +173,7 @@ describe('CUDA fusion pipeline', () => {
     const compiled = compile(model, [x], {
       target: CUDATarget(),
       scheduling: { enabled: false },
-      fusion: { enabled: true, epilogue: true },
+      fusion: { enabled: true },
       trace: {
         level: TraceLevel.DEBUG,
         sink: (event) => events.push(event),
@@ -192,6 +192,29 @@ describe('CUDA fusion pipeline', () => {
     expect(epilogueChanged).toBe(true);
     expect(snapshot.text).toContain('fused_dot_epilogue');
     expect(compiled.kernels().length).toBeGreaterThan(1);
+  });
+
+  it('disables epilogue fusion when fusion is disabled', async () => {
+    const model = new Sequential(new Linear(4, 4), new ReLU());
+    const x = tensor([[1, 2, 3, 4]]);
+    const events = [];
+    const compiled = compile(model, [x], {
+      target: CUDATarget(),
+      fusion: { enabled: false },
+      trace: {
+        level: TraceLevel.DEBUG,
+        sink: (event) => events.push(event),
+        irSnapshot: { afterGraphPasses: true },
+      },
+    });
+
+    await compiled._ready;
+    const snapshot = events.find((event) =>
+      event.type === 'ir_snapshot' && event.label === 'afterGraphPasses'
+    );
+
+    expect(events.some((event) => event.passName === 'EpilogueFusionPass')).toBe(false);
+    expect(snapshot.text).not.toContain('fused_dot_epilogue');
   });
 });
 

@@ -35,7 +35,7 @@ export class CompilerConfig {
     const isGPU = this.target && typeof this.target.isGPU === 'function' && this.target.isGPU();
     const isCuda = isGPU && !isWebGPU;
 
-    this.fusion = { enabled: true, strategy: 'priority', epilogue: undefined, ...opts.fusion };
+    this.fusion = { enabled: true, strategy: 'priority', ...opts.fusion };
     this.scheduling = { enabled: isWebGPU, autotune: false, gpuTiling: isCuda, ...opts.scheduling };
     this.matmulBackend = opts.matmulBackend || 'native';
     this.quantization = { enabled: false, ...opts.quantization };

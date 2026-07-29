@@ -150,7 +150,7 @@ describe('epilogue fusion (forced on) matches eager — LIR accumulator must not
       it(`${prog.name} on ${tname} matches eager`, async () => {
         const eager = flatten(prog.fwd(...prog.ins.map((d) => tensor(d))));
         const target = makeTarget({ enableEpilogueFusion: true });
-        const compiled = compile({ forward: prog.fwd }, prog.ins.map((d) => tensor(d)), { target, fusion: { strategy: 'xla', epilogue: true } });
+        const compiled = compile({ forward: prog.fwd }, prog.ins.map((d) => tensor(d)), { target, fusion: { strategy: 'xla' } });
         const out = flatten(await compiled(...prog.ins.map((d) => tensor(d))));
         expect(out.length).toBe(eager.length);
         for (let i = 0; i < eager.length; i++) {
@@ -176,7 +176,7 @@ const OPT_CONFIGS = {
   O0: { fusion: { enabled: false }, scheduling: { enabled: false }, optimization: { layout: false, rematerialization: false }, memory: { inplaceReuse: false } },
   O1: { fusion: { enabled: true }, memory: { inplaceReuse: true } },
   O1dom: { fusion: { enabled: true, strategy: 'dominator' }, memory: { inplaceReuse: true } },
-  O1epi: { fusion: { enabled: true, epilogue: true }, memory: { inplaceReuse: true } },
+  O1epi: { fusion: { enabled: true }, memory: { inplaceReuse: true } },
   O2: { fusion: { enabled: true }, scheduling: { enabled: true }, optimization: { layout: true, rematerialization: true }, memory: { inplaceReuse: true } },
 };
 
