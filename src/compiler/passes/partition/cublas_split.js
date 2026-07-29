@@ -102,7 +102,7 @@ export function materializePartition(part, name, dotInfoMap) {
   return { part, subFunc, inputs, outputs, dotOp };
 }
 
-const BOUNDARY_OP_NAMES = new Set(['dot', 'cublas_gemm', 'reduce', 'conv', 'quantized_conv', 'scaled_dot_product_attention']);
+const BOUNDARY_OP_NAMES = new Set(['dot', 'fused_dot_epilogue', 'cublas_gemm', 'reduce', 'conv', 'quantized_conv', 'scaled_dot_product_attention']);
 
 function containsBoundaryOp(op) {
   if (BOUNDARY_OP_NAMES.has(op.opName)) return true;

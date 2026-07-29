@@ -47,7 +47,7 @@ export function buildGraphPipeline(config, target, { cudaMatmulChain = false, co
     passes.push(new DCEPass());
   }
 
-  const shouldEpilogueFuse = config.matmulBackend !== 'cublas' && !cudaMatmulChain
+  const shouldEpilogueFuse = config.matmulBackend !== 'cublas'
     && (config.fusion.epilogue !== undefined
       ? config.fusion.epilogue
       : (target && target.enableEpilogueFusion));

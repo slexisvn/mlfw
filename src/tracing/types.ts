@@ -87,7 +87,7 @@ export type CompiledResult = {
   isAsync(name: string): boolean;
   run(name: string, ...args: RuntimeArg[]): void;
   runAsync(name: string, ...args: RuntimeArg[]): Promise<unknown>;
-  getSource(name: string): string;
+  getSource(name: string): string | null;
 };
 
 export type CompiledEntry = {

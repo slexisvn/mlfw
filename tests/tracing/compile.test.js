@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import {
-  tensor, Linear, Sequential, ReLU, add, relu, sum, LSTM, GRU,
+  tensor, Linear, Sequential, ReLU, add, relu, sum, LSTM, GRU, TraceLevel,
 } from '../../src/index.js';
 import { compile, _traceCore } from '../../src/tracing/compile.js';
 import { foldWeightParams } from '../../src/tracing/fold_params.js';
 import { tensorToContiguous } from '../../src/dispatcher/jit_dispatch.js';
-import { WasmTarget, CPUTarget } from '../../src/backend/target.js';
+import { WasmTarget, CPUTarget, CUDATarget } from '../../src/backend/target.js';
 import { QuantizationScheme } from '../../src/compiler/ir/graph/quantization_types.js';
 import { Tensor } from '../../src/tensor/core/tensor.js';
 
@@ -126,11 +126,72 @@ describe('compile accessor methods', () => {
     expect(src.length).toBeGreaterThan(0);
   });
 
+  it('.source() returns all generated kernels', () => {
+    const model = new Sequential(new Linear(4, 2));
+    const x = tensor([[1, 2, 3, 4]]);
+    const compiled = compile(model, [x]);
+    const result = compiled.result();
+    const originalKernels = result.listKernels.bind(result);
+    const originalSource = result.getSource.bind(result);
+    const firstKernel = originalKernels()[0];
+    result.listKernels = () => [firstKernel, 'second_kernel'];
+    result.getSource = (kernel) => (
+      kernel === 'second_kernel'
+        ? 'function second_kernel() { return 2; }'
+        : originalSource(kernel)
+    );
+
+    const kernels = result.listKernels();
+    const src = compiled.source();
+
+    expect(kernels.length).toBeGreaterThan(1);
+    for (const kernel of kernels) {
+      expect(src).toContain(`kernel ${kernel}`);
+      expect(src).toContain(result.getSource(kernel));
+    }
+  });
+
   it('.original holds reference to the model', () => {
     const model = new Sequential(new Linear(4, 2));
     const x = tensor([[1, 2, 3, 4]]);
     const compiled = compile(model, [x]);
     expect(compiled.original).toBe(model);
+  });
+});
+
+describe('CUDA fusion pipeline', () => {
+  it('keeps epilogue fusion enabled before splitting matmul chains', async () => {
+    const model = new Sequential(
+      new Linear(8, 32), new ReLU(),
+      new Linear(32, 16), new ReLU(),
+      new Linear(16, 4),
+    );
+    const x = tensor(Array.from({ length: 8 }, (_, i) =>
+      Array.from({ length: 8 }, (_, j) => (i + j + 1) / 13)
+    ));
+    const events = [];
+    const compiled = compile(model, [x], {
+      target: CUDATarget(),
+      scheduling: { enabled: false },
+      fusion: { enabled: true, epilogue: true },
+      trace: {
+        level: TraceLevel.DEBUG,
+        sink: (event) => events.push(event),
+        irSnapshot: { afterGraphPasses: true },
+      },
+    });
+
+    await compiled._ready;
+    const snapshot = events.find((event) =>
+      event.type === 'ir_snapshot' && event.label === 'afterGraphPasses'
+    );
+    const epilogueChanged = events.some((event) =>
+      event.passName === 'EpilogueFusionPass' && event.changed === true
+    );
+
+    expect(epilogueChanged).toBe(true);
+    expect(snapshot.text).toContain('fused_dot_epilogue');
+    expect(compiled.kernels().length).toBeGreaterThan(1);
   });
 });
 

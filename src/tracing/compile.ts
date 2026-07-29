@@ -202,6 +202,16 @@ export function executeCompiled(compiled: CompiledEntry, inputs: readonly Tensor
   return _wrapOutputs(device, outputTypes, outputArrays, outputShapes);
 }
 
+function sourceForEntry(compiled: CompiledEntry, entryIndex: number): string | null {
+  const chunks: string[] = [];
+  for (const kernel of compiled.result.listKernels()) {
+    const source = compiled.result.getSource(kernel);
+    if (source === null) continue;
+    chunks.push(`// ---- compiled entry ${entryIndex}, kernel ${kernel} ----\n${source}`);
+  }
+  return chunks.length > 0 ? chunks.join('\n\n') : null;
+}
+
 export function compile(model: CompilableModel, exampleInputs?: Tensor[], opts: CompileOptions = {}): unknown {
   if (opts?.backward) {
     return compileWithBackward(model, exampleInputs, opts);
@@ -346,9 +356,7 @@ export function compile(model: CompilableModel, exampleInputs?: Tensor[], opts: 
 
   typedForward.source = () => {
     if (_cacheEntries.length === 0) return null;
-    const compiled = _cacheEntries[0];
-    const kernels = compiled.result.listKernels();
-    return kernels.length > 0 ? compiled.result.getSource(kernels[0]) : null;
+    return sourceForEntry(_cacheEntries[0], 0);
   };
 
   typedForward.kernels = () => {
