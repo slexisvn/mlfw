@@ -2,9 +2,9 @@ import { cu, checkCU } from './ffi.js';
 import { getDevice } from './device.js';
 import { isEagerCapturing } from '../../../dispatcher/eager_mode.js';
 
-function devicePtrParam(dptr) {
+export function devicePtrParam(dptr) {
   const b = Buffer.alloc(8);
-  b.writeBigUInt64LE(BigInt(dptr));
+  b.writeBigUInt64LE(dptr === null || dptr === undefined ? 0n : BigInt(dptr));
   return b;
 }
 

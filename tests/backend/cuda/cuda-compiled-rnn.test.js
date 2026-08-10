@@ -14,7 +14,7 @@ function data(r, sh) {
   return nest(f, sh);
 }
 async function run(target, fwd, x) {
-  const c = compile({ forward: fwd }, [x], { target, verify: false, scheduling: { enabled: true } });
+  const c = compile({ forward: fwd }, [x], { target, scheduling: { enabled: true } });
   let r = c(x); if (r && r.then) r = await r;
   return flat(r);
 }
@@ -53,7 +53,7 @@ describe.skipIf(!cudaDeps)('compiled scan RNN (LSTM/GRU) on CUDA matches CPU', (
     const model = new nn.LSTM(8, 64, 1, false, true);
     model.eval();
     const x = tensor(data(rng(7), [5, 2, 8]));
-    const g = compile({ forward: (a) => model.forward(a)[0] }, [x], { target: CUDATarget(), verify: false, scheduling: { enabled: true } });
+    const g = compile({ forward: (a) => model.forward(a)[0] }, [x], { target: CUDATarget(), scheduling: { enabled: true } });
     const mod = g.result().module;
     const md = mod.kernels.get(mod.listKernels()[0]).metadata;
     const total = md.blockDim.reduce((a, b) => a * b, 1) * md.gridDim.reduce((a, b) => a * b, 1);
@@ -81,7 +81,7 @@ describe.skipIf(!cudaDeps)('compiled scan RNN (LSTM/GRU) on CUDA matches CPU', (
     const model = new nn.LSTM(8, 256, 1, false, true);
     model.eval();
     const x = tensor(data(rng(7), [5, 16, 8]));
-    const g = compile({ forward: (a) => model.forward(a)[0] }, [x], { target: CUDATarget(), verify: false, scheduling: { enabled: true } });
+    const g = compile({ forward: (a) => model.forward(a)[0] }, [x], { target: CUDATarget(), scheduling: { enabled: true } });
     const k = g.result().module.kernels.get(g.result().module.listKernels()[0]);
     expect(k.metadata.blockDim.reduce((a, b) => a * b, 1)).toBe(1);
     expect(k.metadata.scratch.length).toBeGreaterThan(0);

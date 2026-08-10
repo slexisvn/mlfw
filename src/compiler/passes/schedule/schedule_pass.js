@@ -3,6 +3,7 @@ import { Schedule } from '../../schedule/schedule.js';
 import { SchedulePolicy } from '../../schedule/rules.js';
 import { Autotuner } from '../../autotune/autotuner.js';
 import { applyDeterministicGpuSchedule } from '../../schedule/gpu_matmul_schedule.js';
+import { FuncAttr } from '../../ir/func_attrs.js';
 
 export class SchedulePass extends PrimFuncPass {
   constructor(config) {
@@ -27,7 +28,7 @@ export class SchedulePass extends PrimFuncPass {
     const sCfg = this.config.scheduling;
     const trace = ctx.trace;
     if (sCfg.autotune) {
-      if (pf.cublasInfo || pf._tensorIntrin) return;
+      if (pf.hasAttr(FuncAttr.CUBLAS_INFO) || pf.hasAttr(FuncAttr.TENSOR_INTRIN)) return;
       const ft0 = performance.now();
       const tuneResult = this._autotuner.tuneAndApply(pf);
       const durationMs = performance.now() - ft0;
@@ -45,7 +46,7 @@ export class SchedulePass extends PrimFuncPass {
       }
       trace.autotuneStats(pf.name, { durationMs, blockCount, applied: !!(tuneResult && tuneResult.applied), cacheHits });
     } else if (sCfg.enabled || sCfg.gpuTiling) {
-      if (pf.cublasInfo || pf._tensorIntrin) return;
+      if (pf.hasAttr(FuncAttr.CUBLAS_INFO) || pf.hasAttr(FuncAttr.TENSOR_INTRIN)) return;
       const ft0 = performance.now();
       const sch = new Schedule(pf);
       const handled = applyDeterministicGpuSchedule(sch, this.target, sCfg);

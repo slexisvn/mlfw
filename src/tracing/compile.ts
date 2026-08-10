@@ -218,7 +218,7 @@ export function compile(model: CompilableModel, exampleInputs?: Tensor[], opts: 
   }
 
   const target = opts?.target ?? CPUTarget();
-  const compilerOpts: Record<string, unknown> & { target: unknown; verify: boolean } = { target, verify: false, ...opts };
+  const compilerOpts: Record<string, unknown> & { target: unknown } = { target, ...opts };
   const dynamicShapes = opts?.dynamic_shapes || null;
   const shapeBuckets = opts?.shapeBuckets || null;
   const foldWeights = opts?.foldWeights ?? opts?.quantization?.foldWeights ?? false;

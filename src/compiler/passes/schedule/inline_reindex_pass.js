@@ -2,6 +2,7 @@ import { PrimFuncPass } from '../tir_pass.js';
 import { Schedule } from '../../schedule/schedule.js';
 import { invalidateClassifyCache, primFuncHasRecurrence } from '../../schedule/rules.js';
 import { irChildNodes } from '../../ir/ir_visitor.js';
+import { FuncAttr } from '../../ir/func_attrs.js';
 
 function analyzeFunc(root) {
   const blocks = [];
@@ -39,7 +40,7 @@ export class InlineReindexPass extends PrimFuncPass {
 
   run(pf, ctx) {
     if (!this.target.isGPU() || this.target.isWebGPU()) return;
-    if (pf.cublasInfo || pf._tensorIntrin) return;
+    if (pf.hasAttr(FuncAttr.CUBLAS_INFO) || pf.hasAttr(FuncAttr.TENSOR_INTRIN)) return;
     if (primFuncHasRecurrence(pf)) return;
     const sCfg = this.config.scheduling;
     if (!(sCfg.enabled || sCfg.gpuTiling || sCfg.autotune)) return;

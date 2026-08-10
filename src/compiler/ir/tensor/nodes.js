@@ -1,3 +1,5 @@
+import { withFuncAttrs } from '../func_attrs.js';
+
 export const ForKind = Object.freeze({
   SERIAL: 'serial',
   PARALLEL: 'parallel',
@@ -54,7 +56,7 @@ export class TensorNode {
   }
 }
 
-export class PrimFunc extends TensorNode {
+export class PrimFunc extends withFuncAttrs(TensorNode) {
   constructor(name, params, body, bufferMap = new Map(), shapeParams = [], shapeParamMap = null) {
     super();
     this.name = name;

@@ -5,23 +5,18 @@ import { wireInputEdges } from '../../../autograd/accumulator.js';
 import { wrapResult, getGpuContiguousFn } from '../../../dispatcher/jit_dispatch.js';
 import { contiguous } from '../../../tensor/ops/ops.js';
 import { DeviceType } from '../../../tensor/types/device.js';
-import { isEagerDeferred, deviceBufferForInput, deviceBufferForOutput, uploadIfStale } from './resident.js';
-import { acquire, release, copyDeviceToHost } from './memory.js';
+import { deviceBufferForInput, deviceBufferForOutput } from './resident.js';
 import { cublasGemmDevice, cublasGemmBatchedDevice } from './cublas.js';
 import { matmul as opsMatmul } from '../../../tensor/ops/ops.js';
 
-function devIn(arr) { return isEagerDeferred() ? deviceBufferForInput(arr) : uploadIfStale(arr); }
-function devOut(arr, pending) {
-  if (isEagerDeferred()) return deviceBufferForOutput(arr);
-  const dptr = acquire(arr.byteLength); pending.push([arr, dptr]); return dptr;
-}
-function flushOut(pending) { for (const [arr, dptr] of pending) { copyDeviceToHost(arr, dptr); release(dptr, arr.byteLength); } }
+const devIn = deviceBufferForInput;
+const devOut = deviceBufferForOutput;
 
 function operandData(T) {
   let lay = operandLayout(T);
   if (lay) return { data: T._impl.storage.rawData, lay };
   const fn = getGpuContiguousFn();
-  if (isEagerDeferred() && fn) {
+  if (fn) {
     const data = fn(T._impl.storage.rawData, T.shape, T.strides, T._impl.storageOffset, T.dtype);
     const shape = T.shape, rank = shape.length;
     const rows = shape[rank - 2], cols = shape[rank - 1];
@@ -81,17 +76,16 @@ export function gpuMatmul(A, B) {
   const layA = a.lay, layB = b.lay;
   if (!layA || !layB || layA.batch !== layB.batch) return null;
 
-  const batch = layA.batch, pending = [];
+  const batch = layA.batch;
   const dA = devIn(a.data);
   const dB = devIn(b.data);
   const outArr = new Float32Array(batch * M * N);
-  const dC = devOut(outArr, pending);
+  const dC = devOut(outArr);
   if (batch > 1) {
     cublasGemmBatchedDevice(batch, M, N, K, dA, layA.batchStride, layA.trans, dB, layB.batchStride, layB.trans, dC, M * N);
   } else {
     cublasGemmDevice(M, N, K, dA, layA.trans, dB, layB.trans, dC);
   }
-  flushOut(pending);
 
   const outShape = [...A.shape.slice(0, ra - 2), M, N];
   const out = wrapResult(outArr, outShape, A.dtype, A.device);

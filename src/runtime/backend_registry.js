@@ -37,6 +37,12 @@ export async function preloadCudaRuntime() {
   return mod;
 }
 
+export async function releaseCudaMemory() {
+  if (!_cudaMod) return 0;
+  const mod = await _cudaMod;
+  return mod.releaseCudaMemory();
+}
+
 let _webgpuMod = null;
 export async function preloadWebGPU() {
   if (_webgpuMod) return _webgpuMod;

@@ -85,7 +85,7 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
   const target = opts.target ?? CPUTarget();
   const mode = opts.mode || 'separate';
   const rematPolicy = opts.rematPolicy || new RematPolicy(opts.remat || {});
-  const compilerOpts = { target, verify: false, ...opts, backward: undefined, mode: undefined, rematPolicy: undefined, remat: undefined };
+  const compilerOpts = { target, ...opts, backward: undefined, mode: undefined, rematPolicy: undefined, remat: undefined };
   const dynamicShapes = opts.dynamic_shapes || null;
 
   const _cacheEntries: BackwardMeta[] = [];

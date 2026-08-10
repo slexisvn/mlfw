@@ -1,4 +1,5 @@
 import { isDtypeFloat } from '../../../util/dtype_map.js';
+import { withFuncAttrs } from '../func_attrs.js';
 
 export class LIRNode {
   constructor() {
@@ -48,7 +49,7 @@ export class LIRNode {
   }
 }
 
-export class LIRFunc extends LIRNode {
+export class LIRFunc extends withFuncAttrs(LIRNode) {
   constructor(name, params, body, bufferMap, shapeParams, shapeParamMap, metadata) {
     super();
     this.name = name;

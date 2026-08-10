@@ -7,6 +7,7 @@ import { BackendPipeline } from '../../src/backend/pipeline.js';
 import { CUDATarget } from '../../src/backend/target.js';
 import { Schedule } from '../../src/compiler/schedule/schedule.js';
 import { getCudaIntrin } from '../../src/backend/cuda/tensor_intrin.js';
+import { FuncAttr } from '../../src/compiler/ir/func_attrs.js';
 
 function matmulFunc(name, A, B, C, M, N) {
   const i = new VariableNode('i', 'int32'), j = new VariableNode('j', 'int32');
@@ -25,7 +26,7 @@ describe('CUDA tensor-intrinsic (tensorize) codegen', () => {
     const C = new Buffer('C', [M, N], 'f32', 'global');
     const func = matmulFunc('mm_t', A, B, C, M, N);
     new Schedule(func).tensorize('wmma_16x16x16_f16f16f32', { M, N, K, a: 'A', b: 'B', c: 'C' });
-    expect(func._tensorIntrin).toEqual({ name: 'wmma_16x16x16_f16f16f32', info: { M, N, K, a: 'A', b: 'B', c: 'C' } });
+    expect(func.getAttr(FuncAttr.TENSOR_INTRIN)).toEqual({ name: 'wmma_16x16x16_f16f16f32', info: { M, N, K, a: 'A', b: 'B', c: 'C' } });
     expect(typeof getCudaIntrin('wmma_16x16x16_f16f16f32')).toBe('function');
     expect(getCudaIntrin('no_such_intrin')).toBe(null);
   });
@@ -69,7 +70,7 @@ describe('CUDA tensor-intrinsic (tensorize) codegen', () => {
     const B = new Buffer('B', [K, N], 'f16', 'global');
     const C = new Buffer('C', [M, N], 'f32', 'global');
     const func = matmulFunc('mm_bad', A, B, C, M, N);
-    func._tensorIntrin = { name: 'nonexistent_intrin', info: { M, N, K, a: 'A', b: 'B', c: 'C' } };
+    func.setAttr(FuncAttr.TENSOR_INTRIN, { name: 'nonexistent_intrin', info: { M, N, K, a: 'A', b: 'B', c: 'C' } });
     expect(() => new BackendPipeline(CUDATarget()).compile(func)).toThrow(/unknown tensor intrinsic/);
   });
 });

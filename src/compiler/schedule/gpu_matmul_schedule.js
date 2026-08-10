@@ -10,6 +10,7 @@ import {
   MathOpNode, SyncThreadsNode,
 } from '../ir/tensor/nodes.js';
 import { Buffer } from '../ir/tensor/buffer.js';
+import { FuncAttr } from '../ir/func_attrs.js';
 
 const I = (v) => new IntImmNode(v);
 const IV = (n) => new VariableNode(n, 'i32');
@@ -93,7 +94,7 @@ export function applyDeterministicGpuMatmul(schedule, target, sCfg = {}) {
       const body = buildTiledSharedMatmul(dims, tcfg.BS, tcfg.BK);
       schedule.func.body = body;
       if (schedule.func._setChild) schedule.func._setChild('body', body);
-      schedule.func.gpuRegisterBlocked = true;
+      schedule.func.setAttr(FuncAttr.GPU_REGISTER_BLOCKED, true);
       return true;
     }
   }
@@ -103,7 +104,7 @@ export function applyDeterministicGpuMatmul(schedule, target, sCfg = {}) {
   const body = buildRegisterBlockedMatmul(dims, cfg, plan.epilogue);
   schedule.func.body = body;
   if (schedule.func._setChild) schedule.func._setChild('body', body);
-  schedule.func.gpuRegisterBlocked = true;
+  schedule.func.setAttr(FuncAttr.GPU_REGISTER_BLOCKED, true);
   return true;
 }
 

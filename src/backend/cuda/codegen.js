@@ -4,6 +4,7 @@ import { flattenRowMajorIndex } from '../index_emit.js';
 import { irChildNodes } from '../../compiler/ir/ir_visitor.js';
 import { parseThreadAxis, maxBindingExtent, visitStatements, estimateBufferSize, dynamicDimProduct, resolveShapeParam } from '../codegen_utils.js';
 import { getCudaIntrin } from './tensor_intrin.js';
+import { FuncAttr } from '../../compiler/ir/func_attrs.js';
 
 const LOCAL_MEMORY_BUDGET_BYTES = 256 * 1024;
 
@@ -124,10 +125,11 @@ export class CUDACodegen {
     }
 
     this._emitMissingLocalDecls(func);
-    if (func._tensorIntrin) {
-      const emit = getCudaIntrin(func._tensorIntrin.name);
-      if (!emit) throw new Error(`CUDA codegen: unknown tensor intrinsic '${func._tensorIntrin.name}'`);
-      emit(this, func._tensorIntrin.info);
+    const tensorIntrin = func.getAttr(FuncAttr.TENSOR_INTRIN);
+    if (tensorIntrin) {
+      const emit = getCudaIntrin(tensorIntrin.name);
+      if (!emit) throw new Error(`CUDA codegen: unknown tensor intrinsic '${tensorIntrin.name}'`);
+      emit(this, tensorIntrin.info);
     } else {
       this._visitNode(func.body);
     }
@@ -649,8 +651,8 @@ export class CUDACodegen {
   }
 
   _analyzeSharing(func) {
-    if (func._tensorIntrin) { this._needsBarriers = false; return; }
-    if (func.gpuRegisterBlocked) {
+    if (func.hasAttr(FuncAttr.TENSOR_INTRIN)) { this._needsBarriers = false; return; }
+    if (func.getAttr(FuncAttr.GPU_REGISTER_BLOCKED)) {
       this._needsBarriers = false;
       return;
     }

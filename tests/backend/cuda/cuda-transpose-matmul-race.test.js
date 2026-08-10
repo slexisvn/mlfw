@@ -17,7 +17,7 @@ function data(r, sh) {
 }
 async function err(fwd, x) {
   const cpu = flat(await (async () => { const c = compile({ forward: fwd }, [x], { target: CPUTarget() }); let r = c(x); if (r && r.then) r = await r; return r; })());
-  const g = compile({ forward: fwd }, [x], { target: CUDATarget(), verify: false, scheduling: { enabled: true } });
+  const g = compile({ forward: fwd }, [x], { target: CUDATarget(), scheduling: { enabled: true } });
   let r = g(x); if (r && r.then) r = await r; const gpu = flat(r);
   let e = 0; for (let i = 0; i < cpu.length; i++) e = Math.max(e, Math.abs(cpu[i] - gpu[i]) / (1 + Math.abs(cpu[i])));
   return e;

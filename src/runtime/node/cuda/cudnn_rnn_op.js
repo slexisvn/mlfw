@@ -3,20 +3,15 @@ import { AutogradMeta } from '../../../tensor/core/autograd_meta.js';
 import { GradMode } from '../../../autograd/grad_mode.js';
 import { wireInputEdges } from '../../../autograd/accumulator.js';
 import { wrapResult, gpuContiguousArray } from '../../../dispatcher/jit_dispatch.js';
-import { isEagerDeferred, deviceBufferForInput, deviceBufferForOutput, uploadIfStale } from './resident.js';
-import { acquire, release, copyDeviceToHost } from './memory.js';
+import { deviceBufferForInput, deviceBufferForOutput } from './resident.js';
 import { cudnnRNNForward, cudnnRNNBackward, releaseRNNForward, CELL_LSTM, CELL_GRU } from './cudnn.js';
 
 const carr = (t) => gpuContiguousArray(t);
 const prod = (s) => s.reduce((a, b) => a * b, 1);
-function devIn(arr) { return isEagerDeferred() ? deviceBufferForInput(arr) : uploadIfStale(arr); }
-function devOut(arr, pending) {
-  if (isEagerDeferred()) return deviceBufferForOutput(arr);
-  const dptr = acquire(arr.byteLength); pending.push([arr, dptr]); return dptr;
-}
-function flushOut(pending) {
-  for (const [arr, dptr] of pending) { copyDeviceToHost(arr, dptr); release(dptr, arr.byteLength); }
-}
+const devIn = deviceBufferForInput;
+const devOut = deviceBufferForOutput;
+
+const _fwdReclaim = new FinalizationRegistry((ctx) => releaseRNNForward(ctx));
 
 const KIND = {
   lstm: { cellMode: CELL_LSTM, gates: 4, hasCell: true },
@@ -29,7 +24,7 @@ class CudnnRNNBackward extends AutogradNode {
     const [dy, dhy, dcy] = gradOutputs;
     const f = this.info;
     const { seqLen, batch, inputSize, hiddenSize } = f.opts;
-    const numLayers = f.numLayers, stateN = numLayers * batch * hiddenSize, pending = [];
+    const numLayers = f.numLayers, stateN = numLayers * batch * hiddenSize;
 
     const xDev = devIn(f.xArr);
     const yDev = devIn(f.yArr);
@@ -40,23 +35,23 @@ class CudnnRNNBackward extends AutogradNode {
     const dcyDev = f.hasCell && dcy ? devIn(carr(dcy)) : 0n;
 
     const dxArr = new Float32Array(seqLen * batch * inputSize);
-    const dxDev = devOut(dxArr, pending);
+    const dxDev = devOut(dxArr);
     let dhxArr = null, dcxArr = null, dhxDev = 0n, dcxDev = 0n;
     if (f.hasInit) {
-      dhxArr = new Float32Array(stateN); dhxDev = devOut(dhxArr, pending);
-      if (f.hasCell) { dcxArr = new Float32Array(stateN); dcxDev = devOut(dcxArr, pending); }
+      dhxArr = new Float32Array(stateN); dhxDev = devOut(dhxArr);
+      if (f.hasCell) { dcxArr = new Float32Array(stateN); dcxDev = devOut(dcxArr); }
     }
     const gradArrs = f.weightShapes.map((s) => ({
       x2hW: new Float32Array(prod(s.x2hW)), x2hB: new Float32Array(prod(s.x2hB)),
       h2hW: new Float32Array(prod(s.h2hW)), h2hB: new Float32Array(prod(s.h2hB)),
     }));
     const gradDevs = gradArrs.map((g) => ({
-      x2hW: devOut(g.x2hW, pending), x2hB: devOut(g.x2hB, pending),
-      h2hW: devOut(g.h2hW, pending), h2hB: devOut(g.h2hB, pending),
+      x2hW: devOut(g.x2hW), x2hB: devOut(g.x2hB),
+      h2hW: devOut(g.h2hW), h2hB: devOut(g.h2hB),
     }));
 
     cudnnRNNBackward(this.fwd, xDev, yDev, hxDev, cxDev, dyDev, dhyDev, dcyDev, dxDev, dhxDev, dcxDev, gradDevs);
-    flushOut(pending);
+    _fwdReclaim.unregister(this);
 
     const w = (arr, shape) => wrapResult(arr, shape, f.dtype, f.device);
     const grads = [w(dxArr, f.inputShape)];
@@ -83,7 +78,7 @@ function attach(node, output, outputNr) {
 function cudnnRNNOp(kindName, input, cells, opts, hx = null, cx = null) {
   const kind = KIND[kindName];
   const { inputSize, hiddenSize, seqLen, batch } = opts;
-  const numLayers = cells.length, pending = [];
+  const numLayers = cells.length;
   const planOpts = { ...opts, numLayers, cellMode: kind.cellMode, gates: kind.gates };
 
   const xArr = carr(input);
@@ -99,8 +94,8 @@ function cudnnRNNOp(kindName, input, cells, opts, hx = null, cx = null) {
   const yArr = new Float32Array(seqLen * batch * hiddenSize);
   const hyArr = new Float32Array(stateN);
   const cyArr = kind.hasCell ? new Float32Array(stateN) : null;
-  const yDev = devOut(yArr, pending), hyDev = devOut(hyArr, pending);
-  const cyDev = cyArr ? devOut(cyArr, pending) : 0n;
+  const yDev = devOut(yArr), hyDev = devOut(hyArr);
+  const cyDev = cyArr ? devOut(cyArr) : 0n;
 
   const inputs = [input];
   for (const c of cells) inputs.push(c.x2h.weight, c.x2h.bias, c.h2h.weight, c.h2h.bias);
@@ -110,7 +105,6 @@ function cudnnRNNOp(kindName, input, cells, opts, hx = null, cx = null) {
   const training = GradMode.isEnabled() && any;
 
   const fwd = cudnnRNNForward(xDev, layerDevs, planOpts, hxDev, cxDev, yDev, hyDev, cyDev, training);
-  flushOut(pending);
 
   const out = wrapResult(yArr, [seqLen, batch, hiddenSize], input.dtype, input.device);
   const hyT = wrapResult(hyArr, stateShape, input.dtype, input.device);
@@ -123,6 +117,7 @@ function cudnnRNNOp(kindName, input, cells, opts, hx = null, cx = null) {
       weightShapes: cells.map((c) => ({ x2hW: [...c.x2h.weight.shape], x2hB: [...c.x2h.bias.shape], h2hW: [...c.h2h.weight.shape], h2hB: [...c.h2h.bias.shape] })),
     };
     const node = new CudnnRNNBackward(fwd, info, inputs.length);
+    _fwdReclaim.register(node, fwd, node);
     wireInputEdges(node, inputs);
     attach(node, out, 0); attach(node, hyT, 1);
     if (cyT) attach(node, cyT, 2);

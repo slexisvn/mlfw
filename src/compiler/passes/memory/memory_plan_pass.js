@@ -1,5 +1,6 @@
 import { PrimFuncPass } from '../tir_pass.js';
 import { MemoryPlanner } from './memory_planning.js';
+import { FuncAttr } from '../../ir/func_attrs.js';
 
 export class MemoryPlanPass extends PrimFuncPass {
   constructor(config) {
@@ -19,7 +20,7 @@ export class MemoryPlanPass extends PrimFuncPass {
   }
 
   run(pf, ctx) {
-    if (pf.gpuRegisterBlocked) return;
+    if (pf.getAttr(FuncAttr.GPU_REGISTER_BLOCKED)) return;
     const ft0 = performance.now();
     const { plan } = this._planner.planAndRewrite(pf);
     const report = plan.getReport();

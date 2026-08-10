@@ -6,6 +6,7 @@ export function cloneIRShared(node, rec, handleOther) {
   copy._parent = null;
   copy._parentKey = null;
   copy._parentIdx = -1;
+  if (node.attrs instanceof Map) copy.attrs = new Map(node.attrs);
   switch (node.type) {
     case 'ForNode':
       copy.loopVar = node.loopVar;

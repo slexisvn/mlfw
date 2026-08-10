@@ -11,6 +11,7 @@ import { SRefTree } from './sref.js';
 import { loopCarriesReduction, collectVarsUsed } from './legality.js';
 import { cloneIRShared } from '../ir/clone_ir.js';
 import { transform as irTransform, some as irSome } from '../ir/ir_visitor.js';
+import { FuncAttr } from '../ir/func_attrs.js';
 
 const RFACTOR_ASSOCIATIVE_OPS = new Set(['+', '*', 'min', 'max']);
 
@@ -870,7 +871,7 @@ export class Schedule {
     if (!info || typeof info.M !== 'number' || typeof info.N !== 'number' || typeof info.K !== 'number') {
       throw new Error('tensorize expects info { M, N, K, a, b, c }');
     }
-    this.func._tensorIntrin = { name: intrinName, info };
+    this.func.setAttr(FuncAttr.TENSOR_INTRIN, { name: intrinName, info });
     this.state.invalidate();
   }
 

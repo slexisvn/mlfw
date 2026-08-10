@@ -16,6 +16,7 @@ import { register as registerPooling } from './rules/pooling.js';
 import { register as registerResize } from './rules/resize.js';
 import { register as registerAttention } from './rules/attention.js';
 import { elementwiseOpNames } from './rules/elementwise.js';
+import { FuncAttr } from '../../ir/func_attrs.js';
 
 const BROADCAST_VIEW_SAFE_EXTRA = ['compare', 'select', 'clamp', 'convert', 'copy_to_device', 'dot', 'fusion'];
 
@@ -173,6 +174,6 @@ export function lowerGraphToPrimFunc(graphFunc, target = null, context = null) {
   for (const sp of shapeParams) params.push(sp);
 
   const primFunc = new PrimFunc(graphFunc.name, params, stmts.length === 1 ? stmts[0] : new SeqNode(stmts), bufferMap, shapeParams, new Map(ctx.shapeParams));
-  if (graphFunc._partitionTarget) primFunc._partitionTarget = graphFunc._partitionTarget;
+  if (graphFunc._partitionTarget) primFunc.setAttr(FuncAttr.PARTITION_TARGET, graphFunc._partitionTarget);
   return primFunc;
 }

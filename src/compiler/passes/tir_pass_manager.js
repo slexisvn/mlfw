@@ -1,11 +1,13 @@
 import { CompilationError } from '../pipeline/trace.js';
 import { printTensorIR } from '../ir/tensor/printer.js';
+import { checkIRInvariants } from '../pipeline/invariant_check.js';
+import { IRLevel } from '../ir/verify.js';
 
 export class TirPassManager {
   constructor() {
     this.passes = [];
     this.trace = null;
-    this.verifyHook = null;
+    this.checkEachPass = false;
   }
 
   addPass(pass) {
@@ -16,8 +18,8 @@ export class TirPassManager {
     this.trace = trace;
   }
 
-  setVerifyHook(hook) {
-    this.verifyHook = hook;
+  setCheckEachPass(enabled) {
+    this.checkEachPass = enabled;
   }
 
   run(primFuncs, ctx) {
@@ -57,23 +59,19 @@ export class TirPassManager {
       }
     }
 
-    if (this.verifyHook) this._verifyFuncs(primFuncs, ctx);
+    if (this.checkEachPass) this._verifyFuncs(primFuncs, ctx, pass.name);
     pass.trace = null;
   }
 
-  _verifyFuncs(primFuncs, ctx) {
+  _verifyFuncs(primFuncs, ctx, passName) {
     for (const pf of primFuncs) {
       if (ctx.failed.has(pf.name)) continue;
-      const found = this.verifyHook(pf);
-      if (found && found.length > 0) {
-        const msg = found.join('; ');
-        if (ctx.resilient) {
-          ctx.errors.push(new CompilationError('verification', pf.name, msg));
-          ctx.failed.add(pf.name);
-        } else {
-          throw new Error('TensorIR verification failed for ' + pf.name + ': ' + msg);
-        }
-      }
+      const err = checkIRInvariants(IRLevel.TIR, pf, pf.name, passName);
+      if (!err) continue;
+      ctx.errors.push(err);
+      ctx.failed.add(pf.name);
+      ctx.trace.errorEvent('verification', pf.name, err.message);
+      if (!ctx.resilient) throw new Error(err.toString());
     }
   }
 }

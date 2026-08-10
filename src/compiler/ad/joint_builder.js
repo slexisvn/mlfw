@@ -6,6 +6,15 @@ import { getVJPRule, isGradientBarrier, requireVJPRuleOrBarrier } from './vjp_re
 import { RematPolicy } from './remat_policy.js';
 import { REGION_CONTROL_FLOW, backpropOps } from './backward_builder.js';
 
+function replayOp(builder, op, resolve, record) {
+  const vmap = new Map();
+  for (const operand of op.operands) vmap.set(operand, resolve(operand));
+  const cloned = op.clone(vmap);
+  builder._insert(cloned);
+  for (let r = 0; r < op.numResults; r++) record(op.getResult(r), cloned.getResult(r));
+  return cloned;
+}
+
 export class JointGraphBuilder {
   constructor(opts = {}) {
     this._rematPolicy = opts.rematPolicy || new RematPolicy(opts.remat || {});
@@ -33,16 +42,11 @@ export class JointGraphBuilder {
       const recomputeMap = new Map();
 
       for (const op of seg.ops) {
-        const newOperands = new Array(op.numOperands);
-        for (let o = 0; o < op.numOperands; o++) {
-          const origVal = op.getOperand(o);
-          newOperands[o] = recomputeMap.get(origVal.id) || s.valueMap.get(origVal.id) || origVal;
-        }
-        const resultTypes = op.results.map(r => r.type);
-        const cloned = s.builder._buildOp(op.opName, newOperands, resultTypes, new Map(op.attributes), null);
-        for (let r = 0; r < op.numResults; r++) {
-          recomputeMap.set(op.getResult(r).id, cloned.getResult(r));
-        }
+        replayOp(
+          s.builder, op,
+          (v) => recomputeMap.get(v.id) || s.valueMap.get(v.id) || v,
+          (orig, next) => recomputeMap.set(orig.id, next),
+        );
       }
 
       backpropOps(seg.ops, {
@@ -82,16 +86,11 @@ export class JointGraphBuilder {
 
     for (const op of topoOrder) {
       if (op.opName === 'return') continue;
-      const newOperands = new Array(op.numOperands);
-      for (let o = 0; o < op.numOperands; o++) {
-        const origVal = op.getOperand(o);
-        newOperands[o] = valueMap.get(origVal.id) || origVal;
-      }
-      const resultTypes = op.results.map(r => r.type);
-      const cloned = builder._buildOp(op.opName, newOperands, resultTypes, new Map(op.attributes), null);
-      for (let r = 0; r < op.numResults; r++) {
-        valueMap.set(op.getResult(r).id, cloned.getResult(r));
-      }
+      replayOp(
+        builder, op,
+        (v) => valueMap.get(v.id) || v,
+        (orig, next) => valueMap.set(orig.id, next),
+      );
     }
 
     const fwdOutputValues = forwardOutputs.map(v => valueMap.get(v.id));

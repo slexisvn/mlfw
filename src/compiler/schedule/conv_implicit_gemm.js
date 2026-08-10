@@ -6,6 +6,7 @@ import {
 import { Buffer } from '../ir/tensor/buffer.js';
 import { findBlock, collectAllBlockNames } from '../autotune/block_analysis.js';
 import { pickFixedConfig } from '../autotune/gpu_matmul_sketch.js';
+import { FuncAttr } from '../ir/func_attrs.js';
 
 const I = (v) => new IntImmNode(v);
 const FZERO = () => new FloatImmNode(0);
@@ -315,7 +316,7 @@ function pickVectorizedConvConfig(target, ci) {
 
 export function applyImplicitGemmConv(schedule, target, sCfg) {
   const pf = schedule.func;
-  const ci = pf.convInfo;
+  const ci = pf.getAttr(FuncAttr.CONV_INFO);
   if (!ci) return false;
   const names = collectAllBlockNames(pf.body);
   const accName = names.find(n => /^conv_acc_/.test(n));
@@ -345,6 +346,6 @@ export function applyImplicitGemmConv(schedule, target, sCfg) {
   }
   schedule.func.body = body;
   if (schedule.func._setChild) schedule.func._setChild('body', body);
-  schedule.func.gpuRegisterBlocked = true;
+  schedule.func.setAttr(FuncAttr.GPU_REGISTER_BLOCKED, true);
   return true;
 }

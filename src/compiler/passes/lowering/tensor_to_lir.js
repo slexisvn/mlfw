@@ -29,7 +29,7 @@ export function lowerToLIR(primFunc, target) {
     primFunc.shapeParams,
     primFunc.shapeParamMap,
     metadata,
-  );
+  ).copyAttrsFrom(primFunc);
 }
 
 function lowerStmt(node, ctx) {

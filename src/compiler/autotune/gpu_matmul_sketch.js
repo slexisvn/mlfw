@@ -9,6 +9,7 @@ import { ScheduleSketch, SearchVariable } from './sketch.js';
 import { findBlock, collectAllBlockNames, analyzeBlockStructure } from './block_analysis.js';
 import { walk, transform, STOP } from '../ir/ir_visitor.js';
 import { cloneTensorIR } from './tune_ir.js';
+import { FuncAttr } from '../ir/func_attrs.js';
 
 const I = (v) => new IntImmNode(v);
 const FZERO = () => new FloatImmNode(0);
@@ -362,7 +363,7 @@ function createMatmulRegisterBlockGPUSketch(configs) {
       const body = buildRegisterBlockedMatmul(bufs, cfg);
       schedule.func.body = body;
       if (schedule.func._setChild) schedule.func._setChild('body', body);
-      schedule.func.gpuRegisterBlocked = true;
+      schedule.func.setAttr(FuncAttr.GPU_REGISTER_BLOCKED, true);
     });
   sketch.configs = configs;
   sketch.enumerate = () => configs.map((_, i) => ({ config_index: i }));

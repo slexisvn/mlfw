@@ -2,6 +2,8 @@ import { AnalysisManager } from '../analysis/analysis_manager.js';
 import { FunctionPass, ModulePass, PassResult, PassContext } from './pass.js';
 import { TraceLevel } from '../pipeline/trace.js';
 import { CompilationError } from '../pipeline/trace.js';
+import { checkIRInvariants } from '../pipeline/invariant_check.js';
+import { IRLevel } from '../ir/verify.js';
 
 function countOps(target) {
   if (typeof target.numOps === 'function') return target.numOps();
@@ -28,7 +30,7 @@ export class PassManager {
     this.passes = [];
     this.analysisManager = new AnalysisManager();
     this.trace = null;
-    this.verifyHook = null;
+    this.checkEachPass = false;
     this.instruments = [];
   }
 
@@ -50,16 +52,15 @@ export class PassManager {
     this.trace = trace;
   }
 
-  setVerifyHook(hook) {
-    this.verifyHook = hook;
+  setCheckEachPass(enabled) {
+    this.checkEachPass = enabled;
   }
 
   _verifyAfter(pass, target, isModule) {
-    if (!this.verifyHook) return null;
-    const found = this.verifyHook(target, isModule);
-    if (!found || found.length === 0) return null;
+    if (!this.checkEachPass) return null;
+    const level = isModule ? IRLevel.GRAPH_MODULE : IRLevel.GRAPH_FUNC;
     const name = isModule ? (target.name || '<module>') : target.name;
-    return new CompilationError('verification', name, `pass '${pass.name}' produced invalid IR: ${found.join('; ')}`, pass.name);
+    return checkIRInvariants(level, target, name, pass.name);
   }
 
   _applyPass(pass, module, ctx, results) {

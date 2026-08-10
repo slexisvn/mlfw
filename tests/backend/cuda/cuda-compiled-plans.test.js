@@ -136,7 +136,7 @@ describe.skipIf(!cudaDeps)('CUDA compiled multi-kernel & cuBLAS plans', () => {
       const x = tensor(data(rng, [batch, width], -1, 1));
 
       const cpu = flat(await compile({ forward: fwd }, [x], { target: CPUTarget() })(x));
-      const cf = compile({ forward: fwd }, [x], { target: CUDATarget(), verify: false, scheduling: { enabled: true } });
+      const cf = compile({ forward: fwd }, [x], { target: CUDATarget(), scheduling: { enabled: true } });
       const plan = cf.result().module.executionPlan;
       let g = cf(x); if (g && g.then) g = await g; g = flat(g);
 
@@ -162,7 +162,7 @@ describe.skipIf(!cudaDeps)('CUDA compiled multi-kernel & cuBLAS plans', () => {
       const fwd = (x) => c3.forward(c2.forward(c1.forward(x).relu()).relu());
       const x = tensor(data(rng, [N, C, H, H], -1, 1));
       const cpu = flat(await compile({ forward: fwd }, [x], { target: CPUTarget() })(x));
-      const cf = compile({ forward: fwd }, [x], { target: CUDATarget(), verify: false });
+      const cf = compile({ forward: fwd }, [x], { target: CUDATarget() });
       let g = cf(x); if (g && g.then) g = await g; g = flat(g);
       return { err: maxRelErr(cpu, g), split: !!cf.result().module.executionPlan, kernels: cf.result().module.listKernels().length };
     }

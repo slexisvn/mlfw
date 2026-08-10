@@ -1,9 +1,9 @@
 import { getDevice } from './cuda/device.js';
 import { getProgram, getProgramFor } from './cuda/program.js';
-import { acquire, copyHostToDevice, copyDeviceToHost, release, free, drainPool } from './cuda/memory.js';
+import { acquire, copyHostToDevice, copyDeviceToHost, release, free, drainPool, setPoolLimit } from './cuda/memory.js';
 import { launch, f32 } from './cuda/launcher.js';
-import { runCudaPlan, setCudaGraphEnabled, isCudaGraphEnabled } from './cuda/device_plan.js';
-import { uploadIfStale, downloadAndValidate, deviceBufferForInput, deviceBufferForOutput, deviceBufferForInplace, isEagerDeferred, hostReadHook, pinResident, releaseAllResident, flushDeferred } from './cuda/resident.js';
+import { runCudaPlan, setCudaGraphEnabled, isCudaGraphEnabled, releaseAllPlanBuffers } from './cuda/device_plan.js';
+import { deviceBufferForInput, deviceBufferForOutput, deviceBufferForInplace, isEagerDeferred, hostReadHook, pinResident, releaseAllResident, flushDeferred, setResidentCacheLimit } from './cuda/resident.js';
 import { isEagerCapturing, isCudaGraphArmed, setCudaGraphArmed } from '../../dispatcher/eager_mode.js';
 import { destroyEagerGraph } from './cuda/eager_graph.js';
 import { cu } from './cuda/ffi.js';
@@ -15,12 +15,13 @@ import { setGpuContiguousHook } from '../../tensor/native/view/view_ops.js';
 import { IndexSelectBackward } from '../../autograd/function/indexing.js';
 import { DeviceType } from '../../tensor/types/device.js';
 import { typedArrayCtor } from '../../tensor/types/dtype.js';
-import { cudnnAvailable } from './cuda/cudnn.js';
+import { cudnnAvailable, destroyCudnn } from './cuda/cudnn.js';
 import { cudnnLSTMOp, cudnnGRUOp } from './cuda/cudnn_rnn_op.js';
 import { gpuMatmul } from './cuda/cublas_matmul_op.js';
+import { destroyCublas } from './cuda/cublas.js';
 import { registerCudaLinalg } from '../../kernels/cuda/linalg/register.js';
 
-export { runCudaPlan, setCudaGraphEnabled, isCudaGraphEnabled };
+export { runCudaPlan, setCudaGraphEnabled, isCudaGraphEnabled, setResidentCacheLimit, setPoolLimit };
 
 StorageImpl.setHostReadHook(hostReadHook);
 
@@ -119,20 +120,10 @@ export function runCudaKernelResident(compiledKernel, tensorArgs, shapeValues) {
   const ptrs = new Array(buffers.length);
   const scratch = _acquireScratch(meta.scratch);
 
-  if (isEagerDeferred()) {
-    for (let i = 0; i < buffers.length; i++) {
-      ptrs[i] = outputSet.has(i) ? deviceBufferForOutput(buffers[i]) : deviceBufferForInput(buffers[i]);
-    }
-    launch(func, meta.gridDim, meta.blockDim, 0, [...ptrs, ...scratch.ptrs], scalars, false);
-    _releaseScratch(scratch);
-    return;
-  }
-
-  for (let i = 0; i < buffers.length; i++) ptrs[i] = uploadIfStale(buffers[i]);
-  launch(func, meta.gridDim, meta.blockDim, 0, [...ptrs, ...scratch.ptrs], scalars, false);
   for (let i = 0; i < buffers.length; i++) {
-    if (outputSet.has(i)) downloadAndValidate(buffers[i], ptrs[i]);
+    ptrs[i] = outputSet.has(i) ? deviceBufferForOutput(buffers[i]) : deviceBufferForInput(buffers[i]);
   }
+  launch(func, meta.gridDim, meta.blockDim, 0, [...ptrs, ...scratch.ptrs], scalars, false);
   _releaseScratch(scratch);
 }
 
@@ -322,7 +313,10 @@ function freeClipScratch() {
 
 export function releaseCudaMemory() {
   releaseAllResident();
+  releaseAllPlanBuffers();
   freeClipScratch();
+  destroyCudnn();
+  destroyCublas();
   return drainPool();
 }
 

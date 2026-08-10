@@ -3,6 +3,7 @@ import { CPUCodegen } from './cpu/codegen.js';
 import { CUDACodegen } from './cuda/codegen.js';
 import { WasmCodegen } from './wasm/codegen.js';
 import { WebGPUCodegen } from './webgpu/codegen.js';
+import { FuncAttr } from '../compiler/ir/func_attrs.js';
 
 const _byTargetKind = new Map();
 
@@ -60,10 +61,11 @@ registerCodegen(TargetKind.WEBGPU, {
 registerCodegen(TargetKind.CUDA, {
   runtimeKind: 'cuda',
   compile(primFunc, target, pipeline) {
-    if (pipeline && pipeline.matmulBackend === 'cublas' && primFunc.cublasInfo) {
+    const cublasInfo = primFunc.getAttr ? primFunc.getAttr(FuncAttr.CUBLAS_INFO) : null;
+    if (pipeline && pipeline.matmulBackend === 'cublas' && cublasInfo) {
       return {
         source: '',
-        metadata: { kind: 'cuda', cublas: primFunc.cublasInfo, outputIndices: [primFunc.cublasInfo.cIdx] },
+        metadata: { kind: 'cuda', cublas: cublasInfo, outputIndices: [cublasInfo.cIdx] },
       };
     }
     const kernel = new CUDACodegen(target).generate(primFunc);

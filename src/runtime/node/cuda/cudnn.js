@@ -22,8 +22,13 @@ function ensure() {
     const dnn = koffi.load(loadCudaLib(CUDNN_SPEC));
     c = {
       create: dnn.func('int cudnnCreate(_Out_ void **h)'),
+      destroy: dnn.func('int cudnnDestroy(void *h)'),
       setStream: dnn.func('int cudnnSetStream(void *h, void *stream)'),
       getErrorString: dnn.func('str cudnnGetErrorString(int status)'),
+      destroyTensorDesc: dnn.func('int cudnnDestroyTensorDescriptor(void *d)'),
+      destroyRNNDesc: dnn.func('int cudnnDestroyRNNDescriptor(void *d)'),
+      destroyRNNDataDesc: dnn.func('int cudnnDestroyRNNDataDescriptor(void *d)'),
+      destroyDropoutDesc: dnn.func('int cudnnDestroyDropoutDescriptor(void *d)'),
       createRNNDesc: dnn.func('int cudnnCreateRNNDescriptor(_Out_ void **d)'),
       setRNNDesc: dnn.func('int cudnnSetRNNDescriptor_v8(void *d, int algo, int cellMode, int biasMode, int dirMode, int inputMode, int dataType, int mathPrec, int mathType, int inputSize, int hiddenSize, int projSize, int numLayers, void *dropoutDesc, uint auxFlags)'),
       createRNNDataDesc: dnn.func('int cudnnCreateRNNDataDescriptor(_Out_ void **d)'),
@@ -58,7 +63,7 @@ function ck(label, status) {
 }
 const o2 = () => [null];
 
-let _handle = null, _dropout = null;
+let _handle = null, _dropout = null, _dropoutStates = null, _dropoutStatesBytes = 0, _weightDescs = null;
 function handle() {
   if (!ensure()) throw new Error('cuDNN not available');
   const dev = getDevice();
@@ -74,11 +79,41 @@ function dropoutDesc() {
     const h = handle();
     const d = o2(); ck('createDropout', c.createDropoutDesc(d));
     const sz = [0n]; ck('dropStatesSize', c.dropoutGetStatesSize(h, sz));
-    const states = acquire(Math.max(Number(sz[0]), 1));
-    ck('setDropout', c.setDropoutDesc(d[0], h, 0.0, states, sz[0], 0n));
+    _dropoutStatesBytes = Math.max(Number(sz[0]), 1);
+    _dropoutStates = acquire(_dropoutStatesBytes);
+    ck('setDropout', c.setDropoutDesc(d[0], h, 0.0, _dropoutStates, sz[0], 0n));
     _dropout = d[0];
   }
   return _dropout;
+}
+function weightDescs() {
+  if (!_weightDescs) {
+    const m = o2(), b = o2();
+    ck('cwm', c.createTensorDesc(m));
+    ck('cwb', c.createTensorDesc(b));
+    _weightDescs = { m: m[0], b: b[0] };
+  }
+  return _weightDescs;
+}
+
+export function destroyCudnn() {
+  if (_inited !== true) return;
+  for (const p of _descCache.values()) {
+    c.destroyRNNDesc(p.rd);
+    c.destroyRNNDataDesc(p.xDesc);
+    c.destroyRNNDataDesc(p.yDesc);
+    c.destroyTensorDesc(p.hDesc);
+    release(p.devSeq, p.batch * 4);
+  }
+  _descCache.clear();
+  if (_weightDescs) {
+    c.destroyTensorDesc(_weightDescs.m);
+    c.destroyTensorDesc(_weightDescs.b);
+    _weightDescs = null;
+  }
+  if (_dropout) { c.destroyDropoutDesc(_dropout); _dropout = null; }
+  if (_dropoutStates !== null) { release(_dropoutStates, _dropoutStatesBytes); _dropoutStates = null; _dropoutStatesBytes = 0; }
+  if (_handle) { c.destroy(_handle); _handle = null; }
 }
 function tensorDesc(dims, strides) {
   const d = o2(); ck('createTensor', c.createTensorDesc(d));
@@ -118,8 +153,7 @@ function plan({ inputSize, hiddenSize, seqLen, batch, numLayers, cellMode = LSTM
 
 function packWeights(p, weightSpace, layerDevs, download) {
   const h = handle();
-  const mDesc = o2(), bDesc = o2();
-  ck('cwm', c.createTensorDesc(mDesc)); ck('cwb', c.createTensorDesc(bDesc));
+  const { m: mDesc, b: bDesc } = weightDescs();
   const { numLayers, hiddenSize, inputSize, wss, gates } = p;
   for (let l = 0; l < numLayers; l++) {
     const inF = l === 0 ? inputSize : hiddenSize;
@@ -127,7 +161,7 @@ function packWeights(p, weightSpace, layerDevs, download) {
     for (let id = 0; id < 2 * gates; id++) {
       const isInput = id < gates, gate = id % gates;
       const mAddr = [0n], bAddr = [0n];
-      ck('wparam', c.getRNNWeightParams(h, p.rd, l, wss, weightSpace, id, mDesc[0], mAddr, bDesc[0], bAddr));
+      ck('wparam', c.getRNNWeightParams(h, p.rd, l, wss, weightSpace, id, mDesc, mAddr, bDesc, bAddr));
       const wLen = isInput ? hiddenSize * inF : hiddenSize * hiddenSize;
       const wBytes = wLen * 4, bBytes = hiddenSize * 4;
       const wSrc = BigInt(isInput ? ld.x2hW : ld.h2hW) + BigInt(gate * wBytes);
@@ -157,7 +191,8 @@ export function cudnnRNNForward(xDev, layerDevs, opts, hxDev, cxDev, yDev, hyDev
 }
 
 export function releaseRNNForward(ctx) {
-  if (!ctx) return;
+  if (!ctx || ctx.released) return;
+  ctx.released = true;
   release(ctx.weightSpace, ctx.p.wssN);
   release(ctx.workSpace, ctx.p.workN);
   if (ctx.reserveSpace && ctx.reserveSpace !== 0n) release(ctx.reserveSpace, ctx.p.reserveN);
@@ -174,8 +209,6 @@ export function cudnnRNNBackward(ctx, xDev, yDev, hxDev, cxDev, dyDev, dhyDev, d
   ck('backwardWeights', c.rnnBackwardWeights(h, p.rd, WGRAD_ADD, p.devSeq, p.xDesc, xDev, p.hDesc, hxDev || 0n, p.yDesc, yDev,
     p.wss, dweight, p.workSize, workSpace, p.reserveSize, reserveSpace));
   packWeights(p, dweight, gradLayerDevs, true);
-  release(weightSpace, p.wssN);
-  release(workSpace, p.workN);
-  release(reserveSpace, p.reserveN);
   release(dweight, p.wssN);
+  releaseRNNForward(ctx);
 }

@@ -5,6 +5,7 @@ import {
 } from '../../src/index.js';
 import { compile } from '../../src/tracing/compile.js';
 import { CPUTarget, WasmTarget } from '../../src/backend/target.js';
+import { VerifyLevel } from '../../src/compiler/pipeline/invariant_check.js';
 
 function mulberry32(seed) {
   let a = seed >>> 0;
@@ -201,15 +202,15 @@ describe('opt-level differential: every pass-combo preserves semantics (eager ==
   }
 });
 
-describe("verify:'full' runs verifiers after every pass + tensor/LIR, accepts valid IR (eager == compiled)", () => {
+describe('VerifyLevel.EACH_PASS runs verifiers after every pass + tensor/LIR, accepts valid IR (eager == compiled)', () => {
   for (const prog of OPT_PROGRAMS) {
     for (const [tname, makeTarget] of Object.entries(TARGETS)) {
-      it(`${prog.name} on ${tname} compiles clean under verify:'full' (+scheduling)`, async () => {
+      it(`${prog.name} on ${tname} compiles clean under VerifyLevel.EACH_PASS (+scheduling)`, async () => {
         const rng = mulberry32(4200 + prog.name.length * 7);
         const inputs = prog.shapes.map((s) => mk(rng, s, -1, 1));
         const eager = flatten(prog.fwd(...inputs));
         const compiled = compile({ forward: (...a) => prog.fwd(...a) }, inputs, {
-          target: makeTarget(), verify: 'full', scheduling: { enabled: true },
+          target: makeTarget(), verify: VerifyLevel.EACH_PASS, scheduling: { enabled: true },
         });
         const out = flatten(await compiled(...inputs));
         expect(out.length).toBe(eager.length);

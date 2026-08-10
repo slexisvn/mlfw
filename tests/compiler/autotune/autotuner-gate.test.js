@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { Autotuner } from '../../../src/compiler/autotune/autotuner.js';
 import { CPUTarget } from '../../../src/backend/target.js';
+import { PrimFunc, SeqNode } from '../../../src/compiler/ir/tensor/nodes.js';
+import { FuncAttr } from '../../../src/compiler/ir/func_attrs.js';
 
 function makeAutotuner(onWarning) {
   const at = new Autotuner(CPUTarget(), { onWarning });
@@ -8,13 +10,18 @@ function makeAutotuner(onWarning) {
   return at;
 }
 
-const PRISTINE = () => ({ marker: 'original', _setChild() {} });
+const mkFunc = (name, registerBlocked = false) => {
+  const f = new PrimFunc(name, [], new SeqNode([]));
+  if (registerBlocked) f.setAttr(FuncAttr.GPU_REGISTER_BLOCKED, true);
+  return f;
+};
+const PRISTINE = () => mkFunc('original');
 
 describe('Autotuner._applyBestSchedule validity gate', () => {
   it('never adopts a tuned schedule the validator rejected, even when the fallback cannot be built', () => {
     const warnings = [];
     const at = makeAutotuner((w) => warnings.push(w));
-    at._buildTunedSchedule = () => ({ marker: 'tuned' });
+    at._buildTunedSchedule = () => mkFunc('tuned');
     at._scheduleIsValid = () => false; 
     at._buildDefaultSchedule = () => null;
 
@@ -22,7 +29,7 @@ describe('Autotuner._applyBestSchedule validity gate', () => {
     const result = at._applyBestSchedule(primFunc, new Map());
 
     expect(result).toBeNull();
-    expect(primFunc.marker).toBe('original');
+    expect(primFunc.name).toBe('original');
     const stages = warnings.map((w) => w.stage);
     expect(stages).toContain('tuned-schedule-invalid');
     expect(stages).toContain('no-valid-schedule');
@@ -31,25 +38,25 @@ describe('Autotuner._applyBestSchedule validity gate', () => {
   it('falls back to a valid default schedule when the tuned schedule is invalid', () => {
     const at = makeAutotuner(null);
     let adopted = null;
-    at._buildTunedSchedule = () => ({ marker: 'tuned' });
-    at._buildDefaultSchedule = () => ({ marker: 'fallback' });
-    at._scheduleIsValid = (f) => f.marker === 'fallback';
+    at._buildTunedSchedule = () => mkFunc('tuned');
+    at._buildDefaultSchedule = () => mkFunc('fallback');
+    at._scheduleIsValid = (f) => f.name === 'fallback';
     at._adoptSchedule = (_target, src) => { adopted = src; };
 
     const result = at._applyBestSchedule(PRISTINE(), new Map());
     expect(result).not.toBeNull();
-    expect(adopted.marker).toBe('fallback');
+    expect(adopted.name).toBe('fallback');
   });
 
   it('adopts the tuned schedule when it is valid', () => {
     const at = makeAutotuner(null);
     let adopted = null;
-    at._buildTunedSchedule = () => ({ marker: 'tuned' });
+    at._buildTunedSchedule = () => mkFunc('tuned');
     at._scheduleIsValid = () => true;
     at._adoptSchedule = (_target, src) => { adopted = src; };
 
     at._applyBestSchedule(PRISTINE(), new Map());
-    expect(adopted.marker).toBe('tuned');
+    expect(adopted.name).toBe('tuned');
   });
 
   it('keeps the deterministic GPU baseline over a cost-model-only tuned schedule', () => {
@@ -57,13 +64,13 @@ describe('Autotuner._applyBestSchedule validity gate', () => {
     const at = makeAutotuner((w) => warnings.push(w));
     at.config.measurer = null;
     let adopted = null;
-    at._buildTunedSchedule = () => ({ marker: 'tuned' });
-    at._buildDefaultSchedule = () => ({ marker: 'baseline', gpuRegisterBlocked: true });
+    at._buildTunedSchedule = () => mkFunc('tuned');
+    at._buildDefaultSchedule = () => mkFunc('baseline', true);
     at._scheduleIsValid = () => true;
     at._adoptSchedule = (_target, src) => { adopted = src; };
 
     at._applyBestSchedule(PRISTINE(), new Map());
-    expect(adopted.marker).toBe('baseline');
+    expect(adopted.name).toBe('baseline');
     expect(warnings.map((w) => w.stage)).toContain('baseline-preferred');
   });
 
@@ -71,33 +78,33 @@ describe('Autotuner._applyBestSchedule validity gate', () => {
     const at = makeAutotuner(null);
     at.config.measurer = {};
     let adopted = null;
-    at._buildTunedSchedule = () => ({ marker: 'tuned', gpuRegisterBlocked: true });
-    at._buildDefaultSchedule = () => ({ marker: 'baseline', gpuRegisterBlocked: true });
+    at._buildTunedSchedule = () => mkFunc('tuned', true);
+    at._buildDefaultSchedule = () => mkFunc('baseline', true);
     at._scheduleIsValid = () => true;
     at._adoptSchedule = (_target, src) => { adopted = src; };
 
     at._applyBestSchedule(PRISTINE(), new Map());
-    expect(adopted.marker).toBe('tuned');
+    expect(adopted.name).toBe('tuned');
   });
 
   it('does not let a measured generic tuned schedule displace a register-block baseline', () => {
     const at = makeAutotuner(null);
     at.config.measurer = {};
     let adopted = null;
-    at._buildTunedSchedule = () => ({ marker: 'tuned' });
-    at._buildDefaultSchedule = () => ({ marker: 'baseline', gpuRegisterBlocked: true });
+    at._buildTunedSchedule = () => mkFunc('tuned');
+    at._buildDefaultSchedule = () => mkFunc('baseline', true);
     at._scheduleIsValid = () => true;
     at._adoptSchedule = (_target, src) => { adopted = src; };
 
     at._applyBestSchedule(PRISTINE(), new Map());
-    expect(adopted.marker).toBe('baseline');
+    expect(adopted.name).toBe('baseline');
   });
 
   it('does not adopt the default schedule if it is also invalid', () => {
     const at = makeAutotuner(null);
     let adoptCalled = false;
-    at._buildTunedSchedule = () => ({ marker: 'tuned' });
-    at._buildDefaultSchedule = () => ({ marker: 'fallback' });
+    at._buildTunedSchedule = () => mkFunc('tuned');
+    at._buildDefaultSchedule = () => mkFunc('fallback');
     at._scheduleIsValid = () => false;
     at._adoptSchedule = () => { adoptCalled = true; };
 

@@ -1,5 +1,6 @@
 import { PrimFuncPass } from '../tir_pass.js';
 import { Schedule } from '../../schedule/schedule.js';
+import { FuncAttr } from '../../ir/func_attrs.js';
 
 const WMMA_TILE = 16;
 const HALF_DTYPES = new Set(['f16', 'bf16']);
@@ -47,7 +48,7 @@ export class AutoTensorizePass extends PrimFuncPass {
   }
 
   run(pf, ctx) {
-    if (pf.cublasInfo || pf._tensorIntrin) return;
+    if (pf.hasAttr(FuncAttr.CUBLAS_INFO) || pf.hasAttr(FuncAttr.TENSOR_INTRIN)) return;
     if (!this.target || !this.target.isGPU()) return;
     const info = detectWmmaMatmul(pf);
     if (!info) return;

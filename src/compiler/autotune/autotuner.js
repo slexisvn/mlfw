@@ -14,6 +14,7 @@ import { clonePrimFunc } from './tune_ir.js';
 import { ForKind } from '../ir/tensor/nodes.js';
 import { TaskScheduler } from './task_scheduler.js';
 import { getMeasurer } from '../../runtime/measurer_registry.js';
+import { FuncAttr } from '../ir/func_attrs.js';
 
 function resolveMeasurer(target) {
   if (target.isCPU()) return null;
@@ -195,7 +196,7 @@ export class Autotuner {
   }
 
   _isStrongBackendSchedule(func) {
-    return !!func && func.gpuRegisterBlocked === true;
+    return !!func && func.getAttr(FuncAttr.GPU_REGISTER_BLOCKED) === true;
   }
 
   _buildTunedSchedule(primFunc, tuneResults) {

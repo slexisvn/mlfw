@@ -47,8 +47,8 @@ describe('large models end-to-end (compiled == eager, all backends)', () => {
 
   it('CNN classifier (conv + batchnorm + relu + maxpool + linear)', async () => {
     const rng = mulberry32(22);
-    const conv1 = new nn.Conv2d(3, 4, 3, 1, 1), bn1 = new nn.BatchNorm2d(4);
-    const conv2 = new nn.Conv2d(4, 8, 3, 1, 1), bn2 = new nn.BatchNorm2d(8);
+    const conv1 = new nn.Conv2d(3, 4, 3, { stride: 1, padding: 1 }), bn1 = new nn.BatchNorm2d(4);
+    const conv2 = new nn.Conv2d(4, 8, 3, { stride: 1, padding: 1 }), bn2 = new nn.BatchNorm2d(8);
     const pool = new nn.MaxPool2d(2), flatten = new nn.Flatten(), fc = new nn.Linear(8 * 4 * 4, 10);
     [bn1, bn2].forEach((m) => m.eval());
     const relu = nn.F.relu;

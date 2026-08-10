@@ -8,8 +8,6 @@ import { buildTirPipeline } from './tir_pipeline.js';
 import { lowerGraphToPrimFunc } from '../passes/lowering/graph_to_tensor.js';
 import { BackendPipeline, detectPureMatmul } from '../../backend/pipeline.js';
 import { RuntimeModule } from '../../runtime/runtime.js';
-import { TensorVerifier } from '../ir/tensor/verifier.js';
-import { verifyModule, verifyFunction } from '../ir/graph/verifier.js';
 import { CalibrationCollector } from '../analysis/calibration.js';
 import { collectCalibration } from '../analysis/calibrate_exec.js';
 import { GraphPartitionPass, PartitionMaterializationPass } from '../passes/partition/partition_pass.js';
@@ -20,15 +18,17 @@ import { TraceLog, TraceLevel, CompilationError } from './trace.js';
 import { IRPrinter } from '../ir/graph/printer.js';
 import { printTensorIR } from '../ir/tensor/printer.js';
 import { lowerToLIR } from '../passes/lowering/tensor_to_lir.js';
-import { verifyLIR } from '../ir/lir/verifier.js';
+import { VerifyLevel, normalizeVerifyLevel, checkIRInvariants } from './invariant_check.js';
+import { IRLevel } from '../ir/verify.js';
+import { FuncAttr } from '../ir/func_attrs.js';
 
 export { CompilationError } from './trace.js';
+export { VerifyLevel } from './invariant_check.js';
 
 export class CompilerConfig {
   constructor(opts = {}) {
     this.target = opts.target;
-    this.verify = opts.verify !== false;
-    this.verifyMode = opts.verify === 'full' ? 'full' : 'normal';
+    this.verify = normalizeVerifyLevel(opts.verify);
     this.errorMode = opts.errorMode || 'strict';
 
     const isWebGPU = this.target && typeof this.target.isWebGPU === 'function' && this.target.isWebGPU();
@@ -87,6 +87,14 @@ export class CompilerConfig {
 
   get usePartition() {
     return this.partition.enabled && this.partition.targets.length >= 2;
+  }
+
+  get verifyEnabled() {
+    return this.verify !== VerifyLevel.OFF;
+  }
+
+  get verifyEachPass() {
+    return this.verify === VerifyLevel.EACH_PASS;
   }
 }
 
@@ -177,7 +185,7 @@ export class Compiler {
     return [
       {
         name: 'verify:pre',
-        when: (ctx) => ctx.compiler.config.verify,
+        when: (ctx) => ctx.compiler.config.verifyEnabled,
         run: (ctx) => ctx.compiler._verifyGraph(ctx.working, 'before graph passes', ctx.trace, ctx.errors, ctx.failed, ctx.resilient),
       },
       {
@@ -215,7 +223,7 @@ export class Compiler {
       },
       {
         name: 'verify:post',
-        when: (ctx) => ctx.compiler.config.verify,
+        when: (ctx) => ctx.compiler.config.verifyEnabled,
         run: (ctx) => ctx.compiler._verifyGraph(ctx.working, 'after graph passes', ctx.trace, ctx.errors, ctx.failed, ctx.resilient),
       },
       {
@@ -224,7 +232,8 @@ export class Compiler {
           ctx.primFuncs = ctx.compiler._lowerAll(ctx.working, ctx.trace, ctx.errors, ctx.failed, ctx.resilient);
           if (ctx.compiler.config.matmulBackend === 'cublas') {
             for (const pf of ctx.primFuncs) {
-              pf.cublasInfo = ctx.split && ctx.split.cublasInfos ? (ctx.split.cublasInfos.get(pf.name) || null) : detectPureMatmul(pf);
+              const info = ctx.split && ctx.split.cublasInfos ? ctx.split.cublasInfos.get(pf.name) : detectPureMatmul(pf);
+              if (info) pf.setAttr(FuncAttr.CUBLAS_INFO, info);
             }
           }
         },
@@ -235,12 +244,17 @@ export class Compiler {
       },
       {
         name: 'verify:tensor',
-        when: (ctx) => ctx.compiler.config.verify,
-        run: (ctx) => ctx.compiler._verifyAll(ctx.primFuncs, ctx.errors, ctx.failed, ctx.resilient),
+        when: (ctx) => ctx.compiler.config.verifyEnabled,
+        run: (ctx) => ctx.compiler._verifyBoundary(ctx.primFuncs, IRLevel.TIR, ctx),
       },
       {
         name: 'lirLowering',
         run: (ctx) => { ctx.lirFuncs = ctx.compiler._lowerToLIR(ctx.primFuncs, ctx.trace, ctx.errors, ctx.failed, ctx.resilient); },
+      },
+      {
+        name: 'verify:lir',
+        when: (ctx) => ctx.compiler.config.verifyEnabled,
+        run: (ctx) => ctx.compiler._verifyBoundary(ctx.lirFuncs, IRLevel.LIR, ctx),
       },
       {
         name: 'codegen',
@@ -303,13 +317,7 @@ export class Compiler {
     }
 
     pm.setTrace(trace);
-
-    if (this.config.verifyMode === 'full') {
-      pm.setVerifyHook((target, isModule) => {
-        const found = isModule ? verifyModule(target) : verifyFunction(target);
-        return found.map(e => e.toString());
-      });
-    }
+    pm.setCheckEachPass(this.config.verifyEachPass);
 
     trace.phaseStart('graphPasses');
     const t0 = performance.now();
@@ -376,7 +384,8 @@ export class Compiler {
       const ft0 = performance.now();
       const primFunc = lowerGraphToPrimFunc(func, this.config.target, this.context);
       if (this.config.target.isGPU && this.config.target.isGPU() && !(this.config.target.isWebGPU && this.config.target.isWebGPU())) {
-        primFunc.convInfo = detectPureConv(func);
+        const convInfo = detectPureConv(func);
+        if (convInfo) primFunc.setAttr(FuncAttr.CONV_INFO, convInfo);
       }
       trace.functionEvent('lowering', func.name, { durationMs: performance.now() - ft0 });
       primFuncs.push(primFunc);
@@ -392,10 +401,7 @@ export class Compiler {
     const tirPM = new TirPassManager();
     for (const pass of buildTirPipeline(this.config)) tirPM.addPass(pass);
     tirPM.setTrace(ctx.trace);
-    if (this.config.verifyMode === 'full') {
-      const verifier = new TensorVerifier();
-      tirPM.setVerifyHook((pf) => verifier.verify(pf));
-    }
+    tirPM.setCheckEachPass(this.config.verifyEachPass);
     tirPM.run(ctx.primFuncs, {
       trace: ctx.trace,
       errors: ctx.errors,
@@ -408,36 +414,27 @@ export class Compiler {
     if (resilient) {
       for (const func of graphModule) {
         if (failed.has(func.name)) continue;
-        const funcErrors = verifyFunction ? verifyFunction(func) : [];
-        if (funcErrors.length > 0) {
-          const msg = funcErrors.map(e => e.toString()).join('; ');
-          errors.push(new CompilationError('verification', func.name, msg));
-          failed.add(func.name);
-          trace.errorEvent('verification', func.name, msg);
-        }
+        const err = checkIRInvariants(IRLevel.GRAPH_FUNC, func, func.name);
+        if (!err) continue;
+        errors.push(err);
+        failed.add(func.name);
+        trace.errorEvent('verification', func.name, err.message);
       }
       return;
     }
-    const moduleErrors = verifyModule(graphModule);
-    if (moduleErrors.length > 0) {
-      throw new Error('Graph verification failed (' + phase + '): ' + moduleErrors.map(e => e.toString()).join('; '));
-    }
+    const err = checkIRInvariants(IRLevel.GRAPH_MODULE, graphModule, graphModule.name || '<module>');
+    if (err) throw new Error('Graph verification failed (' + phase + '): ' + err.message);
   }
 
-  _verifyAll(primFuncs, errors, failed, resilient) {
-    const verifier = new TensorVerifier();
-    for (const pf of primFuncs) {
-      if (failed.has(pf.name)) continue;
-      const pfErrors = verifier.verify(pf);
-      if (pfErrors.length > 0) {
-        const msg = pfErrors.join('; ');
-        if (resilient) {
-          errors.push(new CompilationError('verification', pf.name, msg));
-          failed.add(pf.name);
-        } else {
-          throw new Error('TensorIR verification failed for ' + pf.name + ': ' + msg);
-        }
-      }
+  _verifyBoundary(funcs, irLevel, ctx) {
+    for (const func of funcs) {
+      if (ctx.failed.has(func.name)) continue;
+      const err = checkIRInvariants(irLevel, func, func.name);
+      if (!err) continue;
+      if (!ctx.resilient) throw new Error(err.toString());
+      ctx.errors.push(err);
+      ctx.failed.add(func.name);
+      ctx.trace.errorEvent('verification', func.name, err.message);
     }
   }
 
@@ -448,14 +445,6 @@ export class Compiler {
     this._eachFunc(primFuncs, 'lirLowering', trace, errors, failed, resilient, (pf) => {
       const ft0 = performance.now();
       const lirFunc = lowerToLIR(pf, this.config.target);
-      if (pf.cublasInfo) lirFunc.cublasInfo = pf.cublasInfo;
-      if (pf.gpuRegisterBlocked) lirFunc.gpuRegisterBlocked = true;
-      if (this.config.verifyMode === 'full') {
-        const lirErrors = verifyLIR(lirFunc);
-        if (lirErrors.length > 0) {
-          throw new Error('LIR verification failed: ' + lirErrors.map(e => e.toString()).join('; '));
-        }
-      }
       trace.functionEvent('lirLowering', pf.name, { durationMs: performance.now() - ft0 });
       lirFuncs.push(lirFunc);
     });
@@ -481,7 +470,7 @@ export class Compiler {
       const ft0 = performance.now();
       let backend;
       if (usePartition) {
-        const targetName = pf._partitionTarget;
+        const targetName = pf.getAttr(FuncAttr.PARTITION_TARGET);
         const target = targetName
           ? this.config.partition.targets.find(t => t.name === targetName)
           : this.config.target;

@@ -2,10 +2,23 @@ import { describe, it, expect } from 'vitest';
 import { TirPassManager } from '../../../src/compiler/passes/tir_pass_manager.js';
 import { PrimFuncPass } from '../../../src/compiler/passes/tir_pass.js';
 import { TraceLog, TraceLevel } from '../../../src/compiler/pipeline/trace.js';
-import { PrimFunc, SeqNode } from '../../../src/compiler/ir/tensor/nodes.js';
+import { PrimFunc, SeqNode, EvaluateNode, VariableNode } from '../../../src/compiler/ir/tensor/nodes.js';
 
 function pf(name) {
   return new PrimFunc(name, [], new SeqNode([]));
+}
+
+class CorruptingPass extends PrimFuncPass {
+  constructor(name, only = null) {
+    super(name, name);
+    this.only = only;
+  }
+  run(primFunc) {
+    if (this.only === null || primFunc.name === this.only) {
+      primFunc.body = new SeqNode([new EvaluateNode(new VariableNode('escaped', 'int32'))]);
+    }
+    return primFunc;
+  }
 }
 
 function mkCtx({ resilient = false, sink = null } = {}) {
@@ -94,22 +107,31 @@ describe('TirPassManager', () => {
     expect(log).toEqual(['P1:f1', 'P2:f2']);
   });
 
-  it('full-mode verify hook fails invalid IR (strict throws)', () => {
+  it('checkEachPass names the pass that produced invalid IR (strict throws)', () => {
     const pm = new TirPassManager();
-    pm.addPass(new RecordPass('P1', []));
-    pm.setVerifyHook((f) => (f.name === 'bad' ? ['region escape'] : []));
-    expect(() => pm.run([pf('bad')], mkCtx())).toThrow(/TensorIR verification failed for bad/);
+    pm.addPass(new CorruptingPass('Breaker'));
+    pm.setCheckEachPass(true);
+    expect(() => pm.run([pf('bad')], mkCtx())).toThrow(/pass 'Breaker' produced invalid IR.*Unbound variable used: escaped/);
   });
 
-  it('full-mode verify hook fails invalid IR (resilient records + fails func)', () => {
+  it('checkEachPass records the error and fails only that func (resilient)', () => {
     const pm = new TirPassManager();
-    pm.addPass(new RecordPass('P1', []));
-    pm.setVerifyHook((f) => (f.name === 'bad' ? ['region escape'] : []));
+    pm.addPass(new CorruptingPass('Breaker', 'bad'));
+    pm.setCheckEachPass(true);
     const ctx = mkCtx({ resilient: true });
     pm.run([pf('bad'), pf('ok')], ctx);
     expect(ctx.failed.has('bad')).toBe(true);
     expect(ctx.failed.has('ok')).toBe(false);
     expect(ctx.errors[0].phase).toBe('verification');
+    expect(ctx.errors[0].passName).toBe('Breaker');
+  });
+
+  it('checkEachPass off lets invalid TIR through', () => {
+    const pm = new TirPassManager();
+    pm.addPass(new CorruptingPass('Breaker'));
+    const ctx = mkCtx();
+    pm.run([pf('bad')], ctx);
+    expect(ctx.errors).toEqual([]);
   });
 
   it('emits phase start/end events per pass phase', () => {

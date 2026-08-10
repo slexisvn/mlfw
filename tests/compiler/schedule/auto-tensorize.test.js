@@ -6,6 +6,7 @@ import {
 import { BackendPipeline } from '../../../src/backend/pipeline.js';
 import { CPUTarget, CUDATarget } from '../../../src/backend/target.js';
 import { AutoTensorizePass, detectWmmaMatmul } from '../../../src/compiler/passes/schedule/tensorize_pass.js';
+import { FuncAttr } from '../../../src/compiler/ir/func_attrs.js';
 
 function matmulFunc(name, M, N, K, aDt = 'f16', bDt = 'f16', cDt = 'f32') {
   const A = new Buffer('A', [M, K], aDt, 'global');
@@ -34,7 +35,7 @@ describe('AutoTensorizePass — automatic tensor-core matmul detection', () => {
   it('applies tensorize on a GPU target and codegen emits a WMMA kernel', () => {
     const pf = matmulFunc('mm_auto', 32, 32, 32);
     new AutoTensorizePass({ target: CUDATarget() }).run(pf, {});
-    expect(pf._tensorIntrin).toEqual({ name: 'wmma_16x16x16_f16f16f32', info: { M: 32, N: 32, K: 32, a: 'A', b: 'B', c: 'C' } });
+    expect(pf.getAttr(FuncAttr.TENSOR_INTRIN)).toEqual({ name: 'wmma_16x16x16_f16f16f32', info: { M: 32, N: 32, K: 32, a: 'A', b: 'B', c: 'C' } });
 
     const src = new BackendPipeline(CUDATarget()).compile(pf).source;
     expect(src).toMatch(/mma_sync\(cf, af, bf, cf\)/);
@@ -44,13 +45,13 @@ describe('AutoTensorizePass — automatic tensor-core matmul detection', () => {
   it('does nothing on a CPU target', () => {
     const pf = matmulFunc('mm_cpu', 32, 32, 32);
     new AutoTensorizePass({ target: CPUTarget() }).run(pf, {});
-    expect(pf._tensorIntrin).toBeUndefined();
+    expect(pf.hasAttr(FuncAttr.TENSOR_INTRIN)).toBe(false);
   });
 
   it('skips a func already routed to cuBLAS', () => {
     const pf = matmulFunc('mm_cublas', 32, 32, 32);
-    pf.cublasInfo = { M: 32, N: 32, K: 32 };
+    pf.setAttr(FuncAttr.CUBLAS_INFO, { M: 32, N: 32, K: 32 });
     new AutoTensorizePass({ target: CUDATarget() }).run(pf, {});
-    expect(pf._tensorIntrin).toBeUndefined();
+    expect(pf.hasAttr(FuncAttr.TENSOR_INTRIN)).toBe(false);
   });
 });

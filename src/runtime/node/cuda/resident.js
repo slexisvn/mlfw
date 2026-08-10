@@ -5,51 +5,37 @@ import { setEagerDeferred, isEagerDeferred, setEagerFlushHook, isEagerCapturing,
 
 export { setEagerDeferred, isEagerDeferred, setCudaGraphArmed };
 
-const CAPACITY = 1024;
-const _safe = new Map();
+const CACHE_FRACTION_OF_FREE = 0.15;
+const MIN_CACHE_BYTES = 128 * 1024 * 1024;
+const LOW_WATER = 0.75;
 
-function _safeEntry(hostArray) {
-  let e = _safe.get(hostArray);
-  if (e) { _safe.delete(hostArray); _safe.set(hostArray, e); return e; }
-  if (_safe.size >= CAPACITY) {
-    const k = _safe.keys().next().value;
-    const o = _safe.get(k);
-    _safe.delete(k);
-    release(o.dptr, o.bytes);
-  }
-  e = { dptr: acquire(hostArray.byteLength), bytes: hostArray.byteLength, valid: false };
-  _safe.set(hostArray, e);
-  return e;
-}
-
-export function uploadIfStale(hostArray) {
-  const e = _safeEntry(hostArray);
-  if (!e.valid) { copyHostToDevice(e.dptr, hostArray); e.valid = true; }
-  return e.dptr;
-}
-
-export function downloadAndValidate(hostArray, dptr) {
-  copyDeviceToHost(hostArray, dptr);
-  const e = _safe.get(hostArray);
-  if (e) e.valid = true;
-}
-
-const DEFERRED_MEM_FRACTION = 0.5;
-const _def = new Map();
-const _pinned = new Set();
-const _capturePinned = new Set();
+const _entries = new Map();
+const _byHost = new WeakMap();
+let _pinned = new WeakSet();
+let _capturePinned = new WeakSet();
 let _defBytes = 0;
 let _defCap = 0;
+let _nextId = 0;
+
+const _reclaim = new FinalizationRegistry((entry) => _reclaimEntry(entry));
 
 export function pinResident(hostArray) { _pinned.add(hostArray); }
 export function unpinResident(hostArray) { _pinned.delete(hostArray); }
-export function clearCapturePins() { _capturePinned.clear(); }
-export function deviceBufferDptr(hostArray) { const e = _def.get(hostArray); return e ? e.dptr : null; }
+export function clearCapturePins() { _capturePinned = new WeakSet(); }
+export function deviceBufferDptr(hostArray) { const e = _byHost.get(hostArray); return e ? e.dptr : null; }
 export function uploadStaticAsync(dptr, hostArray) { copyHostToDeviceAsync(dptr, hostArray); }
 export function downloadStaticAsync(hostArray, dptr) { copyDeviceToHostAsync(hostArray, dptr); }
+export function residentBytes() { return _defBytes; }
+
+export function setResidentCacheLimit(bytes) { _defCap = Math.max(bytes, 0); }
 
 function _cap() {
-  if (!_defCap) _defCap = Math.floor(getDevice().totalMem * DEFERRED_MEM_FRACTION);
+  if (!_defCap) {
+    getDevice();
+    const free = [0n], total = [0n];
+    checkCU('cuMemGetInfo', cu.memGetInfo(free, total));
+    _defCap = Math.max(Math.floor(Number(free[0]) * CACHE_FRACTION_OF_FREE), MIN_CACHE_BYTES);
+  }
   return _defCap;
 }
 
@@ -59,26 +45,65 @@ function _syncDownload(hostArray, dptr) {
   copyDeviceToHost(hostArray, dptr);
 }
 
+function _reclaimEntry(entry) {
+  if (entry.freed) return;
+  entry.freed = true;
+  _entries.delete(entry.id);
+  _defBytes -= entry.bytes;
+  release(entry.dptr, entry.bytes);
+}
+
+function _freeEntry(entry, writeBack) {
+  if (entry.freed) return;
+  const host = entry.ref.deref();
+  if (host !== undefined) {
+    if (writeBack && entry.hostStale) _syncDownload(host, entry.dptr);
+    _reclaim.unregister(host);
+    _byHost.delete(host);
+  }
+  _reclaimEntry(entry);
+}
+
+function _evictPass(target, incoming, evictDirty) {
+  for (const entry of _entries.values()) {
+    if (_defBytes + incoming <= target) return true;
+    const host = entry.ref.deref();
+    if (host === undefined) { _freeEntry(entry, false); continue; }
+    if (_pinned.has(host) || _capturePinned.has(host)) continue;
+    if (entry.hostStale && !evictDirty) continue;
+    _freeEntry(entry, evictDirty);
+  }
+  return _defBytes + incoming <= target;
+}
+
 function _evict(incoming) {
   const cap = _cap();
-  for (const [k, e] of _def) {
-    if (_defBytes + incoming <= cap) break;
-    if (_pinned.has(k) || _capturePinned.has(k)) continue;
-    if (e.hostStale) _syncDownload(k, e.dptr);
-    release(e.dptr, e.bytes);
-    _defBytes -= e.bytes;
-    _def.delete(k);
-  }
+  if (_defBytes + incoming <= cap) return;
+  const target = Math.floor(cap * LOW_WATER);
+  if (_evictPass(target, incoming, false)) return;
+  _evictPass(target, incoming, true);
 }
 
 function _defEntry(hostArray) {
-  let e = _def.get(hostArray);
-  if (e) { _def.delete(hostArray); _def.set(hostArray, e); }
-  else {
+  let e = _byHost.get(hostArray);
+  if (e) {
+    _entries.delete(e.id);
+    _entries.set(e.id, e);
+  } else {
     if (!isEagerCapturing()) _evict(hostArray.byteLength);
-    e = { dptr: acquire(hostArray.byteLength), bytes: hostArray.byteLength, deviceFresh: false, hostStale: false };
-    _def.set(hostArray, e);
+    e = {
+      id: _nextId++,
+      ref: new WeakRef(hostArray),
+      dptr: acquire(hostArray.byteLength),
+      bytes: hostArray.byteLength,
+      deviceFresh: false,
+      hostStale: false,
+      freed: false,
+    };
+    _byHost.set(hostArray, e);
+    _entries.set(e.id, e);
     _defBytes += e.bytes;
+    _reclaim.register(hostArray, e, hostArray);
   }
   if (isEagerCapturing()) _capturePinned.add(hostArray);
   return e;
@@ -110,39 +135,30 @@ export function deviceBufferForInplace(hostArray) {
 }
 
 export function flushDeferred() {
-  for (const [k, e] of _def) {
-    if (_pinned.has(k) || _capturePinned.has(k)) continue;
-    release(e.dptr, e.bytes);
-    _defBytes -= e.bytes;
-    _def.delete(k);
+  for (const entry of _entries.values()) {
+    const host = entry.ref.deref();
+    if (host !== undefined && (_pinned.has(host) || _capturePinned.has(host))) continue;
+    _freeEntry(entry, false);
   }
 }
 
 export function releaseAllResident() {
-  for (const [k, e] of _def) {
-    if (e.hostStale) _syncDownload(k, e.dptr);
-    release(e.dptr, e.bytes);
-  }
-  _def.clear();
+  for (const entry of _entries.values()) _freeEntry(entry, true);
+  _entries.clear();
   _defBytes = 0;
-  _pinned.clear();
-  _capturePinned.clear();
-  for (const e of _safe.values()) release(e.dptr, e.bytes);
-  _safe.clear();
+  _pinned = new WeakSet();
+  _capturePinned = new WeakSet();
 }
 
 export function hostReadHook(hostArray) {
-  const d = _def.get(hostArray);
+  const d = _byHost.get(hostArray);
   if (isEagerCapturing()) {
     if (d && d.hostStale) throw new Error('illegal host read of device-resident tensor during CUDA graph capture');
     return;
   }
-  const s = _safe.get(hostArray);
-  if (s) s.valid = false;
-  if (d) {
-    if (d.hostStale) { _syncDownload(hostArray, d.dptr); d.hostStale = false; }
-    d.deviceFresh = false;
-  }
+  if (!d) return;
+  if (d.hostStale) { _syncDownload(hostArray, d.dptr); d.hostStale = false; }
+  d.deviceFresh = false;
 }
 
 setEagerFlushHook(flushDeferred);

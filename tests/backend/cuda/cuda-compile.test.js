@@ -3,8 +3,8 @@ import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
 import { CUDATarget, CPUTarget } from '../../../src/backend/target.js';
-import {
 import { countLoops as countForLoops } from '../../_utils/kernel_source.js';
+import {
   tensor, Linear, Sequential, ReLU, Sigmoid, Tanh,
   GELU, SiLU, LeakyReLU,
   compile as modelCompile,

@@ -9,6 +9,7 @@ import { RuntimeModule } from '../../../src/runtime/runtime.js';
 import { AutoTensorizePass } from '../../../src/compiler/passes/schedule/tensorize_pass.js';
 import { f32ToF16 } from '../../../src/tensor/utils/half.js';
 import { cudaDeps } from './cuda-setup.js';
+import { FuncAttr } from '../../../src/compiler/ir/func_attrs.js';
 
 function matmulFunc(M, N, K) {
   const A = new Buffer('A', [M, K], 'f16', 'global');
@@ -33,7 +34,7 @@ describe.skipIf(!cudaDeps)('AutoTensorizePass — real-GPU WMMA execution', () =
     const M = 32, N = 32, K = 32;
     const f = matmulFunc(M, N, K);
     new AutoTensorizePass({ target: CUDATarget() }).run(f, {});
-    expect(f._tensorIntrin).toBeTruthy();
+    expect(f.hasAttr(FuncAttr.TENSOR_INTRIN)).toBe(true);
 
     const af = Float32Array.from({ length: M * K }, (_, i) => Math.sin(i * 0.1) * 0.5);
     const bf = Float32Array.from({ length: K * N }, (_, i) => Math.cos(i * 0.1) * 0.5);

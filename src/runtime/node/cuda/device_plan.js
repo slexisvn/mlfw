@@ -1,42 +1,67 @@
-import { cu, checkCU } from './ffi.js';
-import { compileToPTX, hashSource } from './program.js';
-import { setDevice, devSync, acquireDevice, releaseDevice, devH2D, devD2H, devAddr } from './runtime_api.js';
+import { compileToPTX, getProgram } from './program.js';
+import { setDevice, devSync, devH2D, devD2H } from './runtime_api.js';
+import { acquire, release } from './memory.js';
 import { getDevice } from './device.js';
-import { beginEagerCapture, endEagerCapture, replay, syncStream } from './eager_graph.js';
+import { beginEagerCapture, endEagerCapture, destroyEagerGraph, replay, syncStream } from './eager_graph.js';
 import { cublasMatmulDevice } from './cublas.js';
-import { scalarParam } from './launcher.js';
+import { scalarParam, devicePtrParam } from './launcher.js';
+import { cu, checkCU } from './ffi.js';
 
-const _funcCache = new Map();
-const _graphCache = new WeakMap();
-const _residentPlans = new WeakMap();
+const _planState = new WeakMap();
+const _liveStates = new Set();
+const _stateReclaim = new FinalizationRegistry((state) => _releaseState(state));
 
 let _useCudaGraph = false;
 export function setCudaGraphEnabled(on) { _useCudaGraph = on; }
 export function isCudaGraphEnabled() { return _useCudaGraph; }
 
-function loadFunctionOnPrimary(source, kernelName) {
-  const key = hashSource(source) + ':' + kernelName;
-  const cached = _funcCache.get(key);
-  if (cached) return cached;
-  const ptx = compileToPTX(source, kernelName);
-  setDevice();
-  const mod = [null];
-  checkCU('cuModuleLoadData', cu.moduleLoadData(mod, ptx));
-  const func = [null];
-  checkCU('cuModuleGetFunction', cu.moduleGetFunction(func, mod[0], kernelName));
-  _funcCache.set(key, func[0]);
-  return func[0];
+function _releaseState(state) {
+  if (state.released) return;
+  state.released = true;
+  _liveStates.delete(state);
+  destroyEagerGraph(state);
+  state.graph = null;
+  state.exec = null;
+  for (let s = 0; s < state.dptr.length; s++) {
+    if (state.dptr[s] === null) continue;
+    release(state.dptr[s], state.sizes[s]);
+    state.dptr[s] = null;
+  }
 }
 
-function bufferParam(addr) {
-  const b = Buffer.alloc(8);
-  b.writeBigUInt64LE(addr);
-  return b;
+function _stateFor(plan, numSlots) {
+  let state = _planState.get(plan);
+  if (state) return state;
+  state = {
+    dptr: new Array(numSlots).fill(null),
+    sizes: new Array(numSlots).fill(0),
+    pin: new Map(),
+    graph: null,
+    exec: null,
+    released: false,
+  };
+  _planState.set(plan, state);
+  _liveStates.add(state);
+  _stateReclaim.register(plan, state, plan);
+  return state;
+}
+
+function _dropState(plan) {
+  const state = _planState.get(plan);
+  if (!state) return;
+  _stateReclaim.unregister(plan);
+  _planState.delete(plan);
+  _releaseState(state);
+}
+
+export function releaseAllPlanBuffers() {
+  for (const state of [..._liveStates]) _releaseState(state);
+  _liveStates.clear();
 }
 
 function launchOnPrimary(func, gridDim, blockDim, sharedMemBytes, deviceAddrs, scalars, stream = null) {
   const params = [];
-  for (const a of deviceAddrs) params.push(bufferParam(a));
+  for (const a of deviceAddrs) params.push(devicePtrParam(a));
   for (const s of scalars) params.push(scalarParam(s));
   checkCU('cuLaunchKernel', cu.launchKernel(
     func,
@@ -46,65 +71,7 @@ function launchOnPrimary(func, gridDim, blockDim, sharedMemBytes, deviceAddrs, s
   ));
 }
 
-function _runStepGraphed(st, dptr, stream) {
-  const ordered = st.inputSlots.concat(st.outputSlots);
-  const meta = st.kernel.metadata;
-  if (meta.cublas) {
-    const { M, N, K, aIdx, bIdx, cIdx, transB } = meta.cublas;
-    cublasMatmulDevice(M, N, K, dptr[ordered[aIdx]], dptr[ordered[bIdx]], dptr[ordered[cIdx]], transB);
-  } else {
-    const addrs = ordered.map(s => devAddr(dptr[s]));
-    launchOnPrimary(funcsFor(st), meta.gridDim, meta.blockDim, 0, addrs, st.shapeValues || [], stream);
-  }
-}
-
-let _funcsCtx = null;
-function funcsFor(st) { return _funcsCtx.get(st.name); }
-
-function runCudaPlanGraphed(plan, slots, steps) {
-  setDevice();
-  const stream = getDevice().stream;
-  const funcs = new Map();
-  for (const st of steps) {
-    if (!st.kernel.metadata.cublas) funcs.set(st.name, loadFunctionOnPrimary(st.kernel.source, st.kernel.name));
-  }
-  _funcsCtx = funcs;
-  const written = new Set();
-  for (const st of steps) for (const s of st.outputSlots) written.add(s);
-  const argSet = new Set(plan.argSlots);
-
-  let g = _graphCache.get(plan);
-  if (!g) {
-    const dptr = new Array(plan.numSlots).fill(null);
-    for (let s = 0; s < plan.numSlots; s++) {
-      const t = slots[s];
-      if (!t) continue;
-      dptr[s] = acquireDevice(Math.max(t.data.byteLength, 1));
-      if (!written.has(s)) devH2D(dptr[s], t.data);
-    }
-    beginEagerCapture();
-    try {
-      for (const st of steps) _runStepGraphed(st, dptr, stream);
-      const cap = endEagerCapture();
-      g = { dptr, graph: cap.graph, exec: cap.exec };
-    } catch (e) {
-      try { endEagerCapture(); } catch (_) {}
-      throw e;
-    }
-    _graphCache.set(plan, g);
-  } else {
-    for (let s = 0; s < plan.numSlots; s++) {
-      if (slots[s] && !written.has(s)) devH2D(g.dptr[s], slots[s].data);
-    }
-  }
-  replay(g.exec);
-  syncStream();
-  for (let s = 0; s < plan.numSlots; s++) {
-    if (g.dptr[s] !== null && written.has(s) && argSet.has(s)) devD2H(slots[s].data, g.dptr[s]);
-  }
-}
-
-function _launchSteps(steps, dptr, funcs) {
+function _launchSteps(steps, dptr, funcs, stream = null) {
   for (const st of steps) {
     const ordered = st.inputSlots.concat(st.outputSlots);
     const meta = st.kernel.metadata;
@@ -112,19 +79,69 @@ function _launchSteps(steps, dptr, funcs) {
       const { M, N, K, aIdx, bIdx, cIdx, transB } = meta.cublas;
       cublasMatmulDevice(M, N, K, dptr[ordered[aIdx]], dptr[ordered[bIdx]], dptr[ordered[cIdx]], transB);
     } else {
-      const addrs = ordered.map(s => devAddr(dptr[s]));
-      launchOnPrimary(funcs.get(st.name), meta.gridDim, meta.blockDim, 0, addrs, st.shapeValues || []);
+      launchOnPrimary(funcs.get(st.name), meta.gridDim, meta.blockDim, 0, ordered.map((s) => dptr[s]), st.shapeValues || [], stream);
     }
   }
 }
 
-function _runCudaPlanResident(plan, slots, steps, funcs, written) {
-  let entry = _residentPlans.get(plan);
-  if (!entry) {
-    entry = { dptr: new Array(plan.numSlots).fill(null), sizes: new Array(plan.numSlots).fill(0), pin: new Map() };
-    _residentPlans.set(plan, entry);
+function _loadFuncs(steps) {
+  setDevice();
+  const funcs = new Map();
+  for (const st of steps) {
+    if (st.kernel.metadata.cublas) continue;
+    funcs.set(st.name, getProgram(st.kernel.source, st.kernel.name).func);
   }
-  const { dptr, sizes, pin } = entry;
+  return funcs;
+}
+
+function _writtenSlots(steps) {
+  const written = new Set();
+  for (const st of steps) for (const s of st.outputSlots) written.add(s);
+  return written;
+}
+
+function runCudaPlanGraphed(plan, slots, steps) {
+  const funcs = _loadFuncs(steps);
+  const stream = getDevice().stream;
+  const written = _writtenSlots(steps);
+  const argSet = new Set(plan.argSlots);
+
+  const state = _stateFor(plan, plan.numSlots);
+  if (!state.exec) {
+    for (let s = 0; s < plan.numSlots; s++) {
+      const t = slots[s];
+      if (!t) continue;
+      const bytes = Math.max(t.data.byteLength, 1);
+      state.dptr[s] = acquire(bytes);
+      state.sizes[s] = bytes;
+      if (!written.has(s)) devH2D(state.dptr[s], t.data);
+    }
+    beginEagerCapture();
+    try {
+      _launchSteps(steps, state.dptr, funcs, stream);
+      const cap = endEagerCapture();
+      state.graph = cap.graph;
+      state.exec = cap.exec;
+    } catch (e) {
+      try { endEagerCapture(); } catch (_) {}
+      _dropState(plan);
+      throw e;
+    }
+  } else {
+    for (let s = 0; s < plan.numSlots; s++) {
+      if (slots[s] && !written.has(s)) devH2D(state.dptr[s], slots[s].data);
+    }
+  }
+  replay(state.exec);
+  syncStream();
+  for (let s = 0; s < plan.numSlots; s++) {
+    if (state.dptr[s] !== null && written.has(s) && argSet.has(s)) devD2H(slots[s].data, state.dptr[s]);
+  }
+}
+
+function runCudaPlanResident(plan, slots, steps, funcs, written) {
+  const state = _stateFor(plan, plan.numSlots);
+  const { dptr, sizes, pin } = state;
   const argSet = new Set(plan.argSlots);
 
   for (let s = 0; s < plan.numSlots; s++) {
@@ -132,8 +149,8 @@ function _runCudaPlanResident(plan, slots, steps, funcs, written) {
     if (!t) continue;
     const bytes = Math.max(t.data.byteLength, 1);
     if (dptr[s] === null || sizes[s] !== bytes) {
-      if (dptr[s] !== null) releaseDevice(dptr[s], sizes[s]);
-      dptr[s] = acquireDevice(bytes);
+      if (dptr[s] !== null) release(dptr[s], sizes[s]);
+      dptr[s] = acquire(bytes);
       sizes[s] = bytes;
       pin.delete(s);
     }
@@ -155,27 +172,7 @@ function _runCudaPlanResident(plan, slots, steps, funcs, written) {
   }
 }
 
-export async function runCudaPlan(plan, slots, steps, opts) {
-  if (_useCudaGraph) {
-    return runCudaPlanGraphed(plan, slots, steps);
-  }
-  for (const st of steps) {
-    if (!st.kernel.metadata.cublas) compileToPTX(st.kernel.source, st.kernel.name);
-  }
-  setDevice();
-  const funcs = new Map();
-  for (const st of steps) {
-    if (!st.kernel.metadata.cublas) funcs.set(st.name, loadFunctionOnPrimary(st.kernel.source, st.kernel.name));
-  }
-
-  const written = new Set();
-  for (const st of steps) for (const s of st.outputSlots) written.add(s);
-
-  if (opts && opts.resident) {
-    _runCudaPlanResident(plan, slots, steps, funcs, written);
-    return;
-  }
-
+function runCudaPlanTransient(plan, slots, steps, funcs, written) {
   const dptr = new Array(plan.numSlots).fill(null);
   const sizes = new Array(plan.numSlots).fill(0);
   for (let s = 0; s < plan.numSlots; s++) {
@@ -183,18 +180,32 @@ export async function runCudaPlan(plan, slots, steps, opts) {
     if (!t) continue;
     const bytes = Math.max(t.data.byteLength, 1);
     sizes[s] = bytes;
-    dptr[s] = acquireDevice(bytes);
+    dptr[s] = acquire(bytes);
     if (!written.has(s)) devH2D(dptr[s], t.data);
   }
-
-  _launchSteps(steps, dptr, funcs);
-  devSync();
-
-  const argSet = new Set(plan.argSlots);
-  for (let s = 0; s < plan.numSlots; s++) {
-    if (dptr[s] !== null && written.has(s) && argSet.has(s)) devD2H(slots[s].data, dptr[s]);
+  try {
+    _launchSteps(steps, dptr, funcs);
+    devSync();
+    const argSet = new Set(plan.argSlots);
+    for (let s = 0; s < plan.numSlots; s++) {
+      if (dptr[s] !== null && written.has(s) && argSet.has(s)) devD2H(slots[s].data, dptr[s]);
+    }
+  } finally {
+    for (let s = 0; s < plan.numSlots; s++) {
+      if (dptr[s] !== null) release(dptr[s], sizes[s]);
+    }
   }
-  for (let s = 0; s < plan.numSlots; s++) {
-    if (dptr[s] !== null) releaseDevice(dptr[s], sizes[s]);
+}
+
+export async function runCudaPlan(plan, slots, steps, opts) {
+  if (_useCudaGraph) return runCudaPlanGraphed(plan, slots, steps);
+
+  for (const st of steps) {
+    if (!st.kernel.metadata.cublas) compileToPTX(st.kernel.source, st.kernel.name);
   }
+  const funcs = _loadFuncs(steps);
+  const written = _writtenSlots(steps);
+
+  if (opts && opts.resident) runCudaPlanResident(plan, slots, steps, funcs, written);
+  else runCudaPlanTransient(plan, slots, steps, funcs, written);
 }

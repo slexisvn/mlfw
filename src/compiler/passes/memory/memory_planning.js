@@ -3,6 +3,7 @@ import { InplaceAnalysis } from './inplace_analysis.js';
 import { BufferAssignment } from './buffer_assignment.js';
 import { AllocateNode } from '../../ir/tensor/nodes.js';
 import { MinHeap } from '../../../util/min_heap.js';
+import { buffersRequiringDefinedStorage } from '../../analysis/buffer_dataflow.js';
 
 export class MemoryPlan {
   constructor(assignment, livenessResult, inplaceCandidates) {
@@ -113,10 +114,10 @@ export class MemoryPlanner {
   }
 
   _assignPoolOffsets(primFunc, plan, temporaries) {
-    const unsafe = collectFreshZeroDependent(primFunc);
+    const needsDefinedStorage = buffersRequiringDefinedStorage(primFunc);
     for (const interval of temporaries) {
       const buf = interval.buffer;
-      if (unsafe.has(buf)) continue;
+      if (needsDefinedStorage.has(buf)) continue;
       if (buf.scope !== 'global') continue;
       const assignment = plan.assignment.getAssignment(buf);
       if (!assignment || assignment.inplaceOf || assignment.isDynamic) continue;
@@ -126,7 +127,7 @@ export class MemoryPlanner {
   }
 
   _buildReuseAliases(temporaries, plan, primFunc) {
-    const unsafe = collectFreshZeroDependent(primFunc);
+    const needsDefinedStorage = buffersRequiringDefinedStorage(primFunc);
     const inplaceSources = new Set(plan.assignment.inplaceMap.values());
     const effLastUse = plan.assignment.effLastUse;
     const lastUseOf = (interval) => effLastUse.get(interval.buffer) ?? interval.lastUse;
@@ -138,7 +139,7 @@ export class MemoryPlanner {
       if (!assignment || assignment.inplaceOf || assignment.isDynamic) continue;
       if (inplaceSources.has(buf)) continue;
       if (buf.numel() <= 0) continue;
-      if (unsafe.has(buf)) continue;
+      if (needsDefinedStorage.has(buf)) continue;
       const key = `${buf.scope}|${buf.dtype}|${buf.shape.join(',')}|${buf.strides.join(',')}`;
       let bucket = groups.get(key);
       if (!bucket) { bucket = []; groups.set(key, bucket); }
@@ -164,69 +165,6 @@ export class MemoryPlanner {
     }
     return aliasMap;
   }
-}
-
-function exprLoadsBuffer(node, target, seen) {
-  if (!node || typeof node !== 'object' || seen.has(node)) return false;
-  seen.add(node);
-  if (node.type === 'BufferLoadNode') {
-    if (!target || node.buffer === target) return true;
-  }
-  for (const key of Object.keys(node)) {
-    if (key === '_parent' || key === '_parentKey' || key === '_parentIdx') continue;
-    const value = node[key];
-    if (!value || typeof value !== 'object') continue;
-    if (Array.isArray(value)) {
-      for (const item of value) if (exprLoadsBuffer(item, target, seen)) return true;
-    } else if (exprLoadsBuffer(value, target, seen)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function collectFreshZeroDependent(primFunc) {
-  const unsafe = new Set();
-  const writeValues = new Map();
-
-  const visited = new Set();
-  const stack = [primFunc.body];
-  while (stack.length > 0) {
-    const node = stack.pop();
-    if (!node || typeof node !== 'object' || visited.has(node)) continue;
-    visited.add(node);
-
-    if (node.type === 'BufferStoreNode' && node.buffer) {
-      const buf = node.buffer;
-      for (const idx of node.indices) {
-        if (exprLoadsBuffer(idx, null, new Set())) { unsafe.add(buf); break; }
-      }
-      if (exprLoadsBuffer(node.value, buf, new Set())) unsafe.add(buf);
-      let values = writeValues.get(buf);
-      if (!values) { values = []; writeValues.set(buf, values); }
-      values.push(node.value);
-    }
-
-    for (const key of Object.keys(node)) {
-      if (key === '_parent' || key === '_parentKey' || key === '_parentIdx') continue;
-      const value = node[key];
-      if (Array.isArray(value)) {
-        for (const item of value) if (item && typeof item === 'object') stack.push(item);
-      } else if (value && typeof value === 'object') {
-        stack.push(value);
-      }
-    }
-  }
-
-  for (const [buf, values] of writeValues) {
-    const isConstZero = (v) => v && (v.type === 'IntImmNode' || v.type === 'FloatImmNode') && v.value === 0;
-    if (values.every(isConstZero)) unsafe.add(buf);
-    if (values.length === 1 && values[0] && (values[0].type === 'IntImmNode' || values[0].type === 'FloatImmNode')) {
-      unsafe.add(buf);
-    }
-  }
-
-  return unsafe;
 }
 
 function rewriteBufferAliases(root, aliasMap) {
