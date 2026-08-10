@@ -485,8 +485,7 @@ describe('fake-quant (dequantize∘quantize) is LOSSY — must not be removed as
         expect(Math.abs(out[i] - data[i]), `idx ${i}: quant error must be within step`).toBeLessThanOrEqual(scale + 1e-6);
         if (Math.abs(out[i] - data[i]) > 1e-6) appliedQuant = true;
       }
-      // off-grid inputs must show a non-zero rounding error (proves the round-trip was NOT removed)
-      expect(appliedQuant, 'quantization round-trip was eliminated (identity) — fake-quant broken').toBe(true);
+      expect(appliedQuant, 'off-grid inputs produced zero rounding error, so the quantization round-trip was eliminated (identity) — fake-quant broken').toBe(true);
     });
   }
 });

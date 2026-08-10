@@ -3,9 +3,16 @@ import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
 import { CPUTarget } from '../../../src/backend/target.js';
+import { randomArray } from '../../_utils/rng.js';
+import * as ref from '../../_utils/reference_ops.js';
 
 function compile(func, opts = {}) {
   return compileGraph(func, CPUTarget(), opts);
+}
+
+function expectMatches(actual, expected, label, tol = 1e-3) {
+  const r = ref.expectClose(actual, expected, tol, label);
+  expect(r.ok, r.message).toBe(true);
 }
 
 function run(result, name, inputs, outputShapes) {
@@ -26,6 +33,24 @@ const D_MODEL = 8;
 const N_HEADS = 2;
 const D_HEAD = D_MODEL / N_HEADS;
 const D_FF = 16;
+
+const DIMS = { seq: SEQ, dModel: D_MODEL, dFF: D_FF };
+
+function encoderParams(seed) {
+  return {
+    x: randomArray(seed, SEQ * D_MODEL),
+    wq: randomArray(seed + 1, D_MODEL * D_MODEL, -0.4, 0.4),
+    wk: randomArray(seed + 2, D_MODEL * D_MODEL, -0.4, 0.4),
+    wv: randomArray(seed + 3, D_MODEL * D_MODEL, -0.4, 0.4),
+    wo: randomArray(seed + 4, D_MODEL * D_MODEL, -0.4, 0.4),
+    g1: randomArray(seed + 5, D_MODEL, 0.5, 1.5),
+    b1: randomArray(seed + 6, D_MODEL, -0.3, 0.3),
+    wff1: randomArray(seed + 7, D_MODEL * D_FF, -0.3, 0.3),
+    wff2: randomArray(seed + 8, D_FF * D_MODEL, -0.3, 0.3),
+    g2: randomArray(seed + 9, D_MODEL, 0.5, 1.5),
+    b2: randomArray(seed + 10, D_MODEL, -0.3, 0.3),
+  };
+}
 
 describe('Transformer — IR builder', () => {
   it('compiles scaled dot-product attention with multi-head reshape', () => {
@@ -67,7 +92,7 @@ describe('Transformer — IR builder', () => {
     }
   });
 
-  it('compiles full transformer encoder block', () => {
+  it('matches a reference encoder block with distinct Q/K/V/O projections and per-layernorm gamma/beta', () => {
     const x    = new TensorType([SEQ, D_MODEL], ScalarType.F32);
     const wq   = new TensorType([D_MODEL, D_MODEL], ScalarType.F32);
     const wk   = new TensorType([D_MODEL, D_MODEL], ScalarType.F32);
@@ -111,20 +136,15 @@ describe('Transformer — IR builder', () => {
     const r = compile(func);
     expect(r.succeeded).toBe(true);
 
-    const xData = new Float32Array(SEQ * D_MODEL).map((_, i) => Math.sin(i * 0.1));
-    const eye = new Float32Array(D_MODEL * D_MODEL);
-    for (let i = 0; i < D_MODEL; i++) eye[i * D_MODEL + i] = 1;
-    const ff1Data = new Float32Array(D_MODEL * D_FF).fill(0.01);
-    const ff2Data = new Float32Array(D_FF * D_MODEL).fill(0.01);
-    const gamma = new Float32Array(D_MODEL).fill(1);
-    const beta = new Float32Array(D_MODEL).fill(0);
+    const p = encoderParams(200);
     const [result] = run(r, 'encoder_block',
-      [xData, eye, eye, eye, eye, gamma, beta, ff1Data, ff2Data, gamma, beta],
+      [p.x, p.wq, p.wk, p.wv, p.wo, p.g1, p.b1, p.wff1, p.wff2, p.g2, p.b2],
       [[SEQ, D_MODEL]]);
-    expect(result.every(v => isFinite(v))).toBe(true);
+
+    expectMatches(result, ref.transformerEncoderBlock(p.x, { ...DIMS, ...p }), 'encoder_block');
   });
 
-  it('compiles stacked 2-layer transformer encoder', () => {
+  it('matches two reference encoder layers applied in sequence, each with its own weights', () => {
     const x    = new TensorType([SEQ, D_MODEL], ScalarType.F32);
     const wq1  = new TensorType([D_MODEL, D_MODEL], ScalarType.F32);
     const wk1  = new TensorType([D_MODEL, D_MODEL], ScalarType.F32);
@@ -183,21 +203,18 @@ describe('Transformer — IR builder', () => {
     const r = compile(func);
     expect(r.succeeded).toBe(true);
 
-    const xData = new Float32Array(SEQ * D_MODEL).map((_, i) => Math.sin(i * 0.1));
-    const eye = new Float32Array(D_MODEL * D_MODEL);
-    for (let i = 0; i < D_MODEL; i++) eye[i * D_MODEL + i] = 1;
-    const ffData = new Float32Array(D_MODEL * D_FF).fill(0.01);
-    const ff2Data = new Float32Array(D_FF * D_MODEL).fill(0.01);
-    const gamma = new Float32Array(D_MODEL).fill(1);
-    const beta = new Float32Array(D_MODEL).fill(0);
+    const layer1 = encoderParams(300);
+    const layer2 = encoderParams(400);
+    const weightsOf = (p) => [p.wq, p.wk, p.wv, p.wo, p.g1, p.b1, p.wff1, p.wff2, p.g2, p.b2];
     const [result] = run(r, 'stacked_encoder',
-      [xData, eye, eye, eye, eye, gamma, beta, ffData, ff2Data, gamma, beta,
-        eye, eye, eye, eye, gamma, beta, ffData, ff2Data, gamma, beta],
+      [layer1.x, ...weightsOf(layer1), ...weightsOf(layer2)],
       [[SEQ, D_MODEL]]);
-    expect(result.every(v => isFinite(v))).toBe(true);
+
+    const h1 = ref.transformerEncoderBlock(layer1.x, { ...DIMS, ...layer1 });
+    expectMatches(result, ref.transformerEncoderBlock(h1, { ...DIMS, ...layer2 }), 'stacked_encoder');
   });
 
-  it('compiles decoder block with causal mask', () => {
+  it('matches a reference decoder block where the causal mask zeroes attention to future positions', () => {
     const x    = new TensorType([SEQ, D_MODEL], ScalarType.F32);
     const wq   = new TensorType([D_MODEL, D_MODEL], ScalarType.F32);
     const wk   = new TensorType([D_MODEL, D_MODEL], ScalarType.F32);
@@ -243,21 +260,20 @@ describe('Transformer — IR builder', () => {
     const r = compile(func);
     expect(r.succeeded).toBe(true);
 
-    const xData = new Float32Array(SEQ * D_MODEL).map((_, i) => Math.sin(i * 0.1));
-    const eye = new Float32Array(D_MODEL * D_MODEL);
-    for (let i = 0; i < D_MODEL; i++) eye[i * D_MODEL + i] = 1;
+    const p = encoderParams(500);
     const causalMask = new Float32Array(SEQ * SEQ);
     for (let i = 0; i < SEQ; i++)
       for (let j = 0; j < SEQ; j++)
         causalMask[i * SEQ + j] = j <= i ? 0 : -1e9;
-    const gamma = new Float32Array(D_MODEL).fill(1);
-    const beta = new Float32Array(D_MODEL).fill(0);
-    const ff1Data = new Float32Array(D_MODEL * D_FF).fill(0.01);
-    const ff2Data = new Float32Array(D_FF * D_MODEL).fill(0.01);
     const [result] = run(r, 'decoder_block',
-      [xData, eye, eye, eye, eye, causalMask, gamma, beta, ff1Data, ff2Data, gamma, beta],
+      [p.x, p.wq, p.wk, p.wv, p.wo, causalMask, p.g1, p.b1, p.wff1, p.wff2, p.g2, p.b2],
       [[SEQ, D_MODEL]]);
-    expect(result.every(v => isFinite(v))).toBe(true);
+
+    expectMatches(result, ref.transformerEncoderBlock(p.x, { ...DIMS, ...p, mask: causalMask }), 'decoder_block');
+
+    const unmasked = ref.transformerEncoderBlock(p.x, { ...DIMS, ...p });
+    const differs = ref.expectClose(result, unmasked, 1e-3, 'decoder vs unmasked');
+    expect(differs.ok, 'causal mask had no effect — masked output equals the unmasked reference').toBe(false);
   });
 
   it('compiles embedding + positional encoding', () => {

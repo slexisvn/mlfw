@@ -1,8 +1,12 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
-import { DecompositionPass, registerDecomposition } from '../../../src/compiler/passes/decompose/decomposition_pass.js';
+import { DecompositionPass, registerDecomposition, unregisterDecomposition } from '../../../src/compiler/passes/decompose/decomposition_pass.js';
 import { PassResult } from '../../../src/compiler/passes/pass.js';
+
+const CUSTOM_OP = '__test_custom_decompose__';
+
+afterEach(() => unregisterDecomposition(CUSTOM_OP));
 
 function run(func) {
   return new DecompositionPass().run(func);
@@ -212,7 +216,7 @@ describe('pass edge cases', () => {
   });
 
   it('custom registered decomposition gets picked up by the pass', () => {
-    const customName = '_test_custom_op_' + Math.random().toString(36).slice(2);
+    const customName = CUSTOM_OP;
 
     registerDecomposition(customName, (op, b) => {
       const x = op.getOperand(0);

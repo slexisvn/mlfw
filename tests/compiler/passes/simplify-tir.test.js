@@ -32,8 +32,7 @@ function loopBlock(varName, extent, storeValueFn) {
 }
 
 describe('SimplifyPrimFunc (TVM tir.Simplify analog)', () => {
-  it('drops a provably-true in-bounds ternary guard', () => {
-    // i in [0,8): (i < 8 ? A[i] : 0) -> A[i]
+  it('drops a provably-true in-bounds ternary guard: i in [0,8) makes (i < 8 ? A[i] : 0) become A[i]', () => {
     const A = new Buffer('A', [8], 'float32', 'global');
     const f = loopBlock('i', 8, (i) =>
       new IfThenElseNode(new CompareNode('lt', i, c(8)), new BufferLoadNode(A, [i]), new FloatImmNode(0)));
@@ -59,8 +58,7 @@ describe('SimplifyPrimFunc (TVM tir.Simplify analog)', () => {
     expect(idx).toMatchObject({ type: 'VariableNode', name: 'i' });
   });
 
-  it('eliminates a provably-true statement-level IfThenElse (split-style guard)', () => {
-    // for i in [0,8): if (i < 8) A[i] = 0  -> unconditional store
+  it('eliminates a provably-true statement-level IfThenElse: for i in [0,8) { if (i < 8) A[i] = 0 } becomes an unconditional store', () => {
     const A = new Buffer('A', [8], 'float32', 'global');
     const i = iv('i');
     const store = new BufferStoreNode(A, [i], new FloatImmNode(0));

@@ -4,6 +4,7 @@ import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js'
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
 import { CUDATarget, CPUTarget } from '../../../src/backend/target.js';
 import {
+import { countLoops as countForLoops } from '../../_utils/kernel_source.js';
   tensor, Linear, Sequential, ReLU, Sigmoid, Tanh,
   GELU, SiLU, LeakyReLU,
   compile as modelCompile,
@@ -21,9 +22,6 @@ function getSource(result, name) {
   return result.getSource(name);
 }
 
-function countForLoops(src) {
-  return (src.match(/\bfor\s*\(/g) || []).length;
-}
 
 function hasThreadBinding(src, tag) {
   return src.includes(`= ${tag};`) || src.includes(`= ${tag}`);

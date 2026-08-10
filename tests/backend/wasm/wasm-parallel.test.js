@@ -3,6 +3,7 @@ import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
 import { WasmTarget } from '../../../src/backend/target.js';
+import { countLoops } from '../../_utils/kernel_source.js';
 
 const PAR_TARGET = WasmTarget({ numCores: 4 });
 const SEQ_TARGET = WasmTarget({ numCores: 1 });
@@ -19,9 +20,6 @@ function src(result, name) {
   return result.getSource(name);
 }
 
-function countLoops(s) {
-  return (s.match(/\(loop\s/g) || []).length;
-}
 
 function checkBalanced(s) {
   expect((s.match(/\(/g) || []).length).toBe((s.match(/\)/g) || []).length);

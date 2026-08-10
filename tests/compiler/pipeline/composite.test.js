@@ -3,18 +3,13 @@ import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
 import { CPUTarget } from '../../../src/backend/target.js';
+import { countLoops, countTempBuffers } from '../../_utils/kernel_source.js';
 
 function compile(func, opts = {}) {
   return compileGraph(func, CPUTarget(), opts);
 }
 
-function countLoops(src) {
-  return (src.match(/\bfor\s*\(/g) || []).length;
-}
 
-function countTempBuffers(src) {
-  return (src.match(/new Float32Array/g) || []).length;
-}
 
 describe('relu', () => {
   it('zeros out negatives, passes positives', () => {
@@ -413,9 +408,7 @@ describe('multi-output functions', () => {
     expect(Array.from(o2)).toEqual([1, 3, 2, 4]);
   });
 
-  // Two outputs returning the SAME value must each receive a distinct buffer + copy;
-  // a prior bug wrote only the first and left the second all-zero.
-  it('returns the same value twice — both outputs are written', () => {
+  it('returns the same value twice — each output gets its own buffer and copy, neither left all-zero', () => {
     const t = new TensorType([4], ScalarType.F32);
     const func = buildFunction('two_same', [t, t], [t, t], (b, args) => {
       const s = b.add(args[0], args[1]);

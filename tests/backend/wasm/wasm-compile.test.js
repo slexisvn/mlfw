@@ -3,6 +3,7 @@ import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
 import { WasmTarget, CPUTarget } from '../../../src/backend/target.js';
+import { countLoops } from '../../_utils/kernel_source.js';
 
 function compile(func, opts = {}) {
   return compileGraph(func, WasmTarget(), { scheduling: { enabled: true }, ...opts });
@@ -16,9 +17,6 @@ function src(result, name) {
   return result.getSource(name);
 }
 
-function countLoops(s) {
-  return (s.match(/\(loop\s/g) || []).length;
-}
 
 function countBlocks(s) {
   return (s.match(/\(block\s/g) || []).length;

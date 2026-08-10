@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { registry } from '../../../src/compiler/ir/graph/ops.js';
 import { OpDef, SideEffectKind } from '../../../src/compiler/ir/graph/op_registry.js';
 import { MemoryEffectAnalysis } from '../../../src/compiler/analysis/memory_effect.js';
@@ -7,6 +7,7 @@ import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js'
 import { UseDefAnalysis } from '../../../src/compiler/analysis/use_def.js';
 import { PostDominanceAnalysis } from '../../../src/compiler/analysis/dominance.js';
 import { LivenessAnalysis } from '../../../src/compiler/analysis/liveness.js';
+import { scalingRatio, QUADRATIC_RATIO } from '../../_utils/scaling.js';
 
 function makeValue(id) {
   return { id, _uses: [], uses() { return this._uses; } };
@@ -26,15 +27,21 @@ function makeFunc(ops) {
   return { ops() { return ops; } };
 }
 
-function registerOnce(name, sideEffects) {
-  if (!registry.has(name)) {
-    registry.register(new OpDef({ name, numOperands: 1, numResults: 1, sideEffects }));
-  }
+const registeredTestOps = new Set();
+
+function registerTestOp(name, sideEffects) {
+  registry.register(new OpDef({ name, numOperands: 1, numResults: 1, sideEffects }));
+  registeredTestOps.add(name);
 }
+
+afterEach(() => {
+  for (const name of registeredTestOps) registry.unregister(name);
+  registeredTestOps.clear();
+});
 
 describe('MemoryEffectAnalysis effectKind bitmask gating', () => {
   it('READ-only op does not tag its results as WRITE', () => {
-    registerOnce('__test_read_only__', SideEffectKind.READ);
+    registerTestOp('__test_read_only__', SideEffectKind.READ);
     const operand = makeValue('in');
     const resultVal = makeValue('out');
     const op = makeOp('__test_read_only__', [operand], [resultVal]);
@@ -47,7 +54,7 @@ describe('MemoryEffectAnalysis effectKind bitmask gating', () => {
   });
 
   it('WRITE-only op does not tag its operands as READ', () => {
-    registerOnce('__test_write_only__', SideEffectKind.WRITE);
+    registerTestOp('__test_write_only__', SideEffectKind.WRITE);
     const operand = makeValue('in2');
     const resultVal = makeValue('out2');
     const op = makeOp('__test_write_only__', [operand], [resultVal]);
@@ -60,7 +67,7 @@ describe('MemoryEffectAnalysis effectKind bitmask gating', () => {
   });
 
   it('READ|WRITE op tags both operands and results', () => {
-    registerOnce('__test_read_write__', SideEffectKind.READ | SideEffectKind.WRITE);
+    registerTestOp('__test_read_write__', SideEffectKind.READ | SideEffectKind.WRITE);
     const operand = makeValue('in3');
     const resultVal = makeValue('out3');
     const op = makeOp('__test_read_write__', [operand], [resultVal]);
@@ -103,30 +110,41 @@ function genAnalysisGraph(r) {
   });
 }
 
-describe('graph analyses vs independent brute-force (use_def / post-dominance / liveness / memory_effect)', () => {
-  it('60 random real graphs match brute-force oracles', () => {
-    for (let s = 0; s < 60; s++) {
-      const r = mulberry32(0x5151 + s * 2654435761);
-      const func = genAnalysisGraph(r);
-      const allOps = [...func.ops()];
-      const retOp = func.getReturnOp();
-      const ud = UseDefAnalysis.compute(func);
-      const tIdx = new Map(); ud.topologicalOrder.forEach((op, i) => tIdx.set(op, i));
+const ANALYSIS_GRAPHS = Array.from({ length: 60 }, (_, s) => genAnalysisGraph(mulberry32(0x5151 + s * 2654435761)));
 
-      // use_def: topo valid + opUsers == brute
+function analysisCase(func) {
+  const allOps = [...func.ops()];
+  const retOp = func.getReturnOp();
+  const ud = UseDefAnalysis.compute(func);
+  const tIdx = new Map();
+  ud.topologicalOrder.forEach((op, i) => tIdx.set(op, i));
+  return { allOps, retOp, ud, tIdx };
+}
+
+describe('graph analyses vs independent brute-force on 60 seeded random graphs', () => {
+  it('use_def orders every definition before its users and reports exactly the brute-force user set', () => {
+    for (const [s, func] of ANALYSIS_GRAPHS.entries()) {
+      const { allOps, retOp, ud, tIdx } = analysisCase(func);
       for (const op of ud.topologicalOrder) {
-        for (let i = 0; i < op.numOperands; i++) { const d = op.getOperand(i).definingOp; if (d && tIdx.has(d)) expect(tIdx.get(d)).toBeLessThan(tIdx.get(op)); }
+        for (let i = 0; i < op.numOperands; i++) {
+          const d = op.getOperand(i).definingOp;
+          if (d && tIdx.has(d)) expect(tIdx.get(d), `seed ${s}: ${d.opName} must precede ${op.opName}`).toBeLessThan(tIdx.get(op));
+        }
       }
       const brute = new Map(); for (const op of allOps) brute.set(op, new Set());
       for (const op of allOps) for (let i = 0; i < op.numOperands; i++) { const d = op.getOperand(i).definingOp; if (d && brute.has(d)) brute.get(d).add(op); }
       for (const op of allOps) {
         if (op === retOp) continue;
         const got = [...(ud.opUsers.get(op) || new Set())];
-        expect(got.length, `users ${op.opName}`).toBe(brute.get(op).size);
-        for (const u of got) expect(brute.get(op).has(u)).toBe(true);
+        expect(got.length, `seed ${s}: users of ${op.opName}`).toBe(brute.get(op).size);
+        for (const u of got) expect(brute.get(op).has(u), `seed ${s}: ${u.opName} is a spurious user of ${op.opName}`).toBe(true);
       }
+    }
+  });
 
-      // post-dominance: postDominates(a,b) == "a on all paths b->return"
+  it('postDominates(a, b) holds exactly when a lies on every path from b to the return', () => {
+    for (const [s, func] of ANALYSIS_GRAPHS.entries()) {
+      const { allOps, retOp, ud } = analysisCase(func);
       const pd = PostDominanceAnalysis.compute(func, { useDef: ud });
       const succ = new Map(); for (const op of allOps) succ.set(op, []);
       for (const op of allOps) for (let i = 0; i < op.numResults; i++) for (const use of op.getResult(i).uses()) if (succ.has(use.user)) succ.get(op).push(use.user);
@@ -142,21 +160,32 @@ describe('graph analyses vs independent brute-force (use_def / post-dominance / 
       for (const b of allOps) {
         if (b === retOp) continue;
         const inter = onAll(b); if (!inter) continue;
-        for (const a of allOps) { if (a === b || a === retOp) continue; expect(pd.postDominates(a, b), `pd(${a.opName},${b.opName})`).toBe(inter.has(a)); }
+        for (const a of allOps) { if (a === b || a === retOp) continue; expect(pd.postDominates(a, b), `seed ${s}: pd(${a.opName},${b.opName})`).toBe(inter.has(a)); }
       }
+    }
+  });
 
-      // liveness: interval == [def topo idx, max use topo idx]
+  it('every live interval spans exactly [defining index, last use index]', () => {
+    for (const [s, func] of ANALYSIS_GRAPHS.entries()) {
+      const { ud, tIdx } = analysisCase(func);
       const lv = LivenessAnalysis.compute(func, { useDef: ud });
       for (const op of ud.topologicalOrder) for (let i = 0; i < op.numResults; i++) {
         const v = op.getResult(i); let start = tIdx.get(op), end = start;
         for (const use of v.uses()) { const ui = tIdx.get(use.user); if (ui !== undefined && ui > end) end = ui; }
         const got = lv.intervalOf(v);
-        if (got) { expect(got.start, 'live start').toBe(start); expect(got.end, 'live end').toBe(end); }
+        if (got) {
+          expect(got.start, `seed ${s}: live start of ${op.opName}`).toBe(start);
+          expect(got.end, `seed ${s}: live end of ${op.opName}`).toBe(end);
+        }
       }
+    }
+  });
 
-      // memory_effect: all generated ops are pure (no side effects)
+  it('memory_effect reports every generated op as pure, since the generator emits no side-effecting ops', () => {
+    for (const [s, func] of ANALYSIS_GRAPHS.entries()) {
+      const { allOps, retOp } = analysisCase(func);
       const me = MemoryEffectAnalysis.compute(func);
-      for (const op of allOps) if (op !== retOp) expect(me.hasSideEffect(op), `pure ${op.opName}`).toBe(false);
+      for (const op of allOps) if (op !== retOp) expect(me.hasSideEffect(op), `seed ${s}: ${op.opName} must be pure`).toBe(false);
     }
   });
 });
@@ -183,13 +212,12 @@ describe('post-dominance on residual/skip connections (LCA over a DAG)', () => {
 });
 
 describe('post-dominance scales sub-quadratically on deep residual chains', () => {
-  it('computes a 12k-op residual graph well under an O(n^2) wall-clock bound', () => {
+  function residualChain(n) {
     const t = new TensorType([4], ScalarType.F32);
-    const N = 12000;
-    const func = buildFunction('f', [t], [t], (b, args) => {
+    return buildFunction('f', [t], [t], (b, args) => {
       let x = args[0];
       const tips = [];
-      for (let i = 0; i < N; i++) {
+      for (let i = 0; i < n; i++) {
         x = b.relu(x).getResult(0);
         if (i % 2 === 0) tips.push(x);
       }
@@ -197,8 +225,15 @@ describe('post-dominance scales sub-quadratically on deep residual chains', () =
       for (const tp of tips) s = b.add(s, tp).getResult(0);
       b.returnOp([s]);
     });
-    const t0 = performance.now();
-    PostDominanceAnalysis.compute(func);
-    expect(performance.now() - t0).toBeLessThan(2000);
+  }
+
+  it('doubling the op count does not more than double the time (rules out O(n^2))', () => {
+    const { ratio, tSmall, tLarge } = scalingRatio({
+      build: residualChain,
+      work: (func) => PostDominanceAnalysis.compute(func),
+      n: 9000,
+    });
+    expect(ratio, `n=9000 took ${tSmall.toFixed(1)}ms, n=18000 took ${tLarge.toFixed(1)}ms (ratio ${ratio.toFixed(2)})`)
+      .toBeLessThan(QUADRATIC_RATIO);
   });
 });

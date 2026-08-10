@@ -21,8 +21,7 @@ const buildLinear = () => buildFunction('q', [T([M, K])], [T([M, N])], (b, a) =>
   b.returnOp([b.matmul(a[0], wc.getResult(0)).getResult(0)]);
 });
 
-// small activations: |x| ~ 0.3, occupy only ~6/127 of the fixed [-6,6] default range
-function makeInput(seed) {
+function makeSmallActivationInput(seed) {
   const r = rnd(seed); const x = new Float32Array(M * K);
   for (let i = 0; i < x.length; i++) x[i] = (r() - 0.5) * 0.6;
   return x;
@@ -44,10 +43,10 @@ function relErr(out, ref) {
 const compileFn = (mod, tgt) => new Compiler({ target: tgt }).compile(mod);
 
 describe('activation calibration end-to-end', () => {
-  const X = makeInput(1);
+  const X = makeSmallActivationInput(1);
   const ref = reference(X);
   const batches = [];
-  for (let t = 0; t < 4; t++) batches.push([makeInput(100 + t)]);
+  for (let t = 0; t < 4; t++) batches.push([makeSmallActivationInput(100 + t)]);
 
   function run(q) {
     const r = compileGraph(buildLinear(), CPUTarget(), {
@@ -113,7 +112,7 @@ describe('calibration through an intermediate activation (2-layer + relu)', () =
 describe('collectCalibration standalone', () => {
   it('returns a CalibrationResult with observed ranges for activations (arg feeding dot)', () => {
     const func = buildLinear();
-    const batches = [[makeInput(1)], [makeInput(2)]];
+    const batches = [[makeSmallActivationInput(1)], [makeSmallActivationInput(2)]];
     const result = collectCalibration(func, CPUTarget(), batches, { quantizableOps: new Set(['dot']), compileFn });
     const arg = func.args[0];
     expect(result.hasData(arg)).toBe(true);
@@ -124,7 +123,7 @@ describe('collectCalibration standalone', () => {
 
   it('does not observe constant weights (those calibrate from data directly)', () => {
     const func = buildLinear();
-    const result = collectCalibration(func, CPUTarget(), [[makeInput(1)]], { quantizableOps: new Set(['dot']), compileFn });
+    const result = collectCalibration(func, CPUTarget(), [[makeSmallActivationInput(1)]], { quantizableOps: new Set(['dot']), compileFn });
     const wConst = func.findOp(o => o.opName === 'constant');
     expect(result.hasData(wConst.getResult(0))).toBe(false);
   });
@@ -132,7 +131,7 @@ describe('collectCalibration standalone', () => {
   it('throws on async (GPU) targets', () => {
     const func = buildLinear();
     const fakeGpu = { isGPU: () => true, supportsInt8: true };
-    expect(() => collectCalibration(func, fakeGpu, [[makeInput(1)]], { compileFn })).toThrow(/async/i);
+    expect(() => collectCalibration(func, fakeGpu, [[makeSmallActivationInput(1)]], { compileFn })).toThrow(/async/i);
   });
 
   it('throws when no batches are supplied', () => {

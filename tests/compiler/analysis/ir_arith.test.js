@@ -41,8 +41,7 @@ describe('irToSymInt bridge', () => {
 });
 
 describe('proveTrue / proveFalse over guards', () => {
-  it('proves a pad=0 pooling in-bounds guard always holds', () => {
-    // out spatial in [0,2], kernel in [0,1], stride 2, inH=6: ih = oh*2 + kh in [0,5]
+  it('proves a pad=0 pooling in-bounds guard always holds (oh in [0,2], kh in [0,1], stride 2, inH=6 => ih = oh*2+kh in [0,5])', () => {
     const a = analyzerForLoops(new Map([['oh', 3], ['kh', 2]]));
     const ih = add(mul(v('oh'), c(2)), sub(v('kh'), c(0)));
     const ge = new CompareNode('ge', ih, c(0));
@@ -65,8 +64,7 @@ describe('proveTrue / proveFalse over guards', () => {
     expect(proveTrue(a, guard)).toBe(true);
   });
 
-  it('cannot prove a non-divisible split guard', () => {
-    // extent 9, factor 4 => o in [0,2], i in [0,3], max = 11 >= 9
+  it('cannot prove a non-divisible split guard (extent 9, factor 4 => o in [0,2], i in [0,3], max 11 >= 9)', () => {
     const a = analyzerForLoops(new Map([['o', 3], ['i', 4]]));
     const guard = new MathOpNode('<', add(mul(v('o'), c(4)), v('i')), c(9));
     expect(proveTrue(a, guard)).toBe(false);

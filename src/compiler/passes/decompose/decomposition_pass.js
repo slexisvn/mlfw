@@ -9,6 +9,10 @@ export function registerDecomposition(opName, ruleFn) {
   decompositionRules.set(opName, ruleFn);
 }
 
+export function unregisterDecomposition(opName) {
+  return decompositionRules.delete(opName);
+}
+
 export function hasDecomposition(opName) {
   return decompositionRules.has(opName);
 }

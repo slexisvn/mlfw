@@ -5,6 +5,7 @@ import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
 import { CPUTarget } from '../../../src/backend/target.js';
 import { ElementwiseCPURule } from '../../../src/compiler/schedule/rules.js';
 import { ForNode, IntImmNode, VariableNode, ForKind } from '../../../src/compiler/ir/tensor/nodes.js';
+import { countLoops as countForLoops } from '../../_utils/kernel_source.js';
 
 const F32 = ScalarType.F32;
 
@@ -25,9 +26,6 @@ function countStores(s) {
   return (s.match(/\w+\[.*?\]\s*=/g) || []).length;
 }
 
-function countForLoops(s) {
-  return (s.match(/\bfor\s*\(/g) || []).length;
-}
 
 describe('MatmulTiledCPURule — tiling via schedule.tile()', () => {
   it('matmul with scheduling does not inflate stores vs default', () => {

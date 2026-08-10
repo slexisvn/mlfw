@@ -145,8 +145,7 @@ describe('QuantizationParams equality and serialization', () => {
   });
 });
 
-describe('QuantizationParams per-channel from constant array', () => {
-  // weight [K=4, N=3], column n has magnitude ~ (n+1) — wildly different per-channel ranges
+describe('QuantizationParams per-channel from a [K=4, N=3] weight whose column n has magnitude ~(n+1), giving wildly different per-channel ranges', () => {
   const K = 4, N = 3;
   const W = [];
   for (let k = 0; k < K; k++) for (let n = 0; n < N; n++) W.push(Math.sin(k * 1.7 + n) * (n + 1) * 3);

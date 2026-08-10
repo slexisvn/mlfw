@@ -35,9 +35,12 @@
   },
   "scripts": {
     "build": "tsup",
-    "test": "vitest run --exclude '**/node_modules/**' --exclude '**/stress/**' --exclude '**/backend/cuda/**' --exclude '**/cuda-linalg.test.js' --exclude '**/backend/webgpu/**' --exclude '**/vscode-ext/**'",
-    "test:webgpu": "vitest run tests/backend/webgpu/",
-    "test:cuda": "vitest run tests/backend/cuda/ tests/linalg/cuda-linalg.test.js"
+    "test": "vitest run --project unit --project e2e",
+    "test:unit": "vitest run --project unit",
+    "test:e2e": "vitest run --project e2e",
+    "test:webgpu": "vitest run --project webgpu",
+    "test:cuda": "vitest run --project cuda",
+    "test:stress": "vitest run --project stress"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^4.1.8",

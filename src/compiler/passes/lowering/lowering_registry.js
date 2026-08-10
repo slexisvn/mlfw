@@ -14,7 +14,7 @@ const TARGET_PLEVEL = 20;
 
 export { isConstantOp };
 
-export { registerOpStrategy, getOpStrategy, OpStrategy, OpImplementation, selectImplementation } from './op_strategy.js';
+export { registerOpStrategy, unregisterOpStrategy, getOpStrategy, OpStrategy, OpImplementation, selectImplementation } from './op_strategy.js';
 
 export function hasLoweringRule(opName, target) {
   if (getOpStrategy(opName, target)) return true;

@@ -3,17 +3,17 @@ import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
 import { CPUTarget } from '../../../src/backend/target.js';
+import { countLoops, countTempBuffers } from '../../_utils/kernel_source.js';
+import { randomArray } from '../../_utils/rng.js';
+import * as ref from '../../_utils/reference_ops.js';
 
 function compile(func, opts = {}) {
   return compileGraph(func, CPUTarget(), opts);
 }
 
-function countLoops(src) {
-  return (src.match(/\bfor\s*\(/g) || []).length;
-}
-
-function countTempBuffers(src) {
-  return (src.match(/new Float32Array/g) || []).length;
+function expectMatches(actual, expected, label, tol = 1e-4) {
+  const r = ref.expectClose(actual, expected, tol, label);
+  expect(r.ok, r.message).toBe(true);
 }
 
 function run(result, name, inputs, outputShapes) {
@@ -30,7 +30,7 @@ function run(result, name, inputs, outputShapes) {
 }
 
 describe('LSTM cell: sigmoid gates + tanh + hadamard', () => {
-  it('compiles and computes correct gating', () => {
+  it('matches a reference LSTM cell: gate order i,f,g,o with the untouched tail carried through', () => {
     const xt = new TensorType([1, 4], ScalarType.F32);
     const ht = new TensorType([1, 4], ScalarType.F32);
     const ct = new TensorType([1, 4], ScalarType.F32);
@@ -65,19 +65,30 @@ describe('LSTM cell: sigmoid gates + tanh + hadamard', () => {
     const r = compile(func);
     expect(r.succeeded).toBe(true);
 
-    const x = new Float32Array([1, 0, 0, 0]);
-    const h = new Float32Array(4).fill(0);
-    const c = new Float32Array(4).fill(0);
-    const w = new Float32Array(32).fill(0.1);
-    const bias = new Float32Array(4).fill(0);
+    const x = randomArray(11, 4);
+    const h = randomArray(12, 4);
+    const c = randomArray(13, 4);
+    const w = randomArray(14, 32, -0.5, 0.5);
+    const bias = randomArray(15, 4, -0.2, 0.2);
     const [newH, newC] = run(r, 'lstm_cell', [x, h, c, w, bias], [[1, 4], [1, 4]]);
-    expect(newH.every(v => isFinite(v))).toBe(true);
-    expect(newC.every(v => isFinite(v))).toBe(true);
+
+    const row = [1, 4];
+    const biased = ref.add(ref.matmul(ref.concat([x, h], [row, row], 1), [1, 8], w, [8, 4]), bias);
+    const gate = (lo, hi) => ref.slice(biased, row, [0, lo], [1, hi]);
+    const iG = ref.sigmoid(gate(0, 1));
+    const fG = ref.sigmoid(gate(1, 2));
+    const gV = ref.tanh(gate(2, 3));
+    const oG = ref.sigmoid(gate(3, 4));
+    const expC = ref.add(ref.mul(fG, ref.slice(c, row, [0, 0], [1, 1])), ref.mul(iG, gV));
+    const expH = ref.mul(oG, ref.tanh(expC));
+
+    expectMatches(newH, ref.concat([expH, ref.slice(h, row, [0, 1], [1, 4])], [[1, 1], [1, 3]], 1), 'newH');
+    expectMatches(newC, ref.concat([expC, ref.slice(c, row, [0, 1], [1, 4])], [[1, 1], [1, 3]], 1), 'newC');
   });
 });
 
 describe('Squeeze-and-Excitation block', () => {
-  it('compiles SE: global_avgpool -> fc -> relu -> fc -> sigmoid -> scale', () => {
+  it('matches a reference SE block: global avg-pool, two FCs, and a per-channel sigmoid rescale', () => {
     const x     = new TensorType([1, 8, 4, 4], ScalarType.F32);
     const w1    = new TensorType([8, 2], ScalarType.F32);
     const w2    = new TensorType([2, 8], ScalarType.F32);
@@ -102,16 +113,20 @@ describe('Squeeze-and-Excitation block', () => {
     const r = compile(func);
     expect(r.succeeded).toBe(true);
 
-    const xData = new Float32Array(128).fill(2);
-    const w1Data = new Float32Array(16).fill(0.5);
-    const w2Data = new Float32Array(16).fill(0.5);
+    const xData = randomArray(21, 128, 0.5, 2);
+    const w1Data = randomArray(22, 16, -0.5, 0.5);
+    const w2Data = randomArray(23, 16, -0.5, 0.5);
     const [result] = run(r, 'se_block', [xData, w1Data, w2Data], [[1, 8, 4, 4]]);
-    expect(result.every(v => isFinite(v) && v > 0)).toBe(true);
+
+    const pooled = ref.reduce(xData, [1, 8, 4, 4], [2, 3], 'mean');
+    const fc2 = ref.matmul(ref.relu(ref.matmul(pooled, [1, 8], w1Data, [8, 2])), [1, 2], w2Data, [2, 8]);
+    const scale = ref.broadcastTo(ref.sigmoid(fc2), [1, 8, 1, 1], [1, 8, 4, 4]);
+    expectMatches(result, ref.mul(xData, scale), 'se_block');
   });
 });
 
 describe('U-Net skip connection: conv -> concat with encoder feature', () => {
-  it('upsampled decoder concat with encoder skip', () => {
+  it('matches a reference U-Net skip: channel concat feeding a 3x3 conv, with encoder channels first', () => {
     const enc  = new TensorType([1, 4, 4, 4], ScalarType.F32);
     const dec  = new TensorType([1, 8, 4, 4], ScalarType.F32);
     const k    = new TensorType([4, 12, 3, 3], ScalarType.F32);
@@ -127,11 +142,13 @@ describe('U-Net skip connection: conv -> concat with encoder feature', () => {
     const r = compile(func);
     expect(r.succeeded).toBe(true);
 
-    const encData = new Float32Array(64).fill(1);
-    const decData = new Float32Array(128).fill(0.5);
-    const kData = new Float32Array(4 * 12 * 9).fill(0.01);
+    const encData = randomArray(31, 64);
+    const decData = randomArray(32, 128);
+    const kData = randomArray(33, 4 * 12 * 9, -0.2, 0.2);
     const [result] = run(r, 'unet_skip', [encData, decData, kData], [[1, 4, 2, 2]]);
-    expect(result.every(v => isFinite(v) && v >= 0)).toBe(true);
+
+    const cat = ref.concat([encData, decData], [[1, 4, 4, 4], [1, 8, 4, 4]], 1);
+    expectMatches(result, ref.relu(ref.conv2d(cat, [1, 12, 4, 4], kData, [4, 12, 3, 3]).data), 'unet_skip');
   });
 });
 
@@ -168,7 +185,7 @@ describe('Cross-attention: Q from decoder, K/V from encoder', () => {
 });
 
 describe('MobileNet inverted residual: expand -> depthwise -> project', () => {
-  it('compiles inverted bottleneck with expansion factor 4', () => {
+  it('matches a reference inverted bottleneck: 1x1 expand, depthwise 3x3 with groups=16, 1x1 project', () => {
     const x   = new TensorType([1, 4, 8, 8], ScalarType.F32);
     const ke  = new TensorType([16, 4, 1, 1], ScalarType.F32);
     const kd  = new TensorType([16, 1, 3, 3], ScalarType.F32);
@@ -187,17 +204,20 @@ describe('MobileNet inverted residual: expand -> depthwise -> project', () => {
     const r = compile(func);
     expect(r.succeeded).toBe(true);
 
-    const xData = new Float32Array(256).fill(1);
-    const keData = new Float32Array(64).fill(0.1);
-    const kdData = new Float32Array(144).fill(0.1);
-    const kpData = new Float32Array(64).fill(0.1);
+    const xData = randomArray(41, 256);
+    const keData = randomArray(42, 64, -0.4, 0.4);
+    const kdData = randomArray(43, 144, -0.4, 0.4);
+    const kpData = randomArray(44, 64, -0.4, 0.4);
     const [result] = run(r, 'inverted_res', [xData, keData, kdData, kpData], [[1, 4, 6, 6]]);
-    expect(result.every(v => isFinite(v))).toBe(true);
+
+    const expanded = ref.silu(ref.conv2d(xData, [1, 4, 8, 8], keData, [16, 4, 1, 1]).data);
+    const depthwise = ref.silu(ref.conv2d(expanded, [1, 16, 8, 8], kdData, [16, 1, 3, 3], { groups: 16 }).data);
+    expectMatches(result, ref.conv2d(depthwise, [1, 16, 6, 6], kpData, [4, 16, 1, 1]).data, 'inverted_res');
   });
 });
 
 describe('Feature Pyramid Network: multi-scale feature fusion', () => {
-  it('top-down pathway with lateral connections', () => {
+  it('matches a reference FPN merge: 1x1 lateral conv, nearest upsample to 8x8, add the skip, relu', () => {
     const c3  = new TensorType([1, 4, 8, 8], ScalarType.F32);
     const c4  = new TensorType([1, 8, 4, 4], ScalarType.F32);
     const lat = new TensorType([4, 8, 1, 1], ScalarType.F32);
@@ -214,16 +234,19 @@ describe('Feature Pyramid Network: multi-scale feature fusion', () => {
     const r = compile(func);
     expect(r.succeeded).toBe(true);
 
-    const c3Data = new Float32Array(256).fill(1);
-    const c4Data = new Float32Array(128).fill(2);
-    const latData = new Float32Array(32).fill(0.25);
+    const c3Data = randomArray(51, 256);
+    const c4Data = randomArray(52, 128);
+    const latData = randomArray(53, 32, -0.5, 0.5);
     const [result] = run(r, 'fpn_merge', [c3Data, c4Data, latData], [[1, 4, 8, 8]]);
-    expect(result.every(v => isFinite(v) && v >= 0)).toBe(true);
+
+    const lateral = ref.conv2d(c4Data, [1, 8, 4, 4], latData, [4, 8, 1, 1]).data;
+    const upsampled = ref.resizeNearest(lateral, [1, 4, 4, 4], [8, 8]);
+    expectMatches(result, ref.relu(ref.add(c3Data, upsampled)), 'fpn_merge');
   });
 });
 
 describe('Transformer encoder block — full', () => {
-  it('self-attention + FFN + 2x layernorm + 2x residual', () => {
+  it('matches a reference encoder block: scaled dot-product attention, both residuals, and both layernorms with their own gamma/beta', () => {
     const x     = new TensorType([4, 16], ScalarType.F32);
     const wq    = new TensorType([16, 16], ScalarType.F32);
     const wk    = new TensorType([16, 16], ScalarType.F32);
@@ -267,22 +290,30 @@ describe('Transformer encoder block — full', () => {
     const r = compile(func);
     expect(r.succeeded).toBe(true);
 
-    const xData = new Float32Array(64).fill(0).map((_, i) => Math.sin(i * 0.1));
-    const eye16 = new Float32Array(256);
-    for (let i = 0; i < 16; i++) eye16[i * 16 + i] = 1;
-    const wff1Data = new Float32Array(1024).fill(0.01);
-    const wff2Data = new Float32Array(1024).fill(0.01);
-    const gamma = new Float32Array(16).fill(1);
-    const beta = new Float32Array(16).fill(0);
+    const p = {
+      x: randomArray(61, 64),
+      wq: randomArray(62, 256, -0.3, 0.3),
+      wk: randomArray(63, 256, -0.3, 0.3),
+      wv: randomArray(64, 256, -0.3, 0.3),
+      wo: randomArray(65, 256, -0.3, 0.3),
+      g1: randomArray(66, 16, 0.5, 1.5),
+      b1: randomArray(67, 16, -0.3, 0.3),
+      wff1: randomArray(68, 1024, -0.2, 0.2),
+      wff2: randomArray(69, 1024, -0.2, 0.2),
+      g2: randomArray(70, 16, 0.5, 1.5),
+      b2: randomArray(71, 16, -0.3, 0.3),
+    };
     const [result] = run(r, 'encoder_block',
-      [xData, eye16, eye16, eye16, eye16, gamma, beta, wff1Data, wff2Data, gamma, beta],
+      [p.x, p.wq, p.wk, p.wv, p.wo, p.g1, p.b1, p.wff1, p.wff2, p.g2, p.b2],
       [[4, 16]]);
-    expect(result.every(v => isFinite(v))).toBe(true);
+
+    const expected = ref.transformerEncoderBlock(p.x, { seq: 4, dModel: 16, dFF: 64, ...p });
+    expectMatches(result, expected, 'encoder_block', 1e-3);
   });
 });
 
 describe('Dilated conv tower: multi-rate receptive field', () => {
-  it('compiles stacked dilated convolutions', () => {
+  it('matches a reference dilated tower: dilation-2 padded conv then a stride-2 conv', () => {
     const x  = new TensorType([1, 1, 16, 16], ScalarType.F32);
     const k1 = new TensorType([4, 1, 3, 3], ScalarType.F32);
     const k2 = new TensorType([4, 4, 3, 3], ScalarType.F32);
@@ -299,11 +330,13 @@ describe('Dilated conv tower: multi-rate receptive field', () => {
     const r = compile(func);
     expect(r.succeeded).toBe(true);
 
-    const xData = new Float32Array(256).fill(1);
-    const k1Data = new Float32Array(36).fill(1 / 9);
-    const k2Data = new Float32Array(576).fill(0.01);
+    const xData = randomArray(81, 256);
+    const k1Data = randomArray(82, 36, -0.3, 0.3);
+    const k2Data = randomArray(83, 576, -0.15, 0.15);
     const [result] = run(r, 'dilated_tower', [xData, k1Data, k2Data], [[1, 4, 6, 6]]);
-    expect(result.every(v => isFinite(v) && v >= 0)).toBe(true);
+
+    const c1 = ref.relu(ref.conv2d(xData, [1, 1, 16, 16], k1Data, [4, 1, 3, 3], { pad: 1, dilation: 2 }).data);
+    expectMatches(result, ref.relu(ref.conv2d(c1, [1, 4, 14, 14], k2Data, [4, 4, 3, 3], { stride: 2 }).data), 'dilated_tower');
   });
 });
 
@@ -341,7 +374,7 @@ describe('Batch matmul: batched attention scores', () => {
 });
 
 describe('MLP-Mixer style: transpose -> matmul -> transpose (token mixing)', () => {
-  it('compiles token mixing layer', () => {
+  it('matches a reference token-mixing layer: mixing happens across tokens, not channels', () => {
     const x  = new TensorType([8, 16], ScalarType.F32);
     const w  = new TensorType([8, 8], ScalarType.F32);
     const out = new TensorType([8, 16], ScalarType.F32);
@@ -357,11 +390,12 @@ describe('MLP-Mixer style: transpose -> matmul -> transpose (token mixing)', () 
     const r = compile(func);
     expect(r.succeeded).toBe(true);
 
-    const xData = new Float32Array(128).fill(0.5);
-    const wData = new Float32Array(64);
-    for (let i = 0; i < 8; i++) wData[i * 8 + i] = 1;
+    const xData = randomArray(91, 128);
+    const wData = randomArray(92, 64, -0.6, 0.6);
     const [result] = run(r, 'token_mix', [xData, wData], [[8, 16]]);
-    expect(result.every(v => isFinite(v))).toBe(true);
+
+    const mixed = ref.matmul(ref.transpose(xData, [8, 16], [1, 0]), [16, 8], wData, [8, 8]);
+    expectMatches(result, ref.gelu(ref.transpose(mixed, [16, 8], [1, 0])), 'token_mix');
   });
 });
 
@@ -458,7 +492,7 @@ describe('Deep residual chain: 4 residual additions', () => {
 });
 
 describe('Grouped convolution: group=2', () => {
-  it('compiles grouped conv and produces correct channel separation', () => {
+  it('matches a reference groups=2 conv, so each filter sees only its own channel half', () => {
     const x   = new TensorType([1, 4, 4, 4], ScalarType.F32);
     const k   = new TensorType([4, 2, 3, 3], ScalarType.F32);
     const out = new TensorType([1, 4, 2, 2], ScalarType.F32);
@@ -472,10 +506,11 @@ describe('Grouped convolution: group=2', () => {
     const r = compile(func);
     expect(r.succeeded).toBe(true);
 
-    const xData = new Float32Array(64).fill(1);
-    const kData = new Float32Array(72).fill(1 / 9);
+    const xData = randomArray(101, 64);
+    const kData = randomArray(102, 72, -0.5, 0.5);
     const [result] = run(r, 'group_conv', [xData, kData], [[1, 4, 2, 2]]);
-    expect(result.every(v => isFinite(v) && v >= 0)).toBe(true);
+
+    expectMatches(result, ref.relu(ref.conv2d(xData, [1, 4, 4, 4], kData, [4, 2, 3, 3], { groups: 2 }).data), 'group_conv');
   });
 });
 

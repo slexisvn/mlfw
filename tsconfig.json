@@ -29,7 +29,6 @@
     "src/runtime/path.ts",
     "src/runtime/runtime.ts",
     "src/runtime/measurer_registry.ts",
-    "src/notebook/browser.ts",
     "src/lightning/types.ts",
     "src/lightning/metrics/**/*.ts",
     "src/lightning/loggers/**/*.ts",

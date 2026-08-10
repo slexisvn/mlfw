@@ -3,6 +3,7 @@ import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
 import { WebGPUTarget } from '../../../src/backend/target.js';
+import { countLoops as countForLoops } from '../../_utils/kernel_source.js';
 
 function compile(func, opts = {}) {
   return compileGraph(func, WebGPUTarget(), { scheduling: { enabled: true }, ...opts });
@@ -16,9 +17,6 @@ function getSource(result, name) {
   return result.getSource(name);
 }
 
-function countForLoops(src) {
-  return (src.match(/\bfor\s*\(/g) || []).length;
-}
 
 function countStoreStatements(src) {
   return (src.match(/\w+\[.*\]\s*=/g) || []).length;

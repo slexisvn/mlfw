@@ -48,6 +48,12 @@ export function registerOpStrategy(opName, { name, compute, plevel = 10, targetK
   return strat;
 }
 
+export function unregisterOpStrategy(opName) {
+  const existed = strategyRegistry.delete(opName);
+  viewCache.clear();
+  return existed;
+}
+
 export function getOpStrategy(opName, target = null) {
   const full = strategyRegistry.get(opName);
   if (!full) return null;

@@ -3,6 +3,7 @@ import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { FusionGroup, FusionGroupBuilder } from '../../../src/compiler/passes/fusion/fusion_groups.js';
 import { FusionLegality, FusionKind } from '../../../src/compiler/passes/fusion/fusion_analysis.js';
+import { scalingRatio, QUADRATIC_RATIO } from '../../_utils/scaling.js';
 
 function ops(func) {
   const list = [];
@@ -253,12 +254,14 @@ describe('FusionGroupBuilder scales linearly on large graphs (no O(n^2)/O(n^3) b
     });
   }
 
-  it('fuses ~800 same-shape ops well under a wall-clock bound that O(n^2) would blow', () => {
-    const func = makeWide(800);
-    const t0 = performance.now();
-    new FusionGroupBuilder(new FusionLegality()).buildAllGroups(func);
-    const elapsed = performance.now() - t0;
-    expect(elapsed).toBeLessThan(5000);
+  it('doubling the op count does not more than double the time (rules out O(n^2))', () => {
+    const { ratio, tSmall, tLarge } = scalingRatio({
+      build: makeWide,
+      work: (func) => new FusionGroupBuilder(new FusionLegality()).buildAllGroups(func),
+      n: 400,
+    });
+    expect(ratio, `n=400 took ${tSmall.toFixed(1)}ms, n=800 took ${tLarge.toFixed(1)}ms (ratio ${ratio.toFixed(2)})`)
+      .toBeLessThan(QUADRATIC_RATIO);
   });
 });
 

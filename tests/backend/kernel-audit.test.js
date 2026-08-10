@@ -1,20 +1,15 @@
 import { describe, it, expect } from 'vitest';
-import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
-import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
-import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
-import { CPUTarget, CUDATarget } from '../../../src/backend/target.js';
+import { buildFunction } from '../../src/compiler/ir/graph/builder.js';
+import { TensorType, ScalarType } from '../../src/compiler/ir/graph/types.js';
+import { compileGraph } from '../../src/compiler/pipeline/compiler.js';
+import { CPUTarget, CUDATarget } from '../../src/backend/target.js';
+import { countLoops, countTempBuffers } from '../_utils/kernel_source.js';
 
 function compile(func, opts = {}) {
   return compileGraph(func, CPUTarget(), opts);
 }
 
-function countLoops(src) {
-  return (src.match(/\bfor\s*\(/g) || []).length;
-}
 
-function countTempBuffers(src) {
-  return (src.match(/new (Float32Array|Float64Array|Int32Array)/g) || []).length;
-}
 
 function hasArithmeticNoise(src) {
   const issues = [];

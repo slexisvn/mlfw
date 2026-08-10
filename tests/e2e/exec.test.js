@@ -4,8 +4,8 @@ import {
   Linear, Sequential, ReLU, GELU, SiLU, Sigmoid, Tanh,
   LayerNorm, Softmax,
   compile, CPUTarget, WasmTarget,
-} from '../../../src/index.js';
-import { Tensor } from '../../../src/tensor/core/tensor.js';
+} from '../../src/index.js';
+import { Tensor } from '../../src/tensor/core/tensor.js';
 
 const TARGETS = [
   { name: 'cpu', factory: () => CPUTarget() },

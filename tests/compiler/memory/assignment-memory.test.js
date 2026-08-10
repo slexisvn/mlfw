@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { MemoryPool, MemoryBlock, BufferAssignment } from '../../../src/compiler/passes/memory/buffer_assignment.js';
 import { BufferInterval } from '../../../src/compiler/passes/memory/buffer_liveness.js';
 import { Buffer } from '../../../src/compiler/ir/tensor/buffer.js';
+import { InplaceCandidate } from '../../../src/compiler/passes/memory/inplace_analysis.js';
 
 describe('MemoryBlock', () => {
   it('end equals offset + size', () => {
@@ -301,14 +302,11 @@ describe('BufferAssignment', () => {
   });
 });
 
-import { InplaceCandidate } from '../../../src/compiler/passes/memory/inplace_analysis.js';
-
 describe('BufferAssignment: inplace destination extends aliased storage lifetime (no-alias-while-live)', () => {
   it('a later buffer does not reuse storage still held by a live inplace destination', () => {
     const src = new Buffer('src', [16], 'f32', 'global');
     const dst = new Buffer('dst', [16], 'f32', 'global');
     const other = new Buffer('other', [16], 'f32', 'global');
-    // src dies at 1; dst aliases src in-place and lives [1,5]; other lives [2,5] (overlaps dst).
     const intervals = [
       new BufferInterval(src, 0, 1, 'global'),
       new BufferInterval(dst, 1, 5, 'global'),
@@ -321,10 +319,8 @@ describe('BufferAssignment: inplace destination extends aliased storage lifetime
     const oDst = asg.getOffset(dst);
     const oOther = asg.getOffset(other);
 
-    // dst aliases src (in-place) — same storage by design.
-    expect(oDst).toBe(oSrc);
-    // other overlaps dst's live range [2,5] vs [1,5] → must NOT share storage with the live inplace dst.
-    expect(oOther).not.toBe(oDst);
+    expect(oDst, 'dst aliases src in-place and must share its storage').toBe(oSrc);
+    expect(oOther, 'other lives [2,5] overlapping the live inplace dst [1,5] and must not share its storage').not.toBe(oDst);
   });
 
   it('inplace chain (a→b→c) keeps the shared storage live until the last destination dies', () => {
@@ -342,7 +338,6 @@ describe('BufferAssignment: inplace destination extends aliased storage lifetime
     asg.assign(intervals, [new InplaceCandidate(a, b, 't'), new InplaceCandidate(b, c, 't')], 64);
     expect(asg.getOffset(b)).toBe(asg.getOffset(a));
     expect(asg.getOffset(c)).toBe(asg.getOffset(a));
-    // other overlaps c [3,6] which still holds a's storage → must not collide.
-    expect(asg.getOffset(other)).not.toBe(asg.getOffset(a));
+    expect(asg.getOffset(other), 'other lives [3,6] overlapping c which still holds a\'s storage and must not collide').not.toBe(asg.getOffset(a));
   });
 });

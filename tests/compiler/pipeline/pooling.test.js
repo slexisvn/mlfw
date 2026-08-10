@@ -3,6 +3,7 @@ import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
 import { CPUTarget } from '../../../src/backend/target.js';
+import * as ref from '../../_utils/reference_ops.js';
 
 function compile(func) {
   return compileGraph(func, CPUTarget());
@@ -53,7 +54,7 @@ describe('pool2d', () => {
     expect(out[3]).toBeCloseTo(13.5, 5);
   });
 
-  it('single-element padding normalizes to symmetric 2D padding', () => {
+  it('pad-1 max pool matches the reference, with border windows maxing only over in-bounds elements', () => {
     const inp3 = new TensorType([1, 1, 4, 4], ScalarType.F32);
     const out3 = new TensorType([1, 1, 5, 5], ScalarType.F32);
     const func = buildFunction('maxp_pad1', [inp3], [out3], (b, args) => {
@@ -71,7 +72,11 @@ describe('pool2d', () => {
     ]);
     const out = new Float32Array(25);
     r.run('maxp_pad1', inp, out);
-    expect(out.every(v => isFinite(v))).toBe(true);
+
+    const expected = ref.pool2d(inp, [1, 1, 4, 4], 'max', [2, 2], [1, 1], 1);
+    expect(expected.shape).toEqual([1, 1, 5, 5]);
+    const match = ref.expectClose(out, expected.data, 1e-6, 'maxp_pad1');
+    expect(match.ok, match.message).toBe(true);
   });
 
   it('max pool with padding', () => {

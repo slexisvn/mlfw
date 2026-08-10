@@ -46,9 +46,8 @@ describe('ScheduleValidator Analyzer-backed bounds proving', () => {
     expect(ScheduleValidator.validate(f).some(oobMsg)).toBe(false);
   });
 
-  it('is sound: stays silent on a partial overflow it cannot prove is always OOB', () => {
+  it('is sound: stays silent on a partial overflow it cannot prove is always OOB (i in [0,7] makes i+4 span [4,11], overlapping the valid range)', () => {
     const A = new Buffer('A', [8], 'float32', 'global');
-    // i in [0,7], i+4 in [4,11]: overlaps the valid range -> not provably OOB
     const f = storeFunc(A, [add(iv('i'), new IntImmNode(4))], new IntImmNode(0), 'i', 8);
     expect(ScheduleValidator.validate(f).some(oobMsg)).toBe(false);
   });

@@ -3,6 +3,7 @@ import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
 import { CPUTarget } from '../../../src/backend/target.js';
+import { countLoops as countForLoops } from '../../_utils/kernel_source.js';
 
 function compile(func, opts = {}) {
   return compileGraph(func, CPUTarget(), { scheduling: { enabled: true }, ...opts });
@@ -16,9 +17,6 @@ function src(result, name) {
   return result.getSource(name);
 }
 
-function countForLoops(s) {
-  return (s.match(/\bfor\s*\(/g) || []).length;
-}
 
 function countStores(s) {
   return (s.match(/\w+\[.*?\]\s*=/g) || []).length;

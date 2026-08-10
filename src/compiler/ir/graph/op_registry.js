@@ -75,6 +75,10 @@ export class OpRegistry {
     this._defs.set(opDef.name, opDef);
   }
 
+  unregister(name) {
+    return this._defs.delete(name);
+  }
+
   registerOpAttr(opName, key, value) {
     const def = this._defs.get(opName);
     if (!def) throw new Error(`registerOpAttr: op '${opName}' not registered`);

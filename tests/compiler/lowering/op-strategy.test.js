@@ -1,7 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import {
   OpStrategy,
   registerOpStrategy,
+  unregisterOpStrategy,
   getOpStrategy,
   selectImplementation,
   hasOpStrategy,
@@ -14,6 +15,12 @@ import {
 } from '../../../src/compiler/passes/lowering/lowering_registry.js';
 import { TargetKind } from '../../../src/backend/target.js';
 import '../../../src/compiler/passes/lowering/graph_to_tensor.js';
+
+const TEST_OPS = ['__strat_test__', '__lr_generic__', '__lr_target__', '__lr_plevel__', '__lr_replace__', '__target_only__'];
+
+afterEach(() => {
+  for (const name of TEST_OPS) unregisterOpStrategy(name);
+});
 
 describe('OpStrategy core selection', () => {
   it('selects the highest-plevel implementation', () => {

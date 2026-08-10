@@ -3,18 +3,13 @@ import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
 import { CPUTarget } from '../../../src/backend/target.js';
+import { countLoops, countTempBuffers } from '../../_utils/kernel_source.js';
 
 function compile(func, opts = {}) {
   return compileGraph(func, CPUTarget(), opts);
 }
 
-function countLoops(src) {
-  return (src.match(/\bfor\s*\(/g) || []).length;
-}
 
-function countTempBuffers(src) {
-  return (src.match(/new Float32Array/g) || []).length;
-}
 
 function runKernel(result, name, inputs, outputShapes) {
   const inArrays = inputs.map(i => new Float32Array(i));
