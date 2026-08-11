@@ -6,7 +6,7 @@ import { OpTrait } from '../../../../src/compiler/ir/graph/op_registry.js';
 
 const STRUCTURAL = new Set([
   'return', 'yield', 'constant', 'scalar_constant', 'fusion', 'scan', 'if', 'while', 'custom_call',
-  'tuple', 'get_tuple_element',
+  'tuple', 'get_tuple_element', 'call',
 ]);
 
 describe('lowering coverage (build-time gap report)', () => {

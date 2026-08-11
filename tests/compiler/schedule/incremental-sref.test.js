@@ -44,7 +44,7 @@ function blockNames(tree) { return tree.allBlocks().map(s => s.node.name).sort()
 function loopSet(tree) { return new Set(tree.allLoops().map(s => s.node)); }
 
 function expectIncrementalMatchesRebuild(sch) {
-  const inc = sch._srefTree;
+  const inc = sch.state.tree;
   const fresh = new SRefTree(sch.func);
 
   expect(blockNames(inc)).toEqual(blockNames(fresh));
@@ -117,7 +117,7 @@ describe('incremental SRefTree stays identical to a full rebuild after each prim
     const func = matmulFunc('g', 4, 4, 8);
     const sch = new Schedule(func);
     sch.decomposeReduction('g');
-    expect(blockNames(sch._srefTree)).toEqual(['g_init', 'g_upd']);
+    expect(blockNames(sch.state.tree)).toEqual(['g_init', 'g_upd']);
     expectIncrementalMatchesRebuild(sch);
   });
 
@@ -125,7 +125,7 @@ describe('incremental SRefTree stays identical to a full rebuild after each prim
     const func = matmulFunc('g', 4, 4, 8);
     const sch = new Schedule(func);
     sch.rfactor('g', 'k', 2);
-    expect(blockNames(sch._srefTree)).toEqual(['g_rf_c', 'g_rf_p']);
+    expect(blockNames(sch.state.tree)).toEqual(['g_rf_c', 'g_rf_p']);
     expectIncrementalMatchesRebuild(sch);
   });
 

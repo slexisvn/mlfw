@@ -1,17 +1,18 @@
 import {
-  ForNode, BlockNode, SeqNode, BufferStoreNode, BufferLoadNode,
-  VariableNode, IntImmNode, MathOpNode, ForKind, IfThenElseNode, AllocateNode
+  ForNode, BlockNode, SeqNode, BufferStoreNode, BufferLoadNode, BlockRealizeNode,
+  VariableNode, IntImmNode, MathOpNode, ForKind, IterVarKind, IfThenElseNode, AllocateNode
 } from '../ir/tensor/nodes.js';
 import { Buffer } from '../ir/tensor/buffer.js';
 import { ScheduleTrace } from './trace.js';
 import { ScheduleValidator } from './validator.js';
 import { ScheduleState } from './schedule_state.js';
 import { ScheduleMutator } from './mutator.js';
-import { SRefTree } from './sref.js';
-import { loopCarriesReduction, collectVarsUsed } from './legality.js';
+import { loopCarriedDependence, reorderLegality, collectVarsUsed, IterVarPolicy } from './legality.js';
 import { cloneIRShared } from '../ir/clone_ir.js';
-import { transform as irTransform, some as irSome } from '../ir/ir_visitor.js';
+import { transform as irTransform, walk as irWalk } from '../ir/ir_visitor.js';
 import { FuncAttr } from '../ir/func_attrs.js';
+import { AccessKind, loadedBuffers } from '../analysis/buffer_access.js';
+import { LinearForm, mixedRadixDecomposition, linearFormToNode } from '../analysis/iter_map.js';
 
 const RFACTOR_ASSOCIATIVE_OPS = new Set(['+', '*', 'min', 'max']);
 
@@ -32,29 +33,12 @@ function replaceBufferLoads(node, bufName, makeReplacement, counter) {
   }, { bindVars: false });
 }
 
-function loadsBuffer(node, bufName) {
-  return irSome(node, (n) => n.type === 'BufferLoadNode' && n.buffer && n.buffer.name === bufName);
-}
-
-function usesBufferInIndex(node, bufName) {
-  if (!node || typeof node !== 'object') return false;
-  if ((node.type === 'BufferLoadNode' || node.type === 'BufferStoreNode') && node.indices) {
-    for (const ix of node.indices) if (loadsBuffer(ix, bufName)) return true;
-  }
-  for (const k of ['a', 'b', 'expr', 'value', 'condition', 'thenBody', 'elseBody', 'body', 'initBody']) {
-    if (node[k] && usesBufferInIndex(node[k], bufName)) return true;
-  }
-  if (node.args) for (const a of node.args) if (usesBufferInIndex(a, bufName)) return true;
-  if (node.indices) for (const ix of node.indices) if (usesBufferInIndex(ix, bufName)) return true;
-  if (node.stmts) for (const s of node.stmts) if (usesBufferInIndex(s, bufName)) return true;
-  return false;
-}
-
 function cloneExprTree(node) {
   return cloneIRShared(node, cloneExprTree, (n, copy, rec) => {
     if (n.type === 'BlockRealizeNode') {
       copy.iterVar = n.iterVar;
       copy.binding = rec(n.binding);
+      copy.kind = n.kind;
       return copy;
     }
     for (const key of Object.keys(n)) {
@@ -72,19 +56,75 @@ function collectStores(node, out) {
   if (node.type === 'ForNode' || node.type === 'BlockNode') collectStores(node.body, out);
 }
 
-function storeIndexNames(store) {
-  return store.indices.map((ix) => (ix && ix.type === 'VariableNode') ? ix.name : null);
+function usedVarNames(expr) {
+  const names = new Set();
+  irWalk(expr, (n) => { if (n.type === 'VariableNode') names.add(n.name); });
+  return names;
 }
 
-function inlineStoreValue(funcBody, store, tag) {
-  const idxNames = store.indices.map((ix) => ix.name);
-  const tmpNames = idxNames.map((_, k) => `__inl_${tag}_${k}`);
+function recoverIterVar(indexExpr, decomposition, factor) {
+  let expr = decomposition.offset === 0
+    ? indexExpr
+    : new MathOpNode('-', indexExpr, new IntImmNode(decomposition.offset));
+  if (factor.coeff !== 1) expr = new MathOpNode('//', expr, new IntImmNode(factor.coeff));
+  if (factor.coeff * factor.extent !== decomposition.extent) {
+    expr = new MathOpNode('%', expr, new IntImmNode(factor.extent));
+  }
+  return factor.min === 0 ? expr : new MathOpNode('+', expr, new IntImmNode(factor.min));
+}
+
+function invertWriteIndices(access) {
+  const varRanges = new Map();
+  for (const level of access.iterSpace) {
+    if (level) varRanges.set(level.name, [level.min, level.extent]);
+  }
+  const decompositions = [];
+  for (const form of access.forms) {
+    const decomposition = mixedRadixDecomposition(form, varRanges);
+    if (!decomposition) return null;
+    decompositions.push(decomposition);
+  }
+  return decompositions;
+}
+
+function producerVarForms(access, blockInfo) {
+  const forms = new Map();
+  for (const level of access.iterSpace) {
+    if (level) forms.set(level.name, LinearForm.variable(level.name));
+  }
+  if (blockInfo) {
+    for (const binding of blockInfo.bindings) {
+      if (binding.form) forms.set(binding.name, binding.form);
+    }
+  }
+  return forms;
+}
+
+function substituteAffineVars(expr, varForms, loopVarExpr) {
+  return irTransform(expr, (n) => {
+    if (n.type !== 'VariableNode') return n;
+    const form = varForms.get(n.name);
+    if (!form) return n;
+    return linearFormToNode(
+      form,
+      (name) => loopVarExpr.get(name)(),
+      (value) => new IntImmNode(value),
+      (op, a, b) => new MathOpNode(op, a, b)
+    );
+  }, { bindVars: false });
+}
+
+function inlineStoreValue(funcBody, store, decompositions, varForms) {
   const counter = { n: 0 };
   replaceBufferLoads(funcBody, store.buffer.name, (load) => {
-    let expr = cloneExprTree(store.value);
-    for (let k = 0; k < idxNames.length; k++) expr = substituteVar(expr, idxNames[k], () => new VariableNode(tmpNames[k], 'int32'));
-    for (let k = 0; k < idxNames.length; k++) expr = substituteVar(expr, tmpNames[k], () => cloneExprTree(load.indices[k]));
-    return expr;
+    const loopVarExpr = new Map();
+    for (let d = 0; d < decompositions.length; d++) {
+      const decomposition = decompositions[d];
+      for (const factor of decomposition.factors) {
+        loopVarExpr.set(factor.name, () => recoverIterVar(cloneExprTree(load.indices[d]), decomposition, factor));
+      }
+    }
+    return substituteAffineVars(cloneExprTree(store.value), varForms, loopVarExpr);
   }, counter);
   return counter.n;
 }
@@ -126,32 +166,29 @@ export class Schedule {
     this.trace = new ScheduleTrace();
     this.state = new ScheduleState(primFunc);
     this._replaying = false;
-    this._srefTree = new SRefTree(primFunc);
     this.mutator = new ScheduleMutator(primFunc);
   }
 
   _replaceInTree(oldNode, newNode) {
-    if (!this._srefTree.replaceNode(oldNode, newNode)) {
-      this._srefTree.rebuildFrom(this.func.body);
-    }
-    this.state.invalidate();
+    this.state.replaceNode(oldNode, newNode);
   }
 
   _removeFromTree(node) {
-    if (!this._srefTree.removeNode(node)) {
-      this._srefTree.rebuildFrom(this.func.body);
-    }
-    this.state.invalidate();
+    this.state.removeNode(node);
+  }
+
+  getBlockSRef(name) {
+    const sref = this.state.tree.getBlockSRef(name);
+    if (!sref) throw new Error(`Block '${name}' not found`);
+    return sref;
   }
 
   getBlock(name) {
-    const sref = this._srefTree.getBlockSRef(name);
-    if (!sref) throw new Error(`Block '${name}' not found`);
-    return sref.node;
+    return this.getBlockSRef(name).node;
   }
 
   getLoops(blockName) {
-    return this._srefTree.loopsOf(blockName).map(sref => sref.node);
+    return this.state.tree.loopsOf(blockName).map(sref => sref.node);
   }
 
   _resolveLoop(ref) {
@@ -248,118 +285,143 @@ export class Schedule {
     if (loopSet.size !== newOrder.length) {
       throw new Error('reorder: duplicate loop in requested order');
     }
-    let topmostLoop = null;
-    let topmostDepth = Infinity;
-    const depthMap = new Map();
 
-    const findDepths = (node, depth) => {
-      if (!node) return;
-      if (node.type === 'ForNode') {
-        if (loopSet.has(node)) {
-          depthMap.set(node, depth);
-          if (depth < topmostDepth) {
-            topmostDepth = depth;
-            topmostLoop = node;
-          }
-        }
-        findDepths(node.body, depth + 1);
-        return;
-      }
-      if (node.type === 'SeqNode') {
-        for (const s of node.stmts) findDepths(s, depth);
-      } else if (node.type === 'IfThenElseNode') {
-        findDepths(node.thenBody, depth);
-      } else if (node.type === 'BlockNode' || node.type === 'AllocateNode' || node.type === 'LetStmtNode') {
-        findDepths(node.body, depth);
-      }
-    };
-    findDepths(this.func.body, 0);
+    const topmostLoop = this._topmostOf(loopSet);
+    const { links, innermostBody } = this._collectReorderChain(loopSet, topmostLoop);
 
-    if (depthMap.size !== newOrder.length) {
-      throw new Error('reorder: not all requested loops were found in the function nest');
+    const after = links.slice();
+    let slot = 0;
+    for (let i = 0; i < links.length; i++) {
+      if (loopSet.has(links[i])) after[i] = newOrder[slot++];
     }
 
-    const { wrappers, innermostBody } = this._collectReorderNest(loopSet, topmostLoop);
+    const isLoop = (n) => n.type === 'ForNode';
+    const reason = reorderLegality(this.state, links.filter(isLoop), after.filter(isLoop));
+    if (reason) throw new Error(`reorder: ${reason}`);
 
-    this.mutator.replaceNode(topmostLoop, newOrder[0]);
-
-    for (const loop of newOrder) {
-      if (loop === newOrder[0]) continue;
-      loop._parent = null;
-      loop._parentKey = null;
-      loop._parentIdx = -1;
+    const chain = this._arrangeChain(after);
+    this.mutator.replaceNode(topmostLoop, chain[0]);
+    for (const node of chain) {
+      if (node === chain[0]) continue;
+      node._parent = null;
+      node._parentKey = null;
+      node._parentIdx = -1;
+    }
+    for (let i = 0; i < chain.length; i++) {
+      this._setChainChild(chain[i], i + 1 < chain.length ? chain[i + 1] : innermostBody);
     }
 
-    let inner = innermostBody;
-    for (let i = wrappers.length - 1; i >= 0; i--) {
-      this._setWrapperChild(wrappers[i], inner);
-      inner = wrappers[i];
-    }
-
-    for (let i = 0; i < newOrder.length; i++) {
-      const child = i < newOrder.length - 1 ? newOrder[i + 1] : inner;
-      newOrder[i].body = child;
-      newOrder[i]._setChild('body', child);
-    }
-
-    this._replaceInTree(topmostLoop, newOrder[0]);
+    this._replaceInTree(topmostLoop, chain[0]);
 
     if (!this._replaying) {
       this.trace.record('reorder', [newOrder.map(l => l.loopVar.name)]);
     }
   }
 
-  _setWrapperChild(wrapper, child) {
-    if (wrapper.type === 'IfThenElseNode') {
-      wrapper._parent = null; wrapper._parentKey = null; wrapper._parentIdx = -1;
-      wrapper.thenBody = child;
-      wrapper._setChild('thenBody', child);
-    } else {
-      wrapper._parent = null; wrapper._parentKey = null; wrapper._parentIdx = -1;
-      wrapper.body = child;
-      wrapper._setChild('body', child);
+  _topmostOf(loopSet) {
+    let topmost = null;
+    let found = 0;
+    const stack = [{ node: this.func.body, depth: 0 }];
+    let topmostDepth = Infinity;
+    while (stack.length > 0) {
+      const { node, depth } = stack.pop();
+      if (!node) continue;
+      if (node.type === 'ForNode') {
+        if (loopSet.has(node)) {
+          found++;
+          if (depth < topmostDepth) { topmostDepth = depth; topmost = node; }
+        }
+        stack.push({ node: node.body, depth: depth + 1 });
+        continue;
+      }
+      if (node.type === 'SeqNode') {
+        for (const s of node.stmts) stack.push({ node: s, depth });
+      } else if (node.type === 'IfThenElseNode') {
+        stack.push({ node: node.thenBody, depth });
+        if (node.elseBody) stack.push({ node: node.elseBody, depth });
+      } else if (node.type === 'BlockNode' || node.type === 'AllocateNode' || node.type === 'LetStmtNode') {
+        stack.push({ node: node.body, depth });
+        if (node.initBody) stack.push({ node: node.initBody, depth });
+      }
     }
+    if (found !== loopSet.size) {
+      throw new Error('reorder: not all requested loops were found in the function nest');
+    }
+    return topmost;
   }
 
-  _collectReorderNest(loopSet, topmostLoop) {
+  _arrangeChain(after) {
+    const loopNames = new Set(after.filter((n) => n.type === 'ForNode').map((n) => n.loopVar.name));
+    const guardOf = (node) => {
+      if (node.type === 'IfThenElseNode') return node.condition;
+      if (node.type === 'LetStmtNode') return node.value;
+      return null;
+    };
+    const dependsOn = (node) => {
+      const guard = guardOf(node);
+      if (!guard) return new Set();
+      const needs = new Set();
+      for (const name of usedVarNames(guard)) if (loopNames.has(name)) needs.add(name);
+      return needs;
+    };
+
+    const chain = [];
+    const bound = new Set();
+    const deferred = [];
+    const release = () => {
+      for (let i = 0; i < deferred.length;) {
+        if ([...deferred[i].needs].every((n) => bound.has(n))) {
+          chain.push(deferred[i].node);
+          deferred.splice(i, 1);
+        } else i++;
+      }
+    };
+    for (const node of after) {
+      if (node.type === 'ForNode') {
+        chain.push(node);
+        bound.add(node.loopVar.name);
+        release();
+        continue;
+      }
+      const needs = dependsOn(node);
+      if ([...needs].every((n) => bound.has(n))) chain.push(node);
+      else deferred.push({ node, needs });
+    }
+    for (const entry of deferred) chain.push(entry.node);
+    return chain;
+  }
+
+  _setChainChild(node, child) {
+    const key = node.type === 'IfThenElseNode' ? 'thenBody' : 'body';
+    node[key] = child;
+    node._setChild(key, child);
+  }
+
+  _collectReorderChain(loopSet, topmostLoop) {
     const remaining = new Set(loopSet);
-    const wrappers = [];
+    const links = [];
     let node = topmostLoop;
-    let started = false;
     let innermostBody = null;
     while (node) {
       if (node.type === 'ForNode') {
-        if (loopSet.has(node)) {
-          remaining.delete(node);
-          started = true;
-          if (remaining.size === 0) { innermostBody = node.body; break; }
-          node = node.body;
-          continue;
-        }
-        if (started) {
-          throw new Error(
-            `reorder: loops are not a perfect nest — non-reordered loop '${node.loopVar.name}' ` +
-            `is interleaved between reordered loops`
-          );
-        }
+        links.push(node);
+        remaining.delete(node);
+        if (remaining.size === 0) { innermostBody = node.body; break; }
         node = node.body;
       } else if (node.type === 'IfThenElseNode') {
         if (node.elseBody) {
-          throw new Error('reorder: cannot reorder across a conditional with an else-branch');
+          throw new Error('reorder: a two-way conditional separates the reordered loops, so they do not form a single chain');
         }
-        if (started) wrappers.push(node);
+        links.push(node);
         node = node.thenBody;
       } else if (node.type === 'AllocateNode' || node.type === 'LetStmtNode') {
-        if (started) wrappers.push(node);
+        links.push(node);
         node = node.body;
       } else if (node.type === 'BlockNode') {
-        if (started) {
-          throw new Error('reorder: a compute block separates the reordered loops');
-        }
-        node = node.body;
+        throw new Error(`reorder: block '${node.name}' separates the reordered loops, which therefore belong to different block scopes`);
       } else if (node.type === 'SeqNode') {
         if (node.stmts.length !== 1) {
-          throw new Error('reorder: loops are not a perfect nest — multiple statements separate the reordered loops');
+          throw new Error('reorder: multiple statements separate the reordered loops, so they do not form a single chain');
         }
         node = node.stmts[0];
       } else {
@@ -367,9 +429,9 @@ export class Schedule {
       }
     }
     if (remaining.size > 0) {
-      throw new Error('reorder: loops do not form a single perfect nest');
+      throw new Error('reorder: loops do not form a single chain');
     }
-    return { wrappers, innermostBody };
+    return { links, innermostBody };
   }
 
   fuseLoops(outer, inner) {
@@ -464,10 +526,8 @@ export class Schedule {
     if (loop.type !== 'ForNode') throw new Error('vectorize expects ForNode');
     const extent = getConstExtent(loop.extent);
     if (extent === null) throw new Error('Cannot vectorize loop with non-constant extent');
-    const reductionBlock = loopCarriesReduction(loop);
-    if (reductionBlock !== null) {
-      throw new Error(`Cannot vectorize reduction loop '${loop.loopVar.name}' (loop-carried dependency in block '${reductionBlock}')`);
-    }
+    const carried = loopCarriedDependence(this.state, loop, IterVarPolicy.ACCUMULABLE);
+    if (carried !== null) throw new Error(`Cannot vectorize: ${carried}`);
     loop.kind = ForKind.VECTORIZED;
     this.state.invalidate();
     if (!this._replaying) {
@@ -488,10 +548,8 @@ export class Schedule {
   parallelize(loop) {
     loop = this._resolveLoop(loop);
     if (loop.type !== 'ForNode') throw new Error('parallelize expects ForNode');
-    const reductionBlock = loopCarriesReduction(loop);
-    if (reductionBlock !== null) {
-      throw new Error(`Cannot parallelize reduction loop '${loop.loopVar.name}' (loop-carried dependency in block '${reductionBlock}')`);
-    }
+    const carried = loopCarriedDependence(this.state, loop, IterVarPolicy.SPATIAL);
+    if (carried !== null) throw new Error(`Cannot parallelize: ${carried}`);
     loop.kind = ForKind.PARALLEL;
     this.state.invalidate();
     if (!this._replaying) {
@@ -547,21 +605,30 @@ export class Schedule {
       ? block.initBody.value : new IntImmNode(0);
 
     const spatialLoops = loops.filter(l => l.loopVar.name !== reductionVarName);
+    const spatialLoopVars = new Set(spatialLoops.map(l => l.loopVar.name));
     const KO = K / factor;
     const partialBuf = new Buffer(`${acc.name}_rf`, [factor, ...acc.shape], acc.dtype, acc.scope);
 
     const kiVar = freshVar(`${reductionVarName}_rfi`);
     const koVar = freshVar(`${reductionVarName}_rfo`);
     const piVar = freshVar(`${reductionVarName}_rfp`);
+    const kiIter = new BlockRealizeNode(freshVar(`${reductionVarName}_rfvi`), kiVar, IterVarKind.DATA_PAR);
+    const piIter = new BlockRealizeNode(freshVar(`${reductionVarName}_rfvp`), piVar, IterVarKind.COMM_REDUCE);
 
-    const cfIdx = (kvar) => [kvar, ...spatialIdx.map(cloneExprTree)];
-    const partialUpdate = substituteVar(cloneExprTree(update), reductionVarName,
-      () => new MathOpNode('+', new MathOpNode('*', koVar, new IntImmNode(factor)), kiVar));
+    const splitK = () => new MathOpNode('+', new MathOpNode('*', koVar, new IntImmNode(factor)), kiVar);
+    const cfIdx = (iterVar) => [iterVar, ...spatialIdx.map(cloneExprTree)];
+    const partialUpdate = substituteVar(cloneExprTree(update), reductionVarName, splitK);
+    const partialIterVars = block.iterVars.map((iv) => {
+      const copy = cloneExprTree(iv);
+      copy.binding = substituteVar(copy.binding, reductionVarName, splitK);
+      return copy;
+    });
+    partialIterVars.push(kiIter);
 
-    const partialStore = new BufferStoreNode(partialBuf, cfIdx(kiVar),
-      new MathOpNode(op, new BufferLoadNode(partialBuf, cfIdx(kiVar)), partialUpdate));
-    const partialInit = new BufferStoreNode(partialBuf, cfIdx(kiVar), cloneExprTree(initVal));
-    const partialBlock = new BlockNode(`${blockName}_rf_p`, [],
+    const partialStore = new BufferStoreNode(partialBuf, cfIdx(kiIter.iterVar),
+      new MathOpNode(op, new BufferLoadNode(partialBuf, cfIdx(kiIter.iterVar)), partialUpdate));
+    const partialInit = new BufferStoreNode(partialBuf, cfIdx(kiIter.iterVar), cloneExprTree(initVal));
+    const partialBlock = new BlockNode(`${blockName}_rf_p`, partialIterVars,
       block.reads.map(r => ({ buffer: r.buffer })), [{ buffer: partialBuf }], partialStore, partialInit);
 
     let partialNest = new ForNode(koVar, new IntImmNode(0), new IntImmNode(KO), ForKind.SERIAL, partialBlock);
@@ -573,9 +640,10 @@ export class Schedule {
 
     const combineStore = new BufferStoreNode(acc, spatialIdx.map(cloneExprTree),
       new MathOpNode(op, new BufferLoadNode(acc, spatialIdx.map(cloneExprTree)),
-        new BufferLoadNode(partialBuf, cfIdx(piVar))));
+        new BufferLoadNode(partialBuf, cfIdx(piIter.iterVar))));
     const combineInit = new BufferStoreNode(acc, spatialIdx.map(cloneExprTree), cloneExprTree(initVal));
-    const combineBlock = new BlockNode(`${blockName}_rf_c`, [],
+    const combineBlock = new BlockNode(`${blockName}_rf_c`,
+      [...this._iterVarsOver(block, spatialLoopVars), piIter],
       [{ buffer: partialBuf }], [{ buffer: acc }], combineStore, combineInit);
 
     let combineNest = new ForNode(piVar, new IntImmNode(0), new IntImmNode(factor), ForKind.SERIAL, combineBlock);
@@ -601,20 +669,21 @@ export class Schedule {
     if (!store || store.type !== 'BufferStoreNode') throw new Error(`decomposeReduction: block '${blockName}' body is not a store`);
     const acc = store.buffer;
 
-    const spatialVars = new Set();
-    for (const idx of store.indices) collectVarsUsed(idx, spatialVars);
-    const spatialLoops = loops.filter(l => spatialVars.has(l.loopVar.name));
-    const reductionLoops = loops.filter(l => !spatialVars.has(l.loopVar.name));
+    const spatialLoopVars = this._writeIndexLoopVars('decomposeReduction', block, store);
+    const spatialLoops = loops.filter(l => spatialLoopVars.has(l.loopVar.name));
+    const reductionLoops = loops.filter(l => !spatialLoopVars.has(l.loopVar.name));
     if (reductionLoops.length === 0) throw new Error(`decomposeReduction: block '${blockName}' has no reduction loop`);
 
     const initStore = new BufferStoreNode(acc, store.indices.map(cloneExprTree), cloneExprTree(block.initBody.value));
-    const initBlock = new BlockNode(`${blockName}_init`, [], [], [{ buffer: acc }], initStore);
+    const initBlock = new BlockNode(`${blockName}_init`,
+      this._iterVarsOver(block, spatialLoopVars), [], [{ buffer: acc }], initStore);
     let initNest = initBlock;
     for (let i = spatialLoops.length - 1; i >= 0; i--) {
       initNest = new ForNode(spatialLoops[i].loopVar, new IntImmNode(0), cloneExprTree(spatialLoops[i].extent), ForKind.SERIAL, initNest);
     }
 
-    const updBlock = new BlockNode(`${blockName}_upd`, [], block.reads.map(r => ({ buffer: r.buffer })), [{ buffer: acc }], cloneExprTree(store));
+    const updBlock = new BlockNode(`${blockName}_upd`,
+      block.iterVars.map(cloneExprTree), block.reads.map(r => ({ buffer: r.buffer })), [{ buffer: acc }], cloneExprTree(store));
     let updNest = updBlock;
     for (let i = loops.length - 1; i >= 0; i--) {
       updNest = new ForNode(loops[i].loopVar, new IntImmNode(0), cloneExprTree(loops[i].extent), ForKind.SERIAL, updNest);
@@ -678,6 +747,31 @@ export class Schedule {
     if (!this._replaying) this.trace.record('storageAlign', [blockName, bufferName, axis, factor, offset || 0]);
   }
 
+  _writeIndexLoopVars(primitive, block, store) {
+    const info = this.state.blockAccessInfo(block);
+    const access = (info ? info.accesses : []).find((a) => a.kind === AccessKind.WRITE && a.node === store);
+    if (!access) throw new Error(`${primitive}: block '${block.name}' write is not reachable from the function body`);
+    const names = new Set();
+    for (const form of access.forms) {
+      if (!form) throw new Error(`${primitive}: write index of '${access.buffer.name}' is not an affine map of its loop variables`);
+      for (const name of form.terms.keys()) names.add(name);
+    }
+    return names;
+  }
+
+  _iterVarsOver(block, loopVarNames) {
+    const info = this.state.blockAccessInfo(block);
+    if (!info) return [];
+    const formOf = new Map(info.bindings.map((b) => [b.name, b.form]));
+    const kept = [];
+    for (const iv of block.iterVars) {
+      if (!iv || !iv.iterVar) continue;
+      const form = formOf.get(iv.iterVar.name);
+      if (form && [...form.terms.keys()].every((name) => loopVarNames.has(name))) kept.push(cloneExprTree(iv));
+    }
+    return kept;
+  }
+
   _removeBlockNest(producerName, prod) {
     const loops = this.getLoops(producerName);
     const root = loops.length > 0 ? loops[0] : prod;
@@ -686,79 +780,155 @@ export class Schedule {
     this._replaceInTree(root, empty);
   }
 
-  computeInline(producerName) {
-    const prod = this.getBlock(producerName);
-    if (!prod) throw new Error(`computeInline: block '${producerName}' not found`);
-    if (prod.initBody) throw new Error('computeInline: cannot inline a reduction block (has init)');
+  _inlinePlan(primitive, producerName) {
+    const sref = this.getBlockSRef(producerName);
+    const prod = sref.node;
+    if (prod.initBody) throw new Error(`${primitive}: cannot inline a reduction block (has init)`);
 
     const stores = [];
     collectStores(prod.body, stores);
-    const store = stores[0];
-    if (!store) throw new Error('computeInline: producer has no single store to inline');
+    if (stores.length === 0) throw new Error(`${primitive}: producer has no store to inline`);
 
-    const B = store.buffer;
-    if (storeIndexNames(store).some((n) => n === null)) throw new Error('computeInline: producer indices must be simple loop variables');
-    if (loadsBuffer(store.value, B.name)) throw new Error('computeInline: producer is self-referential (recurrence), cannot inline');
-    if (usesBufferInIndex(this.func.body, B.name)) throw new Error(`computeInline: buffer '${B.name}' is used inside an index expression (indirect), cannot safely inline`);
+    const blockInfo = this.state.blockAccessInfo(prod);
+    const byNode = new Map();
+    for (const access of (blockInfo ? blockInfo.accesses : [])) {
+      if (access.kind === AccessKind.WRITE) byNode.set(access.node, access);
+    }
 
-    if (inlineStoreValue(this.func.body, store, producerName) === 0) throw new Error(`computeInline: buffer '${B.name}' has no consumers to inline into`);
-    dropBufferReads(this.func.body, B.name);
-    this._removeBlockNest(producerName, prod);
-    if (!this._replaying) this.trace.record('computeInline', [producerName]);
+    const produced = new Set(stores.map((s) => s.buffer));
+    if (produced.size !== stores.length) throw new Error(`${primitive}: buffer written more than once in block`);
+
+    const plans = [];
+    for (const store of stores) {
+      const access = byNode.get(store);
+      if (!access) throw new Error(`${primitive}: producer store is not reachable from the analyzed function body`);
+      if (access.selfReferential) {
+        throw new Error(`${primitive}: producer is self-referential (recurrence), cannot inline`);
+      }
+      for (const other of loadedBuffers([store.value])) {
+        if (produced.has(other)) throw new Error(`${primitive}: producer store depends on a co-produced buffer`);
+      }
+      if (this.state.accessInfo.indexLoaded.has(store.buffer)) {
+        throw new Error(`${primitive}: buffer '${store.buffer.name}' is used inside an index expression (indirect), cannot safely inline`);
+      }
+      const decompositions = invertWriteIndices(access);
+      if (!decompositions) {
+        throw new Error(`${primitive}: producer write index of '${store.buffer.name}' is not an invertible affine map of its loop variables`);
+      }
+      const varForms = producerVarForms(access, blockInfo);
+      for (const name of usedVarNames(store.value)) {
+        if (!varForms.has(name)) {
+          throw new Error(`${primitive}: producer value depends on '${name}', which is not an iteration variable of the block`);
+        }
+      }
+      plans.push({ store, decompositions, varForms });
+    }
+    return { sref, prod, plans };
+  }
+
+  _applyInline(primitive, producerName, plan) {
+    let total = 0;
+    for (const { store, decompositions, varForms } of plan.plans) {
+      total += inlineStoreValue(this.func.body, store, decompositions, varForms);
+    }
+    if (total === 0) throw new Error(`${primitive}: block '${producerName}' has no consumers to inline into`);
+    for (const { store } of plan.plans) dropBufferReads(this.func.body, store.buffer.name);
+    this._removeBlockNest(producerName, plan.prod);
+    if (!this._replaying) this.trace.record(primitive, [producerName]);
+  }
+
+  computeInline(producerName) {
+    const plan = this._inlinePlan('computeInline', producerName);
+    if (plan.plans.length !== 1) {
+      throw new Error('computeInline: block writes more than one buffer; use computeInlineBlock');
+    }
+    this._applyInline('computeInline', producerName, plan);
   }
 
   computeInlineBlock(producerName) {
-    const prod = this.getBlock(producerName);
-    if (!prod) throw new Error(`computeInlineBlock: block '${producerName}' not found`);
-    if (prod.initBody) throw new Error('computeInlineBlock: cannot inline a reduction block (has init)');
-
-    const stores = [];
-    collectStores(prod.body, stores);
-    if (stores.length === 0) throw new Error('computeInlineBlock: producer has no stores to inline');
-
-    const outNames = new Set(stores.map((s) => s.buffer.name));
-    if (outNames.size !== stores.length) throw new Error('computeInlineBlock: buffer written more than once in block');
-
-    for (const store of stores) {
-      if (storeIndexNames(store).some((n) => n === null)) throw new Error('computeInlineBlock: producer indices must be simple loop variables');
-      for (const name of outNames) if (loadsBuffer(store.value, name)) throw new Error('computeInlineBlock: producer store depends on a co-produced buffer');
-      if (usesBufferInIndex(this.func.body, store.buffer.name)) throw new Error(`computeInlineBlock: buffer '${store.buffer.name}' is used inside an index expression (indirect), cannot safely inline`);
-    }
-
-    let total = 0;
-    for (const store of stores) total += inlineStoreValue(this.func.body, store, `${producerName}_${store.buffer.name}`);
-    if (total === 0) throw new Error(`computeInlineBlock: block '${producerName}' has no consumers to inline into`);
-
-    for (const name of outNames) dropBufferReads(this.func.body, name);
-    this._removeBlockNest(producerName, prod);
-    if (!this._replaying) this.trace.record('computeInlineBlock', [producerName]);
+    this._applyInline('computeInlineBlock', producerName, this._inlinePlan('computeInlineBlock', producerName));
   }
 
-  _relocateBlockToLoop(blockName, targetLoopRef, atStart) {
-    const blk = this.getBlock(blockName);
-    if (!blk) throw new Error(`computeAt: block '${blockName}' not found`);
+  _checkRelocationDependences(primitive, blockSRef, targetLoop, atStart) {
+    const scope = this.state.scopeOf(blockSRef);
+    const self = scope && scope.memberOf(blockSRef);
+    if (!self) throw new Error(`${primitive}: block '${blockSRef.node.name}' is not part of any block scope`);
+    const targetSRef = this.state.tree.getSRef(targetLoop);
+    if (!targetSRef) throw new Error(`${primitive}: target loop is not part of the schedule tree`);
+
+    const inside = targetSRef.childBlocks().map((s) => scope.memberOf(s)).filter((m) => m !== null);
+    if (inside.length === 0) {
+      throw new Error(`${primitive}: the target loop contains no block of the same block scope`);
+    }
+    const positions = inside.map((m) => m.position);
+    const destination = atStart ? Math.min(...positions) : Math.max(...positions);
+    const lo = Math.min(self.position, destination);
+    const hi = Math.max(self.position, destination);
+
+    for (const dep of [...scope.depsBySrc(blockSRef), ...scope.depsByDst(blockSRef)]) {
+      const other = dep.src === blockSRef ? dep.dst : dep.src;
+      if (other === blockSRef) continue;
+      const member = scope.memberOf(other);
+      if (!member || member.position <= lo || member.position >= hi) continue;
+      throw new Error(
+        `${primitive}: moving '${blockSRef.node.name}' across '${other.node.name}' would violate a ` +
+        `${dep.kind} dependence on buffer '${dep.buffer.name}'`
+      );
+    }
+  }
+
+  _alignedLoopPairs(primitive, blockLoops, targetLoop) {
+    const targetChain = [];
+    for (let sref = this.state.tree.getSRef(targetLoop); sref; sref = sref.parent) {
+      if (sref.isLoop) targetChain.unshift(sref.node);
+    }
+    if (blockLoops.length > targetChain.length) {
+      throw new Error(`${primitive}: the moved block is nested deeper than the target loop`);
+    }
+    const aligned = targetChain.slice(targetChain.length - blockLoops.length);
+    const pairs = [];
+    for (let i = 0; i < blockLoops.length; i++) {
+      const from = blockLoops[i];
+      const to = aligned[i];
+      const fromExtent = getConstExtent(from.extent);
+      const toExtent = getConstExtent(to.extent);
+      const fromMin = getConstExtent(from.min);
+      const toMin = getConstExtent(to.min);
+      if (fromExtent === null || toExtent === null || fromMin === null || toMin === null
+          || fromExtent !== toExtent || fromMin !== toMin) {
+        throw new Error(
+          `${primitive}: iteration domain of '${from.loopVar.name}' does not match '${to.loopVar.name}'; ` +
+          `relocation would change the block's iteration space`
+        );
+      }
+      pairs.push([from, to]);
+    }
+    return pairs;
+  }
+
+  _relocateBlockToLoop(primitive, blockName, targetLoopRef, atStart) {
+    const blockSRef = this.getBlockSRef(blockName);
     const targetLoop = this._resolveLoop(targetLoopRef);
-    if (!targetLoop || targetLoop.type !== 'ForNode') throw new Error('computeAt: target must be a loop');
+    if (!targetLoop || targetLoop.type !== 'ForNode') throw new Error(`${primitive}: target must be a loop`);
 
     const blkLoops = this.getLoops(blockName);
-    if (blkLoops.length !== 1) throw new Error('computeAt: aligned case requires exactly one enclosing loop on the moved block');
+    if (blkLoops.length === 0) throw new Error(`${primitive}: the moved block has no enclosing loop`);
     const blkLoop = blkLoops[0];
-    if (blkLoop === targetLoop) throw new Error('computeAt: block already at target loop');
+    if (blkLoops.includes(targetLoop)) throw new Error(`${primitive}: block already sits under the target loop`);
 
-    const bExt = getConstExtent(blkLoop.extent);
-    const tExt = getConstExtent(targetLoop.extent);
-    if (bExt === null || tExt === null || bExt !== tExt) {
-      throw new Error('computeAt: aligned case requires equal static extent on the block and target loops');
-    }
+    const pairs = this._alignedLoopPairs(primitive, blkLoops, targetLoop);
+    this._checkRelocationDependences(primitive, blockSRef, targetLoop, atStart);
 
-    const moved = cloneExprTree(blkLoop.body);
-    substituteVar(moved, blkLoop.loopVar.name, () => targetLoop.loopVar);
+    const moved = cloneExprTree(blkLoops[blkLoops.length - 1].body);
+    const rename = new Map(pairs.map(([from, to]) => [from.loopVar.name, to.loopVar]));
+    irTransform(moved, (n) => (n.type === 'VariableNode' && rename.has(n.name) ? rename.get(n.name) : n), { bindVars: false });
     const relocEmpty = new SeqNode([]);
     this.mutator.replaceNode(blkLoop, relocEmpty);
 
     const tbody = targetLoop.body;
     if (tbody && tbody.type === 'SeqNode') {
       if (atStart) tbody.stmts.unshift(moved); else tbody.stmts.push(moved);
+      tbody._setChildren('stmts', tbody.stmts);
     } else {
       const seq = atStart ? new SeqNode([moved, tbody]) : new SeqNode([tbody, moved]);
       targetLoop.body = seq;
@@ -770,12 +940,12 @@ export class Schedule {
   }
 
   computeAt(producerName, targetLoopRef) {
-    const targetVar = this._relocateBlockToLoop(producerName, targetLoopRef, true);
+    const targetVar = this._relocateBlockToLoop('computeAt', producerName, targetLoopRef, true);
     if (!this._replaying) this.trace.record('computeAt', [producerName, targetVar]);
   }
 
   reverseComputeAt(consumerName, targetLoopRef) {
-    const targetVar = this._relocateBlockToLoop(consumerName, targetLoopRef, false);
+    const targetVar = this._relocateBlockToLoop('reverseComputeAt', consumerName, targetLoopRef, false);
     if (!this._replaying) this.trace.record('reverseComputeAt', [consumerName, targetVar]);
   }
 

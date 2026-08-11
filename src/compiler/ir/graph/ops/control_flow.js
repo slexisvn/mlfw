@@ -1,5 +1,21 @@
 import { OpDef, SideEffectKind, OpTrait } from '../op_registry.js';
 
+export function owningFunctionOf(op) {
+  return op.parentBlock ? op.parentBlock._owningFunction() : null;
+}
+
+export function calleeFunction(op, callee) {
+  const owner = owningFunctionOf(op);
+  const module = owner ? owner._module : null;
+  return module ? module.getFunction(callee) : null;
+}
+
+function typesMatch(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return typeof a.equals === 'function' ? a.equals(b) : false;
+}
+
 export function register(registry) {
   registry.register(new OpDef({
     name: 'return',
@@ -50,6 +66,53 @@ export function register(registry) {
       { name: 'num_carry', type: 'number', required: true },
       { name: 'num_xs', type: 'number', required: true }
     ],
+    inferResultTypes(operandTypes, attrs, resultTypes) {
+      return resultTypes || null;
+    }
+  }));
+
+  registry.register(new OpDef({
+    name: 'call',
+    numOperands: -1,
+    numResults: -1,
+    sideEffects: SideEffectKind.CONTROL,
+    attrs: [{ name: 'callee', type: 'string', required: true }],
+    verify(op) {
+      const errs = [];
+      const callee = op.getAttr('callee');
+      if (typeof callee !== 'string' || callee.length === 0) {
+        errs.push('call requires a non-empty string callee');
+        return errs;
+      }
+      const target = calleeFunction(op, callee);
+      if (target === null) return errs;
+      if (target.name === owningFunctionOf(op).name) {
+        errs.push(`call to '${callee}' is directly recursive`);
+      }
+      if (target.inputTypes.length !== op.numOperands) {
+        errs.push(`call to '${callee}' passes ${op.numOperands} operands but it takes ${target.inputTypes.length}`);
+      }
+      if (target.outputTypes.length !== op.numResults) {
+        errs.push(`call to '${callee}' has ${op.numResults} results but it returns ${target.outputTypes.length}`);
+      }
+      const arity = Math.min(target.inputTypes.length, op.numOperands);
+      for (let i = 0; i < arity; i++) {
+        const got = op.getOperand(i).type;
+        const want = target.inputTypes[i];
+        if (!typesMatch(got, want)) {
+          errs.push(`call to '${callee}' operand ${i} has type ${got} but the callee declares ${want}`);
+        }
+      }
+      const results = Math.min(target.outputTypes.length, op.numResults);
+      for (let i = 0; i < results; i++) {
+        const got = op.getResult(i).type;
+        const want = target.outputTypes[i];
+        if (!typesMatch(got, want)) {
+          errs.push(`call to '${callee}' result ${i} has type ${got} but the callee returns ${want}`);
+        }
+      }
+      return errs;
+    },
     inferResultTypes(operandTypes, attrs, resultTypes) {
       return resultTypes || null;
     }

@@ -3,11 +3,11 @@ import { Operation } from '../../ir/graph/operation.js';
 import { TensorType, ScalarType, isFloatType } from '../../ir/graph/types.js';
 import { registry } from '../../ir/graph/ops.js';
 
-export const PrecisionClass = Object.freeze({ ALWAYS: 'ALWAYS', FOLLOW: 'FOLLOW', NEVER: 'NEVER' });
+export const PrecisionClass = Object.freeze({ ALWAYS: 'ALWAYS', ACCUMULATE: 'ACCUMULATE', FOLLOW: 'FOLLOW', NEVER: 'NEVER' });
 
 const DEFAULT_PRECISION_CLASSES = {
-  dot: PrecisionClass.ALWAYS,
-  conv: PrecisionClass.ALWAYS,
+  dot: PrecisionClass.ACCUMULATE,
+  conv: PrecisionClass.ACCUMULATE,
   reshape: PrecisionClass.FOLLOW,
   transpose: PrecisionClass.FOLLOW,
   broadcast_in_dim: PrecisionClass.FOLLOW,
@@ -27,6 +27,13 @@ for (const [opName, cls] of Object.entries(DEFAULT_PRECISION_CLASSES)) {
 
 export const DEFAULT_AUTOCAST_OPS = new Set(['dot', 'conv']);
 
+const AUTOCAST_CLASSES = new Set([PrecisionClass.ALWAYS, PrecisionClass.ACCUMULATE]);
+
+function accumulatesInHighPrecision(opName) {
+  const def = registry.has(opName) ? registry.get(opName) : null;
+  return !!def && def.getAttr('precisionClass') === PrecisionClass.ACCUMULATE;
+}
+
 function followOpSet(explicit) {
   if (explicit) return explicit;
   const follow = new Set();
@@ -40,7 +47,7 @@ function autocastAllowSet(explicit) {
   if (explicit) return explicit;
   const allow = new Set(DEFAULT_AUTOCAST_OPS);
   for (const def of registry.allOps()) {
-    if (def.getAttr('precisionClass') === PrecisionClass.ALWAYS) allow.add(def.name);
+    if (AUTOCAST_CLASSES.has(def.getAttr('precisionClass'))) allow.add(def.name);
   }
   return allow;
 }
@@ -69,13 +76,16 @@ function castOpToLowPrecision(op, lowDtype) {
   }
   if (!castedAny) return false;
 
+  const accumulates = accumulatesInHighPrecision(op.opName);
   const resultTypes = [];
   for (let r = 0; r < op.numResults; r++) {
     const rt = op.getResult(r).type;
-    resultTypes.push(isCastableFloat(rt, lowDtype) ? new TensorType(rt.shape, lowDtype) : rt);
+    resultTypes.push(!accumulates && isCastableFloat(rt, lowDtype) ? new TensorType(rt.shape, lowDtype) : rt);
   }
 
-  const lowered = new Operation(op.opName, newOperands, resultTypes, new Map(op.attributes));
+  const attributes = new Map(op.attributes);
+  if (accumulates && resultTypes[0] instanceof TensorType) attributes.set('out_dtype', resultTypes[0].dtype);
+  const lowered = new Operation(op.opName, newOperands, resultTypes, attributes);
   block.insertBefore(lowered, op);
 
   for (let r = 0; r < op.numResults; r++) {

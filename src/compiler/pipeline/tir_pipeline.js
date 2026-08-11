@@ -1,6 +1,7 @@
 import { SchedulePass } from '../passes/schedule/schedule_pass.js';
 import { SimplifyPass } from '../passes/simplify/simplify_pass.js';
 import { MemoryPlanPass } from '../passes/memory/memory_plan_pass.js';
+import { MemorySchedulePass } from '../passes/memory/memory_scheduler.js';
 import { LoopPartitionPass } from '../passes/loop_partition/loop_partition.js';
 import { AccumulatorDetectionPass } from '../passes/lowering/accumulator_pass.js';
 import { AutoTensorizePass } from '../passes/schedule/tensorize_pass.js';
@@ -21,6 +22,8 @@ export function buildTirPipeline(config) {
   if (config.optimization.loopPartition) passes.push(new LoopPartitionPass());
 
   passes.push(new SimplifyPass());
+
+  if (config.memory.scheduleForPeak) passes.push(new MemorySchedulePass(config));
 
   passes.push(new MemoryPlanPass(config));
 

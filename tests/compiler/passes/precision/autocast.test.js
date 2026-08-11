@@ -13,6 +13,7 @@ const inner = (mod) => (mod.functions ? mod.functions().next().value : mod);
 const ops = (func) => [...func.ops()];
 const named = (func, name) => ops(func).filter((o) => o.opName === name);
 const dtypesOf = (func, name) => named(func, name).map((o) => o.getResult(0).type.dtype);
+const operandDtypesOf = (func, name) => named(func, name).map((o) => o.getOperand(0).type.dtype);
 
 function matmulChain(name = 'mm') {
   return inner(buildFunction(name, [T([4, 8]), T([8, 4])], [T([4, 4])], (b, a) => {
@@ -34,30 +35,34 @@ function intGraph(name = 'ig') {
 }
 
 describe('the default allow set comes from the op registry, not a hardcoded list', () => {
-  it('dot and conv are registered ALWAYS and both autocast without an explicit allow set', () => {
-    expect(registry.get('dot').getAttr('precisionClass')).toBe(PrecisionClass.ALWAYS);
-    expect(registry.get('conv').getAttr('precisionClass')).toBe(PrecisionClass.ALWAYS);
+  it('dot and conv are ACCUMULATE: operands drop to f16 while the accumulator stays f32', () => {
+    expect(registry.get('dot').getAttr('precisionClass')).toBe(PrecisionClass.ACCUMULATE);
+    expect(registry.get('conv').getAttr('precisionClass')).toBe(PrecisionClass.ACCUMULATE);
     expect([...DEFAULT_AUTOCAST_OPS].sort()).toEqual(['conv', 'dot']);
 
     const mm = matmulChain();
     expect(applyAutocast(mm)).toBe(true);
-    expect(dtypesOf(mm, 'dot')).toEqual([F16]);
+    expect(operandDtypesOf(mm, 'dot')).toEqual([F16]);
+    expect(dtypesOf(mm, 'dot')).toEqual([F]);
+    expect(named(mm, 'dot')[0].getAttr('out_dtype')).toBe(F);
 
     const cv = convGraph();
     expect(applyAutocast(cv)).toBe(true);
-    expect(dtypesOf(cv, 'conv')).toEqual([F16]);
+    expect(operandDtypesOf(cv, 'conv')).toEqual([F16]);
+    expect(dtypesOf(cv, 'conv')).toEqual([F]);
   });
 
-  it('FOLLOW and ALWAYS are disjoint, and every classified op really exists', () => {
-    const byClass = { ALWAYS: [], FOLLOW: [] };
+  it('FOLLOW, ALWAYS and ACCUMULATE are disjoint, and every classified op really exists', () => {
+    const byClass = { ALWAYS: [], ACCUMULATE: [], FOLLOW: [] };
     for (const def of registry.allOps()) {
       const cls = def.getAttr('precisionClass');
       if (cls) byClass[cls].push(def.name);
     }
-    expect(byClass.ALWAYS.sort()).toEqual(['conv', 'dot']);
+    expect(byClass.ACCUMULATE.sort()).toEqual(['conv', 'dot']);
+    expect(byClass.ALWAYS).toEqual([]);
     expect(byClass.FOLLOW.length).toBeGreaterThan(0);
-    expect(byClass.FOLLOW.filter((n) => byClass.ALWAYS.includes(n))).toEqual([]);
-    for (const name of [...byClass.ALWAYS, ...byClass.FOLLOW]) {
+    expect(byClass.FOLLOW.filter((n) => byClass.ACCUMULATE.includes(n))).toEqual([]);
+    for (const name of [...byClass.ACCUMULATE, ...byClass.FOLLOW]) {
       expect(registry.has(name), `precisionClass was set on unregistered op '${name}'`).toBe(true);
     }
   });
@@ -77,7 +82,8 @@ describe('autocast honours the requested low dtype', () => {
   it('casts to bf16 when asked instead of f16', () => {
     const func = matmulChain();
     expect(applyAutocast(func, { dtype: BF16 })).toBe(true);
-    expect(dtypesOf(func, 'dot')).toEqual([BF16]);
+    expect(operandDtypesOf(func, 'dot')).toEqual([BF16]);
+    expect(dtypesOf(func, 'dot')).toEqual([F]);
     for (const c of named(func, 'convert')) {
       expect([BF16, F]).toContain(c.getResult(0).type.dtype);
     }
@@ -86,7 +92,7 @@ describe('autocast honours the requested low dtype', () => {
   it('MixedPrecisionPass forwards its configured dtype and allow set', () => {
     const bf = matmulChain();
     expect(new MixedPrecisionPass({ dtype: BF16 }).run(bf)).toBe(PassResult.CHANGED);
-    expect(dtypesOf(bf, 'dot')).toEqual([BF16]);
+    expect(operandDtypesOf(bf, 'dot')).toEqual([BF16]);
 
     const untouched = matmulChain();
     expect(new MixedPrecisionPass({ allow: new Set(['conv']) }).run(untouched)).toBe(PassResult.UNCHANGED);
@@ -132,12 +138,13 @@ describe('FOLLOW propagation stops at ops that are not FOLLOW', () => {
     }));
 
     expect(applyAutocast(func, { propagateFollow: true })).toBe(true);
-    expect(dtypesOf(func, 'dot')).toEqual([F16]);
+    expect(operandDtypesOf(func, 'dot')).toEqual([F16]);
+    expect(dtypesOf(func, 'dot')).toEqual([F]);
     expect(dtypesOf(func, 'reduce')).toEqual([F]);
-    expect(named(func, 'convert').some((c) => c.getResult(0).type.dtype === F)).toBe(true);
+    expect(named(func, 'convert').every((c) => c.getResult(0).type.dtype === F16)).toBe(true);
   });
 
-  it('an elementwise op between two matmuls sinks to f16 and the round-trip converts collapse', () => {
+  it('an elementwise op between two matmuls stays in the f32 accumulator domain', () => {
     const build = (name) => inner(buildFunction(name, [T([4, 8]), T([8, 8]), T([8, 8]), T([8, 4])], [T([4, 4])], (b, a) => {
       const first = b.matmul(a[0], a[1]).getResult(0);
       const mid = b.add(first, b.matmul(a[0], a[2]).getResult(0)).getResult(0);
@@ -150,8 +157,9 @@ describe('FOLLOW propagation stops at ops that are not FOLLOW', () => {
     applyAutocast(withFollow, { propagateFollow: true });
 
     expect(dtypesOf(plain, 'add')).toEqual([F]);
-    expect(dtypesOf(withFollow, 'add')).toEqual([F16]);
-    expect(named(withFollow, 'convert').length).toBeLessThan(named(plain, 'convert').length);
+    expect(dtypesOf(withFollow, 'add')).toEqual([F]);
+    expect(dtypesOf(withFollow, 'dot')).toEqual([F, F, F]);
+    expect(named(withFollow, 'convert').every((c) => c.getResult(0).type.dtype === F16)).toBe(true);
   });
 });
 

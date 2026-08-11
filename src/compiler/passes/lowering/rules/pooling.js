@@ -1,5 +1,5 @@
 import { IntImmNode, FloatImmNode, MathOpNode, CompareNode, ForNode, ForKind, BufferStoreNode, BufferLoadNode, BlockNode, SeqNode, IfThenElseNode, CallExternNode, CastNode } from '../../../ir/tensor/nodes.js';
-import { registerLoweringRule, buildSpatialNest, parseLayout } from '../lowering_registry.js';
+import { registerLoweringRule, buildSpatialNest, parseLayout, markCommReduce } from '../lowering_registry.js';
 
 function spatialCount(ov, stride, kernel, pad, inExtent) {
   const start = new MathOpNode('-', new MathOpNode('*', ov, new IntImmNode(stride)), new IntImmNode(pad));
@@ -60,6 +60,7 @@ export function register() {
     const kwVar = ctx.allocVar('pkw');
     const allVars = [nVar, cVar, ohVar, owVar, khVar, kwVar];
     const allBinds = ctx.allocBindArray('pv', allVars);
+    markCommReduce(allBinds.slice(4));
 
     const nv = allBinds[0].iterVar;
     const cv = allBinds[1].iterVar;

@@ -1,8 +1,52 @@
 import { Analyzer } from '../analysis/analyzer.js';
 import { SymInt } from '../analysis/sym_int.js';
 import { irBound, analyzerForLoops } from '../analysis/ir_arith.js';
+import { carriesDependence, permutationPreservesDependences } from '../analysis/dependence.js';
+import { IterVarKind } from '../ir/tensor/nodes.js';
 
 export { analyzerForLoops };
+
+export const IterVarPolicy = Object.freeze({
+  SPATIAL: new Set([IterVarKind.DATA_PAR]),
+  REORDERABLE: new Set([IterVarKind.DATA_PAR, IterVarKind.COMM_REDUCE]),
+  ACCUMULABLE: new Set([IterVarKind.DATA_PAR, IterVarKind.COMM_REDUCE]),
+});
+
+function blockAbstractionPermits(state, enclosingLoop, loopVarNames, allowedKinds, byBlock) {
+  const sref = state.tree.getSRef(enclosingLoop);
+  if (!sref) return false;
+  const blocks = sref.childBlocks();
+  if (blocks.length === 0) return false;
+  for (const blockSRef of blocks) {
+    const info = byBlock.get(blockSRef.node);
+    if (!info) return false;
+    for (const name of loopVarNames) {
+      const kinds = info.iterKindsOfLoopVar(name);
+      if (!kinds) return false;
+      for (const kind of kinds) if (!allowedKinds.has(kind)) return false;
+    }
+  }
+  return true;
+}
+
+export function loopCarriedDependence(state, loop, allowedKinds) {
+  const { info, deps } = state.nestAnalysis(loop);
+  const dep = carriesDependence(deps, loop);
+  if (!dep) return null;
+  if (blockAbstractionPermits(state, loop, [loop.loopVar.name], allowedKinds, info.byBlock)) return null;
+  return `loop '${loop.loopVar.name}' carries a ${dep.kind} dependence on buffer '${dep.buffer.name}'`;
+}
+
+export function reorderLegality(state, chain, after) {
+  const permuted = chain.filter((loop, i) => loop !== after[i]);
+  if (permuted.length === 0) return null;
+  const names = permuted.map((l) => l.loopVar.name);
+  const { info, deps } = state.nestAnalysis(chain[0]);
+  if (blockAbstractionPermits(state, chain[chain.length - 1], names, IterVarPolicy.REORDERABLE, info.byBlock)) return null;
+  const dep = permutationPreservesDependences(deps, chain, after);
+  if (!dep) return null;
+  return `permutation violates a ${dep.kind} dependence on buffer '${dep.buffer.name}'`;
+}
 
 export function classifyBufferIndex(analyzer, indexExpr, dimExtent) {
   if (typeof dimExtent !== 'number' || dimExtent < 0) return 'unknown';
@@ -79,14 +123,29 @@ export function collectWriteIndexVars(block, out) {
   }
 }
 
-export function loopVarIsReductionOf(varName, block) {
+export function reductionLoopVars(block) {
+  const writeIdx = new Set();
+  collectWriteIndexVars(block, writeIdx);
   const used = new Set();
   collectVarsUsed(block.body, used);
   if (block.initBody) collectVarsUsed(block.initBody, used);
-  if (!used.has(varName)) return false;
-  const written = new Set();
-  collectWriteIndexVars(block, written);
-  return !written.has(varName);
+
+  const own = new Set();
+  const spatial = new Set();
+  const reduction = new Set();
+  for (const iv of block.iterVars || []) {
+    if (!iv || !iv.iterVar) continue;
+    own.add(iv.iterVar.name);
+    const bindVars = new Set();
+    collectVarsUsed(iv.binding, bindVars);
+    const isSpatial = writeIdx.has(iv.iterVar.name) || [...bindVars].some((v) => writeIdx.has(v));
+    for (const v of bindVars) (isSpatial ? spatial : reduction).add(v);
+  }
+  for (const name of used) {
+    if (!own.has(name) && !writeIdx.has(name)) reduction.add(name);
+  }
+  for (const name of spatial) reduction.delete(name);
+  return reduction;
 }
 
 export function collectBlocksUnder(node, out) {
@@ -114,12 +173,3 @@ export function collectBlocksUnder(node, out) {
   }
 }
 
-export function loopCarriesReduction(loop) {
-  const varName = loop.loopVar.name;
-  const blocks = [];
-  collectBlocksUnder(loop.body, blocks);
-  for (const block of blocks) {
-    if (loopVarIsReductionOf(varName, block)) return block.name;
-  }
-  return null;
-}

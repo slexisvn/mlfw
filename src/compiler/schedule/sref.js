@@ -45,11 +45,12 @@ export class SRef {
 
   childBlocks() {
     const result = [];
-    const stack = [...this.children];
+    const stack = [];
+    for (let i = this.children.length - 1; i >= 0; i--) stack.push(this.children[i]);
     while (stack.length > 0) {
       const c = stack.pop();
       if (c.isBlock) result.push(c);
-      else for (const cc of c.children) stack.push(cc);
+      else for (let i = c.children.length - 1; i >= 0; i--) stack.push(c.children[i]);
     }
     return result;
   }

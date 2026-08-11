@@ -1,5 +1,5 @@
 import { ForKind } from '../ir/tensor/nodes.js';
-import { collectVarsUsed, collectWriteIndexVars, classifyBufferIndex } from './legality.js';
+import { reductionLoopVars, classifyBufferIndex } from './legality.js';
 import { Analyzer } from '../analysis/analyzer.js';
 import { irBound } from '../analysis/ir_arith.js';
 
@@ -163,17 +163,13 @@ export class ScheduleValidator {
         ctx.analyzer.setVarBound(r.iterVar.name, r.binding ? irBound(ctx.analyzer, r.binding) : null);
       }
     }
+    const reductionVars = reductionLoopVars(node);
     if (node.initBody && ctx.innermostLoopVar) {
-      const writtenIdx = new Set();
-      collectWriteIndexVars(node, writtenIdx);
-      const usedVars = new Set();
-      collectVarsUsed(node.body, usedVars);
-      collectVarsUsed(node.initBody, usedVars);
       let reductionEnclosing = 0;
       for (const v of ctx.loopStack) {
-        if (usedVars.has(v) && !writtenIdx.has(v)) reductionEnclosing++;
+        if (reductionVars.has(v)) reductionEnclosing++;
       }
-      if (writtenIdx.has(ctx.innermostLoopVar) || reductionEnclosing > 1) {
+      if (!reductionVars.has(ctx.innermostLoopVar) || reductionEnclosing > 1) {
         ctx.errors.push(
           `Reduction block '${node.name}' violates the init contract: codegen zeroes the accumulator ` +
           `at the single innermost loop, so an init-bearing block needs exactly one enclosing reduction ` +
@@ -182,13 +178,8 @@ export class ScheduleValidator {
       }
     }
     if (ctx.parLoops.length > 0) {
-      const used = new Set();
-      collectVarsUsed(node.body, used);
-      if (node.initBody) collectVarsUsed(node.initBody, used);
-      const written = new Set();
-      collectWriteIndexVars(node, written);
       for (const pl of ctx.parLoops) {
-        if (used.has(pl.varName) && !written.has(pl.varName)) {
+        if (reductionVars.has(pl.varName)) {
           const kind = pl.kind === ForKind.VECTORIZED ? 'Vectorized' : 'Parallel';
           ctx.errors.push(
             `${kind} loop '${pl.varName}' carries a reduction in block '${node.name}': ` +

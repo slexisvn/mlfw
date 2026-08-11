@@ -1,7 +1,7 @@
-import { MathOpNode, FloatImmNode, IntImmNode, BufferStoreNode, BufferLoadNode, BlockNode, SeqNode, CallExternNode, IfThenElseNode, CompareNode, IterVarKind } from '../../../ir/tensor/nodes.js';
+import { MathOpNode, FloatImmNode, IntImmNode, BufferStoreNode, BufferLoadNode, BlockNode, SeqNode, CallExternNode, IfThenElseNode, CompareNode } from '../../../ir/tensor/nodes.js';
 import { Buffer } from '../../../ir/tensor/buffer.js';
 import { DYNAMIC } from '../../../ir/graph/types.js';
-import { registerLoweringRule, buildSpatialNest, wrapLoopsWithNodes, concatIterVars } from '../lowering_registry.js';
+import { registerLoweringRule, buildSpatialNest, wrapLoopsWithNodes, concatIterVars, markCommReduce } from '../lowering_registry.js';
 import { isDtypeInt } from '../../../../util/dtype_map.js';
 
 const INT_DTYPE_MIN = { i8: -128, i16: -32768, i32: -2147483648, i64: -2147483648, ui8: 0, ui16: 0, ui32: 0, bool: 0 };
@@ -46,8 +46,7 @@ export function register() {
 
     const accNest = buildSpatialNest(ctx, 'sa', spatialDims, inBuf.shape, inBuf);
     const rVars = ctx.allocVarArray('r', reduceDims.length);
-    const rIvs = ctx.allocBindArray('rv', rVars);
-    for (const iv of rIvs) iv.kind = IterVarKind.COMM_REDUCE;
+    const rIvs = markCommReduce(ctx.allocBindArray('rv', rVars));
     const inIndices = new Array(inBuf.shape.length);
     for (let i = 0; i < spatialDims.length; i++) inIndices[spatialDims[i]] = accNest.ivs[i].iterVar;
     for (let i = 0; i < reduceDims.length; i++) inIndices[reduceDims[i]] = rIvs[i].iterVar;
@@ -122,7 +121,7 @@ export function register() {
 
       const accNest = buildSpatialNest(ctx, 'as', spatialDims, inBuf.shape, inBuf);
       const rVar = ctx.allocVar('ar');
-      const rBind = ctx.allocBindArray('arv', [rVar]);
+      const rBind = markCommReduce(ctx.allocBindArray('arv', [rVar]));
       const inIndices = new Array(inBuf.shape.length);
       for (let i = 0; i < spatialDims.length; i++) inIndices[spatialDims[i]] = accNest.ivs[i].iterVar;
       inIndices[reduceDim] = rBind[0].iterVar;

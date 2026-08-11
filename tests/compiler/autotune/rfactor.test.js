@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { spatialIter, reduceIter } from '../../_utils/ir_fixture.js';
 import { Buffer } from '../../../src/compiler/ir/tensor/buffer.js';
 import {
   PrimFunc, BlockNode, SeqNode, BufferStoreNode, BufferLoadNode, ForNode,
@@ -22,12 +23,15 @@ function matmulPrimFunc(name, M, N, K) {
   const m = new VariableNode('m', 'int32');
   const n = new VariableNode('n', 'int32');
   const k = new VariableNode('k', 'int32');
-  const prod = new MathOpNode('*', new BufferLoadNode(A, [m, k]), new BufferLoadNode(B, [k, n]));
-  const acc = new MathOpNode('+', new BufferLoadNode(C, [m, n]), prod);
+  const vm = new VariableNode('vm', 'int32');
+  const vn = new VariableNode('vn', 'int32');
+  const vk = new VariableNode('vk', 'int32');
+  const prod = new MathOpNode('*', new BufferLoadNode(A, [vm, vk]), new BufferLoadNode(B, [vk, vn]));
+  const acc = new MathOpNode('+', new BufferLoadNode(C, [vm, vn]), prod);
   const block = new BlockNode(name,
-    [{ iterVar: m, binding: m }, { iterVar: n, binding: n }, { iterVar: k, binding: k }],
+    [spatialIter(vm, m), spatialIter(vn, n), reduceIter(vk, k)],
     [{ buffer: A }, { buffer: B }], [{ buffer: C }],
-    new BufferStoreNode(C, [m, n], acc), new BufferStoreNode(C, [m, n], new IntImmNode(0)));
+    new BufferStoreNode(C, [vm, vn], acc), new BufferStoreNode(C, [vm, vn], new IntImmNode(0)));
   let nest = block;
   for (const [v, e] of [[k, K], [n, N], [m, M]]) {
     nest = new ForNode(v, new IntImmNode(0), new IntImmNode(e), ForKind.SERIAL, nest);
@@ -92,7 +96,7 @@ describe('rfactor schedule primitive', () => {
     const prod = new MathOpNode('*', new BufferLoadNode(A, [m, k]), new BufferLoadNode(B, [k, n]));
     const acc = new MathOpNode('-', new BufferLoadNode(C, [m, n]), prod);
     const block = new BlockNode('g',
-      [{ iterVar: m, binding: m }, { iterVar: n, binding: n }, { iterVar: k, binding: k }],
+      [spatialIter(m), spatialIter(n), reduceIter(k)],
       [{ buffer: A }, { buffer: B }], [{ buffer: C }],
       new BufferStoreNode(C, [m, n], acc), new BufferStoreNode(C, [m, n], new IntImmNode(0)));
     let nest = block;
@@ -177,12 +181,12 @@ describe('fuseConsumer (tiling-with-fusion)', () => {
     const m = new VariableNode('m', 'int32'), n = new VariableNode('n', 'int32'), k = new VariableNode('k', 'int32');
     const pAcc = new MathOpNode('+', new BufferLoadNode(T, [m, n]),
       new MathOpNode('*', new BufferLoadNode(A, [m, k]), new BufferLoadNode(B, [k, n])));
-    const P = new BlockNode('P', [{ iterVar: m, binding: m }, { iterVar: n, binding: n }, { iterVar: k, binding: k }],
+    const P = new BlockNode('P', [spatialIter(m), spatialIter(n), reduceIter(k)],
       [{ buffer: A }, { buffer: B }], [{ buffer: T }], new BufferStoreNode(T, [m, n], pAcc), new BufferStoreNode(T, [m, n], new IntImmNode(0)));
     let pNest = P;
     for (const [v, e] of [[k, K], [n, N], [m, M]]) pNest = new ForNode(v, new IntImmNode(0), new IntImmNode(e), ForKind.SERIAL, pNest);
     const mc = new VariableNode('mc', 'int32'), nc = new VariableNode('nc', 'int32');
-    const C = new BlockNode('C', [{ iterVar: mc, binding: mc }, { iterVar: nc, binding: nc }],
+    const C = new BlockNode('C', [spatialIter(mc), spatialIter(nc)],
       [{ buffer: T }], [{ buffer: O }], new BufferStoreNode(O, [mc, nc], new MathOpNode('*', new BufferLoadNode(T, [mc, nc]), new IntImmNode(2))));
     let cNest = C;
     for (const [v, e] of [[nc, N], [mc, M]]) cNest = new ForNode(v, new IntImmNode(0), new IntImmNode(e), ForKind.SERIAL, cNest);
@@ -256,12 +260,12 @@ describe('fuseConsumer (tiling-with-fusion)', () => {
     const m = new VariableNode('m', 'int32'), n = new VariableNode('n', 'int32'), k = new VariableNode('k', 'int32');
     const pAcc = new MathOpNode('+', new BufferLoadNode(T, [m, n]),
       new MathOpNode('*', new BufferLoadNode(A, [m, k]), new BufferLoadNode(B, [k, n])));
-    const P = new BlockNode('P', [{ iterVar: m, binding: m }, { iterVar: n, binding: n }, { iterVar: k, binding: k }],
+    const P = new BlockNode('P', [spatialIter(m), spatialIter(n), reduceIter(k)],
       [{ buffer: A }, { buffer: B }], [{ buffer: T }], new BufferStoreNode(T, [m, n], pAcc), new BufferStoreNode(T, [m, n], new IntImmNode(0)));
     let pNest = P;
     for (const [v, e] of [[k, K], [n, N], [m, M]]) pNest = new ForNode(v, new IntImmNode(0), new IntImmNode(e), ForKind.SERIAL, pNest);
     const mc = new VariableNode('mc', 'int32'), nc = new VariableNode('nc', 'int32');
-    const C = new BlockNode('C', [{ iterVar: mc, binding: mc }, { iterVar: nc, binding: nc }],
+    const C = new BlockNode('C', [spatialIter(mc), spatialIter(nc)],
       [{ buffer: T }], [{ buffer: B }], new BufferStoreNode(B, [mc, nc], new MathOpNode('*', new BufferLoadNode(T, [mc, nc]), new IntImmNode(2))));
     let cNest = C;
     for (const [v, e] of [[nc, N], [mc, M]]) cNest = new ForNode(v, new IntImmNode(0), new IntImmNode(e), ForKind.SERIAL, cNest);
@@ -279,7 +283,7 @@ describe('fuseConsumer (tiling-with-fusion)', () => {
       const mi = new VariableNode('m', 'int32'), ni = new VariableNode('n', 'int32'), ki = new VariableNode('k', 'int32');
       const acc = new MathOpNode('+', new BufferLoadNode(C, [mi, ni]),
         new MathOpNode('*', new BufferLoadNode(A, [mi, ki]), new BufferLoadNode(Bb, [ki, ni])));
-      const blk = new BlockNode('mm', [{ iterVar: mi, binding: mi }, { iterVar: ni, binding: ni }, { iterVar: ki, binding: ki }],
+      const blk = new BlockNode('mm', [spatialIter(mi), spatialIter(ni), reduceIter(ki)],
         [{ buffer: A }, { buffer: Bb }], [{ buffer: C }], new BufferStoreNode(C, [mi, ni], acc), new BufferStoreNode(C, [mi, ni], new IntImmNode(0)));
       let nest = blk;
       for (const [v, e] of [[ki, k2], [ni, n2], [mi, m2]]) nest = new ForNode(v, new IntImmNode(0), new IntImmNode(e), ForKind.SERIAL, nest);

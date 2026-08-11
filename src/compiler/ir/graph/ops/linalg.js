@@ -14,7 +14,8 @@ export function register(registry) {
       { name: 'lhs_contracting', type: 'array', required: true },
       { name: 'rhs_contracting', type: 'array', required: true },
       { name: 'lhs_batch', type: 'array', required: false },
-      { name: 'rhs_batch', type: 'array', required: false }
+      { name: 'rhs_batch', type: 'array', required: false },
+      { name: 'out_dtype', type: 'string', required: false }
     ],
     getFlops(op) {
       const lhs = op.getOperand(0).type;
@@ -108,7 +109,8 @@ export function register(registry) {
       { name: 'dilation', type: 'array', required: false },
       { name: 'groups', type: 'number', required: false },
       { name: 'input_layout', type: 'string', required: true },
-      { name: 'kernel_layout', type: 'string', required: true }
+      { name: 'kernel_layout', type: 'string', required: true },
+      { name: 'out_dtype', type: 'string', required: false }
     ],
     getFlops(op) {
       const output = op.getResult(0).type;
@@ -138,6 +140,7 @@ function inferDotResultTypes(operandTypes, attrs, opts) {
   if (!(lhs instanceof TensorType) || !(rhs instanceof TensorType)) return null;
   const o = opts && !Array.isArray(opts) ? opts : {};
   if (!o.allowMixedDtype && lhs.dtype !== rhs.dtype) return null;
+  const declared = attrs.get ? attrs.get('out_dtype') : attrs.out_dtype;
   const lhsC = new Set(attrs.get ? attrs.get('lhs_contracting') : attrs.lhs_contracting);
   const rhsC = new Set(attrs.get ? attrs.get('rhs_contracting') : attrs.rhs_contracting);
   const lhsB = new Set((attrs.get ? attrs.get('lhs_batch') : attrs.lhs_batch) || []);
@@ -152,7 +155,7 @@ function inferDotResultTypes(operandTypes, attrs, opts) {
   for (let i = 0; i < rhs.rank; i++) {
     if (!rhsC.has(i) && !rhsB.has(i)) shape.push(rhs.shape[i]);
   }
-  return [new TensorType(shape, o.outputDtype || lhs.dtype)];
+  return [new TensorType(shape, declared || o.outputDtype || lhs.dtype)];
 }
 
 function inferConvResultTypes(operandTypes, attrs, opts) {
@@ -161,6 +164,7 @@ function inferConvResultTypes(operandTypes, attrs, opts) {
   if (!(inp instanceof TensorType) || !(kernel instanceof TensorType)) return null;
   const o = opts && !Array.isArray(opts) ? opts : {};
   if (!o.allowMixedDtype && inp.dtype !== kernel.dtype) return null;
+  const declared = attrs.get ? attrs.get('out_dtype') : attrs.out_dtype;
   const strides = attrs.get ? attrs.get('strides') : attrs.strides;
   const padding = attrs.get ? attrs.get('padding') : attrs.padding;
   const dilation = (attrs.get ? attrs.get('dilation') : attrs.dilation) || strides.map(() => 1);
@@ -179,7 +183,7 @@ function inferConvResultTypes(operandTypes, attrs, opts) {
       outSpatial.push(Math.floor((inDim + padTotal - effectiveK) / strides[i]) + 1);
     }
   }
-  return [new TensorType([batch, outChannels, ...outSpatial], o.outputDtype || inp.dtype)];
+  return [new TensorType([batch, outChannels, ...outSpatial], declared || o.outputDtype || inp.dtype)];
 }
 
 export { inferDotResultTypes, inferConvResultTypes };

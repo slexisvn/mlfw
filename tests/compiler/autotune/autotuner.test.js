@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { spatialIter, reduceIter } from '../../_utils/ir_fixture.js';
 import { getSketchesForBlock } from '../../../src/compiler/autotune/search_space.js';
 import { createMultiLevelTilingSketch } from '../../../src/compiler/autotune/tiling.js';
 import { getTileStructure } from '../../../src/compiler/autotune/tile_structure.js';
@@ -67,11 +68,14 @@ describe('Ansor-style sketch auto-generation derives sketches from block structu
     const m = new VariableNode('m', 'int32');
     const n = new VariableNode('n', 'int32');
     const k = new VariableNode('k', 'int32');
-    const prod = new MathOpNode('mul', new BufferLoadNode(A, [m, k]), new BufferLoadNode(B, [k, n]));
-    const acc = new MathOpNode('add', new BufferLoadNode(C, [m, n]), prod);
-    const body = new BufferStoreNode(C, [m, n], acc);
-    const init = new BufferStoreNode(C, [m, n], new IntImmNode(0));
-    const iterVars = [{ iterVar: m, binding: m }, { iterVar: n, binding: n }, { iterVar: k, binding: k }];
+    const vm = new VariableNode('vm', 'int32');
+    const vn = new VariableNode('vn', 'int32');
+    const vk = new VariableNode('vk', 'int32');
+    const prod = new MathOpNode('mul', new BufferLoadNode(A, [vm, vk]), new BufferLoadNode(B, [vk, vn]));
+    const acc = new MathOpNode('add', new BufferLoadNode(C, [vm, vn]), prod);
+    const body = new BufferStoreNode(C, [vm, vn], acc);
+    const init = new BufferStoreNode(C, [vm, vn], new IntImmNode(0));
+    const iterVars = [spatialIter(vm, m), spatialIter(vn, n), reduceIter(vk, k)];
     const block = new BlockNode(name, iterVars, [{ buffer: A }, { buffer: B }], [{ buffer: C }], body, init);
     let nest = block;
     for (const [v, e] of [[k, K], [n, N], [m, M]]) {
@@ -85,8 +89,10 @@ describe('Ansor-style sketch auto-generation derives sketches from block structu
     const C = new Buffer('C', [M, N], 'float32', 'global');
     const m = new VariableNode('m', 'int32');
     const n = new VariableNode('n', 'int32');
-    const body = new BufferStoreNode(C, [m, n], new MathOpNode('add', new BufferLoadNode(A, [m, n]), new IntImmNode(1)));
-    const iterVars = [{ iterVar: m, binding: m }, { iterVar: n, binding: n }];
+    const vm = new VariableNode('vm', 'int32');
+    const vn = new VariableNode('vn', 'int32');
+    const body = new BufferStoreNode(C, [vm, vn], new MathOpNode('add', new BufferLoadNode(A, [vm, vn]), new IntImmNode(1)));
+    const iterVars = [spatialIter(vm, m), spatialIter(vn, n)];
     const block = new BlockNode(name, iterVars, [{ buffer: A }], [{ buffer: C }], body, null);
     let nest = block;
     for (const [v, e] of [[n, N], [m, M]]) {

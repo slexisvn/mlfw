@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { spatialIter, reduceIter } from '../../_utils/ir_fixture.js';
 import { FeatureExtractor, STATEMENT_FEATURE_SCHEMA } from '../../../src/compiler/autotune/features.js';
 import { LearnedCostModel, AnalyticalCostModel, GuidedCostModel } from '../../../src/compiler/autotune/cost_model.js';
 import { EvolutionarySearch } from '../../../src/compiler/autotune/search.js';
@@ -20,11 +21,14 @@ function matmulPrimFunc(name, M = 8, N = 8, K = 8) {
   const m = new VariableNode('m', 'int32');
   const n = new VariableNode('n', 'int32');
   const k = new VariableNode('k', 'int32');
-  const prod = new MathOpNode('mul', new BufferLoadNode(A, [m, k]), new BufferLoadNode(B, [k, n]));
-  const acc = new MathOpNode('add', new BufferLoadNode(C, [m, n]), prod);
-  const body = new BufferStoreNode(C, [m, n], acc);
-  const init = new BufferStoreNode(C, [m, n], new IntImmNode(0));
-  const iterVars = [{ iterVar: m, binding: m }, { iterVar: n, binding: n }, { iterVar: k, binding: k }];
+  const vm = new VariableNode('vm', 'int32');
+  const vn = new VariableNode('vn', 'int32');
+  const vk = new VariableNode('vk', 'int32');
+  const prod = new MathOpNode('mul', new BufferLoadNode(A, [vm, vk]), new BufferLoadNode(B, [vk, vn]));
+  const acc = new MathOpNode('add', new BufferLoadNode(C, [vm, vn]), prod);
+  const body = new BufferStoreNode(C, [vm, vn], acc);
+  const init = new BufferStoreNode(C, [vm, vn], new IntImmNode(0));
+  const iterVars = [spatialIter(vm, m), spatialIter(vn, n), reduceIter(vk, k)];
   const block = new BlockNode(name, iterVars, [{ buffer: A }, { buffer: B }], [{ buffer: C }], body, init);
   let nest = block;
   for (const [v, e] of [[k, K], [n, N], [m, M]]) {

@@ -6,6 +6,7 @@ import { TirPassManager } from '../passes/tir_pass_manager.js';
 import { buildGraphPipeline } from './graph_pipeline.js';
 import { buildTirPipeline } from './tir_pipeline.js';
 import { lowerGraphToPrimFunc } from '../passes/lowering/graph_to_tensor.js';
+import { TirModule } from '../ir/tensor/module.js';
 import { BackendPipeline, detectPureMatmul } from '../../backend/pipeline.js';
 import { RuntimeModule } from '../../runtime/runtime.js';
 import { CalibrationCollector } from '../analysis/calibration.js';
@@ -55,6 +56,7 @@ export class CompilerConfig {
       inplaceReuse: true,
       allocStrategy: 'best-fit',
       poolAllocation: false,
+      scheduleForPeak: true,
       ...opts.memory,
     };
     this.partition = {
@@ -162,7 +164,7 @@ export class Compiler {
       working: resilient ? cloneGraphModule(graphModule) : graphModule,
       cudaMatmulChain: false,
       split: null,
-      primFuncs: null,
+      tirModule: null,
       lirFuncs: null,
       runtimeModule: null,
     };
@@ -229,9 +231,9 @@ export class Compiler {
       {
         name: 'lowering',
         run: (ctx) => {
-          ctx.primFuncs = ctx.compiler._lowerAll(ctx.working, ctx.trace, ctx.errors, ctx.failed, ctx.resilient);
+          ctx.tirModule = ctx.compiler._lowerAll(ctx.working, ctx.trace, ctx.errors, ctx.failed, ctx.resilient);
           if (ctx.compiler.config.matmulBackend === 'cublas') {
-            for (const pf of ctx.primFuncs) {
+            for (const pf of ctx.tirModule) {
               const info = ctx.split && ctx.split.cublasInfos ? ctx.split.cublasInfos.get(pf.name) : detectPureMatmul(pf);
               if (info) pf.setAttr(FuncAttr.CUBLAS_INFO, info);
             }
@@ -245,11 +247,11 @@ export class Compiler {
       {
         name: 'verify:tensor',
         when: (ctx) => ctx.compiler.config.verifyEnabled,
-        run: (ctx) => ctx.compiler._verifyBoundary(ctx.primFuncs, IRLevel.TIR, ctx),
+        run: (ctx) => ctx.compiler._verifyBoundary(ctx.tirModule, IRLevel.TIR, ctx),
       },
       {
         name: 'lirLowering',
-        run: (ctx) => { ctx.lirFuncs = ctx.compiler._lowerToLIR(ctx.primFuncs, ctx.trace, ctx.errors, ctx.failed, ctx.resilient); },
+        run: (ctx) => { ctx.lirFuncs = ctx.compiler._lowerToLIR(ctx.tirModule, ctx.trace, ctx.errors, ctx.failed, ctx.resilient); },
       },
       {
         name: 'verify:lir',
@@ -379,7 +381,7 @@ export class Compiler {
   _lowerAll(graphModule, trace, errors, failed, resilient) {
     trace.phaseStart('lowering');
     const t0 = performance.now();
-    const primFuncs = [];
+    const tirModule = new TirModule(graphModule.name);
     this._eachFunc(graphModule, 'lowering', trace, errors, failed, resilient, (func) => {
       const ft0 = performance.now();
       const primFunc = lowerGraphToPrimFunc(func, this.config.target, this.context);
@@ -388,13 +390,13 @@ export class Compiler {
         if (convInfo) primFunc.setAttr(FuncAttr.CONV_INFO, convInfo);
       }
       trace.functionEvent('lowering', func.name, { durationMs: performance.now() - ft0 });
-      primFuncs.push(primFunc);
+      tirModule.addFunction(primFunc);
       if (trace.shouldSnapshot('afterLowering')) {
         trace.irDump('afterLowering:' + func.name, printTensorIR(primFunc));
       }
     });
     trace.phaseEnd('lowering', performance.now() - t0);
-    return primFuncs;
+    return tirModule;
   }
 
   _runTirPasses(ctx) {
@@ -402,7 +404,7 @@ export class Compiler {
     for (const pass of buildTirPipeline(this.config)) tirPM.addPass(pass);
     tirPM.setTrace(ctx.trace);
     tirPM.setCheckEachPass(this.config.verifyEachPass);
-    tirPM.run(ctx.primFuncs, {
+    tirPM.run(ctx.tirModule, {
       trace: ctx.trace,
       errors: ctx.errors,
       failed: ctx.failed,
@@ -438,11 +440,11 @@ export class Compiler {
     }
   }
 
-  _lowerToLIR(primFuncs, trace, errors, failed, resilient) {
+  _lowerToLIR(tirModule, trace, errors, failed, resilient) {
     trace.phaseStart('lirLowering');
     const t0 = performance.now();
     const lirFuncs = [];
-    this._eachFunc(primFuncs, 'lirLowering', trace, errors, failed, resilient, (pf) => {
+    this._eachFunc(tirModule, 'lirLowering', trace, errors, failed, resilient, (pf) => {
       const ft0 = performance.now();
       const lirFunc = lowerToLIR(pf, this.config.target);
       trace.functionEvent('lirLowering', pf.name, { durationMs: performance.now() - ft0 });

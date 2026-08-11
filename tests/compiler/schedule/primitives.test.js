@@ -166,3 +166,67 @@ describe('ScheduleValidator flags ambiguous parallel partition (mismatched paral
     expect(errors.some(e => e.includes('parallel partition'))).toBe(false);
   });
 });
+
+describe('Schedule.reorder decides on dependence, not on nest shape', () => {
+  beforeEach(() => resetVarCounter());
+
+  function opaqueNest(name, extents, writeOffsets, readOffsets) {
+    const A = new Buffer(name, extents, 'float32', 'global');
+    const vars = extents.map((_, d) => iv(`x${d}`));
+    const at = (offsets) => offsets.map(([d, k]) => (k === 0 ? vars[d] : new MathOpNode('+', vars[d], new IntImmNode(k))));
+    const store = new BufferStoreNode(A, at(writeOffsets), new BufferLoadNode(A, at(readOffsets)));
+    return { func: new PrimFunc('f', [], loopNest(vars, extents, store), new Map([[name, A]])), vars };
+  }
+
+  function nestOrder(func) {
+    const order = [];
+    for (let node = func.body; node && node.type === 'ForNode'; node = node.body) order.push(node.loopVar.name);
+    return order;
+  }
+
+  it('reorders two non-consecutive loops and leaves the loop between them in place', () => {
+    const buf = new Buffer('A', [4, 5, 6], 'float32', 'global');
+    const vars = [iv('i'), iv('j'), iv('k')];
+    const block = makeBlock('b', buf, vars, new IntImmNode(0));
+    const func = new PrimFunc('f', [], loopNest(vars, [4, 5, 6], block), new Map([['A', buf]]));
+    const sch = new Schedule(func);
+
+    const loops = sch.getLoops('b');
+    sch.reorder(loops[2], loops[0]);
+
+    expect(nestOrder(sch.func)).toEqual(['k', 'j', 'i']);
+    expect(ScheduleValidator.validate(sch.func)).toEqual([]);
+  });
+
+  it('refuses an interchange that would reverse a skewed (<, >) dependence', () => {
+    const { func, vars } = opaqueNest('A', [6, 6], [[0, 0], [1, 0]], [[0, -1], [1, 1]]);
+    const sch = new Schedule(func);
+    const loops = [sch._resolveLoop(vars[0].name), sch._resolveLoop(vars[1].name)];
+    expect(() => sch.reorder(loops[1], loops[0])).toThrow(/violates a \w+ dependence on buffer 'A'/);
+    expect(nestOrder(sch.func)).toEqual(['x0', 'x1']);
+  });
+
+  it('allows an interchange when every dependence stays lexicographically positive', () => {
+    const { func, vars } = opaqueNest('A', [6, 6], [[0, 0], [1, 0]], [[0, -1], [1, -1]]);
+    const sch = new Schedule(func);
+    const loops = [sch._resolveLoop(vars[0].name), sch._resolveLoop(vars[1].name)];
+    sch.reorder(loops[1], loops[0]);
+    expect(nestOrder(sch.func)).toEqual(['x1', 'x0']);
+  });
+
+  it('sinks a split guard below the loop it constrains when that loop moves inward', () => {
+    const buf = new Buffer('A', [12, 12], 'float32', 'global');
+    const vars = [iv('i'), iv('j')];
+    const block = makeBlock('b', buf, vars, new IntImmNode(0));
+    const func = new PrimFunc('f', [], loopNest(vars, [12, 12], block), new Map([['A', buf]]));
+    const sch = new Schedule(func);
+
+    const loops = sch.getLoops('b');
+    const [io, ii] = sch.split(loops[0], 8);
+    const jLoop = sch.getLoops('b').find((l) => l.loopVar.name === 'j');
+    sch.reorder(io, jLoop, ii);
+
+    expect(ScheduleValidator.validate(sch.func)).toEqual([]);
+    expect(nestOrder(sch.func)).toEqual([io.loopVar.name, 'j', ii.loopVar.name]);
+  });
+});

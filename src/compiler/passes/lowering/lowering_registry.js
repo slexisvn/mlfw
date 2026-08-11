@@ -3,7 +3,7 @@ import { SymInt, symVarName } from '../../analysis/sym_int.js';
 import { MemoryScope } from '../../ir/tensor/tensor_types.js';
 import { Buffer } from '../../ir/tensor/buffer.js';
 import { isDtypeInt } from '../../../util/dtype_map.js';
-import { ForNode, BlockNode, SeqNode, BufferStoreNode, BufferLoadNode, VariableNode, IntImmNode, FloatImmNode, BlockRealizeNode, ForKind, MathOpNode, CompareNode, IfThenElseNode, CastNode, mathOp } from '../../ir/tensor/nodes.js';
+import { ForNode, BlockNode, SeqNode, BufferStoreNode, BufferLoadNode, VariableNode, IntImmNode, FloatImmNode, BlockRealizeNode, IterVarKind, ForKind, MathOpNode, CompareNode, IfThenElseNode, CastNode, mathOp } from '../../ir/tensor/nodes.js';
 import { symIntToNode } from '../../ir/tensor/sym_lower.js';
 
 import { isConstantOp } from '../../ir/graph/op_traits.js';
@@ -155,6 +155,11 @@ export class LoweringContext {
   }
 }
 
+export function markCommReduce(ivs) {
+  for (const iv of ivs) iv.kind = IterVarKind.COMM_REDUCE;
+  return ivs;
+}
+
 export function makeLoopNest(ctx, shape, buf) {
   const n = shape.length;
   const loopVars = ctx.allocVarArray('i', n);
@@ -196,8 +201,12 @@ export function emitMatmulInitAcc(ctx, op, lhs, rhs, out, { prefix, initBlockNam
 
   let lhsLoad = new BufferLoadNode(lhs, geo.lhsIdx);
   let rhsLoad = new BufferLoadNode(rhs, geo.rhsIdx);
-  const lhsCast = op.getAttr('lhs_prologue_cast');
-  const rhsCast = op.getAttr('rhs_prologue_cast');
+  const promoteTo = (buf, explicit) => {
+    if (explicit !== undefined && explicit !== null) return explicit;
+    return buf.dtype === out.dtype ? null : out.dtype;
+  };
+  const lhsCast = promoteTo(lhs, op.getAttr('lhs_prologue_cast'));
+  const rhsCast = promoteTo(rhs, op.getAttr('rhs_prologue_cast'));
   if (lhsCast) lhsLoad = new CastNode(lhsLoad, lhs.dtype, lhsCast);
   if (rhsCast) rhsLoad = new CastNode(rhsLoad, rhs.dtype, rhsCast);
   const product = accLeaf(lhsLoad, rhsLoad);
@@ -240,6 +249,7 @@ export function buildConvNest(ctx, op, inBuf, kerBuf, outBuf, { prefix, blockPre
   const soBinds = allBinds.slice(2, 2 + spatialDims);
   const icv = allBinds[2 + spatialDims].iterVar;
   const skBinds = allBinds.slice(3 + spatialDims);
+  markCommReduce([allBinds[2 + spatialDims], ...skBinds]);
 
   const outIdx = new Array(outShape.length);
   outIdx[iLayout['N']] = bv;
@@ -474,7 +484,7 @@ export function buildDotGeometry(ctx, op, lhs, rhs) {
   const bIvs = ctx.allocBindArray('vb', bVars);
   const lsIvs = ctx.allocBindArray('vls', lsVars);
   const rsIvs = ctx.allocBindArray('vrs', rsVars);
-  const cIvs = ctx.allocBindArray('vc', cVars);
+  const cIvs = markCommReduce(ctx.allocBindArray('vc', cVars));
 
   const outIdx = concatIterVars(
     extractIterVars(bIvs), extractIterVars(lsIvs), extractIterVars(rsIvs)

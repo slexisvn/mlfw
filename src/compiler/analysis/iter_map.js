@@ -68,6 +68,17 @@ export function toLinearForm(expr) {
   }
 }
 
+export function composeForm(form, varForms) {
+  if (!form) return null;
+  let result = LinearForm.constant(form.offset);
+  for (const [name, coeff] of form.terms) {
+    const bound = varForms.get(name);
+    if (!bound) return null;
+    result = result.add(bound.scale(coeff));
+  }
+  return result;
+}
+
 export function splitByDivisor(form, divisor) {
   if (!Number.isInteger(divisor) || divisor <= 0) return null;
   const divisible = new Map();
@@ -93,20 +104,19 @@ export function linearFormToNode(form, makeVar, makeConst, makeOp) {
   return makeOp('+', node, makeConst(form.offset));
 }
 
-export function exactCoverRange(expr, varRanges) {
-  const form = toLinearForm(expr);
+export function mixedRadixDecomposition(form, varRanges) {
   if (!form) return null;
 
   const factors = [];
+  let offset = form.offset;
   for (const [name, coeff] of form.terms) {
     const range = varRanges.get(name);
     if (!range) return null;
     const [min, extent] = range;
-    if (min !== 0 || extent <= 0 || coeff <= 0) return null;
-    factors.push({ coeff, extent });
+    if (extent <= 0 || coeff <= 0) return null;
+    offset += coeff * min;
+    factors.push({ name, coeff, extent, min });
   }
-
-  if (factors.length === 0) return [form.offset, 1];
 
   factors.sort((x, y) => x.coeff - y.coeff);
   let stride = 1;
@@ -115,5 +125,14 @@ export function exactCoverRange(expr, varRanges) {
     stride *= factor.extent;
   }
 
-  return [form.offset, stride];
+  return { offset, extent: stride, factors };
+}
+
+export function coverRangeOfForm(form, varRanges) {
+  const decomposition = mixedRadixDecomposition(form, varRanges);
+  return decomposition ? [decomposition.offset, decomposition.extent] : null;
+}
+
+export function exactCoverRange(expr, varRanges) {
+  return coverRangeOfForm(toLinearForm(expr), varRanges);
 }

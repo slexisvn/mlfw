@@ -24,7 +24,7 @@ const A = new Float32Array(M * K).map((_, i) => Math.sin(i * 0.7) * 1.4);
 const B = new Float32Array(K * N).map((_, i) => Math.cos(i * 0.4) * 1.2);
 
 describe('autocast inserts f16 casts around allow-listed compute ops only', () => {
-  it('wraps dot with f16 down-casts and an f32 up-cast; leaves the reduce in f32', () => {
+  it('wraps dot with f16 down-casts, keeps its f32 accumulator, and leaves the reduce in f32', () => {
     const mod = matmulReduce('amp');
     const func = innerFunc(mod);
     expect(applyAutocast(func, { allow: new Set(['dot']) })).toBe(true);
@@ -32,13 +32,14 @@ describe('autocast inserts f16 casts around allow-listed compute ops only', () =
     const dot = [...func.ops()].find(o => o.opName === 'dot');
     expect(dot.getOperand(0).type.dtype).toBe(F16);
     expect(dot.getOperand(1).type.dtype).toBe(F16);
-    expect(dot.getResult(0).type.dtype).toBe(F16);
+    expect(dot.getResult(0).type.dtype).toBe(F);
+    expect(dot.getAttr('out_dtype')).toBe(F);
 
     const reduce = [...func.ops()].find(o => o.opName === 'reduce');
     expect(reduce.getOperand(0).type.dtype).toBe(F);
 
     const converts = [...func.ops()].filter(o => o.opName === 'convert');
-    expect(converts.length).toBe(3);
+    expect(converts.map(c => c.getResult(0).type.dtype)).toEqual([F16, F16]);
   });
 
   it('does nothing when no op is in the allow set', () => {

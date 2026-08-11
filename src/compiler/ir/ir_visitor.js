@@ -127,30 +127,35 @@ function relink(node) {
   }
 }
 
-function walkInner(node, v, o, parent, depth, state) {
-  if (state.stop || !isIRNode(node)) return;
-  const ctx = { parent, depth };
-  let descend = true;
-  if (v.pre) {
-    const r = v.pre(node, ctx);
-    if (r === STOP) { state.stop = true; return; }
-    if (r === false) descend = false;
-  }
-  if (descend) {
-    for (const acc of childAccessors(node, o)) {
-      const kids = acc.read();
-      for (let i = 0; i < kids.length; i++) {
-        walkInner(kids[i], v, o, node, depth + 1, state);
-        if (state.stop) return;
-      }
-    }
-  }
-  if (v.post) v.post(node, ctx);
-}
-
 export function walk(node, visitor, opts = {}) {
   const v = typeof visitor === 'function' ? { pre: visitor } : (visitor || {});
-  walkInner(node, v, normOpts(opts), null, 0, { stop: false });
+  const o = normOpts(opts);
+  if (!isIRNode(node)) return;
+
+  const stack = [{ node, parent: null, depth: 0, entered: false }];
+  while (stack.length > 0) {
+    const frame = stack[stack.length - 1];
+    if (frame.entered) {
+      stack.pop();
+      if (v.post) v.post(frame.node, { parent: frame.parent, depth: frame.depth });
+      continue;
+    }
+    frame.entered = true;
+    let descend = true;
+    if (v.pre) {
+      const r = v.pre(frame.node, { parent: frame.parent, depth: frame.depth });
+      if (r === STOP) return;
+      if (r === false) descend = false;
+    }
+    if (!descend) continue;
+    const kids = [];
+    for (const acc of childAccessors(frame.node, o)) {
+      for (const kid of acc.read()) kids.push(kid);
+    }
+    for (let i = kids.length - 1; i >= 0; i--) {
+      stack.push({ node: kids[i], parent: frame.node, depth: frame.depth + 1, entered: false });
+    }
+  }
 }
 
 export function collect(node, pred, opts = {}) {
@@ -173,25 +178,42 @@ export function find(node, pred, opts = {}) {
 
 export function transform(node, fn, opts = {}) {
   const o = normOpts(opts);
-  return transformInner(node, fn, o);
-}
-
-function transformInner(node, fn, o) {
   if (!isIRNode(node)) return node;
-  let anyChanged = false;
-  for (const acc of childAccessors(node, o)) {
-    const kids = acc.read();
-    if (kids.length === 0) continue;
-    let changed = false;
-    const next = new Array(kids.length);
-    for (let i = 0; i < kids.length; i++) {
-      const nk = transformInner(kids[i], fn, o);
-      if (nk !== kids[i]) changed = true;
-      next[i] = nk;
+
+  const replacements = new Map();
+  const stack = [{ node, entered: false }];
+  while (stack.length > 0) {
+    const frame = stack[stack.length - 1];
+    if (!frame.entered) {
+      frame.entered = true;
+      const kids = [];
+      for (const acc of childAccessors(frame.node, o)) {
+        for (const kid of acc.read()) kids.push(kid);
+      }
+      for (let i = kids.length - 1; i >= 0; i--) stack.push({ node: kids[i], entered: false });
+      continue;
     }
-    if (changed) { acc.write(next); anyChanged = true; }
+    stack.pop();
+
+    let anyChanged = false;
+    for (const acc of childAccessors(frame.node, o)) {
+      const kids = acc.read();
+      if (kids.length === 0) continue;
+      let changed = false;
+      const next = new Array(kids.length);
+      for (let i = 0; i < kids.length; i++) {
+        const nk = replacements.has(kids[i]) ? replacements.get(kids[i]) : kids[i];
+        if (nk !== kids[i]) changed = true;
+        next[i] = nk;
+      }
+      if (changed) { acc.write(next); anyChanged = true; }
+    }
+    if (anyChanged) relink(frame.node);
+
+    const replaced = fn(frame.node);
+    if (replaced !== undefined && replaced !== null && replaced !== frame.node) {
+      replacements.set(frame.node, replaced);
+    }
   }
-  if (anyChanged) relink(node);
-  const replaced = fn(node);
-  return replaced === undefined || replaced === null ? node : replaced;
+  return replacements.has(node) ? replacements.get(node) : node;
 }

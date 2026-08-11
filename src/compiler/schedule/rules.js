@@ -2,6 +2,7 @@
 import { TargetKind } from '../../backend/target.js';
 import { ForKind } from '../ir/tensor/nodes.js';
 import { some as irSome, collect as irCollect } from '../ir/ir_visitor.js';
+import { reductionLoopVars } from './legality.js';
 
 export class ScheduleRule {
   constructor(name) {
@@ -39,47 +40,6 @@ function invalidateClassifyBlock(primFunc, blockName) {
   if (cache) cache.delete(blockName);
 }
 
-function collectVarNames(node, out) {
-  const stack = [node];
-  while (stack.length > 0) {
-    const n = stack.pop();
-    if (!n || typeof n !== 'object') continue;
-    if (n.type === 'VariableNode') { out.add(n.name); continue; }
-    for (const k of ['a', 'b', 'condition', 'thenBody', 'elseBody', 'expr', 'value', 'offsetExpr', 'extent']) {
-      if (n[k]) stack.push(n[k]);
-    }
-    if (n.indices) for (const i of n.indices) stack.push(i);
-    if (n.args) for (const a of n.args) stack.push(a);
-  }
-}
-
-function computeReductionLoopVars(blockNode) {
-  const writeBufs = new Set((blockNode.writes || []).map(w => w.buffer && w.buffer.name));
-  const writeIdxVars = new Set();
-  const stack = [blockNode.body, blockNode.initBody];
-  while (stack.length > 0) {
-    const n = stack.pop();
-    if (!n) continue;
-    if (n.type === 'BufferStoreNode' && n.buffer && writeBufs.has(n.buffer.name)) {
-      for (const idx of n.indices) collectVarNames(idx, writeIdxVars);
-    }
-    if (n.body) stack.push(n.body);
-    if (n.stmts) for (const s of n.stmts) stack.push(s);
-    if (n.thenBody) stack.push(n.thenBody);
-    if (n.elseBody) stack.push(n.elseBody);
-    if (n.value) stack.push(n.value);
-  }
-  const red = new Set();
-  for (const iv of (blockNode.iterVars || [])) {
-    const bindVars = new Set();
-    collectVarNames(iv.binding, bindVars);
-    const isSpatial = (iv.iterVar && writeIdxVars.has(iv.iterVar.name))
-      || [...bindVars].some(v => writeIdxVars.has(v));
-    if (!isSpatial) for (const v of bindVars) red.add(v);
-  }
-  return red;
-}
-
 function collectBlockInfo(root, result, initialLoopStack) {
   const stack = [{ node: root, loops: [...initialLoopStack] }];
   while (stack.length > 0) {
@@ -89,11 +49,11 @@ function collectBlockInfo(root, result, initialLoopStack) {
       stack.push({ node: node.body, loops: [...loops, node] });
     } else if (node.type === 'BlockNode') {
       if (!result.has(node.name)) {
-        const reductionLoopVars = computeReductionLoopVars(node);
+        const reduction = reductionLoopVars(node);
         result.set(node.name, {
           loopCount: loops.length,
-          hasReduction: node.initBody !== null || reductionLoopVars.size > 0,
-          reductionLoopVars,
+          hasReduction: node.initBody !== null || reduction.size > 0,
+          reductionLoopVars: reduction,
           readBuffers: node.reads.map(r => r.buffer.name),
           writeBuffers: node.writes.map(r => r.buffer.name),
           loops: [...loops]
@@ -186,7 +146,7 @@ export class ElementwiseCPURule extends ScheduleRule {
 }
 
 export function primFuncHasReduction(primFunc) {
-  return irSome(primFunc.body, (n) => n.type === 'BlockNode' && (n.initBody !== null || computeReductionLoopVars(n).size > 0), { kinds: 'stmt' });
+  return irSome(primFunc.body, (n) => n.type === 'BlockNode' && (n.initBody !== null || reductionLoopVars(n).size > 0), { kinds: 'stmt' });
 }
 
 export function primFuncHasRecurrence(primFunc) {

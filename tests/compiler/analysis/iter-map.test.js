@@ -82,8 +82,10 @@ describe('exact cover proves a tiled index spans a contiguous range', () => {
     expect(exactCoverRange(mathOp('-', i32(7), v('i')), ranges([['i', [0, 8]]]))).toBeNull();
   });
 
-  it('rejects a loop whose range does not start at zero', () => {
-    expect(exactCoverRange(v('i'), ranges([['i', [2, 8]]]))).toBeNull();
+  it('shifts a loop whose range does not start at zero into the covered offset', () => {
+    expect(exactCoverRange(v('i'), ranges([['i', [2, 8]]]))).toEqual([2, 8]);
+    expect(exactCoverRange(mathOp('+', mathOp('*', v('io'), i32(32)), v('ii')),
+      ranges([['io', [0, 4]], ['ii', [3, 32]]]))).toEqual([3, 128]);
   });
 });
 

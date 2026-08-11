@@ -15,6 +15,7 @@ import { QuantizationPass } from '../passes/quantization/quantization_pass.js';
 import { DecompositionPass } from '../passes/decompose/decomposition_pass.js';
 import { RematerializationPass } from '../passes/memory/rematerialization.js';
 import { CublasRewritePass } from '../passes/rewrite/cublas_rewrite.js';
+import { CallInlinerPass } from '../passes/inline/call_inliner.js';
 import { graphPassesForPhase } from './graph_pass_registry.js';
 
 const DEFAULT_LAUNCH_OVERHEAD_US = 5;
@@ -27,6 +28,7 @@ export function buildGraphPipeline(config, target, { cudaMatmulChain = false, co
 
   for (const p of passesForPhase('pre')) passes.push(p);
 
+  passes.push(new CallInlinerPass());
   passes.push(new DecompositionPass(target));
   passes.push(new FixedPointGroup('canonicalize', [
     new CanonicalizePass(),
