@@ -1,7 +1,7 @@
 import { Tensor } from '../core/tensor.js';
 import { TensorImpl } from '../core/tensor_impl.js';
 import { Storage } from '../core/storage.js';
-import { ScalarType, typedArrayCtor } from '../types/dtype.js';
+import { ScalarType, typedArrayCtor, isDType, dtypeNames } from '../types/dtype.js';
 import type { DType, NumericTypedArray } from '../types/dtype.js';
 import { getDefaultDevice } from '../types/device.js';
 import type { Device } from '../types/device.js';
@@ -14,6 +14,9 @@ type TensorInput = number | ArrayLike<number> | NestedNumberArray | NumericTyped
 
 export function tensor(data: TensorInput, opts?: TensorOptions): Tensor {
   const dtype = opts?.dtype ?? ScalarType.F32;
+  if (!isDType(dtype)) {
+    throw new Error(`tensor: unknown dtype '${String(dtype)}' — expected one of ${dtypeNames().join(', ')}`);
+  }
   const device = opts?.device ?? getDefaultDevice();
   const requiresGrad = opts?.requiresGrad ?? false;
 

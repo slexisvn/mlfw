@@ -49,7 +49,9 @@ function _metaReduction(_keySet: unknown, self: Tensor, dim?: number | readonly 
 
 export function metaMatmul(_keySet: unknown, self: Tensor, other: Tensor): Tensor {
   const shape = matmulOutputShape(self.shape, other.shape);
-  if (shape === null) throw new Error(`metaMatmul: unsupported shapes`);
+  if (shape === null) {
+    throw new Error(`matmul: incompatible shapes [${self.shape}] and [${other.shape}] — the last dim of the first operand must equal the second-to-last dim of the second`);
+  }
   return _metaTensor(shape, self.dtype);
 }
 

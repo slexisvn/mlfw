@@ -1,6 +1,10 @@
 import { defineConfig } from 'vitest/config';
 
-const HARDWARE = ['tests/backend/cuda/**', 'tests/backend/webgpu/**', 'tests/linalg/cuda-linalg.test.js'];
+const CUDA = 'tests/**/*.cuda.test.js';
+const WEBGPU = 'tests/**/*.webgpu.test.js';
+const SCRATCH = 'tests/**/_*.test.js';
+const PERF = 'tests/perf/**';
+const STRESS = 'tests/stress/**';
 
 export default defineConfig({
   test: {
@@ -9,7 +13,7 @@ export default defineConfig({
         test: {
           name: 'unit',
           include: ['tests/**/*.test.js'],
-          exclude: ['tests/e2e/**', 'tests/stress/**', ...HARDWARE],
+          exclude: ['tests/e2e/**', STRESS, PERF, CUDA, WEBGPU, SCRATCH],
           testTimeout: 5000,
         },
       },
@@ -17,20 +21,23 @@ export default defineConfig({
         test: {
           name: 'e2e',
           include: ['tests/e2e/**/*.test.js'],
-          testTimeout: 30000,
+          exclude: [CUDA, WEBGPU, SCRATCH],
+          testTimeout: 60000,
         },
       },
       {
         test: {
           name: 'cuda',
-          include: ['tests/backend/cuda/**/*.test.js', 'tests/linalg/cuda-linalg.test.js'],
+          include: [CUDA],
+          exclude: [PERF, SCRATCH],
           testTimeout: 60000,
         },
       },
       {
         test: {
           name: 'webgpu',
-          include: ['tests/backend/webgpu/**/*.test.js'],
+          include: [WEBGPU],
+          exclude: [PERF, SCRATCH],
           testTimeout: 60000,
         },
       },
@@ -38,12 +45,22 @@ export default defineConfig({
         test: {
           name: 'stress',
           include: ['tests/stress/**/*.test.js'],
+          exclude: [SCRATCH],
+          testTimeout: 120000,
+        },
+      },
+      {
+        test: {
+          name: 'perf',
+          include: ['tests/perf/**/*.test.js'],
+          exclude: [SCRATCH],
           testTimeout: 120000,
         },
       },
     ],
     coverage: {
       provider: 'v8',
+      include: ['src/**'],
       thresholds: {
         lines: 83,
         functions: 85,

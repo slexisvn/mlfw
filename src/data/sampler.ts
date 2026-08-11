@@ -1,3 +1,4 @@
+import { random } from '../util/random.js';
 type Sized = { length: number };
 
 export class Sampler implements Iterable<number | number[]> {
@@ -35,7 +36,7 @@ export class RandomSampler extends Sampler implements Iterable<number> {
     const indices = new Int32Array(n);
     for (let i = 0; i < n; i++) indices[i] = i;
     for (let i = n - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
+      const j = Math.floor(random() * (i + 1));
       const tmp = indices[i];
       indices[i] = indices[j];
       indices[j] = tmp;

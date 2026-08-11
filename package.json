@@ -40,7 +40,8 @@
     "test:e2e": "vitest run --project e2e",
     "test:webgpu": "vitest run --project webgpu",
     "test:cuda": "vitest run --project cuda",
-    "test:stress": "vitest run --project stress"
+    "test:stress": "vitest run --project stress",
+    "test:perf": "vitest run --project perf"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^4.1.8",

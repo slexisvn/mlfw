@@ -3,9 +3,9 @@ import { buildFunction } from '../../../../src/compiler/ir/graph/builder.js';
 import { verifyFunction } from '../../../../src/compiler/ir/graph/verifier.js';
 import { compileGraph } from '../../../../src/compiler/pipeline/compiler.js';
 import { CPUTarget } from '../../../../src/backend/target.js';
-import { TensorType, ScalarType } from '../../../../src/compiler/ir/graph/types.js';
+import { TensorType } from '../../../../src/compiler/ir/graph/types.js';
+import { F32 as F } from '../../../_utils/ir_fixture.js';
 
-const F = ScalarType.F32;
 
 function buildIfProgram(predTrue) {
   const xT = new TensorType([4], F);

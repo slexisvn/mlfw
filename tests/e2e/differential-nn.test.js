@@ -5,46 +5,17 @@ import { conv2d, conv1d } from '../../src/nn/functional/conv.js';
 import { max_pool2d, avg_pool2d } from '../../src/nn/functional/pooling.js';
 import { compile } from '../../src/tracing/compile.js';
 import { CPUTarget, WasmTarget } from '../../src/backend/target.js';
-import { eq, where, gt, clamp, pad, one_hot, index_select, cat, stack, roll, flip, cumsum, sort, topk, argsort, gather, scatter_add, scatter } from '../../src/index.js';
+import { eq, where, clamp, pad, one_hot, index_select, cat, stack, roll, flip, cumsum, sort, topk, argsort, gather, scatter_add, scatter } from '../../src/index.js';
 import { isDtypeFloat } from '../../src/util/dtype_map.js';
-
-function mulberry32(seed) {
-  let a = seed >>> 0;
-  return function () {
-    a |= 0; a = (a + 0x6D2B79F5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-function numel(s) { return s.reduce((a, b) => a * b, 1); }
-function nest(flat, shape) {
-  if (shape.length === 1) return flat.slice(0, shape[0]);
-  const sub = numel(shape.slice(1)); const out = [];
-  for (let i = 0; i < shape[0]; i++) out.push(nest(flat.slice(i * sub, (i + 1) * sub), shape.slice(1)));
-  return out;
-}
-function mk(rng, shape, lo, hi, dtype) {
-  const n = numel(shape); const flat = [];
-  for (let i = 0; i < n; i++) {
-    let v = lo + (hi - lo) * rng();
-    if (dtype && !isDtypeFloat(dtype)) v = Math.round(v);
-    flat.push(v);
-  }
-  return tensor(nest(flat, shape), dtype ? { dtype } : undefined);
-}
-function flatten(t) {
-  if (t && typeof t.contiguous === 'function') return Array.from(t.contiguous().data);
-  if (t && t.data) return Array.from(t.data);
-  return [t];
-}
+import { mulberry32 } from '../_utils/rng.js';
+import { numel, nest, randomTensor, flat } from '../_utils/tensor_data.js';
 
 async function checkDiff(prog, makeTarget, tol = 2e-3) {
   const rng = mulberry32(3000 + prog.name.length * 17);
-  const inputs = prog.shapes.map((s) => mk(rng, s, prog.lo ?? -1, prog.hi ?? 1, prog.dtype));
-  const eager = flatten(prog.fwd(...inputs));
+  const inputs = prog.shapes.map((s) => randomTensor(rng, s, prog.lo ?? -1, prog.hi ?? 1, prog.dtype));
+  const eager = flat(prog.fwd(...inputs));
   const compiled = compile({ forward: (...a) => prog.fwd(...a) }, inputs, { target: makeTarget() });
-  const out = flatten(await compiled(...inputs));
+  const out = flat(await compiled(...inputs));
   expect(out.length).toBe(eager.length);
   for (let i = 0; i < eager.length; i++) {
     const relErr = Math.abs(eager[i] - out[i]) / (1 + Math.abs(eager[i]));
@@ -126,9 +97,9 @@ describe('differential nn: eager vs compiled (conv/pool/norm/dtype)', () => {
 
 describe('index ops: eager vs compiled (one_hot/index_select)', () => {
   async function checkIndexDiff(name, makeTarget, inputs, fwd, tol = 1e-6) {
-    const eager = flatten(fwd(...inputs));
+    const eager = flat(fwd(...inputs));
     const compiled = compile({ forward: (...a) => fwd(...a) }, inputs, { target: makeTarget() });
-    const out = flatten(await compiled(...inputs));
+    const out = flat(await compiled(...inputs));
     expect(out.length).toBe(eager.length);
     for (let i = 0; i < eager.length; i++) {
       const relErr = Math.abs(eager[i] - out[i]) / (1 + Math.abs(eager[i]));
@@ -784,13 +755,13 @@ describe('argmax/argmin: negative dim + keepdim vs independent oracle (eager+cpu
           const x = tensor(nest(values, shape));
 
           it(`eager ${opName}(dim=${dim},keepdim=${keep}) shape=${shape}`, () => {
-            expect(flatten(argMaxMin(opName, x, dim, keep))).toEqual(ref);
+            expect(flat(argMaxMin(opName, x, dim, keep))).toEqual(ref);
           });
 
           for (const [tname, T] of [['cpu', CPUTarget], ['wasm', WasmTarget]]) {
             it(`compiled ${tname} ${opName}(dim=${dim},keepdim=${keep}) shape=${shape}`, async () => {
               const compiled = compile({ forward: (a) => argMaxMin(opName, a, dim, keep) }, [x], { target: T() });
-              expect(flatten(await compiled(x))).toEqual(ref);
+              expect(flat(await compiled(x))).toEqual(ref);
             });
           }
         }

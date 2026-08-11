@@ -1,4 +1,5 @@
 import { Tensor } from '../core/tensor.js';
+import { random } from '../../util/random.js';
 import { TensorImpl } from '../core/tensor_impl.js';
 import { Storage } from '../core/storage.js';
 
@@ -63,8 +64,8 @@ export function randn(shape: readonly number[], opts?: TensorOptions): Tensor {
   if (data) {
     const len = data.length;
     for (let i = 0; i < len; i += 2) {
-      const u1 = Math.random() || 1e-10;
-      const u2 = Math.random();
+      const u1 = random() || 1e-10;
+      const u2 = random();
       const r = Math.sqrt(-2 * Math.log(u1));
       const theta = 6.283185307179586 * u2;
       data[i] = r * Math.cos(theta);
@@ -114,7 +115,7 @@ export function randperm(n: number, opts?: TensorOptions): Tensor {
   const data = t.data as NumericTypedArray;
   for (let i = 0; i < n; i++) data[i] = i;
   for (let i = n - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(random() * (i + 1));
     const tmp = data[i];
     data[i] = data[j];
     data[j] = tmp;

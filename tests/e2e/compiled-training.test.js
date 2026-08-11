@@ -1,14 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { tensor, Linear, ReLU, MSELoss, Adam, TensorDataset, DataLoader, sum, sub, mul } from '../../src/index.js';
+import { tensor, Linear, ReLU, MSELoss, Adam, TensorDataset, DataLoader, sum, sub, mul, manual_seed, unseed } from '../../src/index.js';
 import { LightningModule, Trainer } from '../../src/lightning/index.js';
 
-let _origRandom;
-beforeEach(() => {
-  _origRandom = Math.random;
-  let s = 2 >>> 0;
-  Math.random = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
-});
-afterEach(() => { Math.random = _origRandom; });
+beforeEach(() => manual_seed(2));
+afterEach(() => unseed());
 
 class Net extends LightningModule {
   constructor() {
@@ -53,12 +48,12 @@ describe('compiled training via Trainer(compile=true)', () => {
     expect(compiledLoss).toBeLessThan(start * 0.2);
     expect(compiledLoss).toBeLessThan(0.02);
     expect(Math.abs(compiledLoss - eagerLoss)).toBeLessThan(5e-3);
-  }, 60000);
+  });
 
   it('joint mode converges', async () => {
     const compiled = new Net();
     const start = mse(compiled);
     await new Trainer({ maxEpochs: 40, compile: true, compileMode: 'joint', ...quiet }).fit(compiled, loader());
     expect(mse(compiled)).toBeLessThan(start * 0.2);
-  }, 60000);
+  });
 });

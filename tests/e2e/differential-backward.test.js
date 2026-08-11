@@ -4,32 +4,8 @@ import { tensor, add, sub, mul, div, neg, sqrt, exp, tanh, sigmoid, relu, gelu, 
 import { ones } from '../../src/tensor/factory/creation_ops.js';
 import { compileWithBackward } from '../../src/tracing/compile_backward.js';
 import { CPUTarget, WasmTarget } from '../../src/backend/target.js';
-
-function mulberry32(seed) {
-  let a = seed >>> 0;
-  return function () {
-    a |= 0; a = (a + 0x6D2B79F5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-function numel(s) { return s.reduce((a, b) => a * b, 1); }
-function nest(flat, shape) {
-  if (shape.length === 1) return flat.slice(0, shape[0]);
-  const sub = numel(shape.slice(1)); const out = [];
-  for (let i = 0; i < shape[0]; i++) out.push(nest(flat.slice(i * sub, (i + 1) * sub), shape.slice(1)));
-  return out;
-}
-function data(rng, shape, lo, hi) {
-  const n = numel(shape); const f = [];
-  for (let i = 0; i < n; i++) f.push(lo + (hi - lo) * rng());
-  return nest(f, shape);
-}
-function flat(t) {
-  if (t && typeof t.contiguous === 'function') return Array.from(t.contiguous().data);
-  return Array.from(t.data);
-}
+import { mulberry32 } from '../_utils/rng.js';
+import { numel, nest, randomNested, flat } from '../_utils/tensor_data.js';
 
 const PROGRAMS = [
   { name: 'add', shapes: [[4, 5], [4, 5]], fwd: (x, y) => add(x, y) },
@@ -52,7 +28,7 @@ const PROGRAMS = [
 
 async function checkBackward(prog, makeTarget) {
   const rng = mulberry32(9000 + prog.name.length * 31);
-  const datas = prog.shapes.map((s) => data(rng, s, prog.lo ?? -1, prog.hi ?? 1));
+  const datas = prog.shapes.map((s) => randomNested(rng, s, prog.lo ?? -1, prog.hi ?? 1));
 
   const eagerInputs = datas.map((d) => tensor(d, { requiresGrad: true }));
   const eagerOut = prog.fwd(...eagerInputs);

@@ -5,8 +5,8 @@ import { BackwardGraphBuilder } from '../../../src/compiler/ad/backward_builder.
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
 import { CPUTarget } from '../../../src/backend/target.js';
 import '../../../src/compiler/ad/index.js';
+import { F32 } from '../../_utils/ir_fixture.js';
 
-const F32 = ScalarType.F32;
 
 function t(shape) {
   return new TensorType(shape, F32);

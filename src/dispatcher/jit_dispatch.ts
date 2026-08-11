@@ -105,7 +105,11 @@ function _inferOutputShape(opName: string, tensorArgs: readonly Tensor[], scalar
   }
 
   if (opName === 'matmul') {
-    return matmulOutputShape(tensorArgs[0].shape, tensorArgs[1].shape) || [];
+    const shape = matmulOutputShape(tensorArgs[0].shape, tensorArgs[1].shape);
+    if (shape === null) {
+      throw new Error(`matmul: incompatible shapes [${tensorArgs[0].shape}] and [${tensorArgs[1].shape}] — the last dim of the first operand must equal the second-to-last dim of the second`);
+    }
+    return shape;
   }
 
   if (opName === 'dot') return [];

@@ -1,12 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { buildFunction } from '../../src/compiler/ir/graph/builder.js';
-import { TensorType, ScalarType } from '../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../src/compiler/pipeline/compiler.js';
 import { CPUTarget, WasmTarget, CUDATarget, WebGPUTarget } from '../../src/backend/target.js';
 import { lintKernel, lintKernelStrict } from '../_utils/kernel_lint.js';
+import { F32, T as t } from '../_utils/ir_fixture.js';
 
-const F32 = ScalarType.F32;
-const t = (s) => new TensorType(s, F32);
 
 const MODELS = {
   matmul_relu: () => buildFunction('mm_relu', [t([8, 16]), t([16, 16])], [t([8, 16])], (b, a) => {

@@ -306,6 +306,14 @@ export function compile(model: CompilableModel, exampleInputs?: Tensor[], opts: 
   }
 
   function compiledForward(...inputs: Tensor[]): MaybePromise<TensorOutput | TensorOutput[]> {
+    for (let i = 0; i < inputs.length; i++) {
+      if (!inputs[i] || !Array.isArray(inputs[i].shape)) {
+        throw new Error(`compiled model: argument ${i} is not a Tensor (received ${inputs[i] === undefined ? 'undefined' : typeof inputs[i]})`);
+      }
+    }
+    if (exampleInputs && inputs.length !== exampleInputs.length) {
+      throw new Error(`compiled model: expected ${exampleInputs.length} input tensor(s) but got ${inputs.length}`);
+    }
     let entry = _findCachedEntry(inputs);
     if (!entry) {
       const result = _compile(inputs);

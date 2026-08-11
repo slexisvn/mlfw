@@ -5,10 +5,7 @@ import { Compiler, compileGraph } from '../../../src/compiler/pipeline/compiler.
 import { CPUTarget, CUDATarget } from '../../../src/backend/target.js';
 import { GraphModule } from '../../../src/compiler/ir/graph/module.js';
 import { TraceLevel } from '../../../src/compiler/pipeline/trace.js';
-
-function compile(func, opts = {}) {
-  return compileGraph(func, CPUTarget(), opts);
-}
+import { compileCPU as compile } from '../../_utils/ir_fixture.js';
 
 describe('multi-function module compilation', () => {
   it('compiles module with two functions into two kernels', () => {

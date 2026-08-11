@@ -31,6 +31,7 @@ export { printModule } from './compiler/ir/graph/printer.js';
 export { preloadWebGPU, preloadCudaRuntime, releaseCudaMemory } from './runtime/backend_registry.js';
 export { flushWebGPUEager } from './runtime/webgpu.js';
 export { dispatcher } from './dispatcher/dispatcher.js';
+export { manualSeed as manual_seed, seed, unseed } from './util/random.js';
 
 export {
   zeros, ones, empty, full, randn, arange, eye, linspace, randperm,

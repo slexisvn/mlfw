@@ -1,4 +1,5 @@
 import type { Tensor } from '../tensor/core/tensor.js';
+import { random } from '../util/random.js';
 import type { NumericTypedArray } from '../tensor/types/dtype.js';
 
 type KaimingMode = 'fan_in' | 'fan_out';
@@ -31,7 +32,7 @@ export function uniform_<T extends Tensor>(tensor: T, a = 0, b = 1): T {
   const data = tensor._impl.storage.data;
   if (!data) return tensor;
   const range = b - a;
-  for (let i = 0; i < data.length; i++) data[i] = a + Math.random() * range;
+  for (let i = 0; i < data.length; i++) data[i] = a + random() * range;
   tensor._impl.bumpVersion();
   return tensor;
 }
@@ -40,8 +41,8 @@ export function normal_<T extends Tensor>(tensor: T, mean = 0, std = 1): T {
   const data = tensor._impl.storage.data;
   if (!data) return tensor;
   for (let i = 0; i < data.length; i += 2) {
-    const u1 = Math.random() || 1e-10;
-    const u2 = Math.random();
+    const u1 = random() || 1e-10;
+    const u2 = random();
     const r = Math.sqrt(-2 * Math.log(u1));
     const theta = 6.283185307179586 * u2;
     data[i] = mean + std * r * Math.cos(theta);

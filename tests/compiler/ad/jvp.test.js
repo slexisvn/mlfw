@@ -1,11 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
-import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
 import { CPUTarget } from '../../../src/backend/target.js';
-import { buildForwardDiff, getJVPRule, registerJVPRule } from '../../../src/compiler/ad/jvp.js';
+import { buildForwardDiff } from '../../../src/compiler/ad/jvp.js';
+import { T as t } from '../../_utils/ir_fixture.js';
 
-const t = (s) => new TensorType(s, ScalarType.F32);
 
 describe('forward-mode AD (JVP)', () => {
   it('buildForwardDiff produces a jvp(args, tangents) -> output-tangents function that runs correctly', () => {

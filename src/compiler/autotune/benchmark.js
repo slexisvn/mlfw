@@ -1,4 +1,5 @@
 import { BackendPipeline } from '../../backend/pipeline.js';
+import { random } from '../../util/random.js';
 
 const MAX_MEASURED_SERIAL_TRIPS = 1e6;
 
@@ -105,7 +106,7 @@ export class BenchmarkRunner {
       this._bufferCache.set(cacheKey, buffers);
     }
     for (const buf of buffers) {
-      for (let i = 0; i < buf.length; i++) buf[i] = Math.random() * 2 - 1;
+      for (let i = 0; i < buf.length; i++) buf[i] = random() * 2 - 1;
     }
     return { buffers, totalBytes };
   }

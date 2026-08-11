@@ -1,4 +1,5 @@
 import * as ops from '../../tensor/ops/ops.js';
+import { random } from '../../util/random.js';
 import { full, empty } from '../../tensor/factory/creation_ops.js';
 import type { Tensor } from '../../tensor/core/tensor.js';
 import type { DType } from '../../tensor/types/dtype.js';
@@ -18,7 +19,7 @@ function _bernoulliMask(shape: readonly number[], prob: number, dtype: DType, de
   const data = t._impl.storage.data;
   if (data) {
     for (let i = 0; i < data.length; i++) {
-      data[i] = Math.random() < prob ? 1 : 0;
+      data[i] = random() < prob ? 1 : 0;
     }
   }
   return t;

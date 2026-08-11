@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
-import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
+import { TensorType } from '../../../src/compiler/ir/graph/types.js';
 import { BackwardGraphBuilder } from '../../../src/compiler/ad/backward_builder.js';
 import { JointGraphBuilder } from '../../../src/compiler/ad/joint_builder.js';
 import '../../../src/compiler/ad/index.js';
+import { F32 } from '../../_utils/ir_fixture.js';
 
-const F32 = ScalarType.F32;
 
 function t(shape) {
   return new TensorType(shape, F32);

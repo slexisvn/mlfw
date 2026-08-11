@@ -55,6 +55,16 @@ export function typedArrayCtor(dtype: DType): NumericTypedArrayConstructor {
   return _TYPED_ARRAY_CTORS[dtype] || Float32Array;
 }
 
+const _VALID_DTYPES = new Set<string>(Object.values(ScalarType));
+
+export function isDType(dtype: unknown): dtype is DType {
+  return typeof dtype === 'string' && _VALID_DTYPES.has(dtype);
+}
+
+export function dtypeNames(): string[] {
+  return [..._VALID_DTYPES];
+}
+
 const _FLOAT_PRECEDENCE = [ScalarType.F16, ScalarType.BF16, ScalarType.F32, ScalarType.F64];
 const _INT_PRECEDENCE = [ScalarType.UI8, ScalarType.I8, ScalarType.I16, ScalarType.I32, ScalarType.I64];
 

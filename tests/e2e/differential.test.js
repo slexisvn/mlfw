@@ -6,37 +6,8 @@ import {
 import { compile } from '../../src/tracing/compile.js';
 import { CPUTarget, WasmTarget } from '../../src/backend/target.js';
 import { VerifyLevel } from '../../src/compiler/pipeline/invariant_check.js';
-
-function mulberry32(seed) {
-  let a = seed >>> 0;
-  return function () {
-    a |= 0; a = (a + 0x6D2B79F5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-function numel(s) { return s.reduce((a, b) => a * b, 1); }
-function nest(flat, shape) {
-  if (shape.length === 1) return flat.slice(0, shape[0]);
-  const subN = numel(shape.slice(1));
-  const out = [];
-  for (let i = 0; i < shape[0]; i++) out.push(nest(flat.slice(i * subN, (i + 1) * subN), shape.slice(1)));
-  return out;
-}
-function mk(rng, shape, lo, hi) {
-  const n = numel(shape);
-  const flat = [];
-  for (let i = 0; i < n; i++) flat.push(lo + (hi - lo) * rng());
-  return tensor(nest(flat, shape));
-}
-function flatten(v) {
-  if (v && typeof v.contiguous === 'function') return Array.from(v.contiguous().data);
-  if (v && v.data) return Array.from(v.data);
-  if (Array.isArray(v)) return v.flat(Infinity);
-  return [v];
-}
+import { mulberry32 } from '../_utils/rng.js';
+import { numel, nest, randomTensor, flat } from '../_utils/tensor_data.js';
 
 const PROGRAMS = [
   { name: 'add', shapes: [[6, 8], [6, 8]], fwd: (x, y) => add(x, y) },
@@ -84,12 +55,12 @@ describe('differential: eager vs compiled (CPU + WASM)', () => {
     for (const [tname, makeTarget] of Object.entries(TARGETS)) {
       it(`${prog.name} on ${tname} matches eager`, async () => {
         const rng = mulberry32(1000 + prog.name.length * 13);
-        const inputs = prog.shapes.map((s) => mk(rng, s, prog.lo ?? -1, prog.hi ?? 1));
-        const eager = flatten(prog.fwd(...inputs));
+        const inputs = prog.shapes.map((s) => randomTensor(rng, s, prog.lo ?? -1, prog.hi ?? 1));
+        const eager = flat(prog.fwd(...inputs));
 
         const model = { forward: (...args) => prog.fwd(...args) };
         const compiled = compile(model, inputs, { target: makeTarget() });
-        const out = flatten(await compiled(...inputs));
+        const out = flat(await compiled(...inputs));
 
         expect(out.length).toBe(eager.length);
         for (let i = 0; i < eager.length; i++) {
@@ -121,9 +92,9 @@ describe('algebraic simplification is IEEE-sound: special values (eager == compi
   for (const prog of SPECIAL) {
     for (const [tname, makeTarget] of Object.entries(TARGETS)) {
       it(`${prog.name} on ${tname} matches eager (no unsound x-x/x÷x/exp∘log rewrite)`, async () => {
-        const eager = flatten(prog.fwd(tensor(prog.data)));
+        const eager = flat(prog.fwd(tensor(prog.data)));
         const compiled = compile({ forward: prog.fwd }, [tensor(prog.data)], { target: makeTarget() });
-        const out = flatten(await compiled(tensor(prog.data)));
+        const out = flat(await compiled(tensor(prog.data)));
         expect(out.length).toBe(eager.length);
         for (let i = 0; i < eager.length; i++) {
           expect(eqIEEE(eager[i], out[i]), `${prog.name}/${tname} idx ${i}: eager=${eager[i]} compiled=${out[i]}`).toBe(true);
@@ -149,10 +120,10 @@ describe('epilogue fusion (forced on) matches eager — LIR accumulator must not
   for (const prog of EPILOGUE) {
     for (const [tname, makeTarget] of [['cpu', CPUTarget], ['wasm', WasmTarget]]) {
       it(`${prog.name} on ${tname} matches eager`, async () => {
-        const eager = flatten(prog.fwd(...prog.ins.map((d) => tensor(d))));
+        const eager = flat(prog.fwd(...prog.ins.map((d) => tensor(d))));
         const target = makeTarget({ enableEpilogueFusion: true });
         const compiled = compile({ forward: prog.fwd }, prog.ins.map((d) => tensor(d)), { target, fusion: { strategy: 'xla' } });
-        const out = flatten(await compiled(...prog.ins.map((d) => tensor(d))));
+        const out = flat(await compiled(...prog.ins.map((d) => tensor(d))));
         expect(out.length).toBe(eager.length);
         for (let i = 0; i < eager.length; i++) {
           const relErr = Math.abs(eager[i] - out[i]) / (1 + Math.abs(eager[i]));
@@ -187,10 +158,10 @@ describe('opt-level differential: every pass-combo preserves semantics (eager ==
       for (const [cname, cfg] of Object.entries(OPT_CONFIGS)) {
         it(`${prog.name} on ${tname} @ ${cname} matches eager`, async () => {
           const rng = mulberry32(7000 + prog.name.length * 13 + cname.length);
-          const inputs = prog.shapes.map((s) => mk(rng, s, -1, 1));
-          const eager = flatten(prog.fwd(...inputs));
+          const inputs = prog.shapes.map((s) => randomTensor(rng, s, -1, 1));
+          const eager = flat(prog.fwd(...inputs));
           const compiled = compile({ forward: (...a) => prog.fwd(...a) }, inputs, { target: makeTarget(), ...cfg });
-          const out = flatten(await compiled(...inputs));
+          const out = flat(await compiled(...inputs));
           expect(out.length).toBe(eager.length);
           for (let i = 0; i < eager.length; i++) {
             const relErr = Math.abs(eager[i] - out[i]) / (1 + Math.abs(eager[i]));
@@ -207,12 +178,12 @@ describe('VerifyLevel.EACH_PASS runs verifiers after every pass + tensor/LIR, ac
     for (const [tname, makeTarget] of Object.entries(TARGETS)) {
       it(`${prog.name} on ${tname} compiles clean under VerifyLevel.EACH_PASS (+scheduling)`, async () => {
         const rng = mulberry32(4200 + prog.name.length * 7);
-        const inputs = prog.shapes.map((s) => mk(rng, s, -1, 1));
-        const eager = flatten(prog.fwd(...inputs));
+        const inputs = prog.shapes.map((s) => randomTensor(rng, s, -1, 1));
+        const eager = flat(prog.fwd(...inputs));
         const compiled = compile({ forward: (...a) => prog.fwd(...a) }, inputs, {
           target: makeTarget(), verify: VerifyLevel.EACH_PASS, scheduling: { enabled: true },
         });
-        const out = flatten(await compiled(...inputs));
+        const out = flat(await compiled(...inputs));
         expect(out.length).toBe(eager.length);
         for (let i = 0; i < eager.length; i++) {
           const relErr = Math.abs(eager[i] - out[i]) / (1 + Math.abs(eager[i]));

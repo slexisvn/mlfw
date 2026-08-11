@@ -76,6 +76,7 @@ export function matmulOutputShape(a: Shape, b: Shape): number[] | null {
   const bShape = bRank === 1 ? [b[0]!, 1] : [...b];
   const aR = aShape.length;
   const bR = bShape.length;
+  if (aShape[aR - 1] !== bShape[bR - 2]) return null;
   const batch = broadcastShapes(aShape.slice(0, aR - 2), bShape.slice(0, bR - 2));
   if (batch === null) return null;
   const out = [...batch, aShape[aR - 2], bShape[bR - 1]];

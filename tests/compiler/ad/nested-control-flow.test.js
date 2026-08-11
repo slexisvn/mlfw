@@ -1,13 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
-import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { BackwardGraphBuilder } from '../../../src/compiler/ad/backward_builder.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
 import { CPUTarget } from '../../../src/backend/target.js';
 import '../../../src/compiler/ad/index.js';
+import { F32 as F, T as t } from '../../_utils/ir_fixture.js';
 
-const F = ScalarType.F32;
-const t = (s) => new TensorType(s, F);
 const numel = (s) => s.reduce((a, b) => a * b, 1);
 const T = 4;
 

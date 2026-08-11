@@ -8,6 +8,7 @@ import { UseDefAnalysis } from '../../../src/compiler/analysis/use_def.js';
 import { PostDominanceAnalysis } from '../../../src/compiler/analysis/dominance.js';
 import { LivenessAnalysis } from '../../../src/compiler/analysis/liveness.js';
 import { scalingRatio, QUADRATIC_RATIO } from '../../_utils/scaling.js';
+import { mulberry32 } from '../../_utils/rng.js';
 
 function makeValue(id) {
   return { id, _uses: [], uses() { return this._uses; } };
@@ -79,10 +80,6 @@ describe('MemoryEffectAnalysis effectKind bitmask gating', () => {
   });
 });
 
-function mulberry32(seed) {
-  let a = seed >>> 0;
-  return function () { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
-}
 const _ri = (r, lo, hi) => lo + Math.floor(r() * (hi - lo + 1));
 const _pick = (r, arr) => arr[Math.floor(r() * arr.length)];
 const _UNARY = ['neg', 'relu', 'exp', 'tanh', 'sigmoid', 'abs', 'sqrt'];
@@ -228,12 +225,12 @@ describe('post-dominance scales sub-quadratically on deep residual chains', () =
   }
 
   it('doubling the op count does not more than double the time (rules out O(n^2))', () => {
-    const { ratio, tSmall, tLarge } = scalingRatio({
+    const { ratio, tSmall, tLarge, n } = scalingRatio({
       build: residualChain,
       work: (func) => PostDominanceAnalysis.compute(func),
       n: 9000,
     });
-    expect(ratio, `n=9000 took ${tSmall.toFixed(1)}ms, n=18000 took ${tLarge.toFixed(1)}ms (ratio ${ratio.toFixed(2)})`)
+    expect(ratio, `n=${n} took ${tSmall.toFixed(1)}ms, n=${2 * n} took ${tLarge.toFixed(1)}ms (ratio ${ratio.toFixed(2)})`)
       .toBeLessThan(QUADRATIC_RATIO);
   });
 });

@@ -4,58 +4,8 @@ import { TensorType, ScalarType } from '../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../src/compiler/pipeline/compiler.js';
 import { CPUTarget, CUDATarget } from '../../src/backend/target.js';
 import { countLoops, countTempBuffers } from '../_utils/kernel_source.js';
-
-function compile(func, opts = {}) {
-  return compileGraph(func, CPUTarget(), opts);
-}
-
-
-
-function hasArithmeticNoise(src) {
-  const issues = [];
-  if (/\+\s*0(?!\.\d*[1-9])\b/.test(src)) issues.push('+0');
-  if (/\b0\s*\+/.test(src)) issues.push('0+');
-  if (/\*\s*0(?!\.\d*[1-9])\b/.test(src)) issues.push('*0');
-  if (/\b0\s*\*\s*(?!\.?\d*[1-9])/.test(src)) issues.push('0*');
-  if (/\*\s*1\b(?!\.)/.test(src)) issues.push('*1');
-  if (/\b1\s*\*\b(?!\.)/.test(src)) issues.push('1*');
-  return issues;
-}
-
-function hasExtent1Loops(src) {
-  return (src.match(/for\s*\(\s*let\s+\w+\s*=\s*0;\s*\w+\s*<\s*1;/g) || []).length;
-}
-
-function hasRedundantZeroInit(src) {
-  return (src.match(/\w+\[\w+\]\s*=\s*0\.?0?\s*;/g) || []).length;
-}
-
-function hasBoundsChecks(src) {
-  return (src.match(/>=\s*0/g) || []).length;
-}
-
-function hasModulo(src) {
-  return (src.match(/[^=!<>]%\s*\d+/g) || []).length;
-}
-
-function hasTrunc(src) {
-  return (src.match(/Math\.trunc/g) || []).length;
-}
-
-function audit(src, name) {
-  return {
-    name,
-    lines: src.split('\n').length,
-    loops: countLoops(src),
-    tempBuffers: countTempBuffers(src),
-    arithmeticNoise: hasArithmeticNoise(src),
-    extent1Loops: hasExtent1Loops(src),
-    zeroInits: hasRedundantZeroInit(src),
-    boundsChecks: hasBoundsChecks(src),
-    modulos: hasModulo(src),
-    truncs: hasTrunc(src),
-  };
-}
+import { compileCPU as compile } from '../_utils/ir_fixture.js';
+import { audit, arithmeticNoise, extent1Loops, redundantZeroInits, boundsChecks, modulos, truncs } from '../_utils/kernel_audit.js';
 
 describe('Kernel audit — elementwise fusion quality', () => {
   it('8-op elementwise chain: single loop, zero temp buffers', () => {
@@ -166,8 +116,8 @@ describe('Kernel audit — matmul quality', () => {
 
     const r = compile(func);
     const src = r.getSource('mm_b1');
-    expect(hasExtent1Loops(src)).toBe(0);
-    expect(hasArithmeticNoise(src)).toEqual([]);
+    expect(extent1Loops(src)).toBe(0);
+    expect(arithmeticNoise(src)).toEqual([]);
   });
 
   it('matmul + bias + relu: bias-relu fused, no extra loop', () => {
@@ -186,7 +136,7 @@ describe('Kernel audit — matmul quality', () => {
     const src = r.getSource('mm_bias_relu');
     const loops = countLoops(src);
     expect(loops).toBeLessThanOrEqual(7);
-    expect(hasArithmeticNoise(src)).toEqual([]);
+    expect(arithmeticNoise(src)).toEqual([]);
   });
 });
 
@@ -254,8 +204,8 @@ describe('Kernel audit — conv quality', () => {
 
     const r = compile(func);
     const src = r.getSource('dw');
-    expect(hasArithmeticNoise(src)).toEqual([]);
-    expect(hasBoundsChecks(src)).toBe(0);
+    expect(arithmeticNoise(src)).toEqual([]);
+    expect(boundsChecks(src)).toBe(0);
   });
 });
 
@@ -268,8 +218,8 @@ describe('Kernel audit — shape ops quality', () => {
 
     const r = compile(func);
     const src = r.getSource('id_resh');
-    expect(hasModulo(src)).toBe(0);
-    expect(hasTrunc(src)).toBe(0);
+    expect(modulos(src)).toBe(0);
+    expect(truncs(src)).toBe(0);
   });
 
   it('flatten reshape [4,8] -> [32]: no modulo by 1', () => {
@@ -296,7 +246,7 @@ describe('Kernel audit — shape ops quality', () => {
     const r = compile(func);
     const src = r.getSource('unflatten');
     expect(src).not.toMatch(/%\s*1\b/);
-    expect(hasArithmeticNoise(src)).toEqual([]);
+    expect(arithmeticNoise(src)).toEqual([]);
   });
 
   it('transpose [2,3] -> [3,2]: single loop nest', () => {
@@ -310,7 +260,7 @@ describe('Kernel audit — shape ops quality', () => {
     const r = compile(func);
     const src = r.getSource('tr');
     expect(countLoops(src)).toBe(2);
-    expect(hasArithmeticNoise(src)).toEqual([]);
+    expect(arithmeticNoise(src)).toEqual([]);
   });
 });
 
@@ -327,7 +277,7 @@ describe('Kernel audit — reduction quality', () => {
     const r = compile(func);
     const src = r.getSource('rowsum');
     expect(countTempBuffers(src)).toBe(0);
-    expect(hasArithmeticNoise(src)).toEqual([]);
+    expect(arithmeticNoise(src)).toEqual([]);
   });
 
   it('mean reduction: correct division factor', () => {
@@ -341,7 +291,7 @@ describe('Kernel audit — reduction quality', () => {
 
     const r = compile(func);
     const src = r.getSource('rowmean');
-    expect(hasArithmeticNoise(src)).toEqual([]);
+    expect(arithmeticNoise(src)).toEqual([]);
   });
 });
 
@@ -356,25 +306,25 @@ describe('Kernel audit — quantized conv quality (affine index folding)', () =>
     const r = compileGraph(mkConvQ([1, 3, 10, 10], [4, 3, 3, 3], [1, 4, 8, 8], [[0, 0], [0, 0]]),
       CPUTarget(), { quantization: { enabled: true } });
     const src = r.getSource('cq');
-    expect(hasArithmeticNoise(src)).toEqual([]);
-    expect(hasBoundsChecks(src)).toBe(0);
-    expect(hasExtent1Loops(src)).toBe(0);
+    expect(arithmeticNoise(src)).toEqual([]);
+    expect(boundsChecks(src)).toBe(0);
+    expect(extent1Loops(src)).toBe(0);
   });
 
   it('GPU quantized conv pad=0: no arithmetic noise, no bounds checks', () => {
     const r = compileGraph(mkConvQ([1, 3, 10, 10], [4, 3, 3, 3], [1, 4, 8, 8], [[0, 0], [0, 0]]),
       CUDATarget(), { quantization: { enabled: true } });
     const src = r.getSource('cq');
-    expect(hasArithmeticNoise(src)).toEqual([]);
-    expect(hasBoundsChecks(src)).toBe(0);
+    expect(arithmeticNoise(src)).toEqual([]);
+    expect(boundsChecks(src)).toBe(0);
   });
 
   it('GPU quantized conv pad=1: bounds checks present but no arithmetic noise', () => {
     const r = compileGraph(mkConvQ([1, 3, 8, 8], [4, 3, 3, 3], [1, 4, 8, 8], [[1, 1], [1, 1]]),
       CUDATarget(), { quantization: { enabled: true } });
     const src = r.getSource('cq');
-    expect(hasBoundsChecks(src)).toBeGreaterThan(0);
-    expect(hasArithmeticNoise(src)).toEqual([]);
+    expect(boundsChecks(src)).toBeGreaterThan(0);
+    expect(arithmeticNoise(src)).toEqual([]);
   });
 });
 
