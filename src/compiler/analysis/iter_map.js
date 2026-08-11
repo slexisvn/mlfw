@@ -68,6 +68,31 @@ export function toLinearForm(expr) {
   }
 }
 
+export function splitByDivisor(form, divisor) {
+  if (!Number.isInteger(divisor) || divisor <= 0) return null;
+  const divisible = new Map();
+  const remainder = new Map();
+  for (const [name, coeff] of form.terms) {
+    if (coeff % divisor === 0) divisible.set(name, coeff);
+    else remainder.set(name, coeff);
+  }
+  return {
+    divisible: new LinearForm(0, divisible),
+    remainder: new LinearForm(form.offset, remainder),
+  };
+}
+
+export function linearFormToNode(form, makeVar, makeConst, makeOp) {
+  let node = null;
+  for (const [name, coeff] of form.terms) {
+    const term = coeff === 1 ? makeVar(name) : makeOp('*', makeVar(name), makeConst(coeff));
+    node = node === null ? term : makeOp('+', node, term);
+  }
+  if (node === null) return makeConst(form.offset);
+  if (form.offset === 0) return node;
+  return makeOp('+', node, makeConst(form.offset));
+}
+
 export function exactCoverRange(expr, varRanges) {
   const form = toLinearForm(expr);
   if (!form) return null;

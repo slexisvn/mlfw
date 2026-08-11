@@ -230,3 +230,44 @@ describe('InplaceAnalysis', () => {
     expect(candidates.length).toBe(0);
   });
 });
+
+describe('InplaceAnalysis matches index expressions up to affine canonical form', () => {
+  const v = (n) => new VariableNode(n, 'int32');
+  const c = (x) => new IntImmNode(x);
+  const mul = (a, b) => new MathOpNode('*', a, b);
+  const add = (a, b) => new MathOpNode('+', a, b);
+
+  function pipeline(storeIndex, loadIndex) {
+    const param = new Buffer('param', [32], 'f32', 'global');
+    const src = new Buffer('src', [32], 'f32', 'global');
+    const dst = new Buffer('dst', [32], 'f32', 'global');
+    const out = new Buffer('out', [32], 'f32', 'global');
+
+    const produce = makeBlock('produce', [{ buffer: param }], [{ buffer: src }]);
+    const consume = new BlockNode(
+      'consume', [makeBind('i')], [{ buffer: src }], [{ buffer: dst }],
+      new BufferStoreNode(dst, [storeIndex], new BufferLoadNode(src, [loadIndex])),
+    );
+    const sink = makeBlock('sink', [{ buffer: dst }], [{ buffer: out }]);
+
+    const func = makePrimFunc(new SeqNode([produce, consume, sink]), [param, out]);
+    const candidates = InplaceAnalysis.analyze(func, BufferLiveness.analyze(func));
+    return candidates.some((k) => k.srcBuffer === src && k.dstBuffer === dst);
+  }
+
+  it('accepts identical index expressions', () => {
+    expect(pipeline(add(mul(v('i'), c(4)), v('j')), add(mul(v('i'), c(4)), v('j')))).toBe(true);
+  });
+
+  it('accepts the same index written in a reassociated form', () => {
+    expect(pipeline(add(mul(v('i'), c(4)), v('j')), add(v('j'), mul(c(4), v('i'))))).toBe(true);
+  });
+
+  it('still rejects a genuinely different index', () => {
+    expect(pipeline(add(mul(v('i'), c(4)), v('j')), add(mul(v('i'), c(4)), c(1)))).toBe(false);
+  });
+
+  it('still rejects an index that differs only by a constant offset', () => {
+    expect(pipeline(v('i'), add(v('i'), c(1)))).toBe(false);
+  });
+});

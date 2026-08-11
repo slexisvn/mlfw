@@ -1,4 +1,5 @@
 import { walk as irWalk, collect as irCollect } from '../../ir/ir_visitor.js';
+import { toLinearForm } from '../../analysis/iter_map.js';
 
 export class InplaceCandidate {
   constructor(srcBuffer, dstBuffer, reason) {
@@ -83,9 +84,23 @@ function shapesMatch(a, b) {
 }
 
 
+function affineEqual(x, y) {
+  const fx = toLinearForm(x);
+  if (!fx) return null;
+  const fy = toLinearForm(y);
+  if (!fy) return null;
+  if (fx.offset !== fy.offset || fx.terms.size !== fy.terms.size) return false;
+  for (const [name, coeff] of fx.terms) {
+    if (fy.terms.get(name) !== coeff) return false;
+  }
+  return true;
+}
+
 function exprEqual(x, y) {
   if (x === y) return true;
   if (!x || !y || typeof x !== 'object' || typeof y !== 'object') return false;
+  const affine = affineEqual(x, y);
+  if (affine !== null) return affine;
   if (x.type !== y.type) return false;
   switch (x.type) {
     case 'VariableNode': return x.name === y.name;

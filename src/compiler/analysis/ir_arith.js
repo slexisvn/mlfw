@@ -1,6 +1,7 @@
 import { Analyzer } from './analyzer.js';
 import { SymInt } from './sym_int.js';
-import { IntImmNode, MathOpNode, CompareNode, mathOp } from '../ir/tensor/nodes.js';
+import { IntImmNode, MathOpNode, CompareNode, VariableNode, mathOp } from '../ir/tensor/nodes.js';
+import { toLinearForm, splitByDivisor, linearFormToNode } from './iter_map.js';
 
 const MATHOP_TO_SYM = { '+': 'add', '-': 'sub', '*': 'mul', '//': 'div', '%': 'mod' };
 const COMPARE_MATHOPS = new Set(['<', '<=', '>', '>=', '==', '!=']);
@@ -117,11 +118,32 @@ export function analyzerForLoops(loopExtents) {
   return analyzer;
 }
 
-function asScaledVar(node) {
-  if (!node || node.type !== 'MathOpNode' || node.op !== '*') return null;
-  if (node.b && node.b.type === 'IntImmNode' && node.b.value > 0) return { factor: node.a, c: node.b.value };
-  if (node.a && node.a.type === 'IntImmNode' && node.a.value > 0) return { factor: node.b, c: node.a.value };
-  return null;
+function formToNode(form) {
+  return linearFormToNode(
+    form,
+    (name) => new VariableNode(name, 'int32'),
+    (value) => new IntImmNode(value),
+    (op, a, b) => mathOp(op, a, b),
+  );
+}
+
+function affineDivMod(analyzer, node, divisor) {
+  const form = toLinearForm(node);
+  if (!form) return null;
+  const parts = splitByDivisor(form, divisor);
+  if (!parts) return null;
+
+  const quotient = () => formToNode(parts.divisible.scale(1 / divisor));
+
+  if (parts.remainder.isConstant && parts.remainder.offset === 0) {
+    return { quotient: quotient(), remainder: new IntImmNode(0) };
+  }
+
+  const remainderNode = formToNode(parts.remainder);
+  if (!boundWithin(analyzer, remainderNode, 0, divisor - 1)) return null;
+  if (!boundWithin(analyzer, node, 0, Infinity)) return null;
+
+  return { quotient: quotient(), remainder: remainderNode };
 }
 
 function boundWithin(analyzer, node, lo, hi) {
@@ -169,17 +191,13 @@ export class RewriteSimplify {
     const folded = mathOp(node.op, a, b);
     if (!folded || folded.type !== 'MathOpNode') return folded;
 
-    if (folded.op === '//' && folded.b.type === 'IntImmNode' && folded.b.value > 0) {
+    if ((folded.op === '//' || folded.op === '%') && folded.b.type === 'IntImmNode' && folded.b.value > 0) {
       const c = folded.b.value;
-      const scaled = asScaledVar(folded.a);
-      if (scaled && scaled.c === c) return scaled.factor;
-      if (boundWithin(this.analyzer, folded.a, 0, c - 1)) return new IntImmNode(0);
-    }
-    if (folded.op === '%' && folded.b.type === 'IntImmNode' && folded.b.value > 0) {
-      const c = folded.b.value;
-      const scaled = asScaledVar(folded.a);
-      if (scaled && scaled.c === c) return new IntImmNode(0);
-      if (boundWithin(this.analyzer, folded.a, 0, c - 1)) return folded.a;
+      if (boundWithin(this.analyzer, folded.a, 0, c - 1)) {
+        return folded.op === '//' ? new IntImmNode(0) : folded.a;
+      }
+      const split = affineDivMod(this.analyzer, folded.a, c);
+      if (split) return folded.op === '//' ? split.quotient : split.remainder;
     }
     if (COMPARE_MATHOPS.has(folded.op)) {
       if (proveTrue(this.analyzer, folded)) return new IntImmNode(1);

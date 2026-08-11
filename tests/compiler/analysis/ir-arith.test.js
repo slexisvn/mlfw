@@ -114,3 +114,44 @@ describe('RewriteSimplify', () => {
     expect(out.op).toBe('+');
   });
 });
+
+describe('RewriteSimplify splits an affine index by its divisor', () => {
+  const tiled = () => analyzerForLoops(new Map([['io', 4], ['ii', 32]]));
+
+  it('recovers the outer tile index from (io*32 + ii) // 32', () => {
+    const s = new RewriteSimplify(tiled());
+    const out = s.simplify(fdiv(add(mul(v('io'), c(32)), v('ii')), c(32)));
+    expect(out).toMatchObject({ type: 'VariableNode', name: 'io' });
+  });
+
+  it('recovers the inner tile index from (io*32 + ii) % 32', () => {
+    const s = new RewriteSimplify(tiled());
+    const out = s.simplify(fmod(add(mul(v('io'), c(32)), v('ii')), c(32)));
+    expect(out).toMatchObject({ type: 'VariableNode', name: 'ii' });
+  });
+
+  it('handles the reassociated form the old scaled-var rule could not match', () => {
+    const s = new RewriteSimplify(tiled());
+    const out = s.simplify(fmod(add(v('ii'), mul(c(32), v('io'))), c(32)));
+    expect(out).toMatchObject({ type: 'VariableNode', name: 'ii' });
+  });
+
+  it('divides a multiple-of-divisor coefficient down rather than dropping it', () => {
+    const s = new RewriteSimplify(analyzerForLoops(new Map([['io', 4], ['ii', 8]])));
+    const out = s.simplify(fdiv(add(mul(v('io'), c(64)), v('ii')), c(8)));
+    expect(out).toMatchObject({ type: 'MathOpNode', op: '*' });
+    expect(out.b).toMatchObject({ type: 'IntImmNode', value: 8 });
+  });
+
+  it('refuses to split when the remainder can reach the divisor', () => {
+    const s = new RewriteSimplify(analyzerForLoops(new Map([['io', 4], ['ii', 64]])));
+    const out = s.simplify(fmod(add(mul(v('io'), c(32)), v('ii')), c(32)));
+    expect(out).toMatchObject({ type: 'MathOpNode', op: '%' });
+  });
+
+  it('refuses to split when the inner variable is unbounded', () => {
+    const s = new RewriteSimplify(analyzerForLoops(new Map([['io', 4]])));
+    const out = s.simplify(fmod(add(mul(v('io'), c(32)), v('k')), c(32)));
+    expect(out).toMatchObject({ type: 'MathOpNode', op: '%' });
+  });
+});
