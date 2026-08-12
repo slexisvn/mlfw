@@ -1,10 +1,27 @@
 import { SymInt } from '../../analysis/sym_int.js';
 
-type SymIntValue = InstanceType<typeof SymInt>;
+export type SymIntValue = InstanceType<typeof SymInt>;
 export type Dim = number | SymIntValue;
 export type Shape = readonly Dim[];
 export type ScalarDType = `${ScalarType}`;
 export type IRType = TensorType | TupleType | TokenType | FunctionType;
+
+export interface HashableAttr {
+  hash(): number;
+  equals(other: unknown): boolean;
+}
+
+export type AttrValue =
+  | number
+  | string
+  | boolean
+  | null
+  | ArrayBufferView
+  | SymIntValue
+  | HashableAttr
+  | readonly AttrValue[];
+
+export type AttrInit = ReadonlyMap<string, AttrValue> | Readonly<Record<string, AttrValue>>;
 
 export function dimEquals(a: Dim, b: Dim): boolean {
   if (a === b) return true;

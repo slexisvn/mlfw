@@ -1,5 +1,6 @@
 import { indexSelectGatherOpts } from '../../compiler/ir/graph/builder.js';
 import { ScalarType } from '../../compiler/ir/graph/types.js';
+import type { TensorType } from '../../compiler/ir/graph/types.js';
 import type { DType } from '../types/dtype.js';
 import { reduceInitValue } from '../../util/dtype_map.js';
 
@@ -100,7 +101,7 @@ const IR_BUILDERS: Readonly<Record<string, IrBuilder>> = Object.freeze({
   clamp: (b, a) => callMethod(b, 'clamp', a[1], a[0], a[2]),
   pad: (b, a, s) => callMethod(b, 'pad', a[0], a[1], s.low, s.high),
   one_hot: (b, a, s) => callMethod(b, 'oneHot', a[0], s.depth, { dtype: ScalarType.F32 }),
-  index_select: (b, a, s) => callMethod(b, 'gather', a[0], a[1], indexSelectGatherOpts(a[0].type, s?.dim ?? 0, a[1].type.rank)),
+  index_select: (b, a, s) => callMethod(b, 'gather', a[0], a[1], indexSelectGatherOpts(a[0].type as unknown as TensorType, s?.dim as number ?? 0, a[1].type.rank)),
   gather: (b, a, s) => callMethod(b, 'gatherDim', a[0], a[1], s?.dim ?? 0),
   scatter_add: (b, a, s) => callMethod(b, 'scatterAddDim', a[0], a[1], a[2], s?.dim ?? 0),
   cat: (b, a, s) => callMethod(b, 'concat', a, normalizeDim(s?.dim as number ?? 0, a[0].type.rank)),

@@ -1,5 +1,6 @@
 import { buildFunction } from '../compiler/ir/graph/builder.js';
 import { GraphModule } from '../compiler/ir/graph/module.js';
+import type { GraphFunction as IRGraphFunction } from '../compiler/ir/graph/function.js';
 import { TensorType } from '../compiler/ir/graph/types.js';
 import { lowerGraphToPrimFunc } from '../compiler/passes/lowering/graph_to_tensor.js';
 import { BackendPipeline } from '../backend/pipeline.js';
@@ -10,6 +11,8 @@ import { CanonicalizePass } from '../compiler/passes/canonicalize/canonicalize.j
 import { DCEPass } from '../compiler/passes/simplify/dce.js';
 import { Schedule } from '../compiler/schedule/schedule.js';
 import { SchedulePolicy } from '../compiler/schedule/rules.js';
+import type { ScheduleTarget } from '../compiler/schedule/gpu_matmul_schedule.js';
+import type { PrimFunc } from '../compiler/ir/tensor/nodes.js';
 import { typedArrayCtor } from '../tensor/types/dtype.js';
 import type { DType, NumericTypedArray } from '../tensor/types/dtype.js';
 import { buildMappedOp } from '../tensor/ops/ir_mapping.js';
@@ -71,6 +74,7 @@ export type CacheEntry = {
 const _cache = new Map<string, CacheEntry>();
 const _runtimeModules = new Map<string, RuntimeLike>();
 const _lowerGraphToPrimFunc = lowerGraphToPrimFunc as unknown as (func: GraphFunction, target: TargetLike) => PrimFuncLike;
+const _buildFunction = buildFunction as unknown as (name: string, inputTypes: readonly unknown[], outputTypes: readonly unknown[], bodyFn: (builder: GraphBuilder, args: readonly GraphValue[]) => void) => IRGraphFunction;
 const _BackendPipeline = BackendPipeline as unknown as new (target: TargetLike) => { compile(func: PrimFuncLike): CompiledKernel };
 
 function _cacheKey(opName: string, tensorArgs: readonly TensorLike[], scalarArgs: ScalarArgs, target: TargetLike): string {
@@ -114,7 +118,7 @@ function _compileScheduledGPU(func: GraphFunction, target: TargetLike, backend: 
   try {
     const primFunc = _lowerGraphToPrimFunc(func, target);
     if (primFunc.shapeParams && primFunc.shapeParams.length > 0) return null;
-    new SchedulePolicy(target).applyToAllBlocks(new Schedule(primFunc));
+    new SchedulePolicy(target as unknown as ScheduleTarget).applyToAllBlocks(new Schedule(primFunc as unknown as PrimFunc));
     const compiled = backend.compile(primFunc);
     rt.addCompiledKernel(compiled);
     if (!target.isWebGPU()) _trialLaunch(rt, compiled, primFunc);
@@ -130,7 +134,7 @@ function _buildGraphFunc(opName: string, tensorArgs: readonly TensorLike[], scal
   const inputTypes = tensorArgs.map(t => new TensorType(t.shape, t.dtype));
   const funcName = opName + '_jit_' + (_nextFuncId++);
 
-  const func = buildFunction(funcName, inputTypes, [], (builder: GraphBuilder, irArgs: readonly GraphValue[]) => {
+  const func = _buildFunction(funcName, inputTypes, [], (builder: GraphBuilder, irArgs: readonly GraphValue[]) => {
     let result: MappedGraphOperation;
 
     result = buildMappedOp(
@@ -159,7 +163,7 @@ export function jitCompile(opName: string, tensorArgs: readonly TensorLike[], sc
   const func = _buildGraphFunc(opName, tensorArgs, scalarArgs);
 
   const mod = new GraphModule(opName + '_jit_mod');
-  mod.addFunction(func);
+  mod.addFunction(func as unknown as IRGraphFunction);
   const pm = new PassManager();
   pm.addPass(new DecompositionPass());
   pm.addPass(new CanonicalizePass());

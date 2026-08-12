@@ -4,6 +4,7 @@ import { compileGraph } from '../compiler/pipeline/compiler.js';
 import { CPUTarget } from '../backend/target.js';
 import { Optimizer } from './optimizer.js';
 import type { NumberTypedArray, NumberTypedArrayConstructor, OptimizerParams } from './types.js';
+import type { GraphModule } from '../compiler/ir/graph/module.js';
 
 const F = ScalarType.F32;
 const VEC = (n: number): TensorType => new TensorType([n], F);
@@ -47,7 +48,7 @@ export class FusedOptimizer extends Optimizer {
     let entry = this._kernels.get(numel);
     if (!entry) {
       const func = this._buildGraph(numel);
-      entry = compileGraph(func, this._target, { fusion: { enabled: true } }) as CompiledKernel;
+      entry = compileGraph(func as never, this._target as never, { fusion: { enabled: true } }) as unknown as CompiledKernel;
       this._kernels.set(numel, entry);
     }
     return entry;

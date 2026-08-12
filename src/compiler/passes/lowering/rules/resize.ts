@@ -1,0 +1,58 @@
+import { FloatImmNode, MathOpNode, CastNode, BufferStoreNode, BufferLoadNode, BlockNode, CallExternNode } from '../../../ir/tensor/nodes.js';
+import { registerLoweringRule, buildSpatialNest } from '../lowering_registry.js';
+import type { TirNode } from '../../../ir/tensor/nodes.js';
+
+export function register(): void {
+  registerLoweringRule('resize', (ctx, op, inputs, outputs) => {
+    const inBuf = inputs[0];
+    const outBuf = outputs[0];
+    const method = op.getAttr<string>('method');
+    const inH = inBuf.shape[2] as number;
+    const inW = inBuf.shape[3] as number;
+    const outH = outBuf.shape[2] as number;
+    const outW = outBuf.shape[3] as number;
+
+    const nest = buildSpatialNest(ctx, 'rz', [0, 1, 2, 3], outBuf.shape, outBuf);
+    const [nv, cv, ohv, owv] = nest.indices;
+
+    const scaleH = inH / outH;
+    const scaleW = inW / outW;
+
+    let loadExpr: TirNode;
+    if (method === 'nearest') {
+      const srcH = new CallExternNode('floor', [new MathOpNode('*', ohv, new FloatImmNode(scaleH))], 'f32');
+      const srcW = new CallExternNode('floor', [new MathOpNode('*', owv, new FloatImmNode(scaleW))], 'f32');
+      const clampH = new CastNode(new CallExternNode('min', [new CallExternNode('max', [srcH, new FloatImmNode(0)], 'f32'), new FloatImmNode(inH - 1)], 'f32'), 'f32', 'i32');
+      const clampW = new CastNode(new CallExternNode('min', [new CallExternNode('max', [srcW, new FloatImmNode(0)], 'f32'), new FloatImmNode(inW - 1)], 'f32'), 'f32', 'i32');
+      loadExpr = new BufferLoadNode(inBuf, [nv, cv, clampH, clampW]);
+    } else {
+      const srcHf = new MathOpNode('*', ohv, new FloatImmNode(scaleH));
+      const srcWf = new MathOpNode('*', owv, new FloatImmNode(scaleW));
+      const h0 = new CallExternNode('floor', [srcHf], 'f32');
+      const w0 = new CallExternNode('floor', [srcWf], 'f32');
+      const h1 = new CallExternNode('min', [new MathOpNode('+', h0, new FloatImmNode(1)), new FloatImmNode(inH - 1)], 'f32');
+      const w1 = new CallExternNode('min', [new MathOpNode('+', w0, new FloatImmNode(1)), new FloatImmNode(inW - 1)], 'f32');
+      const hFrac = new MathOpNode('-', srcHf, h0);
+      const wFrac = new MathOpNode('-', srcWf, w0);
+      const clH0 = new CallExternNode('max', [h0, new FloatImmNode(0)], 'f32');
+      const clW0 = new CallExternNode('max', [w0, new FloatImmNode(0)], 'f32');
+      const iH0 = new CastNode(clH0, 'f32', 'i32');
+      const iW0 = new CastNode(clW0, 'f32', 'i32');
+      const iH1 = new CastNode(h1, 'f32', 'i32');
+      const iW1 = new CastNode(w1, 'f32', 'i32');
+      const tl = new BufferLoadNode(inBuf, [nv, cv, iH0, iW0]);
+      const tr = new BufferLoadNode(inBuf, [nv, cv, iH0, iW1]);
+      const bl = new BufferLoadNode(inBuf, [nv, cv, iH1, iW0]);
+      const br = new BufferLoadNode(inBuf, [nv, cv, iH1, iW1]);
+      const oneMinusW = new MathOpNode('-', new FloatImmNode(1), wFrac);
+      const oneMinusH = new MathOpNode('-', new FloatImmNode(1), hFrac);
+      const top = new MathOpNode('+', new MathOpNode('*', tl, oneMinusW), new MathOpNode('*', tr, wFrac));
+      const bot = new MathOpNode('+', new MathOpNode('*', bl, oneMinusW), new MathOpNode('*', br, wFrac));
+      loadExpr = new MathOpNode('+', new MathOpNode('*', top, oneMinusH), new MathOpNode('*', bot, hFrac));
+    }
+
+    const store = new BufferStoreNode(outBuf, nest.indices, loadExpr);
+    const block = new BlockNode(ctx.blockName('resize_block'), nest.ivs, [{ buffer: inBuf }], [{ buffer: outBuf }], store);
+    return nest.wrap(block);
+  });
+}

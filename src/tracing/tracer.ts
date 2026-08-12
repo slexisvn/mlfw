@@ -71,8 +71,8 @@ export class Tracer {
   _initGraph(): SymbolicTensor[] {
     this._func = new GraphFunction(this._name, this._inputTypes, []) as unknown as GraphFunctionLike;
     this._func.inputTypes = [...this._func.inputTypes];
-    this._builder = new IRBuilder(this._func) as IRBuilderLike;
-    this._module = new GraphModule(this._name) as GraphModuleLike;
+    this._builder = new IRBuilder(this._func as unknown as GraphFunction) as unknown as IRBuilderLike;
+    this._module = new GraphModule(this._name) as unknown as GraphModuleLike;
 
     const symbolicInputs: SymbolicTensor[] = [];
     const args = this._func.args;
@@ -124,7 +124,7 @@ export class Tracer {
       for (const arg of symTensorArgs) {
         shapeMap.set(arg.irValue, arg.symbolicShape);
       }
-      const propagated = def.propagateSymbolicShapes(op, shapeMap) as SymbolicShape[] | null | undefined;
+      const propagated = (def.propagateSymbolicShapes as unknown as (op: IROperationLike, shapes: Map<IRValueLike, SymbolicShape>) => SymbolicShape[] | null | undefined)(op, shapeMap);
       if (propagated && propagated[resultIndex]) return propagated[resultIndex];
     }
 

@@ -1,5 +1,6 @@
 import { getBackend } from './backend_registry.js';
 import { CompiledKernel } from '../backend/pipeline.js';
+import type { TargetFeatures } from '../backend/target.js';
 import type { NumericTypedArray } from '../tensor/types/dtype.js';
 
 type RuntimeDType = string;
@@ -374,7 +375,7 @@ export class RuntimeModule {
   static deserialize(data: SerializedRuntimeModule): RuntimeModule {
     const mod = new RuntimeModule(data.name);
     for (const e of data.kernels) {
-      mod.addCompiledKernel(new CompiledKernel(e.name, e.source, { name: e.target }, e.metadata) as unknown as RuntimeKernel);
+      mod.addCompiledKernel(new CompiledKernel(e.name, e.source, { name: e.target } as unknown as TargetFeatures, e.metadata) as unknown as RuntimeKernel);
     }
     return mod;
   }

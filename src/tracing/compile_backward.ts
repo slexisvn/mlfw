@@ -14,6 +14,7 @@ import type { Tensor } from '../tensor/core/tensor.js';
 import type { Device } from '../tensor/types/device.js';
 import type { NumericTypedArray } from '../tensor/types/dtype.js';
 import type { TensorType } from '../compiler/ir/graph/types.js';
+import type { GraphFunction } from '../compiler/ir/graph/function.js';
 import type { CompilableModel, CompiledResult, CompileOptions, GraphFunctionLike, GraphModuleLike, IRBuilderLike, IROperationLike, IRValueLike, MaybePromise, RuntimeArg, SymbolicShape, TensorOutput, TracedCore } from './types.js';
 
 type SavedSource = { kind: 'arg' | 'output'; index: number };
@@ -114,8 +115,8 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
   }
 
   function _compileSeparate(forwardFunc: GraphFunctionLike, traced: TracedCore, policy: BackwardPolicy): SeparateMeta {
-    const bwdBuilder = new BackwardGraphBuilder({ rematPolicy: policy });
-    const { backwardFunc, savedValues, gradInputIndices } = bwdBuilder.build(forwardFunc) as FunctionBuilderResult;
+    const bwdBuilder = new BackwardGraphBuilder({ rematPolicy: policy as unknown as RematPolicy });
+    const { backwardFunc, savedValues, gradInputIndices } = bwdBuilder.build(forwardFunc as unknown as GraphFunction) as unknown as FunctionBuilderResult;
 
     const realReturnOp = forwardFunc.getReturnOp();
     const realOutputs = [...realReturnOp!.operands];
@@ -134,7 +135,7 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
 
     if (extraSaved.length > 0) {
       realReturnOp!.erase();
-      (new IRBuilder(forwardFunc) as IRBuilderLike).returnOp([...realOutputs, ...extraSaved]);
+      (new IRBuilder(forwardFunc as unknown as GraphFunction) as unknown as IRBuilderLike).returnOp([...realOutputs, ...extraSaved]);
       forwardFunc.outputTypes = Object.freeze([
         ...realOutputs.map(v => v.type),
         ...extraSaved.map(v => v.type),
@@ -147,13 +148,13 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
       return { kind: 'output', index: extraIndexById.get(sv.id) };
     }) as SavedSource[];
 
-    const fwdModule = new GraphModule('forward') as GraphModuleLike;
+    const fwdModule = new GraphModule('forward') as unknown as GraphModuleLike;
     fwdModule.addFunction(forwardFunc);
-    const fwdResult = new Compiler(compilerOpts).compile(fwdModule) as CompiledResult;
+    const fwdResult = new Compiler(compilerOpts as never).compile(fwdModule as unknown as GraphModule) as unknown as CompiledResult;
 
-    const bwdModule = new GraphModule('backward') as GraphModuleLike;
+    const bwdModule = new GraphModule('backward') as unknown as GraphModuleLike;
     bwdModule.addFunction(backwardFunc);
-    const bwdResult = new Compiler(compilerOpts).compile(bwdModule) as CompiledResult;
+    const bwdResult = new Compiler(compilerOpts as never).compile(bwdModule as unknown as GraphModule) as unknown as CompiledResult;
 
     return {
       mode: 'separate',
@@ -174,12 +175,12 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
   }
 
   function _compileJoint(forwardFunc: GraphFunctionLike, traced: TracedCore, policy: BackwardPolicy): JointMeta {
-    const jointBuilder = new JointGraphBuilder({ rematPolicy: policy });
-    const { jointFunc, numForwardOutputs, numGradInputs } = jointBuilder.build(forwardFunc) as JointBuilderResult;
+    const jointBuilder = new JointGraphBuilder({ rematPolicy: policy as unknown as RematPolicy });
+    const { jointFunc, numForwardOutputs, numGradInputs } = jointBuilder.build(forwardFunc as unknown as GraphFunction) as unknown as JointBuilderResult;
 
-    const module = new GraphModule('joint') as GraphModuleLike;
+    const module = new GraphModule('joint') as unknown as GraphModuleLike;
     module.addFunction(jointFunc);
-    const result = new Compiler(compilerOpts).compile(module) as CompiledResult;
+    const result = new Compiler(compilerOpts as never).compile(module as unknown as GraphModule) as unknown as CompiledResult;
 
     return {
       mode: 'joint',

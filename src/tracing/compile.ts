@@ -18,6 +18,7 @@ import type { TensorType } from '../compiler/ir/graph/types.js';
 import type { ShapeEnv } from './shape_env.js';
 import type { SymbolicTensor } from './symbolic_tensor.js';
 import type { CompilableModel, CompiledEntry, CompiledForward, CompiledResult, CompileOptions, DynamicShapes, GraphModuleLike, MaybePromise, RuntimeArg, RuntimeTensorLike, SymbolicShape, TensorOutput, TracedCore } from './types.js';
+import type { GraphModule } from '../compiler/ir/graph/module.js';
 
 let _tracingRegistered = false;
 
@@ -247,7 +248,7 @@ export function compile(model: CompilableModel, exampleInputs?: Tensor[], opts: 
 
   function _finalize(traced: TracedCore): CompiledEntry {
     const prepared = foldWeights ? foldWeightParams(traced, tensorToContiguous) : traced;
-    const result = new Compiler(compilerOpts).compile(prepared.graph) as CompiledResult;
+    const result = new Compiler(compilerOpts as never).compile(prepared.graph as unknown as GraphModule) as unknown as CompiledResult;
     return {
       result,
       graph: prepared.graph,

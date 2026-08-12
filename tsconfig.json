@@ -11,7 +11,8 @@
     "skipLibCheck": true
   },
   "include": [
-    "src/compiler/ir/graph/types.ts",
+    "src/compiler/**/*.ts",
+    "src/backend/*.ts",
     "src/util/**/*.ts",
     "src/dispatcher/**/*.ts",
     "src/tensor/types/**/*.ts",
