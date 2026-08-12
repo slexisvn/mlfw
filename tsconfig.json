@@ -13,6 +13,7 @@
   "include": [
     "src/compiler/**/*.ts",
     "src/backend/**/*.ts",
+    "src/kernels/**/*.ts",
     "src/util/**/*.ts",
     "src/dispatcher/**/*.ts",
     "src/tensor/types/**/*.ts",

@@ -1,5 +1,6 @@
 import { parseSchema } from './operator_schema.js';
 import { KernelFunction } from './boxing.js';
+import type { UnboxedFn } from './boxing.js';
 import type { DispatchKeyValue } from './dispatch_key.js';
 
 type OperatorSchemaLike = {
@@ -17,7 +18,7 @@ type Registration =
   | { type: 'impl'; name: string; key: DispatchKeyValue; kernelFn: KernelFunction }
   | { type: 'fallback'; key: DispatchKeyValue; kernelFn: KernelFunction };
 
-type KernelInput = KernelFunction | ((keySet: unknown, ...args: unknown[]) => unknown);
+type KernelInput = KernelFunction | ((...args: never[]) => unknown);
 type BoxedKernelInput = (keySet: unknown, stack: unknown[]) => unknown;
 
 let _dispatcher: DispatcherLike | null = null;
@@ -47,7 +48,7 @@ export class Library {
   }
 
   impl(name: string, key: DispatchKeyValue, fn: KernelInput): this {
-    const kernelFn = fn instanceof KernelFunction ? fn : KernelFunction.fromUnboxed(fn);
+    const kernelFn = fn instanceof KernelFunction ? fn : KernelFunction.fromUnboxed(fn as UnboxedFn);
     if (_dispatcher) {
       _dispatcher.registerKernel(
         `${this._namespace}::${name}`,

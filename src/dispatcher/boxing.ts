@@ -56,6 +56,7 @@ export class IValue {
 }
 
 export { IValueTag };
+export type { UnboxedFn };
 
 export class KernelFunction {
   private readonly _boxed: BoxedFn | null;

@@ -23,14 +23,17 @@ function requireHost(t: Tensor) {
   }
 }
 
-export function hostMatrix(t: Tensor): { data: Float64Array; rows: number; cols: number } {
+export type HostMatrix = { data: Float64Array; rows: number; cols: number };
+export type HostColumns = HostMatrix & { wasVector: boolean };
+
+export function hostMatrix(t: Tensor): HostMatrix {
   if (t.ndim !== 2) throw new Error(`linalg/ml: expected a 2-D matrix, got ${t.ndim}-D`);
   requireHost(t);
   const [rows, cols] = t.shape;
   return { data: float64From(tensorToContiguous(t)), rows, cols };
 }
 
-export function hostColumns(t: Tensor): { data: Float64Array; rows: number; cols: number; wasVector: boolean } {
+export function hostColumns(t: Tensor): HostColumns {
   requireHost(t);
   if (t.ndim === 1) return { data: float64From(tensorToContiguous(t)), rows: t.shape[0], cols: 1, wasVector: true };
   if (t.ndim === 2) return { data: float64From(tensorToContiguous(t)), rows: t.shape[0], cols: t.shape[1], wasVector: false };

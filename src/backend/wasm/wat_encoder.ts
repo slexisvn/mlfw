@@ -330,7 +330,7 @@ function encodeBody(bodyTokens: readonly string[], localMap: Map<string, number>
   return bytes;
 }
 
-export function encodeWat(wat: string): Uint8Array {
+export function encodeWat(wat: string): Uint8Array<ArrayBuffer> {
   const tokens = tokenize(wat);
   const mod = parseModule(tokens);
 
