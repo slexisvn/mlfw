@@ -44,10 +44,13 @@ const MIN_POOL_BYTES = 64 * 1024 * 1024;
 const _pool = new Map();
 let _pooledBytes = 0;
 let _liveBytes = 0;
+let _peakLiveBytes = 0;
 let _poolCap = 0;
 
 export function pooledBytes() { return _pooledBytes; }
 export function liveBytes() { return _liveBytes; }
+export function peakLiveBytes() { return _peakLiveBytes; }
+export function resetPeakLiveBytes() { _peakLiveBytes = _liveBytes; }
 export function poolBuckets() { return _pool.size; }
 export function setPoolLimit(bytes) { _poolCap = Math.max(bytes, 0); _trimPool(); }
 
@@ -88,14 +91,16 @@ function _trimPool() {
 export function acquire(bytes) {
   const cls = sizeClass(bytes);
   const freeList = _pool.get(cls);
+  let dptr;
   if (freeList && freeList.length > 0) {
     _pooledBytes -= cls;
-    _liveBytes += cls;
     _touch(cls, freeList);
-    return freeList.pop();
+    dptr = freeList.pop();
+  } else {
+    dptr = alloc(cls);
   }
-  const dptr = alloc(cls);
   _liveBytes += cls;
+  if (_liveBytes > _peakLiveBytes) _peakLiveBytes = _liveBytes;
   return dptr;
 }
 

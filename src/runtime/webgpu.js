@@ -319,21 +319,39 @@ export async function runWebGPUPlan(plan, slots, steps) {
   const written = new Set();
   for (const st of steps) for (const s of st.outputSlots) written.add(s);
 
+  const groupOf = new Array(plan.numSlots);
+  const groupCount = plan.buffers ? plan.buffers.bufferBytes.length : plan.numSlots;
+  for (let s = 0; s < plan.numSlots; s++) groupOf[s] = plan.buffers ? plan.buffers.slotBuffer[s] : s;
+
   const bufs = new Array(plan.numSlots).fill(null);
   const dtypes = new Array(plan.numSlots).fill('f32');
+  const groupBytes = new Array(groupCount).fill(0);
   for (let s = 0; s < plan.numSlots; s++) {
     const t = slots[s];
     if (!t) continue;
-    const dtype = t.dtype || 'f32';
-    dtypes[s] = dtype;
-    const bytes = Math.max(align4(t.data.length * wgslBytes(dtype)), 4);
-    const isInput = !written.has(s);
-    const buf = device.createBuffer({ size: bytes, usage: BU.STORAGE | BU.COPY_DST | BU.COPY_SRC, mappedAtCreation: isInput });
-    if (isInput) {
-      packTensorInto(new (wgslViewCtor(dtype))(buf.getMappedRange()), t.data, dtype, 0);
+    dtypes[s] = t.dtype || 'f32';
+    const bytes = Math.max(align4(t.data.length * wgslBytes(dtypes[s])), 4);
+    if (bytes > groupBytes[groupOf[s]]) groupBytes[groupOf[s]] = bytes;
+  }
+
+  const groupInit = new Array(groupCount).fill(-1);
+  for (let s = 0; s < plan.numSlots; s++) {
+    if (slots[s] && !written.has(s)) groupInit[groupOf[s]] = s;
+  }
+
+  const groupBufs = new Array(groupCount).fill(null);
+  for (let g = 0; g < groupCount; g++) {
+    if (groupBytes[g] === 0) continue;
+    const init = groupInit[g];
+    const buf = device.createBuffer({ size: groupBytes[g], usage: BU.STORAGE | BU.COPY_DST | BU.COPY_SRC, mappedAtCreation: init >= 0 });
+    if (init >= 0) {
+      packTensorInto(new (wgslViewCtor(dtypes[init]))(buf.getMappedRange()), slots[init].data, dtypes[init], 0);
       buf.unmap();
     }
-    bufs[s] = buf;
+    groupBufs[g] = buf;
+  }
+  for (let s = 0; s < plan.numSlots; s++) {
+    if (slots[s]) bufs[s] = groupBufs[groupOf[s]];
   }
 
   const PLAN_SUBMIT_CHUNK = 32;
@@ -424,7 +442,7 @@ export async function runWebGPUPlan(plan, slots, steps) {
     r.rb.unmap();
     r.rb.destroy();
   }
-  for (const b of bufs) if (b) b.destroy();
+  for (const b of groupBufs) if (b) b.destroy();
   for (const u of uniformBufs) u.destroy();
   for (const sb of scratchBufs) sb.destroy();
 }

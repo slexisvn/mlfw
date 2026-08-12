@@ -31,6 +31,8 @@ export type MemoryConfig = {
   inplaceReuse?: boolean;
   allocStrategy?: string;
   poolAllocation?: boolean;
+  planReuse?: boolean;
+  planDonation?: boolean;
   [key: string]: unknown;
 };
 

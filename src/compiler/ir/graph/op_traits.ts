@@ -65,6 +65,11 @@ export function isTerminatorOp(opName: string): boolean {
   return def !== null && def.isTerminator;
 }
 
+export function isElementwiseOp(opName: string): boolean {
+  const def = registry.get(opName);
+  return def !== null && def.isElementwise;
+}
+
 export function isBroadcastOp(opName: string): boolean {
   const def = registry.get(opName);
   return def !== null && def.isBroadcast;

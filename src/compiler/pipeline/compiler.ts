@@ -20,6 +20,8 @@ import { collectCalibration } from '../analysis/calibrate_exec.js';
 import { GraphPartitionPass, PartitionMaterializationPass } from '../passes/partition/partition_pass.js';
 import { splitGraph } from './graph_split.js';
 import { splitGraphForNative } from '../passes/partition/cublas_split.js';
+import { assignPlanBuffers, computePlanDonations, planMemoryReport } from '../passes/memory/plan_buffer_assignment.js';
+import type { AssignablePlan } from '../passes/memory/plan_buffer_assignment.js';
 import { containsSequentialRegion } from '../ir/graph/op_traits.js';
 import { TargetAttr, targetAttr } from './target_attrs.js';
 import type { SchedulingDefaults } from './target_attrs.js';
@@ -159,6 +161,8 @@ export class CompilerConfig {
       allocStrategy: 'best-fit',
       poolAllocation: false,
       scheduleForPeak: true,
+      planReuse: true,
+      planDonation: true,
       ...opts.memory,
     };
     this.partition = {
@@ -381,6 +385,11 @@ export class Compiler {
         name: 'relaunchOnSerialization',
         run: (ctx: CompileContext) => ctx.compiler._relaunchOnSerialization(ctx),
       },
+      {
+        name: 'planBufferAssignment',
+        when: (ctx: CompileContext) => ctx.compiler.config.memory.planReuse !== false && !!(ctx.split && ctx.split.plan),
+        run: (ctx: CompileContext) => ctx.compiler._assignPlanBuffers(ctx),
+      },
     ];
   }
 
@@ -570,6 +579,15 @@ export class Compiler {
     ctx.lirFuncs = null;
     ctx.runtimeModule = null;
     ctx.restartFrom = 'lowering';
+  }
+
+  _assignPlanBuffers(ctx: CompileContext): void {
+    const plan = (ctx.split as { plan: AssignablePlan }).plan;
+    const donations = this.config.memory.planDonation === false ? [] : computePlanDonations(ctx.working, plan);
+    const buffers = assignPlanBuffers(plan, donations);
+    if (!buffers) return;
+    plan.buffers = buffers;
+    ctx.trace.memoryStats(ctx.working.name, { plan: planMemoryReport(plan, buffers), slots: plan.numSlots });
   }
 
   _runLirPasses(ctx: CompileContext): void {

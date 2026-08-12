@@ -8,6 +8,8 @@ type RuntimeData = NumericTypedArray;
 type RuntimeArrayConstructor = {
   new(length: number): RuntimeData;
   new(data: ArrayLike<number> | ArrayLike<bigint>): RuntimeData;
+  new(store: ArrayBuffer, byteOffset: number, length: number): RuntimeData;
+  readonly BYTES_PER_ELEMENT: number;
 };
 type RuntimeArg = RuntimeTensor | RuntimeData;
 type ShapeParamMap = Map<string, { name: string }>;
@@ -35,12 +37,14 @@ type RuntimeBackend = {
 type KernelInstanceEntry = { backend: RuntimeBackend; instance: unknown | Promise<unknown> };
 type ReturnFixup = { pos: number; kind: 'copy'; srcSlot: number } | { pos: number; kind: 'const'; value: number };
 type ExecutionPlanStep = { name: string; inputSlots: number[]; outputSlots: number[] };
+type PlanIntermediate = { slot: number; shape: number[]; dtype: RuntimeDType };
 type ExecutionPlan = {
   numSlots: number;
   argSlots: number[];
-  intermediates: Array<{ slot: number; shape: number[]; dtype: RuntimeDType }>;
+  intermediates: PlanIntermediate[];
   steps: ExecutionPlanStep[];
   returnFixups?: ReturnFixup[];
+  buffers?: { slotBuffer: number[]; bufferBytes: number[] };
 };
 type PlanStepRuntime = ExecutionPlanStep & {
   kernel: RuntimeKernel | null;
@@ -78,6 +82,32 @@ function dtypeOfTypedArray(a: RuntimeData): RuntimeDType {
   if (a instanceof Uint8Array) return 'ui8';
   if (a instanceof BigInt64Array) return 'i64';
   return 'f32';
+}
+
+function _intermediateNumel(it: PlanIntermediate): number {
+  let numel = 1;
+  for (const d of it.shape) numel *= d;
+  return Math.max(numel, 1);
+}
+
+function _allocIntermediates(plan: ExecutionPlan, slots: Array<RuntimeTensor | null>): void {
+  const grouping = plan.buffers ? plan.buffers.slotBuffer : null;
+  const stores: Array<ArrayBuffer | null> = [];
+  if (grouping) {
+    const sizes: number[] = [];
+    for (const it of plan.intermediates) {
+      const group = grouping[it.slot];
+      const need = _intermediateNumel(it) * typedArrayCtor(it.dtype).BYTES_PER_ELEMENT;
+      if (!(sizes[group] >= need)) sizes[group] = need;
+    }
+    for (let i = 0; i < sizes.length; i++) stores[i] = sizes[i] > 0 ? new ArrayBuffer(sizes[i]) : null;
+  }
+  for (const it of plan.intermediates) {
+    const ctor = typedArrayCtor(it.dtype);
+    const numel = _intermediateNumel(it);
+    const store = grouping ? stores[grouping[it.slot]] : null;
+    slots[it.slot] = new RuntimeTensor(store ? new ctor(store, 0, numel) : new ctor(numel), it.shape, it.dtype);
+  }
 }
 
 function _applyReturnFixups(plan: ExecutionPlan, slots: Array<RuntimeTensor | null>): void {
@@ -267,11 +297,7 @@ export class RuntimeModule {
       slots[plan.argSlots[i]] = a instanceof RuntimeTensor ? a
         : new RuntimeTensor(a, [a.length], dtypeOfTypedArray(a));
     }
-    for (const it of plan.intermediates) {
-      let numel = 1;
-      for (const d of it.shape) numel *= d;
-      slots[it.slot] = new RuntimeTensor(new (typedArrayCtor(it.dtype))(Math.max(numel, 1)), it.shape, it.dtype);
-    }
+    _allocIntermediates(plan, slots);
 
     for (const step of plan.steps) {
       const entry = this._getInstance(step.name);

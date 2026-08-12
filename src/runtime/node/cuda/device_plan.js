@@ -15,6 +15,25 @@ let _useCudaGraph = false;
 export function setCudaGraphEnabled(on) { _useCudaGraph = on; }
 export function isCudaGraphEnabled() { return _useCudaGraph; }
 
+function _groupsOf(plan) {
+  const buffers = plan.buffers;
+  const count = buffers ? buffers.bufferBytes.length : plan.numSlots;
+  const of = new Array(plan.numSlots);
+  for (let s = 0; s < plan.numSlots; s++) of[s] = buffers ? buffers.slotBuffer[s] : s;
+  return { of, count };
+}
+
+function _groupSizes(plan, slots, groups) {
+  const sizes = new Array(groups.count).fill(0);
+  for (let s = 0; s < plan.numSlots; s++) {
+    if (!slots[s]) continue;
+    const bytes = Math.max(slots[s].data.byteLength, 1);
+    const g = groups.of[s];
+    if (bytes > sizes[g]) sizes[g] = bytes;
+  }
+  return sizes;
+}
+
 function _releaseState(state) {
   if (state.released) return;
   state.released = true;
@@ -22,19 +41,21 @@ function _releaseState(state) {
   destroyEagerGraph(state);
   state.graph = null;
   state.exec = null;
-  for (let s = 0; s < state.dptr.length; s++) {
-    if (state.dptr[s] === null) continue;
-    release(state.dptr[s], state.sizes[s]);
-    state.dptr[s] = null;
+  for (let g = 0; g < state.gptr.length; g++) {
+    if (state.gptr[g] === null) continue;
+    release(state.gptr[g], state.sizes[g]);
+    state.gptr[g] = null;
   }
+  state.dptr.fill(null);
 }
 
-function _stateFor(plan, numSlots) {
+function _stateFor(plan, groups) {
   let state = _planState.get(plan);
   if (state) return state;
   state = {
-    dptr: new Array(numSlots).fill(null),
-    sizes: new Array(numSlots).fill(0),
+    dptr: new Array(plan.numSlots).fill(null),
+    gptr: new Array(groups.count).fill(null),
+    sizes: new Array(groups.count).fill(0),
     pin: new Map(),
     graph: null,
     exec: null,
@@ -105,16 +126,20 @@ function runCudaPlanGraphed(plan, slots, steps) {
   const stream = getDevice().stream;
   const written = _writtenSlots(steps);
   const argSet = new Set(plan.argSlots);
+  const groups = _groupsOf(plan);
 
-  const state = _stateFor(plan, plan.numSlots);
+  const state = _stateFor(plan, groups);
   if (!state.exec) {
+    const sizes = _groupSizes(plan, slots, groups);
+    for (let g = 0; g < groups.count; g++) {
+      if (sizes[g] === 0) continue;
+      state.gptr[g] = acquire(sizes[g]);
+      state.sizes[g] = sizes[g];
+    }
     for (let s = 0; s < plan.numSlots; s++) {
-      const t = slots[s];
-      if (!t) continue;
-      const bytes = Math.max(t.data.byteLength, 1);
-      state.dptr[s] = acquire(bytes);
-      state.sizes[s] = bytes;
-      if (!written.has(s)) devH2D(state.dptr[s], t.data);
+      if (!slots[s]) continue;
+      state.dptr[s] = state.gptr[groups.of[s]];
+      if (!written.has(s)) devH2D(state.dptr[s], slots[s].data);
     }
     beginEagerCapture();
     try {
@@ -140,20 +165,27 @@ function runCudaPlanGraphed(plan, slots, steps) {
 }
 
 function runCudaPlanResident(plan, slots, steps, funcs, written) {
-  const state = _stateFor(plan, plan.numSlots);
-  const { dptr, sizes, pin } = state;
+  const groups = _groupsOf(plan);
+  const state = _stateFor(plan, groups);
+  const { dptr, gptr, sizes, pin } = state;
   const argSet = new Set(plan.argSlots);
+  const wanted = _groupSizes(plan, slots, groups);
+
+  const moved = new Set();
+  for (let g = 0; g < groups.count; g++) {
+    if (wanted[g] === 0 || (gptr[g] !== null && sizes[g] === wanted[g])) continue;
+    if (gptr[g] !== null) release(gptr[g], sizes[g]);
+    gptr[g] = acquire(wanted[g]);
+    sizes[g] = wanted[g];
+    moved.add(g);
+  }
 
   for (let s = 0; s < plan.numSlots; s++) {
     const t = slots[s];
     if (!t) continue;
-    const bytes = Math.max(t.data.byteLength, 1);
-    if (dptr[s] === null || sizes[s] !== bytes) {
-      if (dptr[s] !== null) release(dptr[s], sizes[s]);
-      dptr[s] = acquire(bytes);
-      sizes[s] = bytes;
-      pin.delete(s);
-    }
+    const g = groups.of[s];
+    if (moved.has(g)) pin.delete(s);
+    dptr[s] = gptr[g];
     if (written.has(s)) continue;
     const res = t.resident;
     if (res) {
@@ -173,17 +205,19 @@ function runCudaPlanResident(plan, slots, steps, funcs, written) {
 }
 
 function runCudaPlanTransient(plan, slots, steps, funcs, written) {
+  const groups = _groupsOf(plan);
+  const sizes = _groupSizes(plan, slots, groups);
+  const gptr = new Array(groups.count).fill(null);
   const dptr = new Array(plan.numSlots).fill(null);
-  const sizes = new Array(plan.numSlots).fill(0);
-  for (let s = 0; s < plan.numSlots; s++) {
-    const t = slots[s];
-    if (!t) continue;
-    const bytes = Math.max(t.data.byteLength, 1);
-    sizes[s] = bytes;
-    dptr[s] = acquire(bytes);
-    if (!written.has(s)) devH2D(dptr[s], t.data);
-  }
   try {
+    for (let g = 0; g < groups.count; g++) {
+      if (sizes[g] > 0) gptr[g] = acquire(sizes[g]);
+    }
+    for (let s = 0; s < plan.numSlots; s++) {
+      if (!slots[s]) continue;
+      dptr[s] = gptr[groups.of[s]];
+      if (!written.has(s)) devH2D(dptr[s], slots[s].data);
+    }
     _launchSteps(steps, dptr, funcs);
     devSync();
     const argSet = new Set(plan.argSlots);
@@ -191,8 +225,8 @@ function runCudaPlanTransient(plan, slots, steps, funcs, written) {
       if (dptr[s] !== null && written.has(s) && argSet.has(s)) devD2H(slots[s].data, dptr[s]);
     }
   } finally {
-    for (let s = 0; s < plan.numSlots; s++) {
-      if (dptr[s] !== null) release(dptr[s], sizes[s]);
+    for (let g = 0; g < groups.count; g++) {
+      if (gptr[g] !== null) release(gptr[g], sizes[g]);
     }
   }
 }
