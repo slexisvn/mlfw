@@ -8,13 +8,24 @@ import { LANCZOS_G, LANCZOS_COEFFS, ERF_A, ERF_P } from '../../util/special_math
 
 import '../../tensor/utils/half.js';
 
-const _HALF_EXPAND = { f16: '__mlfw_f16_to_f32', bf16: '__mlfw_bf16_to_f32' };
-const _HALF_ROUND = { f16: '__mlfw_f32_to_f16', bf16: '__mlfw_f32_to_bf16' };
+import type { Buffer } from '../../compiler/ir/tensor/buffer.js';
+import type { BlockNode, BufferLoadNode, BufferStoreNode, ForNode, IfThenElseNode, IntImmNode, TirNode, WhileNode } from '../../compiler/ir/tensor/nodes.js';
+import type { IRStmtNode, LIRAccumulatorNode, LIRBindingsNode, LIRFlatStoreNode } from '../../compiler/ir/lir/nodes.js';
+import type { CodegenFunc } from '../codegen_utils.js';
+import type { TargetFeatures } from '../target.js';
+
+type HalfConverterTable = Readonly<Record<string, string | undefined>>;
+type AccTarget = { bufName: string; idxExpr: string };
+type ReductionAcc = { bufName: string; idxExpr: string; dtype: string };
+type ExprFrame = { node: IRStmtNode | null; phase: number };
+
+const _HALF_EXPAND: HalfConverterTable = { f16: '__mlfw_f16_to_f32', bf16: '__mlfw_bf16_to_f32' };
+const _HALF_ROUND: HalfConverterTable = { f16: '__mlfw_f32_to_f16', bf16: '__mlfw_f32_to_bf16' };
 
 const _ERF_POLY = ERF_A.slice().reverse().reduce((acc, c) => `(${c} + t * ${acc})`, '0');
 const _ERF_BODY = `const t = 1.0 / (1.0 + ${ERF_P} * Math.abs(x_erf)); const p = t * ${_ERF_POLY}; return (x_erf >= 0 ? 1 : -1) * (1.0 - p * Math.exp(-x_erf * x_erf));`;
 
-function _erfExpr(arg) {
+function _erfExpr(arg: string): string {
   return `((x_erf => { ${_ERF_BODY} })(${arg}))`;
 }
 
@@ -23,23 +34,38 @@ const _LANCZOS_SUM = LANCZOS_COEFFS
   .join(' + ');
 const _LGAMMA_CORE = `(zg => { const zz = zg - 1; const s = ${_LANCZOS_SUM}; const t = zz + ${LANCZOS_G} + 0.5; return ${0.5 * Math.log(2 * Math.PI)} + (zz + 0.5) * Math.log(t) - t + Math.log(s); })`;
 
-function _lgammaExpr(arg) {
+function _lgammaExpr(arg: string): string {
   return `((x_lg => { const lg = ${_LGAMMA_CORE}; return x_lg < 0.5 ? Math.log(Math.PI / Math.abs(Math.sin(Math.PI * x_lg))) - lg(1 - x_lg) : lg(x_lg); })(${arg}))`;
 }
 
-function _gammaExpr(arg) {
+function _gammaExpr(arg: string): string {
   return `((x_g => { const lg = ${_LGAMMA_CORE}; return x_g < 0.5 ? Math.PI / (Math.sin(Math.PI * x_g) * Math.exp(lg(1 - x_g))) : Math.exp(lg(x_g)); })(${arg}))`;
 }
 
 export class CPUCodegen {
-  constructor(target) {
+  target: TargetFeatures;
+  _indent: number;
+  _lines: string[];
+  _loopStack: string[];
+  declare _aliases: Map<string, string>;
+  declare _accTarget: AccTarget | null;
+  declare _accVar: string | null;
+  declare _accCounter: number;
+  declare _paramBuffers: Set<string>;
+  declare _readBuffers: Set<string>;
+  declare _zeroBuffers: Set<string>;
+  declare _constantBuffers: Map<string, string>;
+  declare _localBuffers: Set<string>;
+  declare _primFunc: CodegenFunc;
+
+  constructor(target: TargetFeatures) {
     this.target = target;
     this._indent = 0;
     this._lines = [];
     this._loopStack = [];
   }
 
-  generate(func) {
+  generate(func: CodegenFunc): string {
     this._indent = 0;
     this._lines = [];
     this._aliases = new Map();
@@ -49,8 +75,8 @@ export class CPUCodegen {
 
     const isLIR = func.type === 'LIRFunc';
 
-    const paramBuffers = new Set();
-    const paramNames = [];
+    const paramBuffers = new Set<string>();
+    const paramNames: string[] = [];
     for (const [, buf] of func.bufferMap) {
       paramNames.push(buf.name);
       paramBuffers.add(buf.name);
@@ -61,13 +87,13 @@ export class CPUCodegen {
     this._paramBuffers = paramBuffers;
     this._readBuffers = new Set();
 
-    let usedBuffers, allocatedBuffers, zeroBuffers, constantBuffers;
+    let usedBuffers: Map<string, Buffer>, allocatedBuffers: Set<string>, zeroBuffers: Set<string>, constantBuffers: Map<string, string>;
 
     if (isLIR) {
-      usedBuffers = func.metadata.usedBuffers;
+      usedBuffers = func.metadata.usedBuffers as Map<string, Buffer>;
       allocatedBuffers = func.metadata.allocatedBuffers;
       zeroBuffers = func.metadata.zeroBuffers;
-      constantBuffers = func.metadata.constantBuffers;
+      constantBuffers = func.metadata.constantBuffers as Map<string, string>;
     } else {
       usedBuffers = new Map();
       allocatedBuffers = new Set();
@@ -86,7 +112,7 @@ export class CPUCodegen {
 
     let poolBytes = 0;
     for (const [, buf] of usedBuffers) {
-      if (buf.poolByteOffset !== undefined && buf.poolByteOffset !== null) {
+      if (buf.poolByteOffset !== undefined && (buf.poolByteOffset as number | null) !== null) {
         const n = buf.numel();
         if (n > 0) poolBytes = Math.max(poolBytes, buf.poolByteOffset + n * dtypeBytes(buf.dtype));
       }
@@ -101,9 +127,9 @@ export class CPUCodegen {
         if (numel > 0) {
           this._emit(`const ${bufName} = ${this._allocRhs(buf, numel)};`);
         } else if (numel < 0) {
-          const parts = [];
+          const parts: string[] = [];
           for (let d = 0; d < buf.shape.length; d++) {
-            parts.push(typeof buf.shape[d] === 'number' && buf.shape[d] >= 0 ? String(buf.shape[d]) : this._resolveShapeParam(buf, d));
+            parts.push(typeof buf.shape[d] === 'number' && (buf.shape[d] as number) >= 0 ? String(buf.shape[d]) : this._resolveShapeParam(buf, d));
           }
           this._emit(`const ${bufName} = new ${jsTypedArray(buf.dtype)}(${parts.join(' * ')});`);
         }
@@ -122,36 +148,36 @@ export class CPUCodegen {
     return this._cleanupSource(this._lines.join('\n'));
   }
 
-  _emit(line) {
+  _emit(line: string): void {
     this._lines.push('  '.repeat(this._indent) + line);
   }
 
-  _allocRhs(buf, numel) {
+  _allocRhs(buf: Buffer, numel: number): string {
     const ty = jsTypedArray(buf.dtype);
-    if (buf.poolByteOffset !== undefined && buf.poolByteOffset !== null && numel > 0) {
+    if (buf.poolByteOffset !== undefined && (buf.poolByteOffset as number | null) !== null && numel > 0) {
       return `new ${ty}(_mem_pool, ${buf.poolByteOffset}, ${numel})`;
     }
     return `new ${ty}(${numel})`;
   }
 
-  _wrapLoad(dtype, expr) {
+  _wrapLoad(dtype: string, expr: string): string {
     const fn = _HALF_EXPAND[dtype];
     return fn ? `${fn}(${expr})` : expr;
   }
 
-  _wrapStoreVal(dtype, expr) {
+  _wrapStoreVal(dtype: string, expr: string): string {
     const fn = _HALF_ROUND[dtype];
     if (fn) return `${fn}(${expr})`;
     if (dtype === 'i64') return `BigInt(${expr})`;
     return expr;
   }
 
-  _zeroLit(dtype) {
+  _zeroLit(dtype: string): string {
     return dtype === 'i64' ? '0n' : '0';
   }
 
-  _visitNode(startNode) {
-    let node = startNode;
+  _visitNode(startNode: IRStmtNode): void {
+    let node: IRStmtNode = startNode;
     while (node) {
       switch (node.type) {
         case 'SeqNode':
@@ -188,7 +214,7 @@ export class CPUCodegen {
     }
   }
 
-  _visitForNode(node) {
+  _visitForNode(node: ForNode): void {
     if (this._isRedundantZeroFill(node)) return;
 
     const varName = node.loopVar.name;
@@ -247,7 +273,7 @@ export class CPUCodegen {
     this._emit('}');
   }
 
-  _visitLIRFlatStore(node) {
+  _visitLIRFlatStore(node: LIRFlatStoreNode): void {
     if (this._zeroBuffers && this._zeroBuffers.has(node.buffer.name)) return;
     if (this._constantBuffers && this._constantBuffers.has(node.buffer.name)) return;
     if (this._accTarget && node.buffer.name === this._accTarget.bufName
@@ -258,7 +284,7 @@ export class CPUCodegen {
     this._emit(node.buffer.name + '[' + this._exprToJS(node.offsetExpr) + '] = ' + this._wrapStoreVal(node.dtype || node.buffer.dtype, this._exprToJS(node.value)) + ';');
   }
 
-  _visitLIRBindings(node) {
+  _visitLIRBindings(node: LIRBindingsNode): void {
     for (const bind of node.bindings) {
       const expr = this._exprToJS(bind.expr);
       this._aliases.set(bind.name, expr);
@@ -266,7 +292,7 @@ export class CPUCodegen {
     this._visitNode(node.body);
   }
 
-  _visitLIRAccumulator(node) {
+  _visitLIRAccumulator(node: LIRAccumulatorNode): void {
     const accVar = node.localName;
     const initExpr = this._exprToJS(node.initLoad);
     this._emit('let ' + accVar + ' = ' + initExpr + ';');
@@ -274,8 +300,8 @@ export class CPUCodegen {
     const prevAcc = this._accTarget;
     const prevVar = this._accVar;
     this._accTarget = {
-      bufName: node.flushStore.buffer.name,
-      idxExpr: this._exprToJS(node.flushStore.offsetExpr),
+      bufName: (node.flushStore as LIRFlatStoreNode).buffer.name,
+      idxExpr: this._exprToJS((node.flushStore as LIRFlatStoreNode).offsetExpr),
     };
     this._accVar = accVar;
 
@@ -286,7 +312,7 @@ export class CPUCodegen {
     this._loopStack.push(varName);
     const accBody = this._exprToJS(node.body);
     const accOp = node.op || '+';
-    let accRhs;
+    let accRhs: string;
     if (accOp === 'max') accRhs = 'Math.max(' + accVar + ', ' + accBody + ')';
     else if (accOp === 'min') accRhs = 'Math.min(' + accVar + ', ' + accBody + ')';
     else accRhs = '(' + accVar + ' ' + accOp + ' ' + accBody + ')';
@@ -295,12 +321,12 @@ export class CPUCodegen {
     this._indent--;
     this._emit('}');
 
-    this._emit(node.flushStore.buffer.name + '[' + this._accTarget.idxExpr + '] = ' + this._wrapStoreVal(node.flushStore.dtype || node.flushStore.buffer.dtype, accVar) + ';');
+    this._emit((node.flushStore as LIRFlatStoreNode).buffer.name + '[' + this._accTarget.idxExpr + '] = ' + this._wrapStoreVal((node.flushStore as LIRFlatStoreNode).dtype || (node.flushStore as LIRFlatStoreNode).buffer.dtype, accVar) + ';');
     this._accTarget = prevAcc;
     this._accVar = prevVar;
   }
 
-  _detectReductionAcc(forNode) {
+  _detectReductionAcc(forNode: ForNode): ReductionAcc | null {
     let block = forNode.body;
     if (!block || block.type !== 'BlockNode') return null;
     const inner = block.body;
@@ -308,7 +334,7 @@ export class CPUCodegen {
     const store = inner;
     const val = store.value;
     if (!val || val.type !== 'MathOpNode' || val.op !== '+') return null;
-    let loadSide = null;
+    let loadSide: BufferLoadNode | null = null;
     if (val.a && val.a.type === 'BufferLoadNode' && val.a.buffer.name === store.buffer.name) loadSide = val.a;
     else if (val.b && val.b.type === 'BufferLoadNode' && val.b.buffer.name === store.buffer.name) loadSide = val.b;
     if (!loadSide) return null;
@@ -328,7 +354,7 @@ export class CPUCodegen {
     return { bufName: store.buffer.name, idxExpr: storeIdx, dtype: store.buffer.dtype };
   }
 
-  _visitBlockNode(node) {
+  _visitBlockNode(node: BlockNode): void {
     for (const bind of node.iterVars) {
       if (bind.iterVar && bind.binding) {
         const expr = this._exprToJS(bind.binding);
@@ -352,7 +378,7 @@ export class CPUCodegen {
   }
 
 
-  _visitIfThenElseStmt(node) {
+  _visitIfThenElseStmt(node: IfThenElseNode): void {
     this._emit(`if (${this._exprToJS(node.condition)}) {`);
     this._indent++;
     this._visitNode(node.thenBody);
@@ -366,7 +392,7 @@ export class CPUCodegen {
     this._emit('}');
   }
 
-  _visitWhileNode(node) {
+  _visitWhileNode(node: WhileNode): void {
     this._visitNode(node.condBody);
     this._emit(`while (${node.condVar.name}[0]) {`);
     this._indent++;
@@ -376,7 +402,7 @@ export class CPUCodegen {
     this._emit('}');
   }
 
-  _visitBufferStoreNode(node) {
+  _visitBufferStoreNode(node: BufferStoreNode): void {
     if (this._zeroBuffers && this._zeroBuffers.has(node.buffer.name)) return;
     if (this._constantBuffers && this._constantBuffers.has(node.buffer.name)) return;
     if (this._accTarget && node.buffer.name === this._accTarget.bufName
@@ -387,10 +413,10 @@ export class CPUCodegen {
     this._emit(node.buffer.name + '[' + this._flatIndex(node.buffer, node.indices) + '] = ' + this._wrapStoreVal(node.buffer.dtype, this._exprToJS(node.value)) + ';');
   }
 
-  _exprToJS(root) {
+  _exprToJS(root: IRStmtNode | null): string {
     if (!root) return '0';
-    const vals = [];
-    const work = [{ node: root, phase: 0 }];
+    const vals: string[] = [];
+    const work: ExprFrame[] = [{ node: root, phase: 0 }];
 
     while (work.length > 0) {
       const top = work[work.length - 1];
@@ -407,10 +433,10 @@ export class CPUCodegen {
           if (this._zeroBuffers && this._zeroBuffers.has(node.buffer.name)) {
             vals.push(this._zeroLit(node.buffer.dtype));
           } else if (this._constantBuffers && this._constantBuffers.has(node.buffer.name)) {
-            const c = this._constantBuffers.get(node.buffer.name);
+            const c = this._constantBuffers.get(node.buffer.name) as string;
             vals.push(node.buffer.dtype === 'i64' ? `BigInt(${c})` : c);
           } else if (this._accTarget && node.buffer.name === this._accTarget.bufName && this._flatIndex(node.buffer, node.indices) === this._accTarget.idxExpr) {
-            vals.push(this._accVar);
+            vals.push(this._accVar as string);
           } else {
             vals.push(this._wrapLoad(node.buffer.dtype, node.buffer.name + '[' + this._flatIndex(node.buffer, node.indices) + ']'));
           }
@@ -426,7 +452,7 @@ export class CPUCodegen {
             vals.push((node.dtype || node.buffer.dtype) === 'i64' ? `BigInt(${c})` : c);
           } else if (this._accTarget && node.buffer.name === this._accTarget.bufName
                      && this._exprToJS(node.offsetExpr) === this._accTarget.idxExpr) {
-            vals.push(this._accVar);
+            vals.push(this._accVar as string);
           } else {
             vals.push(this._wrapLoad(node.dtype || node.buffer.dtype, node.buffer.name + '[' + this._exprToJS(node.offsetExpr) + ']'));
           }
@@ -441,11 +467,11 @@ export class CPUCodegen {
             if (!node.b) { vals.push(`(${node.op}${vals.pop()})`); }
             else {
               const b = vals.pop(), a = vals.pop();
-              if ((node.op === '+' || node.op === '-') && b === '0') { vals.push(a); }
-              else if (node.op === '+' && a === '0') { vals.push(b); }
+              if ((node.op === '+' || node.op === '-') && b === '0') { vals.push(a as string); }
+              else if (node.op === '+' && a === '0') { vals.push(b as string); }
               else if (node.op === '*' && (a === '0' || b === '0')) { vals.push('0'); }
-              else if (node.op === '*' && b === '1') { vals.push(a); }
-              else if (node.op === '*' && a === '1') { vals.push(b); }
+              else if (node.op === '*' && b === '1') { vals.push(a as string); }
+              else if (node.op === '*' && a === '1') { vals.push(b as string); }
               else if (node.op === '%') vals.push(`((${a} % ${b} + ${b}) % ${b})`);
               else if (node.op === '//') vals.push(`((${a} / ${b}) | 0)`);
               else vals.push(`(${a} ${node.op} ${b})`);
@@ -481,8 +507,8 @@ export class CPUCodegen {
           if (top.phase < node.args.length) { const p = top.phase; top.phase++; work.push({ node: node.args[p], phase: 0 }); }
           else {
             work.pop();
-            const args = [];
-            for (let i = 0; i < node.args.length; i++) args.unshift(vals.pop());
+            const args: string[] = [];
+            for (let i = 0; i < node.args.length; i++) args.unshift(vals.pop() as string);
             const joined = args.join(', ');
             if (isJSMathFunc(node.externName)) vals.push(`Math.${node.externName}(${joined})`);
             else if (node.externName === 'rsqrt') vals.push(`(1.0 / Math.sqrt(${joined}))`);
@@ -504,27 +530,27 @@ export class CPUCodegen {
     return vals.length > 0 ? vals[0] : '0';
   }
 
-  _dynamicNumel(buffer) {
+  _dynamicNumel(buffer: Buffer): string {
     return dynamicDimProduct(buffer, 0, (b, j) => this._resolveShapeParam(b, j));
   }
 
-  _flatIndex(buffer, indices) {
+  _flatIndex(buffer: Buffer, indices: readonly IRStmtNode[]): string {
     return flattenRowMajorIndex(buffer, indices, (e) => this._exprToJS(e), (b, i) => this._computeDynamicStride(b, i), true);
   }
 
-  _computeDynamicStride(buffer, dimIdx) {
+  _computeDynamicStride(buffer: Buffer, dimIdx: number): string {
     return dynamicDimProduct(buffer, dimIdx + 1, (b, j) => this._resolveShapeParam(b, j));
   }
 
-  _resolveShapeParam(buffer, dimIdx) {
+  _resolveShapeParam(buffer: Buffer, dimIdx: number): string {
     return resolveShapeParam(this._primFunc, buffer, dimIdx, (v) => v.name, 'CPU', 'js');
   }
 
-  _cleanupSource(src) {
+  _cleanupSource(src: string): string {
     const lines = src.split('\n');
 
-    const allocName = new Array(lines.length).fill(null);
-    const counts = new Map();
+    const allocName = new Array<string | null>(lines.length).fill(null);
+    const counts = new Map<string, number>();
     for (let i = 0; i < lines.length; i++) {
       const m = lines[i].match(/^\s*const (\w+) = new \w+Array\(\d+\);\s*$/);
       if (m) allocName[i] = m[1];
@@ -532,9 +558,9 @@ export class CPUCodegen {
       if (ids) for (const id of ids) counts.set(id, (counts.get(id) || 0) + 1);
     }
 
-    const out = [];
+    const out: string[] = [];
     for (let i = 0; i < lines.length; i++) {
-      if (allocName[i] !== null && counts.get(allocName[i]) === 1) continue; // dead alloc
+      if (allocName[i] !== null && counts.get(allocName[i] as string) === 1) continue; // dead alloc
       const line = lines[i];
       if (/^\s*\}\s*$/.test(line) && out.length > 0 && /^\s*for\s*\(.*\{\s*$/.test(out[out.length - 1])) {
         out.pop();
@@ -545,8 +571,8 @@ export class CPUCodegen {
     return out.join('\n');
   }
 
-  _isRedundantZeroFill(node) {
-    let cur = node.body;
+  _isRedundantZeroFill(node: ForNode): boolean {
+    let cur: IRStmtNode = node.body as IRStmtNode;
     while (cur) {
       if (cur.type === 'ForNode') {
         if (cur.extent.type === 'IntImmNode' && cur.extent.value === 1) {
@@ -570,12 +596,12 @@ export class CPUCodegen {
     return false;
   }
 
-  _isZeroFillBody(body) {
+  _isZeroFillBody(body: IRStmtNode): boolean {
     return isZeroFillBody(body);
   }
 
-  _scanTree(root, usedBuffers, allocatedBuffers, readBuffers) {
-    const stack = [root];
+  _scanTree(root: IRStmtNode, usedBuffers: Map<string, Buffer>, allocatedBuffers: Set<string>, readBuffers: Set<string>): void {
+    const stack: IRStmtNode[] = [root];
     while (stack.length > 0) {
       const node = stack.pop();
       if (!node || typeof node !== 'object') continue;
@@ -589,15 +615,15 @@ export class CPUCodegen {
           if (node.buffer) allocatedBuffers.add(node.buffer.name);
           break;
       }
-      if (node.reads) for (const r of node.reads) { if (r.buffer) usedBuffers.set(r.buffer.name, r.buffer); }
-      if (node.writes) for (const w of node.writes) { if (w.buffer) usedBuffers.set(w.buffer.name, w.buffer); }
+      if ((node as BlockNode).reads) for (const r of (node as BlockNode).reads) { if (r.buffer) usedBuffers.set(r.buffer.name, r.buffer); }
+      if ((node as BlockNode).writes) for (const w of (node as BlockNode).writes) { if (w.buffer) usedBuffers.set(w.buffer.name, w.buffer); }
       for (const c of irChildNodes(node)) stack.push(c);
     }
   }
 
-  _findZeroOnlyBuffers(root, paramBuffers) {
-    const bufWrites = new Map();
-    const stack = [root];
+  _findZeroOnlyBuffers(root: IRStmtNode, paramBuffers: Set<string>): Set<string> {
+    const bufWrites = new Map<string, TirNode[]>();
+    const stack: IRStmtNode[] = [root];
     while (stack.length > 0) {
       const node = stack.pop();
       if (!node || typeof node !== 'object') continue;
@@ -605,12 +631,12 @@ export class CPUCodegen {
         const name = node.buffer.name;
         if (!paramBuffers.has(name)) {
           if (!bufWrites.has(name)) bufWrites.set(name, []);
-          bufWrites.get(name).push(node.value);
+          bufWrites.get(name)!.push(node.value);
         }
       }
       for (const c of irChildNodes(node)) stack.push(c);
     }
-    const result = new Set();
+    const result = new Set<string>();
     this._constantBuffers = new Map();
     for (const [name, writes] of bufWrites) {
       if (writes.length === 0) continue;
@@ -623,7 +649,7 @@ export class CPUCodegen {
       }
       const first = writes[0];
       const isConst = (first.type === 'FloatImmNode' || first.type === 'IntImmNode');
-      if (isConst && writes.every(v => v.type === first.type && v.value === first.value)) {
+      if (isConst && writes.every(v => v.type === first.type && (v as IntImmNode).value === first.value)) {
         this._constantBuffers.set(name, String(first.value));
       }
     }

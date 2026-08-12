@@ -8,22 +8,52 @@ import { parseThreadAxis, maxBindingExtent, visitStatements, estimateBufferSize,
 
 import { LANCZOS_G, LANCZOS_COEFFS, ERF_A, ERF_P } from '../../util/special_math.js';
 
+import type { Buffer } from '../../compiler/ir/tensor/buffer.js';
+import type { AllocateNode, BlockNode, BufferStoreNode, CallExternNode, ForNode, IfThenElseNode, LetStmtNode, NodeSlots, TirNode, WhileNode } from '../../compiler/ir/tensor/nodes.js';
+import type { IRStmtNode, LIRAccumulatorNode, LIRBindingsNode, LIRFlatLoadNode, LIRFlatStoreNode } from '../../compiler/ir/lir/nodes.js';
+import type { BufferDecl, CodegenFunc, ThreadBindingEntry } from '../codegen_utils.js';
+import type { TargetFeatures } from '../target.js';
+
 const BOOL_OPS = new Set(['!', '&&', '||']);
 const CMP_OPS = new Set(['<', '>', '<=', '>=', '==', '!=']);
 const COMPARE_DIRS = new Set(['eq', 'ne', 'lt', 'le', 'gt', 'ge']);
 
-function _wgslFloat(v) {
+type WgslNameTable = Readonly<Record<string, string | undefined>>;
+type PackedBufEntry = { name: string; offset: number; size: number; dtype: string; argIndex?: number };
+type PackGroup = { isWrite: boolean; wt: string; dtype: string; bufs: PackedBufEntry[]; off: number };
+type PackedRef = { storage: string; offset: number };
+type PoolRef = { pool: string; offset: number };
+type PoolDecl = { pool: string; dtype: string; size: number };
+type SlotDecl = { name: string; dtype: string; size: number; scalar?: boolean };
+type HeapSlot = { decl: SlotDecl; freeAt: number };
+type LiveItem = { name: string; size: number; first: number; last: number };
+type PlacedItem = { offset: number; size: number; first: number; last: number };
+type LivenessResult = { minPos: Map<string, number>; maxPos: Map<string, number> };
+type LivenessScope = ReadonlySet<string> | ReadonlyMap<string, Buffer>;
+type WorkgroupPool = { offsets: Map<string, PoolRef>; decls: PoolDecl[]; bytes: number };
+
+export type WebGPUBinding = {
+  index: number;
+  name: string;
+  mode: string;
+  dtype?: string;
+  argIndex?: number;
+  packed?: PackedBufEntry[];
+  packedSize?: number;
+};
+
+function _wgslFloat(v: number): string {
   const s = String(v);
   return /[.e]/.test(s) ? s : `${s}.0`;
 }
 
-function _wgslErf(x) {
+function _wgslErf(x: string): string {
   const t = `(1.0 / (1.0 + ${_wgslFloat(ERF_P)} * abs(${x})))`;
   const poly = ERF_A.slice().reverse().reduce((acc, c) => `(${_wgslFloat(c)} + ${t} * ${acc})`, '0.0');
   return `((select(-1.0, 1.0, ${x} >= 0.0)) * (1.0 - ${t} * ${poly} * exp(-${x} * ${x})))`;
 }
 
-function _wgslLanczosCore(u) {
+function _wgslLanczosCore(u: string): string {
   const zz = `(${u} - 1.0)`;
   const sum = LANCZOS_COEFFS
     .map((c, i) => (i === 0 ? _wgslFloat(c) : `${_wgslFloat(c)} / (${zz} + ${_wgslFloat(i)})`))
@@ -34,27 +64,28 @@ function _wgslLanczosCore(u) {
 
 const _WGSL_PI = _wgslFloat(Math.PI);
 
-function _wgslLgamma(x) {
+function _wgslLgamma(x: string): string {
   const reflected = `(log(${_WGSL_PI} / abs(sin(${_WGSL_PI} * ${x}))) - ${_wgslLanczosCore(`(1.0 - ${x})`)})`;
   return `(select(${_wgslLanczosCore(x)}, ${reflected}, ${x} < 0.5))`;
 }
 
-function _wgslGamma(x) {
+function _wgslGamma(x: string): string {
   const reflected = `(${_WGSL_PI} / (sin(${_WGSL_PI} * ${x}) * exp(${_wgslLanczosCore(`(1.0 - ${x})`)})))`;
   return `(select(exp(${_wgslLanczosCore(x)}), ${reflected}, ${x} < 0.5))`;
 }
 
 const FULL_WALK_KEYS = ['body', 'loopBody', 'condBody', 'initBody', 'thenBody', 'elseBody', 'value', 'a', 'b', 'condition', 'expr', 'offsetExpr'];
-function walkFullChildren(node, visit) {
-  for (const k of FULL_WALK_KEYS) if (node[k]) visit(node[k]);
-  if (node.stmts) for (const s of node.stmts) visit(s);
-  if (node.indices) for (const i of node.indices) visit(i);
-  if (node.args) for (const a of node.args) visit(a);
-  if (node.initLoad) visit(node.initLoad);
-  if (node.flushStore) visit(node.flushStore);
+function walkFullChildren(node: IRStmtNode, visit: (child: IRStmtNode) => void): void {
+  const slots = node as unknown as NodeSlots;
+  for (const k of FULL_WALK_KEYS) if (slots[k]) visit(slots[k] as TirNode);
+  if (slots.stmts) for (const s of slots.stmts as TirNode[]) visit(s);
+  if (slots.indices) for (const i of slots.indices as TirNode[]) visit(i);
+  if (slots.args) for (const a of slots.args as TirNode[]) visit(a);
+  if (slots.initLoad) visit(slots.initLoad as TirNode);
+  if (slots.flushStore) visit(slots.flushStore as TirNode);
 }
 
-const WGSL_THREAD_TAG_MAP = {
+const WGSL_THREAD_TAG_MAP: WgslNameTable = {
   'threadIdx.x': 'local_invocation_id.x',
   'threadIdx.y': 'local_invocation_id.y',
   'threadIdx.z': 'local_invocation_id.z',
@@ -64,7 +95,15 @@ const WGSL_THREAD_TAG_MAP = {
 };
 
 export class WebGPUKernel {
-  constructor(name, source, workgroupSize, dispatchSize, sharedMemBytes, params, bindings) {
+  name: string;
+  source: string;
+  workgroupSize: number[];
+  dispatchSize: number[];
+  sharedMemBytes: number;
+  params: string[];
+  bindings: WebGPUBinding[];
+
+  constructor(name: string, source: string, workgroupSize: number[], dispatchSize: number[], sharedMemBytes: number, params: string[], bindings: WebGPUBinding[]) {
     this.name = name;
     this.source = source;
     this.workgroupSize = workgroupSize;
@@ -76,7 +115,31 @@ export class WebGPUKernel {
 }
 
 export class WebGPUCodegen {
-  constructor(target) {
+  target: TargetFeatures;
+  _indent: number;
+  _lines: string[];
+  _threadBindings: Map<string, ThreadBindingEntry[]>;
+  _sharedBuffers: Buffer[];
+  _workgroupSize: number[];
+  _dispatchSize: number[];
+  _defaultDtype: string;
+  _storeBuffers: Set<string>;
+  declare _primFunc: CodegenFunc;
+  declare _promotedBuffers: Set<string>;
+  declare _promotedBufferDecls: BufferDecl[];
+  declare _wgPoolOffsets: Map<string, PoolRef> | null;
+  declare _wgPoolDecls: PoolDecl[];
+  declare _needsBarriers: boolean;
+  declare _serializeThreads: boolean;
+  declare _localSlots: Map<string, string> | null;
+  declare _slotDecls: SlotDecl[];
+  declare _scalarSlotNames: Set<string>;
+  declare _crossThread: Set<string> | null;
+  declare _crossExtent: Set<string> | null;
+  declare _packedMode: boolean;
+  declare _packedOffsets: Map<string, PackedRef> | null;
+
+  constructor(target: TargetFeatures) {
     this.target = target;
     this._indent = 0;
     this._lines = [];
@@ -88,7 +151,7 @@ export class WebGPUCodegen {
     this._storeBuffers = new Set();
   }
 
-  generate(func) {
+  generate(func: CodegenFunc): WebGPUKernel {
     this._indent = 0;
     this._lines = [];
     this._threadBindings.clear();
@@ -112,13 +175,13 @@ export class WebGPUCodegen {
     const isLIR = func.type === 'LIRFunc';
 
     if (isLIR) {
-      for (const [tag, entries] of func.metadata.threadBindings) {
+      for (const [tag, entries] of func.metadata.threadBindings as Map<string, ThreadBindingEntry[]>) {
         this._threadBindings.set(tag, entries);
         for (const entry of entries) {
           if (!entry.isDynamic) this._applyBindingDim(tag, entry.extent);
         }
       }
-      this._sharedBuffers = func.metadata.sharedBuffers;
+      this._sharedBuffers = func.metadata.sharedBuffers as Buffer[];
     } else {
       this._scanBindings(func.body);
     }
@@ -126,8 +189,8 @@ export class WebGPUCodegen {
     this._scanStoreTargets(func.body);
     this._analyzeSharing(func);
 
-    const paramNames = [];
-    const bindings = [];
+    const paramNames: string[] = [];
+    const bindings: WebGPUBinding[] = [];
     let bindIdx = 0;
     const needsF16 = this._checkF16Usage(func);
 
@@ -140,19 +203,19 @@ export class WebGPUCodegen {
     this._packedMode = canPack;
     this._packedOffsets = null;
 
-    const argIndexOf = new Map();
+    const argIndexOf = new Map<string, number>();
     { let ai = 0; for (const [, buf] of func.bufferMap) argIndexOf.set(buf.name, ai++); }
     {
       let dd = null;
       for (const [, buf] of func.bufferMap) if (this._storeBuffers.has(buf.name)) { dd = buf.dtype; break; }
       this._defaultDtype = dd || (bufList.length ? bufList[0].dtype : 'f32');
     }
-    const WT_DTYPE = { f32: 'f32', i32: 'i32', u32: 'u32', f16: 'f16' };
+    const WT_DTYPE: WgslNameTable = { f32: 'f32', i32: 'i32', u32: 'u32', f16: 'f16' };
 
     if (canPack) {
       this._packedOffsets = new Map();
-      const align4 = n => Math.ceil(n / 4) * 4;
-      const groups = new Map();
+      const align4 = (n: number) => Math.ceil(n / 4) * 4;
+      const groups = new Map<string, PackGroup>();
       for (const [, buf] of func.bufferMap) {
         paramNames.push(buf.name);
         const isWrite = this._storeBuffers.has(buf.name);
@@ -214,7 +277,7 @@ export class WebGPUCodegen {
     }
     if (this._sharedBuffers.length > 0 || this._promotedBufferDecls.length > 0 || this._wgPoolDecls.length > 0) this._emit('');
 
-    const builtins = [];
+    const builtins: string[] = [];
     const hasLocal = !this._serializeThreads && this._hasBindingPrefix('threadIdx');
     const hasWorkgroup = !this._serializeThreads && this._hasBindingPrefix('blockIdx');
     if (hasLocal) builtins.push('@builtin(local_invocation_id) _lid: vec3u');
@@ -237,7 +300,7 @@ export class WebGPUCodegen {
     this._indent++;
 
     if (!this._serializeThreads) {
-      const declaredVars = new Set();
+      const declaredVars = new Set<string>();
       for (const [tag, bindings_list] of this._threadBindings) {
         const wgslTag = WGSL_THREAD_TAG_MAP[tag];
         if (!wgslTag) continue;
@@ -279,21 +342,21 @@ export class WebGPUCodegen {
     );
   }
 
-  _checkF16Usage(func) {
+  _checkF16Usage(func: CodegenFunc): boolean {
     for (const [, buf] of func.bufferMap) {
       if (buf.dtype === 'f16') return true;
     }
     return false;
   }
 
-  _hasBindingPrefix(prefix) {
+  _hasBindingPrefix(prefix: string): boolean {
     for (const tag of this._threadBindings.keys()) {
       if (tag.startsWith(prefix)) return true;
     }
     return false;
   }
 
-  _wgslBuiltinAccess(tag) {
+  _wgslBuiltinAccess(tag: string): string {
     const idx = tag.indexOf('.');
     if (idx < 0) return '_gid.x';
     const prefix = tag.substring(0, idx);
@@ -303,8 +366,8 @@ export class WebGPUCodegen {
     return `_gid.${axis}`;
   }
 
-  _scanStoreTargets(root) {
-    const stack = [root];
+  _scanStoreTargets(root: IRStmtNode): void {
+    const stack: IRStmtNode[] = [root];
     while (stack.length > 0) {
       const node = stack.pop();
       if (!node) continue;
@@ -312,13 +375,13 @@ export class WebGPUCodegen {
         this._storeBuffers.add(node.buffer.name);
       }
       if (node.type === 'LIRAccumulatorNode' && node.flushStore) {
-        this._storeBuffers.add(node.flushStore.buffer.name);
+        this._storeBuffers.add((node.flushStore as LIRFlatStoreNode).buffer.name);
       }
       for (const c of irChildNodes(node)) stack.push(c);
     }
   }
 
-  _scanBindings(root) {
+  _scanBindings(root: IRStmtNode): void {
     walkStmtTree(root, (node) => {
       if (node.type === 'ForNode' && node.kind === ForKind.THREAD_BINDING && node.threadTag) {
         const extent = node.extent.type === 'IntImmNode' ? node.extent.value : 0;
@@ -327,7 +390,7 @@ export class WebGPUCodegen {
         if (!this._threadBindings.has(node.threadTag)) {
           this._threadBindings.set(node.threadTag, [entry]);
         } else {
-          this._threadBindings.get(node.threadTag).push(entry);
+          this._threadBindings.get(node.threadTag)!.push(entry);
         }
         if (!isDynamic) this._applyBindingDim(node.threadTag, extent);
       }
@@ -337,18 +400,18 @@ export class WebGPUCodegen {
     });
   }
 
-  _applyBindingDim(tag, extent) {
+  _applyBindingDim(tag: string, extent: number): void {
     const p = parseThreadAxis(tag);
     if (!p) return;
     if (p.space === 'thread') this._workgroupSize[p.axis] = Math.max(this._workgroupSize[p.axis], extent);
     else this._dispatchSize[p.axis] = Math.max(this._dispatchSize[p.axis], extent);
   }
 
-  _getMaxBindingExtent(tag) {
+  _getMaxBindingExtent(tag: string): number {
     return maxBindingExtent(this._threadBindings, tag);
   }
 
-  _hasRecurrence(func) {
+  _hasRecurrence(func: CodegenFunc): boolean {
     let found = false;
     walkStmtTree(func.body, (n) => {
       if (n.type === 'SyncThreadsNode') { found = true; return false; }
@@ -356,15 +419,15 @@ export class WebGPUCodegen {
     return found;
   }
 
-  _analyzeSharing(func) {
-    const extents = new Set();
+  _analyzeSharing(func: CodegenFunc): void {
+    const extents = new Set<number>();
     for (const [, entries] of this._threadBindings) {
       for (const e of entries) {
         if (e.extent > 0) extents.add(e.extent);
       }
     }
-    const crossThread = this._threadBindings.size > 0 ? this._findCrossThreadBuffers(func) : new Set();
-    const crossExtent = this._threadBindings.size > 0 ? this._findCrossExtentBuffers(func) : new Set();
+    const crossThread = this._threadBindings.size > 0 ? this._findCrossThreadBuffers(func) : new Set<string>();
+    const crossExtent = this._threadBindings.size > 0 ? this._findCrossExtentBuffers(func) : new Set<string>();
     this._crossThread = crossThread;
     this._crossExtent = crossExtent;
     const hasRecurrence = this._hasRecurrence(func);
@@ -373,7 +436,7 @@ export class WebGPUCodegen {
     const smemLimit = this.target.sharedMemoryBytes || 16384;
     let smemUsed = this._sharedBuffers.reduce((sum, b) => sum + Math.max(b.sizeInBytes(), 0), 0);
 
-    const storageNames = new Set();
+    const storageNames = new Set<string>();
     for (const [, buf] of func.bufferMap) storageNames.add(buf.name);
 
     const candidates = this._collectPromotionCandidates(func, storageNames);
@@ -415,8 +478,8 @@ export class WebGPUCodegen {
     }
   }
 
-  _collectPromotionCandidates(func, storageNames) {
-    const candidates = [];
+  _collectPromotionCandidates(func: CodegenFunc, storageNames: ReadonlySet<string>): BufferDecl[] {
+    const candidates: BufferDecl[] = [];
     walkStmtTree(func.body, (node) => {
       if (node.type === 'AllocateNode' && node.scope !== 'shared' && !storageNames.has(node.buffer.name)) {
         const numel = node.buffer.numel();
@@ -425,9 +488,9 @@ export class WebGPUCodegen {
       }
     });
 
-    const refBuffers = new Map();
+    const refBuffers = new Map<string, Buffer>();
     this._scanBufferRefs(func.body, refBuffers);
-    const allocatedNames = new Set();
+    const allocatedNames = new Set<string>();
     this._scanAllocateNodes(func.body, allocatedNames);
     const candidateNames = new Set(candidates.map(c => c.name));
     for (const [name, buf] of refBuffers) {
@@ -440,27 +503,27 @@ export class WebGPUCodegen {
     return candidates;
   }
 
-  _findRecurrenceBody(root) {
-    let found = null;
+  _findRecurrenceBody(root: IRStmtNode): IRStmtNode | null {
+    let found: IRStmtNode | null = null;
     walkStmtTree(root, (node) => {
       if (!found && node.type === 'ForNode' && node.kind === ForKind.RECURRENCE) { found = node.body; return false; }
     });
     return found;
   }
 
-  _namesTouchedOutside(root, skip, names) {
-    const result = new Set();
-    const walk = (node) => {
+  _namesTouchedOutside(root: IRStmtNode, skip: IRStmtNode | null, names: ReadonlySet<string>): Set<string> {
+    const result = new Set<string>();
+    const walk = (node: IRStmtNode | null) => {
       if (!node || node === skip) return;
       if ((node.type === 'BufferLoadNode' || node.type === 'BufferStoreNode' ||
            node.type === 'LIRFlatLoadNode' || node.type === 'LIRFlatStoreNode') && node.buffer
         && names.has(node.buffer.name)) result.add(node.buffer.name);
       if (node.type === 'LIRAccumulatorNode') {
-        if (node.flushStore && node.flushStore.buffer && names.has(node.flushStore.buffer.name)) result.add(node.flushStore.buffer.name);
-        if (node.initLoad && node.initLoad.buffer && names.has(node.initLoad.buffer.name)) result.add(node.initLoad.buffer.name);
+        if (node.flushStore && (node.flushStore as LIRFlatStoreNode).buffer && names.has((node.flushStore as LIRFlatStoreNode).buffer.name)) result.add((node.flushStore as LIRFlatStoreNode).buffer.name);
+        if (node.initLoad && (node.initLoad as LIRFlatLoadNode).buffer && names.has((node.initLoad as LIRFlatLoadNode).buffer.name)) result.add((node.initLoad as LIRFlatLoadNode).buffer.name);
       }
       for (const f of ['stmts', 'body', 'initBody', 'condBody', 'loopBody', 'thenBody', 'elseBody', 'value', 'a', 'b', 'condition', 'expr', 'offsetExpr', 'extent', 'indices', 'args']) {
-        const c = node[f];
+        const c = (node as unknown as NodeSlots)[f];
         if (!c) continue;
         if (Array.isArray(c)) { for (const e of c) walk(e); }
         else if (typeof c === 'object') walk(c);
@@ -470,25 +533,25 @@ export class WebGPUCodegen {
     return result;
   }
 
-  _packWorkgroupPool(func, candidates) {
+  _packWorkgroupPool(func: CodegenFunc, candidates: readonly BufferDecl[]): WorkgroupPool {
     const candNames = new Set(candidates.map(c => c.name));
     const recBody = this._findRecurrenceBody(func.body);
-    const { minPos, maxPos } = recBody ? this._livenessWalk(recBody, candNames) : { minPos: new Map(), maxPos: new Map() };
+    const { minPos, maxPos } = recBody ? this._livenessWalk(recBody, candNames) : { minPos: new Map<string, number>(), maxPos: new Map<string, number>() };
     const persistent = recBody ? this._namesTouchedOutside(func.body, recBody, candNames) : candNames;
-    const byDtype = new Map();
+    const byDtype = new Map<string, LiveItem[]>();
     for (const c of candidates) {
       if (!byDtype.has(c.dtype)) byDtype.set(c.dtype, []);
       const carried = persistent.has(c.name) || !minPos.has(c.name);
-      const fb = carried ? 0 : minPos.get(c.name);
-      const lb = carried ? Number.MAX_SAFE_INTEGER : maxPos.get(c.name);
-      byDtype.get(c.dtype).push({ name: c.name, size: c.size, first: fb, last: lb });
+      const fb = carried ? 0 : minPos.get(c.name) as number;
+      const lb = carried ? Number.MAX_SAFE_INTEGER : maxPos.get(c.name) as number;
+      byDtype.get(c.dtype)!.push({ name: c.name, size: c.size, first: fb, last: lb });
     }
-    const offsets = new Map();
-    const decls = [];
+    const offsets = new Map<string, PoolRef>();
+    const decls: PoolDecl[] = [];
     let bytes = 0;
     for (const [dtype, list] of byDtype) {
       list.sort((a, b) => a.first - b.first || b.size - a.size);
-      const placed = [];
+      const placed: PlacedItem[] = [];
       const pool = `_wg_${wgslType(dtype)}`;
       let peak = 0;
       for (const it of list) {
@@ -511,31 +574,31 @@ export class WebGPUCodegen {
     return { offsets, decls, bytes };
   }
 
-  _findCrossThreadBuffers(func) {
-    const storageNames = new Set();
+  _findCrossThreadBuffers(func: CodegenFunc): Set<string> {
+    const storageNames = new Set<string>();
     for (const [, buf] of func.bufferMap) storageNames.add(buf.name);
-    const result = new Set();
+    const result = new Set<string>();
 
-    const indexUsesLoopVar = (indices, loopVars) => {
+    const indexUsesLoopVar = (indices: readonly IRStmtNode[], loopVars: readonly string[]) => {
       if (loopVars.length === 0) return false;
-      const names = new Set();
+      const names = new Set<string>();
       for (const idx of indices) this._collectVarNames(idx, names);
       return loopVars.some(v => names.has(v));
     };
 
-    const aliasOf = (expr, vars) => {
-      const bv = new Set();
+    const aliasOf = (expr: IRStmtNode, vars: readonly string[]) => {
+      const bv = new Set<string>();
       this._collectVarNames(expr, bv);
       for (const v of bv) if (vars.includes(v)) return true;
       return false;
     };
 
-    const walk = (node, loopVars) => {
+    const walk = (node: IRStmtNode | null, loopVars: readonly string[]) => {
       if (!node) return;
       let inner = loopVars;
       const isSeqLoop = (node.type === 'ForNode' && node.kind !== ForKind.THREAD_BINDING)
         || node.type === 'WhileNode' || node.type === 'LIRAccumulatorNode';
-      if (isSeqLoop && node.loopVar) inner = [...loopVars, node.loopVar.name];
+      if (isSeqLoop && (node as ForNode).loopVar) inner = [...loopVars, (node as ForNode).loopVar.name];
 
       if (node.type === 'LIRBindingsNode' && node.bindings) {
         for (const b of node.bindings) {
@@ -565,22 +628,22 @@ export class WebGPUCodegen {
     return result;
   }
 
-  _findCrossExtentBuffers(func) {
-    const storageNames = new Set();
+  _findCrossExtentBuffers(func: CodegenFunc): Set<string> {
+    const storageNames = new Set<string>();
     for (const [, buf] of func.bufferMap) storageNames.add(buf.name);
-    const stores = new Map();
-    const loads = new Map();
-    const threadVarying = new Set();
-    const isConst = (v) => v && (v.type === 'FloatImmNode' || v.type === 'IntImmNode');
+    const stores = new Map<string, Set<number>>();
+    const loads = new Map<string, Set<number>>();
+    const threadVarying = new Set<string>();
+    const isConst = (v: IRStmtNode | null) => v && (v.type === 'FloatImmNode' || v.type === 'IntImmNode');
 
-    const record = (map, name, extent) => {
+    const record = (map: Map<string, Set<number>>, name: string, extent: number) => {
       if (storageNames.has(name)) return;
       let s = map.get(name);
       if (!s) { s = new Set(); map.set(name, s); }
       s.add(extent);
     };
 
-    const walk = (node, extent) => {
+    const walk = (node: IRStmtNode | null, extent: number) => {
       if (!node) return;
       let inner = extent;
       if (node.type === 'ForNode' && node.kind === ForKind.THREAD_BINDING) {
@@ -589,7 +652,7 @@ export class WebGPUCodegen {
       }
       if (node.type === 'BufferStoreNode' && node.buffer) { record(stores, node.buffer.name, inner); if (!isConst(node.value)) threadVarying.add(node.buffer.name); }
       if (node.type === 'LIRFlatStoreNode' && node.buffer) { record(stores, node.buffer.name, inner); if (!isConst(node.value)) threadVarying.add(node.buffer.name); }
-      if (node.type === 'LIRAccumulatorNode' && node.flushStore && node.flushStore.buffer) { record(stores, node.flushStore.buffer.name, inner); threadVarying.add(node.flushStore.buffer.name); }
+      if (node.type === 'LIRAccumulatorNode' && node.flushStore && (node.flushStore as LIRFlatStoreNode).buffer) { record(stores, (node.flushStore as LIRFlatStoreNode).buffer.name, inner); threadVarying.add((node.flushStore as LIRFlatStoreNode).buffer.name); }
       if (node.type === 'BufferLoadNode' && node.buffer) record(loads, node.buffer.name, inner);
       if (node.type === 'LIRFlatLoadNode' && node.buffer) record(loads, node.buffer.name, inner);
 
@@ -597,7 +660,7 @@ export class WebGPUCodegen {
     };
     walk(func.body, 1);
 
-    const result = new Set();
+    const result = new Set<string>();
     for (const [name, loadExtents] of loads) {
       if (!threadVarying.has(name)) continue;
       const storeExtents = stores.get(name);
@@ -607,36 +670,36 @@ export class WebGPUCodegen {
     return result;
   }
 
-  _collectVarNames(node, out) {
-    const stack = [node];
+  _collectVarNames(node: IRStmtNode | null, out: Set<string>): void {
+    const stack: (IRStmtNode | null)[] = [node];
     while (stack.length > 0) {
       const n = stack.pop();
       if (!n || typeof n !== 'object') continue;
       if (n.type === 'VariableNode') { out.add(n.name); continue; }
       for (const k of ['a', 'b', 'condition', 'thenBody', 'elseBody', 'expr', 'offsetExpr']) {
-        if (n[k]) stack.push(n[k]);
+        if ((n as unknown as NodeSlots)[k]) stack.push((n as unknown as NodeSlots)[k] as TirNode);
       }
-      if (n.indices) for (const i of n.indices) stack.push(i);
-      if (n.args) for (const a of n.args) stack.push(a);
+      if ((n as unknown as NodeSlots).indices) for (const i of (n as unknown as NodeSlots).indices as TirNode[]) stack.push(i);
+      if ((n as unknown as NodeSlots).args) for (const a of (n as unknown as NodeSlots).args as TirNode[]) stack.push(a);
     }
   }
 
-  _emit(line) {
+  _emit(line: string): void {
     this._lines.push('  '.repeat(this._indent) + line);
   }
 
-  _visitNode(node) {
+  _visitNode(node: IRStmtNode): void {
     visitStatements(this, node);
   }
 
-  _emitSync() {
+  _emitSync(): void {
     if (this._needsBarriers) {
       this._emit('storageBarrier();');
       this._emit('workgroupBarrier();');
     }
   }
 
-  _visitForNode(node) {
+  _visitForNode(node: ForNode): void {
     if (node.kind === ForKind.THREAD_BINDING) {
       if (this._serializeThreads) {
         const varName = node.loopVar.name;
@@ -650,9 +713,9 @@ export class WebGPUCodegen {
       }
       const extent = node.extent.type === 'IntImmNode' ? node.extent.value : 0;
       const tag = node.threadTag;
-      const maxExtent = this._getMaxBindingExtent(tag);
+      const maxExtent = this._getMaxBindingExtent(tag as string);
       if (extent > 0 && maxExtent > 0 && extent < maxExtent) {
-        const src = this._wgslBuiltinAccess(tag);
+        const src = this._wgslBuiltinAccess(tag as string);
         this._emit(`if (i32(${src}) < ${extent}) {`);
         this._indent++;
         this._visitNode(node.body);
@@ -675,7 +738,7 @@ export class WebGPUCodegen {
     this._emit('}');
   }
 
-  _visitBlockNode(node) {
+  _visitBlockNode(node: BlockNode): void {
     for (const bind of node.iterVars) {
       if (bind.iterVar && bind.binding) {
         this._emit(`let ${bind.iterVar.name}: i32 = ${this._exprToWGSL(bind.binding)};`);
@@ -685,24 +748,25 @@ export class WebGPUCodegen {
     this._visitNode(node.body);
   }
 
-  _emitMissingLocalDecls() {
+  _emitMissingLocalDecls(func: CodegenFunc): void;
+  _emitMissingLocalDecls(): void {
     for (const d of this._slotDecls) {
       if (d.scalar) this._emit(`var ${d.name}: ${wgslType(d.dtype)};`);
       else this._emit(`var ${d.name}: array<${wgslType(d.dtype)}, ${d.size}>;`);
     }
   }
 
-  _collectLocalBuffers(func) {
-    const storageNames = new Set();
+  _collectLocalBuffers(func: CodegenFunc): Map<string, Buffer> {
+    const storageNames = new Set<string>();
     for (const [, buf] of func.bufferMap) storageNames.add(buf.name);
-    const sharedNames = new Set();
+    const sharedNames = new Set<string>();
     for (const b of this._sharedBuffers) sharedNames.add(b.name);
 
-    const locals = new Map();
-    const isLocal = (name) =>
+    const locals = new Map<string, Buffer>();
+    const isLocal = (name: string) =>
       !storageNames.has(name) && !sharedNames.has(name) && !this._promotedBuffers.has(name);
 
-    const refBuffers = new Map();
+    const refBuffers = new Map<string, Buffer>();
     this._scanBufferRefs(func.body, refBuffers);
     for (const [name, buf] of refBuffers) {
       if (isLocal(name)) locals.set(name, buf);
@@ -716,33 +780,33 @@ export class WebGPUCodegen {
     return locals;
   }
 
-  _assignLocalSlots(func) {
+  _assignLocalSlots(func: CodegenFunc): void {
     const locals = this._collectLocalBuffers(func);
     if (locals.size === 0) return;
 
     const { minPos, maxPos } = this._computeBufferLiveness(func, locals);
 
     const order = [...locals.keys()].sort((x, y) =>
-      (minPos.get(x) - minPos.get(y)) || (maxPos.get(x) - maxPos.get(y)));
+      ((minPos.get(x) as number) - (minPos.get(y) as number)) || ((maxPos.get(x) as number) - (maxPos.get(y) as number)));
 
     this._localSlots = new Map();
-    const freeByDtype = new Map();
+    const freeByDtype = new Map<string, MinHeap<HeapSlot>>();
     let slotCounter = 0;
     let scalarCounter = 0;
 
     const totalThreads = (this._workgroupSize[0] * this._workgroupSize[1] * this._workgroupSize[2])
       * (this._dispatchSize[0] * this._dispatchSize[1] * this._dispatchSize[2]);
-    const ct = this._crossThread || new Set();
-    const ce = this._crossExtent || new Set();
-    const scalarEligible = (name, buf) => !this._serializeThreads && this._threadBindings.size > 0
+    const ct = this._crossThread || new Set<string>();
+    const ce = this._crossExtent || new Set<string>();
+    const scalarEligible = (name: string, buf: Buffer) => !this._serializeThreads && this._threadBindings.size > 0
       && !ct.has(name) && !ce.has(name) && buf.numel() > 1 && buf.numel() <= totalThreads;
 
     for (const name of order) {
-      const buf = locals.get(name);
+      const buf = locals.get(name) as Buffer;
       const numel = buf.numel() > 0 ? buf.numel() : this._estimateBufferSize(buf);
       const size = Math.max(numel, 1);
-      const mn = minPos.get(name);
-      const mx = maxPos.get(name);
+      const mn = minPos.get(name) as number;
+      const mx = maxPos.get(name) as number;
 
       if (scalarEligible(name, buf)) {
         const sname = `_s${scalarCounter++}`;
@@ -753,9 +817,9 @@ export class WebGPUCodegen {
       }
 
       let heap = freeByDtype.get(buf.dtype);
-      if (!heap) { heap = new MinHeap((a, b) => a.freeAt - b.freeAt); freeByDtype.set(buf.dtype, heap); }
+      if (!heap) { heap = new MinHeap<HeapSlot>((a, b) => a.freeAt - b.freeAt); freeByDtype.set(buf.dtype, heap); }
 
-      let slot = null;
+      let slot: HeapSlot | null = null;
       const top = heap.peek();
       if (top && top.freeAt < mn) slot = heap.pop();
 
@@ -764,7 +828,7 @@ export class WebGPUCodegen {
       } else {
         const decl = { name: `_lt${slotCounter++}`, dtype: buf.dtype, size };
         this._slotDecls.push(decl);
-        slot = { decl };
+        slot = { decl } as HeapSlot;
       }
       slot.freeAt = mx;
       this._localSlots.set(name, slot.decl.name);
@@ -772,30 +836,30 @@ export class WebGPUCodegen {
     }
   }
 
-  _computeBufferLiveness(func, locals) {
+  _computeBufferLiveness(func: CodegenFunc, locals: LivenessScope): LivenessResult {
     return this._livenessWalk(func.body, locals);
   }
 
-  _livenessWalk(root, locals) {
-    const minPos = new Map();
-    const maxPos = new Map();
+  _livenessWalk(root: IRStmtNode, locals: LivenessScope): LivenessResult {
+    const minPos = new Map<string, number>();
+    const maxPos = new Map<string, number>();
     const LOOP_TYPES = new Set(['ForNode', 'WhileNode', 'LIRAccumulatorNode']);
     const CHILD_FIELDS = ['stmts', 'body', 'initBody', 'condBody', 'loopBody', 'thenBody',
       'elseBody', 'value', 'a', 'b', 'condition', 'expr', 'offsetExpr', 'extent', 'indices', 'args'];
 
     let pos = 0;
-    const loopStack = [];
-    let outerSet = null;
+    const loopStack: IRStmtNode[] = [];
+    let outerSet: Set<string> | null = null;
     let outerStart = 0;
 
-    const touch = (name) => {
+    const touch = (name: string) => {
       if (!locals.has(name)) return;
       if (!minPos.has(name)) minPos.set(name, pos);
       maxPos.set(name, pos);
-      if (loopStack.length > 0) outerSet.add(name);
+      if (loopStack.length > 0) outerSet!.add(name);
     };
 
-    const walk = (node) => {
+    const walk = (node: IRStmtNode | null) => {
       if (!node) return;
       pos++;
       const isLoop = LOOP_TYPES.has(node.type);
@@ -809,11 +873,11 @@ export class WebGPUCodegen {
         touch(node.buffer.name);
       }
       if (node.type === 'LIRAccumulatorNode') {
-        if (node.flushStore && node.flushStore.buffer) touch(node.flushStore.buffer.name);
-        if (node.initLoad && node.initLoad.buffer) touch(node.initLoad.buffer.name);
+        if (node.flushStore && (node.flushStore as LIRFlatStoreNode).buffer) touch((node.flushStore as LIRFlatStoreNode).buffer.name);
+        if (node.initLoad && (node.initLoad as LIRFlatLoadNode).buffer) touch((node.initLoad as LIRFlatLoadNode).buffer.name);
       }
       for (const f of CHILD_FIELDS) {
-        const c = node[f];
+        const c = (node as unknown as NodeSlots)[f];
         if (!c) continue;
         if (Array.isArray(c)) { for (const e of c) walk(e); }
         else if (typeof c === 'object') walk(c);
@@ -822,9 +886,9 @@ export class WebGPUCodegen {
         loopStack.pop();
         if (openedOuter) {
           const endPos = pos;
-          for (const name of outerSet) {
-            minPos.set(name, Math.min(minPos.get(name), outerStart));
-            maxPos.set(name, Math.max(maxPos.get(name), endPos));
+          for (const name of outerSet as unknown as Set<string>) {
+            minPos.set(name, Math.min(minPos.get(name) as number, outerStart));
+            maxPos.set(name, Math.max(maxPos.get(name) as number, endPos));
           }
           outerSet = null;
         }
@@ -835,8 +899,8 @@ export class WebGPUCodegen {
     return { minPos, maxPos };
   }
 
-  _scanAllocateNodes(root, names) {
-    const stack = [root];
+  _scanAllocateNodes(root: IRStmtNode, names: Set<string>): void {
+    const stack: IRStmtNode[] = [root];
     while (stack.length > 0) {
       const node = stack.pop();
       if (!node) continue;
@@ -845,8 +909,8 @@ export class WebGPUCodegen {
     }
   }
 
-  _scanBufferRefs(root, refs) {
-    const stack = [root];
+  _scanBufferRefs(root: IRStmtNode, refs: Map<string, Buffer>): void {
+    const stack: IRStmtNode[] = [root];
     while (stack.length > 0) {
       const node = stack.pop();
       if (!node) continue;
@@ -855,18 +919,18 @@ export class WebGPUCodegen {
         refs.set(node.buffer.name, node.buffer);
       }
       if (node.type === 'LIRAccumulatorNode') {
-        if (node.flushStore && node.flushStore.buffer) refs.set(node.flushStore.buffer.name, node.flushStore.buffer);
-        if (node.initLoad && node.initLoad.buffer) refs.set(node.initLoad.buffer.name, node.initLoad.buffer);
+        if (node.flushStore && (node.flushStore as LIRFlatStoreNode).buffer) refs.set((node.flushStore as LIRFlatStoreNode).buffer.name, (node.flushStore as LIRFlatStoreNode).buffer);
+        if (node.initLoad && (node.initLoad as LIRFlatLoadNode).buffer) refs.set((node.initLoad as LIRFlatLoadNode).buffer.name, (node.initLoad as LIRFlatLoadNode).buffer);
       }
       for (const c of irChildNodes(node)) stack.push(c);
     }
   }
 
-  _estimateBufferSize(buffer) {
+  _estimateBufferSize(buffer: Buffer): number {
     return estimateBufferSize(buffer);
   }
 
-  _visitAllocateNode(node) {
+  _visitAllocateNode(node: AllocateNode): void {
     if (node.scope !== 'shared') {
       if (this._promotedBuffers.has(node.buffer.name)) return;
       if (this._localSlots && this._localSlots.has(node.buffer.name)) return;
@@ -878,7 +942,7 @@ export class WebGPUCodegen {
     }
   }
 
-  _visitIfStmt(node) {
+  _visitIfStmt(node: IfThenElseNode): void {
     this._emit(`if (${this._boolExpr(node.condition)}) {`);
     this._indent++;
     this._visitNode(node.thenBody);
@@ -892,7 +956,7 @@ export class WebGPUCodegen {
     this._emit('}');
   }
 
-  _visitLetStmtNode(node) {
+  _visitLetStmtNode(node: LetStmtNode): void {
     const varDtype = node.variable.dtype || this._defaultDtype;
     const dtype = wgslType(varDtype);
     const val = this._numericExpr(node.value, varDtype);
@@ -900,9 +964,9 @@ export class WebGPUCodegen {
     this._visitNode(node.body);
   }
 
-  _visitWhileNode(node) {
+  _visitWhileNode(node: WhileNode): void {
     this._visitNode(node.condBody);
-    const condExpr = Array.isArray(node.condVar.shape)
+    const condExpr = Array.isArray((node.condVar as Buffer).shape)
       ? `${this._packedBufAccess(node.condVar.name, '0')} != 0`
       : node.condVar.name;
     this._emit(`while (${condExpr}) {`);
@@ -913,28 +977,28 @@ export class WebGPUCodegen {
     this._emit('}');
   }
 
-  _visitBufferStoreNode(node) {
+  _visitBufferStoreNode(node: BufferStoreNode): void {
     const idx = this._flatIndex(node.buffer, node.indices);
     const target = this._packedBufAccess(node.buffer.name, idx);
     const val = this._numericExpr(node.value, node.buffer.dtype);
     this._emit(`${target} = ${val};`);
   }
 
-  _visitLIRFlatStore(node) {
+  _visitLIRFlatStore(node: LIRFlatStoreNode): void {
     const idx = this._exprToWGSL(node.offsetExpr);
     const target = this._packedBufAccess(node.buffer.name, idx);
     const val = this._numericExpr(node.value, node.buffer.dtype);
     this._emit(`${target} = ${val};`);
   }
 
-  _visitLIRBindings(node) {
+  _visitLIRBindings(node: LIRBindingsNode): void {
     for (const bind of node.bindings) {
       this._emit(`let ${bind.name}: i32 = ${this._numericExpr(bind.expr, 'i32')};`);
     }
     this._visitNode(node.body);
   }
 
-  _visitLIRAccumulator(node) {
+  _visitLIRAccumulator(node: LIRAccumulatorNode): void {
     const accVar = node.localName;
     const dtype = wgslType(node.dtype || this._defaultDtype);
     this._emit(`var ${accVar}: ${dtype} = ${this._exprToWGSL(node.initLoad)};`);
@@ -949,19 +1013,19 @@ export class WebGPUCodegen {
     this._indent--;
     this._emit('}');
 
-    const flushIdx = this._exprToWGSL(node.flushStore.offsetExpr);
-    const flushTarget = this._packedBufAccess(node.flushStore.buffer.name, flushIdx);
+    const flushIdx = this._exprToWGSL((node.flushStore as LIRFlatStoreNode).offsetExpr);
+    const flushTarget = this._packedBufAccess((node.flushStore as LIRFlatStoreNode).buffer.name, flushIdx);
     this._emit(`${flushTarget} = ${accVar};`);
   }
 
-  _isBoolExpr(node) {
+  _isBoolExpr(node: IRStmtNode | null): boolean {
     if (!node) return false;
     if (node.type === 'CompareNode') return true;
     if (node.type === 'MathOpNode' && (BOOL_OPS.has(node.op) || CMP_OPS.has(node.op))) return true;
     return false;
   }
 
-  _numericExpr(node, dtype) {
+  _numericExpr(node: IRStmtNode | null, dtype?: string): string {
     if (this._isBoolExpr(node)) {
       const wt = dtype ? wgslType(dtype) : 'i32';
       if (wt === 'f32') return `select(0.0, 1.0, ${this._exprToWGSL(node)})`;
@@ -970,12 +1034,12 @@ export class WebGPUCodegen {
     return this._exprToWGSL(node);
   }
 
-  _boolExpr(node) {
+  _boolExpr(node: IRStmtNode | null): string {
     if (this._isBoolExpr(node)) return this._exprToWGSL(node);
     return `(${this._exprToWGSL(node)} != 0)`;
   }
 
-  _exprToWGSL(node) {
+  _exprToWGSL(node: IRStmtNode | null): string {
     if (!node) return '0';
     switch (node.type) {
       case 'IntImmNode': return String(node.value);
@@ -1004,7 +1068,7 @@ export class WebGPUCodegen {
     }
   }
 
-  _resolveVariable(name) {
+  _resolveVariable(name: string): string {
     if (this._primFunc && this._primFunc.shapeParams) {
       for (const sp of this._primFunc.shapeParams) {
         if (sp.name === name) return `i32(_shapes.${name})`;
@@ -1013,16 +1077,16 @@ export class WebGPUCodegen {
     return name;
   }
 
-  _emitFloatLiteral(value) {
+  _emitFloatLiteral(value: number): string {
     if (value === Infinity) return 'f32(0x1.fffffep+127)';
     if (value === -Infinity) return 'f32(-0x1.fffffep+127)';
     if (Number.isInteger(value)) return `${value}.0`;
     return String(value);
   }
 
-  _emitExternCall(node) {
+  _emitExternCall(node: CallExternNode): string {
     const n = node.args.length;
-    const args = new Array(n);
+    const args = new Array<string>(n);
     for (let i = 0; i < n; i++) args[i] = this._exprToWGSL(node.args[i]);
     const joined = args.join(', ');
     if (node.externName === 'fmod') {
@@ -1050,34 +1114,34 @@ export class WebGPUCodegen {
     return `${fn}(${joined})`;
   }
 
-  _packedBufAccess(bufName, indexExpr) {
+  _packedBufAccess(bufName: string, indexExpr: string): string {
     if (this._wgPoolOffsets && this._wgPoolOffsets.has(bufName)) {
-      const info = this._wgPoolOffsets.get(bufName);
+      const info = this._wgPoolOffsets.get(bufName) as PoolRef;
       if (info.offset === 0) return `${info.pool}[${indexExpr}]`;
       return `${info.pool}[${info.offset}u + u32(${indexExpr})]`;
     }
     if (this._packedMode && this._packedOffsets && this._packedOffsets.has(bufName)) {
-      const info = this._packedOffsets.get(bufName);
+      const info = this._packedOffsets.get(bufName) as PackedRef;
       if (info.offset === 0) return `${info.storage}[${indexExpr}]`;
       return `${info.storage}[${info.offset}u + u32(${indexExpr})]`;
     }
     if (this._localSlots && this._localSlots.has(bufName)) {
-      const sn = this._localSlots.get(bufName);
+      const sn = this._localSlots.get(bufName) as string;
       if (this._scalarSlotNames.has(sn)) return sn;
       return `${sn}[${indexExpr}]`;
     }
     return `${bufName}[${indexExpr}]`;
   }
 
-  _flatIndex(buffer, indices) {
+  _flatIndex(buffer: Buffer, indices: readonly IRStmtNode[]): string {
     return flattenRowMajorIndex(buffer, indices, (e) => this._exprToWGSL(e), (b, i) => this._computeDynamicStride(b, i), false);
   }
 
-  _computeDynamicStride(buffer, dimIdx) {
+  _computeDynamicStride(buffer: Buffer, dimIdx: number): string {
     return dynamicDimProduct(buffer, dimIdx + 1, (b, j) => this._resolveShapeParam(b, j));
   }
 
-  _resolveShapeParam(buffer, dimIdx) {
+  _resolveShapeParam(buffer: Buffer, dimIdx: number): string {
     return resolveShapeParam(this._primFunc, buffer, dimIdx, (v) => `i32(_shapes.${v.name})`, 'WebGPU', 'wgsl');
   }
 }

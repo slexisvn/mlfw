@@ -3,17 +3,19 @@ const WASM_VERSION = [0x01, 0x00, 0x00, 0x00];
 const SEC_TYPE = 1, SEC_IMPORT = 2, SEC_FUNC = 3, SEC_MEMORY = 5, SEC_EXPORT = 7, SEC_CODE = 10;
 const T_I32 = 0x7f, T_I64 = 0x7e, T_F64 = 0x7c, T_F32 = 0x7d, T_V128 = 0x7b, T_FUNC = 0x60, T_VOID = 0x40;
 
-function uleb(v) { const r = []; do { let b = v & 0x7f; v >>>= 7; if (v) b |= 0x80; r.push(b); } while (v); return r; }
-function sleb(v) { const r = []; let more = true; while (more) { let b = v & 0x7f; v >>= 7; if ((v === 0 && !(b & 0x40)) || (v === -1 && (b & 0x40))) more = false; else b |= 0x80; r.push(b); } return r; }
-function slebBig(v) { v = BigInt(v); const r = []; let more = true; while (more) { let b = Number(v & 0x7fn); v >>= 7n; if ((v === 0n && !(b & 0x40)) || (v === -1n && (b & 0x40))) more = false; else b |= 0x80; r.push(b); } return r; }
-function encStr(s) { const e = new TextEncoder().encode(s); return [...uleb(e.length), ...e]; }
-function encF32(v) { const b = new ArrayBuffer(4); new Float32Array(b)[0] = v; return [...new Uint8Array(b)]; }
-function encF64(v) { const b = new ArrayBuffer(8); new Float64Array(b)[0] = v; return [...new Uint8Array(b)]; }
-function pushAll(dst, src) { for (let i = 0; i < src.length; i++) dst.push(src[i]); return dst; }
-function section(id, data) { const out = [id]; pushAll(out, uleb(data.length)); pushAll(out, data); return out; }
-function vec(items) { const out = []; pushAll(out, uleb(items.length)); for (const i of items) pushAll(out, i); return out; }
+type ByteSeq = readonly number[];
 
-const INSTR = new Map([
+function uleb(v: number): number[] { const r: number[] = []; do { let b = v & 0x7f; v >>>= 7; if (v) b |= 0x80; r.push(b); } while (v); return r; }
+function sleb(v: number): number[] { const r: number[] = []; let more = true; while (more) { let b = v & 0x7f; v >>= 7; if ((v === 0 && !(b & 0x40)) || (v === -1 && (b & 0x40))) more = false; else b |= 0x80; r.push(b); } return r; }
+function slebBig(v: string | bigint): number[] { v = BigInt(v); const r: number[] = []; let more = true; while (more) { let b = Number(v & 0x7fn); v >>= 7n; if ((v === 0n && !(b & 0x40)) || (v === -1n && (b & 0x40))) more = false; else b |= 0x80; r.push(b); } return r; }
+function encStr(s: string): number[] { const e = new TextEncoder().encode(s); return [...uleb(e.length), ...e]; }
+function encF32(v: number): number[] { const b = new ArrayBuffer(4); new Float32Array(b)[0] = v; return [...new Uint8Array(b)]; }
+function encF64(v: number): number[] { const b = new ArrayBuffer(8); new Float64Array(b)[0] = v; return [...new Uint8Array(b)]; }
+function pushAll(dst: number[], src: ByteSeq): number[] { for (let i = 0; i < src.length; i++) dst.push(src[i]); return dst; }
+function section(id: number, data: ByteSeq): number[] { const out = [id]; pushAll(out, uleb(data.length)); pushAll(out, data); return out; }
+function vec(items: readonly ByteSeq[]): number[] { const out: number[] = []; pushAll(out, uleb(items.length)); for (const i of items) pushAll(out, i); return out; }
+
+const INSTR = new Map<string, ByteSeq>([
   ['i32.const', [0x41]], ['f32.const', [0x43]],
   ['local.get', [0x20]], ['local.set', [0x21]],
   ['i32.add', [0x6a]], ['i32.sub', [0x6b]], ['i32.mul', [0x6c]], ['i32.div_s', [0x6d]], ['i32.rem_s', [0x6f]],
@@ -75,8 +77,22 @@ const INSTR = new Map([
   ['f64x2.extract_lane', [0xfd, ...uleb(0x21)]], ['f64x2.replace_lane', [0xfd, ...uleb(0x22)]],
 ]);
 
-function tokenize(wat) {
-  const tokens = [];
+type WatImport = { module: string; name: string; params: number[]; results: number[]; typeIdx?: number };
+type WatModule = {
+  imports: WatImport[];
+  memMin: number;
+  memMax: number;
+  funcExportName: string;
+  funcParams: number[];
+  funcParamNames: string[];
+  funcLocals: number[];
+  funcLocalNames: string[];
+  bodyTokens: string[];
+};
+type WatTypeSig = { params: ByteSeq; results: ByteSeq };
+
+function tokenize(wat: string): string[] {
+  const tokens: string[] = [];
   let i = 0;
   while (i < wat.length) {
     const c = wat[i];
@@ -91,21 +107,21 @@ function tokenize(wat) {
   return tokens;
 }
 
-function parseModule(tokens) {
+function parseModule(tokens: readonly string[]): WatModule {
   let p = 0;
   const eat = () => tokens[p++];
   const peek = () => tokens[p];
-  const expect = t => { if (eat() !== t) throw new Error('expected ' + t + ' at ' + (p - 1)); };
+  const expect = (t: string) => { if (eat() !== t) throw new Error('expected ' + t + ' at ' + (p - 1)); };
 
   expect('('); expect('module');
 
-  const imports = [];
+  const imports: WatImport[] = [];
   let memMin = 1, memMax = 256;
   let funcExportName = '';
-  const funcParams = [];
-  const funcParamNames = [];
-  const funcLocals = [];
-  const funcLocalNames = [];
+  const funcParams: number[] = [];
+  const funcParamNames: string[] = [];
+  const funcLocals: number[] = [];
+  const funcLocalNames: string[] = [];
   let bodyStart = -1, bodyEnd = -1;
 
   while (peek() !== ')') {
@@ -123,8 +139,8 @@ function parseModule(tokens) {
       const name = eat().replace(/"/g, '');
       expect('('); expect('func');
       if (peek().startsWith('$')) p++;
-      const params = [];
-      const results = [];
+      const params: number[] = [];
+      const results: number[] = [];
       while (peek() === '(') {
         p++;
         const inner = eat();
@@ -145,7 +161,7 @@ function parseModule(tokens) {
           while (peek() !== ')') {
             const t = eat();
             if (t.startsWith('$')) { pendingName = t.replace('$', ''); continue; }
-            let ty = null;
+            let ty: number | null = null;
             if (t === 'i32') ty = T_I32; else if (t === 'i64') ty = T_I64; else if (t === 'f32') ty = T_F32; else if (t === 'f64') ty = T_F64; else if (t === 'v128') ty = T_V128;
             if (ty !== null) { funcParams.push(ty); funcParamNames.push(pendingName); pendingName = ''; }
           }
@@ -183,19 +199,19 @@ function parseModule(tokens) {
   return { imports, memMin, memMax, funcExportName, funcParams, funcParamNames, funcLocals, funcLocalNames, bodyTokens: tokens.slice(bodyStart, bodyEnd) };
 }
 
-function encodeBody(bodyTokens, localMap, importMap) {
-  const bytes = [];
+function encodeBody(bodyTokens: readonly string[], localMap: Map<string, number>, importMap: ReadonlyMap<string, number>): number[] {
+  const bytes: number[] = [];
   let p = 0;
   const peek = () => bodyTokens[p];
   const eat = () => bodyTokens[p++];
 
-  const labelStack = [];
+  const labelStack: string[] = [];
 
   let maxLocal = -1;
   for (const v of localMap.values()) if (v > maxLocal) maxLocal = v;
-  function localIdx(name) {
+  function localIdx(name: string): number {
     const clean = name.replace('$', '');
-    if (localMap.has(clean)) return localMap.get(clean);
+    if (localMap.has(clean)) return localMap.get(clean) as number;
     const num = parseInt(clean, 10);
     if (!isNaN(num)) { if (num > maxLocal) maxLocal = num; return num; }
     const nextIdx = maxLocal + 1;
@@ -203,8 +219,8 @@ function encodeBody(bodyTokens, localMap, importMap) {
     localMap.set(clean, nextIdx);
     return nextIdx;
   }
-  function eatLabel() { return (peek() && peek().startsWith('$')) ? eat().replace('$', '') : ''; }
-  function extractName(tok, prefix) { const i = tok.indexOf(prefix); return i >= 0 ? tok.substring(i + prefix.length) : ''; }
+  function eatLabel(): string { return (peek() && peek().startsWith('$')) ? eat().replace('$', '') : ''; }
+  function extractName(tok: string, prefix: string): string { const i = tok.indexOf(prefix); return i >= 0 ? tok.substring(i + prefix.length) : ''; }
 
   function emitBlock() {
     while (p < bodyTokens.length && peek() !== ')') {
@@ -291,34 +307,34 @@ function encodeBody(bodyTokens, localMap, importMap) {
         bytes.push(...uleb(localIdx(eatLabel())));
       }
       else if (t.endsWith('.extract_lane') || t.endsWith('.replace_lane')) {
-        bytes.push(...INSTR.get(t));
+        bytes.push(...INSTR.get(t)!);
         bytes.push(parseInt(eat(), 10));
       }
       else if (INSTR.has(t)) {
-        bytes.push(...INSTR.get(t));
+        bytes.push(...INSTR.get(t)!);
       }
     }
   }
 
-  function resolveBr(label) {
+  function resolveBr(label: string): number {
     for (let i = labelStack.length - 1; i >= 0; i--) {
       if (labelStack[i] === label) return labelStack.length - 1 - i;
     }
     return 0;
   }
 
-  function expect(t) { if (eat() !== t) throw new Error('expect ' + t); }
+  function expect(t: string) { if (eat() !== t) throw new Error('expect ' + t); }
   function skipSExpr() { if (peek() !== '(') { p++; return; } let d = 0; do { const t = eat(); if (t === '(') d++; else if (t === ')') d--; } while (d > 0); }
 
   emitBlock();
   return bytes;
 }
 
-export function encodeWat(wat) {
+export function encodeWat(wat: string): Uint8Array {
   const tokens = tokenize(wat);
   const mod = parseModule(tokens);
 
-  const localMap = new Map();
+  const localMap = new Map<string, number>();
   const paramCount = mod.funcParams.length;
   for (let i = 0; i < mod.funcParamNames.length; i++) {
     if (mod.funcParamNames[i]) localMap.set(mod.funcParamNames[i], i);
@@ -327,14 +343,14 @@ export function encodeWat(wat) {
     localMap.set(mod.funcLocalNames[i], paramCount + i);
   }
 
-  const importMap = new Map();
+  const importMap = new Map<string, number>();
   for (let i = 0; i < mod.imports.length; i++) importMap.set(mod.imports[i].name, i);
 
-  const typeSigs = [];
-  const typeMap = new Map();
-  function getType(params, results) {
+  const typeSigs: WatTypeSig[] = [];
+  const typeMap = new Map<string, number>();
+  function getType(params: ByteSeq, results: ByteSeq): number {
     const key = params.join(',') + '>' + results.join(',');
-    if (typeMap.has(key)) return typeMap.get(key);
+    if (typeMap.has(key)) return typeMap.get(key) as number;
     const i = typeSigs.length;
     typeSigs.push({ params, results });
     typeMap.set(key, i);
@@ -346,9 +362,9 @@ export function encodeWat(wat) {
 
   const typeSec = section(SEC_TYPE, vec(typeSigs.map(s => [T_FUNC, ...uleb(s.params.length), ...s.params, ...uleb(s.results.length), ...s.results])));
 
-  let importSec = [];
+  let importSec: number[] = [];
   if (mod.imports.length > 0) {
-    importSec = section(SEC_IMPORT, vec(mod.imports.map(imp => [...encStr(imp.module), ...encStr(imp.name), 0x00, ...uleb(imp.typeIdx)])));
+    importSec = section(SEC_IMPORT, vec(mod.imports.map(imp => [...encStr(imp.module), ...encStr(imp.name), 0x00, ...uleb(imp.typeIdx as number)])));
   }
 
   const funcSec = section(SEC_FUNC, vec([[...uleb(mainTypeIdx)]]));
@@ -360,9 +376,9 @@ export function encodeWat(wat) {
     [...encStr(mod.funcExportName), 0x00, ...uleb(funcIdx)],
   ]));
 
-  const localDecls = [];
+  const localDecls: number[] = [];
   if (mod.funcLocals.length > 0) {
-    const groups = [];
+    const groups: number[][] = [];
     let cur = mod.funcLocals[0], cnt = 1;
     for (let i = 1; i < mod.funcLocals.length; i++) {
       if (mod.funcLocals[i] === cur) cnt++;
@@ -375,16 +391,16 @@ export function encodeWat(wat) {
   }
 
   const body = encodeBody(mod.bodyTokens, localMap, importMap);
-  const codeBody = [];
+  const codeBody: number[] = [];
   pushAll(codeBody, localDecls);
   pushAll(codeBody, body);
   codeBody.push(0x0b);
-  const codeEntry = [];
+  const codeEntry: number[] = [];
   pushAll(codeEntry, uleb(codeBody.length));
   pushAll(codeEntry, codeBody);
   const codeSec = section(SEC_CODE, vec([codeEntry]));
 
-  const out = [];
+  const out: number[] = [];
   for (const part of [WASM_MAGIC, WASM_VERSION, typeSec, importSec, funcSec, memSec, exportSec, codeSec]) pushAll(out, part);
   return new Uint8Array(out);
 }

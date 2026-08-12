@@ -1,10 +1,21 @@
-const CUDA_INTRINSICS = new Map();
+export type CudaIntrinInfo = { M: number; N: number; K: number; a: string; b: string; c: string; tile?: number };
 
-export function registerCudaIntrin(name, emit) {
+export type CudaIntrinEmitTarget = {
+  _blockDim: number[];
+  _gridDim: number[];
+  _indent: number;
+  _emit(line: string): void;
+};
+
+export type CudaIntrinEmitter = (cg: CudaIntrinEmitTarget, info: CudaIntrinInfo) => void;
+
+const CUDA_INTRINSICS = new Map<string, CudaIntrinEmitter>();
+
+export function registerCudaIntrin(name: string, emit: CudaIntrinEmitter): void {
   CUDA_INTRINSICS.set(name, emit);
 }
 
-export function getCudaIntrin(name) {
+export function getCudaIntrin(name: string): CudaIntrinEmitter | null {
   return CUDA_INTRINSICS.get(name) || null;
 }
 

@@ -6,10 +6,31 @@ import { parseThreadAxis, maxBindingExtent, visitStatements, estimateBufferSize,
 import { getCudaIntrin } from './tensor_intrin.js';
 import { FuncAttr } from '../../compiler/ir/func_attrs.js';
 
+import type { Buffer } from '../../compiler/ir/tensor/buffer.js';
+import type { AllocateNode, BlockNode, BufferStoreNode, CallExternNode, ForNode, IfThenElseNode, LetStmtNode, NodeSlots, TirNode, VecCopyNode, WhileNode } from '../../compiler/ir/tensor/nodes.js';
+import type { IRStmtNode, LIRAccumulatorNode, LIRBindingsNode, LIRFlatLoadNode, LIRFlatStoreNode } from '../../compiler/ir/lir/nodes.js';
+import type { BufferDecl, CodegenFunc, ThreadBindingEntry } from '../codegen_utils.js';
+import type { CudaIntrinInfo } from './tensor_intrin.js';
+import type { TargetFeatures } from '../target.js';
+
 const LOCAL_MEMORY_BUDGET_BYTES = 256 * 1024;
 
+type ReductionLoop = { extC: string; extVal: number; varName: string };
+type FullReduction = { loops: ReductionLoop[]; block: BlockNode; store: BufferStoreNode; valExpr: TirNode | null; total: number };
+type ScratchCandidate = BufferDecl & { bytes: number };
+type TensorIntrinAttr = { name: string; info: CudaIntrinInfo };
+
 export class CUDAKernel {
-  constructor(name, source, blockDim, gridDim, sharedMemBytes, params, outputIndices, scratch) {
+  name: string;
+  source: string;
+  blockDim: number[];
+  gridDim: number[];
+  sharedMemBytes: number;
+  params: string[];
+  outputIndices: number[];
+  scratch: BufferDecl[];
+
+  constructor(name: string, source: string, blockDim: number[], gridDim: number[], sharedMemBytes: number, params: string[], outputIndices: number[], scratch: BufferDecl[]) {
     this.name = name;
     this.source = source;
     this.blockDim = blockDim;
@@ -22,7 +43,26 @@ export class CUDAKernel {
 }
 
 export class CUDACodegen {
-  constructor(target) {
+  target: TargetFeatures;
+  _indent: number;
+  _lines: string[];
+  _threadBindings: Map<string, ThreadBindingEntry[]>;
+  _sharedBuffers: Buffer[];
+  _blockDim: number[];
+  _gridDim: number[];
+  _defaultDtype: string;
+  _storeBuffers: Set<string>;
+  _promotedBuffers: Set<string>;
+  _promotedBufferDecls: BufferDecl[];
+  _declaredLocals: Set<string>;
+  _needsBarriers: boolean;
+  _globalScratch: BufferDecl[];
+  _scratchNames: Set<string>;
+  _serializeThreads: boolean;
+  declare _didParallelReduce: boolean;
+  declare _primFunc: CodegenFunc;
+
+  constructor(target: TargetFeatures) {
     this.target = target;
     this._indent = 0;
     this._lines = [];
@@ -41,7 +81,7 @@ export class CUDACodegen {
     this._serializeThreads = false;
   }
 
-  generate(func) {
+  generate(func: CodegenFunc): CUDAKernel {
     this._indent = 0;
     this._lines = [];
     this._threadBindings.clear();
@@ -62,13 +102,13 @@ export class CUDACodegen {
     const isLIR = func.type === 'LIRFunc';
 
     if (isLIR) {
-      for (const [tag, entries] of func.metadata.threadBindings) {
+      for (const [tag, entries] of func.metadata.threadBindings as Map<string, ThreadBindingEntry[]>) {
         this._threadBindings.set(tag, entries);
         for (const entry of entries) {
           if (!entry.isDynamic) this._applyBindingDim(tag, entry.extent);
         }
       }
-      this._sharedBuffers = func.metadata.sharedBuffers;
+      this._sharedBuffers = func.metadata.sharedBuffers as Buffer[];
     } else {
       this._scanBindings(func.body);
     }
@@ -77,9 +117,9 @@ export class CUDACodegen {
     this._analyzeSharing(func);
     this._collectGlobalScratch(func);
 
-    const paramParts = [];
-    const paramNames = [];
-    const outputIndices = [];
+    const paramParts: string[] = [];
+    const paramNames: string[] = [];
+    const outputIndices: number[] = [];
     let bufferIdx = 0;
     for (const [, buf] of func.bufferMap) {
       paramNames.push(buf.name);
@@ -100,7 +140,7 @@ export class CUDACodegen {
     this._emit(`__global__ void ${func.name}(${paramParts.join(', ')}) {`);
     this._indent++;
 
-    const emittedShared = new Set();
+    const emittedShared = new Set<string>();
     for (const buf of this._sharedBuffers) {
       if (emittedShared.has(buf.name)) continue;
       emittedShared.add(buf.name);
@@ -112,7 +152,7 @@ export class CUDACodegen {
       this._emit(`__shared__ ${cType(d.dtype)} ${d.name}[${d.size}];`);
     }
 
-    const declaredVars = new Set();
+    const declaredVars = new Set<string>();
     if (!this._serializeThreads) {
       for (const [tag, bindings] of this._threadBindings) {
         for (const info of bindings) {
@@ -125,7 +165,7 @@ export class CUDACodegen {
     }
 
     this._emitMissingLocalDecls(func);
-    const tensorIntrin = func.getAttr(FuncAttr.TENSOR_INTRIN);
+    const tensorIntrin = func.getAttr<TensorIntrinAttr>(FuncAttr.TENSOR_INTRIN);
     if (tensorIntrin) {
       const emit = getCudaIntrin(tensorIntrin.name);
       if (!emit) throw new Error(`CUDA codegen: unknown tensor intrinsic '${tensorIntrin.name}'`);
@@ -170,8 +210,8 @@ export class CUDACodegen {
     );
   }
 
-  _scanBindings(root) {
-    const stack = [root];
+  _scanBindings(root: IRStmtNode): void {
+    const stack: IRStmtNode[] = [root];
     while (stack.length > 0) {
       const node = stack.pop();
       if (!node) continue;
@@ -182,42 +222,43 @@ export class CUDACodegen {
         if (!this._threadBindings.has(node.threadTag)) {
           this._threadBindings.set(node.threadTag, [entry]);
         } else {
-          this._threadBindings.get(node.threadTag).push(entry);
+          this._threadBindings.get(node.threadTag)!.push(entry);
         }
         if (!isDynamic) this._applyBindingDim(node.threadTag, extent);
       }
       if (node.type === 'AllocateNode' && node.scope === 'shared') {
         this._sharedBuffers.push(node.buffer);
       }
-      if (node.body) stack.push(node.body);
-      if (node.stmts) for (const s of node.stmts) stack.push(s);
-      if (node.thenBody) stack.push(node.thenBody);
-      if (node.elseBody) stack.push(node.elseBody);
+      const slots = node as unknown as NodeSlots;
+      if (slots.body) stack.push(slots.body as TirNode);
+      if (slots.stmts) for (const s of slots.stmts as TirNode[]) stack.push(s);
+      if (slots.thenBody) stack.push(slots.thenBody as TirNode);
+      if (slots.elseBody) stack.push(slots.elseBody as TirNode);
     }
   }
 
-  _applyBindingDim(tag, extent) {
+  _applyBindingDim(tag: string, extent: number): void {
     const p = parseThreadAxis(tag);
     if (!p) return;
     if (p.space === 'thread') this._blockDim[p.axis] = Math.max(this._blockDim[p.axis], extent);
     else this._gridDim[p.axis] = Math.max(this._gridDim[p.axis], extent);
   }
 
-  _emit(line) {
+  _emit(line: string): void {
     this._lines.push('  '.repeat(this._indent) + line);
   }
 
-  _visitNode(node) {
+  _visitNode(node: IRStmtNode): void {
     visitStatements(this, node);
   }
 
-  _emitSync() {
+  _emitSync(): void {
     this._emit('__syncthreads();');
   }
 
-  _matchFullReduction(node) {
-    const loops = [];
-    let cur = node;
+  _matchFullReduction(node: ForNode): FullReduction | null {
+    const loops: ReductionLoop[] = [];
+    let cur: IRStmtNode = node;
     while (cur && cur.type === 'ForNode') {
       if (cur.kind !== ForKind.SERIAL) return null;
       const ev = cur.extent.type === 'IntImmNode' ? cur.extent.value : 0;
@@ -233,9 +274,9 @@ export class CUDACodegen {
     const val = store.value;
     if (!val || val.type !== 'MathOpNode' || val.op !== '+') return null;
     const idxStr = store.indices.map(i => this._exprToC(i)).join(',');
-    const isOutLoad = (n) => n && n.type === 'BufferLoadNode' && n.buffer === store.buffer
+    const isOutLoad = (n: TirNode | null) => n && n.type === 'BufferLoadNode' && n.buffer === store.buffer
       && n.indices.map(i => this._exprToC(i)).join(',') === idxStr;
-    let valExpr = null;
+    let valExpr: TirNode | null = null;
     if (isOutLoad(val.a)) valExpr = val.b;
     else if (isOutLoad(val.b)) valExpr = val.a;
     else return null;
@@ -246,7 +287,7 @@ export class CUDACodegen {
     return { loops, block, store, valExpr, total };
   }
 
-  _emitParallelReduction(node, red) {
+  _emitParallelReduction(node: ForNode, red: FullReduction): void {
     const T = 256;
     this._blockDim = [T, 1, 1];
     this._didParallelReduce = true;
@@ -277,7 +318,7 @@ export class CUDACodegen {
     this._emit(`if (threadIdx.x == 0) ${red.store.buffer.name}[${outIdx}] = _redsh[0];`);
   }
 
-  _visitForNode(node) {
+  _visitForNode(node: ForNode): void {
     if (node.kind === ForKind.THREAD_BINDING && this._serializeThreads) {
       const varName = node.loopVar.name;
       const extent = this._exprToC(node.extent);
@@ -291,7 +332,7 @@ export class CUDACodegen {
     if (node.kind === ForKind.THREAD_BINDING) {
       const extent = node.extent.type === 'IntImmNode' ? node.extent.value : 0;
       const tag = node.threadTag;
-      const maxExtent = this._getMaxBindingExtent(tag);
+      const maxExtent = this._getMaxBindingExtent(tag as string);
       if (extent > 0 && maxExtent > 0 && extent < maxExtent) {
         this._emit(`if (${tag} < ${extent}) {`);
         this._indent++;
@@ -320,7 +361,7 @@ export class CUDACodegen {
     this._emit('}');
   }
 
-  _visitBlockNode(node) {
+  _visitBlockNode(node: BlockNode): void {
     for (const bind of node.iterVars) {
       if (bind.iterVar && bind.binding) {
         this._emit(`const int ${bind.iterVar.name} = ${this._exprToC(bind.binding)};`);
@@ -330,7 +371,7 @@ export class CUDACodegen {
     this._visitNode(node.body);
   }
 
-  _visitAllocateNode(node) {
+  _visitAllocateNode(node: AllocateNode): void {
     if (node.scope !== 'shared') {
       if (this._promotedBuffers.has(node.buffer.name)) return;
       if (this._scratchNames.has(node.buffer.name)) return;
@@ -346,7 +387,7 @@ export class CUDACodegen {
     }
   }
 
-  _visitIfStmt(node) {
+  _visitIfStmt(node: IfThenElseNode): void {
     this._emit(`if (${this._exprToC(node.condition)}) {`);
     this._indent++;
     this._visitNode(node.thenBody);
@@ -360,15 +401,15 @@ export class CUDACodegen {
     this._emit('}');
   }
 
-  _visitLetStmtNode(node) {
+  _visitLetStmtNode(node: LetStmtNode): void {
     const dtype = node.variable.dtype || this._defaultDtype;
     this._emit(`${cType(dtype)} ${node.variable.name} = ${this._exprToC(node.value)};`);
     this._visitNode(node.body);
   }
 
-  _visitWhileNode(node) {
+  _visitWhileNode(node: WhileNode): void {
     this._visitNode(node.condBody);
-    const condExpr = Array.isArray(node.condVar.shape) ? `${node.condVar.name}[0]` : node.condVar.name;
+    const condExpr = Array.isArray((node.condVar as Buffer).shape) ? `${node.condVar.name}[0]` : node.condVar.name;
     this._emit(`while (${condExpr}) {`);
     this._indent++;
     this._visitNode(node.loopBody);
@@ -377,29 +418,29 @@ export class CUDACodegen {
     this._emit('}');
   }
 
-  _visitBufferStoreNode(node) {
+  _visitBufferStoreNode(node: BufferStoreNode): void {
     this._emit(`${node.buffer.name}[${this._flatIndex(node.buffer, node.indices)}] = ${this._exprToC(node.value)};`);
   }
 
-  _visitVecCopyNode(node) {
+  _visitVecCopyNode(node: VecCopyNode): void {
     const vt = `${cType(node.dstBuffer.dtype)}${node.width}`;
     const d = `${node.dstBuffer.name}[${this._flatIndex(node.dstBuffer, [node.dstIndex])}]`;
     const s = `${node.srcBuffer.name}[${this._flatIndex(node.srcBuffer, [node.srcIndex])}]`;
     this._emit(`*reinterpret_cast<${vt}*>(&${d}) = *reinterpret_cast<const ${vt}*>(&${s});`);
   }
 
-  _visitLIRFlatStore(node) {
+  _visitLIRFlatStore(node: LIRFlatStoreNode): void {
     this._emit(`${node.buffer.name}[${this._exprToC(node.offsetExpr)}] = ${this._exprToC(node.value)};`);
   }
 
-  _visitLIRBindings(node) {
+  _visitLIRBindings(node: LIRBindingsNode): void {
     for (const bind of node.bindings) {
       this._emit(`const int ${bind.name} = ${this._exprToC(bind.expr)};`);
     }
     this._visitNode(node.body);
   }
 
-  _visitLIRAccumulator(node) {
+  _visitLIRAccumulator(node: LIRAccumulatorNode): void {
     const accVar = node.localName;
     const dtype = node.dtype || this._defaultDtype;
     this._emit(`${cType(dtype)} ${accVar} = ${this._exprToC(node.initLoad)};`);
@@ -410,7 +451,7 @@ export class CUDACodegen {
     this._indent++;
     const accBody = this._exprToC(node.body);
     const accOp = node.op || '+';
-    let accRhs;
+    let accRhs: string;
     if (accOp === 'max' || accOp === 'min') {
       if (isDtypeInt(node.dtype)) {
         const cmp = accOp === 'max' ? '>' : '<';
@@ -425,10 +466,10 @@ export class CUDACodegen {
     this._indent--;
     this._emit('}');
 
-    this._emit(`${node.flushStore.buffer.name}[${this._exprToC(node.flushStore.offsetExpr)}] = ${accVar};`);
+    this._emit(`${(node.flushStore as LIRFlatStoreNode).buffer.name}[${this._exprToC((node.flushStore as LIRFlatStoreNode).offsetExpr)}] = ${accVar};`);
   }
 
-  _exprToC(node) {
+  _exprToC(node: IRStmtNode | null): string {
     if (!node) return '0';
     switch (node.type) {
       case 'IntImmNode': return String(node.value);
@@ -451,7 +492,7 @@ export class CUDACodegen {
     }
   }
 
-  _emitFloatLiteral(value) {
+  _emitFloatLiteral(value: number): string {
     if (value === Infinity) return 'INFINITY';
     if (value === -Infinity) return '(-INFINITY)';
     const suffix = cLiteralSuffix(this._defaultDtype);
@@ -460,9 +501,9 @@ export class CUDACodegen {
     return `${mantissa}${suffix}`;
   }
 
-  _emitExternCall(node) {
+  _emitExternCall(node: CallExternNode): string {
     const n = node.args.length;
-    const args = new Array(n);
+    const args = new Array<string>(n);
     for (let i = 0; i < n; i++) args[i] = this._exprToC(node.args[i]);
     const joined = args.join(', ');
     const dtype = node.dtype || this._defaultDtype;
@@ -483,24 +524,24 @@ export class CUDACodegen {
     return `${fn}(${joined})`;
   }
 
-  _flatIndex(buffer, indices) {
+  _flatIndex(buffer: Buffer, indices: readonly IRStmtNode[]): string {
     return flattenRowMajorIndex(buffer, indices, (e) => this._exprToC(e), (b, i) => this._computeDynamicStride(b, i), false);
   }
 
-  _computeDynamicStride(buffer, dimIdx) {
+  _computeDynamicStride(buffer: Buffer, dimIdx: number): string {
     return dynamicDimProduct(buffer, dimIdx + 1, (b, j) => this._resolveShapeParam(b, j));
   }
 
-  _dynamicNumel(buffer) {
+  _dynamicNumel(buffer: Buffer): string {
     return dynamicDimProduct(buffer, 0, (b, j) => this._resolveShapeParam(b, j));
   }
 
-  _getMaxBindingExtent(tag) {
+  _getMaxBindingExtent(tag: string): number {
     return maxBindingExtent(this._threadBindings, tag);
   }
 
-  _scanStoreTargets(root) {
-    const stack = [root];
+  _scanStoreTargets(root: IRStmtNode): void {
+    const stack: IRStmtNode[] = [root];
     while (stack.length > 0) {
       const node = stack.pop();
       if (!node) continue;
@@ -511,24 +552,24 @@ export class CUDACodegen {
         this._storeBuffers.add(node.dstBuffer.name);
       }
       if (node.type === 'LIRAccumulatorNode' && node.flushStore) {
-        this._storeBuffers.add(node.flushStore.buffer.name);
+        this._storeBuffers.add((node.flushStore as LIRFlatStoreNode).buffer.name);
       }
       for (const c of irChildNodes(node)) stack.push(c);
     }
   }
 
-  _hasCrossBlockGlobalRAW(func) {
-    const storageNames = new Set();
+  _hasCrossBlockGlobalRAW(func: CodegenFunc): boolean {
+    const storageNames = new Set<string>();
     for (const [, buf] of func.bufferMap) storageNames.add(buf.name);
     if (storageNames.size === 0) return false;
-    const storedSigs = new Map();
-    const loadedSigs = new Map();
-    const record = (map, name, sig) => {
+    const storedSigs = new Map<string, Set<string>>();
+    const loadedSigs = new Map<string, Set<string>>();
+    const record = (map: Map<string, Set<string>>, name: string, sig: string) => {
       let s = map.get(name);
       if (!s) { s = new Set(); map.set(name, s); }
       s.add(sig);
     };
-    const walk = (node, bindings) => {
+    const walk = (node: IRStmtNode | null, bindings: readonly string[]) => {
       if (!node || typeof node !== 'object') return;
       let next = bindings;
       if (node.type === 'ForNode' && node.kind === ForKind.THREAD_BINDING && node.threadTag) {
@@ -554,8 +595,8 @@ export class CUDACodegen {
     return false;
   }
 
-  _findThreadPrivateAllocs(root, names) {
-    const walk = (node, underThread) => {
+  _findThreadPrivateAllocs(root: IRStmtNode, names: Set<string>): void {
+    const walk = (node: IRStmtNode | null, underThread: boolean) => {
       if (!node || typeof node !== 'object') return;
       let t = underThread;
       if (node.type === 'ForNode' && node.kind === ForKind.THREAD_BINDING && node.threadTag) {
@@ -568,19 +609,19 @@ export class CUDACodegen {
     walk(root, false);
   }
 
-  _findCrossThreadBuffers(func) {
-    const storageNames = new Set();
+  _findCrossThreadBuffers(func: CodegenFunc): Set<string> {
+    const storageNames = new Set<string>();
     for (const [, buf] of func.bufferMap) storageNames.add(buf.name);
     const sharedNames = new Set(this._sharedBuffers.map(b => b.name));
-    const threadPrivate = new Set();
+    const threadPrivate = new Set<string>();
     this._findThreadPrivateAllocs(func.body, threadPrivate);
-    const isIntermediate = (buf) => buf && !storageNames.has(buf.name) && !sharedNames.has(buf.name) && !threadPrivate.has(buf.name);
-    const isMulti = (buf) => typeof buf.numel !== 'function' || buf.numel() !== 1;
-    const localWritten = new Set();
-    const localRead = new Set();
-    const narrowWritten = new Set();
-    const scalarRead = new Set();
-    const walk = (node, narrow) => {
+    const isIntermediate = (buf: Buffer) => buf && !storageNames.has(buf.name) && !sharedNames.has(buf.name) && !threadPrivate.has(buf.name);
+    const isMulti = (buf: Buffer) => typeof buf.numel !== 'function' || buf.numel() !== 1;
+    const localWritten = new Set<string>();
+    const localRead = new Set<string>();
+    const narrowWritten = new Set<string>();
+    const scalarRead = new Set<string>();
+    const walk = (node: IRStmtNode | null, narrow: boolean) => {
       if (!node || typeof node !== 'object') return;
       let n = narrow;
       if (node.type === 'ForNode' && node.kind === ForKind.THREAD_BINDING && node.threadTag) {
@@ -599,15 +640,15 @@ export class CUDACodegen {
       for (const c of irChildNodes(node)) walk(c, n);
     };
     walk(func.body, false);
-    const result = new Set();
+    const result = new Set<string>();
     for (const name of localWritten) if (localRead.has(name)) result.add(name);
     for (const name of narrowWritten) if (scalarRead.has(name)) result.add(name);
     return result;
   }
 
-  _crossThreadBuffersAreBlockLocal(func, crossThread) {
+  _crossThreadBuffersAreBlockLocal(func: CodegenFunc, crossThread: ReadonlySet<string>): boolean {
     let blockLocal = true;
-    const walk = (node, underGrid) => {
+    const walk = (node: IRStmtNode | null, underGrid: boolean) => {
       if (!node || typeof node !== 'object') return;
       let g = underGrid;
       if (node.type === 'ForNode' && node.kind === ForKind.THREAD_BINDING && node.threadTag) {
@@ -622,16 +663,16 @@ export class CUDACodegen {
     return blockLocal;
   }
 
-  _promoteCrossThreadToShared(func, crossThread) {
-    const storageNames = new Set();
+  _promoteCrossThreadToShared(func: CodegenFunc, crossThread: ReadonlySet<string>): boolean {
+    const storageNames = new Set<string>();
     for (const [, buf] of func.bufferMap) storageNames.add(buf.name);
-    const refBuffers = new Map();
+    const refBuffers = new Map<string, Buffer>();
     this._scanBufferRefs(func.body, refBuffers);
 
     const limit = this.target.sharedMemoryBytes || 49152;
     const alreadyShared = new Set(this._sharedBuffers.map(b => b.name));
     let used = this._sharedBuffers.reduce((sum, b) => sum + Math.max(b.sizeInBytes(), 0), 0);
-    const decls = [];
+    const decls: BufferDecl[] = [];
     for (const name of crossThread) {
       if (storageNames.has(name) || this._promotedBuffers.has(name) || alreadyShared.has(name)) continue;
       const buf = refBuffers.get(name);
@@ -650,7 +691,7 @@ export class CUDACodegen {
     return true;
   }
 
-  _analyzeSharing(func) {
+  _analyzeSharing(func: CodegenFunc): void {
     if (func.hasAttr(FuncAttr.TENSOR_INTRIN)) { this._needsBarriers = false; return; }
     if (func.getAttr(FuncAttr.GPU_REGISTER_BLOCKED)) {
       this._needsBarriers = false;
@@ -677,7 +718,7 @@ export class CUDACodegen {
     }
     let crossThreadShared = false;
     for (const [tag, entries] of this._threadBindings) {
-      const perTag = new Set();
+      const perTag = new Set<number>();
       for (const e of entries) {
         if (e.extent > 0) perTag.add(e.extent);
       }
@@ -694,10 +735,10 @@ export class CUDACodegen {
 
     this._needsBarriers = true;
 
-    const storageNames = new Set();
+    const storageNames = new Set<string>();
     for (const [, buf] of func.bufferMap) storageNames.add(buf.name);
 
-    const stack = [func.body];
+    const stack: IRStmtNode[] = [func.body];
     while (stack.length > 0) {
       const node = stack.pop();
       if (!node) continue;
@@ -712,9 +753,9 @@ export class CUDACodegen {
       for (const c of irChildNodes(node)) stack.push(c);
     }
 
-    const refBuffers = new Map();
+    const refBuffers = new Map<string, Buffer>();
     this._scanBufferRefs(func.body, refBuffers);
-    const allocatedNames = new Set();
+    const allocatedNames = new Set<string>();
     this._scanAllocateNodes(func.body, allocatedNames);
     for (const [name, buf] of refBuffers) {
       if (storageNames.has(name) || allocatedNames.has(name)) continue;
@@ -728,14 +769,14 @@ export class CUDACodegen {
     }
   }
 
-  _emitMissingLocalDecls(func) {
-    const storageNames = new Set();
+  _emitMissingLocalDecls(func: CodegenFunc): void {
+    const storageNames = new Set<string>();
     for (const [, buf] of func.bufferMap) storageNames.add(buf.name);
 
-    const allocatedNames = new Set();
+    const allocatedNames = new Set<string>();
     this._scanAllocateNodes(func.body, allocatedNames);
 
-    const refBuffers = new Map();
+    const refBuffers = new Map<string, Buffer>();
     this._scanBufferRefs(func.body, refBuffers);
 
     for (const [name, buf] of refBuffers) {
@@ -752,15 +793,15 @@ export class CUDACodegen {
     }
   }
 
-  _collectGlobalScratch(func) {
+  _collectGlobalScratch(func: CodegenFunc): void {
     const serialized = this._serializeThreads;
     if (this._threadBindings.size > 0 && !serialized) return;
     const THRESHOLD = 32768;
-    const storageNames = new Set();
+    const storageNames = new Set<string>();
     for (const [, buf] of func.bufferMap) storageNames.add(buf.name);
-    const candidates = [];
-    const seen = new Set();
-    const consider = (name, buf) => {
+    const candidates: ScratchCandidate[] = [];
+    const seen = new Set<string>();
+    const consider = (name: string, buf: Buffer) => {
       if (!buf || storageNames.has(name) || this._promotedBuffers.has(name) || this._scratchNames.has(name) || seen.has(name)) return;
       const numel = typeof buf.numel === 'function' ? buf.numel() : 0;
       const size = numel > 0 ? numel : this._estimateBufferSize(buf);
@@ -768,18 +809,18 @@ export class CUDACodegen {
       seen.add(name);
       candidates.push({ name, dtype: buf.dtype, size, bytes: size * dtypeBytes(buf.dtype) });
     };
-    const stack = [func.body];
+    const stack: IRStmtNode[] = [func.body];
     while (stack.length > 0) {
       const n = stack.pop();
       if (!n) continue;
       if (n.type === 'AllocateNode' && n.scope !== 'shared') consider(n.buffer.name, n.buffer);
       for (const c of irChildNodes(n)) stack.push(c);
     }
-    const refBuffers = new Map();
+    const refBuffers = new Map<string, Buffer>();
     this._scanBufferRefs(func.body, refBuffers);
     for (const [name, buf] of refBuffers) consider(name, buf);
 
-    const offload = (c) => { this._scratchNames.add(c.name); this._globalScratch.push({ name: c.name, dtype: c.dtype, size: c.size }); };
+    const offload = (c: ScratchCandidate) => { this._scratchNames.add(c.name); this._globalScratch.push({ name: c.name, dtype: c.dtype, size: c.size }); };
     if (!serialized) {
       for (const c of candidates) if (c.size > THRESHOLD) offload(c);
       return;
@@ -793,8 +834,8 @@ export class CUDACodegen {
     }
   }
 
-  _scanAllocateNodes(root, names) {
-    const stack = [root];
+  _scanAllocateNodes(root: IRStmtNode, names: Set<string>): void {
+    const stack: IRStmtNode[] = [root];
     while (stack.length > 0) {
       const node = stack.pop();
       if (!node) continue;
@@ -803,8 +844,8 @@ export class CUDACodegen {
     }
   }
 
-  _scanBufferRefs(root, refs) {
-    const stack = [root];
+  _scanBufferRefs(root: IRStmtNode, refs: Map<string, Buffer>): void {
+    const stack: IRStmtNode[] = [root];
     while (stack.length > 0) {
       const node = stack.pop();
       if (!node) continue;
@@ -817,18 +858,18 @@ export class CUDACodegen {
         if (node.srcBuffer) refs.set(node.srcBuffer.name, node.srcBuffer);
       }
       if (node.type === 'LIRAccumulatorNode') {
-        if (node.flushStore && node.flushStore.buffer) refs.set(node.flushStore.buffer.name, node.flushStore.buffer);
-        if (node.initLoad && node.initLoad.buffer) refs.set(node.initLoad.buffer.name, node.initLoad.buffer);
+        if (node.flushStore && (node.flushStore as LIRFlatStoreNode).buffer) refs.set((node.flushStore as LIRFlatStoreNode).buffer.name, (node.flushStore as LIRFlatStoreNode).buffer);
+        if (node.initLoad && (node.initLoad as LIRFlatLoadNode).buffer) refs.set((node.initLoad as LIRFlatLoadNode).buffer.name, (node.initLoad as LIRFlatLoadNode).buffer);
       }
       for (const c of irChildNodes(node)) stack.push(c);
     }
   }
 
-  _estimateBufferSize(buffer) {
+  _estimateBufferSize(buffer: Buffer): number {
     return estimateBufferSize(buffer);
   }
 
-  _resolveShapeParam(buffer, dimIdx) {
+  _resolveShapeParam(buffer: Buffer, dimIdx: number): string {
     return resolveShapeParam(this._primFunc, buffer, dimIdx, (v) => v.name, 'CUDA', 'c');
   }
 }

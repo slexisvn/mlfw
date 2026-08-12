@@ -1,6 +1,36 @@
 import { SymInt, symVarName } from '../compiler/analysis/sym_int.js';
+import type { SymExpr, SymIntOp } from '../compiler/analysis/sym_int.js';
+import type { Buffer } from '../compiler/ir/tensor/buffer.js';
+import type { AllocateNode, BlockNode, BufferStoreNode, ForNode, IfThenElseNode, LetStmtNode, NodeSlots, PrimFunc, TirNode, VecCopyNode, WhileNode } from '../compiler/ir/tensor/nodes.js';
+import type { IRStmtNode, LIRAccumulatorNode, LIRBindingsNode, LIRFlatStoreNode, LIRFunc } from '../compiler/ir/lir/nodes.js';
 
-function symOpToString(type, a, b, dialect) {
+export type CodegenDialect = 'c' | 'js' | 'wat' | 'wgsl';
+export type CodegenFunc = PrimFunc | LIRFunc;
+export type ShapeVarRef = { name: string };
+export type ShapeVarFormatter = (v: ShapeVarRef) => string;
+export type ThreadSpace = 'thread' | 'block';
+export type ThreadAxis = { space: ThreadSpace; axis: number };
+export type ThreadBindingEntry = { varName: string; extent: number; isDynamic: boolean; extentNode: TirNode };
+export type BufferDecl = { name: string; dtype: string; size: number };
+export type DimProductResolver = (buffer: Buffer, dimIdx: number) => string;
+export type StmtTreeVisitor = (node: IRStmtNode) => boolean | void;
+
+export interface StatementVisitor {
+  _visitAllocateNode(node: AllocateNode): void;
+  _visitForNode(node: ForNode): void;
+  _visitBlockNode(node: BlockNode): void;
+  _visitIfStmt(node: IfThenElseNode): void;
+  _visitLetStmtNode(node: LetStmtNode): void;
+  _visitBufferStoreNode(node: BufferStoreNode): void;
+  _visitLIRFlatStore(node: LIRFlatStoreNode): void;
+  _visitLIRBindings(node: LIRBindingsNode): void;
+  _visitLIRAccumulator(node: LIRAccumulatorNode): void;
+  _visitWhileNode(node: WhileNode): void;
+  _visitVecCopyNode?(node: VecCopyNode): void;
+  _emitSync(): void;
+}
+
+function symOpToString(type: SymIntOp, a: string, b: string | null, dialect: CodegenDialect): string {
   switch (type) {
     case 'add': return `(${a} + ${b})`;
     case 'sub': return `(${a} - ${b})`;
@@ -15,10 +45,10 @@ function symOpToString(type, a, b, dialect) {
   }
 }
 
-export function emitSymInt(expr, formatVar, dialect = 'c') {
+export function emitSymInt(expr: SymExpr, formatVar: ShapeVarFormatter, dialect: CodegenDialect = 'c'): string {
   if (typeof expr === 'number') return String(expr);
   if (!(expr instanceof SymInt)) return String(expr);
-  if (expr.type === 'var') return formatVar({ name: symVarName(expr.name) });
+  if (expr.type === 'var') return formatVar({ name: symVarName(expr.name as string) });
   if (dialect === 'wat') {
     throw new Error('emitSymInt: compound symbolic expressions are not supported on the WASM backend');
   }
@@ -27,7 +57,7 @@ export function emitSymInt(expr, formatVar, dialect = 'c') {
   return symOpToString(expr.type, a, b, dialect);
 }
 
-export function parseThreadAxis(tag) {
+export function parseThreadAxis(tag: string): ThreadAxis | null {
   const idx = tag.indexOf('.');
   if (idx < 0) return null;
   const axis = tag.charCodeAt(idx + 1) - 120;
@@ -38,8 +68,8 @@ export function parseThreadAxis(tag) {
   return null;
 }
 
-export function visitStatements(cg, start) {
-  const stack = [start];
+export function visitStatements(cg: StatementVisitor, start: IRStmtNode): void {
+  const stack: IRStmtNode[] = [start];
   while (stack.length > 0) {
     const cur = stack.pop();
     if (!cur) continue;
@@ -61,7 +91,7 @@ export function visitStatements(cg, start) {
       case 'LIRAccumulatorNode': cg._visitLIRAccumulator(cur); continue;
       case 'WhileNode': cg._visitWhileNode(cur); continue;
       case 'SyncThreadsNode': cg._emitSync(); continue;
-      case 'VecCopyNode': cg._visitVecCopyNode(cur); continue;
+      case 'VecCopyNode': cg._visitVecCopyNode!(cur); continue;
       case 'EvaluateNode': continue;
       default: throw new Error(`${cg.constructor.name}: unhandled statement node '${cur.type}'`);
     }
@@ -70,14 +100,14 @@ export function visitStatements(cg, start) {
 
 const STMT_CHILD_FIELDS = ['body', 'stmts', 'thenBody', 'elseBody', 'loopBody', 'condBody', 'initBody'];
 
-export function walkStmtTree(root, visit) {
-  const stack = [root];
+export function walkStmtTree(root: IRStmtNode, visit: StmtTreeVisitor): void {
+  const stack: IRStmtNode[] = [root];
   while (stack.length > 0) {
     const n = stack.pop();
     if (!n || typeof n !== 'object') continue;
     if (visit(n) === false) continue;
     for (const k of STMT_CHILD_FIELDS) {
-      const v = n[k];
+      const v = (n as unknown as NodeSlots)[k];
       if (v == null) continue;
       if (Array.isArray(v)) { for (let i = v.length - 1; i >= 0; i--) stack.push(v[i]); }
       else stack.push(v);
@@ -85,8 +115,8 @@ export function walkStmtTree(root, visit) {
   }
 }
 
-export function isZeroFillBody(body) {
-  let cur = body;
+export function isZeroFillBody(body: IRStmtNode): boolean {
+  let cur: IRStmtNode | null = body;
   while (cur) {
     if (cur.type === 'ForNode' || cur.type === 'BlockNode') { cur = cur.body; continue; }
     if (cur.type === 'BufferStoreNode' || cur.type === 'LIRFlatStoreNode') {
@@ -98,7 +128,7 @@ export function isZeroFillBody(body) {
   return false;
 }
 
-export function resolveShapeParam(primFunc, buffer, dimIdx, format, label, dialect = 'c') {
+export function resolveShapeParam(primFunc: CodegenFunc | null, buffer: Buffer, dimIdx: number, format: ShapeVarFormatter, label: string, dialect: CodegenDialect = 'c'): string {
   const d = buffer.shape[dimIdx];
   if (d instanceof SymInt) return emitSymInt(d, format, dialect);
   if (primFunc && primFunc.shapeParamMap) {
@@ -108,7 +138,7 @@ export function resolveShapeParam(primFunc, buffer, dimIdx, format, label, diale
   throw new Error(`${label} codegen: missing shape param for ${buffer.name}:${dimIdx}`);
 }
 
-export function estimateBufferSize(buffer) {
+export function estimateBufferSize(buffer: Buffer): number {
   let n = 1;
   for (const d of buffer.shape) {
     if (typeof d === 'number' && d > 0) n *= d;
@@ -116,8 +146,8 @@ export function estimateBufferSize(buffer) {
   return n;
 }
 
-export function dynamicDimProduct(buffer, startDim, resolveShapeParam) {
-  const parts = [];
+export function dynamicDimProduct(buffer: Buffer, startDim: number, resolveShapeParam: DimProductResolver): string {
+  const parts: string[] = [];
   for (let j = startDim; j < buffer.shape.length; j++) {
     const d = buffer.shape[j];
     if (typeof d === 'number' && d >= 0) parts.push(String(d));
@@ -126,7 +156,7 @@ export function dynamicDimProduct(buffer, startDim, resolveShapeParam) {
   return parts.length === 0 ? '1' : parts.join(' * ');
 }
 
-export function maxBindingExtent(threadBindings, tag) {
+export function maxBindingExtent(threadBindings: ReadonlyMap<string, readonly ThreadBindingEntry[]>, tag: string): number {
   const entries = threadBindings.get(tag);
   if (!entries) return 0;
   let max = 0;

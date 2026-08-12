@@ -1,7 +1,13 @@
-export function flattenRowMajorIndex(buffer, indices, emitLeaf, computeDynamicStride, skipZero = false) {
+import type { Buffer } from '../compiler/ir/tensor/buffer.js';
+import type { IRStmtNode } from '../compiler/ir/lir/nodes.js';
+
+export type IndexLeafEmitter = (index: IRStmtNode) => string;
+export type DynamicStrideEmitter = (buffer: Buffer, dimIdx: number) => string;
+
+export function flattenRowMajorIndex(buffer: Buffer, indices: readonly IRStmtNode[], emitLeaf: IndexLeafEmitter, computeDynamicStride: DynamicStrideEmitter, skipZero = false): string {
   if (indices.length === 0) return '0';
   if (indices.length === 1) return emitLeaf(indices[0]);
-  const parts = [];
+  const parts: string[] = [];
   for (let i = 0; i < indices.length; i++) {
     const idx = emitLeaf(indices[i]);
     if (skipZero && idx === '0') continue;
