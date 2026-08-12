@@ -1,73 +1,12 @@
 import { isDtypeFloat } from '../../../util/dtype_map.js';
+import { TensorNode } from '../tensor/nodes.js';
 import { withFuncAttrs } from '../func_attrs.js';
 import type { Buffer } from '../tensor/buffer.js';
 import type { TirNode, VariableNode } from '../tensor/nodes.js';
 
 export type IRStmtNode = TirNode | LirNode;
 
-export interface ParentedNode {
-  _parent: ParentedNode | null;
-  _parentKey: string | null;
-  _parentIdx: number;
-}
-
-export class LIRNode implements ParentedNode {
-  type: string;
-  declare _dtype?: string;
-  _parent: ParentedNode | null;
-  _parentKey: string | null;
-  _parentIdx: number;
-
-  constructor() {
-    this.type = this.constructor.name.replace(/^_+/, '');
-    this._parent = null;
-    this._parentKey = null;
-    this._parentIdx = -1;
-  }
-
-  _setChild(key: string, child: ParentedNode | null, idx = -1): void {
-    if (child instanceof LIRNode || (child && child._parent !== undefined)) {
-      child._parent = this;
-      child._parentKey = key;
-      child._parentIdx = idx;
-    }
-  }
-
-  _setChildren(key: string, arr: readonly (ParentedNode | null)[] | null): void {
-    if (!arr) return;
-    for (let i = 0; i < arr.length; i++) {
-      const c = arr[i];
-      if (c instanceof LIRNode || (c && c._parent !== undefined)) {
-        c._parent = this;
-        c._parentKey = key;
-        c._parentIdx = i;
-      }
-    }
-  }
-
-  replaceWith(newNode: ParentedNode | null): boolean {
-    const p = this._parent;
-    if (!p) return false;
-    const slots = p as unknown as Record<string, ParentedNode | null | (ParentedNode | null)[]>;
-    const key = this._parentKey as string;
-    if (this._parentIdx >= 0) {
-      (slots[key] as (ParentedNode | null)[])[this._parentIdx] = newNode;
-    } else {
-      slots[key] = newNode;
-    }
-    if (newNode && (newNode instanceof LIRNode || newNode._parent !== undefined)) {
-      newNode._parent = p;
-      newNode._parentKey = this._parentKey;
-      newNode._parentIdx = this._parentIdx;
-    }
-    this._parent = null;
-    this._parentKey = null;
-    this._parentIdx = -1;
-    return true;
-  }
-}
-
-export class LIRFunc extends withFuncAttrs(LIRNode) {
+export class LIRFunc extends withFuncAttrs(TensorNode) {
   declare type: 'LIRFunc';
   name: string;
   params: readonly VariableNode[];
@@ -94,11 +33,11 @@ export class LIRFunc extends withFuncAttrs(LIRNode) {
     this.shapeParams = shapeParams;
     this.shapeParamMap = shapeParamMap;
     this.metadata = metadata;
-    this._setChild('body', body);
+    this._setChild('body', body as TensorNode);
   }
 }
 
-export class LIRFlatLoadNode extends LIRNode {
+export class LIRFlatLoadNode extends TensorNode {
   declare type: 'LIRFlatLoadNode';
   buffer: Buffer;
   offsetExpr: IRStmtNode;
@@ -113,7 +52,7 @@ export class LIRFlatLoadNode extends LIRNode {
   }
 }
 
-export class LIRFlatStoreNode extends LIRNode {
+export class LIRFlatStoreNode extends TensorNode {
   declare type: 'LIRFlatStoreNode';
   buffer: Buffer;
   offsetExpr: IRStmtNode;
@@ -144,7 +83,7 @@ export type LIRAccumulatorConfig = Readonly<{
   initBody?: IRStmtNode | null;
 }>;
 
-export class LIRAccumulatorNode extends LIRNode {
+export class LIRAccumulatorNode extends TensorNode {
   declare type: 'LIRAccumulatorNode';
   localName: string;
   dtype: string;
@@ -176,7 +115,7 @@ export class LIRAccumulatorNode extends LIRNode {
   }
 }
 
-export class LIRBindingsNode extends LIRNode {
+export class LIRBindingsNode extends TensorNode {
   declare type: 'LIRBindingsNode';
   bindings: readonly { name: string; expr: IRStmtNode }[];
   body: IRStmtNode;

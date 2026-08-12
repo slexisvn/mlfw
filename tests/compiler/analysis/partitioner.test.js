@@ -52,9 +52,9 @@ describe('GraphPartitioner._scoreTargetForOp', () => {
     expect(result.getPartition(ops(func)[0]).target.name).toBe('cpu_generic');
   });
 
-  it('libraryOps +100 can beat GPU when compute gap is < 100/10 = 10 TFLOPs', () => {
-    const cpu = CPUTarget({ computeTFLOPs: 5, libraryOps: new Set(['dot']) });
-    const gpu = CUDATarget({ computeTFLOPs: 5, libraryOps: new Set() });
+  it('library-class +100 can beat GPU when compute gap is < 100/10 = 10 TFLOPs', () => {
+    const cpu = CPUTarget({ computeTFLOPs: 5, libraryClasses: new Set(['matmul']) });
+    const gpu = CUDATarget({ computeTFLOPs: 5, libraryClasses: new Set() });
     const lhs = new TensorType([4, 8], ScalarType.F32);
     const rhs = new TensorType([8, 6], ScalarType.F32);
     const func = buildFunction('f', [lhs, rhs], [new TensorType([4, 6], ScalarType.F32)], (b, args) => {
@@ -66,9 +66,9 @@ describe('GraphPartitioner._scoreTargetForOp', () => {
     expect(result.getPartition(ops(func)[0]).target.name).toBe('cpu_generic');
   });
 
-  it('libraryOps +100 loses to GPU default compute gap of 14.5 TFLOPs', () => {
-    const cpu = CPUTarget({ libraryOps: new Set(['dot']) });
-    const gpu = CUDATarget({ libraryOps: new Set() });
+  it('library-class +100 loses to GPU default compute gap of 14.5 TFLOPs', () => {
+    const cpu = CPUTarget({ libraryClasses: new Set(['matmul']) });
+    const gpu = CUDATarget({ libraryClasses: new Set() });
     const lhs = new TensorType([4, 8], ScalarType.F32);
     const rhs = new TensorType([8, 6], ScalarType.F32);
     const func = buildFunction('f', [lhs, rhs], [new TensorType([4, 6], ScalarType.F32)], (b, args) => {

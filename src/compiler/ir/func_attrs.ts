@@ -1,5 +1,5 @@
 export const FuncAttr = Object.freeze({
-  CUBLAS_INFO: 'cublas_info',
+  EXTERNAL_CODEGEN: 'external_codegen',
   CONV_INFO: 'conv_info',
   TENSOR_INTRIN: 'tensor_intrin',
   GPU_REGISTER_BLOCKED: 'gpu_register_blocked',

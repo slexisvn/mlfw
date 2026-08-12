@@ -53,7 +53,7 @@ export class InlineReindexPass extends PrimFuncPass {
 
   override run(pf: PrimFunc, ctx: TirPassCtx): void {
     if (!this.target.isGPU() || this.target.isWebGPU()) return;
-    if (pf.hasAttr(FuncAttr.CUBLAS_INFO) || pf.hasAttr(FuncAttr.TENSOR_INTRIN)) return;
+    if (pf.hasAttr(FuncAttr.EXTERNAL_CODEGEN) || pf.hasAttr(FuncAttr.TENSOR_INTRIN)) return;
     if (primFuncHasRecurrence(pf)) return;
     const sCfg = this.config.scheduling as Record<string, boolean>;
     if (!(sCfg.enabled || sCfg.gpuTiling || sCfg.autotune)) return;

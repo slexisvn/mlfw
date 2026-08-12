@@ -24,12 +24,12 @@ function matmulFunc(M, N, K, aDt = 'f16', bDt = 'f16', cDt = 'f32') {
 describe('func attrs are first-class on PrimFunc and LIRFunc', () => {
   it('starts empty and round-trips values', () => {
     const pf = new PrimFunc('f', [], new SeqNode([]));
-    expect(pf.hasAttr(FuncAttr.CUBLAS_INFO)).toBe(false);
-    expect(pf.getAttr(FuncAttr.CUBLAS_INFO)).toBeNull();
-    pf.setAttr(FuncAttr.CUBLAS_INFO, { M: 4 });
-    expect(pf.getAttr(FuncAttr.CUBLAS_INFO)).toEqual({ M: 4 });
-    expect(pf.removeAttr(FuncAttr.CUBLAS_INFO)).toBe(true);
-    expect(pf.hasAttr(FuncAttr.CUBLAS_INFO)).toBe(false);
+    expect(pf.hasAttr(FuncAttr.EXTERNAL_CODEGEN)).toBe(false);
+    expect(pf.getAttr(FuncAttr.EXTERNAL_CODEGEN)).toBeNull();
+    pf.setAttr(FuncAttr.EXTERNAL_CODEGEN, { M: 4 });
+    expect(pf.getAttr(FuncAttr.EXTERNAL_CODEGEN)).toEqual({ M: 4 });
+    expect(pf.removeAttr(FuncAttr.EXTERNAL_CODEGEN)).toBe(true);
+    expect(pf.hasAttr(FuncAttr.EXTERNAL_CODEGEN)).toBe(false);
   });
 
   it('honours an explicit fallback', () => {
@@ -55,12 +55,12 @@ describe('attrs survive every IR boundary', () => {
   it('lowerToLIR carries attrs from PrimFunc to LIRFunc', () => {
     const pf = matmulFunc(32, 32, 32);
     pf.setAttr(FuncAttr.GPU_REGISTER_BLOCKED, true);
-    pf.setAttr(FuncAttr.CUBLAS_INFO, { M: 32, N: 32, K: 32 });
+    pf.setAttr(FuncAttr.EXTERNAL_CODEGEN, { M: 32, N: 32, K: 32 });
 
     const lir = lowerToLIR(pf, CUDATarget());
 
     expect(lir.getAttr(FuncAttr.GPU_REGISTER_BLOCKED)).toBe(true);
-    expect(lir.getAttr(FuncAttr.CUBLAS_INFO)).toEqual({ M: 32, N: 32, K: 32 });
+    expect(lir.getAttr(FuncAttr.EXTERNAL_CODEGEN)).toEqual({ M: 32, N: 32, K: 32 });
   });
 
   it('clonePrimFunc copies attrs without aliasing the source map', () => {

@@ -1,5 +1,4 @@
 import { TensorNode } from './tensor/nodes.js';
-import { LIRNode } from './lir/nodes.js';
 import type { TirNode } from './tensor/nodes.js';
 import type { LirNode } from './lir/nodes.js';
 
@@ -20,7 +19,7 @@ export type PreVisitor = (node: IRNode, ctx: WalkContext) => VisitResult;
 export type Visitor = PreVisitor | Readonly<{ pre?: PreVisitor; post?: (node: IRNode, ctx: WalkContext) => void }>;
 
 export function isIRNode(x: unknown): x is IRNode {
-  return x instanceof TensorNode || x instanceof LIRNode;
+  return x instanceof TensorNode;
 }
 
 function field(key: string, kind: FieldKind, opts: FieldOpts = {}): FieldSpec {
@@ -173,6 +172,20 @@ export function walk(node: IRNode, visitor: Visitor, opts: WalkOpts = {}): void 
     for (let i = kids.length - 1; i >= 0; i--) {
       stack.push({ node: kids[i], parent: frame.node, depth: frame.depth + 1, entered: false });
     }
+  }
+}
+
+export type ScopeVisitor<C> = (node: IRNode, scope: C) => C | false;
+
+export function walkScoped<C>(node: IRNode, initial: C, visit: ScopeVisitor<C>, opts: WalkOpts = {}): void {
+  if (!isIRNode(node)) return;
+  const stack: { node: IRNode; scope: C }[] = [{ node, scope: initial }];
+  while (stack.length > 0) {
+    const frame = stack.pop() as { node: IRNode; scope: C };
+    const inner = visit(frame.node, frame.scope);
+    if (inner === false) continue;
+    const kids = irChildNodes(frame.node, opts);
+    for (let i = kids.length - 1; i >= 0; i--) stack.push({ node: kids[i], scope: inner });
   }
 }
 

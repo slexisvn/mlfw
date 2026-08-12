@@ -50,7 +50,7 @@ describe('AutoTensorizePass — automatic tensor-core matmul detection', () => {
 
   it('skips a func already routed to cuBLAS', () => {
     const pf = matmulFunc('mm_cublas', 32, 32, 32);
-    pf.setAttr(FuncAttr.CUBLAS_INFO, { M: 32, N: 32, K: 32 });
+    pf.setAttr(FuncAttr.EXTERNAL_CODEGEN, { M: 32, N: 32, K: 32 });
     new AutoTensorizePass({ target: CUDATarget() }).run(pf, {});
     expect(pf.hasAttr(FuncAttr.TENSOR_INTRIN)).toBe(false);
   });

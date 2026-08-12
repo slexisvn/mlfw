@@ -140,6 +140,7 @@ export function register(registry: OpRegistry) {
     name: 'fused_dot_epilogue',
     numOperands: -1,
     numResults: 1,
+    opAttrs: { launchBoundary: 'matmul' },
     traits: [OpTrait.OPAQUE],
     attrs: [
       { name: 'lhs_contracting', type: 'array', required: true },

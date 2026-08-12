@@ -1,7 +1,7 @@
 import { GraphFunction } from '../../ir/graph/function.js';
 import { Operation } from '../../ir/graph/operation.js';
 import { topoSortOps, buildPartitions, topoSortPartitions, computePartitionIO } from './partition_core.js';
-import { isConstantOp as isConstantOpName, isTerminatorOp } from '../../ir/graph/op_traits.js';
+import { isConstantOp as isConstantOpName, isTerminatorOp, containsLaunchBoundary } from '../../ir/graph/op_traits.js';
 import type { GraphModule } from '../../ir/graph/module.js';
 import type { Block } from '../../ir/graph/block.js';
 import type { Value } from '../../ir/graph/value.js';
@@ -129,22 +129,6 @@ export function materializePartition(part: Partition, name: string, dotInfoMap: 
   return { part, subFunc, inputs, outputs, dotOp };
 }
 
-const BOUNDARY_OP_NAMES = new Set(['dot', 'fused_dot_epilogue', 'cublas_gemm', 'reduce', 'conv', 'quantized_conv', 'scaled_dot_product_attention']);
-
-function containsBoundaryOp(op: Operation): boolean {
-  if (BOUNDARY_OP_NAMES.has(op.opName)) return true;
-  if (op.regions) {
-    for (const region of op.regions) {
-      const block = region.entryBlock as Block;
-      if (!block) continue;
-      for (const inner of block.ops()) {
-        if (containsBoundaryOp(inner)) return true;
-      }
-    }
-  }
-  return false;
-}
-
 function maxBoundaryResultBytes(op: Operation): number {
   let m = 0;
   for (let i = 0; i < op.numResults; i++) {
@@ -166,7 +150,7 @@ export function hasDependentBoundaries(graphModule: GraphModule, minIntermediate
     const cached = memo.get(op);
     if (cached !== undefined) return cached;
     memo.set(op, 0);
-    let m = containsBoundaryOp(op) ? maxBoundaryResultBytes(op) : 0;
+    let m = containsLaunchBoundary(op) ? maxBoundaryResultBytes(op) : 0;
     for (let i = 0; i < op.numOperands; i++) {
       const u = maxBoundaryInSubtree(op.getOperand(i).definingOp);
       if (u > m) m = u;
@@ -175,7 +159,7 @@ export function hasDependentBoundaries(graphModule: GraphModule, minIntermediate
     return m;
   };
   for (const op of func.ops()) {
-    if (isTerminatorOp(op.opName) || !containsBoundaryOp(op)) continue;
+    if (isTerminatorOp(op.opName) || !containsLaunchBoundary(op)) continue;
     for (let i = 0; i < op.numOperands; i++) {
       if (maxBoundaryInSubtree(op.getOperand(i).definingOp) > minIntermediate) return true;
     }
@@ -272,7 +256,7 @@ export function splitGraphForNative(graphModule: GraphModule, minBoundaries = 2)
   for (const op of func.ops()) {
     if (isTerminatorOp(op.opName)) continue;
     if (isConstantOp(op)) continue;
-    if (containsBoundaryOp(op)) opTarget.set(op, 'boundary#' + boundaryCount++);
+    if (containsLaunchBoundary(op)) opTarget.set(op, 'boundary#' + boundaryCount++);
     else opTarget.set(op, 'native');
     partitionOps.push(op);
   }
@@ -324,7 +308,7 @@ export function splitGraphForCublas(graphModule: GraphModule): { plan: Execution
       opTarget.set(op, 'cublas#' + dotCount);
       dotInfoMap.set(op, info);
       dotCount++;
-    } else if (containsBoundaryOp(op)) {
+    } else if (containsLaunchBoundary(op)) {
       opTarget.set(op, 'boundary#' + boundaryCount++);
     } else {
       opTarget.set(op, 'native');

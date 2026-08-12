@@ -224,7 +224,7 @@ describe('DominatorFusionPass — maxReductions config', () => {
     }
   });
 
-  it('skips opaque ops (library ops)', () => {
+  it('skips ops the target has a library kernel for', () => {
     const t = new TensorType([64, 64], F32);
     const func = buildFunction('f', [t, t], [t], (b, args) => {
       const sum = b.add(args[0], args[1]);
@@ -232,7 +232,7 @@ describe('DominatorFusionPass — maxReductions config', () => {
     });
 
     const before = findOps(func, 'add').length + findOps(func, 'neg').length;
-    run(func, { libraryOps: new Set(['add']) });
+    run(func, { hasLibraryOp: (name) => name === 'add' });
     const after = findOps(func, 'add').length + findOps(func, 'neg').length;
 
     expect(after).toBe(before);

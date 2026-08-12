@@ -5,7 +5,9 @@ import {
   IfThenElseNode, LetStmtNode, AllocateNode, WhileNode, EvaluateNode,
   MathOpNode, CompareNode, CastNode, CallExternNode, BlockRealizeNode,
 } from '../../ir/tensor/nodes.js';
+import { LIRFlatLoadNode, LIRFlatStoreNode, LIRAccumulatorNode, LIRBindingsNode } from '../../ir/lir/nodes.js';
 import type { IntImmNode, PrimFunc, TirNode } from '../../ir/tensor/nodes.js';
+import type { LIRFunc } from '../../ir/lir/nodes.js';
 
 type SimplifyCtx = { analyzer: Analyzer; simp: RewriteSimplify };
 type VarBound = ReturnType<Analyzer['getVarBound']>;
@@ -17,6 +19,15 @@ export function simplifyPrimFunc(primFunc: PrimFunc): PrimFunc {
   primFunc.body = body;
   primFunc._setChild('body', body);
   return primFunc;
+}
+
+export function simplifyLirFunc(lirFunc: LIRFunc): LIRFunc {
+  const ctx = { analyzer: new Analyzer(), simp: null } as unknown as SimplifyCtx;
+  ctx.simp = new RewriteSimplify(ctx.analyzer);
+  const body = simplifyStmt(lirFunc.body as TirNode, ctx);
+  lirFunc.body = body;
+  lirFunc._setChild('body', body);
+  return lirFunc;
 }
 
 function bindLoopVar(ctx: SimplifyCtx, name: string, extentNode: TirNode): VarBound {
@@ -32,7 +43,7 @@ function bindLoopVar(ctx: SimplifyCtx, name: string, extentNode: TirNode): VarBo
 
 function simplifyStmt(node: TirNode, ctx: SimplifyCtx): TirNode {
   if (!node || typeof node !== 'object') return node;
-  switch (node.type) {
+  switch (node.type as string) {
     case 'ForNode': {
       const f = node as ForNode;
       const prev = bindLoopVar(ctx, f.loopVar.name, f.extent);
@@ -84,6 +95,41 @@ function simplifyStmt(node: TirNode, ctx: SimplifyCtx): TirNode {
     }
     case 'EvaluateNode':
       return new EvaluateNode(simplifyExpr((node as EvaluateNode).value, ctx));
+    case 'LIRFlatStoreNode': {
+      const st = node as unknown as LIRFlatStoreNode;
+      return new LIRFlatStoreNode(
+        st.buffer,
+        simplifyExpr(st.offsetExpr as TirNode, ctx),
+        st.value ? simplifyExpr(st.value as TirNode, ctx) : null,
+        st.dtype,
+      ) as unknown as TirNode;
+    }
+    case 'LIRBindingsNode': {
+      const b = node as unknown as LIRBindingsNode;
+      const bindings = b.bindings.map((bind) => ({ ...bind, expr: simplifyExpr(bind.expr as TirNode, ctx) }));
+      return new LIRBindingsNode(bindings, simplifyStmt(b.body as TirNode, ctx)) as unknown as TirNode;
+    }
+    case 'LIRAccumulatorNode': {
+      const acc = node as unknown as LIRAccumulatorNode;
+      const prev = bindLoopVar(ctx, acc.loopVar.name, acc.extent as TirNode);
+      const body = simplifyExpr(acc.body as TirNode, ctx);
+      const initBody = acc.initBody ? simplifyStmt(acc.initBody as TirNode, ctx) : null;
+      const initLoad = simplifyExpr(acc.initLoad as unknown as TirNode, ctx);
+      const flushStore = simplifyStmt(acc.flushStore as unknown as TirNode, ctx);
+      ctx.analyzer.setVarBound(acc.loopVar.name, prev);
+      return new LIRAccumulatorNode({
+        localName: acc.localName,
+        dtype: acc.dtype,
+        op: acc.op,
+        initLoad: initLoad as unknown as LIRFlatLoadNode,
+        loopVar: acc.loopVar,
+        extent: acc.extent,
+        loopKind: acc.loopKind,
+        body,
+        flushStore: flushStore as unknown as LIRFlatStoreNode,
+        initBody,
+      }) as unknown as TirNode;
+    }
     default:
       return node;
   }
@@ -99,7 +145,7 @@ function simplifyIterVar(ctx: SimplifyCtx): (r: BlockRealizeNode) => BlockRealiz
 
 function simplifyExpr(node: TirNode, ctx: SimplifyCtx): TirNode {
   if (!node || typeof node !== 'object' || !node.type) return node;
-  switch (node.type) {
+  switch (node.type as string) {
     case 'IntImmNode':
     case 'FloatImmNode':
     case 'VariableNode':
@@ -136,6 +182,10 @@ function simplifyExpr(node: TirNode, ctx: SimplifyCtx): TirNode {
       if (proveTrue(ctx.analyzer, cond)) return thenE;
       if (elseE !== null && proveFalse(ctx.analyzer, cond)) return elseE;
       return new IfThenElseNode(cond, thenE, elseE);
+    }
+    case 'LIRFlatLoadNode': {
+      const ld = node as unknown as LIRFlatLoadNode;
+      return new LIRFlatLoadNode(ld.buffer, simplifyExpr(ld.offsetExpr as TirNode, ctx), ld.dtype) as unknown as TirNode;
     }
     default:
       return node;

@@ -96,13 +96,13 @@ describe('FusionCostModel.estimateGroupCost', () => {
     expect(result.parallelismLoss).toBeGreaterThan(0);
   });
 
-  it('libraryCallLoss counts ops that match libraryOps set', () => {
+  it('libraryCallLoss counts ops the target has a library kernel for', () => {
     const t = new TensorType([4], ScalarType.F32);
     const func = buildFunction('f', [t, t], [t], (b, args) => {
       const sum = b.add(args[0], args[1]);
       b.returnOp([b.neg(sum.getResult(0)).getResult(0)]);
     });
-    const cost = new FusionCostModel({ libraryOps: new Set(['add']) });
+    const cost = new FusionCostModel({ hasLibraryOp: (name) => name === 'add' });
     expect(cost.estimateGroupCost(makeGroup(ops(func))).libraryCallLoss).toBe(1);
   });
 });
@@ -128,13 +128,13 @@ describe('FusionCostModel.shouldFuse', () => {
     expect(new FusionCostModel().shouldFuse(makeGroup(ops(func))).fuse).toBe(false);
   });
 
-  it('fuse=false when libraryOps would be lost', () => {
+  it('fuse=false when a library kernel would be lost', () => {
     const t = new TensorType([4], ScalarType.F32);
     const func = buildFunction('f', [t, t], [t], (b, args) => {
       const sum = b.add(args[0], args[1]);
       b.returnOp([b.neg(sum.getResult(0)).getResult(0)]);
     });
-    expect(new FusionCostModel({ libraryOps: new Set(['add']) }).shouldFuse(makeGroup(ops(func))).fuse).toBe(false);
+    expect(new FusionCostModel({ hasLibraryOp: (name) => name === 'add' }).shouldFuse(makeGroup(ops(func))).fuse).toBe(false);
   });
 
   it('fuse=false when group size exceeds maxCodeSizeOps', () => {

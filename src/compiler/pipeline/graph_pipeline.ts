@@ -14,19 +14,19 @@ import { LayoutTransformPass } from '../passes/layout/layout_transform.js';
 import { QuantizationPass } from '../passes/quantization/quantization_pass.js';
 import { DecompositionPass } from '../passes/decompose/decomposition_pass.js';
 import { RematerializationPass } from '../passes/memory/rematerialization.js';
-import { CublasRewritePass } from '../passes/rewrite/cublas_rewrite.js';
 import { CallInlinerPass } from '../passes/inline/call_inliner.js';
+import { activeExternalCodegenProviders } from './external_codegen.js';
 import { graphPassesForPhase } from './graph_pass_registry.js';
 import type { CompilerContext } from './compiler_context.js';
 import type { CompilerConfig, CompileTarget, FusionAwareTarget, GraphPass, PassPhase } from './pipeline_types.js';
 
-export type GraphPipelineOpts = Readonly<{ cudaMatmulChain?: boolean; context?: CompilerContext | null }>;
+export type GraphPipelineOpts = Readonly<{ context?: CompilerContext | null }>;
 
 type GraphPipelineTarget = FusionAwareTarget;
 
 const DEFAULT_LAUNCH_OVERHEAD_US = 5;
 
-export function buildGraphPipeline(config: CompilerConfig, target: GraphPipelineTarget | null, { cudaMatmulChain = false, context = null }: GraphPipelineOpts = {}): GraphPass[] {
+export function buildGraphPipeline(config: CompilerConfig, target: GraphPipelineTarget | null, { context = null }: GraphPipelineOpts = {}): GraphPass[] {
   const passesForPhase = context
     ? (phase: PassPhase) => context.passesForPhase(phase, config, target as CompileTarget)
     : (phase: PassPhase) => graphPassesForPhase(phase, config, target as CompileTarget);
@@ -55,7 +55,8 @@ export function buildGraphPipeline(config: CompilerConfig, target: GraphPipeline
     passes.push(new DCEPass());
   }
 
-  const shouldEpilogueFuse = config.fusion.enabled && config.matmulBackend !== 'cublas'
+  const providers = activeExternalCodegenProviders(config, target as CompileTarget);
+  const shouldEpilogueFuse = config.fusion.enabled && !providers.some(p => p.suppressesEpilogueFusion)
     && target && target.enableEpilogueFusion;
 
   if (shouldEpilogueFuse) {
@@ -79,8 +80,9 @@ export function buildGraphPipeline(config: CompilerConfig, target: GraphPipeline
     passes.push(new DCEPass());
   }
 
-  if (config.matmulBackend === 'cublas') {
-    passes.push(new CublasRewritePass());
+  for (const provider of providers) {
+    if (!provider.graphPasses) continue;
+    for (const p of provider.graphPasses(config, target as CompileTarget)) passes.push(p);
   }
 
   if (config.optimization.rematerialization) {

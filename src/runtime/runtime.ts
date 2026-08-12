@@ -359,6 +359,11 @@ export class RuntimeModule {
     return kernel ? kernel.source : null;
   }
 
+  getKernelMetadata(name: string): Record<string, unknown> | null {
+    const kernel = this.kernels.get(name);
+    return kernel ? kernel.metadata as Record<string, unknown> : null;
+  }
+
   listKernels(): string[] {
     return this.kernels.names();
   }

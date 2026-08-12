@@ -1,13 +1,17 @@
 import { ForKind } from '../../compiler/ir/tensor/nodes.js';
 import { cType, cPtrType, cLiteralSuffix, cMathFunc, isDtypeInt, dtypeBytes, cCompareOp } from '../../util/dtype_map.js';
 import { flattenRowMajorIndex } from '../index_emit.js';
-import { irChildNodes } from '../../compiler/ir/ir_visitor.js';
-import { parseThreadAxis, maxBindingExtent, visitStatements, estimateBufferSize, dynamicDimProduct, resolveShapeParam } from '../codegen_utils.js';
+import { walk } from '../../compiler/ir/ir_visitor.js';
+import { visitStatements, estimateBufferSize, dynamicDimProduct, resolveShapeParam } from '../codegen_utils.js';
+import { parseThreadAxis, maxBindingExtent } from '../../compiler/analysis/thread_binding.js';
+import { allocatedBufferNames, referencedBuffers, storedBufferNames } from '../../compiler/analysis/tir_queries.js';
+import { profileGpuAccesses, crossBlockRAWBuffers, threadSharedIntermediates, storedUnderBlockBinding, hasMultiExtentBlockBinding, GpuRaceReason } from '../../compiler/analysis/gpu_race.js';
+import type { GpuLaunchDiagnosis } from '../../compiler/analysis/gpu_race.js';
 import { getCudaIntrin } from './tensor_intrin.js';
 import { FuncAttr } from '../../compiler/ir/func_attrs.js';
 
 import { Buffer } from '../../compiler/ir/tensor/buffer.js';
-import type { AllocateNode, BlockNode, BufferStoreNode, CallExternNode, ForNode, IfThenElseNode, LetStmtNode, NodeSlots, TirNode, VecCopyNode, WhileNode } from '../../compiler/ir/tensor/nodes.js';
+import type { AllocateNode, BlockNode, BufferStoreNode, CallExternNode, ForNode, IfThenElseNode, LetStmtNode, TirNode, VecCopyNode, WhileNode } from '../../compiler/ir/tensor/nodes.js';
 import type { IRStmtNode, LIRAccumulatorNode, LIRBindingsNode, LIRFlatStoreNode, LIRThreadBinding } from '../../compiler/ir/lir/nodes.js';
 import type { BufferDecl, CodegenFunc } from '../codegen_utils.js';
 import type { CudaIntrinInfo } from './tensor_intrin.js';
@@ -20,6 +24,18 @@ type FullReduction = { loops: ReductionLoop[]; block: BlockNode; store: BufferSt
 type ScratchCandidate = BufferDecl & { bytes: number };
 type TensorIntrinAttr = { name: string; info: CudaIntrinInfo };
 
+export type CUDAKernelConfig = Readonly<{
+  name: string;
+  source: string;
+  blockDim: number[];
+  gridDim: number[];
+  sharedMemBytes: number;
+  params: string[];
+  outputIndices: number[];
+  scratch: BufferDecl[];
+  launchDiagnosis?: GpuLaunchDiagnosis | null;
+}>;
+
 export class CUDAKernel {
   name: string;
   source: string;
@@ -29,16 +45,18 @@ export class CUDAKernel {
   params: string[];
   outputIndices: number[];
   scratch: BufferDecl[];
+  launchDiagnosis: GpuLaunchDiagnosis | null;
 
-  constructor(name: string, source: string, blockDim: number[], gridDim: number[], sharedMemBytes: number, params: string[], outputIndices: number[], scratch: BufferDecl[]) {
-    this.name = name;
-    this.source = source;
-    this.blockDim = blockDim;
-    this.gridDim = gridDim;
-    this.sharedMemBytes = sharedMemBytes;
-    this.params = params;
-    this.outputIndices = outputIndices;
-    this.scratch = scratch || [];
+  constructor(config: CUDAKernelConfig) {
+    this.name = config.name;
+    this.source = config.source;
+    this.blockDim = config.blockDim;
+    this.gridDim = config.gridDim;
+    this.sharedMemBytes = config.sharedMemBytes;
+    this.params = config.params;
+    this.outputIndices = config.outputIndices;
+    this.scratch = config.scratch || [];
+    this.launchDiagnosis = config.launchDiagnosis || null;
   }
 }
 
@@ -59,6 +77,7 @@ export class CUDACodegen {
   _globalScratch: BufferDecl[];
   _scratchNames: Set<string>;
   _serializeThreads: boolean;
+  _launchDiagnosis: GpuLaunchDiagnosis | null;
   declare _didParallelReduce: boolean;
   declare _primFunc: CodegenFunc;
 
@@ -79,6 +98,7 @@ export class CUDACodegen {
     this._globalScratch = [];
     this._scratchNames = new Set();
     this._serializeThreads = false;
+    this._launchDiagnosis = null;
   }
 
   generate(func: CodegenFunc): CUDAKernel {
@@ -98,6 +118,7 @@ export class CUDACodegen {
     this._globalScratch = [];
     this._scratchNames = new Set();
     this._serializeThreads = false;
+    this._launchDiagnosis = null;
 
     const isLIR = func.type === 'LIRFunc';
 
@@ -199,42 +220,33 @@ export class CUDACodegen {
       throw new Error(`[codegen] kernel '${func.name}' shared memory ${sharedBytes} bytes exceeds device limit ${t.sharedMemoryBytes}`);
     }
 
-    return new CUDAKernel(
-      func.name,
-      this._lines.join('\n'),
-      blockDim, gridDim,
-      sharedBytes,
-      paramNames,
+    return new CUDAKernel({
+      name: func.name,
+      source: this._lines.join('\n'),
+      blockDim,
+      gridDim,
+      sharedMemBytes: sharedBytes,
+      params: paramNames,
       outputIndices,
-      this._globalScratch
-    );
+      scratch: this._globalScratch,
+      launchDiagnosis: this._launchDiagnosis,
+    });
   }
 
   _scanBindings(root: IRStmtNode): void {
-    const stack: IRStmtNode[] = [root];
-    while (stack.length > 0) {
-      const node = stack.pop();
-      if (!node) continue;
+    walk(root, (node) => {
       if (node.type === 'ForNode' && node.kind === ForKind.THREAD_BINDING && node.threadTag) {
         const extent = node.extent.type === 'IntImmNode' ? node.extent.value : 0;
         const isDynamic = node.extent.type !== 'IntImmNode';
         const entry = { varName: node.loopVar.name, extent, isDynamic, extentNode: node.extent };
-        if (!this._threadBindings.has(node.threadTag)) {
-          this._threadBindings.set(node.threadTag, [entry]);
-        } else {
-          this._threadBindings.get(node.threadTag)!.push(entry);
-        }
+        const entries = this._threadBindings.get(node.threadTag);
+        if (entries) entries.push(entry);
+        else this._threadBindings.set(node.threadTag, [entry]);
         if (!isDynamic) this._applyBindingDim(node.threadTag, extent);
-      }
-      if (node.type === 'AllocateNode' && node.scope === 'shared') {
+      } else if (node.type === 'AllocateNode' && node.scope === 'shared') {
         this._sharedBuffers.push(node.buffer);
       }
-      const slots = node as unknown as NodeSlots;
-      if (slots.body) stack.push(slots.body as TirNode);
-      if (slots.stmts) for (const s of slots.stmts as TirNode[]) stack.push(s);
-      if (slots.thenBody) stack.push(slots.thenBody as TirNode);
-      if (slots.elseBody) stack.push(slots.elseBody as TirNode);
-    }
+    });
   }
 
   _applyBindingDim(tag: string, extent: number): void {
@@ -541,133 +553,20 @@ export class CUDACodegen {
   }
 
   _scanStoreTargets(root: IRStmtNode): void {
-    const stack: IRStmtNode[] = [root];
-    while (stack.length > 0) {
-      const node = stack.pop();
-      if (!node) continue;
-      if (node.type === 'BufferStoreNode' || node.type === 'LIRFlatStoreNode') {
-        this._storeBuffers.add(node.buffer.name);
-      }
-      if (node.type === 'VecCopyNode') {
-        this._storeBuffers.add(node.dstBuffer.name);
-      }
-      if (node.type === 'LIRAccumulatorNode' && node.flushStore) {
-        this._storeBuffers.add(node.flushStore.buffer.name);
-      }
-      for (const c of irChildNodes(node)) stack.push(c);
-    }
+    this._storeBuffers = storedBufferNames(root);
   }
 
-  _hasCrossBlockGlobalRAW(func: CodegenFunc): boolean {
-    const storageNames = new Set<string>();
-    for (const [, buf] of func.bufferMap) storageNames.add(buf.name);
-    if (storageNames.size === 0) return false;
-    const storedSigs = new Map<string, Set<string>>();
-    const loadedSigs = new Map<string, Set<string>>();
-    const record = (map: Map<string, Set<string>>, name: string, sig: string) => {
-      let s = map.get(name);
-      if (!s) { s = new Set(); map.set(name, s); }
-      s.add(sig);
-    };
-    const walk = (node: IRStmtNode | null, bindings: readonly string[]) => {
-      if (!node || typeof node !== 'object') return;
-      let next = bindings;
-      if (node.type === 'ForNode' && node.kind === ForKind.THREAD_BINDING && node.threadTag) {
-        const extent = node.extent && node.extent.type === 'IntImmNode' ? node.extent.value : 0;
-        next = bindings.concat(`${node.threadTag}:${extent}`);
-      }
-      if (node.type === 'BufferStoreNode' || node.type === 'LIRFlatStoreNode') {
-        if (node.buffer && storageNames.has(node.buffer.name)) record(storedSigs, node.buffer.name, [...next].sort().join(','));
-      }
-      if (node.type === 'BufferLoadNode' || node.type === 'LIRFlatLoadNode') {
-        if (node.buffer && storageNames.has(node.buffer.name)) record(loadedSigs, node.buffer.name, [...next].sort().join(','));
-      }
-      for (const c of irChildNodes(node)) walk(c, next);
-    };
-    walk(func.body, []);
-    for (const [name, stores] of storedSigs) {
-      const loads = loadedSigs.get(name);
-      if (!loads) continue;
-      const sigs = new Set(stores);
-      for (const s of loads) sigs.add(s);
-      if (sigs.size > 1) return true;
-    }
-    return false;
-  }
-
-  _findThreadPrivateAllocs(root: IRStmtNode, names: Set<string>): void {
-    const walk = (node: IRStmtNode | null, underThread: boolean) => {
-      if (!node || typeof node !== 'object') return;
-      let t = underThread;
-      if (node.type === 'ForNode' && node.kind === ForKind.THREAD_BINDING && node.threadTag) {
-        const p = parseThreadAxis(node.threadTag);
-        if (p && p.space === 'thread') t = true;
-      }
-      if (t && node.type === 'AllocateNode' && node.buffer) names.add(node.buffer.name);
-      for (const c of irChildNodes(node)) walk(c, t);
-    };
-    walk(root, false);
-  }
-
-  _findCrossThreadBuffers(func: CodegenFunc): Set<string> {
-    const storageNames = new Set<string>();
-    for (const [, buf] of func.bufferMap) storageNames.add(buf.name);
-    const sharedNames = new Set(this._sharedBuffers.map(b => b.name));
-    const threadPrivate = new Set<string>();
-    this._findThreadPrivateAllocs(func.body, threadPrivate);
-    const isIntermediate = (buf: Buffer) => buf && !storageNames.has(buf.name) && !sharedNames.has(buf.name) && !threadPrivate.has(buf.name);
-    const isMulti = (buf: Buffer) => typeof buf.numel !== 'function' || buf.numel() !== 1;
-    const localWritten = new Set<string>();
-    const localRead = new Set<string>();
-    const narrowWritten = new Set<string>();
-    const scalarRead = new Set<string>();
-    const walk = (node: IRStmtNode | null, narrow: boolean) => {
-      if (!node || typeof node !== 'object') return;
-      let n = narrow;
-      if (node.type === 'ForNode' && node.kind === ForKind.THREAD_BINDING && node.threadTag) {
-        const extent = node.extent && node.extent.type === 'IntImmNode' ? node.extent.value : 0;
-        const maxExtent = this._getMaxBindingExtent(node.threadTag);
-        if (extent > 0 && maxExtent > 0 && extent < maxExtent) n = true;
-      }
-      if ((node.type === 'BufferStoreNode' || node.type === 'LIRFlatStoreNode') && isIntermediate(node.buffer)) {
-        if (isMulti(node.buffer)) localWritten.add(node.buffer.name);
-        else if (n) narrowWritten.add(node.buffer.name);
-      }
-      if ((node.type === 'BufferLoadNode' || node.type === 'LIRFlatLoadNode') && isIntermediate(node.buffer)) {
-        if (isMulti(node.buffer)) localRead.add(node.buffer.name);
-        else scalarRead.add(node.buffer.name);
-      }
-      for (const c of irChildNodes(node)) walk(c, n);
-    };
-    walk(func.body, false);
-    const result = new Set<string>();
-    for (const name of localWritten) if (localRead.has(name)) result.add(name);
-    for (const name of narrowWritten) if (scalarRead.has(name)) result.add(name);
-    return result;
-  }
-
-  _crossThreadBuffersAreBlockLocal(func: CodegenFunc, crossThread: ReadonlySet<string>): boolean {
-    let blockLocal = true;
-    const walk = (node: IRStmtNode | null, underGrid: boolean) => {
-      if (!node || typeof node !== 'object') return;
-      let g = underGrid;
-      if (node.type === 'ForNode' && node.kind === ForKind.THREAD_BINDING && node.threadTag) {
-        const p = parseThreadAxis(node.threadTag);
-        if (p && p.space === 'block') g = true;
-      }
-      if (g && (node.type === 'BufferStoreNode' || node.type === 'LIRFlatStoreNode')
-        && node.buffer && crossThread.has(node.buffer.name)) blockLocal = false;
-      for (const c of irChildNodes(node)) walk(c, g);
-    };
-    walk(func.body, false);
-    return blockLocal;
+  _serialize(reason: string, buffers: ReadonlySet<string>): void {
+    this._serializeThreads = true;
+    this._needsBarriers = false;
+    this._launchDiagnosis = { reason, buffers: [...buffers] };
   }
 
   _promoteCrossThreadToShared(func: CodegenFunc, crossThread: ReadonlySet<string>): boolean {
     const storageNames = new Set<string>();
     for (const [, buf] of func.bufferMap) storageNames.add(buf.name);
     const refBuffers = new Map<string, Buffer>();
-    this._scanBufferRefs(func.body, refBuffers);
+    referencedBuffers(func.body, refBuffers);
 
     const limit = this.target.sharedMemoryBytes || 49152;
     const alreadyShared = new Set(this._sharedBuffers.map(b => b.name));
@@ -697,66 +596,50 @@ export class CUDACodegen {
       this._needsBarriers = false;
       return;
     }
+    const profile = profileGpuAccesses(func, { sharedBuffers: this._sharedBuffers, threadBindings: this._threadBindings });
     const gridThreads = this._gridDim[0] * this._gridDim[1] * this._gridDim[2];
-    if (gridThreads > 1 && this._hasCrossBlockGlobalRAW(func)) {
-      this._serializeThreads = true;
-      this._needsBarriers = false;
+    const crossBlock = crossBlockRAWBuffers(profile);
+    if (gridThreads > 1 && crossBlock.size > 0) {
+      this._serialize(GpuRaceReason.CROSS_BLOCK_RAW, crossBlock);
       return;
     }
     if (this._threadBindings.size > 0) {
       const blockThreads = this._blockDim[0] * this._blockDim[1] * this._blockDim[2];
-      const crossThread = this._findCrossThreadBuffers(func);
+      const crossThread = threadSharedIntermediates(profile);
       if (blockThreads * gridThreads > 1 && crossThread.size > 0) {
-        if (this._crossThreadBuffersAreBlockLocal(func, crossThread) && this._promoteCrossThreadToShared(func, crossThread)) {
+        if (!storedUnderBlockBinding(profile, crossThread) && this._promoteCrossThreadToShared(func, crossThread)) {
           this._needsBarriers = true;
           return;
         }
-        this._serializeThreads = true;
-        this._needsBarriers = false;
+        this._serialize(GpuRaceReason.THREAD_SHARED_INTERMEDIATE, crossThread);
         return;
       }
     }
-    let crossThreadShared = false;
-    for (const [tag, entries] of this._threadBindings) {
-      const perTag = new Set<number>();
-      for (const e of entries) {
-        if (e.extent > 0) perTag.add(e.extent);
-      }
-      if (perTag.size <= 1) continue;
-      const p = parseThreadAxis(tag);
-      if (p && p.space === 'block') {
-        this._serializeThreads = true;
-        this._needsBarriers = false;
-        return;
-      }
-      crossThreadShared = true;
+    const multiExtent = hasMultiExtentBlockBinding(this._threadBindings);
+    if (multiExtent.blockSpace) {
+      this._serialize(GpuRaceReason.MULTI_EXTENT_BLOCK_BINDING, new Set());
+      return;
     }
-    if (!crossThreadShared) return;
+    if (!multiExtent.threadSpace) return;
 
     this._needsBarriers = true;
 
     const storageNames = new Set<string>();
     for (const [, buf] of func.bufferMap) storageNames.add(buf.name);
 
-    const stack: IRStmtNode[] = [func.body];
-    while (stack.length > 0) {
-      const node = stack.pop();
-      if (!node) continue;
-      if (node.type === 'AllocateNode' && node.scope !== 'shared' && !storageNames.has(node.buffer.name)) {
-        const numel = node.buffer.numel();
-        const size = numel > 0 ? numel : this._estimateBufferSize(node.buffer);
-        if (size > 0) {
-          this._promotedBuffers.add(node.buffer.name);
-          this._promotedBufferDecls.push({ name: node.buffer.name, dtype: node.buffer.dtype, size });
-        }
-      }
-      for (const c of irChildNodes(node)) stack.push(c);
-    }
+    walk(func.body, (node) => {
+      if (node.type !== 'AllocateNode' || node.scope === 'shared' || storageNames.has(node.buffer.name)) return;
+      const numel = node.buffer.numel();
+      const size = numel > 0 ? numel : this._estimateBufferSize(node.buffer);
+      if (size <= 0) return;
+      this._promotedBuffers.add(node.buffer.name);
+      this._promotedBufferDecls.push({ name: node.buffer.name, dtype: node.buffer.dtype, size });
+    });
 
     const refBuffers = new Map<string, Buffer>();
-    this._scanBufferRefs(func.body, refBuffers);
+    referencedBuffers(func.body, refBuffers);
     const allocatedNames = new Set<string>();
-    this._scanAllocateNodes(func.body, allocatedNames);
+    allocatedBufferNames(func.body, allocatedNames);
     for (const [name, buf] of refBuffers) {
       if (storageNames.has(name) || allocatedNames.has(name)) continue;
       if (this._promotedBuffers.has(name)) continue;
@@ -774,10 +657,10 @@ export class CUDACodegen {
     for (const [, buf] of func.bufferMap) storageNames.add(buf.name);
 
     const allocatedNames = new Set<string>();
-    this._scanAllocateNodes(func.body, allocatedNames);
+    allocatedBufferNames(func.body, allocatedNames);
 
     const refBuffers = new Map<string, Buffer>();
-    this._scanBufferRefs(func.body, refBuffers);
+    referencedBuffers(func.body, refBuffers);
 
     for (const [name, buf] of refBuffers) {
       if (storageNames.has(name) || allocatedNames.has(name)) continue;
@@ -809,15 +692,11 @@ export class CUDACodegen {
       seen.add(name);
       candidates.push({ name, dtype: buf.dtype, size, bytes: size * dtypeBytes(buf.dtype) });
     };
-    const stack: IRStmtNode[] = [func.body];
-    while (stack.length > 0) {
-      const n = stack.pop();
-      if (!n) continue;
+    walk(func.body, (n) => {
       if (n.type === 'AllocateNode' && n.scope !== 'shared') consider(n.buffer.name, n.buffer);
-      for (const c of irChildNodes(n)) stack.push(c);
-    }
+    });
     const refBuffers = new Map<string, Buffer>();
-    this._scanBufferRefs(func.body, refBuffers);
+    referencedBuffers(func.body, refBuffers);
     for (const [name, buf] of refBuffers) consider(name, buf);
 
     const offload = (c: ScratchCandidate) => { this._scratchNames.add(c.name); this._globalScratch.push({ name: c.name, dtype: c.dtype, size: c.size }); };
@@ -831,37 +710,6 @@ export class CUDACodegen {
       if (localBytes <= LOCAL_MEMORY_BUDGET_BYTES) break;
       offload(c);
       localBytes -= c.bytes;
-    }
-  }
-
-  _scanAllocateNodes(root: IRStmtNode, names: Set<string>): void {
-    const stack: IRStmtNode[] = [root];
-    while (stack.length > 0) {
-      const node = stack.pop();
-      if (!node) continue;
-      if (node.type === 'AllocateNode') names.add(node.buffer.name);
-      for (const c of irChildNodes(node)) stack.push(c);
-    }
-  }
-
-  _scanBufferRefs(root: IRStmtNode, refs: Map<string, Buffer>): void {
-    const stack: IRStmtNode[] = [root];
-    while (stack.length > 0) {
-      const node = stack.pop();
-      if (!node) continue;
-      if ((node.type === 'BufferLoadNode' || node.type === 'BufferStoreNode' ||
-           node.type === 'LIRFlatLoadNode' || node.type === 'LIRFlatStoreNode') && node.buffer) {
-        refs.set(node.buffer.name, node.buffer);
-      }
-      if (node.type === 'VecCopyNode') {
-        if (node.dstBuffer) refs.set(node.dstBuffer.name, node.dstBuffer);
-        if (node.srcBuffer) refs.set(node.srcBuffer.name, node.srcBuffer);
-      }
-      if (node.type === 'LIRAccumulatorNode') {
-        if (node.flushStore && node.flushStore.buffer) refs.set(node.flushStore.buffer.name, node.flushStore.buffer);
-        if (node.initLoad && node.initLoad.buffer) refs.set(node.initLoad.buffer.name, node.initLoad.buffer);
-      }
-      for (const c of irChildNodes(node)) stack.push(c);
     }
   }
 

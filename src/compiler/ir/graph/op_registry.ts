@@ -93,7 +93,7 @@ export type OpDefConfig = Readonly<{
   hasRegions?: boolean;
   numRegions?: number;
   regions?: readonly RegionSpec[];
-  opAttrs?: Readonly<Record<string, AttrValue>>;
+  opAttrs?: Readonly<Record<string, unknown>>;
 }>;
 
 export class OpDef {

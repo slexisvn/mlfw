@@ -4,17 +4,45 @@ import type { IRType } from '../types.js';
 
 type LinalgInferOpts = Readonly<{ allowMixedDtype?: boolean; outputDtype?: ScalarDType }>;
 type LinalgInferExtra = readonly IRType[] | LinalgInferOpts | null;
-import { TensorType, DYNAMIC } from '../types.js';
+import { TensorType, DYNAMIC, Layout } from '../types.js';
+import { LayoutPreference } from '../layout_pref.js';
+import type { LayoutTarget } from '../layout_pref.js';
+import type { Operation } from '../operation.js';
 import type { ScalarDType } from '../types.js';
 import * as pat from '../patterns.js';
 import * as qpat from '../quantization_patterns.js';
+
+const NHWC_RANK = 4;
+
+function convLayout(op: Operation, target: LayoutTarget): LayoutPreference | null {
+  const input = op.getOperand(0).type as TensorType;
+  const rank = input ? input.rank : NHWC_RANK;
+  if (target.preferredConvLayout) {
+    const preferred = target.preferredConvLayout as unknown as Layout;
+    return new LayoutPreference([preferred, null], [preferred]);
+  }
+  if (rank !== NHWC_RANK || !(target.isGPU() || target.isCPU())) return null;
+  const nhwc = new Layout([0, 2, 3, 1]);
+  return new LayoutPreference([nhwc, null], [nhwc]);
+}
+
+function dotLayout(op: Operation, target: LayoutTarget): LayoutPreference | null {
+  const lhsType = op.getOperand(0).type as TensorType;
+  const rhsType = op.getOperand(1).type as TensorType;
+  if (!lhsType || !rhsType) return null;
+  const lhsLayout = Layout.rowMajor(lhsType.rank);
+  if (target.isCPU() && rhsType.rank === 2) {
+    return new LayoutPreference([lhsLayout, Layout.columnMajor(rhsType.rank)], [lhsLayout]);
+  }
+  return new LayoutPreference([lhsLayout, Layout.rowMajor(rhsType.rank)], [lhsLayout]);
+}
 
 export function register(registry: OpRegistry) {
   registry.register(new OpDef({
     name: 'dot',
     numOperands: 2,
     numResults: 1,
-    opAttrs: { gpuCapable: true },
+    opAttrs: { gpuCapable: true, launchBoundary: 'matmul', layoutSensitivity: 4, inferLayout: dotLayout },
     traits: [OpTrait.OPAQUE, OpTrait.OUT_EWISE_FUSABLE],
     attrs: [
       { name: 'lhs_contracting', type: 'array', required: true },
@@ -74,6 +102,7 @@ export function register(registry: OpRegistry) {
     name: 'cublas_gemm',
     numOperands: 2,
     numResults: 1,
+    opAttrs: { launchBoundary: 'matmul' },
     traits: [OpTrait.OPAQUE],
     attrs: [
       { name: 'lhs_contracting', type: 'array', required: true },
@@ -107,7 +136,7 @@ export function register(registry: OpRegistry) {
     name: 'conv',
     numOperands: 2,
     numResults: 1,
-    opAttrs: { gpuCapable: true },
+    opAttrs: { gpuCapable: true, launchBoundary: 'conv', layoutSensitivity: 4, inferLayout: convLayout },
     traits: [OpTrait.OPAQUE],
     attrs: [
       { name: 'strides', type: 'array', required: true },

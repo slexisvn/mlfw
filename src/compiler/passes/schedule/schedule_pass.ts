@@ -36,7 +36,7 @@ export class SchedulePass extends PrimFuncPass {
     const sCfg = this.config.scheduling as Record<string, boolean>;
     const trace = ctx.trace;
     if (sCfg.autotune) {
-      if (pf.hasAttr(FuncAttr.CUBLAS_INFO) || pf.hasAttr(FuncAttr.TENSOR_INTRIN)) return;
+      if (pf.hasAttr(FuncAttr.EXTERNAL_CODEGEN) || pf.hasAttr(FuncAttr.TENSOR_INTRIN)) return;
       const ft0 = performance.now();
       const tuneResult = (this._autotuner as Autotuner).tuneAndApply(pf);
       const durationMs = performance.now() - ft0;
@@ -54,7 +54,7 @@ export class SchedulePass extends PrimFuncPass {
       }
       trace.autotuneStats(pf.name, { durationMs, blockCount, applied: !!(tuneResult && tuneResult.applied), cacheHits });
     } else if (sCfg.enabled || sCfg.gpuTiling) {
-      if (pf.hasAttr(FuncAttr.CUBLAS_INFO) || pf.hasAttr(FuncAttr.TENSOR_INTRIN)) return;
+      if (pf.hasAttr(FuncAttr.EXTERNAL_CODEGEN) || pf.hasAttr(FuncAttr.TENSOR_INTRIN)) return;
       const ft0 = performance.now();
       const sch = new Schedule(pf);
       const handled = applyDeterministicGpuSchedule(sch, this.target as never, sCfg as never);

@@ -57,7 +57,7 @@ export class AutoTensorizePass extends PrimFuncPass {
   }
 
   override run(pf: PrimFunc, ctx: TirPassCtx): void {
-    if (pf.hasAttr(FuncAttr.CUBLAS_INFO) || pf.hasAttr(FuncAttr.TENSOR_INTRIN)) return;
+    if (pf.hasAttr(FuncAttr.EXTERNAL_CODEGEN) || pf.hasAttr(FuncAttr.TENSOR_INTRIN)) return;
     if (!this.target || !this.target.isGPU()) return;
     const info = detectWmmaMatmul(pf);
     if (!info) return;

@@ -1,3 +1,6 @@
+import { TargetAttr } from '../compiler/pipeline/target_attrs.js';
+import { launchBoundaryClass } from '../compiler/ir/graph/op_traits.js';
+
 export const TargetKind = Object.freeze({
   CPU: 'cpu',
   CUDA: 'cuda',
@@ -31,7 +34,7 @@ export type TargetFeaturesConfig = {
   l2CacheBytes?: number;
   supportsFloat16?: boolean;
   supportsTensorCore?: boolean;
-  libraryOps?: ReadonlySet<string>;
+  libraryClasses?: ReadonlySet<string>;
   enableEpilogueFusion?: boolean;
   preferredConvLayout?: string | null;
   layoutAwareOps?: ReadonlySet<string> | Iterable<string>;
@@ -68,7 +71,7 @@ export class TargetFeatures {
   l2CacheBytes: number;
   supportsFloat16: boolean;
   supportsTensorCore: boolean;
-  libraryOps: ReadonlySet<string>;
+  libraryClasses: ReadonlySet<string>;
   enableEpilogueFusion: boolean;
   preferredConvLayout: string | null;
   layoutAwareOps: ReadonlySet<string>;
@@ -102,7 +105,7 @@ export class TargetFeatures {
     this.l2CacheBytes = config.l2CacheBytes || 0;
     this.supportsFloat16 = config.supportsFloat16 ?? false;
     this.supportsTensorCore = config.supportsTensorCore ?? false;
-    this.libraryOps = config.libraryOps || new Set();
+    this.libraryClasses = config.libraryClasses || new Set();
     this.enableEpilogueFusion = config.enableEpilogueFusion ?? false;
     this.preferredConvLayout = config.preferredConvLayout || null;
     this.layoutAwareOps = config.layoutAwareOps instanceof Set ? config.layoutAwareOps : new Set(config.layoutAwareOps || []);
@@ -154,7 +157,8 @@ export class TargetFeatures {
   }
 
   hasLibraryOp(opName: string): boolean {
-    return this.libraryOps.has(opName);
+    const cls = launchBoundaryClass(opName);
+    return cls !== null && this.libraryClasses.has(cls);
   }
 }
 
@@ -193,9 +197,13 @@ export const CUDATarget = (overrides: TargetOverrides = {}): TargetFeatures => n
   computeTFLOPs: 15,
   supportsFloat16: true,
   supportsTensorCore: false,
-  libraryOps: new Set(['dot', 'conv']),
+  libraryClasses: new Set(['matmul', 'conv']),
   enableEpilogueFusion: true,
   supportsInt8: true,
+  attrs: {
+    [TargetAttr.GRAPH_SPLIT]: { matmul: 2, conv: 2, attention: 1 },
+    [TargetAttr.SCHEDULING]: { gpuTiling: true },
+  },
   ...overrides
 });
 
@@ -229,5 +237,6 @@ export const WebGPUTarget = (overrides: TargetOverrides = {}): TargetFeatures =>
   memoryBandwidthGBs: 400,
   computeTFLOPs: 8,
   supportsFloat16: true,
+  attrs: { [TargetAttr.SCHEDULING]: { enabled: true } },
   ...overrides
 });

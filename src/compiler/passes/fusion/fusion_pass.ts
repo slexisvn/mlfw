@@ -32,7 +32,6 @@ export class FusionPass extends FunctionPass {
     this.legality = new FusionLegality({
       maxFusionSize: target.maxFusionSize || config.maxFusionSize,
       maxSharedMemory: target.sharedMemoryBytes || config.maxSharedMemory,
-      libraryOps: target.libraryOps || config.libraryOps,
       allowReductionFusion: config.allowReductionFusion,
     });
     this.costModel = new FusionCostModel({
@@ -40,7 +39,7 @@ export class FusionPass extends FunctionPass {
       computeTFLOPs: target.computeTFLOPs,
       maxRegistersPerThread: target.registersPerThread,
       maxSharedMemory: target.sharedMemoryBytes,
-      libraryOps: target.libraryOps,
+      hasLibraryOp: target.hasLibraryOp ? (opName: string) => (target.hasLibraryOp as (n: string) => boolean)(opName) : undefined,
       policy: target.getAttr ? target.getAttr<FusionCostConfig['policy']>('fusionPolicy') ?? null : null,
       ...config.cost,
     });

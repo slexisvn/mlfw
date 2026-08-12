@@ -157,6 +157,7 @@ export function register(registry: OpRegistry) {
     name: 'quantized_conv',
     numOperands: 2,
     numResults: 1,
+    opAttrs: { launchBoundary: 'conv' },
     traits: [OpTrait.OPAQUE],
     attrs: [
       { name: 'strides', type: 'array', required: true },

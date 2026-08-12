@@ -7,14 +7,20 @@ import type { PassContext } from '../passes/pass.js';
 import { TirPassManager } from '../passes/tir_pass_manager.js';
 import { buildGraphPipeline } from './graph_pipeline.js';
 import { buildTirPipeline } from './tir_pipeline.js';
+import { buildLirPipeline } from './lir_pipeline.js';
+import { LirPassManager } from '../passes/lir_pass_manager.js';
 import { lowerGraphToPrimFunc } from '../passes/lowering/graph_to_tensor.js';
 import { TirModule } from '../ir/tensor/module.js';
-import { BackendPipeline, detectPureMatmul } from '../../backend/pipeline.js';
+import { BackendPipeline } from '../../backend/pipeline.js';
+import { activeExternalCodegenProviders } from './external_codegen.js';
+import type { ExternalKernelInfo } from './external_codegen.js';
 import { RuntimeModule } from '../../runtime/runtime.js';
 import { CalibrationCollector } from '../analysis/calibration.js';
 import { collectCalibration } from '../analysis/calibrate_exec.js';
 import { GraphPartitionPass, PartitionMaterializationPass } from '../passes/partition/partition_pass.js';
 import { splitGraph } from './graph_split.js';
+import { TargetAttr, targetAttr } from './target_attrs.js';
+import type { SchedulingDefaults } from './target_attrs.js';
 import { detectPureConv } from '../schedule/conv_implicit_gemm.js';
 
 import { TraceLog, TraceLevel, CompilationError } from './trace.js';
@@ -30,10 +36,12 @@ export { VerifyLevel } from './invariant_check.js';
 
 import type { GraphFunction } from '../ir/graph/function.js';
 import type { PrimFunc } from '../ir/tensor/nodes.js';
+import type { LIRFunc } from '../ir/lir/nodes.js';
 import type { CompileTarget, FusionConfig, MemoryConfig, OptimizationConfig, QuantizationConfig, GraphPass, TirPass } from './pipeline_types.js';
 import type { VerifyLevelValue } from './invariant_check.js';
 import type { TraceLogConfig, TraceSink, IRSnapshotFlags } from './trace.js';
 import type { PartitionerOpts } from '../analysis/partitioner.js';
+import type { GpuLaunchDiagnosis } from '../analysis/gpu_race.js';
 import type { IRLevelValue } from '../ir/verify.js';
 
 export type SchedulingConfig = { enabled?: boolean; autotune?: boolean; gpuTiling?: boolean; [key: string]: unknown };
@@ -74,7 +82,6 @@ export type CompileContext = {
   resilient: boolean;
   original: GraphModule;
   working: GraphModule;
-  cudaMatmulChain: boolean;
   split: GraphSplitResult;
   tirModule: TirModule | null;
   lirFuncs: LIRFuncLike[] | null;
@@ -83,7 +90,7 @@ export type CompileContext = {
 
 export type LIRFuncLike = { name: string; getAttr?(key: string): unknown; shapeParamMap?: Map<string, unknown>; bufferMap?: unknown };
 
-export type GraphSplitResult = { cublasInfos?: Map<string, unknown>; plan?: unknown } | null;
+export type GraphSplitResult = { cublasInfos?: ReadonlyMap<string, ExternalKernelInfo>; plan?: unknown } | null;
 
 export type CompilePhase = {
   name: string;
@@ -121,12 +128,10 @@ export class CompilerConfig {
     this.verify = normalizeVerifyLevel(opts.verify);
     this.errorMode = opts.errorMode || 'strict';
 
-    const isWebGPU = this.target && typeof this.target.isWebGPU === 'function' && this.target.isWebGPU();
-    const isGPU = this.target && typeof this.target.isGPU === 'function' && this.target.isGPU();
-    const isCuda = isGPU && !isWebGPU;
+    const schedulingDefaults = targetAttr<SchedulingDefaults>(this.target, TargetAttr.SCHEDULING) || {};
 
     this.fusion = { enabled: true, strategy: 'priority', ...opts.fusion };
-    this.scheduling = { enabled: isWebGPU, autotune: false, gpuTiling: isCuda, ...opts.scheduling };
+    this.scheduling = { enabled: false, autotune: false, gpuTiling: false, ...schedulingDefaults, ...opts.scheduling };
     this.matmulBackend = opts.matmulBackend || 'native';
     this.quantization = { enabled: false, ...opts.quantization };
     this.optimization = {
@@ -258,7 +263,6 @@ export class Compiler {
       resilient,
       original: graphModule,
       working: resilient ? cloneGraphModule(graphModule) : graphModule,
-      cudaMatmulChain: false,
       split: null,
       tirModule: null,
       lirFuncs: null,
@@ -296,7 +300,7 @@ export class Compiler {
       },
       {
         name: 'graphPasses',
-        run: (ctx: CompileContext) => { ctx.cudaMatmulChain = ctx.compiler._runGraphPasses(ctx.working, ctx.original, ctx.trace, ctx.errors, ctx.failed, ctx.resilient); },
+        run: (ctx: CompileContext) => ctx.compiler._runGraphPasses(ctx.working, ctx.original, ctx.trace, ctx.errors, ctx.failed, ctx.resilient),
       },
       {
         name: 'partition',
@@ -307,16 +311,7 @@ export class Compiler {
         name: 'split',
         run: (ctx: CompileContext) => {
           const cfg = ctx.compiler.config;
-          const isWebGPU = typeof cfg.target.isWebGPU === 'function' && cfg.target.isWebGPU();
-          const isCuda = typeof cfg.target.isGPU === 'function' && cfg.target.isGPU() && !isWebGPU;
-          let convCount = 0, attentionCount = 0;
-          for (const func of ctx.working) for (const op of func.ops()) {
-            if (op.opName === 'conv' || op.opName === 'quantized_conv') convCount++;
-            else if (op.opName === 'scaled_dot_product_attention') attentionCount++;
-          }
-          const cudaConvChain = isCuda && convCount >= 2;
-          const cudaAttention = isCuda && attentionCount > 0;
-          ctx.split = splitGraph(ctx.working, { config: cfg, target: cfg.target, cudaMatmulChain: ctx.cudaMatmulChain, cudaConvChain, cudaAttention, isWebGPU }) as GraphSplitResult;
+          ctx.split = splitGraph(ctx.working, cfg, cfg.target) as GraphSplitResult;
         },
       },
       {
@@ -327,12 +322,10 @@ export class Compiler {
       {
         name: 'lowering',
         run: (ctx: CompileContext) => {
+          const cfg = ctx.compiler.config;
           ctx.tirModule = ctx.compiler._lowerAll(ctx.working, ctx.trace, ctx.errors, ctx.failed, ctx.resilient);
-          if (ctx.compiler.config.matmulBackend === 'cublas') {
-            for (const pf of ctx.tirModule as TirModule) {
-              const info = ctx.split && ctx.split.cublasInfos ? ctx.split.cublasInfos.get(pf.name) : detectPureMatmul(pf);
-              if (info) pf.setAttr(FuncAttr.CUBLAS_INFO, info);
-            }
+          for (const provider of activeExternalCodegenProviders(cfg, cfg.target)) {
+            if (provider.annotate) provider.annotate(ctx.tirModule, ctx.split);
           }
         },
       },
@@ -348,6 +341,10 @@ export class Compiler {
       {
         name: 'lirLowering',
         run: (ctx: CompileContext) => { ctx.lirFuncs = ctx.compiler._lowerToLIR(ctx.tirModule as TirModule, ctx.trace, ctx.errors, ctx.failed, ctx.resilient); },
+      },
+      {
+        name: 'lirPasses',
+        run: (ctx: CompileContext) => ctx.compiler._runLirPasses(ctx),
       },
       {
         name: 'verify:lir',
@@ -397,20 +394,10 @@ export class Compiler {
     trace.phaseEnd('calibrate', performance.now() - t0);
   }
 
-  _runGraphPasses(graphModule: GraphModule, original: GraphModule, trace: TraceLog, errors: CompilationError[], failed: Set<string>, resilient: boolean): boolean {
+  _runGraphPasses(graphModule: GraphModule, original: GraphModule, trace: TraceLog, errors: CompilationError[], failed: Set<string>, resilient: boolean): void {
     const pm = new PassManager();
 
-    let dotCount = 0;
-    for (const func of graphModule) {
-      for (const op of func.ops()) {
-        if (op.opName === 'dot') dotCount++;
-      }
-    }
-    const tgt = this.config.target;
-    const chainThreshold = ((tgt.getAttr && tgt.getAttr('matmulChainThreshold')) ?? (tgt.kind === 'cuda' ? 2 : Infinity)) as number;
-    const cudaMatmulChain = dotCount >= chainThreshold;
-
-    for (const p of buildGraphPipeline(this.config, this.config.target, { cudaMatmulChain, context: this.context })) {
+    for (const p of buildGraphPipeline(this.config, this.config.target, { context: this.context })) {
       pm.addPass(p);
     }
 
@@ -441,8 +428,6 @@ export class Compiler {
       const printer = new IRPrinter();
       trace.irDump('afterGraphPasses', printer.printModule(graphModule));
     }
-
-    return cudaMatmulChain;
   }
 
   _runPartitioning(graphModule: GraphModule, trace: TraceLog): void {
@@ -507,6 +492,20 @@ export class Compiler {
     });
   }
 
+  _runLirPasses(ctx: CompileContext): void {
+    const pm = new LirPassManager();
+    for (const pass of buildLirPipeline(this.config)) pm.addPass(pass);
+    pm.setTrace(ctx.trace);
+    pm.setCheckEachPass(this.config.verifyEachPass);
+    pm.run(ctx.lirFuncs as LIRFunc[], {
+      trace: ctx.trace,
+      config: this.config,
+      errors: ctx.errors,
+      failed: ctx.failed,
+      resilient: ctx.resilient,
+    });
+  }
+
   _verifyGraph(graphModule: GraphModule, phase: string, trace: TraceLog, errors: CompilationError[], failed: Set<string>, resilient: boolean): void {
     if (resilient) {
       for (const func of graphModule) {
@@ -555,7 +554,7 @@ export class Compiler {
     const runtimeMod = new RuntimeModule('compiled');
 
     const usePartition = this.config.usePartition;
-    const backendOpts = { matmulBackend: this.config.matmulBackend, context: this.context };
+    const backendOpts = { context: this.context };
     const backendCache = new Map<string, InstanceType<typeof BackendPipeline>>();
     const getBackend = (target: CompileTarget) => {
       if (!backendCache.has(target.name)) backendCache.set(target.name, new BackendPipeline(target, backendOpts));
@@ -585,6 +584,10 @@ export class Compiler {
         sourceSize: compiled.source.length,
         targetName: compiled.target.name,
       });
+      const diagnosis = compiled.metadata.launchDiagnosis as GpuLaunchDiagnosis | null | undefined;
+      if (diagnosis) {
+        trace.warn('codegen', pf.name, `kernel serialized to a single thread: ${diagnosis.reason}`, diagnosis);
+      }
     });
 
     trace.phaseEnd('codegen', performance.now() - t0);

@@ -1,7 +1,7 @@
 import { ForKind } from '../../compiler/ir/tensor/nodes.js';
 import { jsTypedArray, isJSMathFunc, isDtypeInt, dtypeBytes, jsCompareOp } from '../../util/dtype_map.js';
 import { flattenRowMajorIndex } from '../index_emit.js';
-import { irChildNodes } from '../../compiler/ir/ir_visitor.js';
+import { walk } from '../../compiler/ir/ir_visitor.js';
 import { dynamicDimProduct, resolveShapeParam, isZeroFillBody } from '../codegen_utils.js';
 
 import { LANCZOS_G, LANCZOS_COEFFS, ERF_A, ERF_P } from '../../util/special_math.js';
@@ -601,41 +601,28 @@ export class CPUCodegen {
   }
 
   _scanTree(root: IRStmtNode, usedBuffers: Map<string, Buffer>, allocatedBuffers: Set<string>, readBuffers: Set<string>): void {
-    const stack: IRStmtNode[] = [root];
-    while (stack.length > 0) {
-      const node = stack.pop();
-      if (!node || typeof node !== 'object') continue;
-      switch (node.type) {
-        case 'BufferStoreNode':
-        case 'BufferLoadNode':
-          if (node.buffer) usedBuffers.set(node.buffer.name, node.buffer);
-          if (node.type === 'BufferLoadNode' && node.buffer && readBuffers) readBuffers.add(node.buffer.name);
-          break;
-        case 'AllocateNode':
-          if (node.buffer) allocatedBuffers.add(node.buffer.name);
-          break;
+    walk(root, (node) => {
+      if (node.type === 'BufferStoreNode' || node.type === 'BufferLoadNode') {
+        if (node.buffer) usedBuffers.set(node.buffer.name, node.buffer);
+        if (node.type === 'BufferLoadNode' && node.buffer && readBuffers) readBuffers.add(node.buffer.name);
+      } else if (node.type === 'AllocateNode' && node.buffer) {
+        allocatedBuffers.add(node.buffer.name);
       }
-      if ((node as BlockNode).reads) for (const r of (node as BlockNode).reads) { if (r.buffer) usedBuffers.set(r.buffer.name, r.buffer); }
-      if ((node as BlockNode).writes) for (const w of (node as BlockNode).writes) { if (w.buffer) usedBuffers.set(w.buffer.name, w.buffer); }
-      for (const c of irChildNodes(node)) stack.push(c);
-    }
+      for (const r of (node as BlockNode).reads || []) { if (r.buffer) usedBuffers.set(r.buffer.name, r.buffer); }
+      for (const w of (node as BlockNode).writes || []) { if (w.buffer) usedBuffers.set(w.buffer.name, w.buffer); }
+    });
   }
 
   _findZeroOnlyBuffers(root: IRStmtNode, paramBuffers: Set<string>): Set<string> {
     const bufWrites = new Map<string, TirNode[]>();
-    const stack: IRStmtNode[] = [root];
-    while (stack.length > 0) {
-      const node = stack.pop();
-      if (!node || typeof node !== 'object') continue;
-      if (node.type === 'BufferStoreNode') {
-        const name = node.buffer.name;
-        if (!paramBuffers.has(name)) {
-          if (!bufWrites.has(name)) bufWrites.set(name, []);
-          bufWrites.get(name)!.push(node.value);
-        }
-      }
-      for (const c of irChildNodes(node)) stack.push(c);
-    }
+    walk(root, (node) => {
+      if (node.type !== 'BufferStoreNode') return;
+      const name = node.buffer.name;
+      if (paramBuffers.has(name)) return;
+      const writes = bufWrites.get(name);
+      if (writes) writes.push(node.value);
+      else bufWrites.set(name, [node.value]);
+    });
     const result = new Set<string>();
     this._constantBuffers = new Map();
     for (const [name, writes] of bufWrites) {

@@ -1,41 +1,39 @@
-import { Layout, TensorType } from '../../ir/graph/types.js';
-import type { IRType } from '../../ir/graph/types.js';
+import { TensorType } from '../../ir/graph/types.js';
+import { registry } from '../../ir/graph/ops.js';
+import { OpAttrKey } from '../../ir/graph/op_traits.js';
+import { LayoutPreference } from '../../ir/graph/layout_pref.js';
+import type { Layout, IRType } from '../../ir/graph/types.js';
+import type { InferLayoutFn } from '../../ir/graph/layout_pref.js';
 import type { Operation } from '../../ir/graph/operation.js';
 import type { CompileTarget } from '../../pipeline/pipeline_types.js';
+
+export { LayoutPreference } from '../../ir/graph/layout_pref.js';
 
 export type LayoutPolicyTarget = CompileTarget & { cacheLineBytes?: number };
 export type LayoutRuleFn = (op: Operation, target: LayoutPolicyTarget) => LayoutPreference | null;
 
-export class LayoutPreference {
-  inputs: readonly (Layout | null)[];
-  outputs: readonly (Layout | null)[];
-  cost: number;
-
-  constructor(inputs: readonly (Layout | null)[], outputs: readonly (Layout | null)[], cost = 0) {
-    this.inputs = inputs;
-    this.outputs = outputs;
-    this.cost = cost;
-  }
-}
+const DEFAULT_CACHE_LINE_BYTES = 64;
+const BYTES_PER_F32 = 4;
 
 export class LayoutPolicy {
   target: LayoutPolicyTarget;
-  private _rules: Map<string, LayoutRuleFn>;
+  private _overrides: Map<string, LayoutRuleFn>;
 
   constructor(target: LayoutPolicyTarget) {
     this.target = target;
-    this._rules = new Map();
-    this._initDefaultRules();
+    this._overrides = new Map();
   }
 
   registerRule(opName: string, fn: LayoutRuleFn): void {
-    this._rules.set(opName, fn);
+    this._overrides.set(opName, fn);
   }
 
   getPreference(op: Operation): LayoutPreference | null {
-    const rule = this._rules.get(op.opName);
-    if (rule) return rule(op, this.target);
-    return null;
+    const override = this._overrides.get(op.opName);
+    if (override) return override(op, this.target);
+    const def = registry.get(op.opName);
+    const infer = def === null ? null : def.getAttr<InferLayoutFn>(OpAttrKey.INFER_LAYOUT);
+    return infer ? infer(op, this.target) : null;
   }
 
   estimateConversionCost(fromLayout: Layout | null, toLayout: Layout | null, tensorType: IRType): number {
@@ -50,54 +48,12 @@ export class LayoutPolicy {
     if (!(tensorType instanceof TensorType)) return 0;
     const numEl = tensorType.numel();
     if (numEl < 0) return 0;
-    const opName = consumer.opName;
-    if (opName === 'dot' || opName === 'conv' || opName === 'matmul') return numEl * 4 * useCount;
-    if (opName === 'reduce') return numEl * 2 * useCount;
-    const cacheLineBytes = this.target.cacheLineBytes || 64;
-    if (numEl * 4 <= cacheLineBytes * 4) return 0;
+    const def = registry.get(consumer.opName);
+    const sensitivity = def === null ? null : def.getAttr<number>(OpAttrKey.LAYOUT_SENSITIVITY);
+    if (sensitivity !== null) return numEl * sensitivity * useCount;
+    const cacheLineBytes = this.target.cacheLineBytes || DEFAULT_CACHE_LINE_BYTES;
+    if (numEl * BYTES_PER_F32 <= cacheLineBytes * BYTES_PER_F32) return 0;
     return Math.floor(numEl * 0.5);
-  }
-
-  _initDefaultRules(): void {
-    this._rules.set('conv', (op, tgt) => {
-      const inp = op.getOperand(0).type as TensorType;
-      const rank = inp?.rank || 4;
-
-      if (tgt.preferredConvLayout) {
-        const pref = tgt.preferredConvLayout as unknown as Layout;
-        return new LayoutPreference([pref, null], [pref]);
-      }
-
-      if (tgt.isGPU() && rank === 4) {
-        const nhwc = new Layout([0, 2, 3, 1]);
-        return new LayoutPreference([nhwc, null], [nhwc]);
-      }
-
-      if (tgt.isCPU() && rank === 4) {
-        const nhwc = new Layout([0, 2, 3, 1]);
-        return new LayoutPreference([nhwc, null], [nhwc]);
-      }
-      return null;
-    });
-
-    this._rules.set('dot', (op, tgt) => {
-      const lhsType = op.getOperand(0).type as TensorType;
-      const rhsType = op.getOperand(1).type as TensorType;
-      if (!lhsType || !rhsType) return null;
-      const lhsLayout = Layout.rowMajor(lhsType.rank);
-      if (tgt.isCPU() && rhsType.rank === 2) {
-        const colMajor = Layout.columnMajor(rhsType.rank);
-        return new LayoutPreference([lhsLayout, colMajor], [lhsLayout]);
-      }
-      const rhsLayout = Layout.rowMajor(rhsType.rank);
-      return new LayoutPreference([lhsLayout, rhsLayout], [lhsLayout]);
-    });
-
-    this._rules.set('reduce', (op, tgt) => {
-      const outType = op.getResult(0).type as TensorType;
-      if (!outType) return null;
-      return new LayoutPreference([null], [Layout.rowMajor(outType.rank)]);
-    });
   }
 }
 

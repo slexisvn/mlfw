@@ -21,7 +21,7 @@ export type DominatorFusionConfig = {
   target?: Partial<FusionAwareTarget> | null;
   maxFusionSize?: number;
   maxReductions?: number;
-  libraryOps?: ReadonlySet<string>;
+  hasLibraryOp?: (opName: string) => boolean;
   cost?: FusionCostConfig;
 };
 
@@ -32,7 +32,7 @@ function isSkipOp(opName: string): boolean {
 export class DominatorFusionPass extends FunctionPass {
   maxFusionSize: number;
   maxReductions: number;
-  libraryOps: ReadonlySet<string>;
+  hasLibraryOp: (opName: string) => boolean;
   costModel: FusionCostModel;
 
   constructor(config: DominatorFusionConfig = {}) {
@@ -41,13 +41,13 @@ export class DominatorFusionPass extends FunctionPass {
     const target = config.target || {};
     this.maxFusionSize = target.maxFusionSize || config.maxFusionSize || 512;
     this.maxReductions = config.maxReductions || 1;
-    this.libraryOps = target.libraryOps || config.libraryOps || new Set();
+    this.hasLibraryOp = target.hasLibraryOp ? (opName: string) => (target.hasLibraryOp as (n: string) => boolean)(opName) : (config.hasLibraryOp || (() => false));
     this.costModel = new FusionCostModel({
       memoryBandwidthGBs: target.memoryBandwidthGBs,
       computeTFLOPs: target.computeTFLOPs,
       maxRegistersPerThread: target.registersPerThread,
       maxSharedMemory: target.sharedMemoryBytes,
-      libraryOps: target.libraryOps,
+      hasLibraryOp: target.hasLibraryOp ? (opName: string) => (target.hasLibraryOp as (n: string) => boolean)(opName) : undefined,
       ...config.cost,
     });
   }
@@ -109,14 +109,14 @@ export class DominatorFusionPass extends FunctionPass {
 
       const pattern = classifyOpPattern(op);
       if (pattern === FusionKind.OPAQUE) continue;
-      if (this.libraryOps.has(op.opName)) continue;
+      if (this.hasLibraryOp(op.opName)) continue;
 
       const pdomOp = pdom.immediatePDom(op) as Operation | null;
       if (!pdomOp || isSkipOp(pdomOp.opName)) continue;
 
       const pdomPattern = classifyOpPattern(pdomOp);
       if (pdomPattern === FusionKind.OPAQUE) continue;
-      if (this.libraryOps.has(pdomOp.opName)) continue;
+      if (this.hasLibraryOp(pdomOp.opName)) continue;
 
       if (!this._canFusePatterns(pattern, pdomPattern)) continue;
       if (!this._pathAllFusable(op, pdomOp, topo, pdom)) continue;
@@ -230,7 +230,7 @@ export class DominatorFusionPass extends FunctionPass {
 
           const pattern = classifyOpPattern(user);
           if (pattern === FusionKind.OPAQUE) return false;
-          if (this.libraryOps.has(user.opName)) return false;
+          if (this.hasLibraryOp(user.opName)) return false;
 
           worklist.push(user);
         }
@@ -255,7 +255,7 @@ export class DominatorFusionPass extends FunctionPass {
           visited.add(user);
 
           const pattern = classifyOpPattern(user);
-          if (pattern === FusionKind.OPAQUE || this.libraryOps.has(user.opName)) continue;
+          if (pattern === FusionKind.OPAQUE || this.hasLibraryOp(user.opName)) continue;
 
           if (group.size < this.maxFusionSize && this._checkReductionLimit(group, user)) {
             group.addOp(user);

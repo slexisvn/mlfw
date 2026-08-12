@@ -8,6 +8,7 @@ import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js'
 import { CPUTarget } from '../../../src/backend/target.js';
 import { FunctionPass, PassResult } from '../../../src/compiler/passes/pass.js';
 import { PrimFuncPass } from '../../../src/compiler/passes/tir_pass.js';
+import { buildLirPipeline } from '../../../src/compiler/pipeline/lir_pipeline.js';
 import { registerGraphPass, clearGraphPasses } from '../../../src/compiler/pipeline/graph_pass_registry.js';
 import { registerTirPass, clearTirPasses, snapshotTirPasses } from '../../../src/compiler/pipeline/tir_pass_registry.js';
 import { PrimFunc, SeqNode, EvaluateNode, VariableNode } from '../../../src/compiler/ir/tensor/nodes.js';
@@ -201,10 +202,12 @@ describe('LIR is verified at the boundary, not only under a debug flag', () => {
     expect(calls.n).toBe(1);
   });
 
-  it('runs it at each-pass level too', () => {
+  it('runs after every LIR pass as well as at the boundary under each-pass level', () => {
     const calls = countingLirVerifier();
+    const lirPassCount = buildLirPipeline(new CompilerConfig({ target: CPUTarget() })).length;
     new Compiler({ target: CPUTarget(), verify: VerifyLevel.EACH_PASS }).compile(addModule());
-    expect(calls.n).toBe(1);
+    expect(calls.n).toBe(lirPassCount + 1);
+    expect(lirPassCount).toBeGreaterThan(0);
   });
 
   it('skips it entirely when verification is off', () => {

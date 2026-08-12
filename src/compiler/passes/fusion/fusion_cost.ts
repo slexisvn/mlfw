@@ -28,7 +28,7 @@ export type FusionCostConfig = {
   maxRegistersPerThread?: number;
   maxSharedMemory?: number;
   maxCodeSizeOps?: number;
-  libraryOps?: ReadonlySet<string>;
+  hasLibraryOp?: (opName: string) => boolean;
   registerBytesPerOp?: number;
   policy?: FusionPolicy | null;
   benefitWeights?: Partial<BenefitWeights>;
@@ -48,7 +48,7 @@ export class FusionCostModel {
   maxRegistersPerThread: number;
   maxSharedMemory: number;
   maxCodeSizeOps: number;
-  libraryOps: ReadonlySet<string>;
+  hasLibraryOp: (opName: string) => boolean;
   registerBytesPerOp: number;
   policy: FusionPolicy | null;
   benefitWeights: BenefitWeights;
@@ -61,7 +61,7 @@ export class FusionCostModel {
     this.maxRegistersPerThread = config.maxRegistersPerThread || 255;
     this.maxSharedMemory = config.maxSharedMemory || 49152;
     this.maxCodeSizeOps = config.maxCodeSizeOps || 256;
-    this.libraryOps = config.libraryOps || new Set();
+    this.hasLibraryOp = config.hasLibraryOp || (() => false);
     this.registerBytesPerOp = config.registerBytesPerOp || 8;
     this.policy = config.policy || null;
     this.benefitWeights = { ...DEFAULT_BENEFIT_WEIGHTS, ...(config.benefitWeights || {}) };
@@ -144,7 +144,7 @@ export class FusionCostModel {
       totalFLOPs += flops;
       totalBytes += this.estimateBytes(op);
 
-      if (this.libraryOps.has(op.opName)) libraryCallLoss++;
+      if (this.hasLibraryOp(op.opName)) libraryCallLoss++;
 
       const def = registry.get(op.opName);
       if (def) {

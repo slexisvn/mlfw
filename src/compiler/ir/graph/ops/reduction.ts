@@ -1,15 +1,24 @@
 import { OpDef, OpTrait } from '../op_registry.js';
 import type { OpAttrMap, OpAttrRecord, OpRegistry } from '../op_registry.js';
-import { TensorType, ScalarType } from '../types.js';
+import { TensorType, ScalarType, Layout } from '../types.js';
+import { LayoutPreference } from '../layout_pref.js';
+import type { Operation } from '../operation.js';
 import type { IRType } from '../types.js';
 
 const VALID_REDUCE_TYPES = new Set(['sum', 'max', 'min', 'prod', 'mean', 'and', 'or']);
+
+function reduceLayout(op: Operation): LayoutPreference | null {
+  const outType = op.getResult(0).type as TensorType;
+  if (!outType) return null;
+  return new LayoutPreference([null], [Layout.rowMajor(outType.rank)]);
+}
 
 export function register(registry: OpRegistry) {
   registry.register(new OpDef({
     name: 'reduce',
     numOperands: 2,
     numResults: 1,
+    opAttrs: { launchBoundary: 'reduce', layoutSensitivity: 2, inferLayout: reduceLayout },
     attrs: [
       { name: 'dimensions', type: 'array', required: true },
       { name: 'reduce_type', type: 'string', required: true }

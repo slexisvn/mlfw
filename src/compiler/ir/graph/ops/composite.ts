@@ -65,6 +65,7 @@ export function register(registry: OpRegistry) {
     name: 'scaled_dot_product_attention',
     numOperands: 3,
     numResults: 1,
+    opAttrs: { launchBoundary: 'attention' },
     traits: [OpTrait.OPAQUE],
     attrs: [
       { name: 'scale', type: 'number', required: true },

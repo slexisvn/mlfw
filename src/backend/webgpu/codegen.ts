@@ -2,18 +2,24 @@ import { ForKind } from '../../compiler/ir/tensor/nodes.js';
 import { wgslType, wgslBytes, wgslMathFunc, hasWgslMathFunc, cCompareOp } from '../../util/dtype_map.js';
 import { flattenRowMajorIndex } from '../index_emit.js';
 import { MinHeap } from '../../util/min_heap.js';
-import { irChildNodes } from '../../compiler/ir/ir_visitor.js';
-import { parseThreadAxis, maxBindingExtent, visitStatements, estimateBufferSize, dynamicDimProduct, resolveShapeParam, walkStmtTree } from '../codegen_utils.js';
+import { walk } from '../../compiler/ir/ir_visitor.js';
+import { visitStatements, estimateBufferSize, dynamicDimProduct, resolveShapeParam } from '../codegen_utils.js';
+import { parseThreadAxis, maxBindingExtent } from '../../compiler/analysis/thread_binding.js';
+import { allocatedBufferNames, referencedBuffers, storedBufferNames } from '../../compiler/analysis/tir_queries.js';
+import { profileGpuAccesses, loopCarriedIntermediates, extentMismatchBuffers, GpuRaceReason } from '../../compiler/analysis/gpu_race.js';
+import type { GpuLaunchDiagnosis } from '../../compiler/analysis/gpu_race.js';
 
 
 import { LANCZOS_G, LANCZOS_COEFFS, ERF_A, ERF_P } from '../../util/special_math.js';
 
 import { Buffer } from '../../compiler/ir/tensor/buffer.js';
-import type { AllocateNode, BlockNode, BufferStoreNode, CallExternNode, ForNode, IfThenElseNode, LetStmtNode, NodeSlots, TirNode, VecCopyNode, WhileNode } from '../../compiler/ir/tensor/nodes.js';
+import type { AllocateNode, BlockNode, BufferStoreNode, CallExternNode, ForNode, IfThenElseNode, LetStmtNode, TirNode, VecCopyNode, WhileNode } from '../../compiler/ir/tensor/nodes.js';
 import type { IRStmtNode, LIRAccumulatorNode, LIRBindingsNode, LIRFlatStoreNode, LIRThreadBinding } from '../../compiler/ir/lir/nodes.js';
 import type { BufferDecl, CodegenFunc } from '../codegen_utils.js';
 import type { TargetFeatures } from '../target.js';
 
+const ACCESS_NODE_TYPES = new Set(['BufferLoadNode', 'BufferStoreNode', 'LIRFlatLoadNode', 'LIRFlatStoreNode']);
+const LOOP_NODE_TYPES = new Set(['ForNode', 'WhileNode', 'LIRAccumulatorNode']);
 const BOOL_OPS = new Set(['!', '&&', '||']);
 const CMP_OPS = new Set(['<', '>', '<=', '>=', '==', '!=']);
 
@@ -73,17 +79,6 @@ function _wgslGamma(x: string): string {
   return `(select(exp(${_wgslLanczosCore(x)}), ${reflected}, ${x} < 0.5))`;
 }
 
-const FULL_WALK_KEYS = ['body', 'loopBody', 'condBody', 'initBody', 'thenBody', 'elseBody', 'value', 'a', 'b', 'condition', 'expr', 'offsetExpr'];
-function walkFullChildren(node: IRStmtNode, visit: (child: IRStmtNode) => void): void {
-  const slots = node as unknown as NodeSlots;
-  for (const k of FULL_WALK_KEYS) if (slots[k]) visit(slots[k] as TirNode);
-  if (slots.stmts) for (const s of slots.stmts as TirNode[]) visit(s);
-  if (slots.indices) for (const i of slots.indices as TirNode[]) visit(i);
-  if (slots.args) for (const a of slots.args as TirNode[]) visit(a);
-  if (slots.initLoad) visit(slots.initLoad as TirNode);
-  if (slots.flushStore) visit(slots.flushStore as TirNode);
-}
-
 const WGSL_THREAD_TAG_MAP: WgslNameTable = {
   'threadIdx.x': 'local_invocation_id.x',
   'threadIdx.y': 'local_invocation_id.y',
@@ -93,6 +88,17 @@ const WGSL_THREAD_TAG_MAP: WgslNameTable = {
   'blockIdx.z': 'workgroup_id.z',
 };
 
+export type WebGPUKernelConfig = Readonly<{
+  name: string;
+  source: string;
+  workgroupSize: number[];
+  dispatchSize: number[];
+  sharedMemBytes: number;
+  params: string[];
+  bindings: WebGPUBinding[];
+  launchDiagnosis?: GpuLaunchDiagnosis | null;
+}>;
+
 export class WebGPUKernel {
   name: string;
   source: string;
@@ -101,15 +107,17 @@ export class WebGPUKernel {
   sharedMemBytes: number;
   params: string[];
   bindings: WebGPUBinding[];
+  launchDiagnosis: GpuLaunchDiagnosis | null;
 
-  constructor(name: string, source: string, workgroupSize: number[], dispatchSize: number[], sharedMemBytes: number, params: string[], bindings: WebGPUBinding[]) {
-    this.name = name;
-    this.source = source;
-    this.workgroupSize = workgroupSize;
-    this.dispatchSize = dispatchSize;
-    this.sharedMemBytes = sharedMemBytes;
-    this.params = params;
-    this.bindings = bindings;
+  constructor(config: WebGPUKernelConfig) {
+    this.name = config.name;
+    this.source = config.source;
+    this.workgroupSize = config.workgroupSize;
+    this.dispatchSize = config.dispatchSize;
+    this.sharedMemBytes = config.sharedMemBytes;
+    this.params = config.params;
+    this.bindings = config.bindings;
+    this.launchDiagnosis = config.launchDiagnosis || null;
   }
 }
 
@@ -130,6 +138,7 @@ export class WebGPUCodegen {
   declare _wgPoolDecls: PoolDecl[];
   declare _needsBarriers: boolean;
   declare _serializeThreads: boolean;
+  declare _launchDiagnosis: GpuLaunchDiagnosis | null;
   declare _localSlots: Map<string, string> | null;
   declare _slotDecls: SlotDecl[];
   declare _scalarSlotNames: Set<string>;
@@ -165,6 +174,7 @@ export class WebGPUCodegen {
     this._wgPoolDecls = [];
     this._needsBarriers = false;
     this._serializeThreads = false;
+    this._launchDiagnosis = null;
     this._localSlots = null;
     this._slotDecls = [];
     this._scalarSlotNames = new Set();
@@ -331,14 +341,16 @@ export class WebGPUCodegen {
       Math.min(this._dispatchSize[2], t.maxGridDimZ),
     ];
 
-    return new WebGPUKernel(
-      func.name,
-      this._lines.join('\n'),
-      workgroupSize, dispatchSize,
-      this._sharedBuffers.reduce((sum, b) => sum + Math.max(b.sizeInBytes(), 0), 0),
-      paramNames,
-      bindings
-    );
+    return new WebGPUKernel({
+      name: func.name,
+      source: this._lines.join('\n'),
+      workgroupSize,
+      dispatchSize,
+      sharedMemBytes: this._sharedBuffers.reduce((sum, b) => sum + Math.max(b.sizeInBytes(), 0), 0),
+      params: paramNames,
+      bindings,
+      launchDiagnosis: this._launchDiagnosis,
+    });
   }
 
   _checkF16Usage(func: CodegenFunc): boolean {
@@ -367,22 +379,11 @@ export class WebGPUCodegen {
   }
 
   _scanStoreTargets(root: IRStmtNode): void {
-    const stack: IRStmtNode[] = [root];
-    while (stack.length > 0) {
-      const node = stack.pop();
-      if (!node) continue;
-      if (node.type === 'BufferStoreNode' || node.type === 'LIRFlatStoreNode') {
-        this._storeBuffers.add(node.buffer.name);
-      }
-      if (node.type === 'LIRAccumulatorNode' && node.flushStore) {
-        this._storeBuffers.add(node.flushStore.buffer.name);
-      }
-      for (const c of irChildNodes(node)) stack.push(c);
-    }
+    this._storeBuffers = storedBufferNames(root);
   }
 
   _scanBindings(root: IRStmtNode): void {
-    walkStmtTree(root, (node) => {
+    walk(root, (node) => {
       if (node.type === 'ForNode' && node.kind === ForKind.THREAD_BINDING && node.threadTag) {
         const extent = node.extent.type === 'IntImmNode' ? node.extent.value : 0;
         const isDynamic = node.extent.type !== 'IntImmNode';
@@ -397,7 +398,7 @@ export class WebGPUCodegen {
       if (node.type === 'AllocateNode' && node.scope === 'shared') {
         this._sharedBuffers.push(node.buffer);
       }
-    });
+    }, { kinds: 'stmt' });
   }
 
   _applyBindingDim(tag: string, extent: number): void {
@@ -411,11 +412,19 @@ export class WebGPUCodegen {
     return maxBindingExtent(this._threadBindings, tag);
   }
 
+  _serialize(reason: string, buffers: ReadonlySet<string>): void {
+    this._serializeThreads = true;
+    this._workgroupSize = [1, 1, 1];
+    this._dispatchSize = [1, 1, 1];
+    this._needsBarriers = false;
+    this._launchDiagnosis = { reason, buffers: [...buffers] };
+  }
+
   _hasRecurrence(func: CodegenFunc): boolean {
     let found = false;
-    walkStmtTree(func.body, (n) => {
+    walk(func.body, (n) => {
       if (n.type === 'SyncThreadsNode') { found = true; return false; }
-    });
+    }, { kinds: 'stmt' });
     return found;
   }
 
@@ -426,8 +435,9 @@ export class WebGPUCodegen {
         if (e.extent > 0) extents.add(e.extent);
       }
     }
-    const crossThread = this._threadBindings.size > 0 ? this._findCrossThreadBuffers(func) : new Set<string>();
-    const crossExtent = this._threadBindings.size > 0 ? this._findCrossExtentBuffers(func) : new Set<string>();
+    const profile = profileGpuAccesses(func, { sharedBuffers: this._sharedBuffers, threadBindings: this._threadBindings });
+    const crossThread = this._threadBindings.size > 0 ? loopCarriedIntermediates(profile) : new Set<string>();
+    const crossExtent = this._threadBindings.size > 0 ? extentMismatchBuffers(profile) : new Set<string>();
     this._crossThread = crossThread;
     this._crossExtent = crossExtent;
     const hasRecurrence = this._hasRecurrence(func);
@@ -455,17 +465,12 @@ export class WebGPUCodegen {
         for (const c of candidates) this._promotedBuffers.add(c.name);
         return;
       }
-      this._serializeThreads = true;
-      this._workgroupSize = [1, 1, 1];
-      this._dispatchSize = [1, 1, 1];
-      this._needsBarriers = false;
+      this._serialize(GpuRaceReason.RECURRENCE_EXCEEDS_WORKGROUP, new Set());
+    } else if ((crossThread.size > 0 || crossExtent.size > 0) && dispatchProduct > 1) {
+      const reason = crossThread.size > 0 ? GpuRaceReason.THREAD_SHARED_INTERMEDIATE : GpuRaceReason.EXTENT_MISMATCH;
+      this._serialize(reason, new Set([...crossThread, ...crossExtent]));
     } else {
-      this._serializeThreads = (crossThread.size > 0 || crossExtent.size > 0) && dispatchProduct > 1;
-      if (this._serializeThreads) {
-        this._workgroupSize = [1, 1, 1];
-        this._dispatchSize = [1, 1, 1];
-      }
-      this._needsBarriers = !this._serializeThreads;
+      this._needsBarriers = true;
     }
 
     for (const c of candidates) {
@@ -480,18 +485,18 @@ export class WebGPUCodegen {
 
   _collectPromotionCandidates(func: CodegenFunc, storageNames: ReadonlySet<string>): BufferDecl[] {
     const candidates: BufferDecl[] = [];
-    walkStmtTree(func.body, (node) => {
+    walk(func.body, (node) => {
       if (node.type === 'AllocateNode' && node.scope !== 'shared' && !storageNames.has(node.buffer.name)) {
         const numel = node.buffer.numel();
         const size = numel > 0 ? numel : this._estimateBufferSize(node.buffer);
         if (size > 0) candidates.push({ name: node.buffer.name, dtype: node.buffer.dtype, size });
       }
-    });
+    }, { kinds: 'stmt' });
 
     const refBuffers = new Map<string, Buffer>();
-    this._scanBufferRefs(func.body, refBuffers);
+    referencedBuffers(func.body, refBuffers);
     const allocatedNames = new Set<string>();
-    this._scanAllocateNodes(func.body, allocatedNames);
+    allocatedBufferNames(func.body, allocatedNames);
     const candidateNames = new Set(candidates.map(c => c.name));
     for (const [name, buf] of refBuffers) {
       if (storageNames.has(name) || allocatedNames.has(name)) continue;
@@ -505,31 +510,24 @@ export class WebGPUCodegen {
 
   _findRecurrenceBody(root: IRStmtNode): IRStmtNode | null {
     let found: IRStmtNode | null = null;
-    walkStmtTree(root, (node) => {
+    walk(root, (node) => {
       if (!found && node.type === 'ForNode' && node.kind === ForKind.RECURRENCE) { found = node.body; return false; }
-    });
+    }, { kinds: 'stmt' });
     return found;
   }
 
   _namesTouchedOutside(root: IRStmtNode, skip: IRStmtNode | null, names: ReadonlySet<string>): Set<string> {
     const result = new Set<string>();
-    const walk = (node: IRStmtNode | null) => {
-      if (!node || node === skip) return;
-      if ((node.type === 'BufferLoadNode' || node.type === 'BufferStoreNode' ||
-           node.type === 'LIRFlatLoadNode' || node.type === 'LIRFlatStoreNode') && node.buffer
-        && names.has(node.buffer.name)) result.add(node.buffer.name);
-      if (node.type === 'LIRAccumulatorNode') {
-        if (node.flushStore && node.flushStore.buffer && names.has(node.flushStore.buffer.name)) result.add(node.flushStore.buffer.name);
-        if (node.initLoad && node.initLoad.buffer && names.has(node.initLoad.buffer.name)) result.add(node.initLoad.buffer.name);
+    walk(root, (node) => {
+      if (node === skip) return false;
+      const n = node as unknown as { buffer?: Buffer; flushStore?: { buffer?: Buffer }; initLoad?: { buffer?: Buffer } };
+      const touch = (buffer: Buffer | null | undefined) => { if (buffer && names.has(buffer.name)) result.add(buffer.name); };
+      if (ACCESS_NODE_TYPES.has(node.type)) touch(n.buffer);
+      else if (node.type === 'LIRAccumulatorNode') {
+        touch(n.flushStore && n.flushStore.buffer);
+        touch(n.initLoad && n.initLoad.buffer);
       }
-      for (const f of ['stmts', 'body', 'initBody', 'condBody', 'loopBody', 'thenBody', 'elseBody', 'value', 'a', 'b', 'condition', 'expr', 'offsetExpr', 'extent', 'indices', 'args']) {
-        const c = (node as unknown as NodeSlots)[f];
-        if (!c) continue;
-        if (Array.isArray(c)) { for (const e of c) walk(e); }
-        else if (typeof c === 'object') walk(c);
-      }
-    };
-    walk(root);
+    });
     return result;
   }
 
@@ -572,116 +570,6 @@ export class WebGPUCodegen {
       bytes += peak * (wgslBytes(dtype) || 4);
     }
     return { offsets, decls, bytes };
-  }
-
-  _findCrossThreadBuffers(func: CodegenFunc): Set<string> {
-    const storageNames = new Set<string>();
-    for (const [, buf] of func.bufferMap) storageNames.add(buf.name);
-    const result = new Set<string>();
-
-    const indexUsesLoopVar = (indices: readonly IRStmtNode[], loopVars: readonly string[]) => {
-      if (loopVars.length === 0) return false;
-      const names = new Set<string>();
-      for (const idx of indices) this._collectVarNames(idx, names);
-      return loopVars.some(v => names.has(v));
-    };
-
-    const aliasOf = (expr: IRStmtNode, vars: readonly string[]) => {
-      const bv = new Set<string>();
-      this._collectVarNames(expr, bv);
-      for (const v of bv) if (vars.includes(v)) return true;
-      return false;
-    };
-
-    const walk = (node: IRStmtNode | null, loopVars: readonly string[]) => {
-      if (!node) return;
-      let inner = loopVars;
-      const isSeqLoop = (node.type === 'ForNode' && node.kind !== ForKind.THREAD_BINDING)
-        || node.type === 'WhileNode' || node.type === 'LIRAccumulatorNode';
-      if (isSeqLoop && (node as ForNode).loopVar) inner = [...loopVars, (node as ForNode).loopVar.name];
-
-      if (node.type === 'LIRBindingsNode' && node.bindings) {
-        for (const b of node.bindings) {
-          if (!inner.includes(b.name) && aliasOf(b.expr, inner)) inner = [...inner, b.name];
-        }
-      }
-      if (node.type === 'BlockNode' && node.iterVars) {
-        for (const iv of node.iterVars) {
-          if (iv.iterVar && iv.binding && !inner.includes(iv.iterVar.name) && aliasOf(iv.binding, inner)) {
-            inner = [...inner, iv.iterVar.name];
-          }
-        }
-      }
-      if (node.type === 'LetStmtNode' && node.variable && !inner.includes(node.variable.name) && aliasOf(node.value, inner)) {
-        inner = [...inner, node.variable.name];
-      }
-
-      if (node.type === 'BufferLoadNode' && node.buffer && !storageNames.has(node.buffer.name)
-        && indexUsesLoopVar(node.indices || [], inner)) result.add(node.buffer.name);
-      if (node.type === 'LIRFlatLoadNode' && node.buffer && !storageNames.has(node.buffer.name)
-        && node.offsetExpr && indexUsesLoopVar([node.offsetExpr], inner)) result.add(node.buffer.name);
-
-      walkFullChildren(node, (c) => walk(c, inner));
-    };
-
-    walk(func.body, []);
-    return result;
-  }
-
-  _findCrossExtentBuffers(func: CodegenFunc): Set<string> {
-    const storageNames = new Set<string>();
-    for (const [, buf] of func.bufferMap) storageNames.add(buf.name);
-    const stores = new Map<string, Set<number>>();
-    const loads = new Map<string, Set<number>>();
-    const threadVarying = new Set<string>();
-    const isConst = (v: IRStmtNode | null) => v && (v.type === 'FloatImmNode' || v.type === 'IntImmNode');
-
-    const record = (map: Map<string, Set<number>>, name: string, extent: number) => {
-      if (storageNames.has(name)) return;
-      let s = map.get(name);
-      if (!s) { s = new Set(); map.set(name, s); }
-      s.add(extent);
-    };
-
-    const walk = (node: IRStmtNode | null, extent: number) => {
-      if (!node) return;
-      let inner = extent;
-      if (node.type === 'ForNode' && node.kind === ForKind.THREAD_BINDING) {
-        const e = node.extent && node.extent.type === 'IntImmNode' ? node.extent.value : 0;
-        if (e > 0) inner = extent * e;
-      }
-      if (node.type === 'BufferStoreNode' && node.buffer) { record(stores, node.buffer.name, inner); if (!isConst(node.value)) threadVarying.add(node.buffer.name); }
-      if (node.type === 'LIRFlatStoreNode' && node.buffer) { record(stores, node.buffer.name, inner); if (!isConst(node.value)) threadVarying.add(node.buffer.name); }
-      if (node.type === 'LIRAccumulatorNode' && node.flushStore && node.flushStore.buffer) { record(stores, node.flushStore.buffer.name, inner); threadVarying.add(node.flushStore.buffer.name); }
-      if (node.type === 'BufferLoadNode' && node.buffer) record(loads, node.buffer.name, inner);
-      if (node.type === 'LIRFlatLoadNode' && node.buffer) record(loads, node.buffer.name, inner);
-
-      walkFullChildren(node, (c) => walk(c, inner));
-    };
-    walk(func.body, 1);
-
-    const result = new Set<string>();
-    for (const [name, loadExtents] of loads) {
-      if (!threadVarying.has(name)) continue;
-      const storeExtents = stores.get(name);
-      if (!storeExtents) continue;
-      for (const le of loadExtents) if (!storeExtents.has(le)) { result.add(name); break; }
-    }
-    return result;
-  }
-
-  _collectVarNames(node: IRStmtNode | null, out: Set<string>): void {
-    const stack: (IRStmtNode | null)[] = [node];
-    while (stack.length > 0) {
-      const n = stack.pop();
-      if (!n || typeof n !== 'object') continue;
-      if (n.type === 'VariableNode') { out.add(n.name); continue; }
-      for (const k of ['a', 'b', 'condition', 'thenBody', 'elseBody', 'expr', 'offsetExpr']) {
-        if ((n as unknown as NodeSlots)[k]) stack.push((n as unknown as NodeSlots)[k] as TirNode);
-      }
-      if ((n as unknown as NodeSlots).indices) for (const i of (n as unknown as NodeSlots).indices as TirNode[]) stack.push(i);
-      if ((n as unknown as NodeSlots).args) for (const a of (n as unknown as NodeSlots).args as TirNode[]) stack.push(a);
-    }
   }
 
   _emit(line: string): void {
@@ -766,16 +654,16 @@ export class WebGPUCodegen {
       !storageNames.has(name) && !sharedNames.has(name) && !this._promotedBuffers.has(name);
 
     const refBuffers = new Map<string, Buffer>();
-    this._scanBufferRefs(func.body, refBuffers);
+    referencedBuffers(func.body, refBuffers);
     for (const [name, buf] of refBuffers) {
       if (isLocal(name)) locals.set(name, buf);
     }
 
-    walkStmtTree(func.body, (node) => {
+    walk(func.body, (node) => {
       if (node.type === 'AllocateNode' && node.scope !== 'shared' && node.buffer && isLocal(node.buffer.name)) {
         locals.set(node.buffer.name, node.buffer);
       }
-    });
+    }, { kinds: 'stmt' });
     return locals;
   }
 
@@ -842,87 +730,48 @@ export class WebGPUCodegen {
   _livenessWalk(root: IRStmtNode, locals: LivenessScope): LivenessResult {
     const minPos = new Map<string, number>();
     const maxPos = new Map<string, number>();
-    const LOOP_TYPES = new Set(['ForNode', 'WhileNode', 'LIRAccumulatorNode']);
-    const CHILD_FIELDS = ['stmts', 'body', 'initBody', 'condBody', 'loopBody', 'thenBody',
-      'elseBody', 'value', 'a', 'b', 'condition', 'expr', 'offsetExpr', 'extent', 'indices', 'args'];
 
     let pos = 0;
-    const loopStack: IRStmtNode[] = [];
+    let loopDepth = 0;
     let outerSet: Set<string> | null = null;
     let outerStart = 0;
 
-    const touch = (name: string) => {
-      if (!locals.has(name)) return;
+    const touch = (buffer: Buffer | null | undefined) => {
+      if (!buffer || !locals.has(buffer.name)) return;
+      const name = buffer.name;
       if (!minPos.has(name)) minPos.set(name, pos);
       maxPos.set(name, pos);
-      if (loopStack.length > 0) outerSet!.add(name);
+      if (outerSet) outerSet.add(name);
     };
 
-    const walk = (node: IRStmtNode | null) => {
-      if (!node) return;
-      pos++;
-      const isLoop = LOOP_TYPES.has(node.type);
-      let openedOuter = false;
-      if (isLoop) {
-        if (loopStack.length === 0) { outerSet = new Set(); outerStart = pos; openedOuter = true; }
-        loopStack.push(node);
-      }
-      if ((node.type === 'BufferLoadNode' || node.type === 'BufferStoreNode' ||
-           node.type === 'LIRFlatLoadNode' || node.type === 'LIRFlatStoreNode') && node.buffer) {
-        touch(node.buffer.name);
-      }
-      if (node.type === 'LIRAccumulatorNode') {
-        if (node.flushStore && node.flushStore.buffer) touch(node.flushStore.buffer.name);
-        if (node.initLoad && node.initLoad.buffer) touch(node.initLoad.buffer.name);
-      }
-      for (const f of CHILD_FIELDS) {
-        const c = (node as unknown as NodeSlots)[f];
-        if (!c) continue;
-        if (Array.isArray(c)) { for (const e of c) walk(e); }
-        else if (typeof c === 'object') walk(c);
-      }
-      if (isLoop) {
-        loopStack.pop();
-        if (openedOuter) {
-          const endPos = pos;
-          for (const name of outerSet as unknown as Set<string>) {
-            minPos.set(name, Math.min(minPos.get(name) as number, outerStart));
-            maxPos.set(name, Math.max(maxPos.get(name) as number, endPos));
-          }
-          outerSet = null;
+    const openedOuterAt = new Set<IRStmtNode>();
+
+    walk(root, {
+      pre: (node) => {
+        pos++;
+        if (LOOP_NODE_TYPES.has(node.type)) {
+          if (loopDepth === 0) { outerSet = new Set(); outerStart = pos; openedOuterAt.add(node as IRStmtNode); }
+          loopDepth++;
         }
-      }
-    };
-
-    walk(root);
+        const n = node as unknown as { buffer?: Buffer; flushStore?: { buffer?: Buffer }; initLoad?: { buffer?: Buffer } };
+        if (ACCESS_NODE_TYPES.has(node.type)) touch(n.buffer);
+        else if (node.type === 'LIRAccumulatorNode') {
+          touch(n.flushStore && n.flushStore.buffer);
+          touch(n.initLoad && n.initLoad.buffer);
+        }
+      },
+      post: (node) => {
+        if (!LOOP_NODE_TYPES.has(node.type)) return;
+        loopDepth--;
+        if (!openedOuterAt.delete(node as IRStmtNode)) return;
+        for (const name of outerSet as Set<string>) {
+          minPos.set(name, Math.min(minPos.get(name) as number, outerStart));
+          maxPos.set(name, Math.max(maxPos.get(name) as number, pos));
+        }
+        outerSet = null;
+      },
+    });
     return { minPos, maxPos };
-  }
-
-  _scanAllocateNodes(root: IRStmtNode, names: Set<string>): void {
-    const stack: IRStmtNode[] = [root];
-    while (stack.length > 0) {
-      const node = stack.pop();
-      if (!node) continue;
-      if (node.type === 'AllocateNode') names.add(node.buffer.name);
-      for (const c of irChildNodes(node)) stack.push(c);
-    }
-  }
-
-  _scanBufferRefs(root: IRStmtNode, refs: Map<string, Buffer>): void {
-    const stack: IRStmtNode[] = [root];
-    while (stack.length > 0) {
-      const node = stack.pop();
-      if (!node) continue;
-      if ((node.type === 'BufferLoadNode' || node.type === 'BufferStoreNode' ||
-           node.type === 'LIRFlatLoadNode' || node.type === 'LIRFlatStoreNode') && node.buffer) {
-        refs.set(node.buffer.name, node.buffer);
-      }
-      if (node.type === 'LIRAccumulatorNode') {
-        if (node.flushStore && node.flushStore.buffer) refs.set(node.flushStore.buffer.name, node.flushStore.buffer);
-        if (node.initLoad && node.initLoad.buffer) refs.set(node.initLoad.buffer.name, node.initLoad.buffer);
-      }
-      for (const c of irChildNodes(node)) stack.push(c);
-    }
   }
 
   _estimateBufferSize(buffer: Buffer): number {
