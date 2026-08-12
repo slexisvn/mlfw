@@ -14,6 +14,7 @@ export type ForKindValue = (typeof ForKind)[keyof typeof ForKind];
 
 export class TensorNode {
   type: string;
+  declare _dtype?: string;
   _parent: TensorNode | null;
   _parentKey: string | null;
   _parentIdx: number;

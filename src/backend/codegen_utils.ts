@@ -2,7 +2,7 @@ import { SymInt, symVarName } from '../compiler/analysis/sym_int.js';
 import type { SymExpr, SymIntOp } from '../compiler/analysis/sym_int.js';
 import type { Buffer } from '../compiler/ir/tensor/buffer.js';
 import type { AllocateNode, BlockNode, BufferStoreNode, ForNode, IfThenElseNode, LetStmtNode, NodeSlots, PrimFunc, TirNode, VecCopyNode, WhileNode } from '../compiler/ir/tensor/nodes.js';
-import type { IRStmtNode, LIRAccumulatorNode, LIRBindingsNode, LIRFlatStoreNode, LIRFunc } from '../compiler/ir/lir/nodes.js';
+import type { IRStmtNode, LIRAccumulatorNode, LIRBindingsNode, LIRFlatStoreNode, LIRFunc, LIRThreadBinding } from '../compiler/ir/lir/nodes.js';
 
 export type CodegenDialect = 'c' | 'js' | 'wat' | 'wgsl';
 export type CodegenFunc = PrimFunc | LIRFunc;
@@ -10,7 +10,6 @@ export type ShapeVarRef = { name: string };
 export type ShapeVarFormatter = (v: ShapeVarRef) => string;
 export type ThreadSpace = 'thread' | 'block';
 export type ThreadAxis = { space: ThreadSpace; axis: number };
-export type ThreadBindingEntry = { varName: string; extent: number; isDynamic: boolean; extentNode: TirNode };
 export type BufferDecl = { name: string; dtype: string; size: number };
 export type DimProductResolver = (buffer: Buffer, dimIdx: number) => string;
 export type StmtTreeVisitor = (node: IRStmtNode) => boolean | void;
@@ -26,7 +25,7 @@ export interface StatementVisitor {
   _visitLIRBindings(node: LIRBindingsNode): void;
   _visitLIRAccumulator(node: LIRAccumulatorNode): void;
   _visitWhileNode(node: WhileNode): void;
-  _visitVecCopyNode?(node: VecCopyNode): void;
+  _visitVecCopyNode(node: VecCopyNode): void;
   _emitSync(): void;
 }
 
@@ -91,7 +90,7 @@ export function visitStatements(cg: StatementVisitor, start: IRStmtNode): void {
       case 'LIRAccumulatorNode': cg._visitLIRAccumulator(cur); continue;
       case 'WhileNode': cg._visitWhileNode(cur); continue;
       case 'SyncThreadsNode': cg._emitSync(); continue;
-      case 'VecCopyNode': cg._visitVecCopyNode!(cur); continue;
+      case 'VecCopyNode': cg._visitVecCopyNode(cur); continue;
       case 'EvaluateNode': continue;
       default: throw new Error(`${cg.constructor.name}: unhandled statement node '${cur.type}'`);
     }
@@ -121,6 +120,7 @@ export function isZeroFillBody(body: IRStmtNode): boolean {
     if (cur.type === 'ForNode' || cur.type === 'BlockNode') { cur = cur.body; continue; }
     if (cur.type === 'BufferStoreNode' || cur.type === 'LIRFlatStoreNode') {
       const val = cur.value;
+      if (!val) return false;
       return (val.type === 'FloatImmNode' && val.value === 0) || (val.type === 'IntImmNode' && val.value === 0);
     }
     return false;
@@ -156,8 +156,8 @@ export function dynamicDimProduct(buffer: Buffer, startDim: number, resolveShape
   return parts.length === 0 ? '1' : parts.join(' * ');
 }
 
-export function maxBindingExtent(threadBindings: ReadonlyMap<string, readonly ThreadBindingEntry[]>, tag: string): number {
-  const entries = threadBindings.get(tag);
+export function maxBindingExtent(threadBindings: ReadonlyMap<string, readonly LIRThreadBinding[]>, tag: string | null): number {
+  const entries = tag === null ? undefined : threadBindings.get(tag);
   if (!entries) return 0;
   let max = 0;
   for (const e of entries) if (e.extent > max) max = e.extent;

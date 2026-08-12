@@ -241,7 +241,7 @@ function lowerAccumulator(forNode: ForNode, acc: AccumulatorInfo, ctx: LowerCtx)
   const flushStore = new LIRFlatStoreNode(
     acc.store.buffer,
     flushOffsetExpr,
-    null!,
+    null,
     acc.store.buffer.dtype,
   );
 

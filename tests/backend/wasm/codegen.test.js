@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { WasmCodegen } from '../../../src/backend/wasm/codegen.js';
 import { WasmTarget } from '../../../src/backend/target.js';
+import { inferDtype } from '../../../src/compiler/ir/lir/nodes.js';
 import { Buffer } from '../../../src/compiler/ir/tensor/buffer.js';
 import {
   PrimFunc, ForNode, BlockNode, SeqNode,
@@ -472,12 +473,7 @@ describe('WasmCodegen._scanMathImports', () => {
 });
 
 
-describe('WasmCodegen._inferDtype', () => {
-  function inferDtype(node) {
-    const cg = makeCodegen();
-    return cg._inferDtype(node);
-  }
-
+describe('inferDtype', () => {
   it('IntImmNode → i32', () => {
     expect(inferDtype(new IntImmNode(0))).toBe('i32');
   });

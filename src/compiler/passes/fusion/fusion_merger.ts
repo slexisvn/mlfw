@@ -130,6 +130,8 @@ export class FusionMergerPass extends FunctionPass {
       }
     }
 
+    if (intermediateBytes < this.minMemorySavings) return false;
+
     let producerOnlyUsedByConsumer = true;
     for (let r = 0; r < producer.numResults; r++) {
       const val = producer.getResult(r);

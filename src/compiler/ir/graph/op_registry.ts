@@ -149,6 +149,7 @@ export class OpDef {
   get isReduction(): boolean { return this.traits.has(OpTrait.REDUCTION); }
   get isBroadcast(): boolean { return this.traits.has(OpTrait.BROADCAST); }
   get isInjective(): boolean { return this.traits.has(OpTrait.INJECTIVE); }
+  get isView(): boolean { return this.traits.has(OpTrait.VIEW); }
   get isOutEWiseFusable(): boolean { return this.traits.has(OpTrait.OUT_EWISE_FUSABLE); }
   get isOpaque(): boolean { return this.traits.has(OpTrait.OPAQUE); }
   get hasSideEffects(): boolean { return this.sideEffects !== SideEffectKind.NONE; }

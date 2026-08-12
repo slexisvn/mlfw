@@ -54,7 +54,7 @@ export class CPUCodegen {
   declare _paramBuffers: Set<string>;
   declare _readBuffers: Set<string>;
   declare _zeroBuffers: Set<string>;
-  declare _constantBuffers: Map<string, string>;
+  declare _constantBuffers: Map<string, number>;
   declare _localBuffers: Set<string>;
   declare _primFunc: CodegenFunc;
 
@@ -87,13 +87,13 @@ export class CPUCodegen {
     this._paramBuffers = paramBuffers;
     this._readBuffers = new Set();
 
-    let usedBuffers: Map<string, Buffer>, allocatedBuffers: Set<string>, zeroBuffers: Set<string>, constantBuffers: Map<string, string>;
+    let usedBuffers: Map<string, Buffer>, allocatedBuffers: Set<string>, zeroBuffers: Set<string>, constantBuffers: Map<string, number>;
 
     if (isLIR) {
-      usedBuffers = func.metadata.usedBuffers as Map<string, Buffer>;
+      usedBuffers = func.metadata.usedBuffers;
       allocatedBuffers = func.metadata.allocatedBuffers;
       zeroBuffers = func.metadata.zeroBuffers;
-      constantBuffers = func.metadata.constantBuffers as Map<string, string>;
+      constantBuffers = func.metadata.constantBuffers;
     } else {
       usedBuffers = new Map();
       allocatedBuffers = new Set();
@@ -112,7 +112,7 @@ export class CPUCodegen {
 
     let poolBytes = 0;
     for (const [, buf] of usedBuffers) {
-      if (buf.poolByteOffset !== undefined && (buf.poolByteOffset as number | null) !== null) {
+      if (buf.poolByteOffset !== undefined) {
         const n = buf.numel();
         if (n > 0) poolBytes = Math.max(poolBytes, buf.poolByteOffset + n * dtypeBytes(buf.dtype));
       }
@@ -154,7 +154,7 @@ export class CPUCodegen {
 
   _allocRhs(buf: Buffer, numel: number): string {
     const ty = jsTypedArray(buf.dtype);
-    if (buf.poolByteOffset !== undefined && (buf.poolByteOffset as number | null) !== null && numel > 0) {
+    if (buf.poolByteOffset !== undefined && numel > 0) {
       return `new ${ty}(_mem_pool, ${buf.poolByteOffset}, ${numel})`;
     }
     return `new ${ty}(${numel})`;
@@ -300,8 +300,8 @@ export class CPUCodegen {
     const prevAcc = this._accTarget;
     const prevVar = this._accVar;
     this._accTarget = {
-      bufName: (node.flushStore as LIRFlatStoreNode).buffer.name,
-      idxExpr: this._exprToJS((node.flushStore as LIRFlatStoreNode).offsetExpr),
+      bufName: node.flushStore.buffer.name,
+      idxExpr: this._exprToJS(node.flushStore.offsetExpr),
     };
     this._accVar = accVar;
 
@@ -321,7 +321,7 @@ export class CPUCodegen {
     this._indent--;
     this._emit('}');
 
-    this._emit((node.flushStore as LIRFlatStoreNode).buffer.name + '[' + this._accTarget.idxExpr + '] = ' + this._wrapStoreVal((node.flushStore as LIRFlatStoreNode).dtype || (node.flushStore as LIRFlatStoreNode).buffer.dtype, accVar) + ';');
+    this._emit(node.flushStore.buffer.name + '[' + this._accTarget.idxExpr + '] = ' + this._wrapStoreVal(node.flushStore.dtype || node.flushStore.buffer.dtype, accVar) + ';');
     this._accTarget = prevAcc;
     this._accVar = prevVar;
   }
@@ -433,7 +433,7 @@ export class CPUCodegen {
           if (this._zeroBuffers && this._zeroBuffers.has(node.buffer.name)) {
             vals.push(this._zeroLit(node.buffer.dtype));
           } else if (this._constantBuffers && this._constantBuffers.has(node.buffer.name)) {
-            const c = this._constantBuffers.get(node.buffer.name) as string;
+            const c = String(this._constantBuffers.get(node.buffer.name));
             vals.push(node.buffer.dtype === 'i64' ? `BigInt(${c})` : c);
           } else if (this._accTarget && node.buffer.name === this._accTarget.bufName && this._flatIndex(node.buffer, node.indices) === this._accTarget.idxExpr) {
             vals.push(this._accVar as string);
@@ -584,7 +584,7 @@ export class CPUCodegen {
       if (cur.type === 'BlockNode') { cur = cur.body; continue; }
       if (cur.type === 'BufferStoreNode' || cur.type === 'LIRFlatStoreNode') {
         const val = cur.value;
-        const isZero = (val.type === 'FloatImmNode' && val.value === 0) || (val.type === 'IntImmNode' && val.value === 0);
+        const isZero = !!val && ((val.type === 'FloatImmNode' && val.value === 0) || (val.type === 'IntImmNode' && val.value === 0));
         if (!isZero || !cur.buffer) return false;
         const name = cur.buffer.name;
         const onlyZero = this._zeroBuffers && this._zeroBuffers.has(name);
@@ -650,7 +650,7 @@ export class CPUCodegen {
       const first = writes[0];
       const isConst = (first.type === 'FloatImmNode' || first.type === 'IntImmNode');
       if (isConst && writes.every(v => v.type === first.type && (v as IntImmNode).value === first.value)) {
-        this._constantBuffers.set(name, String(first.value));
+        this._constantBuffers.set(name, first.value);
       }
     }
     return result;

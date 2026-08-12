@@ -9,106 +9,40 @@ describe('MemoryBlock', () => {
     const block = new MemoryBlock(64, 128, null);
     expect(block.end).toBe(192);
   });
-
-  it('overlaps returns true for intersecting blocks', () => {
-    const a = new MemoryBlock(0, 100, null);
-    const b = new MemoryBlock(50, 100, null);
-    expect(a.overlaps(b)).toBe(true);
-    expect(b.overlaps(a)).toBe(true);
-  });
-
-  it('overlaps returns false for non-intersecting blocks', () => {
-    const a = new MemoryBlock(0, 64, null);
-    const b = new MemoryBlock(128, 64, null);
-    expect(a.overlaps(b)).toBe(false);
-  });
-
-  it('overlaps returns false for adjacent blocks', () => {
-    const a = new MemoryBlock(0, 64, null);
-    const b = new MemoryBlock(64, 64, null);
-    expect(a.overlaps(b)).toBe(false);
-  });
 });
 
 describe('MemoryPool', () => {
-  it('first allocation starts at offset 0', () => {
-    const pool = new MemoryPool('global', 64);
-    const buf = new Buffer('a', [16], 'f32', 'global');
-    const block = pool.allocate(64, buf);
-    expect(block.offset).toBe(0);
-  });
-
-  it('second allocation does not overlap first', () => {
-    const pool = new MemoryPool('global', 64);
-    const buf1 = new Buffer('a', [16], 'f32', 'global');
-    const buf2 = new Buffer('b', [16], 'f32', 'global');
-    const b1 = pool.allocate(64, buf1);
-    const b2 = pool.allocate(64, buf2);
-    expect(b1.overlaps(b2)).toBe(false);
-  });
-
-  it('allocations are aligned to pool alignment', () => {
+  it('placeAt aligns size up and tracks peak usage', () => {
     const pool = new MemoryPool('global', 128);
-    const buf = new Buffer('a', [10], 'f32', 'global');
-    const block = pool.allocate(100, buf);
-    expect(block.offset % 128).toBe(0);
+    const block = pool.placeAt(0, 100, new Buffer('a', [25], 'f32', 'global'));
     expect(block.size % 128).toBe(0);
+    expect(pool.peakUsage).toBe(block.end);
   });
+});
 
-  it('peakUsage tracks maximum memory usage', () => {
-    const pool = new MemoryPool('global', 64);
-    const buf1 = new Buffer('a', [16], 'f32', 'global');
-    const buf2 = new Buffer('b', [16], 'f32', 'global');
-    pool.allocate(256, buf1);
-    pool.allocate(128, buf2);
-    expect(pool.peakUsage).toBeGreaterThanOrEqual(256 + 128);
-  });
-
-  it('release frees a block allowing reuse', () => {
-    const pool = new MemoryPool('global', 64);
-    const buf1 = new Buffer('a', [16], 'f32', 'global');
-    const buf2 = new Buffer('b', [16], 'f32', 'global');
-    const b1 = pool.allocate(64, buf1);
-    pool.release(b1);
-    const b2 = pool.allocate(64, buf2);
-    expect(b2.offset).toBe(0);
-  });
-
-  it('release of non-existent block is a no-op', () => {
-    const pool = new MemoryPool('global', 64);
-    const fakeBlock = new MemoryBlock(0, 64, null);
-    pool.release(fakeBlock);
-    expect(pool.blocks.length).toBe(0);
-  });
-
-  function buildGappedPool(strategy) {
-    const pool = new MemoryPool('global', 64, strategy);
-    const buf = () => new Buffer('x', [1], 'f32', 'global');
-    pool.allocate(64, buf());
-    const big = pool.allocate(192, buf());
-    pool.allocate(64, buf());
-    const mid = pool.allocate(128, buf());
-    pool.allocate(64, buf());
-    pool.release(big);
-    pool.release(mid);
-    return pool;
+describe('BufferAssignment gap strategy', () => {
+  // A, C, E stay live across the probe; B and D die before it, so the probe sees
+  // two reusable holes: a 192-byte one at 256 and a 64-byte one at 576.
+  function assignWithStrategy(strategy) {
+    const mk = (name, numel) => new Buffer(name, [numel], 'f32', 'global');
+    const probe = mk('probe', 16);
+    const intervals = [
+      new BufferInterval(mk('a', 64), 0, 20, 'global'),
+      new BufferInterval(mk('b', 48), 0, 5, 'global'),
+      new BufferInterval(mk('c', 32), 0, 20, 'global'),
+      new BufferInterval(mk('d', 16), 0, 6, 'global'),
+      new BufferInterval(mk('e', 16), 0, 20, 'global'),
+      new BufferInterval(probe, 10, 11, 'global'),
+    ];
+    const assignment = new BufferAssignment().assign(intervals, [], 64, strategy);
+    return assignment.getOffset(probe);
   }
 
-  it('best-fit picks the tightest gap, first-fit the lowest', () => {
-    const firstFit = buildGappedPool('first-fit');
-    const bestFit = buildGappedPool('best-fit');
-
-    const fa = firstFit.allocate(128, new Buffer('f', [1], 'f32', 'global'));
-    const ba = bestFit.allocate(128, new Buffer('b', [1], 'f32', 'global'));
-
-    expect(fa.offset).toBe(64);
-    expect(ba.offset).toBe(320);
-  });
-
-  it('fragmentation reports the fraction of peak not occupied by live blocks', () => {
-    const pool = buildGappedPool('best-fit');
-    expect(pool.fragmentation()).toBeGreaterThan(0);
-    expect(pool.fragmentation()).toBeLessThanOrEqual(1);
+  it('first-fit takes the lowest hole, best-fit the tightest', () => {
+    const firstFit = assignWithStrategy('first-fit');
+    const bestFit = assignWithStrategy('best-fit');
+    expect(firstFit).toBe(256);
+    expect(bestFit).toBe(576);
   });
 });
 

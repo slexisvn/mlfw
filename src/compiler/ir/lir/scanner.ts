@@ -4,7 +4,7 @@ import { ForKind } from '../tensor/nodes.js';
 import { collect as irCollect } from '../ir_visitor.js';
 import type { IRNode } from '../ir_visitor.js';
 import type { PrimFunc, TirNode, BufferStoreNode, IntImmNode, FloatImmNode } from '../tensor/nodes.js';
-import type { LIRMetadata as LIRMetadataType } from './nodes.js';
+import type { LIRMetadata as LIRMetadataType, LIRThreadBinding } from './nodes.js';
 import type { Buffer } from '../tensor/buffer.js';
 export type TargetLike = { isGPU?: () => boolean; kind?: string; name?: string } | null | undefined;
 
@@ -40,7 +40,7 @@ function walkTree(root: TirNode, meta: LIRMetadataType, target: TargetLike): voi
           if (!meta.threadBindings.has(node.threadTag)) {
             meta.threadBindings.set(node.threadTag, [entry]);
           } else {
-            (meta.threadBindings.get(node.threadTag) as unknown[]).push(entry);
+            (meta.threadBindings.get(node.threadTag) as LIRThreadBinding[]).push(entry);
           }
         }
         break;

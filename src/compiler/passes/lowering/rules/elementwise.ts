@@ -49,9 +49,9 @@ export function elementwiseOpNames(): string[] {
   return names;
 }
 
-export function buildElementwiseExpr(opName: string, loadArgs: readonly TirNode[], dtype: string): TirNode | null {
+export function buildElementwiseExpr(opName: string, loadArgs: readonly TirNode[], dtype: string): TirNode {
   const jsOp = elementwiseScalarOp(opName);
-  if (!jsOp) return null;
+  if (!jsOp) throw new Error(`buildElementwiseExpr: op '${opName}' has no elementwise scalar op registered`);
   if (SYNTHETIC_UNARY[opName]) return SYNTHETIC_UNARY[opName](loadArgs);
   if (loadArgs.length === 2 && BINARY_ARITH.has(jsOp)) {
     return new MathOpNode(jsOp, loadArgs[0], loadArgs[1]);
@@ -71,7 +71,7 @@ export function buildElementwiseExpr(opName: string, loadArgs: readonly TirNode[
 export function register(): void {
   for (const opName of elementwiseOpNames()) {
     registerLoweringRule(opName, (ctx, op, inputs, outputs) =>
-      lowerPointwise(ctx, op, inputs, outputs, (o, loads, dtype) => buildElementwiseExpr(o.opName, loads, dtype) as TirNode)
+      lowerPointwise(ctx, op, inputs, outputs, (o, loads, dtype) => buildElementwiseExpr(o.opName, loads, dtype))
     );
   }
 

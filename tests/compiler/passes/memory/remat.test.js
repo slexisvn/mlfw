@@ -207,6 +207,22 @@ describe('RematerializationPass scoring', () => {
   });
 });
 
+describe('RematerializationPass view ops', () => {
+  it('rematerializes a transpose instead of keeping it live', () => {
+    const t = new TensorType([1024, 1024], ScalarType.F32);
+    const func = buildFunction('f', [t], [t, t], (b, args) => {
+      const tr = b.transpose(args[0], [1, 0]);
+      const a = b.add(tr.getResult(0), args[0]);
+      const m = b.mul(tr.getResult(0), args[0]);
+      b.returnOp([a.getResult(0), m.getResult(0)]);
+    });
+
+    expect(findOps(func, 'transpose').length).toBe(1);
+    run(func, { memoryBudget: 1, maxIterations: 1 });
+    expect(findOps(func, 'transpose').length).toBe(2);
+  });
+});
+
 describe('RematerializationPass maxIterations', () => {
   it('maxIterations=1 limits to single rematerialization step', () => {
     const t = new TensorType([1024, 1024], ScalarType.F32);

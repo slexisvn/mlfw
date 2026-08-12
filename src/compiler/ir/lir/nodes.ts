@@ -13,6 +13,7 @@ export interface ParentedNode {
 
 export class LIRNode implements ParentedNode {
   type: string;
+  declare _dtype?: string;
   _parent: ParentedNode | null;
   _parentKey: string | null;
   _parentIdx: number;
@@ -116,10 +117,10 @@ export class LIRFlatStoreNode extends LIRNode {
   declare type: 'LIRFlatStoreNode';
   buffer: Buffer;
   offsetExpr: IRStmtNode;
-  value: IRStmtNode;
+  value: IRStmtNode | null;
   dtype: string;
 
-  constructor(buffer: Buffer, offsetExpr: IRStmtNode, value: IRStmtNode, dtype: string) {
+  constructor(buffer: Buffer, offsetExpr: IRStmtNode, value: IRStmtNode | null, dtype: string) {
     super();
     this.buffer = buffer;
     this.offsetExpr = offsetExpr;
@@ -134,12 +135,12 @@ export type LIRAccumulatorConfig = Readonly<{
   localName: string;
   dtype: string;
   op?: string;
-  initLoad: IRStmtNode;
+  initLoad: LIRFlatLoadNode;
   loopVar: VariableNode;
   extent: IRStmtNode;
   loopKind: string;
   body: IRStmtNode;
-  flushStore: IRStmtNode;
+  flushStore: LIRFlatStoreNode;
   initBody?: IRStmtNode | null;
 }>;
 
@@ -148,12 +149,12 @@ export class LIRAccumulatorNode extends LIRNode {
   localName: string;
   dtype: string;
   op: string;
-  initLoad: IRStmtNode;
+  initLoad: LIRFlatLoadNode;
   loopVar: VariableNode;
   extent: IRStmtNode;
   loopKind: string;
   body: IRStmtNode;
-  flushStore: IRStmtNode;
+  flushStore: LIRFlatStoreNode;
   initBody: IRStmtNode | null;
 
   constructor(config: LIRAccumulatorConfig) {
@@ -188,6 +189,9 @@ export class LIRBindingsNode extends LIRNode {
   }
 }
 
+export type LIRThreadBinding = { varName: string; extent: number; isDynamic: boolean; extentNode: IRStmtNode | null };
+export type LIRExternCall = { argCount: number; dtype: string };
+
 export type LIRMemoryLayout = {
   bufferOffsets: Map<string, number>;
   totalBytes: number;
@@ -195,14 +199,14 @@ export type LIRMemoryLayout = {
 };
 
 export class LIRMetadata {
-  locals: Map<string, unknown>;
-  externCalls: Map<string, unknown>;
+  locals: Map<string, string>;
+  externCalls: Map<string, LIRExternCall>;
   memoryLayout: LIRMemoryLayout;
-  threadBindings: Map<string, unknown>;
-  sharedBuffers: unknown[];
+  threadBindings: Map<string, LIRThreadBinding[]>;
+  sharedBuffers: Buffer[];
   zeroBuffers: Set<string>;
-  constantBuffers: Map<string, unknown>;
-  usedBuffers: Map<string, unknown>;
+  constantBuffers: Map<string, number>;
+  usedBuffers: Map<string, Buffer>;
   allocatedBuffers: Set<string>;
   paramBuffers: Set<string>;
 

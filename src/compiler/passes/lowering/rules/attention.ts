@@ -21,7 +21,7 @@ const I = (n: number): IntImmNode => new IntImmNode(n);
 const ld = (b: Buffer, idx: TirNode[]): BufferLoadNode => new BufferLoadNode(b, idx);
 const st = (b: Buffer, idx: TirNode[], val: TirNode): BufferStoreNode => new BufferStoreNode(b, idx, val);
 const mop = (o: string, a: TirNode, b: TirNode): MathOpNode => new MathOpNode(o, a, b);
-const ext = (name: string, ...args: TirNode[]): CallExternNode => new CallExternNode(name, args, undefined!);
+const ext = (name: string, dtype: string, ...args: TirNode[]): CallExternNode => new CallExternNode(name, args, dtype);
 const forL = (v: VariableNode, n: number, body: TirNode, kind = ForKind.SERIAL): ForNode => new ForNode(v, Z, new IntImmNode(n), kind, body);
 const forT = (v: VariableNode, tag: string, n: number, body: TirNode): ForNode => new ForNode(v, Z, new IntImmNode(n), ForKind.THREAD_BINDING, body, tag);
 
@@ -73,9 +73,9 @@ function buildNaive(ctx: LoweringContext, op: Operation, inputs: Buffer[], outpu
     [{ buffer: s }, { buffer: mn }, { buffer: p }, { buffer: cr }, { buffer: l }],
     new SeqNode([
       st(s, [Z], mop('*', ld(s, [Z]), new FloatImmNode(scale))),
-      st(mn, [Z], ext('max', ld(m, [Z]), ld(s, [Z]))),
-      st(p, [Z], ext('exp', mop('-', ld(s, [Z]), ld(mn, [Z])))),
-      st(cr, [Z], ext('exp', mop('-', ld(m, [Z]), ld(mn, [Z])))),
+      st(mn, [Z], ext('max', dtype, ld(m, [Z]), ld(s, [Z]))),
+      st(p, [Z], ext('exp', dtype, mop('-', ld(s, [Z]), ld(mn, [Z])))),
+      st(cr, [Z], ext('exp', dtype, mop('-', ld(m, [Z]), ld(mn, [Z])))),
       st(l, [Z], mop('+', mop('*', ld(l, [Z]), ld(cr, [Z])), ld(p, [Z]))),
     ]));
 
@@ -167,9 +167,9 @@ function buildTiled(ctx: LoweringContext, op: Operation, inputs: Buffer[], outpu
   const sAccum = forL(ds, Dk, st(s, [Z], mop('+', ld(s, [Z]), mop('*', ld(qreg, [ds]), ld(Ks, [jj, ds])))));
   const scalarUpd = new SeqNode([
     st(s, [Z], mop('*', ld(s, [Z]), new FloatImmNode(scale))),
-    st(mn, [Z], ext('max', ld(m, [Z]), ld(s, [Z]))),
-    st(p, [Z], ext('exp', mop('-', ld(s, [Z]), ld(mn, [Z])))),
-    st(cr, [Z], ext('exp', mop('-', ld(m, [Z]), ld(mn, [Z])))),
+    st(mn, [Z], ext('max', dtype, ld(m, [Z]), ld(s, [Z]))),
+    st(p, [Z], ext('exp', dtype, mop('-', ld(s, [Z]), ld(mn, [Z])))),
+    st(cr, [Z], ext('exp', dtype, mop('-', ld(m, [Z]), ld(mn, [Z])))),
     st(l, [Z], mop('+', mop('*', ld(l, [Z]), ld(cr, [Z])), ld(p, [Z]))),
   ]);
   const oUpd = forL(doo, Dv, st(o, [doo], mop('+', mop('*', ld(o, [doo]), ld(cr, [Z])), mop('*', ld(p, [Z]), ld(Vs, [jj, doo])))));

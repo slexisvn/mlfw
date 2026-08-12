@@ -8,15 +8,14 @@ import { parseThreadAxis, maxBindingExtent, visitStatements, estimateBufferSize,
 
 import { LANCZOS_G, LANCZOS_COEFFS, ERF_A, ERF_P } from '../../util/special_math.js';
 
-import type { Buffer } from '../../compiler/ir/tensor/buffer.js';
-import type { AllocateNode, BlockNode, BufferStoreNode, CallExternNode, ForNode, IfThenElseNode, LetStmtNode, NodeSlots, TirNode, WhileNode } from '../../compiler/ir/tensor/nodes.js';
-import type { IRStmtNode, LIRAccumulatorNode, LIRBindingsNode, LIRFlatLoadNode, LIRFlatStoreNode } from '../../compiler/ir/lir/nodes.js';
-import type { BufferDecl, CodegenFunc, ThreadBindingEntry } from '../codegen_utils.js';
+import { Buffer } from '../../compiler/ir/tensor/buffer.js';
+import type { AllocateNode, BlockNode, BufferStoreNode, CallExternNode, ForNode, IfThenElseNode, LetStmtNode, NodeSlots, TirNode, VecCopyNode, WhileNode } from '../../compiler/ir/tensor/nodes.js';
+import type { IRStmtNode, LIRAccumulatorNode, LIRBindingsNode, LIRFlatStoreNode, LIRThreadBinding } from '../../compiler/ir/lir/nodes.js';
+import type { BufferDecl, CodegenFunc } from '../codegen_utils.js';
 import type { TargetFeatures } from '../target.js';
 
 const BOOL_OPS = new Set(['!', '&&', '||']);
 const CMP_OPS = new Set(['<', '>', '<=', '>=', '==', '!=']);
-const COMPARE_DIRS = new Set(['eq', 'ne', 'lt', 'le', 'gt', 'ge']);
 
 type WgslNameTable = Readonly<Record<string, string | undefined>>;
 type PackedBufEntry = { name: string; offset: number; size: number; dtype: string; argIndex?: number };
@@ -118,7 +117,7 @@ export class WebGPUCodegen {
   target: TargetFeatures;
   _indent: number;
   _lines: string[];
-  _threadBindings: Map<string, ThreadBindingEntry[]>;
+  _threadBindings: Map<string, LIRThreadBinding[]>;
   _sharedBuffers: Buffer[];
   _workgroupSize: number[];
   _dispatchSize: number[];
@@ -175,13 +174,13 @@ export class WebGPUCodegen {
     const isLIR = func.type === 'LIRFunc';
 
     if (isLIR) {
-      for (const [tag, entries] of func.metadata.threadBindings as Map<string, ThreadBindingEntry[]>) {
+      for (const [tag, entries] of func.metadata.threadBindings) {
         this._threadBindings.set(tag, entries);
         for (const entry of entries) {
           if (!entry.isDynamic) this._applyBindingDim(tag, entry.extent);
         }
       }
-      this._sharedBuffers = func.metadata.sharedBuffers as Buffer[];
+      this._sharedBuffers = func.metadata.sharedBuffers;
     } else {
       this._scanBindings(func.body);
     }
@@ -315,7 +314,7 @@ export class WebGPUCodegen {
     }
 
     this._assignLocalSlots(func);
-    this._emitMissingLocalDecls(func);
+    this._emitMissingLocalDecls();
     this._visitNode(func.body);
     this._indent--;
     this._emit('}');
@@ -356,7 +355,8 @@ export class WebGPUCodegen {
     return false;
   }
 
-  _wgslBuiltinAccess(tag: string): string {
+  _wgslBuiltinAccess(tag: string | null): string {
+    if (tag === null) return '_gid.x';
     const idx = tag.indexOf('.');
     if (idx < 0) return '_gid.x';
     const prefix = tag.substring(0, idx);
@@ -375,7 +375,7 @@ export class WebGPUCodegen {
         this._storeBuffers.add(node.buffer.name);
       }
       if (node.type === 'LIRAccumulatorNode' && node.flushStore) {
-        this._storeBuffers.add((node.flushStore as LIRFlatStoreNode).buffer.name);
+        this._storeBuffers.add(node.flushStore.buffer.name);
       }
       for (const c of irChildNodes(node)) stack.push(c);
     }
@@ -407,7 +407,7 @@ export class WebGPUCodegen {
     else this._dispatchSize[p.axis] = Math.max(this._dispatchSize[p.axis], extent);
   }
 
-  _getMaxBindingExtent(tag: string): number {
+  _getMaxBindingExtent(tag: string | null): number {
     return maxBindingExtent(this._threadBindings, tag);
   }
 
@@ -519,8 +519,8 @@ export class WebGPUCodegen {
            node.type === 'LIRFlatLoadNode' || node.type === 'LIRFlatStoreNode') && node.buffer
         && names.has(node.buffer.name)) result.add(node.buffer.name);
       if (node.type === 'LIRAccumulatorNode') {
-        if (node.flushStore && (node.flushStore as LIRFlatStoreNode).buffer && names.has((node.flushStore as LIRFlatStoreNode).buffer.name)) result.add((node.flushStore as LIRFlatStoreNode).buffer.name);
-        if (node.initLoad && (node.initLoad as LIRFlatLoadNode).buffer && names.has((node.initLoad as LIRFlatLoadNode).buffer.name)) result.add((node.initLoad as LIRFlatLoadNode).buffer.name);
+        if (node.flushStore && node.flushStore.buffer && names.has(node.flushStore.buffer.name)) result.add(node.flushStore.buffer.name);
+        if (node.initLoad && node.initLoad.buffer && names.has(node.initLoad.buffer.name)) result.add(node.initLoad.buffer.name);
       }
       for (const f of ['stmts', 'body', 'initBody', 'condBody', 'loopBody', 'thenBody', 'elseBody', 'value', 'a', 'b', 'condition', 'expr', 'offsetExpr', 'extent', 'indices', 'args']) {
         const c = (node as unknown as NodeSlots)[f];
@@ -652,7 +652,7 @@ export class WebGPUCodegen {
       }
       if (node.type === 'BufferStoreNode' && node.buffer) { record(stores, node.buffer.name, inner); if (!isConst(node.value)) threadVarying.add(node.buffer.name); }
       if (node.type === 'LIRFlatStoreNode' && node.buffer) { record(stores, node.buffer.name, inner); if (!isConst(node.value)) threadVarying.add(node.buffer.name); }
-      if (node.type === 'LIRAccumulatorNode' && node.flushStore && (node.flushStore as LIRFlatStoreNode).buffer) { record(stores, (node.flushStore as LIRFlatStoreNode).buffer.name, inner); threadVarying.add((node.flushStore as LIRFlatStoreNode).buffer.name); }
+      if (node.type === 'LIRAccumulatorNode' && node.flushStore && node.flushStore.buffer) { record(stores, node.flushStore.buffer.name, inner); threadVarying.add(node.flushStore.buffer.name); }
       if (node.type === 'BufferLoadNode' && node.buffer) record(loads, node.buffer.name, inner);
       if (node.type === 'LIRFlatLoadNode' && node.buffer) record(loads, node.buffer.name, inner);
 
@@ -713,9 +713,9 @@ export class WebGPUCodegen {
       }
       const extent = node.extent.type === 'IntImmNode' ? node.extent.value : 0;
       const tag = node.threadTag;
-      const maxExtent = this._getMaxBindingExtent(tag as string);
+      const maxExtent = this._getMaxBindingExtent(tag);
       if (extent > 0 && maxExtent > 0 && extent < maxExtent) {
-        const src = this._wgslBuiltinAccess(tag as string);
+        const src = this._wgslBuiltinAccess(tag);
         this._emit(`if (i32(${src}) < ${extent}) {`);
         this._indent++;
         this._visitNode(node.body);
@@ -748,7 +748,6 @@ export class WebGPUCodegen {
     this._visitNode(node.body);
   }
 
-  _emitMissingLocalDecls(func: CodegenFunc): void;
   _emitMissingLocalDecls(): void {
     for (const d of this._slotDecls) {
       if (d.scalar) this._emit(`var ${d.name}: ${wgslType(d.dtype)};`);
@@ -787,7 +786,7 @@ export class WebGPUCodegen {
     const { minPos, maxPos } = this._computeBufferLiveness(func, locals);
 
     const order = [...locals.keys()].sort((x, y) =>
-      ((minPos.get(x) as number) - (minPos.get(y) as number)) || ((maxPos.get(x) as number) - (maxPos.get(y) as number)));
+      ((minPos.get(x) ?? 0) - (minPos.get(y) ?? 0)) || ((maxPos.get(x) ?? 0) - (maxPos.get(y) ?? 0)));
 
     this._localSlots = new Map();
     const freeByDtype = new Map<string, MinHeap<HeapSlot>>();
@@ -805,8 +804,8 @@ export class WebGPUCodegen {
       const buf = locals.get(name) as Buffer;
       const numel = buf.numel() > 0 ? buf.numel() : this._estimateBufferSize(buf);
       const size = Math.max(numel, 1);
-      const mn = minPos.get(name) as number;
-      const mx = maxPos.get(name) as number;
+      const mn = minPos.get(name) ?? 0;
+      const mx = maxPos.get(name) ?? 0;
 
       if (scalarEligible(name, buf)) {
         const sname = `_s${scalarCounter++}`;
@@ -873,8 +872,8 @@ export class WebGPUCodegen {
         touch(node.buffer.name);
       }
       if (node.type === 'LIRAccumulatorNode') {
-        if (node.flushStore && (node.flushStore as LIRFlatStoreNode).buffer) touch((node.flushStore as LIRFlatStoreNode).buffer.name);
-        if (node.initLoad && (node.initLoad as LIRFlatLoadNode).buffer) touch((node.initLoad as LIRFlatLoadNode).buffer.name);
+        if (node.flushStore && node.flushStore.buffer) touch(node.flushStore.buffer.name);
+        if (node.initLoad && node.initLoad.buffer) touch(node.initLoad.buffer.name);
       }
       for (const f of CHILD_FIELDS) {
         const c = (node as unknown as NodeSlots)[f];
@@ -919,8 +918,8 @@ export class WebGPUCodegen {
         refs.set(node.buffer.name, node.buffer);
       }
       if (node.type === 'LIRAccumulatorNode') {
-        if (node.flushStore && (node.flushStore as LIRFlatStoreNode).buffer) refs.set((node.flushStore as LIRFlatStoreNode).buffer.name, (node.flushStore as LIRFlatStoreNode).buffer);
-        if (node.initLoad && (node.initLoad as LIRFlatLoadNode).buffer) refs.set((node.initLoad as LIRFlatLoadNode).buffer.name, (node.initLoad as LIRFlatLoadNode).buffer);
+        if (node.flushStore && node.flushStore.buffer) refs.set(node.flushStore.buffer.name, node.flushStore.buffer);
+        if (node.initLoad && node.initLoad.buffer) refs.set(node.initLoad.buffer.name, node.initLoad.buffer);
       }
       for (const c of irChildNodes(node)) stack.push(c);
     }
@@ -966,7 +965,7 @@ export class WebGPUCodegen {
 
   _visitWhileNode(node: WhileNode): void {
     this._visitNode(node.condBody);
-    const condExpr = Array.isArray((node.condVar as Buffer).shape)
+    const condExpr = node.condVar instanceof Buffer
       ? `${this._packedBufAccess(node.condVar.name, '0')} != 0`
       : node.condVar.name;
     this._emit(`while (${condExpr}) {`);
@@ -975,6 +974,17 @@ export class WebGPUCodegen {
     this._visitNode(node.condBody);
     this._indent--;
     this._emit('}');
+  }
+
+  _visitVecCopyNode(node: VecCopyNode): void {
+    const dstIdx = this._flatIndex(node.dstBuffer, [node.dstIndex]);
+    const srcIdx = this._flatIndex(node.srcBuffer, [node.srcIndex]);
+    for (let lane = 0; lane < node.width; lane++) {
+      const off = lane === 0 ? '' : ` + ${lane}`;
+      const dst = this._packedBufAccess(node.dstBuffer.name, `${dstIdx}${off}`);
+      const src = this._packedBufAccess(node.srcBuffer.name, `${srcIdx}${off}`);
+      this._emit(`${dst} = ${src};`);
+    }
   }
 
   _visitBufferStoreNode(node: BufferStoreNode): void {
@@ -1013,8 +1023,8 @@ export class WebGPUCodegen {
     this._indent--;
     this._emit('}');
 
-    const flushIdx = this._exprToWGSL((node.flushStore as LIRFlatStoreNode).offsetExpr);
-    const flushTarget = this._packedBufAccess((node.flushStore as LIRFlatStoreNode).buffer.name, flushIdx);
+    const flushIdx = this._exprToWGSL(node.flushStore.offsetExpr);
+    const flushTarget = this._packedBufAccess(node.flushStore.buffer.name, flushIdx);
     this._emit(`${flushTarget} = ${accVar};`);
   }
 

@@ -53,12 +53,12 @@ export class MultiOutputFusionPass extends FunctionPass {
     let mergeCount = 0;
     const merged = new Set<Operation>();
 
-    for (const { left, right, sharedInputs, sharedBytes } of candidates) {
+    for (const { left, right } of candidates) {
       if (merged.has(left) || merged.has(right)) continue;
       if (!this._canMerge(left, right)) continue;
       if (this._mergeCreatesCycle(left, right)) continue;
 
-      this._mergeMultiOutput(left, right, sharedInputs);
+      this._mergeMultiOutput(left, right);
       merged.add(left);
       merged.add(right);
       changed = true;
@@ -218,7 +218,7 @@ export class MultiOutputFusionPass extends FunctionPass {
     return false;
   }
 
-  _mergeMultiOutput(left: Operation, right: Operation, sharedInputIds: ReadonlySet<number>): void {
+  _mergeMultiOutput(left: Operation, right: Operation): void {
     const lBlock = left.regions[0].entryBlock as Block;
     const rBlock = right.regions[0].entryBlock as Block;
     const lYield = getYieldOp(lBlock);

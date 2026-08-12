@@ -16,7 +16,6 @@ type PartitionerOpts = ConstructorParameters<typeof PartitionerConfig>[0];
 type PartitionResult = ReturnType<GraphPartitioner['partition']>;
 type DevicePartition = PartitionResult['partitions'][number];
 type MaterializedGroup = { id: number; target: string; ops: Operation[] };
-export type PartitionMaterializationConfig = { targets?: readonly unknown[] };
 
 export class GraphPartitionPass extends FunctionPass {
   partitionerConfig: PartitionerConfig;
@@ -144,11 +143,8 @@ export class GraphPartitionPass extends FunctionPass {
 }
 
 export class PartitionMaterializationPass extends FunctionPass {
-  targets: readonly unknown[];
-
-  constructor(config: PartitionMaterializationConfig = {}) {
+  constructor() {
     super('PartitionMaterializationPass');
-    this.targets = config.targets || [];
   }
 
   override run(func: PassTarget, analysisManager?: AnalysisManager): PassResultValue {
@@ -165,7 +161,7 @@ export class PartitionMaterializationPass extends FunctionPass {
       module.addFunction(subFunc);
     }
 
-    this._rewriteOriginalFunction(graphFunc, subFunctions, partitionMap);
+    this._rewriteOriginalFunction(graphFunc, subFunctions);
 
     if (this.trace && this.trace.level >= TraceLevel.DEBUG) {
       this.trace.emit({
@@ -235,7 +231,7 @@ export class PartitionMaterializationPass extends FunctionPass {
     return subFunctions;
   }
 
-  _rewriteOriginalFunction(func: GraphFunction, subFunctions: readonly GraphFunction[], partitionMap: ReadonlyMap<number, MaterializedGroup>): void {
+  _rewriteOriginalFunction(func: GraphFunction, subFunctions: readonly GraphFunction[]): void {
     const attrHost = func as GraphFunction & { setAttr?(key: string, value: unknown): void };
     for (const subFunc of subFunctions) {
       attrHost.setAttr?.(`sub_${subFunc.name}`, subFunc._partitionTarget);

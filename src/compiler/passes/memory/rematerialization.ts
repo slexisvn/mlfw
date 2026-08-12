@@ -203,7 +203,7 @@ export class RematerializationPass extends FunctionPass {
       if (flops > 0) return flops;
     }
 
-    if (def.isElementwise || def.isBroadcast || (def as OpDef & { isView?: boolean }).isView) {
+    if (def.isElementwise || def.isBroadcast || def.isView) {
       let elements = 0;
       for (let i = 0; i < op.numResults; i++) {
         const t = op.getResult(i).type;

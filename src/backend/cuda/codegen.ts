@@ -6,10 +6,10 @@ import { parseThreadAxis, maxBindingExtent, visitStatements, estimateBufferSize,
 import { getCudaIntrin } from './tensor_intrin.js';
 import { FuncAttr } from '../../compiler/ir/func_attrs.js';
 
-import type { Buffer } from '../../compiler/ir/tensor/buffer.js';
+import { Buffer } from '../../compiler/ir/tensor/buffer.js';
 import type { AllocateNode, BlockNode, BufferStoreNode, CallExternNode, ForNode, IfThenElseNode, LetStmtNode, NodeSlots, TirNode, VecCopyNode, WhileNode } from '../../compiler/ir/tensor/nodes.js';
-import type { IRStmtNode, LIRAccumulatorNode, LIRBindingsNode, LIRFlatLoadNode, LIRFlatStoreNode } from '../../compiler/ir/lir/nodes.js';
-import type { BufferDecl, CodegenFunc, ThreadBindingEntry } from '../codegen_utils.js';
+import type { IRStmtNode, LIRAccumulatorNode, LIRBindingsNode, LIRFlatStoreNode, LIRThreadBinding } from '../../compiler/ir/lir/nodes.js';
+import type { BufferDecl, CodegenFunc } from '../codegen_utils.js';
 import type { CudaIntrinInfo } from './tensor_intrin.js';
 import type { TargetFeatures } from '../target.js';
 
@@ -46,7 +46,7 @@ export class CUDACodegen {
   target: TargetFeatures;
   _indent: number;
   _lines: string[];
-  _threadBindings: Map<string, ThreadBindingEntry[]>;
+  _threadBindings: Map<string, LIRThreadBinding[]>;
   _sharedBuffers: Buffer[];
   _blockDim: number[];
   _gridDim: number[];
@@ -102,13 +102,13 @@ export class CUDACodegen {
     const isLIR = func.type === 'LIRFunc';
 
     if (isLIR) {
-      for (const [tag, entries] of func.metadata.threadBindings as Map<string, ThreadBindingEntry[]>) {
+      for (const [tag, entries] of func.metadata.threadBindings) {
         this._threadBindings.set(tag, entries);
         for (const entry of entries) {
           if (!entry.isDynamic) this._applyBindingDim(tag, entry.extent);
         }
       }
-      this._sharedBuffers = func.metadata.sharedBuffers as Buffer[];
+      this._sharedBuffers = func.metadata.sharedBuffers;
     } else {
       this._scanBindings(func.body);
     }
@@ -332,7 +332,7 @@ export class CUDACodegen {
     if (node.kind === ForKind.THREAD_BINDING) {
       const extent = node.extent.type === 'IntImmNode' ? node.extent.value : 0;
       const tag = node.threadTag;
-      const maxExtent = this._getMaxBindingExtent(tag as string);
+      const maxExtent = this._getMaxBindingExtent(tag);
       if (extent > 0 && maxExtent > 0 && extent < maxExtent) {
         this._emit(`if (${tag} < ${extent}) {`);
         this._indent++;
@@ -409,7 +409,7 @@ export class CUDACodegen {
 
   _visitWhileNode(node: WhileNode): void {
     this._visitNode(node.condBody);
-    const condExpr = Array.isArray((node.condVar as Buffer).shape) ? `${node.condVar.name}[0]` : node.condVar.name;
+    const condExpr = node.condVar instanceof Buffer ? `${node.condVar.name}[0]` : node.condVar.name;
     this._emit(`while (${condExpr}) {`);
     this._indent++;
     this._visitNode(node.loopBody);
@@ -466,7 +466,7 @@ export class CUDACodegen {
     this._indent--;
     this._emit('}');
 
-    this._emit(`${(node.flushStore as LIRFlatStoreNode).buffer.name}[${this._exprToC((node.flushStore as LIRFlatStoreNode).offsetExpr)}] = ${accVar};`);
+    this._emit(`${node.flushStore.buffer.name}[${this._exprToC(node.flushStore.offsetExpr)}] = ${accVar};`);
   }
 
   _exprToC(node: IRStmtNode | null): string {
@@ -536,7 +536,7 @@ export class CUDACodegen {
     return dynamicDimProduct(buffer, 0, (b, j) => this._resolveShapeParam(b, j));
   }
 
-  _getMaxBindingExtent(tag: string): number {
+  _getMaxBindingExtent(tag: string | null): number {
     return maxBindingExtent(this._threadBindings, tag);
   }
 
@@ -552,7 +552,7 @@ export class CUDACodegen {
         this._storeBuffers.add(node.dstBuffer.name);
       }
       if (node.type === 'LIRAccumulatorNode' && node.flushStore) {
-        this._storeBuffers.add((node.flushStore as LIRFlatStoreNode).buffer.name);
+        this._storeBuffers.add(node.flushStore.buffer.name);
       }
       for (const c of irChildNodes(node)) stack.push(c);
     }
@@ -858,8 +858,8 @@ export class CUDACodegen {
         if (node.srcBuffer) refs.set(node.srcBuffer.name, node.srcBuffer);
       }
       if (node.type === 'LIRAccumulatorNode') {
-        if (node.flushStore && (node.flushStore as LIRFlatStoreNode).buffer) refs.set((node.flushStore as LIRFlatStoreNode).buffer.name, (node.flushStore as LIRFlatStoreNode).buffer);
-        if (node.initLoad && (node.initLoad as LIRFlatLoadNode).buffer) refs.set((node.initLoad as LIRFlatLoadNode).buffer.name, (node.initLoad as LIRFlatLoadNode).buffer);
+        if (node.flushStore && node.flushStore.buffer) refs.set(node.flushStore.buffer.name, node.flushStore.buffer);
+        if (node.initLoad && node.initLoad.buffer) refs.set(node.initLoad.buffer.name, node.initLoad.buffer);
       }
       for (const c of irChildNodes(node)) stack.push(c);
     }

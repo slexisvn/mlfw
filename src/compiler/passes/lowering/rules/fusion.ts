@@ -32,7 +32,7 @@ export function getInlineFusionBuilder(opName: string): InlineFusionBuilder | un
 function initBuiltinFusionBuilders(): void {
   for (const opName of elementwiseOpNames()) {
     INLINE_FUSION_BUILDERS.set(opName, (innerOp, args, dtype) =>
-      buildElementwiseExpr(innerOp.opName, args, dtype) as TirNode
+      buildElementwiseExpr(innerOp.opName, args, dtype)
     );
   }
 

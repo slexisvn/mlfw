@@ -16,7 +16,7 @@ type WasmTypeInfo = {
   bytes: number;
 };
 
-type SimdInfo = {
+export type SimdInfo = {
   laneType: string;
   lanes: number;
   laneBytes: number;

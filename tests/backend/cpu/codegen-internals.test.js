@@ -361,7 +361,7 @@ describe('CPUCodegen._findZeroOnlyBuffers', () => {
     const seq = new SeqNode([s1, s2]);
     const { zero, constant } = findZero(seq);
     expect(zero.has('cbuf')).toBe(false);
-    expect(constant.get('cbuf')).toBe('3.14');
+    expect(constant.get('cbuf')).toBe(3.14);
   });
 
   it('does not mark buffer with mixed values as constant', () => {
@@ -400,7 +400,7 @@ describe('CPUCodegen._findZeroOnlyBuffers', () => {
     const s2 = new BufferStoreNode(b, [new IntImmNode(1)], new IntImmNode(42));
     const seq = new SeqNode([s1, s2]);
     const { constant } = findZero(seq);
-    expect(constant.get('icbuf')).toBe('42');
+    expect(constant.get('icbuf')).toBe(42);
   });
 });
 

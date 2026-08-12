@@ -395,13 +395,4 @@ export class FusionGroupBuilder {
     return false;
   }
 
-  _hasDependency(source: Operation, target: Operation): boolean {
-    for (let k = 0; k < source.numResults; k++) {
-      const res = source.getResult(k);
-      for (let l = 0; l < target.numOperands; l++) {
-        if (target.getOperand(l) === res) return true;
-      }
-    }
-    return false;
-  }
 }

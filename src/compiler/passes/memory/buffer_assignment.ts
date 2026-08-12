@@ -61,10 +61,6 @@ export class MemoryBlock {
   get end(): number {
     return this.offset + this.size;
   }
-
-  overlaps(other: MemoryBlock): boolean {
-    return this.offset < other.end && other.offset < this.end;
-  }
 }
 
 export class MemoryPool {
@@ -82,12 +78,6 @@ export class MemoryPool {
     this.peakUsage = 0;
   }
 
-  allocate(size: number, buffer: Buffer): MemoryBlock {
-    const aligned = this._align(size);
-    const offset = this._findFreeOffset(aligned);
-    return this.placeAt(offset, aligned, buffer);
-  }
-
   placeAt(offset: number, size: number, buffer: Buffer): MemoryBlock {
     const aligned = this._align(size);
     const block = new MemoryBlock(offset, aligned, buffer);
@@ -99,33 +89,6 @@ export class MemoryPool {
 
   _align(size: number): number {
     return Math.ceil(size / this.alignment) * this.alignment;
-  }
-
-  _findFreeOffset(size: number): number {
-    const live = this.blocks;
-    let cursor = 0;
-    const sel = gapSelector(this.strategy);
-
-    for (const block of live) {
-      const start = this._align(cursor);
-      const gap = block.offset - start;
-      const hit = sel.consider(start, gap, size);
-      if (hit !== null) return hit;
-      if (block.end > cursor) cursor = block.end;
-    }
-
-    return sel.result(this._align(cursor));
-  }
-
-  fragmentation(): number {
-    if (this.peakUsage === 0) return 0;
-    const used = this.blocks.reduce((sum: number, b: MemoryBlock) => sum + b.size, 0);
-    return Math.max(0, 1 - used / this.peakUsage);
-  }
-
-  release(block: MemoryBlock): void {
-    const idx = this.blocks.indexOf(block);
-    if (idx >= 0) this.blocks.splice(idx, 1);
   }
 }
 

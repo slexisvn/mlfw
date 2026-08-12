@@ -1,5 +1,6 @@
 import { ForKind } from '../../compiler/ir/tensor/nodes.js';
 import { wasmType, wasmLoad, wasmStore, wasmBytes, isDtypeFloat, wasmSimdEntry, wasmVecOp } from '../../util/dtype_map.js';
+import type { SimdInfo } from '../../util/dtype_map.js';
 import { inferDtype } from '../../compiler/ir/lir/nodes.js';
 import { HALF_WASM_CONSTANTS } from '../../tensor/utils/half.js';
 import { irChildNodes } from '../../compiler/ir/ir_visitor.js';
@@ -7,21 +8,19 @@ import { resolveShapeParam, isZeroFillBody } from '../codegen_utils.js';
 
 import type { Buffer } from '../../compiler/ir/tensor/buffer.js';
 import type { BlockNode, BufferLoadNode, BufferStoreNode, CallExternNode, CastNode, CompareNode, ForNode, IfThenElseNode, MathOpNode, NodeSlots, SeqNode, TirNode, WhileNode } from '../../compiler/ir/tensor/nodes.js';
-import type { DtypeInferable, IRStmtNode, LIRAccumulatorNode, LIRBindingsNode, LIRFlatLoadNode, LIRFlatStoreNode, LIRFunc } from '../../compiler/ir/lir/nodes.js';
-import type { Dim, Shape } from '../../compiler/ir/graph/types.js';
+import type { IRStmtNode, LIRAccumulatorNode, LIRBindingsNode, LIRFlatStoreNode, LIRFunc } from '../../compiler/ir/lir/nodes.js';
 import type { CodegenFunc } from '../codegen_utils.js';
 import type { TargetFeatures } from '../target.js';
 
 const _HALF_DTYPES = new Set(['f16', 'bf16']);
 
-type SimdEntry = NonNullable<ReturnType<typeof wasmSimdEntry>>;
-type SimdOpKey = Parameters<typeof wasmVecOp>[1];
+type SimdOpKey = keyof SimdInfo;
 type InstrTable = Readonly<Record<string, string | undefined>>;
 type VectorMode = {
   dtype: string;
   lanes: number;
   loopVar: string;
-  simd: SimdEntry;
+  simd: SimdInfo;
   laneVars: Set<string>;
   addrLocal?: string | null;
   vecLets?: Set<string>;
@@ -30,7 +29,6 @@ type VectorMode = {
 };
 type WasmAcc = { local: string; bufName: string; indices?: TirNode[] };
 type WasmAccPattern = { buf: Buffer; indices: TirNode[]; outerIndices: TirNode[] };
-type IndexKeyBuffer = { name: string; shape?: Shape; strides?: readonly Dim[] };
 type BindingRef = { name: string; expr: IRStmtNode };
 
 export type WasmParallelInfo = { extent: number; outputIndices: number[]; poolSafe: boolean };
@@ -49,7 +47,6 @@ export class WasmCodegen {
   _lines: string[];
   _indent: number;
   _locals: Map<string, string>;
-  _localCounter: number;
   _imports: Map<string, string>;
   _bufferOffsets: Map<string, number>;
   _totalMemBytes: number;
@@ -62,17 +59,14 @@ export class WasmCodegen {
   declare _waccCounter: number;
   declare _hasParallel: boolean;
   declare _parallelExtent: number;
-  declare _intMinMaxDepth: number;
   declare _intMinMaxEmitDepth: number;
   declare _intDivEmitDepth: number;
-  declare _dynamicBuffers: Set<string>;
 
   constructor(target: TargetFeatures) {
     this.target = target;
     this._lines = [];
     this._indent = 0;
     this._locals = new Map();
-    this._localCounter = 0;
     this._imports = new Map();
     this._bufferOffsets = new Map();
     this._totalMemBytes = 0;
@@ -86,7 +80,6 @@ export class WasmCodegen {
     this._lines = [];
     this._indent = 0;
     this._locals.clear();
-    this._localCounter = 0;
     this._imports.clear();
     this._bufferOffsets.clear();
     this._totalMemBytes = 0;
@@ -105,11 +98,11 @@ export class WasmCodegen {
         this._bufferOffsets.set(name, offset);
       }
       this._totalMemBytes = func.metadata.memoryLayout.totalBytes;
-      for (const [name, info] of func.metadata.externCalls as Map<string, { argCount: number }>) {
+      for (const [name, info] of func.metadata.externCalls) {
         const sig = this._mathImportSig(name, info.argCount);
         this._imports.set(name, sig);
       }
-      for (const [name, dtype] of func.metadata.locals as Map<string, string>) {
+      for (const [name, dtype] of func.metadata.locals) {
         this._ensureLocal(name, wasmType(dtype));
       }
     } else {
@@ -171,7 +164,6 @@ export class WasmCodegen {
 
     this._fixLetStmtLocals(func.body);
 
-    this._intMinMaxDepth = 0;
     this._prescanIntMinMax(func.body);
 
     this._ensureHalfScratch(func);
@@ -391,7 +383,7 @@ export class WasmCodegen {
       if (_HALF_DTYPES.has(buf.dtype)) { needs = true; break; }
     }
     if (!needs && (func as LIRFunc).metadata && (func as LIRFunc).metadata.locals) {
-      for (const [, dtype] of (func as LIRFunc).metadata.locals as Map<string, string>) {
+      for (const [, dtype] of (func as LIRFunc).metadata.locals) {
         if (_HALF_DTYPES.has(dtype)) { needs = true; break; }
       }
     }
@@ -451,7 +443,7 @@ export class WasmCodegen {
             node = node.body;
             continue;
           }
-          const varDtype = inferDtype(node.value as unknown as DtypeInferable) || node.variable.dtype || this._defaultDtype;
+          const varDtype = inferDtype(node.value) || node.variable.dtype || this._defaultDtype;
           this._locals.set(node.variable.name, wasmType(varDtype));
           this._emitCoercedTo(node.value, this._numPrefix(varDtype));
           this._emit(`local.set $${node.variable.name}`);
@@ -486,8 +478,8 @@ export class WasmCodegen {
       if ((node.type === 'BufferStoreNode' || node.type === 'LIRFlatStoreNode') && node.buffer) {
         storeNames.add(node.buffer.name);
       }
-      if (node.type === 'LIRAccumulatorNode' && node.flushStore && (node.flushStore as LIRFlatStoreNode).buffer) {
-        storeNames.add((node.flushStore as LIRFlatStoreNode).buffer.name);
+      if (node.type === 'LIRAccumulatorNode' && node.flushStore && node.flushStore.buffer) {
+        storeNames.add(node.flushStore.buffer.name);
       }
       const slots = node as unknown as NodeSlots;
       if (slots.body) stack.push(slots.body as TirNode);
@@ -691,7 +683,7 @@ export class WasmCodegen {
     const prevAcc = this._wasmAcc;
     this._wasmAcc = {
       local: accLocal,
-      bufName: (node.flushStore as LIRFlatStoreNode).buffer.name,
+      bufName: node.flushStore.buffer.name,
     };
 
     const varName = node.loopVar.name;
@@ -721,14 +713,14 @@ export class WasmCodegen {
     this._indent--;
     this._emit(')');
 
-    this._emitFlatAddr((node.flushStore as LIRFlatStoreNode).buffer, (node.flushStore as LIRFlatStoreNode).offsetExpr);
+    this._emitFlatAddr(node.flushStore.buffer, node.flushStore.offsetExpr);
     this._emit('(local.get $' + accLocal + ')');
-    this._emitStoreOp((node.flushStore as LIRFlatStoreNode).dtype);
+    this._emitStoreOp(node.flushStore.dtype);
 
     this._wasmAcc = prevAcc;
   }
 
-  _visitVecAccumulator(node: LIRAccumulatorNode, simdEntry: SimdEntry, lanes: number, extent: number): void {
+  _visitVecAccumulator(node: LIRAccumulatorNode, simdEntry: SimdInfo, lanes: number, extent: number): void {
     const accLocal = node.localName;
     const dtype = node.dtype;
     const varName = node.loopVar.name;
@@ -751,7 +743,7 @@ export class WasmCodegen {
     const prevAcc = this._wasmAcc;
     this._wasmAcc = {
       local: accLocal,
-      bufName: (node.flushStore as LIRFlatStoreNode).buffer.name,
+      bufName: node.flushStore.buffer.name,
     };
 
     this._vectorMode = { dtype, lanes, loopVar: varName, simd: simdEntry, laneVars: this._computeLaneVars(node) };
@@ -818,9 +810,9 @@ export class WasmCodegen {
       this._emit(')');
     }
 
-    this._emitFlatAddr((node.flushStore as LIRFlatStoreNode).buffer, (node.flushStore as LIRFlatStoreNode).offsetExpr);
+    this._emitFlatAddr(node.flushStore.buffer, node.flushStore.offsetExpr);
     this._emit('(local.get $' + accLocal + ')');
-    this._emitStoreOp((node.flushStore as LIRFlatStoreNode).dtype);
+    this._emitStoreOp(node.flushStore.dtype);
 
     this._wasmAcc = prevAcc;
   }
@@ -1091,7 +1083,7 @@ export class WasmCodegen {
         this._emitCallExtern(node);
         break;
       case 'IfThenElseNode': {
-        const resultDtype = (node as unknown as DtypeInferable)._dtype || inferDtype(node.thenBody as unknown as DtypeInferable);
+        const resultDtype = node._dtype || inferDtype(node.thenBody);
         const resultType = this._numPrefix(resultDtype);
         this._emitExpr(node.condition);
         if (isDtypeFloat(this._wasmExprDtype(node.condition))) {
@@ -1128,7 +1120,7 @@ export class WasmCodegen {
   }
 
   _exprPrefix(node: IRStmtNode | null): string {
-    return this._numPrefix((node && (node as unknown as DtypeInferable)._dtype) || inferDtype(node as unknown as DtypeInferable));
+    return this._numPrefix((node && node._dtype) || inferDtype(node));
   }
 
   _convertTo(fromPrefix: string, toPrefix: string): void {
@@ -1381,11 +1373,9 @@ export class WasmCodegen {
       if (n.type === 'CallExternNode' && (n.externName === 'min' || n.externName === 'max') && !isDtypeFloat(n.dtype)) {
         this._ensureLocal('_immm_a' + depth, 'i32');
         this._ensureLocal('_immm_b' + depth, 'i32');
-        if (depth + 1 > this._intMinMaxDepth) this._intMinMaxDepth = depth + 1;
         childDepth = depth + 1;
       } else if (n.type === 'CallExternNode' && n.externName === 'abs' && !isDtypeFloat(n.dtype)) {
         this._ensureLocal('_iabs' + depth, 'i32');
-        if (depth + 1 > this._intMinMaxDepth) this._intMinMaxDepth = depth + 1;
         childDepth = depth + 1;
       } else if (this._isIntDivNode(n)) {
         const t = wasmType(this._joinPrefix(this._exprPrefix((n as MathOpNode).a), this._exprPrefix((n as MathOpNode).b)));
@@ -2078,7 +2068,6 @@ export class WasmCodegen {
   _layoutBuffers(primFunc: CodegenFunc): void {
     let offset = 0;
     const align = 16;
-    this._dynamicBuffers = new Set();
     const place = (buf: Buffer) => {
       offset = Math.ceil(offset / align) * align;
       this._bufferOffsets.set(buf.name, offset);
@@ -2087,7 +2076,6 @@ export class WasmCodegen {
       if (!isDynamic && numel > 0) {
         offset += numel * wasmBytes(buf.dtype);
       } else {
-        this._dynamicBuffers.add(buf.name);
         offset += 65536;
       }
     };
@@ -2167,7 +2155,7 @@ export class WasmCodegen {
         }
       }
       if (n.type === 'LetStmtNode' && n.variable) {
-        const letDtype = inferDtype(n.value as unknown as DtypeInferable) || n.variable.dtype || this._defaultDtype;
+        const letDtype = inferDtype(n.value) || n.variable.dtype || this._defaultDtype;
         this._ensureLocal(n.variable.name, wasmType(letDtype));
       }
       const slots = n as unknown as NodeSlots;
@@ -2191,7 +2179,7 @@ export class WasmCodegen {
       const localType = this._locals.get(node.name);
       if (localType) return localType === 'f32' ? 'f32' : 'i32';
     }
-    return inferDtype(node as unknown as DtypeInferable);
+    return inferDtype(node);
   }
 
   _fixLetStmtLocals(node: IRStmtNode): void {
@@ -2200,7 +2188,7 @@ export class WasmCodegen {
       const n = stack.pop();
       if (!n) continue;
       if (n.type === 'LetStmtNode' && n.variable && n.value) {
-        const valDtype = inferDtype(n.value as unknown as DtypeInferable);
+        const valDtype = inferDtype(n.value);
         if (valDtype) this._locals.set(n.variable.name, wasmType(valDtype));
       }
       const slots = n as unknown as NodeSlots;
@@ -2224,10 +2212,6 @@ export class WasmCodegen {
     return null;
   }
 
-  _inferDtype(node: IRStmtNode | null): string {
-    return (node && (node as unknown as DtypeInferable)._dtype) || inferDtype(node as unknown as DtypeInferable);
-  }
-
   _detectWasmAcc(forNode: ForNode): WasmAccPattern | null {
     let block = forNode.body;
     if (!block || block.type !== 'BlockNode') return null;
@@ -2240,8 +2224,8 @@ export class WasmCodegen {
     if (val.a && val.a.type === 'BufferLoadNode' && val.a.buffer.name === store.buffer.name) loadSide = val.a;
     else if (val.b && val.b.type === 'BufferLoadNode' && val.b.buffer.name === store.buffer.name) loadSide = val.b;
     if (!loadSide) return null;
-    const storeKey = this._indicesKey(store.buffer, store.indices);
-    const loadKey = this._indicesKey(loadSide.buffer, loadSide.indices);
+    const storeKey = this._indicesKey(store.buffer.name, store.indices);
+    const loadKey = this._indicesKey(loadSide.buffer.name, loadSide.indices);
     if (storeKey !== loadKey) return null;
     const outerIndices = store.indices.map(idx => {
       if (idx.type !== 'VariableNode') return idx;
@@ -2256,15 +2240,16 @@ export class WasmCodegen {
   _isAccTarget(buffer: Buffer, indices: readonly IRStmtNode[]): boolean {
     if (!this._wasmAcc) return false;
     if (buffer.name !== this._wasmAcc.bufName) return false;
-    return this._indicesKey(buffer, indices) === this._indicesKey({ name: this._wasmAcc.bufName, shape: buffer.shape, strides: buffer.strides }, this._wasmAcc.indices as TirNode[]);
+    if (!this._wasmAcc.indices) return false;
+    return this._indicesKey(buffer.name, indices) === this._indicesKey(this._wasmAcc.bufName, this._wasmAcc.indices);
   }
 
-  _indicesKey(buffer: IndexKeyBuffer, indices: readonly IRStmtNode[]): string {
+  _indicesKey(bufName: string, indices: readonly IRStmtNode[]): string {
     const parts: string[] = [];
     for (let i = 0; i < indices.length; i++) {
       parts.push(this._exprKey(indices[i]));
     }
-    return buffer.name + ':' + parts.join(',');
+    return bufName + ':' + parts.join(',');
   }
 
   _exprKey(node: IRStmtNode | null): string {

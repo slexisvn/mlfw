@@ -448,9 +448,7 @@ export class Compiler {
   _runPartitioning(graphModule: GraphModule, trace: TraceLog): void {
     const pm = new PassManager();
     pm.addPass(new GraphPartitionPass(this.config.partition));
-    pm.addPass(new PartitionMaterializationPass({
-      targets: this.config.partition.targets,
-    }));
+    pm.addPass(new PartitionMaterializationPass());
 
     pm.setTrace(trace);
 
