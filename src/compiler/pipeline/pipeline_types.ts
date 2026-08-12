@@ -13,6 +13,7 @@ export type { TargetFeatures as CompileTarget } from '../../backend/target.js';
 export type FusionAwareTarget = TargetFeatures & { maxFusionSize?: number };
 
 export type OptimizationConfig = {
+  splitSerializedKernels?: boolean;
   tensorize?: boolean;
   loopPartition?: boolean;
   detectAccumulators?: boolean;

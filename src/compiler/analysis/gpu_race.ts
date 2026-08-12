@@ -214,6 +214,28 @@ export function profileGpuAccesses(func: PrimFunc | LIRFunc, opts: GpuProfileOpt
   return profiles;
 }
 
+export type LaunchGeometry = Readonly<{ blockThreads: number; gridThreads: number }>;
+
+export function launchGeometry(func: PrimFunc | LIRFunc): LaunchGeometry {
+  const blockDim = [1, 1, 1];
+  const gridDim = [1, 1, 1];
+  walk(func.body as IRNode, (node) => {
+    if (node.type !== 'ForNode') return;
+    const forNode = node as unknown as { kind: string; threadTag: string | null };
+    if (forNode.kind !== ForKind.THREAD_BINDING || !forNode.threadTag) return;
+    const axis = parseThreadAxis(forNode.threadTag);
+    if (!axis) return;
+    const extent = staticExtent(node as unknown as { extent?: IRNode | null });
+    if (extent <= 0) return;
+    const dims = axis.space === 'thread' ? blockDim : gridDim;
+    dims[axis.axis] = Math.max(dims[axis.axis], extent);
+  });
+  return {
+    blockThreads: blockDim[0] * blockDim[1] * blockDim[2],
+    gridThreads: gridDim[0] * gridDim[1] * gridDim[2],
+  };
+}
+
 export function crossBlockRAWBuffers(profile: GpuAccessProfile): Set<string> {
   const result = new Set<string>();
   for (const [name, p] of profile) {

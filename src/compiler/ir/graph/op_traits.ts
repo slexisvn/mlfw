@@ -4,6 +4,7 @@ import type { Operation } from './operation.js';
 export const OpAttrKey = Object.freeze({
   GPU_CAPABLE: 'gpuCapable',
   LAUNCH_BOUNDARY: 'launchBoundary',
+  SEQUENTIAL_REGION: 'sequentialRegion',
   INFER_LAYOUT: 'inferLayout',
   LAYOUT_SENSITIVITY: 'layoutSensitivity',
 });
@@ -25,6 +26,20 @@ export function containsLaunchBoundary(op: Operation): boolean {
     if (!block) continue;
     for (const inner of block.ops()) {
       if (containsLaunchBoundary(inner)) return true;
+    }
+  }
+  return false;
+}
+
+export function containsSequentialRegion(op: Operation): boolean {
+  const def = registry.get(op.opName);
+  if (def !== null && def.getAttr<boolean>(OpAttrKey.SEQUENTIAL_REGION) === true) return true;
+  if (!op.regions) return false;
+  for (const region of op.regions) {
+    const block = region.entryBlock;
+    if (!block) continue;
+    for (const inner of block.ops()) {
+      if (containsSequentialRegion(inner)) return true;
     }
   }
   return false;

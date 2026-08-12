@@ -19,6 +19,8 @@ import { CalibrationCollector } from '../analysis/calibration.js';
 import { collectCalibration } from '../analysis/calibrate_exec.js';
 import { GraphPartitionPass, PartitionMaterializationPass } from '../passes/partition/partition_pass.js';
 import { splitGraph } from './graph_split.js';
+import { splitGraphForNative } from '../passes/partition/cublas_split.js';
+import { containsSequentialRegion } from '../ir/graph/op_traits.js';
 import { TargetAttr, targetAttr } from './target_attrs.js';
 import type { SchedulingDefaults } from './target_attrs.js';
 import { detectPureConv } from '../schedule/conv_implicit_gemm.js';
@@ -86,7 +88,11 @@ export type CompileContext = {
   tirModule: TirModule | null;
   lirFuncs: LIRFuncLike[] | null;
   runtimeModule: RuntimeModuleLike | null;
+  restartFrom: string | null;
 };
+
+const MAX_RELAUNCH_ATTEMPTS = 1;
+const RACE_SPLIT_MIN_BOUNDARIES = 1;
 
 export type LIRFuncLike = { name: string; getAttr?(key: string): unknown; shapeParamMap?: Map<string, unknown>; bufferMap?: unknown };
 
@@ -103,6 +109,7 @@ export type RuntimeModuleLike = {
   runAsync(funcName: string, ...args: unknown[]): Promise<unknown>;
   isAsync(funcName: string): boolean;
   getKernelSource(funcName: string): string | null;
+  getKernelMetadata(funcName: string): Record<string, unknown> | null;
   listKernels(): string[];
   executionPlan?: unknown;
 };
@@ -143,6 +150,7 @@ export class CompilerConfig {
       loopPartition: false,
       detectAccumulators: false,
       tensorize: false,
+      splitSerializedKernels: true,
       ...opts.optimization,
     };
     this.memory = {
@@ -267,11 +275,22 @@ export class Compiler {
       tirModule: null,
       lirFuncs: null,
       runtimeModule: null,
+      restartFrom: null,
     };
 
-    for (const phase of this._compilePhases()) {
+    const phases = this._compilePhases();
+    let relaunches = 0;
+    for (let i = 0; i < phases.length; i++) {
+      const phase = phases[i];
       if (phase.when && !phase.when(ctx)) continue;
       phase.run(ctx);
+      if (ctx.restartFrom === null) continue;
+
+      const target = phases.findIndex(p => p.name === ctx.restartFrom);
+      ctx.restartFrom = null;
+      if (target < 0 || relaunches >= MAX_RELAUNCH_ATTEMPTS) continue;
+      relaunches++;
+      i = target - 1;
     }
 
     trace.phaseEnd('compile', performance.now() - t0);
@@ -357,6 +376,10 @@ export class Compiler {
           ctx.runtimeModule = ctx.compiler._codegen(ctx.lirFuncs as LIRFuncLike[], ctx.trace, ctx.errors, ctx.failed, ctx.resilient);
           if (ctx.split) (ctx.runtimeModule as RuntimeModuleLike).executionPlan = ctx.split.plan;
         },
+      },
+      {
+        name: 'relaunchOnSerialization',
+        run: (ctx: CompileContext) => ctx.compiler._relaunchOnSerialization(ctx),
       },
     ];
   }
@@ -490,6 +513,63 @@ export class Compiler {
       failed: ctx.failed,
       resilient: ctx.resilient,
     });
+  }
+
+  _serializedKernels(runtimeModule: RuntimeModuleLike): { name: string; diagnosis: GpuLaunchDiagnosis }[] {
+    const serialized: { name: string; diagnosis: GpuLaunchDiagnosis }[] = [];
+    for (const name of runtimeModule.listKernels()) {
+      const metadata = runtimeModule.getKernelMetadata(name);
+      const diagnosis = metadata ? metadata.launchDiagnosis as GpuLaunchDiagnosis | null : null;
+      if (diagnosis) serialized.push({ name, diagnosis });
+    }
+    return serialized;
+  }
+
+  _hasSequentialRegion(module: GraphModule): boolean {
+    for (const func of module) {
+      for (const op of func.ops()) {
+        if (containsSequentialRegion(op)) return true;
+      }
+    }
+    return false;
+  }
+
+  _relaunchOnSerialization(ctx: CompileContext): void {
+    if (this.config.optimization.splitSerializedKernels === false) return;
+    const serialized = this._serializedKernels(ctx.runtimeModule as RuntimeModuleLike);
+    if (serialized.length === 0) return;
+
+    const module = ctx.working;
+    const detail = {
+      kernels: serialized.map(s => s.name),
+      reasons: [...new Set(serialized.map(s => s.diagnosis.reason))],
+      buffers: [...new Set(serialized.flatMap(s => s.diagnosis.buffers))],
+    };
+
+    if (ctx.failed.size > 0) {
+      ctx.trace.warn('relaunch', module.name, 'keeping serialized kernel: earlier phases already failed', detail);
+      return;
+    }
+
+    if (this._hasSequentialRegion(module)) {
+      ctx.trace.warn('relaunch', module.name,
+        'keeping serialized kernel: a sequential recurrence must stay in one kernel', detail);
+      return;
+    }
+
+    const split = splitGraphForNative(module, RACE_SPLIT_MIN_BOUNDARIES) as GraphSplitResult;
+    if (!split) {
+      ctx.trace.warn('relaunch', module.name, 'keeping serialized kernel: the graph cannot be split any further', detail);
+      return;
+    }
+
+    ctx.trace.explain('relaunch', module.name, 'split into separate kernels and recompiled',
+      'the fused kernel could not run at its launch geometry', detail);
+    ctx.split = split;
+    ctx.tirModule = null;
+    ctx.lirFuncs = null;
+    ctx.runtimeModule = null;
+    ctx.restartFrom = 'lowering';
   }
 
   _runLirPasses(ctx: CompileContext): void {
