@@ -5,6 +5,7 @@ import { eagerFlush, setCudaGraphArmed } from '../../../dispatcher/eager_mode.js
 import { GradMode } from '../../../autograd/grad_mode.js';
 import { resolveLimit } from './utils.js';
 import type { Tensor } from '../../../tensor/core/tensor.js';
+import type { NumericTypedArray } from '../../../tensor/types/dtype.js';
 import type { CallbackConnector } from '../hooks.js';
 import type { SchedulerConfig } from '../module.js';
 import type {
@@ -23,7 +24,7 @@ type LossLike = {
   backward(): void;
   _impl: {
     storage: {
-      rawData: unknown;
+      rawData: NumericTypedArray | null;
     };
   };
 };
@@ -34,7 +35,7 @@ type TensorLikeForFlatten = {
   contiguous?: () => unknown;
   _impl: {
     storage: {
-      rawData: unknown;
+      rawData: NumericTypedArray | null;
     };
   };
 };
@@ -230,9 +231,9 @@ export class TrainingLoop {
     schedulerConfigs: Array<SchedulerConfig | null>,
     strategy: SingleDeviceStrategy
   ): Promise<unknown> {
-    const eg = await import('#io/cuda/eager_graph.js');
-    const resident = await import('#io/cuda/resident.js');
-    const mem = await import('#io/cuda/memory.js');
+    const eg = await import('#io/cuda/eager_graph');
+    const resident = await import('#io/cuda/resident');
+    const mem = await import('#io/cuda/memory');
 
     let r = model.__eagerGraphRunner;
     if (!r) {
@@ -254,7 +255,7 @@ export class TrainingLoop {
 
     if (r.phase === 'warmup') {
       r.inputs = inputs.map((t) => {
-        const raw = t._impl.storage.rawData;
+        const raw = t._impl.storage.rawData!;
         resident.deviceBufferForInput(raw);
         resident.pinResident(raw);
         return { dptr: resident.deviceBufferDptr(raw) };
@@ -277,7 +278,7 @@ export class TrainingLoop {
         return this._eagerTrainStepCore(model, batch, optimizers, strategy, trainer);
       }
       r.exec = r.captured!.exec;
-      r.lossDptr = resident.deviceBufferDptr((loss as LossLike)._impl.storage.rawData);
+      r.lossDptr = resident.deviceBufferDptr((loss as LossLike)._impl.storage.rawData!);
       r.lossScratch = new Float32Array(1);
       r.phase = 'replay';
       eg.replay(r.exec);
@@ -290,7 +291,7 @@ export class TrainingLoop {
     }
 
     for (let i = 0; i < r.inputs!.length && i < inputs.length; i++) {
-      if (r.inputs![i].dptr) mem.copyHostToDeviceAsync(r.inputs![i].dptr, inputs[i]._impl.storage.rawData);
+      if (r.inputs![i].dptr) mem.copyHostToDeviceAsync(r.inputs![i].dptr!, inputs[i]._impl.storage.rawData!);
     }
     eg.replay(r.exec!);
     eg.syncStream();

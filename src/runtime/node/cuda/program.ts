@@ -1,7 +1,11 @@
 import { cu, nv, checkCU, readProgramLog, cudaIncludeDir } from './ffi.js';
+import type { CudaHandle } from './ffi.js';
 import { getDevice } from './device.js';
+import type { CudaKernel } from '../../io.js';
 
-const _cache = new Map();
+export type CudaProgram = { func: CudaHandle | null; module: CudaHandle | null };
+
+const _cache = new Map<string, CudaProgram>();
 
 const PREAMBLE =
   '#ifndef INFINITY\n#define INFINITY __int_as_float(0x7f800000)\n#endif\n' +
@@ -11,7 +15,7 @@ const STDINT_TYPEDEFS =
   'typedef signed char int8_t;\ntypedef short int16_t;\ntypedef int int32_t;\ntypedef long long int64_t;\n' +
   'typedef unsigned char uint8_t;\ntypedef unsigned short uint16_t;\ntypedef unsigned int uint32_t;\ntypedef unsigned long long uint64_t;\n';
 
-export function hashSource(s) {
+export function hashSource(s: string): string {
   let h = 0x811c9dc5;
   for (let i = 0; i < s.length; i++) {
     h ^= s.charCodeAt(i);
@@ -20,9 +24,9 @@ export function hashSource(s) {
   return (h >>> 0).toString(16);
 }
 
-const _ptxCache = new Map();
+const _ptxCache = new Map<string, Uint8Array>();
 
-export function compileToPTX(source, kernelName) {
+export function compileToPTX(source: string, kernelName: string): Uint8Array {
   const key = hashSource(source);
   const cached = _ptxCache.get(key);
   if (cached) return cached;
@@ -35,7 +39,7 @@ export function compileToPTX(source, kernelName) {
   if (/mma_sync|wmma::|fragment</.test(source)) includes += '#include <mma.h>\nusing namespace nvcuda::wmma;\n';
   if (source.includes('__pipeline_memcpy_async')) includes += '#include <cuda_pipeline.h>\n';
   const wrapped = includes + PREAMBLE + 'extern "C" {\n' + source + '\n}\n';
-  const prog = [null];
+  const prog: (CudaHandle | null)[] = [null];
   checkCU('nvrtcCreateProgram', nv.createProgram(prog, wrapped, kernelName + '.cu', 0, null, null));
   const options = ['--gpu-architecture=' + arch];
   if (cudaIncludeDir) options.push('--include-path=' + cudaIncludeDir);
@@ -54,9 +58,9 @@ export function compileToPTX(source, kernelName) {
   return ptx;
 }
 
-const _byKernel = new WeakMap();
+const _byKernel = new WeakMap<CudaKernel, CudaProgram>();
 
-export function getProgramFor(compiledKernel) {
+export function getProgramFor(compiledKernel: CudaKernel): CudaProgram {
   let r = _byKernel.get(compiledKernel);
   if (r) return r;
   r = getProgram(compiledKernel.source, compiledKernel.name);
@@ -64,15 +68,15 @@ export function getProgramFor(compiledKernel) {
   return r;
 }
 
-export function getProgram(source, kernelName) {
+export function getProgram(source: string, kernelName: string): CudaProgram {
   const key = hashSource(source) + ':' + kernelName;
   const cached = _cache.get(key);
   if (cached) return cached;
 
   const ptx = compileToPTX(source, kernelName);
-  const mod = [null];
+  const mod: (CudaHandle | null)[] = [null];
   checkCU('cuModuleLoadData', cu.moduleLoadData(mod, ptx));
-  const func = [null];
+  const func: (CudaHandle | null)[] = [null];
   checkCU('cuModuleGetFunction', cu.moduleGetFunction(func, mod[0], kernelName));
 
   const result = { func: func[0], module: mod[0] };

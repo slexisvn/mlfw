@@ -3,24 +3,56 @@ import { AutogradMeta } from '../../../tensor/core/autograd_meta.js';
 import { GradMode } from '../../../autograd/grad_mode.js';
 import { wireInputEdges } from '../../../autograd/accumulator.js';
 import { wrapResult, gpuContiguousArray } from '../../../dispatcher/jit_dispatch.js';
+import type { NumericTypedArray } from '../../../tensor/types/dtype.js';
 import { deviceBufferForInput, deviceBufferForOutput } from './resident.js';
 import { cudnnRNNForward, cudnnRNNBackward, releaseRNNForward, CELL_LSTM, CELL_GRU } from './cudnn.js';
+import type { RNNForwardCtx, RNNLayerDevs, RNNPlanOpts } from './cudnn.js';
+import type { Tensor } from '../../../tensor/core/tensor.js';
+import type { DType } from '../../../tensor/types/dtype.js';
+import type { Device } from '../../../tensor/types/device.js';
+import type { DevicePtr } from './ffi.js';
 
-const carr = (t) => gpuContiguousArray(t);
-const prod = (s) => s.reduce((a, b) => a * b, 1);
+type RNNCell = {
+  x2h: { weight: Tensor; bias: Tensor };
+  h2h: { weight: Tensor; bias: Tensor };
+};
+
+type WeightShapes = { x2hW: number[]; x2hB: number[]; h2hW: number[]; h2hB: number[] };
+
+type RNNBackwardInfo = {
+  xArr: NumericTypedArray;
+  yArr: Float32Array;
+  hxArr: NumericTypedArray | null;
+  cxArr: NumericTypedArray | null;
+  opts: RNNPlanOpts;
+  numLayers: number;
+  hasInit: boolean;
+  hasCell: boolean;
+  dtype: DType;
+  device: Device;
+  inputShape: number[];
+  stateShape: number[];
+  weightShapes: WeightShapes[];
+};
+
+const carr = (t: Tensor): NumericTypedArray => gpuContiguousArray(t);
+const prod = (s: readonly number[]): number => s.reduce((a, b) => a * b, 1);
 const devIn = deviceBufferForInput;
 const devOut = deviceBufferForOutput;
 
-const _fwdReclaim = new FinalizationRegistry((ctx) => releaseRNNForward(ctx));
+const _fwdReclaim = new FinalizationRegistry<RNNForwardCtx>((ctx) => releaseRNNForward(ctx));
 
-const KIND = {
+const KIND: Record<string, { cellMode: number; gates: number; hasCell: boolean }> = {
   lstm: { cellMode: CELL_LSTM, gates: 4, hasCell: true },
   gru: { cellMode: CELL_GRU, gates: 3, hasCell: false },
 };
 
 class CudnnRNNBackward extends AutogradNode {
-  constructor(fwd, info, numInputs) { super(numInputs); this.fwd = fwd; this.info = info; }
-  apply(gradOutputs) {
+  fwd: RNNForwardCtx;
+  info: RNNBackwardInfo;
+
+  constructor(fwd: RNNForwardCtx, info: RNNBackwardInfo, numInputs: number) { super(numInputs); this.fwd = fwd; this.info = info; }
+  apply(gradOutputs: readonly (Tensor | null)[]): Tensor[] {
     const [dy, dhy, dcy] = gradOutputs;
     const f = this.info;
     const { seqLen, batch, inputSize, hiddenSize } = f.opts;
@@ -28,15 +60,15 @@ class CudnnRNNBackward extends AutogradNode {
 
     const xDev = devIn(f.xArr);
     const yDev = devIn(f.yArr);
-    const hxDev = f.hasInit ? devIn(f.hxArr) : 0n;
-    const cxDev = f.hasCell && f.hasInit ? devIn(f.cxArr) : 0n;
-    const dyDev = devIn(carr(dy));
+    const hxDev = f.hasInit ? devIn(f.hxArr!) : 0n;
+    const cxDev = f.hasCell && f.hasInit ? devIn(f.cxArr!) : 0n;
+    const dyDev = devIn(carr(dy!));
     const dhyDev = dhy ? devIn(carr(dhy)) : 0n;
     const dcyDev = f.hasCell && dcy ? devIn(carr(dcy)) : 0n;
 
     const dxArr = new Float32Array(seqLen * batch * inputSize);
     const dxDev = devOut(dxArr);
-    let dhxArr = null, dcxArr = null, dhxDev = 0n, dcxDev = 0n;
+    let dhxArr: Float32Array | null = null, dcxArr: Float32Array | null = null, dhxDev: DevicePtr = 0n, dcxDev: DevicePtr = 0n;
     if (f.hasInit) {
       dhxArr = new Float32Array(stateN); dhxDev = devOut(dhxArr);
       if (f.hasCell) { dcxArr = new Float32Array(stateN); dcxDev = devOut(dcxArr); }
@@ -53,21 +85,21 @@ class CudnnRNNBackward extends AutogradNode {
     cudnnRNNBackward(this.fwd, xDev, yDev, hxDev, cxDev, dyDev, dhyDev, dcyDev, dxDev, dhxDev, dcxDev, gradDevs);
     _fwdReclaim.unregister(this);
 
-    const w = (arr, shape) => wrapResult(arr, shape, f.dtype, f.device);
+    const w = (arr: NumericTypedArray, shape: readonly number[]): Tensor => wrapResult(arr, shape, f.dtype, f.device);
     const grads = [w(dxArr, f.inputShape)];
     for (let l = 0; l < gradArrs.length; l++) {
       const g = gradArrs[l], s = f.weightShapes[l];
       grads.push(w(g.x2hW, s.x2hW), w(g.x2hB, s.x2hB), w(g.h2hW, s.h2hW), w(g.h2hB, s.h2hB));
     }
     if (f.hasInit) {
-      grads.push(w(dhxArr, f.stateShape));
-      if (f.hasCell) grads.push(w(dcxArr, f.stateShape));
+      grads.push(w(dhxArr!, f.stateShape));
+      if (f.hasCell) grads.push(w(dcxArr!, f.stateShape));
     }
     return grads;
   }
 }
 
-function attach(node, output, outputNr) {
+function attach(node: AutogradNode, output: Tensor, outputNr: number): void {
   const meta = new AutogradMeta();
   meta.setGradFn(node, outputNr);
   meta.requiresGrad = true;
@@ -75,7 +107,14 @@ function attach(node, output, outputNr) {
   output._impl._updateKeySet();
 }
 
-function cudnnRNNOp(kindName, input, cells, opts, hx = null, cx = null) {
+function cudnnRNNOp(
+  kindName: string,
+  input: Tensor,
+  cells: readonly RNNCell[],
+  opts: RNNPlanOpts,
+  hx: Tensor | null = null,
+  cx: Tensor | null = null,
+): (Tensor | null)[] {
   const kind = KIND[kindName];
   const { inputSize, hiddenSize, seqLen, batch } = opts;
   const numLayers = cells.length;
@@ -88,7 +127,7 @@ function cudnnRNNOp(kindName, input, cells, opts, hx = null, cx = null) {
     h2hW: devIn(carr(c.h2h.weight)), h2hB: devIn(carr(c.h2h.bias)),
   }));
   const hxArr = hx ? carr(hx) : null, cxArr = kind.hasCell && cx ? carr(cx) : null;
-  const hxDev = hx ? devIn(hxArr) : 0n, cxDev = cxArr ? devIn(cxArr) : 0n;
+  const hxDev = hx ? devIn(hxArr!) : 0n, cxDev = cxArr ? devIn(cxArr) : 0n;
 
   const stateN = numLayers * batch * hiddenSize, stateShape = [numLayers, batch, hiddenSize];
   const yArr = new Float32Array(seqLen * batch * hiddenSize);
@@ -99,7 +138,7 @@ function cudnnRNNOp(kindName, input, cells, opts, hx = null, cx = null) {
 
   const inputs = [input];
   for (const c of cells) inputs.push(c.x2h.weight, c.x2h.bias, c.h2h.weight, c.h2h.bias);
-  if (hx) { inputs.push(hx); if (kind.hasCell) inputs.push(cx); }
+  if (hx) { inputs.push(hx); if (kind.hasCell) inputs.push(cx!); }
   let any = false;
   for (const t of inputs) { if (t._impl.autogradMeta && t.requiresGrad) { any = true; break; } }
   const training = GradMode.isEnabled() && any;
@@ -127,10 +166,10 @@ function cudnnRNNOp(kindName, input, cells, opts, hx = null, cx = null) {
   return kind.hasCell ? [out, hyT, cyT] : [out, hyT];
 }
 
-export function cudnnLSTMOp(input, cells, opts, hx = null, cx = null) {
+export function cudnnLSTMOp(input: Tensor, cells: readonly RNNCell[], opts: RNNPlanOpts, hx: Tensor | null = null, cx: Tensor | null = null): (Tensor | null)[] {
   return cudnnRNNOp('lstm', input, cells, opts, hx, cx);
 }
 
-export function cudnnGRUOp(input, cells, opts, h0 = null) {
+export function cudnnGRUOp(input: Tensor, cells: readonly RNNCell[], opts: RNNPlanOpts, h0: Tensor | null = null): (Tensor | null)[] {
   return cudnnRNNOp('gru', input, cells, opts, h0, null);
 }

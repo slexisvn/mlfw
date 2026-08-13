@@ -2,11 +2,33 @@ import koffi from 'koffi';
 import { getDevice } from './device.js';
 import { setDevice } from './runtime_api.js';
 import { cu, checkCU } from './ffi.js';
+import type { CudaHandle, DevicePtr } from './ffi.js';
 import { acquire, release, copyHostToDevice, copyDeviceToHost } from './memory.js';
 import { loadCudaLib, CUSOLVER_SPEC } from './lib_resolver.js';
 
-let c, _inited = null;
-function ensure() {
+interface CusolverApi {
+  create(h: (CudaHandle | null)[]): number;
+  destroy(h: CudaHandle | null): number;
+  setStream(h: CudaHandle | null, stream: CudaHandle | null): number;
+  gesvdBufferSize(h: CudaHandle | null, m: number, n: number, lwork: number[]): number;
+  gesvd(h: CudaHandle | null, jobu: number, jobvt: number, m: number, n: number, A: DevicePtr, lda: number, S: DevicePtr, U: DevicePtr, ldu: number, VT: DevicePtr, ldvt: number, work: DevicePtr, lwork: number, rwork: DevicePtr, info: DevicePtr): number;
+  syevdBufferSize(h: CudaHandle | null, jobz: number, uplo: number, n: number, A: DevicePtr, lda: number, W: DevicePtr, lwork: number[]): number;
+  syevd(h: CudaHandle | null, jobz: number, uplo: number, n: number, A: DevicePtr, lda: number, W: DevicePtr, work: DevicePtr, lwork: number, info: DevicePtr): number;
+  potrfBufferSize(h: CudaHandle | null, uplo: number, n: number, A: DevicePtr, lda: number, lwork: number[]): number;
+  potrf(h: CudaHandle | null, uplo: number, n: number, A: DevicePtr, lda: number, work: DevicePtr, lwork: number, info: DevicePtr): number;
+  getrfBufferSize(h: CudaHandle | null, m: number, n: number, A: DevicePtr, lda: number, lwork: number[]): number;
+  getrf(h: CudaHandle | null, m: number, n: number, A: DevicePtr, lda: number, work: DevicePtr, ipiv: DevicePtr, info: DevicePtr): number;
+  getrs(h: CudaHandle | null, trans: number, n: number, nrhs: number, A: DevicePtr, lda: number, ipiv: DevicePtr, B: DevicePtr, ldb: number, info: DevicePtr): number;
+}
+
+type CusolverScope = {
+  up(hostArr: ArrayBufferView): DevicePtr;
+  out(bytes: number): DevicePtr;
+  free(): void;
+};
+
+let c: CusolverApi, _inited: boolean | null = null;
+function ensure(): boolean {
   if (_inited !== null) return _inited;
   try {
     const sol = koffi.load(loadCudaLib(CUSOLVER_SPEC));
@@ -31,18 +53,18 @@ function ensure() {
   return _inited;
 }
 
-export function cusolverAvailable() { return ensure(); }
+export function cusolverAvailable(): boolean { return ensure(); }
 
 const JOB_ECON = 'S'.charCodeAt(0);
 const EIG_VECTOR = 1, FILL_LOWER = 0, OP_T = 1;
 
-let _handle = null;
-function handle() {
+let _handle: CudaHandle | null = null;
+function handle(): CudaHandle | null {
   if (!ensure()) throw new Error('cuSOLVER library not found; install the CUDA Toolkit (cusolver) to use GPU linalg');
   const dev = getDevice();
   setDevice();
   if (!_handle) {
-    const h = [null];
+    const h: (CudaHandle | null)[] = [null];
     ck('create', c.create(h));
     _handle = h[0];
     ck('setStream', c.setStream(_handle, dev.stream));
@@ -50,16 +72,16 @@ function handle() {
   return _handle;
 }
 
-function ck(label, status) {
+function ck(label: string, status: number): void {
   if (status !== 0) throw new Error('cuSOLVER ' + label + ' failed: ' + status);
 }
 
-function sync() {
+function sync(): void {
   checkCU('cuStreamSynchronize', cu.streamSynchronize(getDevice().stream));
 }
 
-function scope() {
-  const allocs = [];
+function scope(): CusolverScope {
+  const allocs: [DevicePtr, number][] = [];
   return {
     up(hostArr) {
       const p = acquire(hostArr.byteLength);
@@ -77,13 +99,13 @@ function scope() {
   };
 }
 
-function readInt(dptr) {
+function readInt(dptr: DevicePtr): number {
   const h = new Int32Array(1);
   copyDeviceToHost(h, dptr);
   return h[0];
 }
 
-export function csGesvd(Acm, m, n) {
+export function csGesvd(Acm: ArrayBufferView, m: number, n: number): { S: Float32Array; U: Float32Array; VT: Float32Array } {
   const h = handle();
   const s = scope();
   try {
@@ -103,7 +125,7 @@ export function csGesvd(Acm, m, n) {
   } finally { s.free(); }
 }
 
-export function csSyevd(Acm, n) {
+export function csSyevd(Acm: ArrayBufferView, n: number): { W: Float32Array; V: Float32Array } {
   const h = handle();
   const s = scope();
   try {
@@ -121,7 +143,7 @@ export function csSyevd(Acm, n) {
   } finally { s.free(); }
 }
 
-export function csPotrf(Acm, n) {
+export function csPotrf(Acm: ArrayBufferView, n: number): Float32Array {
   const h = handle();
   const s = scope();
   try {
@@ -140,7 +162,7 @@ export function csPotrf(Acm, n) {
   } finally { s.free(); }
 }
 
-export function csGetrf(Acm, n) {
+export function csGetrf(Acm: ArrayBufferView, n: number): { LU: Float32Array; ipiv: Int32Array } {
   const h = handle();
   const s = scope();
   try {
@@ -156,7 +178,7 @@ export function csGetrf(Acm, n) {
   } finally { s.free(); }
 }
 
-export function csSolveLU(Acm, n, Bcm, nrhs, trans) {
+export function csSolveLU(Acm: ArrayBufferView, n: number, Bcm: ArrayBufferView, nrhs: number, trans: number): Float32Array {
   const h = handle();
   const s = scope();
   try {

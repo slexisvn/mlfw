@@ -1,22 +1,90 @@
 import koffi from 'koffi';
 import { cu } from './ffi.js';
+import type { CudaHandle, DevicePtr } from './ffi.js';
 import { getDevice } from './device.js';
 import { setDevice } from './runtime_api.js';
 import { acquire, release } from './memory.js';
 import { loadCudaLib, CUDNN_SPEC } from './lib_resolver.js';
 import { isEagerCapturing } from '../../../dispatcher/eager_mode.js';
 
-function d2d(dst, src, bytes) {
+interface CudnnApi {
+  create(h: (CudaHandle | null)[]): number;
+  destroy(h: CudaHandle | null): number;
+  setStream(h: CudaHandle | null, stream: CudaHandle | null): number;
+  getErrorString(status: number): string;
+  destroyTensorDesc(d: CudaHandle | null): number;
+  destroyRNNDesc(d: CudaHandle | null): number;
+  destroyRNNDataDesc(d: CudaHandle | null): number;
+  destroyDropoutDesc(d: CudaHandle | null): number;
+  createRNNDesc(d: (CudaHandle | null)[]): number;
+  setRNNDesc(d: CudaHandle | null, algo: number, cellMode: number, biasMode: number, dirMode: number, inputMode: number, dataType: number, mathPrec: number, mathType: number, inputSize: number, hiddenSize: number, projSize: number, numLayers: number, dropoutDesc: CudaHandle | null, auxFlags: number): number;
+  createRNNDataDesc(d: (CudaHandle | null)[]): number;
+  setRNNDataDesc(d: CudaHandle | null, dataType: number, layout: number, maxSeqLength: number, batchSize: number, vectorSize: number, seqLengthArray: ArrayBufferView, paddingFill: null): number;
+  createTensorDesc(d: (CudaHandle | null)[]): number;
+  setTensorNdDesc(d: CudaHandle | null, dataType: number, nbDims: number, dimA: ArrayBufferView, strideA: ArrayBufferView): number;
+  createDropoutDesc(d: (CudaHandle | null)[]): number;
+  setDropoutDesc(d: CudaHandle | null, h: CudaHandle | null, dropout: number, states: DevicePtr, stateSize: bigint, seed: bigint): number;
+  dropoutGetStatesSize(h: CudaHandle | null, sz: bigint[]): number;
+  getRNNWeightSpaceSize(h: CudaHandle | null, d: CudaHandle | null, sz: bigint[]): number;
+  getRNNTempSpaceSizes(h: CudaHandle | null, d: CudaHandle | null, fwdMode: number, xDesc: CudaHandle | null, work: bigint[], reserve: bigint[]): number;
+  getRNNWeightParams(h: CudaHandle | null, d: CudaHandle | null, pseudoLayer: number, wss: bigint, weightSpace: DevicePtr, linLayerID: number, mDesc: CudaHandle | null, mAddr: bigint[], bDesc: CudaHandle | null, bAddr: bigint[]): number;
+  rnnForward(h: CudaHandle | null, d: CudaHandle | null, fwdMode: number, devSeqLengths: DevicePtr, xDesc: CudaHandle | null, x: DevicePtr, yDesc: CudaHandle | null, y: DevicePtr, hDesc: CudaHandle | null, hx: DevicePtr, hy: DevicePtr, cDesc: CudaHandle | null, cx: DevicePtr, cy: DevicePtr, wss: bigint, weightSpace: DevicePtr, workSize: bigint, workSpace: DevicePtr, reserveSize: bigint, reserveSpace: DevicePtr): number;
+  rnnBackwardData(h: CudaHandle | null, d: CudaHandle | null, devSeqLengths: DevicePtr, yDesc: CudaHandle | null, y: DevicePtr, dy: DevicePtr, xDesc: CudaHandle | null, dx: DevicePtr, hDesc: CudaHandle | null, hx: DevicePtr, dhy: DevicePtr, dhx: DevicePtr, cDesc: CudaHandle | null, cx: DevicePtr, dcy: DevicePtr, dcx: DevicePtr, wss: bigint, weightSpace: DevicePtr, workSize: bigint, workSpace: DevicePtr, reserveSize: bigint, reserveSpace: DevicePtr): number;
+  rnnBackwardWeights(h: CudaHandle | null, d: CudaHandle | null, addGrad: number, devSeqLengths: DevicePtr, xDesc: CudaHandle | null, x: DevicePtr, hDesc: CudaHandle | null, hx: DevicePtr, yDesc: CudaHandle | null, y: DevicePtr, wss: bigint, dweightSpace: DevicePtr, workSize: bigint, workSpace: DevicePtr, reserveSize: bigint, reserveSpace: DevicePtr): number;
+}
+
+export type RNNLayerDevs = { x2hW: DevicePtr; x2hB: DevicePtr; h2hW: DevicePtr; h2hB: DevicePtr };
+
+export type RNNPlanOpts = {
+  inputSize: number;
+  hiddenSize: number;
+  seqLen: number;
+  batch: number;
+  numLayers: number;
+  cellMode?: number;
+  gates?: number;
+};
+
+type RNNPlan = {
+  rd: CudaHandle | null;
+  xDesc: CudaHandle | null;
+  yDesc: CudaHandle | null;
+  hDesc: CudaHandle | null;
+  devSeq: DevicePtr;
+  wss: bigint;
+  wssN: number;
+  workSize: bigint;
+  workN: number;
+  reserveSize: bigint;
+  reserveN: number;
+  inputSize: number;
+  hiddenSize: number;
+  seqLen: number;
+  batch: number;
+  numLayers: number;
+  gates: number;
+};
+
+export type RNNForwardCtx = {
+  p: RNNPlan;
+  weightSpace: DevicePtr;
+  workSpace: DevicePtr;
+  reserveSpace: DevicePtr;
+  training: boolean;
+  released?: boolean;
+};
+
+function d2d(dst: DevicePtr, src: DevicePtr, bytes: number): void {
   if (isEagerCapturing()) cu.memcpyDtoDAsync(dst, src, bytes, getDevice().stream);
   else cu.memcpyDtoD(dst, src, bytes);
 }
-function memZero(dst, bytes) {
+function memZero(dst: DevicePtr, bytes: number): void {
   if (isEagerCapturing()) cu.memsetD8Async(dst, 0, bytes, getDevice().stream);
   else cu.memsetD8(dst, 0, bytes);
 }
 
-let c, _inited = null;
-function ensure() {
+let c: CudnnApi, _inited: boolean | null = null;
+function ensure(): boolean {
   if (_inited !== null) return _inited;
   try {
     const dnn = koffi.load(loadCudaLib(CUDNN_SPEC));
@@ -51,20 +119,20 @@ function ensure() {
   }
   return _inited;
 }
-export function cudnnAvailable() { return ensure(); }
+export function cudnnAvailable(): boolean { return ensure(); }
 
 const FLOAT = 0, ALGO_STANDARD = 0, LSTM = 2, GRU = 3, DOUBLE_BIAS = 2, UNIDIR = 0, LINEAR_INPUT = 0, ALLOW_CONVERSION = 2;
 export const CELL_LSTM = LSTM, CELL_GRU = GRU;
 const LAYOUT_SEQ_MAJOR_UNPACKED = 0;
 const FWD_TRAINING = 1, FWD_INFERENCE = 0, WGRAD_ADD = 0;
 
-function ck(label, status) {
+function ck(label: string, status: number): void {
   if (status !== 0) throw new Error('cuDNN ' + label + ' failed: ' + status + ' (' + c.getErrorString(status) + ')');
 }
-const o2 = () => [null];
+const o2 = (): (CudaHandle | null)[] => [null];
 
-let _handle = null, _dropout = null, _dropoutStates = null, _dropoutStatesBytes = 0, _weightDescs = null;
-function handle() {
+let _handle: CudaHandle | null = null, _dropout: CudaHandle | null = null, _dropoutStates: DevicePtr | null = null, _dropoutStatesBytes = 0, _weightDescs: { m: CudaHandle | null; b: CudaHandle | null } | null = null;
+function handle(): CudaHandle | null {
   if (!ensure()) throw new Error('cuDNN not available');
   const dev = getDevice();
   setDevice();
@@ -74,7 +142,7 @@ function handle() {
   }
   return _handle;
 }
-function dropoutDesc() {
+function dropoutDesc(): CudaHandle | null {
   if (!_dropout) {
     const h = handle();
     const d = o2(); ck('createDropout', c.createDropoutDesc(d));
@@ -86,7 +154,7 @@ function dropoutDesc() {
   }
   return _dropout;
 }
-function weightDescs() {
+function weightDescs(): { m: CudaHandle | null; b: CudaHandle | null } {
   if (!_weightDescs) {
     const m = o2(), b = o2();
     ck('cwm', c.createTensorDesc(m));
@@ -96,7 +164,7 @@ function weightDescs() {
   return _weightDescs;
 }
 
-export function destroyCudnn() {
+export function destroyCudnn(): void {
   if (_inited !== true) return;
   for (const p of _descCache.values()) {
     c.destroyRNNDesc(p.rd);
@@ -115,24 +183,24 @@ export function destroyCudnn() {
   if (_dropoutStates !== null) { release(_dropoutStates, _dropoutStatesBytes); _dropoutStates = null; _dropoutStatesBytes = 0; }
   if (_handle) { c.destroy(_handle); _handle = null; }
 }
-function tensorDesc(dims, strides) {
+function tensorDesc(dims: readonly number[], strides: readonly number[]): CudaHandle | null {
   const d = o2(); ck('createTensor', c.createTensorDesc(d));
   ck('setTensorNd', c.setTensorNdDesc(d[0], FLOAT, dims.length, new Int32Array(dims), new Int32Array(strides)));
   return d[0];
 }
-function dataDesc(seqLen, batch, vec, seqArr) {
+function dataDesc(seqLen: number, batch: number, vec: number, seqArr: Int32Array): CudaHandle | null {
   const d = o2(); ck('createRNNData', c.createRNNDataDesc(d));
   ck('setRNNData', c.setRNNDataDesc(d[0], FLOAT, LAYOUT_SEQ_MAJOR_UNPACKED, seqLen, batch, vec, seqArr, null));
   return d[0];
 }
 
-const _descCache = new Map();
-function plan({ inputSize, hiddenSize, seqLen, batch, numLayers, cellMode = LSTM, gates = 4 }) {
+const _descCache = new Map<string, RNNPlan>();
+function plan({ inputSize, hiddenSize, seqLen, batch, numLayers, cellMode = LSTM, gates = 4 }: RNNPlanOpts): RNNPlan {
   const key = `${cellMode}_${inputSize}_${hiddenSize}_${seqLen}_${batch}_${numLayers}`;
   let p = _descCache.get(key);
   if (p) return p;
   const h = handle();
-  const rnnDesc = o2(); ck('createRNN', c.createRNNDesc(rnnDesc));
+  const rnnDesc: (CudaHandle | null)[] = o2(); ck('createRNN', c.createRNNDesc(rnnDesc));
   ck('setRNN', c.setRNNDesc(rnnDesc[0], ALGO_STANDARD, cellMode, DOUBLE_BIAS, UNIDIR, LINEAR_INPUT, FLOAT, FLOAT, ALLOW_CONVERSION, inputSize, hiddenSize, hiddenSize, numLayers, dropoutDesc(), 0));
   const rd = rnnDesc[0];
   const seqArr = new Int32Array(batch).fill(seqLen);
@@ -151,7 +219,7 @@ function plan({ inputSize, hiddenSize, seqLen, batch, numLayers, cellMode = LSTM
   return p;
 }
 
-function packWeights(p, weightSpace, layerDevs, download) {
+function packWeights(p: RNNPlan, weightSpace: DevicePtr, layerDevs: readonly RNNLayerDevs[], download: boolean): void {
   const h = handle();
   const { m: mDesc, b: bDesc } = weightDescs();
   const { numLayers, hiddenSize, inputSize, wss, gates } = p;
@@ -177,7 +245,17 @@ function packWeights(p, weightSpace, layerDevs, download) {
   }
 }
 
-export function cudnnRNNForward(xDev, layerDevs, opts, hxDev, cxDev, yDev, hyDev, cyDev, training = true) {
+export function cudnnRNNForward(
+  xDev: DevicePtr,
+  layerDevs: readonly RNNLayerDevs[],
+  opts: RNNPlanOpts,
+  hxDev: DevicePtr,
+  cxDev: DevicePtr,
+  yDev: DevicePtr,
+  hyDev: DevicePtr,
+  cyDev: DevicePtr,
+  training = true,
+): RNNForwardCtx {
   const h = handle();
   const p = plan({ ...opts, numLayers: layerDevs.length });
   const weightSpace = acquire(p.wssN);
@@ -190,7 +268,7 @@ export function cudnnRNNForward(xDev, layerDevs, opts, hxDev, cxDev, yDev, hyDev
   return { p, weightSpace, workSpace, reserveSpace, training };
 }
 
-export function releaseRNNForward(ctx) {
+export function releaseRNNForward(ctx: RNNForwardCtx | null | undefined): void {
   if (!ctx || ctx.released) return;
   ctx.released = true;
   release(ctx.weightSpace, ctx.p.wssN);
@@ -198,7 +276,20 @@ export function releaseRNNForward(ctx) {
   if (ctx.reserveSpace && ctx.reserveSpace !== 0n) release(ctx.reserveSpace, ctx.p.reserveN);
 }
 
-export function cudnnRNNBackward(ctx, xDev, yDev, hxDev, cxDev, dyDev, dhyDev, dcyDev, dxDev, dhxDev, dcxDev, gradLayerDevs) {
+export function cudnnRNNBackward(
+  ctx: RNNForwardCtx,
+  xDev: DevicePtr,
+  yDev: DevicePtr,
+  hxDev: DevicePtr,
+  cxDev: DevicePtr,
+  dyDev: DevicePtr,
+  dhyDev: DevicePtr,
+  dcyDev: DevicePtr,
+  dxDev: DevicePtr,
+  dhxDev: DevicePtr,
+  dcxDev: DevicePtr,
+  gradLayerDevs: readonly RNNLayerDevs[],
+): void {
   const { p, weightSpace, workSpace, reserveSpace } = ctx;
   const h = handle();
   const dweight = acquire(p.wssN);

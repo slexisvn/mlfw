@@ -17,20 +17,20 @@
   ],
   "imports": {
     "#io/fs": {
-      "browser": "./src/runtime/browser/fs.js",
-      "default": "./src/runtime/node/fs.js"
+      "browser": "./src/runtime/browser/fs.ts",
+      "default": "./src/runtime/node/fs.ts"
     },
     "#io/wasm_pool": {
-      "browser": "./src/runtime/browser/wasm_pool.js",
-      "default": "./src/runtime/node/wasm_pool.js"
+      "browser": "./src/runtime/browser/wasm_pool.ts",
+      "default": "./src/runtime/node/wasm_pool.ts"
     },
     "#io/cuda_runtime": {
-      "browser": "./src/runtime/browser/cuda_runtime.js",
-      "default": "./src/runtime/node/cuda_runtime.js"
+      "browser": "./src/runtime/browser/cuda_runtime.ts",
+      "default": "./src/runtime/node/cuda_runtime.ts"
     },
     "#io/cuda/*": {
-      "browser": "./src/runtime/browser/cuda/*",
-      "default": "./src/runtime/node/cuda/*"
+      "browser": "./src/runtime/browser/cuda/*.ts",
+      "default": "./src/runtime/node/cuda/*.ts"
     }
   },
   "scripts": {
@@ -44,6 +44,7 @@
     "test:perf": "vitest run --project perf"
   },
   "devDependencies": {
+    "@types/node": "^26.2.0",
     "@vitest/coverage-v8": "^4.1.8",
     "esbuild": "^0.28.0",
     "puppeteer-core": "^25.1.0",

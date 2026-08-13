@@ -9,7 +9,9 @@ import { destroyEagerGraph } from './cuda/eager_graph.js';
 import { cu } from './cuda/ffi.js';
 import { StorageImpl } from '../../tensor/core/storage_impl.js';
 import { registerMeasurer } from '../measurer_registry.js';
+import type { Measurer } from '../measurer_registry.js';
 import { setGpuContiguousFn, setGpuConcatFn, setCudnnLSTM, setCudnnGRU, setGpuAdamFn, setGpuMatmul, wrapResult } from '../../dispatcher/jit_dispatch.js';
+import type { DynamicFn } from '../../dispatcher/jit_dispatch.js';
 import { contiguous as viewContiguous } from '../../tensor/ops/ops.js';
 import { setGpuContiguousHook } from '../../tensor/native/view/view_ops.js';
 import { IndexSelectBackward } from '../../autograd/function/indexing.js';
@@ -20,12 +22,28 @@ import { cudnnLSTMOp, cudnnGRUOp } from './cuda/cudnn_rnn_op.js';
 import { gpuMatmul } from './cuda/cublas_matmul_op.js';
 import { destroyCublas } from './cuda/cublas.js';
 import { registerCudaLinalg } from '../../kernels/cuda/linalg/register.js';
+import type { CudaKernel, CudaKernelMetadata } from '../io.js';
+import type { DevicePtr } from './cuda/ffi.js';
+import type { Tensor } from '../../tensor/core/tensor.js';
+import type { DType, NumericTypedArray } from '../../tensor/types/dtype.js';
+import type { LightningModuleLike, OptimizerLike } from '../../lightning/types.js';
+
+type MeasureOpts = { warmup?: number; repeat?: number; minWarmupMs?: number; maxWarmup?: number };
+type KernelArg = NumericTypedArray | number;
+type AdamDeviceState = { _mDev?: DevicePtr; _vDev?: DevicePtr; _tDev?: DevicePtr; step: number };
+type AdamScalars = {
+  beta1: number; beta2: number; omb1: number; omb2: number; eps: number;
+  lr: number; wd: number; stepSize: number; bc2sqrt: number;
+};
+type ScratchAlloc = { ptrs: DevicePtr[]; bufs: [DevicePtr, number][] };
+type ClipParam = { grad: Tensor | null };
+type CublasModule = typeof import('./cuda/cublas.js');
 
 export { runCudaPlan, setCudaGraphEnabled, isCudaGraphEnabled, setResidentCacheLimit, setPoolLimit };
 
 StorageImpl.setHostReadHook(hostReadHook);
 
-export function measureCudaKernel(compiledKernel, bufferByteSizes, shapeValues = [], opts = {}) {
+export function measureCudaKernel(compiledKernel: CudaKernel, bufferByteSizes: readonly number[], shapeValues: readonly number[] = [], opts: MeasureOpts = {}): number[] {
   getDevice();
   const { func } = getProgram(compiledKernel.source, compiledKernel.name);
   const meta = compiledKernel.metadata;
@@ -42,13 +60,13 @@ export function measureCudaKernel(compiledKernel, bufferByteSizes, shapeValues =
     const wStart = performance.now();
     let w = 0;
     while (w < warmup || (performance.now() - wStart) < minWarmupMs) {
-      launch(func, grid, block, smem, ptrs, shapeValues);
+      launch(func, grid!, block!, smem, ptrs, shapeValues);
       if (++w >= maxWarmup) break;
     }
-    const samples = [];
+    const samples: number[] = [];
     for (let i = 0; i < repeat; i++) {
       const t0 = performance.now();
-      launch(func, grid, block, smem, ptrs, shapeValues);
+      launch(func, grid!, block!, smem, ptrs, shapeValues);
       samples.push(performance.now() - t0);
     }
     return samples;
@@ -57,34 +75,34 @@ export function measureCudaKernel(compiledKernel, bufferByteSizes, shapeValues =
   }
 }
 
-let _cublas = null;
+let _cublas: CublasModule | null = null;
 
-export async function preloadCublas() {
+export async function preloadCublas(): Promise<CublasModule> {
   if (!_cublas) _cublas = await import('./cuda/cublas.js');
   return _cublas;
 }
 
-export function runCudaKernelSync(compiledKernel, tensorArgs, shapeValues) {
+export function runCudaKernelSync(compiledKernel: CudaKernel, tensorArgs: readonly KernelArg[], shapeValues: readonly number[] | null): void {
   const meta = compiledKernel.metadata;
   if (meta.cublas) {
     if (!_cublas) throw new Error('cuBLAS module not preloaded; call preloadCublas() before sync execution');
     const { M, N, K, aIdx, bIdx, cIdx, transB } = meta.cublas;
-    _cublas.cublasMatmul(M, N, K, tensorArgs[aIdx], tensorArgs[bIdx], tensorArgs[cIdx], transB);
+    _cublas.cublasMatmul(M, N, K, tensorArgs[aIdx] as NumericTypedArray, tensorArgs[bIdx] as NumericTypedArray, tensorArgs[cIdx] as NumericTypedArray, transB);
     return;
   }
   getDevice();
   const { func } = getProgramFor(compiledKernel);
 
-  const buffers = [];
-  const scalars = [];
+  const buffers: NumericTypedArray[] = [];
+  const scalars: number[] = [];
   for (const a of tensorArgs) {
-    if (ArrayBuffer.isView(a)) buffers.push(a);
-    else scalars.push(a);
+    if (ArrayBuffer.isView(a)) buffers.push(a as NumericTypedArray);
+    else scalars.push(a as number);
   }
   if (shapeValues) for (const v of shapeValues) scalars.push(v);
 
   const outputs = meta.outputIndices || buffers.map((_, i) => i);
-  const ptrs = [];
+  const ptrs: DevicePtr[] = [];
   for (const host of buffers) {
     const dptr = acquire(host.byteLength);
     copyHostToDevice(dptr, host);
@@ -92,7 +110,7 @@ export function runCudaKernelSync(compiledKernel, tensorArgs, shapeValues) {
   }
   const scratch = _acquireScratch(meta.scratch);
 
-  launch(func, meta.gridDim, meta.blockDim, 0, [...ptrs, ...scratch.ptrs], scalars);
+  launch(func, meta.gridDim!, meta.blockDim!, 0, [...ptrs, ...scratch.ptrs], scalars);
 
   const outputSet = new Set(outputs);
   for (let i = 0; i < buffers.length; i++) {
@@ -102,34 +120,34 @@ export function runCudaKernelSync(compiledKernel, tensorArgs, shapeValues) {
   _releaseScratch(scratch);
 }
 
-export function runCudaKernelResident(compiledKernel, tensorArgs, shapeValues) {
+export function runCudaKernelResident(compiledKernel: CudaKernel, tensorArgs: readonly KernelArg[], shapeValues: readonly number[] | null): void {
   const meta = compiledKernel.metadata;
   if (meta.cublas) throw new Error('cuBLAS kernels are not supported on the eager device-resident path');
   getDevice();
   const { func } = getProgramFor(compiledKernel);
 
-  const buffers = [];
-  const scalars = [];
+  const buffers: NumericTypedArray[] = [];
+  const scalars: number[] = [];
   for (const a of tensorArgs) {
-    if (ArrayBuffer.isView(a)) buffers.push(a);
-    else scalars.push(a);
+    if (ArrayBuffer.isView(a)) buffers.push(a as NumericTypedArray);
+    else scalars.push(a as number);
   }
   if (shapeValues) for (const v of shapeValues) scalars.push(v);
 
   const outputSet = meta._outputSet || (meta._outputSet = new Set(meta.outputIndices || buffers.map((_, i) => i)));
-  const ptrs = new Array(buffers.length);
+  const ptrs: DevicePtr[] = new Array(buffers.length);
   const scratch = _acquireScratch(meta.scratch);
 
   for (let i = 0; i < buffers.length; i++) {
     ptrs[i] = outputSet.has(i) ? deviceBufferForOutput(buffers[i]) : deviceBufferForInput(buffers[i]);
   }
-  launch(func, meta.gridDim, meta.blockDim, 0, [...ptrs, ...scratch.ptrs], scalars, false);
+  launch(func, meta.gridDim!, meta.blockDim!, 0, [...ptrs, ...scratch.ptrs], scalars, false);
   _releaseScratch(scratch);
 }
 
-function _acquireScratch(scratch) {
+function _acquireScratch(scratch: CudaKernelMetadata['scratch']): ScratchAlloc {
   if (!scratch || scratch.length === 0) return { ptrs: [], bufs: [] };
-  const ptrs = [], bufs = [];
+  const ptrs: DevicePtr[] = [], bufs: [DevicePtr, number][] = [];
   for (const s of scratch) {
     const bytes = s.size * typedArrayCtor(s.dtype).BYTES_PER_ELEMENT;
     const p = acquire(bytes);
@@ -137,22 +155,22 @@ function _acquireScratch(scratch) {
   }
   return { ptrs, bufs };
 }
-function _releaseScratch(scratch) {
+function _releaseScratch(scratch: ScratchAlloc): void {
   for (const [p, bytes] of scratch.bufs) release(p, bytes);
 }
 
-export async function runCudaKernel(compiledKernel, tensorArgs, shapeValues) {
+export async function runCudaKernel(compiledKernel: CudaKernel, tensorArgs: readonly KernelArg[], shapeValues: readonly number[] | null): Promise<void> {
   if (compiledKernel.metadata.cublas) await preloadCublas();
   runCudaKernelSync(compiledKernel, tensorArgs, shapeValues);
 }
 
-const _CTYPE = { f32: 'float', f64: 'double', i64: 'long long', i32: 'int', i16: 'short', i8: 'signed char', u8: 'unsigned char', bool: 'unsigned char' };
-function _ctype(dtype) { return _CTYPE[dtype] || 'float'; }
+const _CTYPE: Record<string, string> = { f32: 'float', f64: 'double', i64: 'long long', i32: 'int', i16: 'short', i8: 'signed char', u8: 'unsigned char', bool: 'unsigned char' };
+function _ctype(dtype: string): string { return _CTYPE[dtype] || 'float'; }
 
-const _kernSrc = new Map();
-function _meta(n, outIdx) { return { gridDim: [Math.max(Math.ceil(n / 256), 1), 1, 1], blockDim: [256, 1, 1], sharedMemBytes: 0, outputIndices: outIdx }; }
+const _kernSrc = new Map<string, string>();
+function _meta(n: number, outIdx: number[]): CudaKernelMetadata { return { gridDim: [Math.max(Math.ceil(n / 256), 1), 1, 1], blockDim: [256, 1, 1], sharedMemBytes: 0, outputIndices: outIdx }; }
 
-function _gatherKernel(ct, name) {
+function _gatherKernel(ct: string, name: string): string {
   return `extern "C" __global__ void ${name}(const ${ct}* in, ${ct}* out, int n, int rank,
   int s0,int s1,int s2,int s3,int s4,int s5,int s6,int s7,
   int t0,int t1,int t2,int t3,int t4,int t5,int t6,int t7, int off) {
@@ -165,20 +183,20 @@ function _gatherKernel(ct, name) {
 }`;
 }
 
-export function deviceContiguous(rawData, shape, strides, offset, dtype) {
+export function deviceContiguous(rawData: NumericTypedArray | null, shape: readonly number[], strides: readonly number[], offset: number, dtype: DType): NumericTypedArray {
   const ct = _ctype(dtype);
   const name = `gather_${dtype}`;
   let src = _kernSrc.get(name); if (!src) { src = _gatherKernel(ct, name); _kernSrc.set(name, src); }
   const rank = shape.length;
   let n = 1; for (let i = 0; i < rank; i++) n *= shape[i];
   const out = new (typedArrayCtor(dtype))(Math.max(n, 1));
-  const shp = new Array(8).fill(1), strd = new Array(8).fill(0);
+  const shp: number[] = new Array(8).fill(1), strd: number[] = new Array(8).fill(0);
   for (let i = 0; i < rank; i++) { shp[i] = shape[i]; strd[i] = strides[i]; }
-  runCudaKernelResident({ source: src, name, metadata: _meta(n, [1]) }, [rawData, out, n, rank, ...shp, ...strd, offset | 0], null);
+  runCudaKernelResident({ source: src, name, metadata: _meta(n, [1]) }, [rawData!, out, n, rank, ...shp, ...strd, offset | 0], null);
   return out;
 }
 
-function _catKernel(ct, name) {
+function _catKernel(ct: string, name: string): string {
   return `extern "C" __global__ void ${name}(const ${ct}* in, ${ct}* out, int pre, int dk, int tail, int total, int offset) {
   int i = blockIdx.x*blockDim.x + threadIdx.x; int n = pre*dk*tail; if (i >= n) return;
   int t = i % tail; int r = i / tail; int j = r % dk; int p = r / dk;
@@ -186,7 +204,7 @@ function _catKernel(ct, name) {
 }`;
 }
 
-export function deviceConcat(opName, inputArrays, inputShapes, dim, outShape, outData, dtype) {
+export function deviceConcat(opName: string, inputArrays: readonly NumericTypedArray[], inputShapes: readonly (readonly number[])[], dim: number, outShape: readonly number[], outData: NumericTypedArray, dtype: DType): void {
   const ct = _ctype(dtype);
   const name = `catcopy_${dtype}`;
   let src = _kernSrc.get(name); if (!src) { src = _catKernel(ct, name); _kernSrc.set(name, src); }
@@ -205,7 +223,7 @@ export function deviceConcat(opName, inputArrays, inputShapes, dim, outShape, ou
   }
 }
 
-function _adamKernel(ct, name) {
+function _adamKernel(ct: string, name: string): string {
   return `extern "C" __global__ void ${name}(${ct}* w, const ${ct}* g, ${ct}* m, ${ct}* v, int n, float b1, float b2, float ob1, float ob2, float eps, float ss, float bc2s, float wd) {
   int i = blockIdx.x*blockDim.x + threadIdx.x; if (i >= n) return;
   float gi = (float)g[i] + wd * (float)w[i];
@@ -216,13 +234,13 @@ function _adamKernel(ct, name) {
 }`;
 }
 
-function _stepIncKernel(name) {
+function _stepIncKernel(name: string): string {
   return `extern "C" __global__ void ${name}(int* t) {
   if (threadIdx.x == 0 && blockIdx.x == 0) t[0] = t[0] + 1;
 }`;
 }
 
-function _adamGraphKernel(ct, name) {
+function _adamGraphKernel(ct: string, name: string): string {
   return `extern "C" __global__ void ${name}(${ct}* w, const ${ct}* g, ${ct}* m, ${ct}* v, const int* t, int n, float b1, float b2, float ob1, float ob2, float eps, float lr, float wd) {
   int i = blockIdx.x*blockDim.x + threadIdx.x; if (i >= n) return;
   int step = t[0];
@@ -238,7 +256,7 @@ function _adamGraphKernel(ct, name) {
 }`;
 }
 
-function _clipAccumKernel(name) {
+function _clipAccumKernel(name: string): string {
   return `extern "C" __global__ void ${name}(const float* g, double* acc, int n) {
   extern __shared__ double sdata[];
   int tid = threadIdx.x;
@@ -250,7 +268,7 @@ function _clipAccumKernel(name) {
   if (tid == 0) atomicAdd(acc, sdata[0]);
 }`;
 }
-function _clipCoefKernel(name) {
+function _clipCoefKernel(name: string): string {
   return `extern "C" __global__ void ${name}(const double* acc, const float* mp, float* coef) {
   if (threadIdx.x == 0 && blockIdx.x == 0) {
     double norm = sqrt(acc[0]);
@@ -259,27 +277,27 @@ function _clipCoefKernel(name) {
   }
 }`;
 }
-function _clipScaleKernel(name) {
+function _clipScaleKernel(name: string): string {
   return `extern "C" __global__ void ${name}(float* g, const float* coef, int n) {
   int i = blockIdx.x*blockDim.x + threadIdx.x; if (i < n) g[i] = g[i] * coef[0];
 }`;
 }
 
-let _clipAcc = null, _clipCoef = null, _clipMax = null;
-export function deviceClipGradNorm(params, maxNorm, eps = 1e-6) {
+let _clipAcc: DevicePtr | null = null, _clipCoef: DevicePtr | null = null, _clipMax: DevicePtr | null = null;
+export function deviceClipGradNorm(params: Iterable<ClipParam>, maxNorm: number, eps = 1e-6): void {
   getDevice();
   if (_clipAcc === null) { _clipAcc = acquire(8); _clipCoef = acquire(4); _clipMax = acquire(8); }
   const stream = getDevice().stream;
-  if (!isEagerCapturing()) copyHostToDevice(_clipMax, new Float32Array([maxNorm, eps]));
-  if (isEagerCapturing()) cu.memsetD8Async(_clipAcc, 0, 8, stream);
-  else cu.memsetD8(_clipAcc, 0, 8);
+  if (!isEagerCapturing()) copyHostToDevice(_clipMax!, new Float32Array([maxNorm, eps]));
+  if (isEagerCapturing()) cu.memsetD8Async(_clipAcc!, 0, 8, stream);
+  else cu.memsetD8(_clipAcc!, 0, 8);
   const accumF = getProgram(_clipAccumKernel('clip_accum'), 'clip_accum').func;
   const coefF = getProgram(_clipCoefKernel('clip_coef'), 'clip_coef').func;
   const scaleF = getProgram(_clipScaleKernel('clip_scale'), 'clip_scale').func;
-  const grads = [];
+  const grads: [DevicePtr, number][] = [];
   for (const p of params) {
     if (!p.grad) continue;
-    const gRaw = p.grad._impl.storage.rawData;
+    const gRaw = p.grad!._impl.storage.rawData;
     if (!gRaw) continue;
     const n = gRaw.length;
     const gDev = deviceBufferForInplace(gRaw);
@@ -287,31 +305,31 @@ export function deviceClipGradNorm(params, maxNorm, eps = 1e-6) {
     launch(accumF, [Math.ceil(n / 256), 1, 1], [256, 1, 1], 256 * 8, [gDev, _clipAcc], [n], false);
   }
   if (grads.length === 0) return;
-  launch(coefF, [1, 1, 1], [1, 1, 1], 0, [_clipAcc, _clipMax, _clipCoef], [], false);
+  launch(coefF, [1, 1, 1], [1, 1, 1], 0, [_clipAcc!, _clipMax!, _clipCoef!], [], false);
   for (const [gDev, n] of grads) {
-    launch(scaleF, [Math.ceil(n / 256), 1, 1], [256, 1, 1], 0, [gDev, _clipCoef], [n], false);
+    launch(scaleF, [Math.ceil(n / 256), 1, 1], [256, 1, 1], 0, [gDev, _clipCoef!], [n], false);
   }
 }
 
-export function freeOptimizerDeviceState(optimizer) {
+export function freeOptimizerDeviceState(optimizer: OptimizerLike | null | undefined): void {
   const state = optimizer && optimizer._state;
   if (!state || typeof state.values !== 'function') return;
   for (const st of state.values()) {
     if (!st) continue;
-    if (st._mDev !== undefined) { free(st._mDev); delete st._mDev; }
-    if (st._vDev !== undefined) { free(st._vDev); delete st._vDev; }
-    if (st._tDev !== undefined) { free(st._tDev); delete st._tDev; }
+    if (st._mDev !== undefined) { free(st._mDev as DevicePtr); delete st._mDev; }
+    if (st._vDev !== undefined) { free(st._vDev as DevicePtr); delete st._vDev; }
+    if (st._tDev !== undefined) { free(st._tDev as DevicePtr); delete st._tDev; }
   }
 }
 
-function freeClipScratch() {
+function freeClipScratch(): void {
   if (_clipAcc !== null) {
-    free(_clipAcc); free(_clipCoef); free(_clipMax);
+    free(_clipAcc); free(_clipCoef!); free(_clipMax!);
     _clipAcc = null; _clipCoef = null; _clipMax = null;
   }
 }
 
-export function releaseCudaMemory() {
+export function releaseCudaMemory(): number {
   releaseAllResident();
   releaseAllPlanBuffers();
   freeClipScratch();
@@ -320,7 +338,7 @@ export function releaseCudaMemory() {
   return drainPool();
 }
 
-export function teardownAfterFit(model, optimizers) {
+export function teardownAfterFit(model: LightningModuleLike | null | undefined, optimizers?: readonly OptimizerLike[] | null): number {
   const runner = model && model.__eagerGraphRunner;
   if (runner) {
     try { destroyEagerGraph(runner.captured); } catch (_) {}
@@ -334,28 +352,28 @@ export function teardownAfterFit(model, optimizers) {
   return drainPool();
 }
 
-export function stepIncKernelSource() {
+export function stepIncKernelSource(): { source: string; name: string } {
   const name = 'step_inc';
   let src = _kernSrc.get(name); if (!src) { src = _stepIncKernel(name); _kernSrc.set(name, src); }
   return { source: src, name };
 }
 
-export function adamGraphKernelSource(dtype = 'f32') {
+export function adamGraphKernelSource(dtype: string = 'f32'): { source: string; name: string } {
   const name = `adam_graph_${dtype}`;
   let src = _kernSrc.get(name); if (!src) { src = _adamGraphKernel(_ctype(dtype), name); _kernSrc.set(name, src); }
   return { source: src, name };
 }
 
-function _setDeviceInt(dptr, value) {
+function _setDeviceInt(dptr: DevicePtr, value: number): void {
   copyHostToDevice(dptr, new Int32Array([value | 0]));
 }
 
-export function deviceAdam(p, state, sc) {
+export function deviceAdam(p: Tensor, state: AdamDeviceState, sc: AdamScalars): boolean {
   if (!isEagerDeferred()) return false;
   const dtype = p.dtype || 'f32';
   if (dtype !== 'f32') return false;
   const wRaw = p._impl.storage.rawData;
-  const gRaw = p.grad._impl.storage.rawData;
+  const gRaw = p.grad!._impl.storage.rawData;
   if (!wRaw || !gRaw) return false;
   const n = wRaw.length;
   getDevice();
@@ -391,7 +409,7 @@ export function deviceAdam(p, state, sc) {
   return true;
 }
 
-function gpuContiguousTensor(t) {
+function gpuContiguousTensor(t: Tensor): Tensor | null {
   if (!isEagerDeferred() || !t.device || t.device.type !== DeviceType.GPU) return null;
   const out = deviceContiguous(t._impl.storage.rawData, t.shape, t.strides, t._impl.storageOffset, t.dtype);
   return wrapResult(out, [...t.shape], t.dtype, t.device);
@@ -403,7 +421,7 @@ const _idxAddSrc = `extern "C" __global__ void index_add0(const float* g, const 
   int i = t / E, j = t % E;
   atomicAdd(&out[idx[i]*E + j], g[i*E + j]);
 }`;
-function gpuIndexSelectBackward(g, index, inputShape, dim) {
+function gpuIndexSelectBackward(g: Tensor, index: Tensor, inputShape: readonly number[], dim: number): Tensor | null {
   if (!isEagerDeferred() || dim !== 0 || inputShape.length !== 2) return null;
   if (!g.device || g.device.type !== DeviceType.GPU) return null;
   if (index.dtype !== 'i32') return null;
@@ -418,17 +436,17 @@ function gpuIndexSelectBackward(g, index, inputShape, dim) {
   const stream = getDevice().stream;
   if (isEagerCapturing()) cu.memsetD8Async(outDev, 0, V * E * 4, stream);
   else cu.memsetD8(outDev, 0, V * E * 4);
-  const gDev = deviceBufferForInput(gc._impl.storage.rawData);
-  const idxDev = deviceBufferForInput(idxC._impl.storage.rawData);
+  const gDev = deviceBufferForInput(gc._impl.storage.rawData!);
+  const idxDev = deviceBufferForInput(idxC._impl.storage.rawData!);
   launch(func, [Math.ceil((K * E) / 256), 1, 1], [256, 1, 1], 0, [gDev, idxDev, outDev], [K, E], false);
   return wrapResult(out, [V, E], g.dtype, g.device);
 }
 IndexSelectBackward.setGpuBackward(gpuIndexSelectBackward);
 setGpuContiguousFn(deviceContiguous);
 setGpuConcatFn(deviceConcat);
-setGpuAdamFn(deviceAdam);
-setGpuMatmul(gpuMatmul);
-if (cudnnAvailable()) { setCudnnLSTM(cudnnLSTMOp); setCudnnGRU(cudnnGRUOp); }
+setGpuAdamFn(deviceAdam as DynamicFn);
+setGpuMatmul(gpuMatmul as DynamicFn);
+if (cudnnAvailable()) { setCudnnLSTM(cudnnLSTMOp as DynamicFn); setCudnnGRU(cudnnGRUOp as DynamicFn); }
 registerCudaLinalg();
 
-registerMeasurer('cuda', measureCudaKernel);
+registerMeasurer('cuda', measureCudaKernel as Measurer);

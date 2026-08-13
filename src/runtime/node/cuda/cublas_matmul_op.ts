@@ -8,11 +8,17 @@ import { DeviceType } from '../../../tensor/types/device.js';
 import { deviceBufferForInput, deviceBufferForOutput } from './resident.js';
 import { cublasGemmDevice, cublasGemmBatchedDevice } from './cublas.js';
 import { matmul as opsMatmul } from '../../../tensor/ops/ops.js';
+import type { Tensor } from '../../../tensor/core/tensor.js';
+import type { NumericTypedArray } from '../../../tensor/types/dtype.js';
+
+type TransposableTensor = Tensor & { transpose(dim0: number, dim1: number): Tensor };
+type OperandLayout = { trans: boolean; batchStride: number; batch: number; rows: number; cols: number };
+type OperandData = { data: NumericTypedArray | null; lay: OperandLayout | null };
 
 const devIn = deviceBufferForInput;
 const devOut = deviceBufferForOutput;
 
-function operandData(T) {
+function operandData(T: Tensor): OperandData {
   let lay = operandLayout(T);
   if (lay) return { data: T._impl.storage.rawData, lay };
   const fn = getGpuContiguousFn();
@@ -28,7 +34,7 @@ function operandData(T) {
   return { data: Tc._impl.storage.rawData, lay: operandLayout(Tc) };
 }
 
-function operandLayout(T) {
+function operandLayout(T: Tensor): OperandLayout | null {
   if (T.storageOffset !== 0) return null;
   const shape = T.shape, strides = T.strides, rank = shape.length;
   if (rank < 2) return null;
@@ -46,17 +52,20 @@ function operandLayout(T) {
 }
 
 class MatmulBackward extends AutogradNode {
-  constructor(A, B) { super(2); this.A = A; this.B = B; }
-  apply(gradOutputs) {
+  A: Tensor;
+  B: Tensor;
+
+  constructor(A: Tensor, B: Tensor) { super(2); this.A = A; this.B = B; }
+  apply(gradOutputs: readonly Tensor[]): Tensor[] {
     const dC = gradOutputs[0];
     const A = this.A, B = this.B, ra = A.shape.length, rb = B.shape.length;
-    const dA = opsMatmul(dC, B.transpose(rb - 2, rb - 1));
-    const dB = opsMatmul(A.transpose(ra - 2, ra - 1), dC);
+    const dA = opsMatmul(dC, (B as TransposableTensor).transpose(rb - 2, rb - 1));
+    const dB = opsMatmul((A as TransposableTensor).transpose(ra - 2, ra - 1), dC);
     return [dA, dB];
   }
 }
 
-function attach(node, output) {
+function attach(node: AutogradNode, output: Tensor): void {
   const meta = new AutogradMeta();
   meta.setGradFn(node, 0);
   meta.requiresGrad = true;
@@ -64,7 +73,7 @@ function attach(node, output) {
   output._impl._updateKeySet();
 }
 
-export function gpuMatmul(A, B) {
+export function gpuMatmul(A: Tensor, B: Tensor): Tensor | null {
   if (!A.device || A.device.type !== DeviceType.GPU || B.device.type !== DeviceType.GPU) return null;
   if (A.dtype !== 'f32' || B.dtype !== 'f32') return null;
   const ra = A.shape.length, rb = B.shape.length;
@@ -77,8 +86,8 @@ export function gpuMatmul(A, B) {
   if (!layA || !layB || layA.batch !== layB.batch) return null;
 
   const batch = layA.batch;
-  const dA = devIn(a.data);
-  const dB = devIn(b.data);
+  const dA = devIn(a.data!);
+  const dB = devIn(b.data!);
   const outArr = new Float32Array(batch * M * N);
   const dC = devOut(outArr);
   if (batch > 1) {

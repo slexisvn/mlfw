@@ -3,10 +3,56 @@ import { loadCudaLib, cudaIncludeDir, DRIVER_SPEC, NVRTC_SPEC } from './lib_reso
 
 export { cudaIncludeDir };
 
+import type { CudaHandle, DevicePtr } from '../../io.js';
+
+export type { CudaHandle, DevicePtr };
+
+export interface CuApi {
+  init(flags: number): number;
+  deviceGet(dev: number[], ordinal: number): number;
+  deviceGetAttribute(pi: number[], attrib: number, dev: number): number;
+  primaryCtxRetain(pctx: (CudaHandle | null)[], dev: number): number;
+  primaryCtxRelease(dev: number): number;
+  ctxSynchronize(): number;
+  moduleLoadData(mod: (CudaHandle | null)[], image: Uint8Array): number;
+  moduleGetFunction(func: (CudaHandle | null)[], mod: CudaHandle | null, name: string): number;
+  memGetInfo(free: bigint[], total: bigint[]): number;
+  memAlloc(dptr: bigint[], bytes: number): number;
+  memFree(dptr: DevicePtr): number;
+  memcpyHtoD(dst: DevicePtr, src: ArrayBufferView, n: number): number;
+  memcpyDtoH(dst: ArrayBufferView, src: DevicePtr, n: number): number;
+  memcpyDtoD(dst: DevicePtr, src: DevicePtr, n: number): number;
+  memcpyHtoDAsync(dst: DevicePtr, src: ArrayBufferView, n: number, stream: CudaHandle | null): number;
+  memcpyDtoHAsync(dst: ArrayBufferView, src: DevicePtr, n: number, stream: CudaHandle | null): number;
+  memcpyDtoDAsync(dst: DevicePtr, src: DevicePtr, n: number, stream: CudaHandle | null): number;
+  memsetD8(dst: DevicePtr, uc: number, n: number): number;
+  memsetD8Async(dst: DevicePtr, uc: number, n: number, stream: CudaHandle | null): number;
+  launchKernel(f: CudaHandle | null, gx: number, gy: number, gz: number, bx: number, by: number, bz: number, shmem: number, stream: CudaHandle | null, params: Uint8Array[], extra: null): number;
+  streamCreate(stream: (CudaHandle | null)[], flags: number): number;
+  streamSynchronize(stream: CudaHandle | null): number;
+  ctxSetCurrent(ctx: CudaHandle | null): number;
+  streamBeginCapture(stream: CudaHandle | null, mode: number): number;
+  streamEndCapture(stream: CudaHandle | null, graph: (CudaHandle | null)[]): number;
+  graphInstantiate(exec: (CudaHandle | null)[], graph: CudaHandle | null, flags: bigint): number;
+  graphLaunch(exec: CudaHandle | null, stream: CudaHandle | null): number;
+  graphExecDestroy(exec: CudaHandle | null): number;
+  graphDestroy(graph: CudaHandle | null): number;
+}
+
+export interface NvApi {
+  createProgram(prog: (CudaHandle | null)[], src: string, name: string, n: number, h: null, inc: null): number;
+  compileProgram(prog: CudaHandle | null, n: number, opts: string[]): number;
+  destroyProgram(prog: (CudaHandle | null)[]): number;
+  getPTXSize(prog: CudaHandle | null, sz: bigint[]): number;
+  getPTX(prog: CudaHandle | null, ptx: Uint8Array): number;
+  getProgramLogSize(prog: CudaHandle | null, sz: bigint[]): number;
+  getProgramLog(prog: CudaHandle | null, log: Uint8Array): number;
+}
+
 const drv = koffi.load(loadCudaLib(DRIVER_SPEC));
 const nvrtc = koffi.load(loadCudaLib(NVRTC_SPEC));
 
-export const cu = {
+export const cu: CuApi = {
   init: drv.func('int cuInit(uint)'),
   deviceGet: drv.func('int cuDeviceGet(_Out_ int *dev, int ordinal)'),
   deviceGetAttribute: drv.func('int cuDeviceGetAttribute(_Out_ int *pi, int attrib, int dev)'),
@@ -38,7 +84,7 @@ export const cu = {
   graphDestroy: drv.func('int cuGraphDestroy(void *graph)'),
 };
 
-export const nv = {
+export const nv: NvApi = {
   createProgram: nvrtc.func('int nvrtcCreateProgram(_Out_ void **prog, str src, str name, int n, void *h, void *inc)'),
   compileProgram: nvrtc.func('int nvrtcCompileProgram(void *prog, int n, str *opts)'),
   destroyProgram: nvrtc.func('int nvrtcDestroyProgram(void **prog)'),
@@ -51,11 +97,11 @@ export const nv = {
 export const ATTR_CC_MAJOR = 75;
 export const ATTR_CC_MINOR = 76;
 
-export function checkCU(label, code) {
+export function checkCU(label: string, code: number): void {
   if (code !== 0) throw new Error('CUDA driver error ' + code + ' in ' + label);
 }
 
-export function readProgramLog(prog) {
+export function readProgramLog(prog: CudaHandle | null): string {
   const sz = [0n];
   nv.getProgramLogSize(prog, sz);
   const n = Number(sz[0]);

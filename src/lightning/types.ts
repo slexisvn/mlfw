@@ -1,5 +1,8 @@
 import type { NumericTypedArray } from '../tensor/types/dtype.js';
+import type { Tensor } from '../tensor/core/tensor.js';
+import type { OptimizerState } from '../optim/types.js';
 import type { Device } from '../tensor/types/device.js';
+import type { CudaHandle, DevicePtr, EagerGraph } from '../runtime/io.js';
 import type { Callback } from './callbacks/callback.js';
 import type { CallbackConnector, LoggerConnector } from './core/hooks.js';
 import type { SchedulerConfig } from './core/module.js';
@@ -44,6 +47,7 @@ export type OptimizerGroupLike = {
   [key: string]: unknown;
 };
 export type OptimizerLike = {
+  _state?: Map<number, OptimizerState>;
   paramGroups: OptimizerGroupLike[];
   defaults?: Record<string, unknown>;
   step(): void;
@@ -51,6 +55,7 @@ export type OptimizerLike = {
   stateDict?(): unknown;
 };
 export type LightningModuleLike = {
+  _cudaGraphPhase?: string;
   _currentOptimizers?: OptimizerLike[];
   _logBuffer: Map<string, unknown>;
   _trainer?: unknown;
@@ -61,7 +66,7 @@ export type LightningModuleLike = {
   log(name: string, value: unknown, options?: UnknownRecord): void;
   stateDict?(): unknown;
   loadStateDict?(state: unknown): void;
-  parameters?(): Iterable<unknown>;
+  parameters?(): Iterable<Tensor>;
   train(): void;
   eval(): void;
   forward(...args: unknown[]): unknown;
@@ -143,10 +148,10 @@ export type CompiledTrainStep = {
 export type EagerGraphRunner = {
   phase: 'warmup' | 'disabled' | 'replay';
   seen: number;
-  inputs?: Array<{ dptr: unknown }>;
-  captured?: { exec: unknown };
-  exec?: unknown;
-  lossDptr?: unknown;
+  inputs?: Array<{ dptr: DevicePtr | null }>;
+  captured?: EagerGraph;
+  exec?: CudaHandle | null;
+  lossDptr?: DevicePtr | null;
   lossScratch?: Float32Array;
   captureError?: unknown;
 };

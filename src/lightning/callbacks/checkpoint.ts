@@ -97,7 +97,7 @@ export class ModelCheckpoint extends Callback {
       this._saveCheckpoint(model, trainer, path);
       if (this._saveTopK >= 0) {
         this._recent.push(path);
-        while (this._recent.length > this._saveTopK) this._tryDelete(this._recent.shift());
+        while (this._recent.length > this._saveTopK) this._tryDelete(this._recent.shift()!);
       }
       return;
     }
@@ -179,7 +179,7 @@ export class ModelCheckpoint extends Callback {
     }
   }
 
-  private _tryDelete(path: string | undefined): void {
+  private _tryDelete(path: string): void {
     try { fs.remove(path); } catch { /* noop */ }
   }
 }

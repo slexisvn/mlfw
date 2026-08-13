@@ -1,4 +1,4 @@
-type Measurer = (...args: unknown[]) => unknown;
+export type Measurer = (...args: unknown[]) => unknown;
 
 const _measurers = new Map<string, Measurer>();
 

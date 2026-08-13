@@ -4,6 +4,32 @@ import {
   LANCZOS_G, LANCZOS_COEFFS, ERF_A, ERF_P, DIGAMMA_SHIFT, DIGAMMA_SERIES,
   erfScalar, erfcScalar, lgammaScalar, gammaScalar, digammaScalar,
 } from '../../util/special_math.js';
+import type { WasmParallelInfo } from '../../backend/wasm/codegen.js';
+import type { NumericTypedArray } from '../../tensor/types/dtype.js';
+import type { WasmInstance } from '../io.js';
+
+type WorkerBufferEntry = {
+  offset: number;
+  length: number;
+  data: ArrayBufferLike;
+  fullLength: number;
+  elemStart: number;
+};
+
+type WorkerRequest = {
+  wasmBinary: ArrayBufferLike;
+  mathImportNames: readonly string[];
+  bufferEntries: WorkerBufferEntry[];
+  callArgs: number[];
+  controlBuffer: SharedArrayBuffer;
+  workerIdx: number;
+  outputIndices: readonly number[];
+};
+
+type WorkerResponse = {
+  workerIdx: number;
+  outputs: (ArrayBuffer | null)[];
+};
 
 const WORKER_SRC = `
 const { parentPort } = require('node:worker_threads');
@@ -71,9 +97,9 @@ parentPort.on('message', (msg) => {
 });
 `;
 
-let _pool = null;
+let _pool: WasmThreadPool | null = null;
 
-function getPool() {
+function getPool(): WasmThreadPool {
   if (!_pool) {
     const numWorkers = Math.max(1, Math.min(os.cpus().length - 1, 16));
     _pool = new WasmThreadPool(numWorkers);
@@ -82,13 +108,17 @@ function getPool() {
 }
 
 class WasmThreadPool {
-  constructor(numWorkers) {
+  numWorkers: number;
+  _workers: Worker[];
+  _ready: unknown[];
+
+  constructor(numWorkers: number) {
     this.numWorkers = numWorkers;
     this._workers = [];
     this._ready = [];
   }
 
-  _ensureWorkers() {
+  _ensureWorkers(): void {
     if (this._workers.length > 0) return;
     for (let i = 0; i < this.numWorkers; i++) {
       const w = new Worker(WORKER_SRC, { eval: true });
@@ -97,10 +127,10 @@ class WasmThreadPool {
     }
   }
 
-  dispatch(workerIdx, msg) {
+  dispatch(workerIdx: number, msg: WorkerRequest): Promise<WorkerResponse> {
     this._ensureWorkers();
     return new Promise((resolve) => {
-      const handler = (result) => {
+      const handler = (result: WorkerResponse) => {
         if (result.workerIdx === workerIdx) {
           this._workers[workerIdx].removeListener('message', handler);
           resolve(result);
@@ -111,13 +141,20 @@ class WasmThreadPool {
     });
   }
 
-  terminate() {
+  terminate(): void {
     for (const w of this._workers) w.terminate();
     this._workers = [];
   }
 }
 
-export async function runWasmParallel(wasmInst, name, tensorArgs, shapeValues, parallel, mathImportNames) {
+export async function runWasmParallel(
+  wasmInst: WasmInstance,
+  name: string,
+  tensorArgs: readonly NumericTypedArray[],
+  shapeValues: readonly number[] | null,
+  parallel: WasmParallelInfo,
+  mathImportNames: readonly string[],
+): Promise<void> {
   const pool = getPool();
   pool._ensureWorkers();
 
@@ -130,7 +167,7 @@ export async function runWasmParallel(wasmInst, name, tensorArgs, shapeValues, p
   const activeWorkers = Math.min(pool.numWorkers, Math.max(1, extent));
   const chunkSize = Math.ceil(extent / activeWorkers);
 
-  const strides = [];
+  const strides: number[] = [];
   for (let i = 0; i < nBufs; i++) {
     const data = tensorArgs[i];
     const bufLen = data instanceof Float32Array ? data.length : 0;
@@ -146,13 +183,13 @@ export async function runWasmParallel(wasmInst, name, tensorArgs, shapeValues, p
   const controlBuffer = new SharedArrayBuffer(4 * activeWorkers);
   const wasmBinary = binary.buffer.slice(binary.byteOffset, binary.byteOffset + binary.byteLength);
 
-  const promises = [];
+  const promises: Promise<WorkerResponse>[] = [];
   for (let w = 0; w < activeWorkers; w++) {
     const parStart = w * chunkSize;
     const parEnd = Math.min(parStart + chunkSize, extent);
     if (parStart >= extent) break;
 
-    const bufferEntries = [];
+    const bufferEntries: WorkerBufferEntry[] = [];
     for (let i = 0; i < nBufs; i++) {
       const data = tensorArgs[i];
       if (!(data instanceof Float32Array)) continue;
@@ -201,7 +238,7 @@ export async function runWasmParallel(wasmInst, name, tensorArgs, shapeValues, p
     } else {
       const firstResult = results.find(r => r.workerIdx === 0);
       if (firstResult && firstResult.outputs[i]) {
-        data.set(new Float32Array(firstResult.outputs[i]));
+        data.set(new Float32Array(firstResult.outputs[i] as ArrayBuffer));
       }
     }
   }

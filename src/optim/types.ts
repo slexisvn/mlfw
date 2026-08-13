@@ -4,6 +4,7 @@ import type { NumericTypedArray } from '../tensor/types/dtype.js';
 export type OptimizerParam = Tensor;
 export type OptimizerStateValue =
   | number
+  | bigint
   | boolean
   | string
   | readonly number[]

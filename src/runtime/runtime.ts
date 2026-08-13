@@ -14,7 +14,7 @@ type RuntimeArrayConstructor = {
 type RuntimeArg = RuntimeTensor | RuntimeData;
 type ShapeParamMap = Map<string, { name: string }>;
 type BufferMap = Map<string | { name?: string }, { name?: string } | null | undefined>;
-type RuntimeKernel = {
+export type RuntimeKernel = {
   name: string;
   source: string;
   target: { name: string };
@@ -36,9 +36,9 @@ type RuntimeBackend = {
 };
 type KernelInstanceEntry = { backend: RuntimeBackend; instance: unknown | Promise<unknown> };
 type ReturnFixup = { pos: number; kind: 'copy'; srcSlot: number } | { pos: number; kind: 'const'; value: number };
-type ExecutionPlanStep = { name: string; inputSlots: number[]; outputSlots: number[] };
+export type ExecutionPlanStep = { name: string; inputSlots: number[]; outputSlots: number[] };
 type PlanIntermediate = { slot: number; shape: number[]; dtype: RuntimeDType };
-type ExecutionPlan = {
+export type ExecutionPlan = {
   numSlots: number;
   argSlots: number[];
   intermediates: PlanIntermediate[];
@@ -46,7 +46,7 @@ type ExecutionPlan = {
   returnFixups?: ReturnFixup[];
   buffers?: { slotBuffer: number[]; bufferBytes: number[] };
 };
-type PlanStepRuntime = ExecutionPlanStep & {
+export type PlanStepRuntime = ExecutionPlanStep & {
   kernel: RuntimeKernel | null;
   shapeValues: number[] | null;
 };

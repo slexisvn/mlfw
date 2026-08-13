@@ -19,8 +19,8 @@ import { scalarArgNames } from '../tensor/ops/metadata.js';
 type ScalarMap = Record<string, unknown>;
 type TargetFactory = () => TargetLike;
 type GpuContiguousFn = (data: NumericTypedArray | null, shape: readonly number[], strides: readonly number[], offset: number, dtype: DType) => NumericTypedArray;
-type GpuConcatFn = (opName: string, inputs: NumericTypedArray[], shapes: readonly number[][], dim: unknown, outShape: readonly number[], outData: NumericTypedArray, dtype: DType) => void;
-type DynamicFn = (...args: unknown[]) => unknown;
+type GpuConcatFn = (opName: string, inputs: NumericTypedArray[], shapes: readonly number[][], dim: number, outShape: readonly number[], outData: NumericTypedArray, dtype: DType) => void;
+export type DynamicFn = (...args: unknown[]) => unknown;
 
 let _cpuTarget: TargetLike | undefined;
 let _cudaTarget: TargetLike | undefined;
