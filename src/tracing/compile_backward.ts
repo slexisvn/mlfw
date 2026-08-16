@@ -381,6 +381,24 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
       throw new Error('Must run forward before backward');
     }
 
+    const reference = _activeMeta.mode === 'joint'
+      ? (_savedValues as JointSavedContext).gradOutputArrays
+      : (_savedValues as SeparateForwardContext).outputArrays.slice(0, _activeMeta.numRealOutputs);
+    if (gradOutputs.length !== reference.length) {
+      throw new Error(
+        `backward() expects one gradient per forward output: the model returns ${reference.length} output(s) but ${gradOutputs.length} gradient(s) were given`
+      );
+    }
+    for (let i = 0; i < gradOutputs.length; i++) {
+      const expected = reference[i].length;
+      const got = computeNumel(gradOutputs[i].shape);
+      if (got !== expected) {
+        throw new Error(
+          `backward() gradient ${i} has ${got} element(s) but forward output ${i} has ${expected}`
+        );
+      }
+    }
+
     if (_activeMeta.mode === 'joint') {
       return _executeJointBackward(_activeMeta, gradOutputs, _savedValues as JointSavedContext);
     }

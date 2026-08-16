@@ -24,6 +24,8 @@ const INSTR = new Map<string, ByteSeq>([
   ['i32.and', [0x71]], ['i32.or', [0x72]], ['i32.xor', [0x73]], ['i32.shl', [0x74]], ['i32.shr_s', [0x75]], ['i32.shr_u', [0x76]],
   ['i32.reinterpret_f32', [0xbc]], ['f32.reinterpret_i32', [0xbe]],
   ['i32.trunc_f32_s', [0xa8]],
+  ['i32.trunc_sat_f32_s', [0xfc, ...uleb(0)]], ['i32.trunc_sat_f64_s', [0xfc, ...uleb(2)]],
+  ['i64.trunc_sat_f32_s', [0xfc, ...uleb(4)]], ['i64.trunc_sat_f64_s', [0xfc, ...uleb(6)]],
   ['f32.add', [0x92]], ['f32.sub', [0x93]], ['f32.mul', [0x94]], ['f32.div', [0x95]],
   ['f32.neg', [0x8c]], ['f32.abs', [0x8b]], ['f32.ceil', [0x8d]], ['f32.floor', [0x8e]], ['f32.sqrt', [0x91]], ['f32.min', [0x96]], ['f32.max', [0x97]],
   ['f32.eq', [0x5b]], ['f32.ne', [0x5c]], ['f32.lt', [0x5d]], ['f32.gt', [0x5e]], ['f32.le', [0x5f]], ['f32.ge', [0x60]],

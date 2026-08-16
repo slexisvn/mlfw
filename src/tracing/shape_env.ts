@@ -44,7 +44,7 @@ export class ShapeEnv {
     const symShape = new Array<SymbolicDim>(concreteShape.length);
 
     for (let i = 0; i < concreteShape.length; i++) {
-      if (dynamicDims && dynamicDims.has(i)) {
+      if (dynamicDims && dynamicDims.has(i) && concreteShape[i] > 1) {
         const sym = this.allocate(inputIdx, i, concreteShape[i]);
         irShape[i] = DYNAMIC;
         symShape[i] = sym;

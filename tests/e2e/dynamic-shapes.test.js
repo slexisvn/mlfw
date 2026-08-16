@@ -197,6 +197,39 @@ describe('pooling honours a dynamic batch extent', () => {
   });
 });
 
+describe('size-1 axes are specialized, not symbolized', () => {
+  const fwd3 = (a, b, c) => ops.relu(ops.sub(ops.mul(ops.add(a, b), ops.sub(a, c)), ops.tanh(ops.mul(b, c))));
+
+  it('broadcasting operands with a dynamic size-1 axis match eager', async () => {
+    const r = rng(101);
+    const inputs = [randomTensor(r, [16, 1, 32]), randomTensor(r, [1, 12, 32]), randomTensor(r, [16, 12, 1])];
+    const eager = flat(fwd3(...inputs));
+
+    for (const spec of [inputs.map(() => new Set([0])), inputs.map(() => true)]) {
+      const compiled = compile({ forward: fwd3 }, inputs, { target: CPUTarget(), dynamic_shapes: spec });
+      if (compiled._ready) await compiled._ready;
+      const got = flat(await compiled(...inputs));
+      const { worst, at } = maxRelErr(eager, got);
+      expect(worst, `idx ${at}: eager=${eager[at]} compiled=${got[at]}`).toBeLessThan(TOL);
+    }
+  });
+
+  it('a batch-1 example still recompiles correctly for a larger batch', async () => {
+    const fc = new nn.Linear(32, 16);
+    const fwd = (x) => ops.sum(nn.F.relu(fc.forward(x)), -1);
+    const one = randomTensor(rng(102), [1, 32]);
+    const compiled = compile({ forward: fwd }, [one], { target: CPUTarget(), dynamic_shapes: [new Set([0])] });
+    if (compiled._ready) await compiled._ready;
+
+    const first = maxRelErr(flat(fwd(one)), flat(await compiled(one)));
+    expect(first.worst).toBeLessThan(TOL);
+
+    const many = randomTensor(rng(103), [6, 32]);
+    const second = maxRelErr(flat(fwd(many)), flat(await compiled(many)));
+    expect(second.worst, `idx ${second.at}`).toBeLessThan(TOL);
+  });
+});
+
 describe('compiled scratch buffers are declared once', () => {
   it('argmax emits a single allocation for its running-best scratch', () => {
     const compiled = compile({ forward: (a) => a.argmax(0, false) }, [tensor([3, 1, 4, 1, 5])], { target: CPUTarget() });

@@ -3,13 +3,15 @@ import {
   PrimFunc, ForNode, ForKind, SeqNode, AllocateNode, LetStmtNode, VecCopyNode,
   BlockNode, BlockRealizeNode,
   BufferStoreNode, BufferLoadNode, VariableNode, IntImmNode, FloatImmNode, MathOpNode, CallExternNode,
+  IfThenElseNode, CompareNode,
 } from '../../../src/compiler/ir/tensor/nodes.js';
 import { Buffer } from '../../../src/compiler/ir/tensor/buffer.js';
 import { walkScoped } from '../../../src/compiler/ir/ir_visitor.js';
 import {
   varNamesOf, usesAnyVar, usesAnyVarIn, storedBufferNames, referencedBuffers,
   allocatedBufferNames, collectScopeBindings, findLoopOfKind, staticExtentOf,
-  bufferAccessCount, firstBufferAccessDtype, loadsAreUnitStrideIn, hasBufferAccessMatching,
+  bufferAccessCount, vectorValueDtype, loadsAreUnitStrideIn, hasBufferAccessMatching,
+  indicesAreLaneAffine, loopCarriedDependenceIn, guardedLoadsAreInRange,
 } from '../../../src/compiler/analysis/tir_queries.js';
 
 const v = (name) => new VariableNode(name, 'int32');
@@ -73,15 +75,70 @@ describe('buffer queries reach every schema field, not a hardcoded key list', ()
     expect([...allocatedBufferNames(body)].sort()).toEqual(['t', 'u']);
   });
 
-  it('reports the first buffer access dtype in program order', () => {
+  it('reports the value-position dtype when every value access agrees', () => {
     const a = buf('a', [4], 'float16');
-    const b = buf('b', [4], 'float32');
+    const b = buf('b', [4], 'float16');
     const body = new SeqNode([
       new BufferStoreNode(a, [i32(0)], f32v(1)),
       new BufferStoreNode(b, [i32(0)], f32v(1)),
     ]);
-    expect(firstBufferAccessDtype(body, 'float32')).toBe('float16');
-    expect(firstBufferAccessDtype(new SeqNode([]), 'float32')).toBe(null);
+    expect(vectorValueDtype(body, 'float32')).toBe('float16');
+    expect(vectorValueDtype(new SeqNode([]), 'float32')).toBe('float32');
+  });
+
+  it('reports null when value-position accesses mix dtypes', () => {
+    const half = buf('h', [4], 'float16');
+    const single = buf('s', [4], 'float32');
+    const body = new SeqNode([
+      new BufferStoreNode(half, [i32(0)], f32v(1)),
+      new BufferStoreNode(single, [i32(0)], f32v(1)),
+    ]);
+    expect(vectorValueDtype(body, 'float32')).toBe(null);
+  });
+
+  it('accepts index expressions that are lane-affine', () => {
+    const out = buf('out', [8]);
+    const src = buf('src', [8]);
+    const lanes = new Set(['i']);
+    const body = new BufferStoreNode(out, [v('i')], new BufferLoadNode(src, [new MathOpNode('+', v('i'), i32(2))]));
+    expect(indicesAreLaneAffine(body, lanes)).toBe(true);
+  });
+
+  it('rejects an indirect index that varies per lane', () => {
+    const out = buf('out', [8]);
+    const src = buf('src', [8]);
+    const perm = buf('perm', [8], 'int32');
+    const lanes = new Set(['i']);
+    const gathered = new BufferLoadNode(src, [new BufferLoadNode(perm, [v('i')])]);
+    expect(indicesAreLaneAffine(new BufferStoreNode(out, [v('i')], gathered), lanes)).toBe(false);
+  });
+
+  it('rejects a scaled index that skips elements between lanes', () => {
+    const out = buf('out', [8]);
+    const lanes = new Set(['i']);
+    const body = new BufferStoreNode(out, [mul(v('i'), i32(2))], f32v(1));
+    expect(indicesAreLaneAffine(body, lanes)).toBe(false);
+  });
+
+  it('detects a load from a stored buffer at a different index', () => {
+    const acc = buf('acc', [8]);
+    const shifted = new BufferLoadNode(acc, [new MathOpNode('+', v('i'), i32(1))]);
+    expect(loopCarriedDependenceIn(new BufferStoreNode(acc, [v('i')], shifted))).toBe(true);
+  });
+
+  it('allows a read-modify-write of the same element', () => {
+    const acc = buf('acc', [8]);
+    const same = new BufferLoadNode(acc, [v('i')]);
+    expect(loopCarriedDependenceIn(new BufferStoreNode(acc, [v('i')], same))).toBe(false);
+  });
+
+  it('ignores index-position accesses of a different dtype', () => {
+    const data = buf('data', [4], 'float32');
+    const out = buf('out', [4], 'float32');
+    const idx = buf('idx', [4], 'int32');
+    const gathered = new BufferLoadNode(data, [new BufferLoadNode(idx, [v('i')])]);
+    const body = new BufferStoreNode(out, [v('i')], gathered);
+    expect(vectorValueDtype(body, 'float32')).toBe('float32');
   });
 
   it('matches buffer accesses by dtype through both node families', () => {
@@ -189,5 +246,38 @@ describe('storedBufferNames on a whole function', () => {
     const body = new BufferStoreNode(out, [i32(0)],
       new CallExternNode('max', [new BufferLoadNode(a, [i32(0)]), f32v(0)], 'float32'));
     expect([...referencedBuffers(body).keys()].sort()).toEqual(['a', 'out']);
+  });
+});
+
+describe('guarded loads under a vectorized select', () => {
+  const laneVars = new Set(['j']);
+
+  it('accepts branches that load the index the loop stores to', () => {
+    const out = buf('out', [4, 8]);
+    const a = buf('a', [4, 8]);
+    const b = buf('b', [4, 8]);
+    const idx = [v('i'), v('j')];
+    const select = new IfThenElseNode(
+      new CompareNode('gt', new BufferLoadNode(a, idx), f32v(0)),
+      new BufferLoadNode(a, [v('i'), v('j')]),
+      new BufferLoadNode(b, [v('i'), v('j')]),
+    );
+    expect(guardedLoadsAreInRange(new BufferStoreNode(out, idx, select), laneVars)).toBe(true);
+  });
+
+  it('rejects a branch that loads a shifted index the guard was protecting', () => {
+    const out = buf('out', [4, 8]);
+    const src = buf('src', [4, 6]);
+    const shifted = new BufferLoadNode(src, [v('i'), new MathOpNode('-', v('j'), i32(1))]);
+    const select = new IfThenElseNode(new CompareNode('ge', v('j'), i32(1)), shifted, f32v(0));
+    expect(guardedLoadsAreInRange(new BufferStoreNode(out, [v('i'), v('j')], select), laneVars)).toBe(false);
+  });
+
+  it('rejects a guarded load even when the guard itself is lane-invariant', () => {
+    const out = buf('out', [6, 8]);
+    const src = buf('src', [4, 8]);
+    const shiftedRow = new BufferLoadNode(src, [new MathOpNode('-', v('i'), i32(1)), v('j')]);
+    const select = new IfThenElseNode(new CompareNode('ge', v('i'), i32(1)), shiftedRow, f32v(0));
+    expect(guardedLoadsAreInRange(new BufferStoreNode(out, [v('i'), v('j')], select), laneVars)).toBe(false);
   });
 });

@@ -1,4 +1,4 @@
-import { walk, some, find } from '../ir/ir_visitor.js';
+import { walk, some, find, irChildNodes } from '../ir/ir_visitor.js';
 import type { IRNode } from '../ir/ir_visitor.js';
 import type { Buffer } from '../ir/tensor/buffer.js';
 import type { ForNode, TirNode } from '../ir/tensor/nodes.js';
@@ -36,12 +36,38 @@ export function bufferAccessCount(root: IRNode): number {
   return count;
 }
 
-export function firstBufferAccessDtype(root: IRNode, fallback: string): string | null {
-  const node = find(root, (n) => ACCESS_TYPES.has(n.type));
-  if (!node) return null;
+function accessDtype(node: IRNode, fallback: string): string {
   const n = node as unknown as { buffer?: { dtype: string }; dtype?: string };
-  if (n.buffer) return n.buffer.dtype;
+  if (node.type === 'BufferLoadNode' || node.type === 'BufferStoreNode') {
+    return (n.buffer && n.buffer.dtype) || fallback;
+  }
   return n.dtype || fallback;
+}
+
+function accessesInIndexPosition(root: IRNode): Set<IRNode> {
+  const marked = new Set<IRNode>();
+  walk(root, (node) => {
+    if (!ACCESS_TYPES.has(node.type)) return;
+    const n = node as unknown as { indices?: (IRNode | null)[]; offsetExpr?: IRNode | null };
+    const subtrees = n.indices || (n.offsetExpr ? [n.offsetExpr] : []);
+    for (const sub of subtrees) {
+      if (sub) walk(sub, (inner) => { if (ACCESS_TYPES.has(inner.type)) marked.add(inner); });
+    }
+  });
+  return marked;
+}
+
+export function vectorValueDtype(root: IRNode, fallback: string): string | null {
+  const indexPosition = accessesInIndexPosition(root);
+  let dtype: string | null = null;
+  let mixed = false;
+  walk(root, (node) => {
+    if (mixed || !ACCESS_TYPES.has(node.type) || indexPosition.has(node)) return;
+    const found = accessDtype(node, fallback);
+    if (dtype === null) dtype = found;
+    else if (dtype !== found) mixed = true;
+  });
+  return mixed ? null : (dtype ?? fallback);
 }
 
 export function storedBufferNames(root: IRNode): Set<string> {
@@ -128,6 +154,101 @@ export function loadsAreUnitStrideIn(root: IRNode, vecVars: ReadonlySet<string>)
       return !!offsetExpr && stridedMul(offsetExpr);
     }
     return false;
+  });
+}
+
+function laneAffineExpr(node: IRNode | null | undefined, laneVars: ReadonlySet<string>): boolean {
+  if (!node || !usesAnyVar(node, laneVars)) return true;
+  if (node.type === 'VariableNode') return true;
+  if (node.type === 'CastNode') return irChildNodes(node).every((k) => laneAffineExpr(k, laneVars));
+  if (node.type === 'MathOpNode') {
+    const op = (node as unknown as { op?: string }).op;
+    if (op !== '+' && op !== '-') return false;
+    return irChildNodes(node).every((k) => laneAffineExpr(k, laneVars));
+  }
+  return false;
+}
+
+export function indicesAreLaneAffine(root: IRNode, laneVars: ReadonlySet<string>): boolean {
+  if (laneVars.size === 0) return true;
+  return !some(root, (node) => {
+    if (!ACCESS_TYPES.has(node.type)) return false;
+    const n = node as unknown as { indices?: (IRNode | null)[]; offsetExpr?: IRNode | null };
+    const parts = n.indices || (n.offsetExpr !== undefined ? [n.offsetExpr] : []);
+    for (const part of parts) if (!laneAffineExpr(part, laneVars)) return true;
+    return false;
+  });
+}
+
+const KEY_FIELDS = ['name', 'value', 'op', 'externName', 'dtype', 'toDtype', 'fromDtype'] as const;
+
+export function exprKey(node: IRNode | null | undefined): string {
+  if (!node) return '_';
+  const n = node as unknown as Record<string, unknown>;
+  let key = node.type;
+  for (const field of KEY_FIELDS) {
+    const v = n[field];
+    if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') key += `|${field}=${v}`;
+  }
+  const buffer = n.buffer as { name?: string } | undefined;
+  if (buffer && buffer.name) key += `|buf=${buffer.name}`;
+  const kids = irChildNodes(node);
+  key += '(';
+  for (let i = 0; i < kids.length; i++) key += (i ? ',' : '') + exprKey(kids[i]);
+  return key + ')';
+}
+
+function indexKey(node: IRNode): string {
+  const n = node as unknown as { indices?: (IRNode | null)[]; offsetExpr?: IRNode | null };
+  const parts = n.indices || (n.offsetExpr !== undefined ? [n.offsetExpr] : []);
+  return parts.map((p) => exprKey(p)).join(',');
+}
+
+export function guardedLoadsAreInRange(root: IRNode, laneVars: ReadonlySet<string>): boolean {
+  if (laneVars.size === 0) return true;
+
+  const storeKeys = new Set<string>();
+  walk(root, (node) => { if (STORE_TYPES.has(node.type)) storeKeys.add(indexKey(node)); });
+
+  let safe = true;
+  walk(root, (node) => {
+    if (!safe || node.type !== 'IfThenElseNode') return;
+    const select = node as unknown as { condition?: IRNode; thenBody?: IRNode; elseBody?: IRNode };
+    for (const branch of [select.thenBody, select.elseBody]) {
+      if (!branch) continue;
+      walk(branch, (inner) => {
+        if (inner.type !== 'BufferLoadNode' && inner.type !== 'LIRFlatLoadNode') return;
+        if (!storeKeys.has(indexKey(inner))) safe = false;
+      });
+    }
+  });
+
+  return safe;
+}
+
+function accessLocationKey(node: IRNode): string {
+  const n = node as unknown as { buffer?: { name?: string }; indices?: (IRNode | null)[]; offsetExpr?: IRNode | null };
+  const buffer = (n.buffer && n.buffer.name) || '?';
+  const parts = n.indices || (n.offsetExpr !== undefined ? [n.offsetExpr] : []);
+  return buffer + '@' + parts.map((p) => exprKey(p)).join(',');
+}
+
+export function loopCarriedDependenceIn(root: IRNode): boolean {
+  const written = new Set<string>();
+  const writtenLocations = new Set<string>();
+  walk(root, (node) => {
+    if (!STORE_TYPES.has(node.type)) return;
+    const buffer = (node as unknown as { buffer?: { name?: string } }).buffer;
+    if (buffer && buffer.name) written.add(buffer.name);
+    writtenLocations.add(accessLocationKey(node));
+  });
+  if (written.size === 0) return false;
+
+  return some(root, (node) => {
+    if (node.type !== 'BufferLoadNode' && node.type !== 'LIRFlatLoadNode') return false;
+    const buffer = (node as unknown as { buffer?: { name?: string } }).buffer;
+    if (!buffer || !buffer.name || !written.has(buffer.name)) return false;
+    return !writtenLocations.has(accessLocationKey(node));
   });
 }
 

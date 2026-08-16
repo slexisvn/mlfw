@@ -4,7 +4,7 @@ import type { SimdInfo } from '../../util/dtype_map.js';
 import { inferDtype } from '../../compiler/ir/lir/nodes.js';
 import { HALF_WASM_CONSTANTS } from '../../tensor/utils/half.js';
 import { walk, some, collect, walkScoped } from '../../compiler/ir/ir_visitor.js';
-import { usesAnyVar, usesAnyVarIn, bufferAccessCount, firstBufferAccessDtype, storedBufferNames, collectScopeBindings, findLoopOfKind, staticExtentOf, hasBufferAccessMatching, loadsAreUnitStrideIn } from '../../compiler/analysis/tir_queries.js';
+import { usesAnyVar, usesAnyVarIn, bufferAccessCount, vectorValueDtype, loopCarriedDependenceIn, indicesAreLaneAffine, guardedLoadsAreInRange, storedBufferNames, collectScopeBindings, findLoopOfKind, staticExtentOf, hasBufferAccessMatching, loadsAreUnitStrideIn } from '../../compiler/analysis/tir_queries.js';
 import { resolveShapeParam, isZeroFillBody } from '../codegen_utils.js';
 
 import type { Buffer } from '../../compiler/ir/tensor/buffer.js';
@@ -523,9 +523,18 @@ export class WasmCodegen {
   }
 
   _visitLIRBindings(node: LIRBindingsNode): void {
+    const vm = this._vectorMode;
     for (const bind of node.bindings) {
       this._emitExpr(bind.expr);
       this._emit(`local.set $${bind.name}`);
+      if (vm && vm.simd && this._dependsOnVecVar(bind.expr)) {
+        const vecName = bind.name + '_vlet';
+        this._ensureLocal(vecName, 'v128');
+        if (!vm.vecLets) vm.vecLets = new Set();
+        vm.vecLets.add(bind.name);
+        this._emitVecExpr(bind.expr);
+        this._emit('local.set $' + vecName);
+      }
     }
     this._visitNode(node.body);
   }
@@ -552,11 +561,13 @@ export class WasmCodegen {
 
     const extent = this._constExtent(node.extent);
     const accOp = node.op || '+';
+    const laneDtype = vectorValueDtype(node.body, dtype);
     const simdEntry = accOp === '+' && extent !== null && node.loopKind === ForKind.VECTORIZED
-      && this.target.supportsSimd() ? wasmSimdEntry(dtype) : null;
+      && this.target.supportsSimd() && laneDtype === dtype ? wasmSimdEntry(dtype) : null;
     const lanes = simdEntry ? this.target.vectorWidth : 0;
 
-    if (simdEntry && (extent as number) >= lanes && this._vecAccumOperandsUnitStride(node)) {
+    if (simdEntry && (extent as number) >= lanes && this._vecAccumOperandsUnitStride(node)
+      && this._vectorizationIsLegal(node.body, this._computeLaneVars(node), node.loopVar.name)) {
       this._visitVecAccumulator(node, simdEntry, lanes, extent as number);
       return;
     }
@@ -1018,13 +1029,13 @@ export class WasmCodegen {
       else if (fromPrefix === 'i32') this._emit('f32.convert_i32_s');
       else if (fromPrefix === 'i64') this._emit('f32.convert_i64_s');
     } else if (toPrefix === 'i32') {
-      if (fromPrefix === 'f64') this._emit('i32.trunc_f64_s');
-      else if (fromPrefix === 'f32') this._emit('i32.trunc_f32_s');
+      if (fromPrefix === 'f64') this._emit('i32.trunc_sat_f64_s');
+      else if (fromPrefix === 'f32') this._emit('i32.trunc_sat_f32_s');
       else if (fromPrefix === 'i64') this._emit('i32.wrap_i64');
     } else if (toPrefix === 'i64') {
       if (fromPrefix === 'i32') this._emit('i64.extend_i32_s');
-      else if (fromPrefix === 'f32') this._emit('i64.trunc_f32_s');
-      else if (fromPrefix === 'f64') this._emit('i64.trunc_f64_s');
+      else if (fromPrefix === 'f32') this._emit('i64.trunc_sat_f32_s');
+      else if (fromPrefix === 'f64') this._emit('i64.trunc_sat_f64_s');
     }
   }
 
@@ -1316,9 +1327,9 @@ export class WasmCodegen {
   _visitVectorizedFor(node: ForNode): void {
     const varName = node.loopVar.name;
     const extent = this._constExtent(node.extent) as number;
-    const dtype = this._inferBodyDtype(node.body) || this._defaultDtype;
+    const dtype = this._inferBodyDtype(node.body);
     const lanes = this.target.vectorWidth;
-    const simdEntry = wasmSimdEntry(dtype);
+    const simdEntry = dtype === null ? null : wasmSimdEntry(dtype);
 
     if (!simdEntry || extent < lanes || this._treeHasHalf(node.body)) {
       this._emitForLoop(varName, node.extent, node.body);
@@ -1326,7 +1337,8 @@ export class WasmCodegen {
     }
 
     const laneVars = this._computeLaneVars(node);
-    if (!this._vecStoresLaneIndexed(node.body, laneVars) || !this._vecLoadsContiguous(node.body, laneVars)) {
+    if (!this._vecStoresLaneIndexed(node.body, laneVars) || !this._vecLoadsContiguous(node.body, laneVars)
+      || !this._vectorizationIsLegal(node.body, laneVars, varName)) {
       this._emitForLoop(varName, node.extent, node.body);
       return;
     }
@@ -1392,7 +1404,7 @@ export class WasmCodegen {
   }
 
   _inferBodyDtype(body: IRStmtNode): string | null {
-    return firstBufferAccessDtype(body, this._defaultDtype);
+    return vectorValueDtype(body, this._defaultDtype);
   }
 
   _emitVecStore(node: BufferStoreNode): void {
@@ -1461,17 +1473,12 @@ export class WasmCodegen {
         if (vm.vecLets && vm.vecLets.has(node.name)) {
           this._emit('(local.get $' + node.name + '_vlet)');
         } else if (node.name === vm.loopVar) {
-          this._emit('(local.get $' + node.name + ')');
+          this._emitVecInduction(node.name);
         } else {
           const localType = this._locals.get(node.name);
-          if (localType === 'f32') {
-            this._emit('(local.get $' + node.name + ')');
-            this._emit(vm.simd.splat);
-          } else {
-            this._emit('(local.get $' + node.name + ')');
-            if (isDtypeFloat(dtype)) this._emit('f32.convert_i32_s');
-            this._emit(vm.simd.splat);
-          }
+          this._emit('(local.get $' + node.name + ')');
+          this._emitLaneCoercion(localType === 'f32' ? 'f32' : 'i32');
+          this._emit(vm.simd.splat);
         }
         break;
       case 'MathOpNode':
@@ -1498,6 +1505,56 @@ export class WasmCodegen {
         this._emitExpr(node);
         break;
     }
+  }
+
+  _laneScalarType(): string {
+    const vm = this._vectorMode as VectorMode;
+    return vm.simd.laneType.split('x')[0];
+  }
+
+  _emitLaneCoercion(fromType: string): void {
+    const to = this._laneScalarType();
+    if (to === fromType) return;
+    if (fromType === 'i32') this._emit(to + '.convert_i32_s');
+    else if (to === 'i32') this._emit('i32.trunc_sat_' + fromType + '_s');
+    else this._emit(to + '.promote_' + fromType);
+  }
+
+  _emitVecInduction(varName: string): void {
+    const vm = this._vectorMode as VectorMode;
+    this._emit('(local.get $' + varName + ')');
+    this._emitLaneCoercion('i32');
+    this._emit(vm.simd.splat);
+    for (let lane = 1; lane < vm.lanes; lane++) {
+      this._emit('(local.get $' + varName + ')');
+      this._emit('(i32.const ' + lane + ')');
+      this._emit('i32.add');
+      this._emitLaneCoercion('i32');
+      this._emit(vm.simd.replaceLane + ' ' + lane);
+    }
+  }
+
+  _vecGuardIsLaneInvariant(root: IRStmtNode, laneVars: ReadonlySet<string>): boolean {
+    return !some(root, (n) => n.type === 'IfThenElseNode'
+      && usesAnyVar((n as unknown as IfThenElseNode).condition, laneVars), { kinds: 'stmt' });
+  }
+
+  _vecLaneVarsResolvable(root: IRStmtNode, laneVars: ReadonlySet<string>, loopVar: string): boolean {
+    const bound = new Set<string>([loopVar]);
+    walk(root, (n) => {
+      if (n.type === 'LetStmtNode' && n.variable) bound.add(n.variable.name);
+      if (n.type === 'LIRBindingsNode') for (const bind of n.bindings) bound.add(bind.name);
+    });
+    for (const name of laneVars) if (!bound.has(name)) return false;
+    return true;
+  }
+
+  _vectorizationIsLegal(body: IRStmtNode, laneVars: ReadonlySet<string>, loopVar: string): boolean {
+    return this._vecLaneVarsResolvable(body, laneVars, loopVar)
+      && this._vecGuardIsLaneInvariant(body, laneVars)
+      && indicesAreLaneAffine(body, laneVars)
+      && guardedLoadsAreInRange(body, laneVars)
+      && !loopCarriedDependenceIn(body);
   }
 
   _isVecMaskExpr(node: IRStmtNode | null): boolean {
@@ -1692,6 +1749,11 @@ export class WasmCodegen {
     walk(forNode.body, (n) => {
       if (n.type === 'LetStmtNode' && n.variable && usesAnyVar(n.value, laneVars)) {
         this._ensureLocal(n.variable.name + '_vlet', 'v128');
+      }
+      if (n.type === 'LIRBindingsNode') {
+        for (const bind of n.bindings) {
+          if (usesAnyVar(bind.expr, laneVars)) this._ensureLocal(bind.name + '_vlet', 'v128');
+        }
       }
     });
   }

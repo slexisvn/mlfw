@@ -198,9 +198,11 @@ describe('WasmCodegen._emitExpr — CastNode', () => {
     return cg._lines.map(l => l.trim()).join('\n');
   }
 
-  it('emits i32.trunc_f32_s for float to int', () => {
+  it('emits the non-trapping i32.trunc_sat_f32_s for float to int', () => {
     const node = new CastNode(new FloatImmNode(3.7), 'f32', 'i32');
-    expect(emitExpr(node)).toContain('i32.trunc_f32_s');
+    const emitted = emitExpr(node);
+    expect(emitted).toContain('i32.trunc_sat_f32_s');
+    expect(emitted.split('\n')).not.toContain('i32.trunc_f32_s');
   });
 
   it('emits f32.convert_i32_s for int to float', () => {

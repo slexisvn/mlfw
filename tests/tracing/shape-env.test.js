@@ -63,12 +63,24 @@ describe('ShapeEnv.guardDivisible', () => {
 describe('ShapeEnv.bindInputShapes + evaluateGuards', () => {
   it('passes when concrete shapes satisfy all guards', () => {
     const env = new ShapeEnv();
-    env.produceShapeSpec(0, [1, 8], new Set([0]));
+    env.produceShapeSpec(0, [2, 8], new Set([0]));
     env.guardRelation('s0', 'gt', 0);
 
     env.bindInputShapes([{ shape: [4, 8] }]);
     const { passed } = env.evaluateGuards();
     expect(passed).toBe(true);
+  });
+
+  it('specializes a size-1 axis even when it is requested dynamic', () => {
+    const env = new ShapeEnv();
+    const { irShape, symShape } = env.produceShapeSpec(0, [1, 8], new Set([0, 1]));
+
+    expect(symShape[0], 'a size-1 axis carries broadcast meaning and stays concrete').toBe(1);
+    expect(irShape[0]).toBe(1);
+    expect(typeof symShape[1], 'a size-8 axis is still symbolic').toBe('string');
+
+    env.bindInputShapes([{ shape: [4, 8] }]);
+    expect(env.evaluateGuards().passed, 'a different extent must fail the guard and force a recompile').toBe(false);
   });
 
   it('fails when static dim changes', () => {
