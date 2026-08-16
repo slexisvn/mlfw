@@ -9,7 +9,7 @@ import { RuntimeTensor } from '../runtime/runtime.js';
 import { typedArrayCtor } from '../tensor/types/dtype.js';
 import { computeNumel } from '../tensor/utils/shape_utils.js';
 
-import { foldWeightParams } from './fold_params.js';
+import { foldWeightParams, weightPredicate, MAX_FOLDABLE_ELEMENTS } from './fold_params.js';
 import { compileWithBackward } from './compile_backward.js';
 import type { Tensor } from '../tensor/core/tensor.js';
 import type { Device } from '../tensor/types/device.js';
@@ -246,8 +246,11 @@ export function compile(model: CompilableModel, exampleInputs?: Tensor[], opts: 
     return error;
   }
 
+  const quantizing = !!(opts?.quantization as { enabled?: boolean } | undefined)?.enabled;
+  const foldPredicate = weightPredicate(quantizing ? Infinity : MAX_FOLDABLE_ELEMENTS);
+
   function _finalize(traced: TracedCore): CompiledEntry {
-    const prepared = foldWeights ? foldWeightParams(traced, tensorToContiguous) : traced;
+    const prepared = foldWeights ? foldWeightParams(traced, tensorToContiguous, foldPredicate) : traced;
     const result = new Compiler(compilerOpts as never).compile(prepared.graph as unknown as GraphModule) as unknown as CompiledResult;
     return {
       result,

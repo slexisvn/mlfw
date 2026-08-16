@@ -485,7 +485,7 @@ export function lowerConstant(ctx: LoweringContext, op: Operation): TirNode {
       for (let d = 0; d < outBuf.shape.length; d++) idx[d] = new IntImmNode(Math.floor(i / strides[d]) % (outBuf.shape[d] as number));
       stmts.push(new BufferStoreNode(outBuf, idx, imm(arrVal[i])));
     }
-    return new SeqNode(stmts);
+    return new BlockNode(ctx.blockName(`${op.opName}_block`), [], [], [{ buffer: outBuf }], new SeqNode(stmts));
   }
 
   const valNode = typeof val === 'number' ? imm(val) : imm(0);

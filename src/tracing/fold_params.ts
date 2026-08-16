@@ -4,13 +4,23 @@ import type { AttrMap, GraphFunctionLike, IRValueLike, IROperationLike, TracedCo
 
 const FLOAT_DTYPES = new Set(['f16', 'f32', 'f64']);
 
+export const MAX_FOLDABLE_ELEMENTS = 1024;
+
 type FoldPredicate = (param: Tensor, index?: number, arg?: IRValueLike) => boolean;
 type GetData = (param: Tensor) => unknown;
 type OperationCtor = new (opName: string, operands: IRValueLike[], resultTypes: readonly unknown[], attributes?: AttrMap | Map<string, unknown> | null, regions?: unknown) => IROperationLike;
 
-export function defaultWeightPredicate(param: Tensor): boolean {
-  return param && param.shape && param.shape.length >= 2 && FLOAT_DTYPES.has(param.dtype);
+export function weightPredicate(maxElements: number = MAX_FOLDABLE_ELEMENTS): FoldPredicate {
+  return (param: Tensor): boolean => {
+    if (!param || !param.shape || param.shape.length < 2) return false;
+    if (!FLOAT_DTYPES.has(param.dtype)) return false;
+    let numel = 1;
+    for (const d of param.shape) numel *= d;
+    return numel <= maxElements;
+  };
 }
+
+export const defaultWeightPredicate: FoldPredicate = weightPredicate();
 
 export function foldWeightParams(traced: TracedCore, getData: GetData, shouldFold: FoldPredicate = defaultWeightPredicate): TracedCore {
   const func = traced.graph.functions().next().value as GraphFunctionLike | undefined;

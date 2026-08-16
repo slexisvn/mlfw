@@ -99,19 +99,20 @@ export class QuantizationPass extends FunctionPass {
       const op = topo[i];
       if (isTerminatorOp(op.opName)) continue;
       if (cfg.excludeOps.has(op.opName) || !cfg.quantizableOps.has(op.opName)) {
-        for (let o = 0; o < op.numOperands; o++) {
-          if (quantizedValues.has(op.getOperand(o))) {
-            changed = this._insertDequantBefore(op, o, op.getOperand(o), cfg) || changed;
-          }
-        }
+        changed = this._dequantizeOperands(op, quantizedValues, cfg) || changed;
         continue;
       }
 
-      if (cfg.sensitivityResult && cfg.sensitivityThreshold > 0) {
-        if (cfg.sensitivityResult.isSensitive(op, cfg.sensitivityThreshold)) continue;
+      if (cfg.sensitivityResult && cfg.sensitivityThreshold > 0
+          && cfg.sensitivityResult.isSensitive(op, cfg.sensitivityThreshold)) {
+        changed = this._dequantizeOperands(op, quantizedValues, cfg) || changed;
+        continue;
       }
 
-      if (cfg.weightOnly && !hasConstantOperand(op)) continue;
+      if (cfg.weightOnly && !hasConstantOperand(op)) {
+        changed = this._dequantizeOperands(op, quantizedValues, cfg) || changed;
+        continue;
+      }
 
       const opDef = registry.get(op.opName);
       const nativeVariant = opDef ? opDef.getAttr<string>('quantizedVariant') : null;
@@ -128,14 +129,7 @@ export class QuantizationPass extends FunctionPass {
     }
 
     const retOp = graphFunc.getReturnOp();
-    if (retOp) {
-      for (let i = 0; i < retOp.numOperands; i++) {
-        const val = retOp.getOperand(i);
-        if (quantizedValues.has(val)) {
-          changed = this._insertDequantBefore(retOp, i, val, cfg) || changed;
-        }
-      }
-    }
+    if (retOp) changed = this._dequantizeOperands(retOp, quantizedValues, cfg) || changed;
 
     if (this.trace && this.trace.level >= TraceLevel.DEBUG && changed) {
       this.trace.emit({
@@ -223,19 +217,31 @@ export class QuantizationPass extends FunctionPass {
     return true;
   }
 
-  _insertDequantQuantBoundary(op: Operation, quantizedValues: Set<Value>, cfg: QuantizationConfig): boolean {
+  _dequantizeOperands(op: Operation, quantizedValues: Set<Value>, cfg: QuantizationConfig): boolean {
     let changed = false;
-
     for (let i = 0; i < op.numOperands; i++) {
       const val = op.getOperand(i);
       if (quantizedValues.has(val)) {
         changed = this._insertDequantBefore(op, i, val, cfg) || changed;
       }
     }
+    return changed;
+  }
+
+  _feedsExcludedOp(val: Value, cfg: QuantizationConfig): boolean {
+    for (const use of val.uses()) {
+      if (cfg.excludeOps.has(use.user.opName)) return true;
+    }
+    return false;
+  }
+
+  _insertDequantQuantBoundary(op: Operation, quantizedValues: Set<Value>, cfg: QuantizationConfig): boolean {
+    let changed = this._dequantizeOperands(op, quantizedValues, cfg);
 
     for (let r = 0; r < op.numResults; r++) {
       const val = op.getResult(r);
       if (!(val.type instanceof TensorType) || !isFloatType((val.type as TensorTypeT).dtype)) continue;
+      if (this._feedsExcludedOp(val, cfg)) continue;
       const qResult = this._insertQuantizeAfter(op, r, cfg);
       if (qResult) {
         const uses = [...val.uses()];
