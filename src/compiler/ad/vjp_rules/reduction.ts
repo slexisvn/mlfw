@@ -41,7 +41,31 @@ registerVJPRule('reduce', (ctx) => {
   }
 
   if (reduceType === 'prod') {
-    throw new Error("reduce VJP for reduce_type='prod' is not implemented; provide a gradient rule or avoid differentiating reduce_prod");
+    const b = ctx.builder;
+    const zeroS = b.scalarConstant(0, dtype).getResult(0);
+    const oneS = b.scalarConstant(1, dtype).getResult(0);
+    const zeros = b.broadcast(zeroS, inputShape, []).getResult(0);
+    const ones = b.broadcast(oneS, inputShape, []).getResult(0);
+
+    const isZero = b.compare(input, zeros, 'eq').getResult(0);
+    const withoutZeros = b.select(isZero, ones, input).getResult(0);
+    const prodNonZero = b.reduce(withoutZeros, oneS, dimensions, 'prod').getResult(0);
+    const prodNonZeroBr = b.broadcast(b.reshape(prodNonZero, keepShape).getResult(0), inputShape, identityDims).getResult(0);
+
+    const zeroIndicator = b.select(isZero, ones, zeros).getResult(0);
+    const zeroCount = b.reduce(zeroIndicator, zeroS, dimensions, 'sum').getResult(0);
+    const zeroCountBr = b.broadcast(b.reshape(zeroCount, keepShape).getResult(0), inputShape, identityDims).getResult(0);
+
+    const noZeros = b.compare(zeroCountBr, zeros, 'eq').getResult(0);
+    const oneZero = b.compare(zeroCountBr, ones, 'eq').getResult(0);
+
+    const quotient = b.div(prodNonZeroBr, withoutZeros).getResult(0);
+    const nonZeroDeriv = b.select(noZeros, quotient, zeros).getResult(0);
+    const zeroDeriv = b.select(oneZero, prodNonZeroBr, zeros).getResult(0);
+    const deriv = b.select(isZero, zeroDeriv, nonZeroDeriv).getResult(0);
+
+    const gradBroadcast = b.broadcast(gradKept, inputShape, identityDims).getResult(0);
+    return [b.mul(gradBroadcast, deriv).getResult(0), null];
   }
 
   throw new Error(`reduce VJP: unsupported reduce_type '${reduceType}' on the gradient path (would silently drop the gradient)`);

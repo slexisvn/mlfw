@@ -8,7 +8,7 @@ import type { IRNode } from '../../ir/ir_visitor.js';
 import type { TirPassCtx } from '../tir_pass.js';
 import type { CompilerConfig, CompileTarget } from '../../pipeline/pipeline_types.js';
 
-type BlockSummary = { name: string; writes: Set<string>; reads: Set<string>; hasInit: boolean };
+type BlockSummary = { name: string; writes: Set<string>; reads: Set<string>; hasInit: boolean; stores: number; pureReindex: boolean };
 type FuncAnalysis = { blocks: BlockSummary[]; loadCount: Map<string, number>; storeWriters: Map<string, Set<string>> };
 type WalkEntry = { node: TirNode; block: BlockSummary | null };
 
@@ -25,6 +25,8 @@ function analyzeFunc(root: TirNode): FuncAnalysis {
       if (block) block.reads.add(buf.name);
     } else if (node.type === 'BufferStoreNode' && buf && block) {
       block.writes.add(buf.name);
+      block.stores++;
+      if ((node as BufferStoreNode).value.type !== 'BufferLoadNode') block.pureReindex = false;
       let writers = storeWriters.get(buf.name);
       if (!writers) { writers = new Set<string>(); storeWriters.set(buf.name, writers); }
       writers.add(block.name);
@@ -32,12 +34,20 @@ function analyzeFunc(root: TirNode): FuncAnalysis {
     let childBlock = block;
     if (node.type === 'BlockNode') {
       const b = node as BlockNode;
-      childBlock = { name: b.name, writes: new Set<string>(), reads: new Set<string>(), hasInit: b.initBody != null };
+      childBlock = { name: b.name, writes: new Set<string>(), reads: new Set<string>(), hasInit: b.initBody != null, stores: 0, pureReindex: true };
       blocks.push(childBlock);
     }
     for (const child of irChildNodes(node as unknown as IRNode)) stack.push({ node: child as unknown as TirNode, block: childBlock });
   }
   return { blocks, loadCount, storeWriters };
+}
+
+function duplicationIsBounded(b: BlockSummary, loadCount: ReadonlyMap<string, number>): boolean {
+  if (b.pureReindex && b.stores === 1) return true;
+  for (const w of b.writes) {
+    if ((loadCount.get(w) || 0) > 1) return false;
+  }
+  return true;
 }
 
 export class InlineReindexPass extends PrimFuncPass {
@@ -70,6 +80,7 @@ export class InlineReindexPass extends PrimFuncPass {
       if (!writes.every((w) => !storage.has(w) && (storeWriters.get(w) as Set<string>).size === 1)) continue;
       if (!writes.some((w) => (loadCount.get(w) || 0) > 0)) continue;
       if (![...b.reads].every((r) => (storeWriters.get(r) ? (storeWriters.get(r) as Set<string>).size : 0) <= 1)) continue;
+      if (!duplicationIsBounded(b, loadCount)) continue;
       try {
         sch.computeInlineBlock(b.name);
         inlined = true;

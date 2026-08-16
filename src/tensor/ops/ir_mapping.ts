@@ -73,10 +73,16 @@ function callMethod(builder: BuilderLike, name: string, ...args: unknown[]): Gra
   return (builder[name] as BuilderFn).call(builder, ...args);
 }
 
+function buildIdentity(builder: BuilderLike, value: GraphValue): GraphOperation {
+  return builder._inferAndBuild('add', [value, builder.scalarConstant(0, value.type.dtype).getResult(0)], null);
+}
+
 const IR_BUILDERS: Readonly<Record<string, IrBuilder>> = Object.freeze({
   matmul: (b, a) => callMethod(b, 'matmul', a[0], a[1]),
   dot: (b, a) => callMethod(b, 'dot', a[0], a[1], [a[0].type.rank - 1], [0]),
-  clone: (b, a) => b._inferAndBuild('add', [a[0], b.scalarConstant(0, a[0].type.dtype).getResult(0)], null),
+  clone: (b, a) => buildIdentity(b, a[0]),
+  contiguous: (b, a) => buildIdentity(b, a[0]),
+  fill: (b, a, s) => callMethod(b, 'broadcast', b.scalarConstant(s.value, a[0].type.dtype).getResult(0), a[0].type.shape, []),
   relu: (b, a) => callMethod(b, 'relu', a[0]),
   sigmoid: (b, a) => callMethod(b, 'sigmoid', a[0]),
   gelu: (b, a) => callMethod(b, 'gelu', a[0]),

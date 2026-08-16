@@ -23,12 +23,14 @@ export class ShapeEnv {
   private _guards: ShapeGuard[];
   private _bindings: Map<string, number>;
   private _nextId: number;
+  private _specialized: Set<string>;
 
   constructor() {
     this._symbols = new Map();
     this._guards = [];
     this._bindings = new Map();
     this._nextId = 0;
+    this._specialized = new Set();
   }
 
   allocate(inputIdx: number, dimIdx: number, hint: number): string {
@@ -59,6 +61,30 @@ export class ShapeEnv {
 
   guardRelation(lhs: SymbolicDim, op: GuardOp, rhs: SymbolicDim): void {
     this._guards.push({ lhs, op, rhs });
+  }
+
+  hintOf(expr: SymbolicDim): number | null {
+    if (typeof expr === 'number') return expr;
+    if (typeof expr === 'string') {
+      const info = this._symbols.get(expr);
+      return info ? info.hint : null;
+    }
+    if (expr instanceof SymInt) {
+      const hints = new Map<string, number>();
+      for (const [name, info] of this._symbols) hints.set(name, info.hint);
+      return SymInt.evaluate(expr, hints);
+    }
+    return null;
+  }
+
+  specialize(expr: SymbolicDim): number | null {
+    const hint = this.hintOf(expr);
+    if (hint === null || typeof expr === 'number') return hint;
+    const key = `${String(expr)}=${hint}`;
+    if (this._specialized.has(key)) return hint;
+    this._specialized.add(key);
+    this.guardRelation(expr, 'eq', hint);
+    return hint;
   }
 
   guardDivisible(sym: SymbolicDim, divisor: number): void {

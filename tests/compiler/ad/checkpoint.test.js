@@ -253,7 +253,7 @@ describe('Checkpointed joint builder', () => {
   });
 });
 
-describe('AD rejects region control-flow where it cannot be differentiated', () => {
+describe('AD differentiates region control-flow in every builder mode', () => {
   function buildScanModel() {
     const T = 3, D = 2;
     return buildFunction('scan_fwd', [t([T, D]), t([D])], [t([D])], (b, [xs, init]) => {
@@ -265,24 +265,31 @@ describe('AD rejects region control-flow where it cannot be differentiated', () 
     });
   }
 
-  it('checkpointed backward throws on scan instead of silently dropping its gradients', () => {
+  const noScanOps = (func) => {
+    for (const op of func.ops()) expect(op.opName).not.toBe('scan');
+  };
+
+  it('non-checkpointed backward differentiates scan', () => {
+    const result = new BackwardGraphBuilder().build(buildScanModel());
+    expect(result.gradInputIndices.length).toBeGreaterThan(0);
+    noScanOps(result.backwardFunc);
+  });
+
+  it('checkpointed backward differentiates scan', () => {
     const builder = new BackwardGraphBuilder({ checkpointPolicy: new EveryKPolicy({ segmentSize: 1 }) });
-    expect(() => builder.build(buildScanModel())).toThrow(/region control-flow|scan/i);
+    const result = builder.build(buildScanModel());
+    expect(result.gradInputIndices.length).toBeGreaterThan(0);
   });
 
-  it('non-checkpointed backward still differentiates scan (control case)', () => {
-    const builder = new BackwardGraphBuilder();
-    expect(() => builder.build(buildScanModel())).not.toThrow();
+  it('joint builder differentiates scan', () => {
+    const result = new JointGraphBuilder().build(buildScanModel());
+    expect(result.numGradInputs).toBe(2);
   });
 
-  it('joint builder throws on scan instead of silently dropping its gradients', () => {
-    const builder = new JointGraphBuilder();
-    expect(() => builder.build(buildScanModel())).toThrow(/region control-flow|scan/i);
-  });
-
-  it('checkpointed joint builder throws on scan', () => {
+  it('checkpointed joint builder differentiates scan', () => {
     const builder = new JointGraphBuilder({ checkpointPolicy: new EveryKPolicy({ segmentSize: 1 }) });
-    expect(() => builder.build(buildScanModel())).toThrow(/region control-flow|scan/i);
+    const result = builder.build(buildScanModel());
+    expect(result.numGradInputs).toBe(2);
   });
 });
 

@@ -176,3 +176,44 @@ export class SiluBackward extends AutogradNode {
     return [ops.mul(g, grad)];
   }
 }
+
+export class AbsBackward extends AutogradNode {
+  constructor() { super(1); }
+  apply(gradOutputs: GradOutputList): GradInputList {
+    const [x] = this.savedTensors();
+    return [ops.mul(gradOutputs[0], ops.sign(x.detach()))];
+  }
+}
+
+export class SinBackward extends AutogradNode {
+  constructor() { super(1); }
+  apply(gradOutputs: GradOutputList): GradInputList {
+    const [x] = this.savedTensors();
+    return [ops.mul(gradOutputs[0], ops.cos(x.detach()))];
+  }
+}
+
+export class CosBackward extends AutogradNode {
+  constructor() { super(1); }
+  apply(gradOutputs: GradOutputList): GradInputList {
+    const [x] = this.savedTensors();
+    return [ops.neg(ops.mul(gradOutputs[0], ops.sin(x.detach())))];
+  }
+}
+
+export class RsqrtBackward extends AutogradNode {
+  constructor() { super(1); }
+  apply(gradOutputs: GradOutputList): GradInputList {
+    const [x] = this.savedTensors();
+    const r = ops.rsqrt(x.detach());
+    const cubed = ops.mul(ops.mul(r, r), r);
+    return [ops.mul(gradOutputs[0], ops.mul(cubed, -0.5))];
+  }
+}
+
+export class IdentityBackward extends AutogradNode {
+  constructor() { super(1); }
+  apply(gradOutputs: GradOutputList): GradInputList {
+    return [gradOutputs[0]];
+  }
+}

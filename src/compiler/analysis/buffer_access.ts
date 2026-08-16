@@ -23,6 +23,7 @@ export type BufferAccessResult = {
   byBuffer: Map<Buffer, BufferAccess[]>;
   byBlock: Map<BlockNode, BlockAccessInfo>;
   indexLoaded: Set<Buffer>;
+  allocatedUnder: Map<Buffer, Set<TirNode>>;
 };
 
 export class BufferAccess {
@@ -110,6 +111,7 @@ export function collectBufferAccesses(root: TirNode, env: BufferAccessEnv = null
   const byBuffer = new Map<Buffer, BufferAccess[]>();
   const byBlock = new Map<BlockNode, BlockAccessInfo>();
   const indexLoaded = new Set<Buffer>();
+  const allocatedUnder = new Map<Buffer, Set<TirNode>>();
   const loopRanges = new Map<string, VarRange>();
   const varForms = new Map<string, LinearForm>();
   const scopes: [string, VarRange | undefined, LinearForm | undefined][][] = [];
@@ -209,6 +211,12 @@ export function collectBufferAccesses(root: TirNode, env: BufferAccessEnv = null
         case 'WhileNode':
           conditionalDepth++;
           break;
+        case 'AllocateNode': {
+          const enclosing = new Set<TirNode>();
+          for (const level of loopStack) if (level) enclosing.add(level.node);
+          allocatedUnder.set(node.buffer, enclosing);
+          break;
+        }
         case 'BufferStoreNode':
           record(node, node.buffer, AccessKind.WRITE, node.indices, loadedBuffers([node.value]));
           break;
@@ -235,7 +243,12 @@ export function collectBufferAccesses(root: TirNode, env: BufferAccessEnv = null
     },
   });
 
-  return { order, byBuffer, byBlock, indexLoaded };
+  return { order, byBuffer, byBlock, indexLoaded, allocatedUnder };
+}
+
+export function isPrivateToLoop(result: BufferAccessResult, buffer: Buffer, loop: TirNode): boolean {
+  const enclosing = result.allocatedUnder.get(buffer);
+  return enclosing !== undefined && enclosing.has(loop);
 }
 
 export function coversWholeBuffer(access: BufferAccess): boolean {

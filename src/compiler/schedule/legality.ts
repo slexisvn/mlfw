@@ -6,6 +6,7 @@ import { IterVarKind } from '../ir/tensor/nodes.js';
 import type { TirNode, ForNode, BlockNode, SeqNode, IfThenElseNode, LetStmtNode, AllocateNode, VariableNode, BufferLoadNode, BufferStoreNode, MathOpNode, CompareNode, CastNode, CallExternNode } from '../ir/tensor/nodes.js';
 import type { Analyzer as AnalyzerType } from '../analysis/analyzer.js';
 import type { ScheduleState } from './schedule_state.js';
+import { isPrivateToLoop } from '../analysis/buffer_access.js';
 import type { BlockAccessInfo } from '../analysis/buffer_access.js';
 import type { SymExpr } from '../analysis/sym_int.js';
 
@@ -38,7 +39,7 @@ function blockAbstractionPermits(state: ScheduleState, enclosingLoop: TirNode, l
 
 export function loopCarriedDependence(state: ScheduleState, loop: ForNode, allowedKinds: ReadonlySet<string>): string | null {
   const { info, deps } = state.nestAnalysis(loop);
-  const dep = carriesDependence(deps, loop);
+  const dep = carriesDependence(deps, loop, (buffer) => isPrivateToLoop(info, buffer, loop));
   if (!dep) return null;
   if (blockAbstractionPermits(state, loop, [loop.loopVar.name], allowedKinds, info.byBlock)) return null;
   return `loop '${loop.loopVar.name}' carries a ${dep.kind} dependence on buffer '${dep.buffer.name}'`;

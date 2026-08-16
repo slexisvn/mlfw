@@ -1,4 +1,4 @@
-import { topoSortOpSet } from '../../ir/graph/graph_algorithms.js';
+import { readValues, topoSortOpSet } from '../../ir/graph/graph_algorithms.js';
 import type { Operation } from '../../ir/graph/operation.js';
 import type { Value } from '../../ir/graph/value.js';
 
@@ -47,8 +47,8 @@ export function buildPartitions(partitionOps: readonly Operation[], { labelOf, s
 
   const operandParts = (op: Operation): Set<Partition> => {
     const s = new Set<Partition>();
-    for (let i = 0; i < op.numOperands; i++) {
-      const d = op.getOperand(i).definingOp;
+    for (const v of readValues(op)) {
+      const d = v.definingOp;
       if (!d) continue;
       const part = opToPart.get(d);
       if (part) s.add(part);
@@ -69,8 +69,8 @@ export function buildPartitions(partitionOps: readonly Operation[], { labelOf, s
     const label = labelOf(op);
     if (label == null) continue;
     let merged = false;
-    for (let i = 0; i < op.numOperands; i++) {
-      const producer = op.getOperand(i).definingOp;
+    for (const v of readValues(op)) {
+      const producer = v.definingOp;
       if (!producer) continue;
       const pPart = opToPart.get(producer);
       if (!pPart || !sameLabel(pPart.label, label)) continue;
@@ -109,8 +109,7 @@ export function computePartitionIO(opSet: ReadonlySet<Operation>, iterOps: Itera
   const constDefs: Operation[] = [], constSet = new Set<Operation>();
 
   for (const op of iterOps) {
-    for (let i = 0; i < op.numOperands; i++) {
-      const v = op.getOperand(i);
+    for (const v of readValues(op)) {
       const d = v.definingOp;
       if (d && opSet.has(d)) continue;
       if (pullConstants && d && isConstant(d)) {

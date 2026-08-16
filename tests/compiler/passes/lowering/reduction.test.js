@@ -5,7 +5,7 @@ import { lowerGraphToPrimFunc } from '../../../../src/compiler/passes/lowering/g
 import {
   ForNode, BlockNode, BufferStoreNode, BufferLoadNode,
   MathOpNode, FloatImmNode, IntImmNode, SeqNode,
-  CallExternNode, CompareNode, IfThenElseNode
+  CallExternNode, CompareNode, IfThenElseNode, AllocateNode
 } from '../../../../src/compiler/ir/tensor/nodes.js';
 
 function lower(name, inTypes, outTypes, bodyFn) {
@@ -141,30 +141,33 @@ describe('reduce prod lowering', () => {
 });
 
 describe('argmax lowering', () => {
-  it('argmax produces init + accumulate with comparison logic', () => {
+  it('argmax keeps its running best in a loop-private scratch and compares with gt', () => {
     const inT = new TensorType([3, 5], ScalarType.F32);
     const outT = new TensorType([3], ScalarType.I32);
     const pf = lower('f', [inT], [outT], (b, args) => {
       b.returnOp([b.argmax(args[0], 1).getResult(0)]);
     });
 
-    const stmts = getSeqStmts(pf.body);
-    expect(stmts.length).toBe(2);
+    const allocs = collectNodes(pf.body, n => n instanceof AllocateNode);
+    expect(allocs.length).toBe(1);
+    expect(allocs[0].scope).toBe('local');
+    expect(allocs[0].buffer.shape).toEqual([1]);
 
-    const initBlocks = collectNodes(stmts[0], n => n instanceof BlockNode);
-    expect(initBlocks[0].name).toMatch(/^arg_init_\d+$/);
+    const initBlocks = collectNodes(pf.body, n => n instanceof BlockNode && /^arg_init_\d+$/.test(n.name));
+    expect(initBlocks.length).toBe(1);
+    const initInsideAlloc = collectNodes(allocs[0].body, n => n === initBlocks[0]);
+    expect(initInsideAlloc.length).toBe(1);
 
-    const initStores = collectNodes(stmts[0], n => n instanceof BufferStoreNode);
-    const negInfStore = initStores.find(s =>
+    const negInfStore = collectNodes(pf.body, n => n instanceof BufferStoreNode).find(s =>
       s.value instanceof FloatImmNode && s.value.value === -Infinity
     );
     expect(negInfStore).toBeDefined();
+    expect(negInfStore.buffer.name).toBe(allocs[0].buffer.name);
 
-    const compares = collectNodes(stmts[1], n => n instanceof CompareNode);
-    const gtCompare = compares.find(c => c.direction === 'gt');
+    const gtCompare = collectNodes(pf.body, n => n instanceof CompareNode).find(c => c.direction === 'gt');
     expect(gtCompare).toBeDefined();
 
-    const ites = collectNodes(stmts[1], n => n instanceof IfThenElseNode);
+    const ites = collectNodes(pf.body, n => n instanceof IfThenElseNode);
     expect(ites.length).toBeGreaterThanOrEqual(2);
   });
 });
@@ -177,16 +180,12 @@ describe('argmin lowering', () => {
       b.returnOp([b.argmin(args[0], 1).getResult(0)]);
     });
 
-    const stmts = getSeqStmts(pf.body);
-
-    const initStores = collectNodes(stmts[0], n => n instanceof BufferStoreNode);
-    const posInfStore = initStores.find(s =>
+    const posInfStore = collectNodes(pf.body, n => n instanceof BufferStoreNode).find(s =>
       s.value instanceof FloatImmNode && s.value.value === Infinity
     );
     expect(posInfStore).toBeDefined();
 
-    const compares = collectNodes(stmts[1], n => n instanceof CompareNode);
-    const ltCompare = compares.find(c => c.direction === 'lt');
+    const ltCompare = collectNodes(pf.body, n => n instanceof CompareNode).find(c => c.direction === 'lt');
     expect(ltCompare).toBeDefined();
   });
 });

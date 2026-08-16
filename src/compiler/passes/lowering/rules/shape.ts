@@ -119,7 +119,7 @@ export function register(): void {
         inIndices[i] = shifted;
       }
       const geZero = new CompareNode('ge', inIndices[i], new IntImmNode(0));
-      const ltSize = new CompareNode('lt', inIndices[i], new IntImmNode(inBuf.shape[i] as number));
+      const ltSize = new CompareNode('lt', inIndices[i], ctx.extentNode(inBuf.shape[i], inBuf, i));
       inBoundsExpr = new MathOpNode('*', inBoundsExpr, new MathOpNode('*', geZero, ltSize));
     }
     const loadIn = new BufferLoadNode(inBuf, inIndices);

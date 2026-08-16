@@ -1,10 +1,11 @@
 import { GraphFunction } from '../ir/graph/function.js';
 import { IRBuilder } from '../ir/graph/builder.js';
 import { UseDefAnalysis } from '../analysis/use_def.js';
+import { readValues } from '../ir/graph/graph_algorithms.js';
 import { GradAccumulator, gradOrZero } from './grad_accumulator.js';
-import { getVJPRule, isGradientBarrier, requireVJPRuleOrBarrier } from './vjp_registry.js';
+import { getRegionVJP } from './vjp_registry.js';
 import { RematPolicy } from './remat_policy.js';
-import { REGION_CONTROL_FLOW, backpropOps } from './backward_builder.js';
+import { backpropOps, computeGradReachability } from './backward_builder.js';
 import type { Operation } from '../ir/graph/operation.js';
 import type { Value } from '../ir/graph/value.js';
 import type { CheckpointPolicy } from './checkpoint_policy.js';
@@ -39,11 +40,22 @@ type RecordFn = (orig: Value, next: Value) => void;
 
 function replayOp(builder: IRBuilder, op: Operation, resolve: ResolveFn, record: RecordFn): Operation {
   const vmap = new Map<Value, Value>();
-  for (const operand of op.operands) vmap.set(operand, resolve(operand));
+  for (const value of readValues(op)) vmap.set(value, resolve(value));
   const cloned = op.clone(vmap);
   builder._insert(cloned);
   for (let r = 0; r < op.numResults; r++) record(op.getResult(r), cloned.getResult(r));
   return cloned;
+}
+
+function regionBackprop(accumulator: GradAccumulator, builder: IRBuilder, needsGrad: ReadonlySet<number>, resolve: ResolveFn) {
+  return (op: Operation): boolean => {
+    const regionFn = getRegionVJP(op.opName);
+    if (!regionFn) return false;
+    (regionFn as unknown as (op: Operation, ctx: unknown) => void)(op, {
+      accumulator, builder, needsGrad, materialize: resolve,
+    });
+    return true;
+  };
 }
 
 export class JointGraphBuilder {
@@ -60,9 +72,11 @@ export class JointGraphBuilder {
       return this._buildCheckpointed(forwardFunc);
     }
     const s = this._buildScaffold(forwardFunc);
+    const resolve = (v: Value) => s.valueMap.get(v.id) || v;
     backpropOps(s.topoOrder, {
       accumulator: s.accumulator, builder: s.builder, needsGrad: s.needsGrad,
-      resolveValue: (v: Value) => s.valueMap.get(v.id) || v,
+      resolveValue: resolve,
+      handleRegionOp: regionBackprop(s.accumulator, s.builder, s.needsGrad, resolve),
     });
     return this._finish(s);
   }
@@ -74,18 +88,16 @@ export class JointGraphBuilder {
     for (let i = segments.length - 1; i >= 0; i--) {
       const seg = segments[i];
       const recomputeMap = new Map<number, Value>();
+      const resolve = (v: Value) => recomputeMap.get(v.id) || s.valueMap.get(v.id) || v;
 
       for (const op of seg.ops) {
-        replayOp(
-          s.builder, op,
-          (v) => recomputeMap.get(v.id) || s.valueMap.get(v.id) || v,
-          (orig, next) => recomputeMap.set(orig.id, next),
-        );
+        replayOp(s.builder, op, resolve, (orig, next) => recomputeMap.set(orig.id, next));
       }
 
       backpropOps(seg.ops, {
         accumulator: s.accumulator, builder: s.builder, needsGrad: s.needsGrad,
-        resolveValue: (v: Value) => recomputeMap.get(v.id) || s.valueMap.get(v.id) || v,
+        resolveValue: resolve,
+        handleRegionOp: regionBackprop(s.accumulator, s.builder, s.needsGrad, resolve),
       });
     }
     return this._finish(s);
@@ -94,7 +106,6 @@ export class JointGraphBuilder {
   _buildScaffold(forwardFunc: GraphFunction): JointScaffold {
     const analysis = UseDefAnalysis.compute(forwardFunc);
     const topoOrder = analysis.topologicalOrder;
-    this._assertNoRegionControlFlow(topoOrder);
 
     const returnOp = forwardFunc.getReturnOp();
     if (!returnOp) throw new Error('Forward function has no return op');
@@ -128,7 +139,7 @@ export class JointGraphBuilder {
     }
 
     const fwdOutputValues = forwardOutputs.map(v => valueMap.get(v.id) as Value);
-    const needsGrad = this._computeGradReachability(forwardFunc, topoOrder);
+    const needsGrad = computeGradReachability(forwardFunc, topoOrder);
     const accumulator = new GradAccumulator(builder);
     for (let i = 0; i < forwardOutputs.length; i++) {
       accumulator.accumulate(forwardOutputs[i].id, gradOutputArgs[i]);
@@ -148,39 +159,5 @@ export class JointGraphBuilder {
       numForwardOutputs: s.forwardOutputs.length,
       numGradInputs: gradInputValues.length,
     };
-  }
-
-  _computeGradReachability(func: GraphFunction, topoOrder: readonly Operation[]): Set<number> {
-    const needsGrad = new Set<number>();
-    const returnOp = func.getReturnOp() as Operation;
-
-    for (const val of returnOp.operands) {
-      needsGrad.add(val.id);
-    }
-
-    for (let i = topoOrder.length - 1; i >= 0; i--) {
-      const op = topoOrder[i];
-      if (op.opName === 'return') continue;
-
-      const hasGradResult = op.results.some(r => needsGrad.has(r.id));
-      if (!hasGradResult) continue;
-
-      if (!getVJPRule(op.opName)) continue;
-      if (isGradientBarrier(op.opName)) continue;
-
-      for (let o = 0; o < op.numOperands; o++) {
-        needsGrad.add(op.getOperand(o).id);
-      }
-    }
-
-    return needsGrad;
-  }
-
-  _assertNoRegionControlFlow(ops: readonly Operation[]): void {
-    for (const op of ops) {
-      if (REGION_CONTROL_FLOW.has(op.opName)) {
-        throw new Error(`JointGraphBuilder does not support region control-flow op '${op.opName}'; use BackwardGraphBuilder (separate mode) without a checkpointPolicy, which differentiates scan/if.`);
-      }
-    }
   }
 }

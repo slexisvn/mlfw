@@ -2,6 +2,7 @@ import { GraphFunction } from '../ir/graph/function.js';
 import { IRBuilder } from '../ir/graph/builder.js';
 
 import { UseDefAnalysis } from '../analysis/use_def.js';
+import { readValues } from '../ir/graph/graph_algorithms.js';
 import { GradAccumulator, gradOrZero } from './grad_accumulator.js';
 import { getVJPRule, isGradientBarrier, requireVJPRuleOrBarrier, getRegionVJP } from './vjp_registry.js';
 import { buildScanBackward, buildCondBackward, regionFreeVars } from './scan_backward.js';
@@ -18,6 +19,15 @@ import type { RematPolicy } from './remat_policy.js';
 export { REGION_CONTROL_FLOW };
 
 export type ResolveValueFn = (v: Value) => Value;
+
+function cloneOpWithRegions(builder: IRBuilder, op: Operation, resolve: ResolveValueFn): Operation {
+  const remap = new Map<Value, Value>();
+  for (const v of readValues(op)) {
+    const mapped = resolve(v);
+    if (mapped !== v) remap.set(v, mapped);
+  }
+  return builder._insert(op.clone(remap));
+}
 
 export type BackpropOptions = {
   accumulator: GradAccumulator;
@@ -78,6 +88,38 @@ export function backpropOps(orderedOps: readonly Operation[], { accumulator, bui
   }
 }
 
+export function computeGradReachability(func: GraphFunction, topoOrder: readonly Operation[]): Set<number> {
+  const needsGrad = new Set<number>();
+  const returnOp = func.getReturnOp() as Operation;
+
+  for (const val of returnOp.operands) {
+    needsGrad.add(val.id);
+  }
+
+  for (let i = topoOrder.length - 1; i >= 0; i--) {
+    const op = topoOrder[i];
+    if (op.opName === 'return') continue;
+
+    const hasGradResult = op.results.some(r => needsGrad.has(r.id));
+    if (!hasGradResult) continue;
+
+    if (REGION_CONTROL_FLOW.has(op.opName)) {
+      for (let o = 0; o < op.numOperands; o++) needsGrad.add(op.getOperand(o).id);
+      for (const fv of regionControlFlowFreeVars(op)) needsGrad.add(fv.id);
+      continue;
+    }
+
+    if (!getVJPRule(op.opName)) continue;
+    if (isGradientBarrier(op.opName)) continue;
+
+    for (let o = 0; o < op.numOperands; o++) {
+      needsGrad.add(op.getOperand(o).id);
+    }
+  }
+
+  return needsGrad;
+}
+
 function regionControlFlowFreeVars(op: Operation): Value[] {
   const out: Value[] = [];
   for (const region of op.regions) {
@@ -133,7 +175,7 @@ export class BackwardGraphBuilder {
     const forwardOutputs = returnOp.operands;
     const forwardInputs = forwardFunc.args;
 
-    const needsGrad = this._computeGradReachability(forwardFunc, topoOrder);
+    const needsGrad = computeGradReachability(forwardFunc, topoOrder);
     const { savedValues, savedValueIndices } = this._identifySavedValues(topoOrder, needsGrad, forwardInputs);
 
     const gradOutputTypes = forwardOutputs.map(v => v.type);
@@ -218,8 +260,9 @@ export class BackwardGraphBuilder {
         stack.pop();
         continue;
       }
-      if (frame.i < defOp.numOperands) {
-        const operand = defOp.getOperand(frame.i);
+      const defReads = readValues(defOp);
+      if (frame.i < defReads.length) {
+        const operand = defReads[frame.i];
         frame.i++;
         if (operand.definingOp && !valueMap.has(operand.id) && !onStack.has(operand.id)) {
           onStack.add(operand.id);
@@ -227,13 +270,7 @@ export class BackwardGraphBuilder {
         }
         continue;
       }
-      const operands = new Array<Value>(defOp.numOperands);
-      for (let o = 0; o < defOp.numOperands; o++) {
-        const ov = defOp.getOperand(o);
-        operands[o] = valueMap.has(ov.id) ? valueMap.get(ov.id) as Value : ov;
-      }
-      const resultTypes = defOp.results.map(r => r.type);
-      const cloned = builder._buildOp(defOp.opName, operands, resultTypes, new Map(defOp.attributes), null);
+      const cloned = cloneOpWithRegions(builder, defOp, (v) => valueMap.get(v.id) ?? v);
       for (let r = 0; r < defOp.numResults; r++) {
         valueMap.set(defOp.getResult(r).id, cloned.getResult(r));
       }
@@ -242,38 +279,6 @@ export class BackwardGraphBuilder {
     }
 
     return valueMap.has(rootVal.id) ? valueMap.get(rootVal.id) as Value : rootVal;
-  }
-
-  _computeGradReachability(func: GraphFunction, topoOrder: readonly Operation[]): Set<number> {
-    const needsGrad = new Set<number>();
-    const returnOp = func.getReturnOp() as Operation;
-
-    for (const val of returnOp.operands) {
-      needsGrad.add(val.id);
-    }
-
-    for (let i = topoOrder.length - 1; i >= 0; i--) {
-      const op = topoOrder[i];
-      if (op.opName === 'return') continue;
-
-      const hasGradResult = op.results.some(r => needsGrad.has(r.id));
-      if (!hasGradResult) continue;
-
-      if (REGION_CONTROL_FLOW.has(op.opName)) {
-        for (let o = 0; o < op.numOperands; o++) needsGrad.add(op.getOperand(o).id);
-        for (const fv of regionControlFlowFreeVars(op)) needsGrad.add(fv.id);
-        continue;
-      }
-
-      if (!getVJPRule(op.opName)) continue;
-      if (isGradientBarrier(op.opName)) continue;
-
-      for (let o = 0; o < op.numOperands; o++) {
-        needsGrad.add(op.getOperand(o).id);
-      }
-    }
-
-    return needsGrad;
   }
 
   _identifySavedValues(topoOrder: readonly Operation[], needsGrad: ReadonlySet<number>, forwardInputs: readonly Value[]): SavedValueInfo {
@@ -373,16 +378,8 @@ export class BackwardGraphBuilder {
     const forwardOutputs = returnOp.operands;
     const forwardInputs = forwardFunc.args;
 
-    const needsGrad = this._computeGradReachability(forwardFunc, topoOrder);
+    const needsGrad = computeGradReachability(forwardFunc, topoOrder);
     const segments = (this._checkpointPolicy as CheckpointPolicy).segment(topoOrder, forwardFunc);
-
-    for (const seg of segments) {
-      for (const op of seg.ops) {
-        if (REGION_CONTROL_FLOW.has(op.opName)) {
-          throw new Error(`Checkpointed backward does not support region control-flow op '${op.opName}'; build the backward without a checkpointPolicy, which differentiates scan/if via buildScanBackward/buildCondBackward.`);
-        }
-      }
-    }
 
     const savedValueSet = new Set<number>();
     const savedValues: Value[] = [];
@@ -484,18 +481,9 @@ export class BackwardGraphBuilder {
 
       const recomputeMap = new Map<number, Value>();
 
+      const resolve = (v: Value) => recomputeMap.get(v.id) || savedValueMap.get(v.id) || constantMap.get(v.id) || v;
       for (const op of seg.ops) {
-        const newOperands = new Array<Value>(op.numOperands);
-        for (let o = 0; o < op.numOperands; o++) {
-          const origVal = op.getOperand(o);
-          const mapped = recomputeMap.get(origVal.id) ||
-                         savedValueMap.get(origVal.id) ||
-                         constantMap.get(origVal.id);
-          newOperands[o] = mapped || origVal;
-        }
-
-        const resultTypes = op.results.map(r => r.type);
-        const cloned = builder._buildOp(op.opName, newOperands, resultTypes, new Map(op.attributes), null);
+        const cloned = cloneOpWithRegions(builder, op, resolve);
 
         for (let r = 0; r < op.numResults; r++) {
           recomputeMap.set(op.getResult(r).id, cloned.getResult(r));
@@ -504,7 +492,15 @@ export class BackwardGraphBuilder {
 
       backpropOps(seg.ops, {
         accumulator, builder, needsGrad,
-        resolveValue: (v: Value) => recomputeMap.get(v.id) || savedValueMap.get(v.id) || constantMap.get(v.id) || v,
+        resolveValue: resolve,
+        handleRegionOp: (op: Operation) => {
+          const regionFn = getRegionVJP(op.opName);
+          if (!regionFn) return false;
+          (regionFn as unknown as (op: Operation, ctx: unknown) => void)(op, {
+            accumulator, builder, needsGrad, materialize: resolve, scanCheckpoint: this._scanCheckpoint,
+          });
+          return true;
+        },
       });
     }
 

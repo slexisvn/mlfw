@@ -1,4 +1,4 @@
-import { OpDef, OpTrait } from '../op_registry.js';
+import { OpAttrKey, OpDef, OpTrait } from '../op_registry.js';
 import type { OpAttrMap, OpAttrRecord, OpRegistry } from '../op_registry.js';
 import type { IRType } from '../types.js';
 
@@ -42,7 +42,7 @@ export function register(registry: OpRegistry) {
     name: 'dot',
     numOperands: 2,
     numResults: 1,
-    opAttrs: { gpuCapable: true, launchBoundary: 'matmul', layoutSensitivity: 4, inferLayout: dotLayout },
+    opAttrs: { [OpAttrKey.GPU_CAPABLE]: true, [OpAttrKey.LAUNCH_BOUNDARY]: 'matmul', [OpAttrKey.LAYOUT_SENSITIVITY]: 4, [OpAttrKey.INFER_LAYOUT]: dotLayout },
     traits: [OpTrait.OPAQUE, OpTrait.OUT_EWISE_FUSABLE],
     attrs: [
       { name: 'lhs_contracting', type: 'array', required: true },
@@ -102,7 +102,7 @@ export function register(registry: OpRegistry) {
     name: 'cublas_gemm',
     numOperands: 2,
     numResults: 1,
-    opAttrs: { launchBoundary: 'matmul' },
+    opAttrs: { [OpAttrKey.LAUNCH_BOUNDARY]: 'matmul' },
     traits: [OpTrait.OPAQUE],
     attrs: [
       { name: 'lhs_contracting', type: 'array', required: true },
@@ -136,7 +136,7 @@ export function register(registry: OpRegistry) {
     name: 'conv',
     numOperands: 2,
     numResults: 1,
-    opAttrs: { gpuCapable: true, launchBoundary: 'conv', layoutSensitivity: 4, inferLayout: convLayout },
+    opAttrs: { [OpAttrKey.GPU_CAPABLE]: true, [OpAttrKey.LAUNCH_BOUNDARY]: 'conv', [OpAttrKey.LAYOUT_SENSITIVITY]: 4, [OpAttrKey.INFER_LAYOUT]: convLayout },
     traits: [OpTrait.OPAQUE],
     attrs: [
       { name: 'strides', type: 'array', required: true },

@@ -7,7 +7,7 @@ import { PassResult } from '../../../../src/compiler/passes/pass.js';
 import { CPUTarget, CUDATarget } from '../../../../src/backend/target.js';
 import { GraphFunction } from '../../../../src/compiler/ir/graph/function.js';
 import { compileGraph } from '../../../../src/compiler/pipeline/compiler.js';
-import { F32 as F } from '../../../_utils/ir_fixture.js';
+import { F32 as F, T } from '../../../_utils/ir_fixture.js';
 
 function findOps(func, opName) {
   const result = [];
@@ -160,20 +160,43 @@ describe('GraphPartitionPass', () => {
 
 describe('GraphPartitionPass topo sort and insertion ordering', () => {
   it('topoSortOps throws when the op set contains a cycle', () => {
-    const a = { numOperands: 1, numResults: 1, getOperand() { return { definingOp: b }; }, getResult() { return {}; } };
-    const b = { numOperands: 1, numResults: 1, getOperand() { return { definingOp: a }; }, getResult() { return {}; } };
+    const func = buildFunction('cyc', [T([4])], [T([4])], (b, args) => {
+      const x = b.neg(args[0]);
+      const y = b.neg(x.getResult(0));
+      x.replaceOperand(0, y.getResult(0));
+      b.returnOp([y.getResult(0)]);
+    });
+    const ops = allOps(func);
 
-    expect(() => topoSortOps([a, b])).toThrow(/cycle/i);
+    expect(() => topoSortOps(ops)).toThrow(/cycle/i);
   });
 
   it('topoSortOps returns all ops for an acyclic set', () => {
-    const r1 = {};
-    const p = { numOperands: 0, numResults: 1, getOperand() { return null; }, getResult() { return r1; } };
-    const c = { numOperands: 1, numResults: 0, getOperand() { return { definingOp: p }; }, getResult() { return {}; } };
+    let producer, consumer;
+    buildFunction('acyc', [T([4])], [T([4])], (b, args) => {
+      producer = b.neg(args[0]);
+      consumer = b.exp(producer.getResult(0));
+      b.returnOp([consumer.getResult(0)]);
+    });
 
-    const sorted = topoSortOps([c, p]);
+    const sorted = topoSortOps([consumer, producer]);
     expect(sorted.length).toBe(2);
-    expect(sorted.indexOf(p)).toBeLessThan(sorted.indexOf(c));
+    expect(sorted.indexOf(producer)).toBeLessThan(sorted.indexOf(consumer));
+  });
+
+  it('topoSortOps orders a region-capturing op after the producer it captures', () => {
+    let producer, scanOp;
+    buildFunction('cap', [T([3, 2]), T([2])], [T([2])], (b, args) => {
+      producer = b.neg(args[1]);
+      scanOp = b.scanOp([args[0]], [producer.getResult(0)], (rb, xs, carry) => {
+        const acc = rb.add(rb.add(carry[0], xs[0]).getResult(0), producer.getResult(0));
+        return [[acc.getResult(0)], []];
+      });
+      b.returnOp([scanOp.getResult(0)]);
+    });
+
+    const sorted = topoSortOps([scanOp, producer]);
+    expect(sorted.indexOf(producer)).toBeLessThan(sorted.indexOf(scanOp));
   });
 
   it('copy_to_device is inserted after the transferred value definingOp', () => {

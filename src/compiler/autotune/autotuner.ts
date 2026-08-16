@@ -345,7 +345,7 @@ export class Autotuner {
     for (const name of collectAllBlockNames(sch.func.body)) {
       if (fusedAway.has(name) || this._blockIsParallelized(sch, name)) continue;
       if (!policy) policy = new SchedulePolicy(this.target);
-      try { policy.applyToBlock(sch, name); } catch (e) { this._warn('residual-block', name, e); }
+      policy.applyToBlock(sch, name);
     }
   }
 

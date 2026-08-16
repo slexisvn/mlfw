@@ -143,3 +143,12 @@ registerVJPRule('pad', (ctx) => {
 
   return [ctx.builder.slice(grad, starts, limits).getResult(0), null];
 });
+
+registerVJPRule('split', (ctx) => {
+  const dimension = ctx.op.getAttr<number>('dimension')!;
+  const pieces = ctx.results.map((result, i) => {
+    const grad = ctx.gradOutputs[i];
+    return grad !== null && grad !== undefined ? grad : ctx.full(0, result.type);
+  });
+  return [ctx.builder.concat(pieces, dimension).getResult(0)];
+});

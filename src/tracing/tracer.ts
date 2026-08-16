@@ -17,6 +17,11 @@ export function getActiveTracer(): Tracer | null {
   return _activeTracer;
 }
 
+function _outputTypeOf(value: TensorOutput): TensorType {
+  if (value instanceof SymbolicTensor) return value.irValue.type as TensorType;
+  return new TensorType(value.shape, value.dtype);
+}
+
 export class Tracer {
   private _name: string;
   private _shapeEnv: ShapeEnv;
@@ -107,52 +112,12 @@ export class Tracer {
     for (let i = 0; i < op.numResults; i++) {
       const resultValue = op.getResult(i);
       const resultType = resultValue.type;
-      const resultSymShape = this._propagateSymbolicShape(opName, op, tensorArgs, resultType, i);
+      const resultSymShape = (resultValue.symbolicShape as SymbolicShape | undefined) || [...resultType.shape];
       resultValue.symbolicShape = resultSymShape;
       results.push(new SymbolicTensor(resultValue, resultType.shape as readonly number[], resultType.dtype, this, resultSymShape));
     }
 
     return results.length === 1 ? results[0] : results;
-  }
-
-  _propagateSymbolicShape(opName: string, op: IROperationLike, tensorArgs: readonly TensorOutput[], resultType: TensorType, resultIndex = 0): SymbolicShape {
-    const symTensorArgs = tensorArgs.filter((a): a is SymbolicTensor => a instanceof SymbolicTensor);
-
-    const def = registry.get(op.opName || opName);
-    if (def && def.propagateSymbolicShapes) {
-      const shapeMap = new Map<IRValueLike, SymbolicShape>();
-      for (const arg of symTensorArgs) {
-        shapeMap.set(arg.irValue, arg.symbolicShape);
-      }
-      const propagated = (def.propagateSymbolicShapes as unknown as (op: IROperationLike, shapes: Map<IRValueLike, SymbolicShape>) => SymbolicShape[] | null | undefined)(op, shapeMap);
-      if (propagated && propagated[resultIndex]) return propagated[resultIndex];
-    }
-
-    const resultShape = resultType.shape;
-    const outSym = new Array<MutableSymbolicShape[number]>(resultShape.length);
-
-    for (let i = 0; i < resultShape.length; i++) {
-      if (resultShape[i] !== DYNAMIC) {
-        outSym[i] = resultShape[i];
-        continue;
-      }
-
-      let resolved = null;
-      for (const arg of symTensorArgs) {
-        const argSymShape = arg.symbolicShape;
-        if (!argSymShape) continue;
-        const offset = resultShape.length - argSymShape.length;
-        const srcIdx = i - offset;
-        if (srcIdx >= 0 && srcIdx < argSymShape.length && typeof argSymShape[srcIdx] === 'string') {
-          resolved = argSymShape[srcIdx];
-          break;
-        }
-      }
-
-      outSym[i] = resolved !== null ? resolved : DYNAMIC;
-    }
-
-    return outSym;
   }
 
   scan(
@@ -221,15 +186,13 @@ export class Tracer {
       this._requireBuilder().returnOp([symbolicTensor.irValue]);
       this._outputSymShapes = [symbolicTensor.symbolicShape];
     }
-    this._outputTypes = [new TensorType(symbolicTensor.shape, symbolicTensor.dtype)];
+    this._outputTypes = [_outputTypeOf(symbolicTensor)];
   }
 
   markOutputs(symbolicTensors: readonly SymbolicTensor[]): void {
     const irValues = symbolicTensors.map(st => st.irValue);
     this._requireBuilder().returnOp(irValues);
-    this._outputTypes = symbolicTensors.map(
-      st => new TensorType(st.shape, st.dtype)
-    );
+    this._outputTypes = symbolicTensors.map(_outputTypeOf);
     this._outputSymShapes = symbolicTensors.map(
       st => st.symbolicShape
     );

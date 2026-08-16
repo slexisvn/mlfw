@@ -1,4 +1,4 @@
-import { OpDef, OpTrait } from '../op_registry.js';
+import { OpAttrKey, OpDef, OpTrait } from '../op_registry.js';
 import type { OpAttrRecord, OpRegistry } from '../op_registry.js';
 import { TensorType, ScalarType, DYNAMIC, isFloatType } from '../types.js';
 import type { ScalarDType } from '../types.js';
@@ -157,7 +157,7 @@ export function register(registry: OpRegistry) {
     name: 'quantized_conv',
     numOperands: 2,
     numResults: 1,
-    opAttrs: { launchBoundary: 'conv' },
+    opAttrs: { [OpAttrKey.LAUNCH_BOUNDARY]: 'conv' },
     traits: [OpTrait.OPAQUE],
     attrs: [
       { name: 'strides', type: 'array', required: true },

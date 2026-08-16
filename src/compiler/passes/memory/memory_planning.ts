@@ -4,6 +4,8 @@ import { BufferAssignment } from './buffer_assignment.js';
 import { AllocateNode } from '../../ir/tensor/nodes.js';
 import { MinHeap } from '../../../util/min_heap.js';
 import { buffersRequiringDefinedStorage } from '../../analysis/buffer_dataflow.js';
+import { walk } from '../../ir/ir_visitor.js';
+import type { IRNode } from '../../ir/ir_visitor.js';
 import type { Buffer } from '../../ir/tensor/buffer.js';
 import type { PrimFunc, TirNode } from '../../ir/tensor/nodes.js';
 import type { BufferInterval, BufferLivenessResult } from './buffer_liveness.js';
@@ -129,8 +131,13 @@ export class MemoryPlanner {
 
     let body: TirNode = primFunc.body;
     const allocated = new Set<Buffer>();
+    const preAllocated = new Set<string>();
+    walk(primFunc.body as unknown as IRNode, (node) => {
+      if ((node as { type: string }).type === 'AllocateNode') preAllocated.add((node as unknown as AllocateNode).buffer.name);
+    });
     for (const interval of sorted) {
       const buf = interval.buffer;
+      if (preAllocated.has(buf.name)) continue;
       if (aliasMap.has(buf)) continue;
       const assignment = plan.assignment.getAssignment(buf);
       if (!assignment) continue;

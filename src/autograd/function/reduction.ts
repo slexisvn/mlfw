@@ -61,3 +61,70 @@ export class MeanBackward extends AutogradNode {
     return [ops.div(expanded, n)];
   }
 }
+
+function _selectMaskGrad(node: AutogradNode, gradOutputs: GradOutputList, input: Tensor, result: Tensor): GradInputList {
+  const meta = node.inputMetadata(0);
+  const inputShape = meta!.shape;
+  const args = node.opArgs();
+  const dim = args ? args[1] : undefined;
+  const keepdim = args ? args[2] : false;
+  const dims = _normalizeDims(dim, inputShape.length);
+
+  const expandedResult = _unreduce(result, inputShape, dims, keepdim);
+  const expandedGrad = _unreduce(gradOutputs[0], inputShape, dims, keepdim);
+  const mask = ops.eq(input, expandedResult);
+  const z = zeros(inputShape, { dtype: expandedGrad.dtype, device: expandedGrad.device });
+  return [ops.where(mask, expandedGrad, z)];
+}
+
+export class MaxBackward extends AutogradNode {
+  constructor() { super(1); }
+  apply(gradOutputs: GradOutputList): GradInputList {
+    const [input] = this.savedTensors();
+    const x = input.detach();
+    const args = this.opArgs();
+    const result = ops.max(x, args ? args[1] as number : undefined, args ? args[2] as boolean : false);
+    return _selectMaskGrad(this, gradOutputs, x, result);
+  }
+}
+
+export class MinBackward extends AutogradNode {
+  constructor() { super(1); }
+  apply(gradOutputs: GradOutputList): GradInputList {
+    const [input] = this.savedTensors();
+    const x = input.detach();
+    const args = this.opArgs();
+    const result = ops.min(x, args ? args[1] as number : undefined, args ? args[2] as boolean : false);
+    return _selectMaskGrad(this, gradOutputs, x, result);
+  }
+}
+
+export class ProdBackward extends AutogradNode {
+  constructor() { super(1); }
+  apply(gradOutputs: GradOutputList): GradInputList {
+    const [input] = this.savedTensors();
+    const x = input.detach();
+    const meta = this.inputMetadata(0);
+    const inputShape = meta!.shape;
+    const args = this.opArgs();
+    const dim = args ? args[1] : undefined;
+    const keepdim = args ? args[2] : false;
+    const dims = _normalizeDims(dim, inputShape.length);
+
+    const zerosT = zeros(inputShape, { dtype: x.dtype, device: x.device });
+    const onesT = full(inputShape, 1, { dtype: x.dtype, device: x.device });
+    const isZero = ops.eq(x, zerosT);
+    const withoutZeros = ops.where(isZero, onesT, x);
+
+    const prodNonZero = _unreduce(ops.prod(withoutZeros, dim as number, keepdim as boolean), inputShape, dims, keepdim);
+    const zeroCount = _unreduce(ops.sum(ops.where(isZero, onesT, zerosT), dim as number, keepdim as boolean), inputShape, dims, keepdim);
+
+    const noZeros = ops.eq(zeroCount, zerosT);
+    const oneZero = ops.eq(zeroCount, onesT);
+    const nonZeroDeriv = ops.where(noZeros, ops.div(prodNonZero, withoutZeros), zerosT);
+    const zeroDeriv = ops.where(oneZero, prodNonZero, zerosT);
+    const deriv = ops.where(isZero, zeroDeriv, nonZeroDeriv);
+
+    return [ops.mul(_unreduce(gradOutputs[0], inputShape, dims, keepdim), deriv)];
+  }
+}

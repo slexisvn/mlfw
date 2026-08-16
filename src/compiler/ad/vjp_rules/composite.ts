@@ -1,7 +1,9 @@
 import { registerVJPRule } from '../vjp_registry.js';
 import { broadcastDimsExcluding } from '../../ir/graph/builder.js';
+import { ScalarType, TensorType } from '../../ir/graph/types.js';
 import type { Value } from '../../ir/graph/value.js';
-import type { TensorType } from '../../ir/graph/types.js';
+
+const MASKED_SCORE = -1e30;
 
 registerVJPRule('softmax', (ctx) => {
   const grad = ctx.gradOutputs[0]!;
@@ -90,7 +92,7 @@ registerVJPRule('scaled_dot_product_attention', (ctx) => {
   const dO = ctx.gradOutputs[0]!;
   const [Q, K, V] = ctx.operands;
   const scale = ctx.op.getAttr('scale');
-  if (ctx.op.getAttr<boolean>('causal')!) throw new Error('causal scaled_dot_product_attention VJP not supported');
+  const causal = ctx.op.getAttr<boolean>('causal')!;
   const b = ctx.builder;
   const dtype = Q.type.dtype;
   const rank = Q.type.rank;
@@ -100,7 +102,17 @@ registerVJPRule('scaled_dot_product_attention', (ctx) => {
   const lastT = (x: Value) => b.transpose(x, perm).getResult(0);
 
   const s = b.matmul(Q, lastT(K)).getResult(0);
-  const ss = b.mul(s, ctx.full(scale as number, s.type as TensorType)).getResult(0);
+  let ss = b.mul(s, ctx.full(scale as number, s.type as TensorType)).getResult(0);
+  if (causal) {
+    const scoreType = ss.type as TensorType;
+    const indexType = new TensorType(scoreType.shape, ScalarType.I32);
+    const rowIdx = b.iota(rank - 2, indexType).getResult(0);
+    const colIdx = b.iota(rank - 1, indexType).getResult(0);
+    const offset = (scoreType.shape[rank - 1] as number) - (scoreType.shape[rank - 2] as number);
+    const limit = b.add(rowIdx, b.broadcast(b.scalarConstant(offset, ScalarType.I32).getResult(0), scoreType.shape, []).getResult(0)).getResult(0);
+    const allowed = b.compare(colIdx, limit, 'le').getResult(0);
+    ss = b.select(allowed, ss, ctx.full(MASKED_SCORE, scoreType)).getResult(0);
+  }
   const p = b.softmax(ss, rank - 1).getResult(0);
 
   const dV = b.matmul(lastT(p), dO).getResult(0);

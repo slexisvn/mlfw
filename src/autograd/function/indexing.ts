@@ -161,3 +161,58 @@ export class WhereBackward extends AutogradNode {
     return [null, gradA, gradB];
   }
 }
+
+export class MaximumBackward extends AutogradNode {
+  constructor() { super(2); }
+  apply(gradOutputs: GradOutputList): GradInputList {
+    const g = gradOutputs[0];
+    const [a, b] = this.savedTensors().map((t) => t.detach());
+    const mask = ops.ge(a, b);
+    const z = zeros(g.shape, { dtype: g.dtype, device: g.device });
+    return [ops.where(mask, g, z), ops.where(mask, z, g)];
+  }
+}
+
+export class MinimumBackward extends AutogradNode {
+  constructor() { super(2); }
+  apply(gradOutputs: GradOutputList): GradInputList {
+    const g = gradOutputs[0];
+    const [a, b] = this.savedTensors().map((t) => t.detach());
+    const mask = ops.le(a, b);
+    const z = zeros(g.shape, { dtype: g.dtype, device: g.device });
+    return [ops.where(mask, g, z), ops.where(mask, z, g)];
+  }
+}
+
+export class GatherBackward extends AutogradNode {
+  constructor() { super(2); }
+  apply(gradOutputs: GradOutputList): GradInputList {
+    const g = gradOutputs[0];
+    const [input, index] = this.savedTensors().map((t) => t.detach());
+    const args = this.opArgs() || [];
+    const dim = (args[1] as number) ?? 0;
+    const base = zeros(input.shape, { dtype: g.dtype, device: g.device });
+    return [ops.scatter_add(base, dim, index, g), null];
+  }
+}
+
+export class ScatterAddBackward extends AutogradNode {
+  constructor() { super(3); }
+  apply(gradOutputs: GradOutputList): GradInputList {
+    const g = gradOutputs[0];
+    const [, index] = this.savedTensors().map((t) => t.detach());
+    const args = this.opArgs() || [];
+    const dim = (args[1] as number) ?? 0;
+    return [g, null, ops.gather(g, dim, index)];
+  }
+}
+
+export class RemBackward extends AutogradNode {
+  constructor() { super(2); }
+  apply(gradOutputs: GradOutputList): GradInputList {
+    const g = gradOutputs[0];
+    const [a, b] = this.savedTensors().map((t) => t.detach());
+    const quotient = ops.div(ops.sub(a, ops.remainder(a, b)), b);
+    return [g, ops.neg(ops.mul(g, quotient))];
+  }
+}

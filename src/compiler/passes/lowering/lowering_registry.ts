@@ -122,7 +122,7 @@ export class LoweringContext {
     buf = new Buffer(`buf_${this.varCounter++}`, shape, dtype, MemoryScope.GLOBAL, strides);
     if (value.symbolicShape) buf.symbolicShape = value.symbolicShape;
     this.bufferMap.set(value, buf);
-    this._registerDynamicDims(buf);
+    this.declareBuffer(buf);
     return buf;
   }
 
@@ -133,11 +133,11 @@ export class LoweringContext {
     const strides = t.layout ? t.layout.computeStrides(shape) : null;
     const buf = new Buffer(`buf_${this.varCounter++}`, shape, dtype, MemoryScope.GLOBAL, strides);
     if (value.symbolicShape) buf.symbolicShape = value.symbolicShape;
-    this._registerDynamicDims(buf);
+    this.declareBuffer(buf);
     return buf;
   }
 
-  _registerDynamicDims(buf: Buffer): void {
+  declareBuffer(buf: Buffer): void {
     for (let i = 0; i < buf.shape.length; i++) {
       const d = buf.shape[i];
       if (d === DYNAMIC) this.extentNode(DYNAMIC, buf, i);

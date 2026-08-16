@@ -195,3 +195,20 @@ registerVJPRule('rsqrt', (ctx) => {
   const deriv = ctx.builder.mul(half, resultCubed).getResult(0);
   return [ctx.builder.mul(grad, deriv).getResult(0)];
 });
+
+for (const op of ['floor', 'ceil', 'round', 'sign']) {
+  registerVJPRule(op, (ctx) => [ctx.full(0, ctx.operands[0].type)]);
+}
+
+registerVJPRule('mish', (ctx) => {
+  const b = ctx.builder;
+  const grad = ctx.gradOutputs[0]!;
+  const [x] = ctx.operands;
+  const one = ctx.full(1, x.type);
+  const softplus = b.log(b.add(one, b.exp(x).getResult(0)).getResult(0)).getResult(0);
+  const tanhSp = b.tanh(softplus).getResult(0);
+  const sech2 = b.sub(one, b.mul(tanhSp, tanhSp).getResult(0)).getResult(0);
+  const sigmoidX = b.sigmoid(x).getResult(0);
+  const deriv = b.add(tanhSp, b.mul(x, b.mul(sech2, sigmoidX).getResult(0)).getResult(0)).getResult(0);
+  return [b.mul(grad, deriv).getResult(0)];
+});

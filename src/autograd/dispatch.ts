@@ -2,7 +2,7 @@ import { DispatchKey, AUTOGRAD_KEY_SET } from '../dispatcher/dispatch_key.js';
 import { KernelFunction } from '../dispatcher/boxing.js';
 import { dispatcher } from '../dispatcher/dispatcher.js';
 import { GradMode } from './grad_mode.js';
-import { getGradFn, hasGradFn } from './registry.js';
+import { getGradFn, isDecomposedOp, isGradientBarrier } from './registry.js';
 import { GradAccumulator } from './accumulator.js';
 import { AutogradMeta } from '../tensor/core/autograd_meta.js';
 import { TensorImpl } from '../tensor/core/tensor_impl.js';
@@ -102,6 +102,7 @@ export function wrapWithAutograd(opName: string, handle: OperatorHandle) {
       return dispatcher.redispatch(handle, stripped, ...args);
     }
 
+
     const tensorArgs = _extractTensors(args);
     gradFn.setOpArgs(args);
     for (let i = 0; i < tensorArgs.length; i++) {
@@ -132,6 +133,8 @@ export function wrapWithAutograd(opName: string, handle: OperatorHandle) {
       meta!.setGradFn(gradFn, 0);
       meta!.requiresGrad = true;
       result._impl._updateKeySet();
+    } else if (Array.isArray(result) && result.some(_isTensor)) {
+      throw new Error(`autograd: op '${opName}' returns multiple tensors, which eager autograd cannot track — the gradient would be silently dropped. Use compileWithBackward, or detach the inputs.`);
     }
 
     return result;
@@ -154,9 +157,9 @@ export function registerAutogradKernels(): void {
     if (!handle) continue;
     const opName = handle.name;
 
-    const fn = hasGradFn(opName)
-      ? wrapWithAutograd(opName, handle)
-      : _makePassthrough(handle);
+    const fn = isGradientBarrier(opName) || isDecomposedOp(opName)
+      ? _makePassthrough(handle)
+      : wrapWithAutograd(opName, handle);
 
     const kernel = KernelFunction.fromUnboxed(fn);
     for (const key of keys) handle.entry.registerKernel(key, kernel);

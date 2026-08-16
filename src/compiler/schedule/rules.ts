@@ -563,7 +563,13 @@ export class SchedulePolicy {
     }
     const rule = this.selectRule(schedule.func, blockName);
     if (rule) {
-      rule.apply(schedule, blockName, this.target);
+      try {
+        rule.apply(schedule, blockName, this.target);
+      } catch (e) {
+        invalidateClassifyBlock(schedule.func, blockName);
+        this._explain(blockName, 'none', `rule '${rule.name}' rejected: ${(e as Error).message}`);
+        return null;
+      }
       invalidateClassifyBlock(schedule.func, blockName);
       this._explain(blockName, rule.name, `matched rule '${rule.name}' for ${this.target.name}`);
       return rule.name;

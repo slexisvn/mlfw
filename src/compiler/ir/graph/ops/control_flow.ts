@@ -1,4 +1,4 @@
-import { OpDef, SideEffectKind, OpTrait } from '../op_registry.js';
+import { OpAttrKey, OpDef, SideEffectKind, OpTrait } from '../op_registry.js';
 import type { OpRegistry } from '../op_registry.js';
 import type { IRType } from '../types.js';
 import type { Operation } from '../operation.js';
@@ -51,7 +51,7 @@ export function register(registry: OpRegistry) {
     name: 'while',
     numOperands: -1,
     numResults: -1,
-    opAttrs: { sequentialRegion: true },
+    opAttrs: { [OpAttrKey.SEQUENTIAL_REGION]: true },
     hasRegions: true,
     numRegions: 2,
     sideEffects: SideEffectKind.CONTROL,
@@ -64,7 +64,7 @@ export function register(registry: OpRegistry) {
     name: 'scan',
     numOperands: -1,
     numResults: -1,
-    opAttrs: { sequentialRegion: true },
+    opAttrs: { [OpAttrKey.SEQUENTIAL_REGION]: true },
     hasRegions: true,
     numRegions: 1,
     sideEffects: SideEffectKind.CONTROL,
@@ -142,7 +142,7 @@ export function register(registry: OpRegistry) {
     name: 'fused_dot_epilogue',
     numOperands: -1,
     numResults: 1,
-    opAttrs: { launchBoundary: 'matmul' },
+    opAttrs: { [OpAttrKey.LAUNCH_BOUNDARY]: 'matmul' },
     traits: [OpTrait.OPAQUE],
     attrs: [
       { name: 'lhs_contracting', type: 'array', required: true },

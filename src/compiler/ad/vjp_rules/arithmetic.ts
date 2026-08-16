@@ -1,4 +1,5 @@
 import { registerVJPRule } from '../vjp_registry.js';
+import { isFloatType } from '../../ir/graph/types.js';
 import type { VJPContext } from '../vjp_registry.js';
 
 registerVJPRule('add', (ctx) => {
@@ -85,4 +86,22 @@ registerVJPRule('pow', (ctx) => {
   const product = ctx.builder.mul(basePowExp, logBase).getResult(0);
   const gradExp = ctx.builder.mul(grad, product).getResult(0);
   return [gradBase, gradExp];
+});
+
+registerVJPRule('rem', (ctx) => {
+  const b = ctx.builder;
+  const grad = ctx.gradOutputs[0]!;
+  const [lhs, rhs] = ctx.operands;
+  const quotient = b.sub(lhs, ctx.results[0]).getResult(0);
+  const ratio = b.div(quotient, rhs).getResult(0);
+  const gradRhs = b.mul(grad, b.neg(ratio).getResult(0)).getResult(0);
+  return [grad, gradRhs];
+});
+
+registerVJPRule('convert', (ctx) => {
+  const [x] = ctx.operands;
+  if (!isFloatType(x.type.dtype)) return [null];
+  const grad = ctx.gradOutputs[0]!;
+  if (grad.type.dtype === x.type.dtype) return [grad];
+  return [ctx.builder.convert(grad, x.type.dtype).getResult(0)];
 });

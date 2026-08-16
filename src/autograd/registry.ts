@@ -2,13 +2,17 @@ import { AddBackward, SubBackward, MulBackward, DivBackward, NegBackward, PowBac
 
 import { ExpBackward, LogBackward, SqrtBackward, TanhBackward, SigmoidBackward, ReluBackward, GeluBackward, SiluBackward, SoftmaxBackward, LogSoftmaxBackward, ErfBackward, ErfcBackward, LgammaBackward, GammaBackward } from './function/unary.js';
 
-import { SumBackward, MeanBackward } from './function/reduction.js';
+import { SumBackward, MeanBackward, MaxBackward, MinBackward, ProdBackward } from './function/reduction.js';
+import { AbsBackward, SinBackward, CosBackward, RsqrtBackward, IdentityBackward } from './function/unary.js';
+import { MaximumBackward, MinimumBackward, GatherBackward, ScatterAddBackward, RemBackward } from './function/indexing.js';
+import { Conv2dBackward, Pool2dBackward, LayerNormBackward, BatchNormBackward, EmbeddingBackward } from './function/nn.js';
 import { MatmulBackward, DotBackward } from './function/linalg.js';
 
 
 import { CatBackward, StackBackward, ClampBackward, PadBackward, IndexSelectBackward, WhereBackward } from './function/indexing.js';
 import { ReshapeBackward, TransposeBackward, PermuteBackward, SliceBackward, ExpandBackward, SelectBackward } from './function/view.js';
 import type { AutogradNode } from './node.js';
+import { COMPOSITE_KERNELS } from '../tensor/native/composite/composite_ops.js';
 import type { OpArgs } from './types.js';
 
 type GradFactory = (args: OpArgs) => AutogradNode;
@@ -64,11 +68,72 @@ _register('select', (args) => new SelectBackward(args![1] as number, args![2] as
 _register('unsqueeze', () => new ReshapeBackward());
 _register('squeeze', () => new ReshapeBackward());
 
+_register('abs', () => new AbsBackward());
+_register('sin', () => new SinBackward());
+_register('cos', () => new CosBackward());
+_register('rsqrt', () => new RsqrtBackward());
+_register('clone', () => new IdentityBackward());
+_register('contiguous', () => new IdentityBackward());
+
+_register('max', () => new MaxBackward());
+_register('min', () => new MinBackward());
+_register('prod', () => new ProdBackward());
+
+_register('maximum', () => new MaximumBackward());
+_register('minimum', () => new MinimumBackward());
+_register('rem', () => new RemBackward());
+_register('gather', () => new GatherBackward());
+_register('scatter_add', () => new ScatterAddBackward());
+
+
+_register('conv2d', () => new Conv2dBackward());
+_register('pool2d', () => new Pool2dBackward());
+_register('layer_norm', () => new LayerNormBackward());
+_register('batch_norm', () => new BatchNormBackward());
+_register('embedding', () => new EmbeddingBackward());
+
+const _decomposed = new Set<string>(Object.keys(COMPOSITE_KERNELS));
+
+export function isDecomposedOp(opName: string): boolean {
+  return _decomposed.has(opName);
+}
+
+const _barriers = new Set<string>();
+
+export function registerGradientBarrier(...opNames: readonly string[]): void {
+  for (const name of opNames) _barriers.add(name);
+}
+
+export function isGradientBarrier(opName: string): boolean {
+  return _barriers.has(opName);
+}
+
 export function getGradFn(opName: string, args: OpArgs = null): AutogradNode | null {
   const factory = _registry.get(opName);
-  return factory ? factory(args) : null;
+  if (factory) return factory(args);
+  if (_barriers.has(opName) || _decomposed.has(opName)) return null;
+  throw new Error(`autograd: op '${opName}' is on the gradient path but has no backward rule and is not a registered gradient barrier — the gradient would be silently dropped. Register one in src/autograd/registry.ts.`);
 }
 
 export function hasGradFn(opName: string): boolean {
   return _registry.has(opName);
 }
+
+export function listOpsWithoutGrad(opNames: Iterable<string>): string[] {
+  const missing: string[] = [];
+  for (const name of opNames) {
+    if (!_registry.has(name) && !_barriers.has(name) && !_decomposed.has(name)) missing.push(name);
+  }
+  return missing;
+}
+
+registerGradientBarrier(
+  'eq', 'ne', 'lt', 'le', 'gt', 'ge',
+  'argmax', 'argmin', 'argsort',
+  'floor', 'ceil', 'sign', 'one_hot', 'fill',
+  'cholesky', 'cov', 'det', 'eigh', 'inv', 'lstsq', 'pinv', 'qr', 'solve', 'svd',
+  'fft', 'ifft',
+  'decision_tree_fit', 'decision_tree_predict', 'elastic_net',
+  'gaussian_nb_fit', 'gaussian_nb_predict',
+  'kmeans', 'kmeans_predict', 'knn_predict',
+);

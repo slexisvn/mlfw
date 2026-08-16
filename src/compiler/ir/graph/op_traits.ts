@@ -1,13 +1,17 @@
 import { registry } from './ops.js';
+import { OpAttrKey, OpTrait } from './op_registry.js';
 import type { Operation } from './operation.js';
 
-export const OpAttrKey = Object.freeze({
-  GPU_CAPABLE: 'gpuCapable',
-  LAUNCH_BOUNDARY: 'launchBoundary',
-  SEQUENTIAL_REGION: 'sequentialRegion',
-  INFER_LAYOUT: 'inferLayout',
-  LAYOUT_SENSITIVITY: 'layoutSensitivity',
-});
+export { OpAttrKey } from './op_registry.js';
+
+export function unifiedOperandIndices(opName: string, numOperands: number): readonly number[] | null {
+  const def = registry.get(opName);
+  if (def === null) return null;
+  const declared = def.getAttr<readonly number[]>(OpAttrKey.UNIFIED_OPERANDS);
+  if (declared !== null) return declared;
+  if (!def.hasTrait(OpTrait.SAME_OPERAND_AND_RESULT_TYPE)) return null;
+  return Array.from({ length: numOperands }, (_, i) => i);
+}
 
 export function launchBoundaryClass(opName: string): string | null {
   const def = registry.get(opName);

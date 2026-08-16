@@ -195,8 +195,9 @@ export function dependences(byBuffer: ReadonlyMap<Buffer, readonly BufferAccess[
   return deps;
 }
 
-export function carriesDependence(deps: readonly Dependence[], loopNode: TirNode): Dependence | null {
+export function carriesDependence(deps: readonly Dependence[], loopNode: TirNode, ignore?: (buffer: Buffer) => boolean): Dependence | null {
   for (const dep of deps) {
+    if (ignore !== undefined && ignore(dep.buffer)) continue;
     const level = dep.loops.findIndex((l) => l.node === loopNode);
     if (level < 0) continue;
     let outerEq = true;

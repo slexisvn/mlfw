@@ -1,4 +1,4 @@
-import { OpDef, OpTrait } from '../op_registry.js';
+import { OpAttrKey, OpDef, OpTrait } from '../op_registry.js';
 import type { OpRegistry } from '../op_registry.js';
 import { TensorType, ScalarType } from '../types.js';
 import type { IRType } from '../types.js';
@@ -30,6 +30,7 @@ export function register(registry: OpRegistry) {
     numResults: 1,
     attrs: [{ name: 'direction', type: 'string', required: true }],
     traits: [OpTrait.ELEMENTWISE],
+    opAttrs: { [OpAttrKey.UNIFIED_OPERANDS]: [0, 1] },
     inferResultTypes: inferCompare,
     verify(op) {
       const errs = [];
@@ -48,6 +49,7 @@ export function register(registry: OpRegistry) {
     numOperands: 3,
     numResults: 1,
     traits: [OpTrait.ELEMENTWISE],
+    opAttrs: { [OpAttrKey.UNIFIED_OPERANDS]: [1, 2] },
     inferResultTypes(operandTypes) {
       if (operandTypes.length !== 3) return null;
       const [pred, onTrue, onFalse] = operandTypes;
@@ -65,6 +67,7 @@ export function register(registry: OpRegistry) {
     numOperands: 3,
     numResults: 1,
     traits: [OpTrait.ELEMENTWISE],
+    opAttrs: { [OpAttrKey.UNIFIED_OPERANDS]: [1, 2] },
     inferResultTypes(operandTypes) {
       if (operandTypes.length !== 3) return null;
       const [cond, x, y] = operandTypes;

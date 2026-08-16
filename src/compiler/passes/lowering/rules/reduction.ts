@@ -1,4 +1,4 @@
-import { MathOpNode, FloatImmNode, IntImmNode, BufferStoreNode, BufferLoadNode, BlockNode, SeqNode, CallExternNode, IfThenElseNode, CompareNode } from '../../../ir/tensor/nodes.js';
+import { MathOpNode, FloatImmNode, IntImmNode, BufferStoreNode, BufferLoadNode, BlockNode, SeqNode, CallExternNode, IfThenElseNode, CompareNode, AllocateNode } from '../../../ir/tensor/nodes.js';
 import { Buffer } from '../../../ir/tensor/buffer.js';
 import { DYNAMIC } from '../../../ir/graph/types.js';
 import { registerLoweringRule, buildSpatialNest, wrapLoopsWithNodes, concatIterVars, markCommReduce } from '../lowering_registry.js';
@@ -114,39 +114,39 @@ export function register(): void {
         return idx;
       };
 
-      const bestValBuf = new Buffer('_argval_' + ctx.varCounter, spatialDims.map(d => inBuf.shape[d]), inBuf.dtype, 'global');
+      const bestValBuf = new Buffer('_argval_' + ctx.varCounter, [1], inBuf.dtype, 'local');
       ctx.varCounter++;
+      const bestIdx = [new IntImmNode(0)];
 
-      const initNest = buildSpatialNest(ctx, 'ai', spatialDims, inBuf.shape, inBuf);
-      const initValStore = new BufferStoreNode(bestValBuf, initNest.indices, argReduceSentinel(inBuf.dtype, compareFn === 'gt'));
-      const initIdxStore = new BufferStoreNode(outBuf, outIndicesFor(initNest), new IntImmNode(0));
-      const initBlock = new BlockNode(ctx.blockName('arg_init'), initNest.ivs, [], [{ buffer: bestValBuf }, { buffer: outBuf }], new SeqNode([initValStore, initIdxStore]));
-      const initBody = spatialDims.length > 0 ? initNest.wrap(initBlock) : initBlock;
+      const nest = buildSpatialNest(ctx, 'ai', spatialDims, inBuf.shape, inBuf);
+      const outIndices = outIndicesFor(nest);
 
-      const accNest = buildSpatialNest(ctx, 'as', spatialDims, inBuf.shape, inBuf);
+      const initValStore = new BufferStoreNode(bestValBuf, bestIdx, argReduceSentinel(inBuf.dtype, compareFn === 'gt'));
+      const initIdxStore = new BufferStoreNode(outBuf, outIndices, new IntImmNode(0));
+      const initBlock = new BlockNode(ctx.blockName('arg_init'), nest.ivs, [], [{ buffer: bestValBuf }, { buffer: outBuf }], new SeqNode([initValStore, initIdxStore]));
+
       const rVar = ctx.allocVar('ar');
       const rBind = markCommReduce(ctx.allocBindArray('arv', [rVar]));
       const inIndices: TirNode[] = new Array(inBuf.shape.length);
-      for (let i = 0; i < spatialDims.length; i++) inIndices[spatialDims[i]] = accNest.ivs[i].iterVar;
+      for (let i = 0; i < spatialDims.length; i++) inIndices[spatialDims[i]] = nest.ivs[i].iterVar;
       inIndices[reduceDim] = rBind[0].iterVar;
 
       const loadVal = new BufferLoadNode(inBuf, inIndices);
-      const loadBest = new BufferLoadNode(bestValBuf, accNest.indices);
+      const loadBest = new BufferLoadNode(bestValBuf, bestIdx);
       const isBetter = new CompareNode(compareFn, loadVal, loadBest);
       const newBest = new IfThenElseNode(isBetter, loadVal, loadBest);
-      const outAccIndices = outIndicesFor(accNest);
-      const loadIdx = new BufferLoadNode(outBuf, outAccIndices);
+      const loadIdx = new BufferLoadNode(outBuf, outIndices);
       const newIdx = new IfThenElseNode(isBetter, rBind[0].iterVar, loadIdx);
-      const storeIdx = new BufferStoreNode(outBuf, outAccIndices, newIdx);
-      const storeVal = new BufferStoreNode(bestValBuf, accNest.indices, newBest);
-      const accBlock = new BlockNode(ctx.blockName('arg_acc'), concatIterVars(accNest.ivs, rBind),
+      const storeIdx = new BufferStoreNode(outBuf, outIndices, newIdx);
+      const storeVal = new BufferStoreNode(bestValBuf, bestIdx, newBest);
+      const accBlock = new BlockNode(ctx.blockName('arg_acc'), concatIterVars(nest.ivs, rBind),
         [{ buffer: inBuf }, { buffer: bestValBuf }], [{ buffer: bestValBuf }, { buffer: outBuf }],
         new SeqNode([storeIdx, storeVal]));
       const rExtent = ctx.extentNode(inBuf.shape[reduceDim], inBuf, reduceDim);
-      let accBody: TirNode = wrapLoopsWithNodes(accBlock, [rVar], [rExtent]);
-      accBody = accNest.wrap(accBody);
+      const accBody: TirNode = wrapLoopsWithNodes(accBlock, [rVar], [rExtent]);
 
-      return new SeqNode([initBody, accBody]);
+      const perElement = new AllocateNode(bestValBuf, bestValBuf.scope, new SeqNode([initBlock, accBody]));
+      return spatialDims.length > 0 ? nest.wrap(perElement) : perElement;
     });
   }
 

@@ -12,6 +12,15 @@ export const SideEffectKind = Object.freeze({
   CONTROL: 8
 });
 
+export const OpAttrKey = Object.freeze({
+  GPU_CAPABLE: 'gpuCapable',
+  LAUNCH_BOUNDARY: 'launchBoundary',
+  SEQUENTIAL_REGION: 'sequentialRegion',
+  INFER_LAYOUT: 'inferLayout',
+  LAYOUT_SENSITIVITY: 'layoutSensitivity',
+  UNIFIED_OPERANDS: 'unifiedOperands',
+});
+
 export const OpTrait = Object.freeze({
   COMMUTATIVE: 'commutative',
   ASSOCIATIVE: 'associative',

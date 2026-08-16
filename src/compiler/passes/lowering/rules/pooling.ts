@@ -33,7 +33,7 @@ export function register(): void {
     const hAx = layout['H'];
     const wAx = layout['W'];
 
-    const batch = inBuf.shape[nAx] as number;
+    const batchExtent = ctx.extentNode(inBuf.shape[nAx], inBuf, nAx);
     const channels = inBuf.shape[cAx] as number;
     const inH = inBuf.shape[hAx] as number;
     const inW = inBuf.shape[wAx] as number;
@@ -104,7 +104,7 @@ export function register(): void {
     accBody = new ForNode(owVar, new IntImmNode(0), new IntImmNode(outW), ForKind.SERIAL, accBody);
     accBody = new ForNode(ohVar, new IntImmNode(0), new IntImmNode(outH), ForKind.SERIAL, accBody);
     accBody = new ForNode(cVar, new IntImmNode(0), new IntImmNode(channels), ForKind.SERIAL, accBody);
-    accBody = new ForNode(nVar, new IntImmNode(0), new IntImmNode(batch), ForKind.SERIAL, accBody);
+    accBody = new ForNode(nVar, new IntImmNode(0), batchExtent, ForKind.SERIAL, accBody);
 
     const parts: TirNode[] = [initBody, accBody];
 

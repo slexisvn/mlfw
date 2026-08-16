@@ -1,4 +1,4 @@
-import { OpDef, OpTrait } from '../op_registry.js';
+import { OpAttrKey, OpDef, OpTrait } from '../op_registry.js';
 import type { OpAttrMap, OpAttrRecord, OpRegistry } from '../op_registry.js';
 import { TensorType, ScalarType, Layout } from '../types.js';
 import { LayoutPreference } from '../layout_pref.js';
@@ -18,7 +18,7 @@ export function register(registry: OpRegistry) {
     name: 'reduce',
     numOperands: 2,
     numResults: 1,
-    opAttrs: { launchBoundary: 'reduce', layoutSensitivity: 2, inferLayout: reduceLayout },
+    opAttrs: { [OpAttrKey.LAUNCH_BOUNDARY]: 'reduce', [OpAttrKey.LAYOUT_SENSITIVITY]: 2, [OpAttrKey.INFER_LAYOUT]: reduceLayout },
     attrs: [
       { name: 'dimensions', type: 'array', required: true },
       { name: 'reduce_type', type: 'string', required: true }
@@ -78,6 +78,20 @@ export function register(registry: OpRegistry) {
     return [new TensorType(newShape, ScalarType.I32)];
   }
 
+  function propagateArgReduceShapes(op: Operation, shapes: ReadonlyMap<unknown, readonly unknown[]>): (readonly unknown[])[] | null {
+    const inShape = shapes.get(op.getOperand(0));
+    if (!inShape) return null;
+    const axis = op.getAttr<number>('axis') as number;
+    if (axis === undefined) return null;
+    const keepDims = op.getAttr<boolean>('keep_dims') || false;
+    const resShape: unknown[] = [];
+    for (let i = 0; i < inShape.length; i++) {
+      if (i === axis) { if (keepDims) resShape.push(1); }
+      else resShape.push(inShape[i]);
+    }
+    return [resShape];
+  }
+
   registry.register(new OpDef({
     name: 'argmax',
     numOperands: 1,
@@ -87,7 +101,8 @@ export function register(registry: OpRegistry) {
       { name: 'keep_dims', type: 'boolean', required: false }
     ],
     traits: [OpTrait.REDUCTION],
-    inferResultTypes: inferArgReduceTypes
+    inferResultTypes: inferArgReduceTypes,
+    propagateSymbolicShapes: propagateArgReduceShapes as never,
   }));
 
   registry.register(new OpDef({
@@ -99,6 +114,7 @@ export function register(registry: OpRegistry) {
       { name: 'keep_dims', type: 'boolean', required: false }
     ],
     traits: [OpTrait.REDUCTION],
-    inferResultTypes: inferArgReduceTypes
+    inferResultTypes: inferArgReduceTypes,
+    propagateSymbolicShapes: propagateArgReduceShapes as never,
   }));
 }

@@ -1,13 +1,52 @@
-import { TensorType, ScalarType, TupleType } from './types.js';
+import { TensorType, ScalarType, TupleType, DYNAMIC } from './types.js';
 import { Operation } from './operation.js';
 import { Block, Region } from './block.js';
 import { GraphFunction } from './function.js';
 import { GraphModule } from './module.js';
 import { registry } from './ops.js';
+import { unifiedOperandIndices } from './op_traits.js';
+import { resultDtype } from '../../../tensor/types/dtype.js';
 import type { AttrValue, Dim, IRType, ScalarDType, Shape } from './types.js';
 import type { Value, BlockArgument } from './value.js';
 
 export type AttrRecord = Record<string, AttrValue>;
+
+export function propagateSymbolicShapes(op: Operation): void {
+  const operandShapes = new Map<Value, Shape>();
+  for (const operand of op.operands) {
+    if (operand.symbolicShape) operandShapes.set(operand, operand.symbolicShape);
+  }
+  if (operandShapes.size === 0) return;
+
+  const def = registry.get(op.opName);
+  const propagated = def && def.propagateSymbolicShapes
+    ? def.propagateSymbolicShapes(op, operandShapes as never) as unknown as (Shape | null)[] | null
+    : null;
+
+  for (let i = 0; i < op.numResults; i++) {
+    const result = op.getResult(i);
+    const resultType = result.type;
+    if (!(resultType instanceof TensorType)) continue;
+    const fromRule = propagated ? propagated[i] : null;
+    result.symbolicShape = fromRule || alignSymbolicShape(resultType.shape, operandShapes);
+  }
+}
+
+function alignSymbolicShape(resultShape: Shape, operandShapes: ReadonlyMap<Value, Shape>): Dim[] {
+  const out: Dim[] = new Array(resultShape.length);
+  for (let i = 0; i < resultShape.length; i++) {
+    if (resultShape[i] !== DYNAMIC) { out[i] = resultShape[i]; continue; }
+    out[i] = DYNAMIC;
+    for (const symShape of operandShapes.values()) {
+      const srcIdx = i - (resultShape.length - symShape.length);
+      if (srcIdx >= 0 && srcIdx < symShape.length && typeof symShape[srcIdx] === 'string') {
+        out[i] = symShape[srcIdx];
+        break;
+      }
+    }
+  }
+  return out;
+}
 
 export type AllReduceOpts = Readonly<{ reduceOp?: string; meshAxis?: number }>;
 export type AllGatherOpts = Readonly<{ meshAxis?: number; gatherDim?: number }>;
@@ -110,11 +149,33 @@ export class IRBuilder {
 
   _buildOp(name: string, operands: readonly Value[], resultTypes: readonly IRType[], attributes: AttrRecord | ReadonlyMap<string, AttrValue> | null = null, regions: readonly Region[] | null = null): Operation {
     const op = new Operation(name, operands, resultTypes, attributes, regions);
+    propagateSymbolicShapes(op);
     return this._insert(op);
   }
 
-  _inferAndBuild(name: string, operands: readonly Value[], attributes: AttrRecord | ReadonlyMap<string, AttrValue> | null = null, regions: readonly Region[] | null = null, explicitResultTypes: readonly IRType[] | null = null): Operation {
+  _unifyOperandDtypes(name: string, operands: readonly Value[]): readonly Value[] {
+    const indices = unifiedOperandIndices(name, operands.length);
+    if (indices === null || indices.length < 2) return operands;
+
+    let target: ScalarDType | null = null;
+    for (const i of indices) {
+      const type = operands[i]?.type;
+      if (!(type instanceof TensorType)) return operands;
+      target = target === null ? type.dtype : resultDtype(target, type.dtype) as ScalarDType;
+    }
+
+    let unified: Value[] | null = null;
+    for (const i of indices) {
+      if ((operands[i].type as TensorType).dtype === target) continue;
+      if (unified === null) unified = [...operands];
+      unified[i] = this.convert(operands[i], target!).getResult(0);
+    }
+    return unified || operands;
+  }
+
+  _inferAndBuild(name: string, rawOperands: readonly Value[], attributes: AttrRecord | ReadonlyMap<string, AttrValue> | null = null, regions: readonly Region[] | null = null, explicitResultTypes: readonly IRType[] | null = null): Operation {
     const opDef = registry.get(name);
+    const operands = this._unifyOperandDtypes(name, rawOperands);
     let resultTypes: readonly IRType[] | null = explicitResultTypes;
     if (!resultTypes && opDef && opDef.inferResultTypes) {
       const operandTypes = operands.map(o => o.type);

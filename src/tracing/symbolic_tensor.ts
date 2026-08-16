@@ -4,6 +4,7 @@ import { Storage } from '../tensor/core/storage.js';
 import { DispatchKey, DispatchKeySet } from '../dispatcher/dispatch_key.js';
 import { META_DEVICE } from '../tensor/types/device.js';
 import { computeStrides } from '../tensor/utils/shape_utils.js';
+import { DYNAMIC } from '../compiler/ir/graph/types.js';
 import type { DType } from '../tensor/types/dtype.js';
 import type { Tracer } from './tracer.js';
 import type { IRValueLike, SymbolicShape } from './types.js';
@@ -35,6 +36,21 @@ export class SymbolicTensor extends Tensor {
 
   get symbolicShape(): SymbolicShape {
     return this._symbolicShape;
+  }
+
+  get shape(): readonly number[] {
+    const raw = super.shape;
+    const sym = this._symbolicShape;
+    if (!sym) return raw;
+    let specialized: number[] | null = null;
+    for (let i = 0; i < raw.length; i++) {
+      if (raw[i] !== DYNAMIC || i >= sym.length) continue;
+      const hint = this._tracer.shapeEnv.specialize(sym[i]);
+      if (hint === null) continue;
+      if (specialized === null) specialized = [...raw];
+      specialized[i] = hint;
+    }
+    return specialized || raw;
   }
 
   get dispatchKeySet(): DispatchKeySet {

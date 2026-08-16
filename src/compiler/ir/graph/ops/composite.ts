@@ -1,4 +1,4 @@
-import { OpDef, OpTrait } from '../op_registry.js';
+import { OpAttrKey, OpDef, OpTrait } from '../op_registry.js';
 import type { OpRegistry } from '../op_registry.js';
 import type { IRType } from '../types.js';
 import type { Operation } from '../operation.js';
@@ -65,7 +65,7 @@ export function register(registry: OpRegistry) {
     name: 'scaled_dot_product_attention',
     numOperands: 3,
     numResults: 1,
-    opAttrs: { launchBoundary: 'attention' },
+    opAttrs: { [OpAttrKey.LAUNCH_BOUNDARY]: 'attention' },
     traits: [OpTrait.OPAQUE],
     attrs: [
       { name: 'scale', type: 'number', required: true },
@@ -82,7 +82,7 @@ export function register(registry: OpRegistry) {
     name: 'softmax',
     numOperands: 1,
     numResults: 1,
-    opAttrs: { gpuCapable: true },
+    opAttrs: { [OpAttrKey.GPU_CAPABLE]: true },
     attrs: [{ name: 'axis', type: 'number', required: true }],
     inferResultTypes: inferSameAsInputFloat,
     verify: verifyUnaryFloat
@@ -128,7 +128,7 @@ export function register(registry: OpRegistry) {
     name: 'layer_norm',
     numOperands: 3,
     numResults: 1,
-    opAttrs: { gpuCapable: true },
+    opAttrs: { [OpAttrKey.GPU_CAPABLE]: true },
     attrs: [
       { name: 'axis', type: 'number', required: true },
       { name: 'epsilon', type: 'number', required: true }
@@ -149,7 +149,7 @@ export function register(registry: OpRegistry) {
     name: 'batch_norm',
     numOperands: 5,
     numResults: 1,
-    opAttrs: { gpuCapable: true },
+    opAttrs: { [OpAttrKey.GPU_CAPABLE]: true },
     attrs: [
       { name: 'axis', type: 'number', required: true },
       { name: 'epsilon', type: 'number', required: true }
