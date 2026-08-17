@@ -56,6 +56,7 @@ export type ConvNestOpts = {
   leafBuilder(inIdx: TirNode[], kerIdx: TirNode[]): TirNode;
 };
 export type PointwiseExprBuilder = (op: Operation, loads: BufferLoadNode[], dtype: string) => TirNode;
+export type ConstBuffer = { buffer: Buffer; data: ArrayLike<number> };
 
 const GENERIC_PLEVEL = 10;
 const TARGET_PLEVEL = 20;
@@ -93,6 +94,7 @@ export class LoweringContext {
   shapeParams: Map<string, VariableNode>;
   symbolToVar: Map<SymIntValue, VariableNode>;
   symVars: Map<string, VariableNode>;
+  constBuffers: ConstBuffer[];
   private _blockCounter: number;
 
   constructor() {
@@ -101,6 +103,7 @@ export class LoweringContext {
     this.shapeParams = new Map();
     this.symbolToVar = new Map();
     this.symVars = new Map();
+    this.constBuffers = [];
     this._blockCounter = 0;
   }
 
@@ -453,7 +456,24 @@ export function lowerPointwise(ctx: LoweringContext, op: Operation, inputs: read
   return wrapInLoops(block, loopVars, outBuf.shape, extentNodes);
 }
 
-export function lowerConstant(ctx: LoweringContext, op: Operation): TirNode {
+export function expandConstantStores(buf: Buffer, data: ArrayLike<number>, blockName: string): TirNode {
+  const isInt = isDtypeInt(buf.dtype);
+  const imm = (x: number): TirNode => isInt ? new IntImmNode(x) : new FloatImmNode(x);
+  if (buf.shape.length === 0) return new BufferStoreNode(buf, [], imm(data[0]));
+
+  const strides: number[] = new Array(buf.shape.length);
+  let acc = 1;
+  for (let d = buf.shape.length - 1; d >= 0; d--) { strides[d] = acc; acc *= buf.shape[d] as number; }
+  const stmts: TirNode[] = [];
+  for (let i = 0; i < data.length; i++) {
+    const idx: TirNode[] = new Array(buf.shape.length);
+    for (let d = 0; d < buf.shape.length; d++) idx[d] = new IntImmNode(Math.floor(i / strides[d]) % (buf.shape[d] as number));
+    stmts.push(new BufferStoreNode(buf, idx, imm(data[i])));
+  }
+  return new BlockNode(blockName, [], [], [{ buffer: buf }], new SeqNode(stmts));
+}
+
+export function lowerConstant(ctx: LoweringContext, op: Operation): TirNode | null {
   const result = op.getResult(0);
   const rtype = result.type as TensorType;
   const val = op.getAttr<number | readonly number[]>('value');
@@ -473,19 +493,11 @@ export function lowerConstant(ctx: LoweringContext, op: Operation): TirNode {
 
   const arrVal = val as ArrayLike<number>;
   if (val && typeof val !== 'number' && typeof arrVal.length === 'number') {
-    if (outBuf.shape.length === 0) {
-      return new BufferStoreNode(outBuf, [], imm(arrVal[0]));
+    if (op.getAttr<boolean>('folded_weight') && outBuf.shape.length > 0) {
+      ctx.constBuffers.push({ buffer: outBuf, data: arrVal });
+      return null;
     }
-    const strides: number[] = new Array(outBuf.shape.length);
-    let acc = 1;
-    for (let d = outBuf.shape.length - 1; d >= 0; d--) { strides[d] = acc; acc *= outBuf.shape[d] as number; }
-    const stmts: TirNode[] = [];
-    for (let i = 0; i < arrVal.length; i++) {
-      const idx: TirNode[] = new Array(outBuf.shape.length);
-      for (let d = 0; d < outBuf.shape.length; d++) idx[d] = new IntImmNode(Math.floor(i / strides[d]) % (outBuf.shape[d] as number));
-      stmts.push(new BufferStoreNode(outBuf, idx, imm(arrVal[i])));
-    }
-    return new BlockNode(ctx.blockName(`${op.opName}_block`), [], [], [{ buffer: outBuf }], new SeqNode(stmts));
+    return expandConstantStores(outBuf, arrVal, ctx.blockName(`${op.opName}_block`));
   }
 
   const valNode = typeof val === 'number' ? imm(val) : imm(0);

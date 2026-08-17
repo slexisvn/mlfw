@@ -6,6 +6,7 @@ import { LoopPartitionPass } from '../passes/loop_partition/loop_partition.js';
 import { AccumulatorDetectionPass } from '../passes/lowering/accumulator_pass.js';
 import { AutoTensorizePass } from '../passes/schedule/tensorize_pass.js';
 import { InlineReindexPass } from '../passes/schedule/inline_reindex_pass.js';
+import { LegalizeConstBuffersPass } from '../passes/lowering/const_buffer_pass.js';
 import { tirPassesForPhase } from './tir_pass_registry.js';
 import type { CompilerConfig, TirPass } from './pipeline_types.js';
 
@@ -13,6 +14,8 @@ export function buildTirPipeline(config: CompilerConfig): TirPass[] {
   const passes: TirPass[] = [];
 
   for (const p of tirPassesForPhase('pre', config)) passes.push(p);
+
+  if (!config.target.supportsConstBuffers) passes.push(new LegalizeConstBuffersPass());
 
   passes.push(new InlineReindexPass(config));
 

@@ -4,9 +4,11 @@ import type { CodegenEntry, CodegenMetadata } from './codegen_registry.js';
 import type { PrimFunc } from '../compiler/ir/tensor/nodes.js';
 import type { CompilerContext } from '../compiler/pipeline/compiler_context.js';
 import type { ExternalCodegenAttr } from '../compiler/pipeline/external_codegen.js';
+import type { ConstBuffer } from '../compiler/passes/lowering/lowering_registry.js';
 import type { TargetFeatures } from './target.js';
 
 export type BackendPipelineOptions = { context?: CompilerContext | null };
+export type KernelConstBuffer = { name: string; dtype: string; data: ArrayLike<number> };
 
 export class CompiledKernel {
   name: string;
@@ -43,6 +45,13 @@ export class BackendPipeline {
     const entry = ((this.context && this.context.getCodegenEntry(this.target.kind)) || getCodegenEntry(this.target.kind)) as CodegenEntry | null;
     if (!entry) throw new Error(`Unsupported target kind: ${this.target.kind}`);
     const { source, metadata } = entry.compile(primFunc, this.target, this);
+    const constBuffers = primFunc.getAttr<ConstBuffer[]>(FuncAttr.CONST_BUFFERS);
+    if (constBuffers && constBuffers.length > 0) {
+      if (!this.target.supportsConstBuffers) {
+        throw new Error(`Target '${this.target.name}' cannot bind constant buffers; LegalizeConstBuffersPass must expand them before codegen`);
+      }
+      metadata.constBuffers = constBuffers.map((cb): KernelConstBuffer => ({ name: cb.buffer.name, dtype: cb.buffer.dtype, data: cb.data }));
+    }
     return new CompiledKernel(primFunc.name, source, this.target, metadata);
   }
 

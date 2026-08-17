@@ -2,7 +2,7 @@ import { PrimFunc, SeqNode, BufferStoreNode, BufferLoadNode, BlockNode } from '.
 import { topoSortOpSet } from '../../ir/graph/graph_algorithms.js';
 import { registry } from '../../ir/graph/ops.js';
 
-import { LoweringContext, registerLoweringRule, hasLoweringRule, getLoweringRule, lowerConstant, isConstantOp, makeLoopNest, wrapInLoops } from './lowering_registry.js';
+import { LoweringContext, registerLoweringRule, hasLoweringRule, getLoweringRule, lowerConstant, expandConstantStores, isConstantOp, makeLoopNest, wrapInLoops } from './lowering_registry.js';
 import { isTerminatorOp, isBroadcastOp } from '../../ir/graph/op_traits.js';
 import { register as registerElementwise } from './rules/elementwise.js';
 import { register as registerShape } from './rules/shape.js';
@@ -22,6 +22,7 @@ import type { Operation } from '../../ir/graph/operation.js';
 import type { Value } from '../../ir/graph/value.js';
 import type { Block } from '../../ir/graph/block.js';
 import type { Buffer } from '../../ir/tensor/buffer.js';
+import type { ConstBuffer } from './lowering_registry.js';
 import type { TirNode, VariableNode } from '../../ir/tensor/nodes.js';
 import type { TensorType } from '../../ir/graph/types.js';
 import type { CompilerContext } from '../../pipeline/compiler_context.js';
@@ -113,7 +114,9 @@ export function lowerGraphToPrimFunc(graphFunc: GraphFunction, target: CompileTa
   const stmts: TirNode[] = [];
 
   for (const op of graphFunc.ops()) {
-    if (isConstantOp(op.opName)) stmts.push(lowerConstant(ctx, op));
+    if (!isConstantOp(op.opName)) continue;
+    const stmt = lowerConstant(ctx, op);
+    if (stmt) stmts.push(stmt);
   }
 
   for (const op of topologicalOps(graphFunc)) {
@@ -168,6 +171,20 @@ export function lowerGraphToPrimFunc(graphFunc: GraphFunction, target: CompileTa
     stmts.push(wrapInLoops(block, loopVars, src.shape, extentNodes));
   }
 
+  const boundBuffers = new Set<Buffer>(bufferMap.values());
+  const constBuffers: ConstBuffer[] = [];
+  for (const cb of ctx.constBuffers) {
+    if (boundBuffers.has(cb.buffer)) {
+      stmts.push(expandConstantStores(cb.buffer, cb.data, ctx.blockName('constant_block')));
+      continue;
+    }
+    const v = ctx.allocVar('const');
+    params.push(v);
+    bufferMap.set(v, cb.buffer);
+    boundBuffers.add(cb.buffer);
+    constBuffers.push(cb);
+  }
+
   const shapeParams: VariableNode[] = [];
   const seenSp = new Set<string>();
   for (const sp of ctx.shapeParams.values()) {
@@ -183,6 +200,7 @@ export function lowerGraphToPrimFunc(graphFunc: GraphFunction, target: CompileTa
   for (const sp of shapeParams) params.push(sp);
 
   const primFunc = new PrimFunc(graphFunc.name, params, stmts.length === 1 ? stmts[0] : new SeqNode(stmts), bufferMap, shapeParams, new Map(ctx.shapeParams));
+  if (constBuffers.length > 0) primFunc.setAttr(FuncAttr.CONST_BUFFERS, constBuffers);
   if (graphFunc._partitionTarget) primFunc.setAttr(FuncAttr.PARTITION_TARGET, graphFunc._partitionTarget);
   return primFunc;
 }

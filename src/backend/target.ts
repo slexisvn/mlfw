@@ -41,6 +41,7 @@ export type TargetFeaturesConfig = {
   preferredBlockFactor?: number;
   supportsBlockedLayout?: boolean;
   supportsInt8?: boolean;
+  supportsConstBuffers?: boolean;
   simd?: boolean;
   host?: TargetFeatures | null;
   attrs?: Readonly<Record<string, unknown>>;
@@ -78,6 +79,7 @@ export class TargetFeatures {
   preferredBlockFactor: number;
   supportsBlockedLayout: boolean;
   supportsInt8: boolean;
+  supportsConstBuffers: boolean;
   simd: boolean;
   host: TargetFeatures | null;
   attrs: Map<string, unknown>;
@@ -112,6 +114,7 @@ export class TargetFeatures {
     this.preferredBlockFactor = config.preferredBlockFactor || 0;
     this.supportsBlockedLayout = config.supportsBlockedLayout ?? false;
     this.supportsInt8 = config.supportsInt8 ?? false;
+    this.supportsConstBuffers = config.supportsConstBuffers ?? false;
     this.simd = config.simd ?? false;
     this.host = config.host || null;
     this.attrs = new Map(Object.entries(config.attrs || {}));
@@ -175,6 +178,7 @@ export const CPUTarget = (overrides: TargetOverrides = {}): TargetFeatures => ne
   supportsBlockedLayout: true,
   preferredBlockFactor: 8,
   supportsInt8: true,
+  supportsConstBuffers: true,
   ...overrides
 });
 
@@ -200,6 +204,7 @@ export const CUDATarget = (overrides: TargetOverrides = {}): TargetFeatures => n
   libraryClasses: new Set(['matmul', 'conv']),
   enableEpilogueFusion: true,
   supportsInt8: true,
+  supportsConstBuffers: true,
   attrs: {
     [TargetAttr.GRAPH_SPLIT]: { matmul: 2, conv: 2, attention: 1 },
     [TargetAttr.SCHEDULING]: { gpuTiling: true },
@@ -216,6 +221,7 @@ export const WasmTarget = (overrides: TargetOverrides = {}): TargetFeatures => n
   memoryBandwidthGBs: 10,
   computeTFLOPs: 0.1,
   supportsInt8: true,
+  supportsConstBuffers: true,
   simd: true,
   ...overrides
 });

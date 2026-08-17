@@ -247,7 +247,8 @@ export function compile(model: CompilableModel, exampleInputs?: Tensor[], opts: 
   }
 
   const quantizing = !!(opts?.quantization as { enabled?: boolean } | undefined)?.enabled;
-  const foldPredicate = weightPredicate(quantizing ? Infinity : MAX_FOLDABLE_ELEMENTS);
+  const linksConstants = quantizing || !!(target as { supportsConstBuffers?: boolean })?.supportsConstBuffers;
+  const foldPredicate = weightPredicate(linksConstants ? Infinity : MAX_FOLDABLE_ELEMENTS);
 
   function _finalize(traced: TracedCore): CompiledEntry {
     const prepared = foldWeights ? foldWeightParams(traced, tensorToContiguous, foldPredicate) : traced;

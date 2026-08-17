@@ -49,11 +49,13 @@ type JointMeta = {
   outputSymShapes: readonly SymbolicShape[];
 };
 type BackwardMeta = SeparateMeta | JointMeta;
+type ArgSpec = { shape: number[]; dtype: string };
 type SeparateForwardContext = {
   results: TensorOutput | TensorOutput[];
   inputArrays: NumericTypedArray[];
   paramArrays: NumericTypedArray[];
   outputArrays: NumericTypedArray[];
+  argSpecs: ArgSpec[];
   device: Device;
 };
 type JointSavedContext = {
@@ -234,12 +236,14 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
       outputShapes[i] = shape;
     }
 
+    const argSpecs: ArgSpec[] = [...inputs, ...params].map((t: Tensor) => ({ shape: [...t.shape], dtype: t.dtype }));
+
     const allArgs: RuntimeArg[] = [...inputArrays, ...paramArrays, ...outputArrays];
     const build = () => {
       const results = numRealOutputs === 1
         ? wrapResult(outputArrays[0], outputShapes[0], allOutputTypes[0].dtype, device)
         : Array.from({ length: numRealOutputs }, (_, i) => wrapResult(outputArrays[i], outputShapes[i], allOutputTypes[i].dtype, device));
-      return { results, inputArrays, paramArrays, outputArrays, device };
+      return { results, inputArrays, paramArrays, outputArrays, argSpecs, device };
     };
     const pending = _runK(compiled.fwdResult, funcName, allArgs);
     return pending ? pending.then(build) : build();
@@ -274,9 +278,20 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
     }
 
     const allArgs: RuntimeArg[] = [...gradArrays, ...savedArrays, ...gradInputArrays];
-    const build = () => gradInputArrays.map((arr, i) =>
-      wrapResult(arr, gradInputShapes[i], bwdFunc.outputTypes[i].dtype, savedContext.device)
-    );
+    const build = () => {
+      const gradInputs = new Array<TensorOutput>(savedContext.argSpecs.length);
+      for (let i = 0; i < numGradOutputs; i++) {
+        gradInputs[compiled.gradInputIndices[i]] =
+          wrapResult(gradInputArrays[i], gradInputShapes[i], bwdFunc.outputTypes[i].dtype, savedContext.device);
+      }
+      for (let i = 0; i < gradInputs.length; i++) {
+        if (gradInputs[i]) continue;
+        const spec = savedContext.argSpecs[i];
+        const Ctor = typedArrayCtor(spec.dtype);
+        gradInputs[i] = wrapResult(new Ctor(Math.max(computeNumel(spec.shape), 1)), spec.shape, spec.dtype, savedContext.device);
+      }
+      return gradInputs;
+    };
     const pending = _runK(compiled.bwdResult, funcName, allArgs);
     return pending ? pending.then(build) : build();
   }

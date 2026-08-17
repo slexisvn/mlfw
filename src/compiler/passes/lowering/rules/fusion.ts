@@ -279,7 +279,8 @@ function lowerFusionAsIndividualOps(ctx: LoweringContext, fusionOp: Operation, s
     }
 
     if (isConstantOp(innerOp.opName)) {
-      stmts.push(lowerConstant(ctx, innerOp));
+      const stmt = lowerConstant(ctx, innerOp);
+      if (stmt) stmts.push(stmt);
       continue;
     }
 

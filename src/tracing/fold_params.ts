@@ -43,7 +43,7 @@ export function foldWeightParams(traced: TracedCore, getData: GetData, shouldFol
     const data = getData(f.param);
     const tt = f.arg.type;
     const OperationClass = Operation as unknown as OperationCtor;
-    const c = new OperationClass('constant', [], [tt], { value: data, tensor_type: tt });
+    const c = new OperationClass('constant', [], [tt], { value: data, tensor_type: tt, folded_weight: true });
     const first = entry.firstOp;
     if (first) entry.insertBefore(c, first);
     else entry.pushOp(c);

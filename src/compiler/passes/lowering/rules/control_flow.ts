@@ -53,7 +53,8 @@ function lowerRegionBody(ctx: LoweringContext, region: Region, argBuffers: reado
       return { stmts, yieldBuffers: results };
     }
     if (isConstantOp(innerOp.opName)) {
-      stmts.push(lowerConstant(ctx, innerOp));
+      const stmt = lowerConstant(ctx, innerOp);
+      if (stmt) stmts.push(stmt);
       continue;
     }
     const outerOperands: (Buffer | Value)[] = new Array(innerOp.numOperands);

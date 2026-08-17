@@ -7,7 +7,8 @@ import { cublasMatmulDevice } from './cublas.js';
 import { scalarParam, devicePtrParam } from './launcher.js';
 import { cu, checkCU } from './ffi.js';
 import type { CudaHandle, DevicePtr } from './ffi.js';
-import type { ExecutionPlan, PlanStepRuntime, RuntimeKernel, RuntimeTensor } from '../../runtime.js';
+import { constBuffersOf } from '../../runtime.js';
+import type { ExecutionPlan, KernelConstBuffer, PlanStepRuntime, RuntimeKernel, RuntimeTensor } from '../../runtime.js';
 import type { ExternalKernelInfo } from '../../../compiler/pipeline/external_codegen.js';
 
 type PlanGroups = { of: number[]; count: number };
@@ -103,6 +104,31 @@ function _dropState(plan: ExecutionPlan): void {
 export function releaseAllPlanBuffers(): void {
   for (const state of [..._liveStates]) _releaseState(state);
   _liveStates.clear();
+  releaseConstBuffers();
+}
+
+const _constPtr = new WeakMap<KernelConstBuffer, DevicePtr>();
+const _constAllocs: [KernelConstBuffer, DevicePtr, number][] = [];
+
+function _uploadConsts(steps: readonly PlanStepRuntime[]): void {
+  for (const st of steps) {
+    for (const cb of constBuffersOf(st.kernel)) {
+      if (_constPtr.has(cb)) continue;
+      const bytes = Math.max(cb.data.byteLength, 1);
+      const ptr = acquire(bytes);
+      devH2D(ptr, cb.data);
+      _constPtr.set(cb, ptr);
+      _constAllocs.push([cb, ptr, bytes]);
+    }
+  }
+}
+
+export function releaseConstBuffers(): void {
+  for (const [cb, ptr, bytes] of _constAllocs) {
+    release(ptr, bytes);
+    _constPtr.delete(cb);
+  }
+  _constAllocs.length = 0;
 }
 
 function launchOnPrimary(func: CudaHandle | null, gridDim: readonly number[], blockDim: readonly number[], sharedMemBytes: number, deviceAddrs: readonly (DevicePtr | null)[], scalars: readonly number[], stream: CudaHandle | null = null): void {
@@ -125,13 +151,16 @@ function _launchSteps(steps: readonly PlanStepRuntime[], dptr: (DevicePtr | null
       const { M, N, K, aIdx, bIdx, cIdx, transB } = meta.cublas;
       cublasMatmulDevice(M, N, K, dptr[ordered[aIdx]]!, dptr[ordered[bIdx]]!, dptr[ordered[cIdx]]!, transB);
     } else {
-      launchOnPrimary(funcs.get(st.name)!, meta.gridDim!, meta.blockDim!, 0, ordered.map((s) => dptr[s]), st.shapeValues || [], stream);
+      const addrs = ordered.map((s) => dptr[s]);
+      for (const cb of constBuffersOf(st.kernel)) addrs.push(_constPtr.get(cb)!);
+      launchOnPrimary(funcs.get(st.name)!, meta.gridDim!, meta.blockDim!, 0, addrs, st.shapeValues || [], stream);
     }
   }
 }
 
-function _loadFuncs(steps: readonly PlanStepRuntime[]): KernelFuncs {
+function _prepareKernels(steps: readonly PlanStepRuntime[]): KernelFuncs {
   setDevice();
+  _uploadConsts(steps);
   const funcs: KernelFuncs = new Map();
   for (const st of steps) {
     if (st.kernel!.metadata.cublas) continue;
@@ -147,7 +176,7 @@ function _writtenSlots(steps: readonly PlanStepRuntime[]): Set<number> {
 }
 
 function runCudaPlanGraphed(plan: ExecutionPlan, slots: PlanSlots, steps: readonly PlanStepRuntime[]): void {
-  const funcs = _loadFuncs(steps);
+  const funcs = _prepareKernels(steps);
   const stream = getDevice().stream;
   const written = _writtenSlots(steps);
   const argSet = new Set(plan.argSlots);
@@ -262,7 +291,7 @@ export async function runCudaPlan(plan: ExecutionPlan, slots: PlanSlots, steps: 
   for (const st of steps) {
     if (!st.kernel!.metadata.cublas) compileToPTX(st.kernel!.source, st.kernel!.name);
   }
-  const funcs = _loadFuncs(steps);
+  const funcs = _prepareKernels(steps);
   const written = _writtenSlots(steps);
 
   if (opts && opts.resident) runCudaPlanResident(plan, slots, steps, funcs, written);

@@ -3,7 +3,7 @@ import { buildFunction } from '../../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../../src/compiler/ir/graph/types.js';
 import { FusionGroup, FusionGroupBuilder } from '../../../../src/compiler/passes/fusion/fusion_groups.js';
 import { FusionLegality, FusionKind } from '../../../../src/compiler/passes/fusion/fusion_analysis.js';
-import { scalingRatio, QUADRATIC_RATIO } from '../../../_utils/scaling.js';
+import { scalingExponent, scalingReport, SUBQUADRATIC_EXPONENT } from '../../../_utils/scaling.js';
 
 function ops(func) {
   const list = [];
@@ -254,14 +254,13 @@ describe('FusionGroupBuilder scales linearly on large graphs (no O(n^2)/O(n^3) b
     });
   }
 
-  it('doubling the op count does not more than double the time (rules out O(n^2))', () => {
-    const { ratio, tSmall, tLarge, n } = scalingRatio({
+  it('the time exponent over an 8x size span stays well below quadratic', () => {
+    const measured = scalingExponent({
       build: makeWide,
       work: (func) => new FusionGroupBuilder(new FusionLegality()).buildAllGroups(func),
-      n: 400,
+      n: 100,
     });
-    expect(ratio, `n=${n} took ${tSmall.toFixed(1)}ms, n=${2 * n} took ${tLarge.toFixed(1)}ms (ratio ${ratio.toFixed(2)})`)
-      .toBeLessThan(QUADRATIC_RATIO);
+    expect(measured.exponent, scalingReport(measured)).toBeLessThan(SUBQUADRATIC_EXPONENT);
   });
 });
 

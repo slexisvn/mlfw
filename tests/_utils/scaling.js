@@ -1,33 +1,57 @@
-function timeOnce(work, input) {
-  const t0 = performance.now();
-  work(input);
-  return performance.now() - t0;
-}
-
-function measure(build, work, n, runs, warmups) {
-  const small = build(n);
-  const large = build(2 * n);
-  for (let i = 0; i < warmups; i++) {
-    work(small);
-    work(large);
-  }
-  let tSmall = Infinity;
-  let tLarge = Infinity;
+function timeAt(build, work, size, runs, warmups) {
+  const input = build(size);
+  for (let i = 0; i < warmups; i++) work(input);
+  let best = Infinity;
   for (let i = 0; i < runs; i++) {
-    tSmall = Math.min(tSmall, timeOnce(work, small));
-    tLarge = Math.min(tLarge, timeOnce(work, large));
+    const t0 = performance.now();
+    work(input);
+    const dt = performance.now() - t0;
+    if (dt < best) best = dt;
   }
-  return { tSmall, tLarge };
+  return best;
 }
 
-export function scalingRatio({ build, work, n, runs = 5, warmups = 2, minMs = 5, maxGrowth = 4 }) {
-  let size = n;
-  let m = measure(build, work, size, runs, warmups);
-  for (let i = 0; i < maxGrowth && m.tSmall < minMs; i++) {
-    size *= 2;
-    m = measure(build, work, size, runs, warmups);
+function sweep(build, work, sizes, runs, warmups) {
+  const best = new Array(sizes.length).fill(Infinity);
+  const ascending = sizes.map((_, i) => i);
+  for (const order of [ascending, [...ascending].reverse()]) {
+    for (const i of order) {
+      const t = timeAt(build, work, sizes[i], runs, warmups);
+      if (t < best[i]) best[i] = t;
+    }
   }
-  return { ratio: m.tLarge / m.tSmall, tSmall: m.tSmall, tLarge: m.tLarge, n: size };
+  return best;
 }
 
-export const QUADRATIC_RATIO = 3;
+function leastSquaresSlope(xs, ys) {
+  let xbar = 0, ybar = 0;
+  for (let i = 0; i < xs.length; i++) { xbar += xs[i]; ybar += ys[i]; }
+  xbar /= xs.length;
+  ybar /= ys.length;
+  let num = 0, den = 0;
+  for (let i = 0; i < xs.length; i++) {
+    num += (xs[i] - xbar) * (ys[i] - ybar);
+    den += (xs[i] - xbar) * (xs[i] - xbar);
+  }
+  return num / den;
+}
+
+export function scalingExponent({ build, work, n, points = 4, runs = 2, warmups = 1, minMs = 3, maxGrowth = 4 }) {
+  let base = n;
+  let sizes, times;
+  for (let g = 0; ; g++) {
+    sizes = Array.from({ length: points }, (_, i) => base * (2 ** i));
+    times = sweep(build, work, sizes, runs, warmups);
+    if (times[0] >= minMs || g >= maxGrowth) break;
+    base *= 2;
+  }
+  const exponent = leastSquaresSlope(sizes.map(Math.log2), times.map(Math.log2));
+  return { exponent, sizes, times };
+}
+
+export const SUBQUADRATIC_EXPONENT = 1.85;
+
+export function scalingReport({ exponent, sizes, times }) {
+  const measured = sizes.map((s, i) => `${s}:${times[i].toFixed(1)}ms`).join(' ');
+  return `${measured} (exponent ${exponent.toFixed(2)}, linear 1.0, quadratic 2.0)`;
+}

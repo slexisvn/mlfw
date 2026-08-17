@@ -7,7 +7,7 @@ import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js'
 import { UseDefAnalysis } from '../../../src/compiler/analysis/use_def.js';
 import { PostDominanceAnalysis } from '../../../src/compiler/analysis/dominance.js';
 import { LivenessAnalysis } from '../../../src/compiler/analysis/liveness.js';
-import { scalingRatio, QUADRATIC_RATIO } from '../../_utils/scaling.js';
+import { scalingExponent, scalingReport, SUBQUADRATIC_EXPONENT } from '../../_utils/scaling.js';
 import { mulberry32 } from '../../_utils/rng.js';
 
 function makeValue(id) {
@@ -224,13 +224,26 @@ describe('post-dominance scales sub-quadratically on deep residual chains', () =
     });
   }
 
-  it('doubling the op count does not more than double the time (rules out O(n^2))', () => {
-    const { ratio, tSmall, tLarge, n } = scalingRatio({
+  it('the time exponent over an 8x size span stays well below quadratic', () => {
+    const measured = scalingExponent({
       build: residualChain,
       work: (func) => PostDominanceAnalysis.compute(func),
-      n: 9000,
+      n: 1125,
     });
-    expect(ratio, `n=${n} took ${tSmall.toFixed(1)}ms, n=${2 * n} took ${tLarge.toFixed(1)}ms (ratio ${ratio.toFixed(2)})`)
-      .toBeLessThan(QUADRATIC_RATIO);
+    expect(measured.exponent, scalingReport(measured)).toBeLessThan(SUBQUADRATIC_EXPONENT);
+  });
+
+  it('the same harness reports a quadratic workload as quadratic', () => {
+    const measured = scalingExponent({
+      build: (n) => Int32Array.from({ length: n }, (_, i) => (i * 2654435761) | 0),
+      work: (a) => {
+        let acc = 0;
+        for (let i = 0; i < a.length; i++) for (let j = 0; j < a.length; j++) acc += (a[i] ^ a[j]) & 1;
+        return acc;
+      },
+      n: 1750,
+      minMs: 1,
+    });
+    expect(measured.exponent, scalingReport(measured)).toBeGreaterThan(SUBQUADRATIC_EXPONENT);
   });
 });

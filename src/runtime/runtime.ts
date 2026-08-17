@@ -23,10 +23,12 @@ export type RuntimeKernel = {
     imports?: Map<string, unknown>;
     bufferOffsets?: Map<unknown, number>;
     scratch?: unknown[];
+    constBuffers?: KernelConstBuffer[];
     parallel?: { extent: number; poolSafe?: boolean } | null;
     [key: string]: unknown;
   };
 };
+export type KernelConstBuffer = { name: string; dtype: string; data: RuntimeData };
 type RuntimeBackend = {
   instantiate(kernel: RuntimeKernel): unknown | Promise<unknown>;
   runSync(instance: unknown, tensorArgs: unknown[], shapeValues: number[] | null): unknown;
@@ -82,6 +84,13 @@ function dtypeOfTypedArray(a: RuntimeData): RuntimeDType {
   if (a instanceof Uint8Array) return 'ui8';
   if (a instanceof BigInt64Array) return 'i64';
   return 'f32';
+}
+
+const NO_CONST_BUFFERS: readonly KernelConstBuffer[] = [];
+
+export function constBuffersOf(kernel: RuntimeKernel | null | undefined): readonly KernelConstBuffer[] {
+  const cbs = kernel && kernel.metadata && kernel.metadata.constBuffers;
+  return cbs && cbs.length > 0 ? cbs : NO_CONST_BUFFERS;
 }
 
 function _intermediateNumel(it: PlanIntermediate): number {
@@ -258,6 +267,7 @@ export class RuntimeModule {
       const bufferMap = this._bufferMaps && this._bufferMaps.get(name);
       shapeValues = RuntimeModule._extractShapeParams(shapeParamMap, tensorShapes, args, bufferMap);
     }
+    for (const cb of constBuffersOf(this.kernels.get(name))) tensorArgs.push(cb.data);
     return { tensorArgs, shapeValues };
   }
 

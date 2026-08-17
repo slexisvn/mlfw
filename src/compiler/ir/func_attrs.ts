@@ -1,4 +1,5 @@
 export const FuncAttr = Object.freeze({
+  CONST_BUFFERS: 'const_buffers',
   EXTERNAL_CODEGEN: 'external_codegen',
   CONV_INFO: 'conv_info',
   TENSOR_INTRIN: 'tensor_intrin',
