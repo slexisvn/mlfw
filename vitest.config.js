@@ -31,6 +31,7 @@ export default defineConfig({
           include: [CUDA],
           exclude: [PERF, SCRATCH],
           testTimeout: 60000,
+          fileParallelism: false,
         },
       },
       {

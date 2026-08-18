@@ -1331,7 +1331,7 @@ export class WasmCodegen {
     const lanes = this.target.vectorWidth;
     const simdEntry = dtype === null ? null : wasmSimdEntry(dtype);
 
-    if (!simdEntry || extent < lanes || this._treeHasHalf(node.body)) {
+    if (dtype === null || !simdEntry || extent < lanes || this._treeHasHalf(node.body)) {
       this._emitForLoop(varName, node.extent, node.body);
       return;
     }

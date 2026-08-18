@@ -74,3 +74,42 @@ export class BatchNorm2d extends BatchNorm1d {
     super(numFeatures, eps, affine);
   }
 }
+
+
+export class RMSNorm extends Module {
+  normalizedShape: readonly number[];
+  eps: number;
+  weight: Parameter | null;
+
+  constructor(normalizedShape: number | readonly number[], eps = 1e-6, affine = true) {
+    super();
+    this.normalizedShape = typeof normalizedShape === 'number' ? [normalizedShape] : [...normalizedShape];
+    this.eps = eps;
+    this.weight = affine ? new Parameter(ones([...this.normalizedShape])) : null;
+  }
+
+  forward(input: NNTensor): NNTensor {
+    return Fn.rms_norm(input, this.normalizedShape, this.weight as unknown as NNTensor | null, this.eps);
+  }
+}
+
+export class InstanceNorm2d extends Module {
+  numChannels: number;
+  eps: number;
+  weight: Parameter | null;
+  bias: Parameter | null;
+
+  constructor(numChannels: number, eps = 1e-5, affine = false) {
+    super();
+    this.numChannels = numChannels;
+    this.eps = eps;
+    this.weight = affine ? new Parameter(ones([numChannels])) : null;
+    this.bias = affine ? new Parameter(zeros([numChannels])) : null;
+  }
+
+  forward(input: NNTensor): NNTensor {
+    return Fn.instance_norm(input, this.weight as unknown as NNTensor | null, this.bias as unknown as NNTensor | null, this.eps);
+  }
+}
+
+export class InstanceNorm1d extends InstanceNorm2d {}

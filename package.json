@@ -35,7 +35,7 @@
   },
   "scripts": {
     "build": "tsup",
-    "test": "vitest run --project unit --project e2e",
+    "test": "vitest run --project unit --project e2e --project webgpu",
     "test:unit": "vitest run --project unit",
     "test:e2e": "vitest run --project e2e",
     "test:webgpu": "vitest run --project webgpu",

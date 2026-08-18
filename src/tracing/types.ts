@@ -4,6 +4,8 @@ import type { Device } from '../tensor/types/device.js';
 import type { Dim, TensorType } from '../compiler/ir/graph/types.js';
 import type { ShapeEnv } from './shape_env.js';
 import type { SymbolicTensor } from './symbolic_tensor.js';
+import type { ArgIndexBound } from '../util/index_bounds.js';
+import type { GateDecision } from '../compiler/pipeline/opt_gate.js';
 
 export type SymbolicDim = Dim | string;
 export type SymbolicShape = readonly SymbolicDim[];
@@ -98,6 +100,7 @@ export type CompiledEntry = {
   outputTypes: readonly TensorType[];
   shapeEnv: ShapeEnv;
   outputSymShapes: readonly SymbolicShape[];
+  indexBounds: readonly ArgIndexBound[];
 };
 
 export type RuntimeArg = NumericTypedArray | RuntimeTensorLike;
@@ -118,6 +121,7 @@ export type CompileOptions = Record<string, unknown> & {
   dynamic_shapes?: DynamicShapes;
   shapeBuckets?: readonly (readonly (readonly number[])[])[];
   foldWeights?: boolean;
+  tuneOptimizations?: boolean;
   quantization?: { foldWeights?: boolean };
   mode?: string;
   rematPolicy?: unknown;
@@ -131,5 +135,6 @@ export type CompiledForward = {
   source(): string | null;
   kernels(): string[];
   result(): CompiledResult | null;
+  tuningReport(): GateDecision[];
   _ready: Promise<void> | null;
 };

@@ -63,6 +63,23 @@ export function group_norm(input: NNTensor, numGroups: number, weight: OptionalT
   return normalized;
 }
 
+export function rms_norm(input: NNTensor, normalizedShape: readonly number[], weight: OptionalTensor, eps = 1e-6): NNTensor {
+  const axis = input.ndim - normalizedShape.length;
+  const dims = [];
+  for (let i = axis; i < input.ndim; i++) dims.push(i);
+
+  let meanSq: NNTensor = ops.mul(input, input) as NNTensor;
+  for (let i = dims.length - 1; i >= 0; i--) meanSq = ops.mean(meanSq, dims[i], true) as NNTensor;
+
+  const invRms = ops.div(full([], 1), ops.sqrt(ops.add(meanSq, full([], eps)))) as NNTensor;
+  const normalized = ops.mul(input, invRms) as NNTensor;
+  return weight ? ops.mul(normalized, weight) as NNTensor : normalized;
+}
+
+export function instance_norm(input: NNTensor, weight: OptionalTensor, bias: OptionalTensor, eps = 1e-5): NNTensor {
+  return group_norm(input, input.shape[1], weight, bias, eps);
+}
+
 const CHANNEL_AXIS = 1;
 
 function channelShape(ndim: number, channels: number): number[] {

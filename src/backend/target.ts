@@ -34,6 +34,7 @@ export type TargetFeaturesConfig = {
   l2CacheBytes?: number;
   supportsFloat16?: boolean;
   supportsTensorCore?: boolean;
+  arch?: string | null;
   libraryClasses?: ReadonlySet<string>;
   enableEpilogueFusion?: boolean;
   preferredConvLayout?: string | null;
@@ -48,6 +49,19 @@ export type TargetFeaturesConfig = {
 };
 
 export type TargetOverrides = Partial<TargetFeaturesConfig>;
+
+const TENSOR_CORE_MIN_MAJOR = 7;
+
+export function archMajor(arch: string | null | undefined): number | null {
+  if (!arch) return null;
+  const m = /^sm_(\d)(\d+)$/.exec(arch);
+  return m ? Number(m[1]) : null;
+}
+
+export function archSupportsTensorCore(arch: string | null | undefined): boolean {
+  const major = archMajor(arch);
+  return major !== null && major >= TENSOR_CORE_MIN_MAJOR;
+}
 
 export class TargetFeatures {
   kind: string;
@@ -72,6 +86,7 @@ export class TargetFeatures {
   l2CacheBytes: number;
   supportsFloat16: boolean;
   supportsTensorCore: boolean;
+  arch: string | null;
   libraryClasses: ReadonlySet<string>;
   enableEpilogueFusion: boolean;
   preferredConvLayout: string | null;
@@ -105,8 +120,9 @@ export class TargetFeatures {
     this.cacheLineSizeBytes = config.cacheLineSizeBytes || 64;
     this.l1CacheBytes = config.l1CacheBytes || 0;
     this.l2CacheBytes = config.l2CacheBytes || 0;
+    this.arch = config.arch ?? null;
     this.supportsFloat16 = config.supportsFloat16 ?? false;
-    this.supportsTensorCore = config.supportsTensorCore ?? false;
+    this.supportsTensorCore = config.supportsTensorCore ?? archSupportsTensorCore(this.arch);
     this.libraryClasses = config.libraryClasses || new Set();
     this.enableEpilogueFusion = config.enableEpilogueFusion ?? false;
     this.preferredConvLayout = config.preferredConvLayout || null;
@@ -200,7 +216,6 @@ export const CUDATarget = (overrides: TargetOverrides = {}): TargetFeatures => n
   memoryBandwidthGBs: 900,
   computeTFLOPs: 15,
   supportsFloat16: true,
-  supportsTensorCore: false,
   libraryClasses: new Set(['matmul', 'conv']),
   enableEpilogueFusion: true,
   supportsInt8: true,

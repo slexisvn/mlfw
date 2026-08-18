@@ -60,9 +60,9 @@ export {
 
 export {
   Module, Parameter, F,
-  Linear, Conv1d, Conv2d,
+  Linear, Conv1d, Conv2d, Conv3d, ConvTranspose1d, ConvTranspose2d,
   ReLU, GELU, SiLU, Sigmoid, Tanh, LeakyReLU, ELU, Softmax, LogSoftmax,
-  LayerNorm, BatchNorm1d, BatchNorm2d,
+  LayerNorm, BatchNorm1d, BatchNorm2d, RMSNorm, InstanceNorm1d, InstanceNorm2d,
   MaxPool2d, AvgPool2d, AdaptiveAvgPool2d,
   Dropout,
   CrossEntropyLoss, MSELoss, NLLLoss, BCELoss,
@@ -71,11 +71,13 @@ export {
   LSTM, LSTMCell,
   Sequential, ModuleList, ModuleDict,
   Flatten,
+  Upsample,
   MultiheadAttention,
   TransformerEncoderLayer, TransformerDecoderLayer,
   TransformerEncoder, TransformerDecoder,
   Transformer,
   PositionalEncoding,
+  KVCache,
 } from './nn/index.js';
 
 export * as nn from './nn/index.js';

@@ -11,6 +11,14 @@ import { computeNumel } from '../tensor/utils/shape_utils.js';
 
 import { foldWeightParams, weightPredicate, MAX_FOLDABLE_ELEMENTS } from './fold_params.js';
 import { compileWithBackward } from './compile_backward.js';
+import { userArgIndexBounds } from '../compiler/analysis/index_bounds.js';
+import { assertArgIndexBounds } from '../util/index_bounds.js';
+import { cloneGraphModule } from '../compiler/ir/graph/module.js';
+import {
+  BASELINE, candidateByName, gateCacheKey, graphSignature, optimizationCandidates, selectWinner,
+} from '../compiler/pipeline/opt_gate.js';
+import type { ArgIndexBound } from '../util/index_bounds.js';
+import type { CandidateMeasurement, GateDecision, GateTarget } from '../compiler/pipeline/opt_gate.js';
 import type { Tensor } from '../tensor/core/tensor.js';
 import type { Device } from '../tensor/types/device.js';
 import type { DType, NumericTypedArray } from '../tensor/types/dtype.js';
@@ -213,6 +221,54 @@ function sourceForEntry(compiled: CompiledEntry, entryIndex: number): string | n
   return chunks.length > 0 ? chunks.join('\n\n') : null;
 }
 
+const _gateDecisions = new Map<string, string>();
+
+const GATE_WARMUP = 2;
+const GATE_REPEAT = 7;
+const GATE_TOL = 2e-3;
+
+export function clearOptimizationGateCache(): void {
+  _gateDecisions.clear();
+}
+
+function _flatOf(out: unknown): number[] {
+  const items = Array.isArray(out) ? out : [out];
+  const values: number[] = [];
+  for (const t of items) {
+    const data = (t as { contiguous?: () => { data: ArrayLike<number> }; data?: ArrayLike<number> });
+    const arr = data.contiguous ? data.contiguous().data : data.data;
+    if (!arr) continue;
+    for (let i = 0; i < arr.length; i++) values.push(Number(arr[i]));
+  }
+  return values;
+}
+
+function _closeEnough(a: readonly number[], b: readonly number[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (!Number.isFinite(b[i])) return false;
+    if (Math.abs(a[i] - b[i]) / (1 + Math.abs(a[i])) > GATE_TOL) return false;
+  }
+  return true;
+}
+
+function _timeEntry(entry: CompiledEntry, inputs: readonly Tensor[]): { ms: number; values: number[] } | null {
+  entry.shapeEnv.bindInputShapes(inputs);
+  let last: unknown;
+  for (let i = 0; i < GATE_WARMUP; i++) {
+    last = executeCompiled(entry, inputs, entry.shapeEnv);
+    if (_isThenable(last)) return null;
+  }
+  const samples: number[] = [];
+  for (let i = 0; i < GATE_REPEAT; i++) {
+    const t0 = performance.now();
+    last = executeCompiled(entry, inputs, entry.shapeEnv);
+    samples.push(performance.now() - t0);
+  }
+  samples.sort((x, y) => x - y);
+  return { ms: samples[Math.floor(samples.length / 2)], values: _flatOf(last) };
+}
+
 export function compile(model: CompilableModel, exampleInputs?: Tensor[], opts: CompileOptions = {}): unknown {
   if (opts?.backward) {
     return compileWithBackward(model, exampleInputs, opts);
@@ -223,8 +279,10 @@ export function compile(model: CompilableModel, exampleInputs?: Tensor[], opts: 
   const dynamicShapes = opts?.dynamic_shapes || null;
   const shapeBuckets = opts?.shapeBuckets || null;
   const foldWeights = opts?.foldWeights ?? opts?.quantization?.foldWeights ?? false;
+  const tuneOptimizations = opts?.tuneOptimizations ?? false;
 
   const _cacheEntries: CompiledEntry[] = [];
+  const _gateReports: GateDecision[] = [];
 
   function _attachRepro(error: unknown, inputs: readonly Tensor[] | undefined, phase: string): unknown {
     if (!error || typeof error !== 'object' || (error as ReproError).repro) return error;
@@ -250,18 +308,95 @@ export function compile(model: CompilableModel, exampleInputs?: Tensor[], opts: 
   const linksConstants = quantizing || !!(target as { supportsConstBuffers?: boolean })?.supportsConstBuffers;
   const foldPredicate = weightPredicate(linksConstants ? Infinity : MAX_FOLDABLE_ELEMENTS);
 
-  function _finalize(traced: TracedCore): CompiledEntry {
-    const prepared = foldWeights ? foldWeightParams(traced, tensorToContiguous, foldPredicate) : traced;
-    const result = new Compiler(compilerOpts as never).compile(prepared.graph as unknown as GraphModule) as unknown as CompiledResult;
+  function _entryFor(prepared: TracedCore, indexBounds: readonly ArgIndexBound[], overrides: Readonly<Record<string, unknown>> | null): CompiledEntry {
+    const opts = overrides
+      ? {
+        ...compilerOpts as Record<string, unknown>,
+        optimization: { ...(compilerOpts as { optimization?: object }).optimization, ...(overrides.optimization as object ?? {}) },
+        scheduling: { ...(compilerOpts as { scheduling?: object }).scheduling, ...(overrides.scheduling as object ?? {}) },
+      }
+      : compilerOpts as Record<string, unknown>;
+    const module = overrides
+      ? cloneGraphModule(prepared.graph as unknown as GraphModule)
+      : prepared.graph as unknown as GraphModule;
+    const result = new Compiler(opts as never).compile(module) as unknown as CompiledResult;
     return {
       result,
-      graph: prepared.graph,
+      graph: module as unknown as GraphModuleLike,
       capturedParams: prepared.capturedParams,
       numUserInputs: prepared.numUserInputs,
       outputTypes: prepared.outputTypes,
       shapeEnv: prepared.shapeEnv,
       outputSymShapes: prepared.outputSymShapes,
+      indexBounds,
     };
+  }
+
+  function _finalize(traced: TracedCore): CompiledEntry {
+    const prepared = foldWeights ? foldWeightParams(traced, tensorToContiguous, foldPredicate) : traced;
+    const indexBounds = userArgIndexBounds(prepared.graph as unknown as GraphModule, prepared.numUserInputs);
+    const tuned = tuneOptimizations
+      ? runOptimizationGate(prepared, indexBounds, _entryFor)
+      : null;
+    return tuned ?? _entryFor(prepared, indexBounds, null);
+  }
+
+  function runOptimizationGate(
+    prepared: TracedCore,
+    indexBounds: readonly ArgIndexBound[],
+    build: (p: TracedCore, b: readonly ArgIndexBound[], o: Readonly<Record<string, unknown>> | null) => CompiledEntry,
+  ): CompiledEntry | null {
+    const gateTarget = target as unknown as GateTarget & { name?: string };
+    const candidates = optimizationCandidates(gateTarget);
+    if (candidates.length === 0 || !exampleInputs) return null;
+
+    const func = (prepared.graph as unknown as GraphModule).functions().next().value;
+    const opNames: string[] = [];
+    if (func) for (const op of func.ops()) opNames.push(op.opName);
+    const key = gateCacheKey(
+      graphSignature(opNames, exampleInputs.map(t => t.shape)),
+      gateTarget?.name ?? 'unknown',
+      candidates,
+    );
+
+    const cached = _gateDecisions.get(key);
+    if (cached !== undefined) {
+      return build(prepared, indexBounds, candidateByName(candidates, cached)?.optimization ? { optimization: candidateByName(candidates, cached)!.optimization } : null);
+    }
+
+    const measurements: CandidateMeasurement[] = [];
+    let baselineEntry: CompiledEntry | null = null;
+    let reference: number[] | null = null;
+    const winners = new Map<string, CompiledEntry>();
+
+    for (const spec of [{ name: BASELINE, optimization: undefined }, ...candidates]) {
+      let entry: CompiledEntry;
+      try {
+        entry = build(prepared, indexBounds, spec.name === BASELINE ? null : { optimization: spec.optimization });
+      } catch (e) {
+        measurements.push({ name: spec.name, ms: 0, correct: false, error: String((e as Error)?.message ?? e) });
+        continue;
+      }
+      const timed = _timeEntry(entry, exampleInputs!);
+      if (!timed) {
+        measurements.push({ name: spec.name, ms: 0, correct: false, error: 'runtime is asynchronous; the gate only measures synchronous runtimes' });
+        if (spec.name === BASELINE) return null;
+        continue;
+      }
+      if (spec.name === BASELINE) {
+        reference = timed.values;
+        baselineEntry = entry;
+      }
+      const correct = reference !== null && _closeEnough(reference, timed.values);
+      measurements.push({ name: spec.name, ms: timed.ms, correct });
+      if (correct) winners.set(spec.name, entry);
+    }
+
+    if (!baselineEntry) return null;
+    const decision = selectWinner(measurements);
+    _gateDecisions.set(key, decision.winner);
+    _gateReports.push(decision);
+    return winners.get(decision.winner) ?? baselineEntry;
   }
 
   function _compileWith(inputs: Tensor[], dynShapes: DynamicShapes): MaybePromise<CompiledEntry> {
@@ -299,6 +434,7 @@ export function compile(model: CompilableModel, exampleInputs?: Tensor[], opts: 
   }
 
   function _execute(entry: CompiledEntry, inputs: readonly Tensor[]): MaybePromise<TensorOutput | TensorOutput[]> {
+    assertArgIndexBounds(entry.indexBounds, inputs);
     try {
       const out = executeCompiled(entry, inputs, entry.shapeEnv);
       if (_isThenable(out)) {
@@ -356,6 +492,7 @@ export function compile(model: CompilableModel, exampleInputs?: Tensor[], opts: 
   }
 
   const typedForward = compiledForward as CompiledForward;
+  typedForward.tuningReport = () => [..._gateReports];
   typedForward.original = model;
 
   typedForward.graph = (inputs?: Tensor[]) => {

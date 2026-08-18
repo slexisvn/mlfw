@@ -1,4 +1,5 @@
 import { Module } from '../module.js';
+import type { KVCache, KVCacheSlot } from '../kv_cache.js';
 import { Linear } from './linear.js';
 import { LayerNorm } from './normalization.js';
 import { Dropout } from './dropout.js';
@@ -42,7 +43,7 @@ export class MultiheadAttention extends Module {
     this.outProj = new Linear(embedDim, embedDim, bias);
   }
 
-  forward(query: NNTensor, key: NNTensor, value: NNTensor, attnMask: OptionalTensor = null, keyPaddingMask: OptionalTensor = null, isCausal = false): NNTensor {
+  forward(query: NNTensor, key: NNTensor, value: NNTensor, attnMask: OptionalTensor = null, keyPaddingMask: OptionalTensor = null, isCausal = false, cache: KVCacheSlot | null = null): NNTensor {
     if (!this.batchFirst) {
       query = query.transpose(0, 1);
       key = key.transpose(0, 1);
@@ -60,6 +61,8 @@ export class MultiheadAttention extends Module {
     q = q.reshape([B, L, this.numHeads, this.headDim]).permute([0, 2, 1, 3]);
     k = k.reshape([B, S, this.numHeads, this.headDim]).permute([0, 2, 1, 3]);
     v = v.reshape([B, S, this.numHeads, this.headDim]).permute([0, 2, 1, 3]);
+
+    if (cache) [k, v] = cache.append(k as NNTensor, v as NNTensor);
 
     if (keyPaddingMask) {
       const negInf = full(keyPaddingMask.shape, -Infinity);
@@ -122,15 +125,15 @@ export class TransformerEncoderLayer extends Module {
     this._batchFirst = batchFirst;
   }
 
-  forward(src: NNTensor, srcMask: OptionalTensor = null, srcKeyPaddingMask: OptionalTensor = null, isCausal = false): NNTensor {
+  forward(src: NNTensor, srcMask: OptionalTensor = null, srcKeyPaddingMask: OptionalTensor = null, isCausal = false, cache: KVCacheSlot | null = null): NNTensor {
     if (this.normFirst) {
-      return this._forwardPreNorm(src, srcMask, srcKeyPaddingMask, isCausal);
+      return this._forwardPreNorm(src, srcMask, srcKeyPaddingMask, isCausal, cache);
     }
-    return this._forwardPostNorm(src, srcMask, srcKeyPaddingMask, isCausal);
+    return this._forwardPostNorm(src, srcMask, srcKeyPaddingMask, isCausal, cache);
   }
 
-  _forwardPostNorm(src: NNTensor, srcMask: OptionalTensor, srcKeyPaddingMask: OptionalTensor, isCausal: boolean): NNTensor {
-    let x = this.selfAttn.forward(src, src, src, srcMask, srcKeyPaddingMask, isCausal);
+  _forwardPostNorm(src: NNTensor, srcMask: OptionalTensor, srcKeyPaddingMask: OptionalTensor, isCausal: boolean, cache: KVCacheSlot | null = null): NNTensor {
+    let x = this.selfAttn.forward(src, src, src, srcMask, srcKeyPaddingMask, isCausal, cache);
     x = this.norm1.forward(ops.add(src, this.dropout1.forward(x) as NNTensor) as NNTensor);
     let ff = this._activation(this.linear1.forward(x));
     ff = this.linear2.forward(this.dropoutFFN.forward(ff) as NNTensor);
@@ -138,9 +141,9 @@ export class TransformerEncoderLayer extends Module {
     return x;
   }
 
-  _forwardPreNorm(src: NNTensor, srcMask: OptionalTensor, srcKeyPaddingMask: OptionalTensor, isCausal: boolean): NNTensor {
+  _forwardPreNorm(src: NNTensor, srcMask: OptionalTensor, srcKeyPaddingMask: OptionalTensor, isCausal: boolean, cache: KVCacheSlot | null = null): NNTensor {
     let normed = this.norm1.forward(src);
-    let x = this.selfAttn.forward(normed, normed, normed, srcMask, srcKeyPaddingMask, isCausal);
+    let x = this.selfAttn.forward(normed, normed, normed, srcMask, srcKeyPaddingMask, isCausal, cache);
     x = ops.add(src, this.dropout1.forward(x) as NNTensor) as NNTensor;
     let ff = this._activation(this.linear1.forward(this.norm2.forward(x)));
     ff = this.linear2.forward(this.dropoutFFN.forward(ff) as NNTensor);
@@ -255,10 +258,12 @@ export class TransformerEncoder extends Module {
     this.norm = norm;
   }
 
-  forward(src: NNTensor, mask: OptionalTensor = null, srcKeyPaddingMask: OptionalTensor = null, isCausal = false): NNTensor {
+  forward(src: NNTensor, mask: OptionalTensor = null, srcKeyPaddingMask: OptionalTensor = null, isCausal = false, cache: KVCache | null = null): NNTensor {
     let output = src;
+    let i = 0;
     for (const layer of this.layers) {
-      output = (layer as TransformerEncoderLayer).forward(output, mask, srcKeyPaddingMask, isCausal);
+      output = (layer as TransformerEncoderLayer).forward(output, mask, srcKeyPaddingMask, isCausal, cache ? cache.slot(i) : null);
+      i++;
     }
     if (this.norm) output = this.norm.forward(output);
     return output;

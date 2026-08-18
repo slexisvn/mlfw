@@ -72,6 +72,25 @@ window.runCase = async (src, inputs, config) => {
   try { const g = compile({forward:(...a)=>fn(M,...a)}, xs, {target:WebGPUTarget(), ...(config || {})}); out.gpu = arr(await g(...xs)); } catch(e){ out.gpuErr = String(e && e.message || e); }
   return out;
 };
+window.runSequential = async (layers, inputs) => {
+  const mk = (spec) => {
+    if (spec.t === 'linear') return new M.Linear(spec.i, spec.o);
+    if (spec.t === 'relu') return new M.ReLU();
+    if (spec.t === 'sigmoid') return new M.Sigmoid();
+    return new M.Tanh();
+  };
+  const model = new M.Sequential(...layers.map(mk));
+  const xs = inputs.map(d => tensor(d));
+  const arr = (t) => Array.from((t.contiguous ? t.contiguous() : t).data);
+  const out = {};
+  try { out.eager = arr(model.forward(xs[0])); } catch(e) { out.eagerErr = String(e && e.message || e); }
+  try {
+    const g = compile(model, [xs[0]], { target: WebGPUTarget() });
+    out.runs = [];
+    for (const x of xs) { const r = await g(x); out.runs.push(arr(r)); out.shape = r.shape; }
+  } catch(e) { out.gpuErr = String(e && e.message || e); }
+  return out;
+};
 window.runRNN = async (kind, E, H, T, B, seed) => {
   let a = seed >>> 0;
   const r = () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
@@ -317,6 +336,94 @@ describe.skipIf(!deps)('webgpu via Chrome (differential vs CPU)', () => {
     expect(maxErr, `maxErr=${maxErr}`).toBeLessThan(tol);
     return res;
   }
+
+  async function seq(layers, inputs) {
+    const res = await page.evaluate((l, i) => window.runSequential(l, i), layers, inputs);
+    expect(res.eagerErr, `eager error: ${res.eagerErr}`).toBeUndefined();
+    expect(res.gpuErr, `gpu error: ${res.gpuErr}`).toBeUndefined();
+    return res;
+  }
+
+  const closeTo = (a, b) => a.reduce((m, v, i) => Math.max(m, Math.abs(v - b[i])), 0);
+
+  it('Linear forward [1,4]->[1,2] matches eager', async () => {
+    const res = await seq([{ t: 'linear', i: 4, o: 2 }], [[[1, 2, 3, 4]]]);
+    expect(res.shape).toEqual([1, 2]);
+    expect(closeTo(res.runs[0], res.eager)).toBeLessThan(1e-3);
+  });
+
+  it('Linear + ReLU clamps negatives', async () => {
+    const res = await seq([{ t: 'linear', i: 4, o: 4 }, { t: 'relu' }], [[[1, -1, 2, -2]]]);
+    expect(Math.min(...res.runs[0])).toBeGreaterThanOrEqual(0);
+    expect(closeTo(res.runs[0], res.eager)).toBeLessThan(1e-3);
+  });
+
+  it('Linear + Sigmoid bounds [0,1]', async () => {
+    const res = await seq([{ t: 'linear', i: 3, o: 3 }, { t: 'sigmoid' }], [[[10, -10, 0]]]);
+    expect(Math.min(...res.runs[0])).toBeGreaterThanOrEqual(0);
+    expect(Math.max(...res.runs[0])).toBeLessThanOrEqual(1);
+    expect(closeTo(res.runs[0], res.eager)).toBeLessThan(1e-3);
+  });
+
+  it('Linear + Tanh bounds [-1,1]', async () => {
+    const res = await seq([{ t: 'linear', i: 3, o: 3 }, { t: 'tanh' }], [[[5, -5, 0]]]);
+    expect(Math.min(...res.runs[0])).toBeGreaterThanOrEqual(-1);
+    expect(Math.max(...res.runs[0])).toBeLessThanOrEqual(1);
+    expect(closeTo(res.runs[0], res.eager)).toBeLessThan(1e-3);
+  });
+
+  it('repeated runs on the same input are bit-identical', async () => {
+    const res = await seq([{ t: 'linear', i: 4, o: 2 }], [[[1, 2, 3, 4]], [[1, 2, 3, 4]]]);
+    expect(res.runs[1]).toEqual(res.runs[0]);
+  });
+
+  it('different inputs produce different outputs', async () => {
+    const res = await seq([{ t: 'linear', i: 4, o: 2 }], [[[1, 0, 0, 0]], [[0, 0, 0, 1]]]);
+    expect(res.runs[1]).not.toEqual(res.runs[0]);
+  });
+
+  it('zero input produces finite output', async () => {
+    const res = await seq([{ t: 'linear', i: 4, o: 2 }], [[[0, 0, 0, 0]]]);
+    expect(res.runs[0].every(Number.isFinite), `non-finite in ${JSON.stringify(res.runs[0])}`).toBe(true);
+  });
+
+  it('3-layer MLP executes correctly', async () => {
+    const res = await seq(
+      [{ t: 'linear', i: 8, o: 16 }, { t: 'relu' }, { t: 'linear', i: 16, o: 8 }, { t: 'relu' }, { t: 'linear', i: 8, o: 4 }],
+      [[[1, 2, 3, 4, 5, 6, 7, 8]]],
+    );
+    expect(res.shape).toEqual([1, 4]);
+    expect(res.runs[0].every(Number.isFinite), `non-finite in ${JSON.stringify(res.runs[0])}`).toBe(true);
+    expect(closeTo(res.runs[0], res.eager)).toBeLessThan(1e-3);
+  });
+
+  it('chained reduces with unused inputs match CPU (multi-kernel buffers)', async () => {
+    await caseClose(
+      '(M, a, b, c) => M.neg(M.mean(M.neg(M.mean(a, 1, false)), 1, false))',
+      [
+        { data: [[0.5, -0.3], [0.2, 0.9]] },
+        { data: [[0.1, 0.4], [-0.2, 0.7]] },
+        { data: [[0.3, 0.1], [0.6, -0.5]] },
+      ],
+      null,
+      1e-4,
+    );
+  });
+
+  it('scheduled+autotuned conv2d + relu + maxpool matches CPU (multi-workgroup serialized)', async () => {
+    const mk = (seed, shape) => {
+      const n = numel(shape);
+      const d = [];
+      for (let i = 0; i < n; i++) d.push(Math.abs(Math.sin(i * 1.3 + seed)) * 2 - 0.5);
+      return nest(d, shape);
+    };
+    await caseClose(
+      '(M, x, w) => M.max_pool2d(M.relu(M.conv2d(x, w, null, [1, 1], [1, 1], [1, 1], 1)), [2, 2], [2, 2], [0, 0])',
+      [{ data: mk(1, [1, 2, 8, 8]) }, { data: mk(2, [3, 2, 3, 3]) }],
+      { scheduling: { enabled: true, autotune: true } },
+      3e-3,
+    );
+  });
 
   it('large RNN per-step dispatch matches CPU (carry ping-pong + scalar-replaced fused kernels)', async () => {
     for (const [kind, E, H, T, B] of [['lstm', 32, 64, 8, 32], ['gru', 32, 64, 6, 32]]) {

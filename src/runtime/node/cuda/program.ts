@@ -1,6 +1,7 @@
 import { cu, nv, checkCU, readProgramLog, cudaIncludeDir } from './ffi.js';
 import type { CudaHandle } from './ffi.js';
 import { getDevice } from './device.js';
+import { ptxCacheKey, readPtx, writePtx } from './ptx_cache.js';
 import type { CudaKernel } from '../../io.js';
 
 export type CudaProgram = { func: CudaHandle | null; module: CudaHandle | null };
@@ -26,23 +27,43 @@ export function hashSource(s: string): string {
 
 const _ptxCache = new Map<string, Uint8Array>();
 
-export function compileToPTX(source: string, kernelName: string): Uint8Array {
-  const key = hashSource(source);
-  const cached = _ptxCache.get(key);
-  if (cached) return cached;
+let _nvrtcVersion: string | null = null;
 
-  const { arch } = getDevice();
+function nvrtcVersion(): string {
+  if (_nvrtcVersion === null) {
+    const major = [0], minor = [0];
+    _nvrtcVersion = nv.version(major, minor) === 0 ? major[0] + '.' + minor[0] : 'unknown';
+  }
+  return _nvrtcVersion;
+}
+
+function wrapSource(source: string): string {
   let includes = '';
   if (source.includes('__half')) includes += '#include <cuda_fp16.h>\n';
   if (source.includes('__nv_bfloat16')) includes += '#include <cuda_bf16.h>\n';
   if (/u?int(8|16|64)_t/.test(source)) includes += STDINT_TYPEDEFS;
   if (/mma_sync|wmma::|fragment</.test(source)) includes += '#include <mma.h>\nusing namespace nvcuda::wmma;\n';
   if (source.includes('__pipeline_memcpy_async')) includes += '#include <cuda_pipeline.h>\n';
-  const wrapped = includes + PREAMBLE + 'extern "C" {\n' + source + '\n}\n';
-  const prog: (CudaHandle | null)[] = [null];
-  checkCU('nvrtcCreateProgram', nv.createProgram(prog, wrapped, kernelName + '.cu', 0, null, null));
+  return includes + PREAMBLE + 'extern "C" {\n' + source + '\n}\n';
+}
+
+export function compileToPTX(source: string, kernelName: string): Uint8Array {
+  const { arch } = getDevice();
+  const wrapped = wrapSource(source);
   const options = ['--gpu-architecture=' + arch];
   if (cudaIncludeDir) options.push('--include-path=' + cudaIncludeDir);
+
+  const key = ptxCacheKey([wrapped, kernelName, arch, nvrtcVersion(), options.join(' ')]);
+  const memHit = _ptxCache.get(key);
+  if (memHit) return memHit;
+  const diskHit = readPtx(key);
+  if (diskHit) {
+    _ptxCache.set(key, diskHit);
+    return diskHit;
+  }
+
+  const prog: (CudaHandle | null)[] = [null];
+  checkCU('nvrtcCreateProgram', nv.createProgram(prog, wrapped, kernelName + '.cu', 0, null, null));
   const compileCode = nv.compileProgram(prog[0], options.length, options);
   if (compileCode !== 0) {
     const log = readProgramLog(prog[0]);
@@ -55,7 +76,13 @@ export function compileToPTX(source: string, kernelName: string): Uint8Array {
   checkCU('nvrtcGetPTX', nv.getPTX(prog[0], ptx));
   nv.destroyProgram(prog);
   _ptxCache.set(key, ptx);
+  writePtx(key, ptx);
   return ptx;
+}
+
+export function clearProgramCache(): void {
+  _ptxCache.clear();
+  _cache.clear();
 }
 
 const _byKernel = new WeakMap<CudaKernel, CudaProgram>();

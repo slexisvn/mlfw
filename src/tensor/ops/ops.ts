@@ -2,6 +2,7 @@ import { dispatcher, computeKeySet } from '../../dispatcher/dispatcher.js';
 import { getHandle } from './registry.js';
 import { scalar } from '../factory/from_ops.js';
 import { getGpuMatmul } from '../../dispatcher/jit_dispatch.js';
+import { assertIndicesInRange } from '../../util/index_bounds.js';
 import type { Tensor } from '../core/tensor.js';
 
 type TensorInput = Tensor | number;
@@ -71,8 +72,14 @@ export function where(condition: Tensor, self: Tensor, other: Tensor): Tensor { 
 export function clamp(self: Tensor, min: TensorInput, max: TensorInput): Tensor { return _dispatchTensor('clamp', self, _asTensor(min, self), _asTensor(max, self)); }
 export function pad(self: Tensor, low: readonly number[], high: readonly number[], value: TensorInput = 0): Tensor { return _dispatchTensor('pad', self, _asTensor(value, self), low, high); }
 export function one_hot(indices: Tensor, depth: number): Tensor { return _dispatchTensor('one_hot', indices, depth); }
-export function index_select(self: Tensor, dim: number, index: Tensor): Tensor { return _dispatchTensor('index_select', self, index, dim); }
-export function gather(self: Tensor, dim: number, index: Tensor): Tensor { return _dispatchTensor('gather', self, index, dim); }
+export function index_select(self: Tensor, dim: number, index: Tensor): Tensor {
+  assertIndicesInRange(index, self.shape[dim < 0 ? self.shape.length + dim : dim], 'index_select');
+  return _dispatchTensor('index_select', self, index, dim);
+}
+export function gather(self: Tensor, dim: number, index: Tensor): Tensor {
+  assertIndicesInRange(index, self.shape[dim < 0 ? self.shape.length + dim : dim], 'gather');
+  return _dispatchTensor('gather', self, index, dim);
+}
 export function scatter_add(self: Tensor, dim: number, index: Tensor, src: Tensor): Tensor { return _dispatchTensor('scatter_add', self, index, src, dim); }
 export function scatter(self: Tensor, dim: number, index: Tensor, src: Tensor): Tensor { return _dispatchTensor('scatter', self, dim, index, src); }
 
@@ -133,4 +140,7 @@ export function layer_norm(input: Tensor, weight: Tensor, bias: Tensor, axis: nu
 export function batch_norm(input: Tensor, weight: Tensor, bias: Tensor, mean: Tensor, variance: Tensor, axis: number, eps: number): Tensor { return _dispatchTensor('batch_norm', input, weight, bias, mean, variance, axis, eps); }
 export function conv2d(input: Tensor, weight: Tensor, strides: readonly number[], padding: PaddingArg, dilation: readonly number[], groups: number): Tensor { return _dispatchTensor('conv2d', input, weight, strides, padding, dilation, groups); }
 export function pool2d(input: Tensor, poolType: string, kernelSize: readonly number[], strides: readonly number[], padding: PaddingArg): Tensor { return _dispatchTensor('pool2d', input, poolType, kernelSize, strides, padding); }
-export function embedding(weight: Tensor, indices: Tensor): Tensor { return _dispatchTensor('embedding', weight, indices); }
+export function embedding(weight: Tensor, indices: Tensor): Tensor {
+  assertIndicesInRange(indices, weight.shape[0], 'embedding');
+  return _dispatchTensor('embedding', weight, indices);
+}

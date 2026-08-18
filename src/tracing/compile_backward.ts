@@ -10,9 +10,12 @@ import '../compiler/ad/index.js';
 import { tensorToContiguous, wrapResult } from '../dispatcher/jit_dispatch.js';
 import { typedArrayCtor } from '../tensor/types/dtype.js';
 import { computeNumel } from '../tensor/utils/shape_utils.js';
+import { userArgIndexBounds } from '../compiler/analysis/index_bounds.js';
+import { assertArgIndexBounds } from '../util/index_bounds.js';
+import type { ArgIndexBound } from '../util/index_bounds.js';
 import type { Tensor } from '../tensor/core/tensor.js';
 import type { Device } from '../tensor/types/device.js';
-import type { NumericTypedArray } from '../tensor/types/dtype.js';
+import type { DType, NumericTypedArray } from '../tensor/types/dtype.js';
 import type { TensorType } from '../compiler/ir/graph/types.js';
 import type { GraphFunction } from '../compiler/ir/graph/function.js';
 import type { CompilableModel, CompiledResult, CompileOptions, GraphFunctionLike, GraphModuleLike, IRBuilderLike, IROperationLike, IRValueLike, MaybePromise, RuntimeArg, SymbolicShape, TensorOutput, TracedCore } from './types.js';
@@ -34,6 +37,7 @@ type SeparateMeta = {
   outputTypes: readonly TensorType[];
   shapeEnv: TracedCore['shapeEnv'];
   outputSymShapes: readonly SymbolicShape[];
+  indexBounds: readonly ArgIndexBound[];
 };
 type JointMeta = {
   mode: 'joint';
@@ -47,9 +51,10 @@ type JointMeta = {
   inputTypes: readonly TensorType[];
   shapeEnv: TracedCore['shapeEnv'];
   outputSymShapes: readonly SymbolicShape[];
+  indexBounds: readonly ArgIndexBound[];
 };
 type BackwardMeta = SeparateMeta | JointMeta;
-type ArgSpec = { shape: number[]; dtype: string };
+type ArgSpec = { shape: number[]; dtype: DType };
 type SeparateForwardContext = {
   results: TensorOutput | TensorOutput[];
   inputArrays: NumericTypedArray[];
@@ -105,11 +110,13 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
 
     const finish = (t: TracedCore): BackwardMeta => {
       const func = t.graph.functions().next().value as GraphFunctionLike;
+      const indexBounds = userArgIndexBounds(t.graph as unknown as GraphModule, t.numUserInputs);
       const compiled = mode === 'joint'
         ? _compileJoint(func, t, rematPolicy)
         : _compileSeparate(func, t, rematPolicy);
       compiled.shapeEnv = t.shapeEnv;
       compiled.outputSymShapes = t.outputSymShapes;
+      compiled.indexBounds = indexBounds;
       return compiled;
     };
 
@@ -173,6 +180,7 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
       outputTypes: traced.outputTypes,
       shapeEnv: traced.shapeEnv,
       outputSymShapes: traced.outputSymShapes,
+      indexBounds: [],
     };
   }
 
@@ -196,6 +204,7 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
       inputTypes: forwardFunc.inputTypes,
       shapeEnv: traced.shapeEnv,
       outputSymShapes: traced.outputSymShapes,
+      indexBounds: [],
     };
   }
 
@@ -307,6 +316,7 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
   }
 
   function _forwardWith(meta: BackwardMeta, inputs: readonly Tensor[]): MaybePromise<TensorOutput | TensorOutput[]> {
+    assertArgIndexBounds(meta.indexBounds, inputs);
     _activeMeta = meta;
     if (meta.mode === 'joint') {
       return _executeJointForward(meta, inputs);

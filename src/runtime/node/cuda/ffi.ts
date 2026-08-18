@@ -47,6 +47,7 @@ export interface NvApi {
   getPTX(prog: CudaHandle | null, ptx: Uint8Array): number;
   getProgramLogSize(prog: CudaHandle | null, sz: bigint[]): number;
   getProgramLog(prog: CudaHandle | null, log: Uint8Array): number;
+  version(major: number[], minor: number[]): number;
 }
 
 const drv = koffi.load(loadCudaLib(DRIVER_SPEC));
@@ -92,6 +93,7 @@ export const nv: NvApi = {
   getPTX: nvrtc.func('int nvrtcGetPTX(void *prog, _Out_ uint8_t *ptx)'),
   getProgramLogSize: nvrtc.func('int nvrtcGetProgramLogSize(void *prog, _Out_ size_t *sz)'),
   getProgramLog: nvrtc.func('int nvrtcGetProgramLog(void *prog, _Out_ uint8_t *log)'),
+  version: nvrtc.func('int nvrtcVersion(_Out_ int *major, _Out_ int *minor)'),
 };
 
 export const ATTR_CC_MAJOR = 75;
