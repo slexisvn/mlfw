@@ -370,10 +370,17 @@ export function typeEquals(a: IRType, b: IRType): boolean {
   return false;
 }
 
+export function dimToString(dim: Dim): string {
+  if (dim === DYNAMIC) return '?';
+  if (typeof dim === 'number') return String(dim);
+  return `[${String(dim)}]`;
+}
+
 export function typeToString(type: IRType): string {
   if (type instanceof TensorType) {
-    const dims = type.shape.map(d => d === DYNAMIC ? '?' : String(d));
-    return `tensor<${dims.join('x')}x${type.dtype}>`;
+    const dims = type.shape.map(dimToString);
+    const layout = type.layout.isIdentity() ? '' : `, [${type.layout.order.join(', ')}]`;
+    return `tensor<${dims.join('x')}x${type.dtype}${layout}>`;
   }
   if (type instanceof TupleType) {
     return `tuple<${type.elements.map(typeToString).join(', ')}>`;

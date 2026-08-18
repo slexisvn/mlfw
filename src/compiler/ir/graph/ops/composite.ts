@@ -3,6 +3,7 @@ import type { OpRegistry } from '../op_registry.js';
 import type { IRType } from '../types.js';
 import type { Operation } from '../operation.js';
 import { TensorType, isFloatType } from '../types.js';
+import { unaryElementwiseTraits } from './helpers.js';
 
 function inferSameAsInput(operandTypes: readonly IRType[]): IRType[] | null {
   if (operandTypes.length < 1) return null;
@@ -101,7 +102,7 @@ export function register(registry: OpRegistry) {
     name: 'gelu',
     numOperands: 1,
     numResults: 1,
-    traits: [OpTrait.ELEMENTWISE, OpTrait.SAME_OPERAND_AND_RESULT_TYPE],
+    traits: unaryElementwiseTraits,
     inferResultTypes: inferSameAsInputFloat,
     verify: verifyUnaryFloat
   }));
@@ -110,7 +111,7 @@ export function register(registry: OpRegistry) {
     name: 'sigmoid',
     numOperands: 1,
     numResults: 1,
-    traits: [OpTrait.ELEMENTWISE, OpTrait.SAME_OPERAND_AND_RESULT_TYPE],
+    traits: unaryElementwiseTraits,
     inferResultTypes: inferSameAsInputFloat,
     verify: verifyUnaryFloat
   }));
@@ -119,7 +120,7 @@ export function register(registry: OpRegistry) {
     name: 'silu',
     numOperands: 1,
     numResults: 1,
-    traits: [OpTrait.ELEMENTWISE, OpTrait.SAME_OPERAND_AND_RESULT_TYPE],
+    traits: unaryElementwiseTraits,
     inferResultTypes: inferSameAsInputFloat,
     verify: verifyUnaryFloat
   }));
@@ -171,7 +172,7 @@ export function register(registry: OpRegistry) {
       name,
       numOperands: 1,
       numResults: 1,
-      traits: [OpTrait.ELEMENTWISE, OpTrait.SAME_OPERAND_AND_RESULT_TYPE],
+      traits: unaryElementwiseTraits,
       inferResultTypes: inferSameAsInputFloat,
       verify: verifyUnaryFloat
     }));
@@ -182,7 +183,7 @@ export function register(registry: OpRegistry) {
     numOperands: 1,
     numResults: 1,
     attrs: [{ name: 'alpha', type: 'number' }],
-    traits: [OpTrait.ELEMENTWISE, OpTrait.SAME_OPERAND_AND_RESULT_TYPE],
+    traits: unaryElementwiseTraits,
     inferResultTypes: inferSameAsInputFloat,
     verify: verifyUnaryFloat
   }));
@@ -192,7 +193,7 @@ export function register(registry: OpRegistry) {
     numOperands: 1,
     numResults: 1,
     attrs: [{ name: 'negative_slope', type: 'number' }],
-    traits: [OpTrait.ELEMENTWISE, OpTrait.SAME_OPERAND_AND_RESULT_TYPE],
+    traits: unaryElementwiseTraits,
     inferResultTypes: inferSameAsInputFloat,
     verify: verifyUnaryFloat
   }));
@@ -202,7 +203,7 @@ export function register(registry: OpRegistry) {
     numOperands: 1,
     numResults: 1,
     attrs: [{ name: 'alpha', type: 'number' }],
-    traits: [OpTrait.ELEMENTWISE, OpTrait.SAME_OPERAND_AND_RESULT_TYPE],
+    traits: unaryElementwiseTraits,
     inferResultTypes: inferSameAsInputFloat,
     verify: verifyUnaryFloat
   }));

@@ -1,7 +1,7 @@
 import { OpDef, OpTrait } from '../op_registry.js';
 import type { OpRegistry } from '../op_registry.js';
 import {
-  inferUnaryElementwise, verifyUnaryElementwise,
+  inferUnaryElementwise, verifyUnaryElementwise, unaryElementwiseTraits,
   inferUnaryFloat, verifyUnaryFloat
 } from './helpers.js';
 
@@ -11,7 +11,7 @@ export function register(registry: OpRegistry) {
       name,
       numOperands: 1,
       numResults: 1,
-      traits: [OpTrait.ELEMENTWISE, OpTrait.SAME_OPERAND_AND_RESULT_TYPE],
+      traits: unaryElementwiseTraits,
       inferResultTypes: inferUnaryElementwise,
       verify: verifyUnaryElementwise
     }));
@@ -21,7 +21,7 @@ export function register(registry: OpRegistry) {
     name: 'exp',
     numOperands: 1,
     numResults: 1,
-    traits: [OpTrait.ELEMENTWISE, OpTrait.SAME_OPERAND_AND_RESULT_TYPE],
+    traits: unaryElementwiseTraits,
     inferResultTypes: inferUnaryFloat,
     fold(constValues) { return typeof constValues[0] === 'number' ? Math.exp(constValues[0]) : undefined; },
     verify: verifyUnaryFloat
@@ -32,7 +32,7 @@ export function register(registry: OpRegistry) {
       name,
       numOperands: 1,
       numResults: 1,
-      traits: [OpTrait.ELEMENTWISE, OpTrait.SAME_OPERAND_AND_RESULT_TYPE],
+      traits: unaryElementwiseTraits,
       inferResultTypes: inferUnaryFloat,
       verify: verifyUnaryFloat
     }));

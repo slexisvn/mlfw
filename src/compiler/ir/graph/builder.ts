@@ -192,6 +192,10 @@ export class IRBuilder {
     return this._buildOp(name, operands, resultTypes, attributes, regions);
   }
 
+  create(name: string, operands: readonly Value[], attributes: AttrRecord | ReadonlyMap<string, AttrValue> | null = null): Operation {
+    return this._inferAndBuild(name, operands, attributes);
+  }
+
   constant(value: AttrValue, tensorType: TensorType): Operation {
     return this._buildOp('constant', [], [tensorType], {
       value,

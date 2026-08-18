@@ -27,7 +27,8 @@ export {
 export { GradMode, noGrad, enableGrad } from './autograd/grad_mode.js';
 export { SymbolicTensor } from './tracing/symbolic_tensor.js';
 export { TraceLevel } from './compiler/pipeline/trace.js';
-export { printModule } from './compiler/ir/graph/printer.js';
+export { printModule, printFunction } from './compiler/ir/graph/printer.js';
+export { parseModule, parseFunction, IRParseError } from './compiler/ir/graph/parser.js';
 export { preloadWebGPU, preloadCudaRuntime, releaseCudaMemory } from './runtime/backend_registry.js';
 export { flushWebGPUEager } from './runtime/webgpu.js';
 export { dispatcher } from './dispatcher/dispatcher.js';

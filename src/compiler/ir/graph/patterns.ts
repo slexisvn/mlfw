@@ -2,7 +2,9 @@ import { Pattern } from '../rewrite/pattern.js';
 import { TensorType } from './types.js';
 import { isDtypeInt } from '../../../util/dtype_map.js';
 import { isOp, wildcard, matchPattern } from '../rewrite/dfpattern.js';
+import { registry } from './ops.js';
 import type { AttrValue } from './types.js';
+import type { Value } from './value.js';
 import type { Operation } from './operation.js';
 import type { IRBuilder } from './builder.js';
 
@@ -467,6 +469,65 @@ export class LayoutTransformCompose extends Pattern {
       { src_layout: srcLayout, dst_layout: composed });
     op.replaceAllResultsWith([newOp.getResult(0)]);
     op.erase();
+    return true;
+  }
+}
+
+export class IdempotentSelf extends Pattern {
+  constructor(opName: string) {
+    super(`idempotent_self_${opName}`, 10);
+    this.rootOpName = opName;
+  }
+  override match(op: Operation): boolean {
+    return op.numOperands === 2 && op.getOperand(0) === op.getOperand(1);
+  }
+  override rewrite(op: Operation, builder: IRBuilder): boolean {
+    op.replaceAllResultsWith([op.getOperand(0)]);
+    op.erase();
+    return true;
+  }
+}
+
+export class AssociativeConstantReassoc extends Pattern {
+  constructor(opName: string) {
+    super(`associative_constant_reassoc_${opName}`, 4);
+    this.rootOpName = opName;
+  }
+  _parts(op: Operation): { inner: Operation; x: Value; outerConst: Operation; innerConst: Operation } | null {
+    if (op.numOperands !== 2) return null;
+    const outerConst = op.getOperand(1).definingOp;
+    if (!outerConst || outerConst.opName !== 'constant') return null;
+    const innerValue = op.getOperand(0);
+    if (innerValue.useCount !== 1) return null;
+    const inner = innerValue.definingOp;
+    if (!inner || inner.opName !== op.opName || inner.numOperands !== 2) return null;
+    const innerConst = inner.getOperand(1).definingOp;
+    if (!innerConst || innerConst.opName !== 'constant') return null;
+    if (!innerConst.getResult(0).type.equals(outerConst.getResult(0).type)) return null;
+    return { inner, x: inner.getOperand(0), outerConst, innerConst };
+  }
+  _folded(op: Operation, parts: { outerConst: Operation; innerConst: Operation }): AttrValue | undefined {
+    const def = registry.get(op.opName);
+    if (!def || !def.fold) return undefined;
+    const a = parts.innerConst.getAttr<AttrValue>('value');
+    const b = parts.outerConst.getAttr<AttrValue>('value');
+    if (a === undefined || b === undefined) return undefined;
+    return def.fold([a, b], op.attributes, [parts.innerConst, parts.outerConst]);
+  }
+  override match(op: Operation): boolean {
+    const parts = this._parts(op);
+    return parts !== null && this._folded(op, parts) !== undefined;
+  }
+  override rewrite(op: Operation, builder: IRBuilder): boolean {
+    const parts = this._parts(op);
+    if (!parts) return false;
+    const value = this._folded(op, parts);
+    if (value === undefined) return false;
+    const folded = builder.constant(value, parts.outerConst.getResult(0).type as TensorType);
+    const combined = builder.create(op.opName, [parts.x, folded.getResult(0)], op.attributes);
+    op.replaceAllResultsWith([combined.getResult(0)]);
+    op.erase();
+    parts.inner.erase();
     return true;
   }
 }

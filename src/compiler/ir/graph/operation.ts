@@ -164,13 +164,25 @@ export class Operation {
     return op;
   }
 
+  hasInterchangeableOperands(): boolean {
+    if (this.operands.length !== 2) return false;
+    const def = registry.get(this.opName);
+    return def !== null && def.isCommutative;
+  }
+
   structuralHash(): number {
     let h = 0x811c9dc5;
     for (let i = 0; i < this.opName.length; i++) {
       h = ((h ^ this.opName.charCodeAt(i)) * 0x01000193) & 0x7fffffff;
     }
-    for (let i = 0; i < this.operands.length; i++) {
-      h = ((h ^ this.operands[i].id) * 0x01000193) & 0x7fffffff;
+    if (this.hasInterchangeableOperands()) {
+      const a = this.operands[0].id, b = this.operands[1].id;
+      h = ((h ^ (a < b ? a : b)) * 0x01000193) & 0x7fffffff;
+      h = ((h ^ (a < b ? b : a)) * 0x01000193) & 0x7fffffff;
+    } else {
+      for (let i = 0; i < this.operands.length; i++) {
+        h = ((h ^ this.operands[i].id) * 0x01000193) & 0x7fffffff;
+      }
     }
     for (const [key, val] of this.attributes) {
       for (let i = 0; i < key.length; i++) {
@@ -190,8 +202,14 @@ export class Operation {
     if (this.results.length !== other.results.length) return false;
     if (this.attributes.size !== other.attributes.size) return false;
     if (this.regions.length > 0 || other.regions.length > 0) return false;
-    for (let i = 0; i < this.operands.length; i++) {
-      if (this.operands[i] !== other.operands[i]) return false;
+    if (this.hasInterchangeableOperands()) {
+      const sameOrder = this.operands[0] === other.operands[0] && this.operands[1] === other.operands[1];
+      const swapped = this.operands[0] === other.operands[1] && this.operands[1] === other.operands[0];
+      if (!sameOrder && !swapped) return false;
+    } else {
+      for (let i = 0; i < this.operands.length; i++) {
+        if (this.operands[i] !== other.operands[i]) return false;
+      }
     }
     for (const [key, val] of this.attributes) {
       if (!other.attributes.has(key)) return false;

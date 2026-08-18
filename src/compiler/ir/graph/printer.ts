@@ -1,4 +1,6 @@
 import { TensorType, typeToString } from './types.js';
+import { jsTypedArray } from '../../../util/dtype_map.js';
+import type { Block as BlockType } from './block.js';
 import type { AttrValue } from './types.js';
 import type { Value } from './value.js';
 import type { Block } from './block.js';
@@ -43,6 +45,7 @@ export class IRPrinter {
     const out = lines as string[];
     this.valueNames.clear();
     this._nextValueId = 0;
+    for (const block of func.body) this._nameBlockValues(block);
 
     const args = func.args.map((arg, i) => {
       const name = this._nameValue(arg);
@@ -144,6 +147,16 @@ export class IRPrinter {
     return ownLines ? out.join('\n') : undefined;
   }
 
+  _nameBlockValues(block: BlockType): void {
+    for (const arg of block.arguments) this._nameValue(arg);
+    for (const op of block) {
+      for (let i = 0; i < op.numResults; i++) this._nameValue(op.getResult(i));
+      for (const region of op.regions) {
+        for (const inner of region.blocks) this._nameBlockValues(inner);
+      }
+    }
+  }
+
   _nameValue(value: Value): string {
     if (this.valueNames.has(value)) return this.valueNames.get(value) as string;
     const name = `%${this._nextValueId++}`;
@@ -169,6 +182,13 @@ function sortedEntries(map: ReadonlyMap<string, AttrValue>): [string, AttrValue]
   return entries;
 }
 
+const DENSE_DTYPES = ['f16', 'bf16', 'f32', 'f64', 'i8', 'i16', 'i32', 'i64', 'ui8', 'bool', 'index'];
+const DENSE_DTYPE_BY_ARRAY: Record<string, string> = {};
+for (const dtype of DENSE_DTYPES) {
+  const name = jsTypedArray(dtype);
+  if (!(name in DENSE_DTYPE_BY_ARRAY)) DENSE_DTYPE_BY_ARRAY[name] = dtype;
+}
+
 function formatAttrValue(val: AttrValue | undefined): string {
   if (val === null || val === undefined) return 'null';
   if (typeof val === 'number') {
@@ -187,6 +207,13 @@ function formatAttrValue(val: AttrValue | undefined): string {
       return '[' + arr.map(v => formatAttrValue(v)).join(', ') + ']';
     }
     return '[' + arr.map(v => formatAttrValue(v)).join(', ') + ']';
+  }
+  if (ArrayBuffer.isView(val) && !(val instanceof DataView)) {
+    const view = val as unknown as { constructor: { name: string }; length: number; [index: number]: number };
+    const dtype = DENSE_DTYPE_BY_ARRAY[view.constructor.name] || 'f32';
+    const items: string[] = [];
+    for (let i = 0; i < view.length; i++) items.push(formatAttrValue(view[i]));
+    return `dense<${dtype}>[${items.join(', ')}]`;
   }
   if (typeof val === 'object' && val.constructor === Object) {
     const entries = Object.entries(val as unknown as Record<string, AttrValue>).sort((a, b) => a[0].localeCompare(b[0]));

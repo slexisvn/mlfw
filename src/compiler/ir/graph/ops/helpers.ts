@@ -67,3 +67,5 @@ export function verifyUnaryFloat(op: Operation): string[] {
 
 export const binaryArithTraits: readonly OpTraitValue[] = [OpTrait.ELEMENTWISE, OpTrait.SAME_OPERAND_AND_RESULT_TYPE];
 export const commBinaryArithTraits: readonly OpTraitValue[] = [...binaryArithTraits, OpTrait.COMMUTATIVE, OpTrait.ASSOCIATIVE];
+export const latticeBinaryTraits: readonly OpTraitValue[] = [...commBinaryArithTraits, OpTrait.IDEMPOTENT];
+export const unaryElementwiseTraits: readonly OpTraitValue[] = [OpTrait.ELEMENTWISE, OpTrait.SAME_OPERAND_AND_RESULT_TYPE, OpTrait.SAME_OPERAND_AND_RESULT_SHAPE];

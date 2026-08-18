@@ -2,16 +2,31 @@ import { FunctionPass } from '../pass.js';
 import { PatternSet } from '../../ir/rewrite/pattern.js';
 import { PatternApplicator } from '../rewrite/pattern.js';
 import { registry } from '../../ir/graph/ops.js';
+import { OpTrait } from '../../ir/graph/op_registry.js';
+import { CommutativeConstantRight, IdempotentSelf, AssociativeConstantReassoc } from '../../ir/graph/patterns.js';
+import type { OpDef } from '../../ir/graph/op_registry.js';
+import type { Pattern } from '../../ir/rewrite/pattern.js';
 import type { GraphFunction } from '../../ir/graph/function.js';
 import type { AnalysisManager } from '../../analysis/analysis_manager.js';
 import type { PassResultValue, PassTarget } from '../pass.js';
 
 let _cachedPatterns: PatternSet | null = null;
 
+function traitPatternsFor(def: OpDef): Pattern[] {
+  const patterns: Pattern[] = [];
+  if (def.isCommutative) {
+    patterns.push(new CommutativeConstantRight(def.name));
+    if (def.isAssociative && def.fold) patterns.push(new AssociativeConstantReassoc(def.name));
+  }
+  if (def.hasTrait(OpTrait.IDEMPOTENT)) patterns.push(new IdempotentSelf(def.name));
+  return patterns;
+}
+
 function getCanonicalizationPatterns(): PatternSet {
   if (_cachedPatterns) return _cachedPatterns;
   _cachedPatterns = new PatternSet();
   for (const def of registry.allOps()) {
+    for (const p of traitPatternsFor(def)) _cachedPatterns.add(p);
     if (def.getCanonicalizationPatterns) {
       const opPatterns = def.getCanonicalizationPatterns();
       if (opPatterns) {

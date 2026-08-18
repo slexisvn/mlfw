@@ -1,6 +1,7 @@
 import { TensorType, typeToString } from './types.js';
 import { Value } from './value.js';
 import { registry } from './ops.js';
+import { verifyTraits } from './trait_verifier.js';
 import type { Block } from './block.js';
 import type { Operation } from './operation.js';
 import type { GraphFunction } from './function.js';
@@ -242,6 +243,10 @@ function verifyOperation(op: Operation, func: GraphFunction, definedValues: Set<
         op, func
       ));
     }
+  }
+
+  for (const message of verifyTraits(op)) {
+    errors.push(new VerificationError(message, op, func));
   }
 
   if (opDef.verify) {

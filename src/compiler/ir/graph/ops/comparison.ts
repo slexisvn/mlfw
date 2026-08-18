@@ -83,7 +83,7 @@ export function register(registry: OpRegistry) {
     name: 'logical_not',
     numOperands: 1,
     numResults: 1,
-    traits: [OpTrait.ELEMENTWISE],
+    traits: [OpTrait.ELEMENTWISE, OpTrait.SAME_OPERAND_AND_RESULT_TYPE, OpTrait.SAME_OPERAND_AND_RESULT_SHAPE],
     inferResultTypes: inferUnaryBool,
   }));
 
@@ -92,7 +92,7 @@ export function register(registry: OpRegistry) {
       name,
       numOperands: 2,
       numResults: 1,
-      traits: [OpTrait.ELEMENTWISE],
+      traits: [OpTrait.ELEMENTWISE, OpTrait.SAME_OPERAND_AND_RESULT_TYPE, OpTrait.COMMUTATIVE, OpTrait.ASSOCIATIVE, OpTrait.IDEMPOTENT],
       inferResultTypes: inferBinaryBool,
     }));
   }

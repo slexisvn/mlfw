@@ -4,7 +4,7 @@ import * as pat from '../patterns.js';
 import {
   inferBinaryElementwise, inferUnaryElementwise,
   verifyBinaryElementwise, verifyUnaryElementwise,
-  binaryArithTraits, commBinaryArithTraits
+  binaryArithTraits, commBinaryArithTraits, latticeBinaryTraits, unaryElementwiseTraits
 } from './helpers.js';
 
 function scalarBinaryFold(fn: (a: number, b: number) => number): FoldFn {
@@ -26,7 +26,7 @@ export function register(registry: OpRegistry) {
     traits: commBinaryArithTraits,
     inferResultTypes: inferBinaryElementwise,
     verify: verifyBinaryElementwise,
-    getCanonicalizationPatterns() { return [pat.commutativeConstantRightFor('add'), new pat.AddZero()]; },
+    getCanonicalizationPatterns() { return [new pat.AddZero()]; },
     fold: scalarBinaryFold((a, b) => a + b)
   }));
 
@@ -37,7 +37,7 @@ export function register(registry: OpRegistry) {
     traits: commBinaryArithTraits,
     inferResultTypes: inferBinaryElementwise,
     verify: verifyBinaryElementwise,
-    getCanonicalizationPatterns() { return [pat.commutativeConstantRightFor('mul'), new pat.MulOne(), new pat.MulZero()]; },
+    getCanonicalizationPatterns() { return [new pat.MulOne(), new pat.MulZero()]; },
     fold: scalarBinaryFold((a, b) => a * b)
   }));
 
@@ -78,7 +78,7 @@ export function register(registry: OpRegistry) {
     name: 'neg',
     numOperands: 1,
     numResults: 1,
-    traits: [OpTrait.ELEMENTWISE, OpTrait.SAME_OPERAND_AND_RESULT_TYPE],
+    traits: unaryElementwiseTraits,
     inferResultTypes: inferUnaryElementwise,
     verify: verifyUnaryElementwise,
     getCanonicalizationPatterns() { return [new pat.DoubleNeg()]; },
@@ -90,7 +90,7 @@ export function register(registry: OpRegistry) {
       name,
       numOperands: 2,
       numResults: 1,
-      traits: [...binaryArithTraits, OpTrait.COMMUTATIVE],
+      traits: latticeBinaryTraits,
       inferResultTypes: inferBinaryElementwise,
       verify: verifyBinaryElementwise
     }));

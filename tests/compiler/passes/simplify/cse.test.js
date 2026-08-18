@@ -48,8 +48,8 @@ describe('identical ops with same operands get eliminated', () => {
   });
 });
 
-describe('different operands prevent elimination', () => {
-  it('add(x, y) and add(y, x) are NOT eliminated — operand order matters', () => {
+describe('commutative ops are matched up to operand order', () => {
+  it('add(x, y) and add(y, x) collapse - add carries the commutative trait', () => {
     const t = new TensorType([4], ScalarType.F32);
     const func = buildFunction('f', [t, t], [t, t], (b, args) => {
       const a1 = b.add(args[0], args[1]);
@@ -57,10 +57,25 @@ describe('different operands prevent elimination', () => {
       b.returnOp([a1.getResult(0), a2.getResult(0)]);
     });
 
+    expect(run(func)).toBe(PassResult.CHANGED);
+    expect(retVal(func, 0)).toBe(retVal(func, 1));
+    expect(func.findOps(op => op.opName === 'add').length).toBe(1);
+  });
+
+  it('sub(x, y) and sub(y, x) are NOT eliminated - sub is not commutative', () => {
+    const t = new TensorType([4], ScalarType.F32);
+    const func = buildFunction('f', [t, t], [t, t], (b, args) => {
+      const s1 = b.sub(args[0], args[1]);
+      const s2 = b.sub(args[1], args[0]);
+      b.returnOp([s1.getResult(0), s2.getResult(0)]);
+    });
+
     expect(run(func)).toBe(PassResult.UNCHANGED);
     expect(retVal(func, 0)).not.toBe(retVal(func, 1));
   });
+});
 
+describe('different operands prevent elimination', () => {
   it('add(x, x) and add(x, y) are NOT eliminated — different operand identity', () => {
     const t = new TensorType([4], ScalarType.F32);
     const func = buildFunction('f', [t, t], [t, t], (b, args) => {
@@ -267,5 +282,45 @@ describe('pass behavior', () => {
         }
       }
     }
+  });
+});
+
+describe('redundancy is matched across enclosing scopes, not just within a block', () => {
+  it('an op inside a region collapses onto an identical op in the enclosing block', () => {
+    const t = new TensorType([4], ScalarType.F32);
+    const boolT = new TensorType([], ScalarType.BOOL);
+    let innerAdd = null;
+    const func = buildFunction('f', [t, t, boolT], [t], (b, args) => {
+      const outer = b.add(args[0], args[1]);
+      const branch = b.ifOp(args[2], [t], (tb) => {
+        innerAdd = tb.add(args[0], args[1]);
+        tb.yieldOp([innerAdd.getResult(0)]);
+      }, (eb) => {
+        eb.yieldOp([args[0]]);
+      });
+      b.returnOp([b.add(outer.getResult(0), branch.getResult(0)).getResult(0)]);
+    });
+
+    expect(run(func)).toBe(PassResult.CHANGED);
+
+    const addsInRegions = [...func.opsRecursive()].filter(op => op.opName === 'add');
+    expect(addsInRegions.length).toBe(2);
+    expect(innerAdd.parentBlock).toBe(null);
+  });
+
+  it('an op in one branch does NOT collapse onto an identical op in a sibling branch', () => {
+    const t = new TensorType([4], ScalarType.F32);
+    const boolT = new TensorType([], ScalarType.BOOL);
+    const func = buildFunction('f', [t, t, boolT], [t], (b, args) => {
+      const branch = b.ifOp(args[2], [t], (tb) => {
+        tb.yieldOp([tb.mul(args[0], args[1]).getResult(0)]);
+      }, (eb) => {
+        eb.yieldOp([eb.mul(args[0], args[1]).getResult(0)]);
+      });
+      b.returnOp([branch.getResult(0)]);
+    });
+
+    expect(run(func)).toBe(PassResult.UNCHANGED);
+    expect([...func.opsRecursive()].filter(op => op.opName === 'mul').length).toBe(2);
   });
 });
