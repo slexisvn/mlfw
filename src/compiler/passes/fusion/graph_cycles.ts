@@ -112,8 +112,26 @@ export class GraphCycles {
 
     this._parent[t] = s;
     this._nodeAtRank[this._rank[t]] = -1;
-    this._reorder(loRank, hiRank);
+
+    if (this._reachesWithinWindow(hi, loRank, hiRank)) {
+      this._reorder(loRank, hiRank);
+    } else {
+      const sRank = this._rank[s];
+      if (sRank !== loRank) this._nodeAtRank[sRank] = -1;
+      this._rank[s] = loRank;
+      this._nodeAtRank[loRank] = s;
+    }
     return s;
+  }
+
+  _reachesWithinWindow(hi: number, loRank: number, hiRank: number): boolean {
+    for (const raw of this._in[hi]) {
+      const v = this.find(raw);
+      if (v === hi) continue;
+      const rank = this._rank[v];
+      if (rank > loRank && rank < hiRank) return true;
+    }
+    return false;
   }
 
   _reorder(loRank: number, hiRank: number): void {

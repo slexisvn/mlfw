@@ -35,7 +35,8 @@ export const OpTrait = Object.freeze({
   VIEW: 'view',
   INJECTIVE: 'injective',
   OUT_EWISE_FUSABLE: 'out_ewise_fusable',
-  OPAQUE: 'opaque'
+  OPAQUE: 'opaque',
+  RECURSIVE_MEMORY_EFFECTS: 'recursive_memory_effects'
 });
 
 export type SideEffectMask = number;
@@ -161,6 +162,7 @@ export class OpDef {
   get isView(): boolean { return this.traits.has(OpTrait.VIEW); }
   get isOutEWiseFusable(): boolean { return this.traits.has(OpTrait.OUT_EWISE_FUSABLE); }
   get isOpaque(): boolean { return this.traits.has(OpTrait.OPAQUE); }
+  get hasRecursiveMemoryEffects(): boolean { return this.traits.has(OpTrait.RECURSIVE_MEMORY_EFFECTS); }
   get hasSideEffects(): boolean { return this.sideEffects !== SideEffectKind.NONE; }
 }
 

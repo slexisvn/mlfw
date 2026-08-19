@@ -113,8 +113,16 @@ export function childAccessors(node: IRNode, opts: WalkOpts = {}): ChildAccessor
   return out;
 }
 
+export function schemaFor(nodeType: string): readonly FieldSpec[] | undefined {
+  return SCHEMA[nodeType];
+}
+
+export function schemaNodeTypes(): string[] {
+  return Object.keys(SCHEMA);
+}
+
 export function irChildNodes(node: IRNode, opts: WalkOpts = {}): IRNode[] {
-  if (!isIRNode(node) || SCHEMA[node.type] === undefined) return [];
+  if (!isIRNode(node)) return [];
   const out: IRNode[] = [];
   for (const acc of childAccessors(node, opts)) {
     const kids = acc.read();

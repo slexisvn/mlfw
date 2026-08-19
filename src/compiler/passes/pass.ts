@@ -1,6 +1,7 @@
 import type { GraphModule } from '../ir/graph/module.js';
 import type { GraphFunction } from '../ir/graph/function.js';
-import type { AnalysisCtor, AnalysisManager } from '../analysis/analysis_manager.js';
+import { AnalysisManager } from '../analysis/analysis_manager.js';
+import type { AnalysisCtor } from '../analysis/analysis_manager.js';
 import type { TraceLog } from '../pipeline/trace.js';
 
 export type PassResultValue = (typeof PassResult)[keyof typeof PassResult];
@@ -26,6 +27,7 @@ export class Pass {
   requiredAnalyses: AnalysisCtor[];
   optLevel: number;
   trace: TraceLog | null;
+  private _ownAnalyses: AnalysisManager | null;
 
   constructor(name: string) {
     this.name = name;
@@ -34,6 +36,17 @@ export class Pass {
     this.requiredAnalyses = [];
     this.optLevel = 0;
     this.trace = null;
+    this._ownAnalyses = null;
+  }
+
+  analyses(analysisManager?: AnalysisManager): AnalysisManager {
+    if (analysisManager) return analysisManager;
+    if (!this._ownAnalyses) this._ownAnalyses = new AnalysisManager();
+    return this._ownAnalyses;
+  }
+
+  getAnalysis<TResult>(AnalysisClass: AnalysisCtor<TResult>, func: GraphFunction, analysisManager?: AnalysisManager): TResult {
+    return this.analyses(analysisManager).getAnalysis(AnalysisClass, func);
   }
 
   run(target: PassTarget, analysisManager?: AnalysisManager): PassResultValue {

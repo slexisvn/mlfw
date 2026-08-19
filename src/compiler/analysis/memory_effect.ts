@@ -20,16 +20,21 @@ export class MemoryEffect {
 
 export class MemoryEffectResult {
   opEffects: Map<Operation, MemoryEffect[]>;
+  opKinds: Map<Operation, SideEffectMask>;
   private _valueEffects: Map<Value, ValueEffectEntry[]>;
 
-  constructor(opEffects: Map<Operation, MemoryEffect[]>, valueEffects: Map<Value, ValueEffectEntry[]>) {
+  constructor(opEffects: Map<Operation, MemoryEffect[]>, valueEffects: Map<Value, ValueEffectEntry[]>, opKinds: Map<Operation, SideEffectMask> = new Map()) {
     this.opEffects = opEffects;
+    this.opKinds = opKinds;
     this._valueEffects = valueEffects;
   }
 
+  effectKind(op: Operation): SideEffectMask {
+    return this.opKinds.get(op) ?? SideEffectKind.NONE;
+  }
+
   hasSideEffect(op: Operation): boolean {
-    const effects = this.opEffects.get(op);
-    return !!effects && effects.length > 0;
+    return this.effectKind(op) !== SideEffectKind.NONE;
   }
 
   getEffects(op: Operation): MemoryEffect[] {
@@ -66,8 +71,30 @@ export class MemoryEffectAnalysis {
   static get depKey(): string { return 'memoryEffect'; }
   static get dependencies(): readonly AnalysisCtor[] { return []; }
 
+  static _foldRecursiveEffects(opKinds: Map<Operation, SideEffectMask>): void {
+    const nestedKind = (op: Operation): SideEffectMask => {
+      let mask = SideEffectKind.NONE;
+      for (const region of op.regions) {
+        for (const block of region.blocks) {
+          for (const inner of block.ops()) {
+            mask |= opKinds.get(inner) ?? SideEffectKind.NONE;
+            mask |= nestedKind(inner);
+          }
+        }
+      }
+      return mask;
+    };
+
+    for (const op of [...opKinds.keys()]) {
+      const def = registry.get(op.opName);
+      if (!def || !def.hasRecursiveMemoryEffects) continue;
+      opKinds.set(op, (opKinds.get(op) ?? SideEffectKind.NONE) | nestedKind(op));
+    }
+  }
+
   static compute(func: GraphFunction): MemoryEffectResult {
     const opEffects = new Map<Operation, MemoryEffect[]>();
+    const opKinds = new Map<Operation, SideEffectMask>();
     const valueEffects = new Map<Value, ValueEffectEntry[]>();
 
     const addValueEffect = (value: Value, op: Operation, effect: MemoryEffect): void => {
@@ -117,8 +144,11 @@ export class MemoryEffectAnalysis {
       }
 
       opEffects.set(op, effects);
+      opKinds.set(op, effectKind);
     }
 
-    return new MemoryEffectResult(opEffects, valueEffects);
+    MemoryEffectAnalysis._foldRecursiveEffects(opKinds);
+
+    return new MemoryEffectResult(opEffects, valueEffects, opKinds);
   }
 }

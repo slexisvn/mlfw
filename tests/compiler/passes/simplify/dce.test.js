@@ -219,3 +219,92 @@ describe('DCEPass op count correctness', () => {
     expect(names).toEqual(['add', 'neg', 'return']);
   });
 });
+
+describe('dead region-carrying ops', () => {
+  const boolT = new TensorType([], ScalarType.BOOL);
+
+  it('erases an if whose results are unused and whose branches are side-effect free', () => {
+    const t = new TensorType([4], ScalarType.F32);
+    const func = buildFunction('f', [t, boolT], [t], (b, args) => {
+      b.ifOp(args[1], [t], (tb) => { tb.yieldOp([tb.neg(args[0]).getResult(0)]); },
+                           (eb) => { eb.yieldOp([args[0]]); });
+      b.returnOp([args[0]]);
+    });
+
+    expect(new DCEPass().run(func)).toBe(PassResult.CHANGED);
+    expect(func.opsArray().map(o => o.opName)).toEqual(['return']);
+  });
+
+  it('erases the ops nested inside the dead region too', () => {
+    const t = new TensorType([4], ScalarType.F32);
+    const func = buildFunction('f', [t, boolT], [t], (b, args) => {
+      b.ifOp(args[1], [t], (tb) => { tb.yieldOp([tb.tanh(tb.neg(args[0]).getResult(0)).getResult(0)]); },
+                           (eb) => { eb.yieldOp([args[0]]); });
+      b.returnOp([args[0]]);
+    });
+
+    new DCEPass().run(func);
+    expect([...func.opsRecursive()].map(o => o.opName)).toEqual(['return']);
+  });
+
+  it('keeps a region op whose body has a side effect', () => {
+    const t = new TensorType([4], ScalarType.F32);
+    const func = buildFunction('f', [t, boolT], [t], (b, args) => {
+      b.ifOp(args[1], [t], (tb) => {
+        tb.yieldOp([tb.customCall('side_effecting', [args[0]], [t]).getResult(0)]);
+      }, (eb) => { eb.yieldOp([args[0]]); });
+      b.returnOp([args[0]]);
+    });
+
+    new DCEPass().run(func);
+    expect(func.findOp(o => o.opName === 'if')).not.toBeNull();
+  });
+
+  it('keeps a region op whose results are still used', () => {
+    const t = new TensorType([4], ScalarType.F32);
+    const func = buildFunction('f', [t, boolT], [t], (b, args) => {
+      const branch = b.ifOp(args[1], [t], (tb) => { tb.yieldOp([tb.neg(args[0]).getResult(0)]); },
+                                          (eb) => { eb.yieldOp([args[0]]); });
+      b.returnOp([branch.getResult(0)]);
+    });
+
+    expect(new DCEPass().run(func)).toBe(PassResult.UNCHANGED);
+    expect(func.findOp(o => o.opName === 'if')).not.toBeNull();
+  });
+
+  it('cascades: a producer kept alive only by a dead region body dies with it', () => {
+    const t = new TensorType([4], ScalarType.F32);
+    const func = buildFunction('f', [t, boolT], [t], (b, args) => {
+      const feeder = b.tanh(args[0]);
+      b.ifOp(args[1], [t], (tb) => { tb.yieldOp([tb.neg(feeder.getResult(0)).getResult(0)]); },
+                           (eb) => { eb.yieldOp([args[0]]); });
+      b.returnOp([args[0]]);
+    });
+
+    new DCEPass().run(func);
+    expect([...func.opsRecursive()].map(o => o.opName)).toEqual(['return']);
+  });
+});
+
+describe('erasing a dead region does not depend on textual order', () => {
+  it('erases a region body whose ops are stored out of dependency order', () => {
+    const t = new TensorType([4], ScalarType.F32);
+    const boolT = new TensorType([], ScalarType.BOOL);
+    const func = buildFunction('f', [t, boolT], [t], (b, args) => {
+      b.ifOp(args[1], [t], (tb) => {
+        tb.yieldOp([tb.tanh(tb.neg(args[0]).getResult(0)).getResult(0)]);
+      }, (eb) => { eb.yieldOp([args[0]]); });
+      b.returnOp([args[0]]);
+    });
+
+    const body = func.findOp(o => o.opName === 'if').getRegion(0).entryBlock;
+    const neg = body.opsArray().find(o => o.opName === 'neg');
+    const tanh = body.opsArray().find(o => o.opName === 'tanh');
+    body.removeOp(neg);
+    body.insertAfter(neg, tanh);
+    expect(body.opsArray().map(o => o.opName)).toEqual(['tanh', 'neg', 'yield']);
+
+    expect(() => new DCEPass().run(func)).not.toThrow();
+    expect([...func.opsRecursive()].map(o => o.opName)).toEqual(['return']);
+  });
+});

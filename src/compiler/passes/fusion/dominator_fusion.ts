@@ -37,7 +37,7 @@ export class DominatorFusionPass extends FunctionPass {
 
   constructor(config: DominatorFusionConfig = {}) {
     super('DominatorFusionPass');
-    this.requiredAnalyses = [UseDefAnalysis];
+    this.requiredAnalyses = [UseDefAnalysis, PostDominanceAnalysis];
     const target = config.target || {};
     this.maxFusionSize = target.maxFusionSize || config.maxFusionSize || 512;
     this.maxReductions = config.maxReductions || 1;
@@ -54,11 +54,9 @@ export class DominatorFusionPass extends FunctionPass {
 
   override run(func: PassTarget, analysisManager?: AnalysisManager): PassResultValue {
     const graphFunc = func as GraphFunction;
-    const useDef = analysisManager
-      ? analysisManager.getAnalysis(UseDefAnalysis, graphFunc)
-      : UseDefAnalysis.compute(graphFunc);
+    const useDef = this.getAnalysis(UseDefAnalysis, graphFunc, analysisManager);
 
-    const pdom = PostDominanceAnalysis.compute(graphFunc, { useDef });
+    const pdom = this.getAnalysis(PostDominanceAnalysis, graphFunc, analysisManager);
     const topo = useDef.topologicalOrder;
     const groups = this._buildGroups(topo, pdom);
 

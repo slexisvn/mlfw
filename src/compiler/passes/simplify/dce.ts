@@ -5,6 +5,7 @@ import { isTerminatorOp } from '../../ir/graph/op_traits.js';
 import { TraceLevel } from '../../pipeline/trace.js';
 import type { GraphFunction } from '../../ir/graph/function.js';
 import type { Operation } from '../../ir/graph/operation.js';
+import type { Value } from '../../ir/graph/value.js';
 import type { AnalysisManager } from '../../analysis/analysis_manager.js';
 import type { MemoryEffectResult } from '../../analysis/memory_effect.js';
 import type { PassResultValue, PassTarget } from '../pass.js';
@@ -12,17 +13,15 @@ import type { PassResultValue, PassTarget } from '../pass.js';
 export class DCEPass extends FunctionPass {
   constructor() {
     super('dce');
-    this.preservedAnalyses = new Set();
     this.requiredAnalyses = [MemoryEffectAnalysis];
+    this.preservedAnalyses = new Set([MemoryEffectAnalysis as never]);
   }
 
   override run(target: PassTarget, analysisManager?: AnalysisManager): PassResultValue {
     const func = target as GraphFunction;
     let changed = false;
 
-    const memEffects = (analysisManager
-      ? analysisManager.getAnalysis(MemoryEffectAnalysis as never, func)
-      : MemoryEffectAnalysis.compute(func)) as MemoryEffectResult;
+    const memEffects = this.getAnalysis(MemoryEffectAnalysis as never, func, analysisManager) as MemoryEffectResult;
 
     const worklist: Operation[] = [];
     for (const op of func.opsRecursive()) {
@@ -39,12 +38,12 @@ export class DCEPass extends FunctionPass {
       if (!this._isDead(op, memEffects)) continue;
 
       const operandDefs: Operation[] = [];
-      for (let i = 0; i < op.numOperands; i++) {
-        const defOp = op.getOperand(i).definingOp;
+      for (const consumed of this._valuesReadBy(op)) {
+        const defOp = consumed.definingOp;
         if (defOp && defOp.parentBlock) operandDefs.push(defOp);
       }
 
-      op.erase();
+      this._eraseRecursively(op);
       changed = true;
       erasedCount++;
 
@@ -65,15 +64,46 @@ export class DCEPass extends FunctionPass {
     return changed ? PassResult.CHANGED : PassResult.UNCHANGED;
   }
 
+  _valuesReadBy(op: Operation): Value[] {
+    const values: Value[] = [];
+    const visit = (current: Operation): void => {
+      for (let i = 0; i < current.numOperands; i++) values.push(current.getOperand(i));
+      for (const region of current.regions) {
+        for (const block of region.blocks) {
+          for (const inner of block.ops()) visit(inner);
+        }
+      }
+    };
+    visit(op);
+    return values;
+  }
+
   _isDead(op: Operation, memEffects: MemoryEffectResult): boolean {
     if (isTerminatorOp(op.opName)) return false;
-
-    if (op.regions && op.regions.length > 0) return false;
 
     for (let i = 0; i < op.numResults; i++) {
       if (op.getResult(i).hasUses) return false;
     }
 
     return !memEffects.hasSideEffect(op);
+  }
+
+  _eraseRecursively(op: Operation): void {
+    const nested: Operation[] = [];
+    const collect = (current: Operation): void => {
+      for (const region of current.regions) {
+        for (const block of region.blocks) {
+          for (const inner of block.opsArray()) {
+            nested.push(inner);
+            collect(inner);
+          }
+        }
+      }
+    };
+    collect(op);
+
+    for (const inner of nested) inner.dropAllOperands();
+    for (let i = nested.length - 1; i >= 0; i--) nested[i].erase();
+    op.erase();
   }
 }

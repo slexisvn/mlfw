@@ -29,6 +29,7 @@ export class LayoutTransformPass extends FunctionPass {
 
   constructor(config: LayoutTransformConfig = {}) {
     super('LayoutTransformPass');
+    this.requiredAnalyses = [UseDefAnalysis];
     this.target = config.target || null;
     this._policy = null;
   }
@@ -41,9 +42,7 @@ export class LayoutTransformPass extends FunctionPass {
       this._policy = new LayoutPolicy(this.target);
     }
 
-    const useDef = analysisManager
-      ? analysisManager.getAnalysis(UseDefAnalysis, graphFunc)
-      : UseDefAnalysis.compute(graphFunc);
+    const useDef = this.getAnalysis(UseDefAnalysis, graphFunc, analysisManager);
 
     const result = LayoutAnalysis.compute(graphFunc, { useDef }, this._policy as never);
 

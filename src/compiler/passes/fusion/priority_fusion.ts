@@ -69,9 +69,7 @@ export class PriorityFusionPass extends FunctionPass {
 
   override run(func: PassTarget, analysisManager?: AnalysisManager): PassResultValue {
     const graphFunc = func as GraphFunction;
-    const useDef = analysisManager
-      ? analysisManager.getAnalysis(UseDefAnalysis, graphFunc)
-      : UseDefAnalysis.compute(graphFunc);
+    const useDef = this.getAnalysis(UseDefAnalysis, graphFunc, analysisManager);
     const topo = useDef.topologicalOrder;
     const n = topo.length;
     if (n === 0) return PassResult.UNCHANGED;

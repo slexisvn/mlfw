@@ -41,7 +41,7 @@ export function register(registry: OpRegistry) {
     numResults: -1,
     hasRegions: true,
     numRegions: 2,
-    sideEffects: SideEffectKind.CONTROL,
+    traits: [OpTrait.RECURSIVE_MEMORY_EFFECTS],
     inferResultTypes(operandTypes, attrs, resultTypes) {
       return resultTypes || null;
     }
@@ -54,7 +54,7 @@ export function register(registry: OpRegistry) {
     opAttrs: { [OpAttrKey.SEQUENTIAL_REGION]: true },
     hasRegions: true,
     numRegions: 2,
-    sideEffects: SideEffectKind.CONTROL,
+    traits: [OpTrait.RECURSIVE_MEMORY_EFFECTS],
     inferResultTypes(operandTypes) {
       return [...operandTypes];
     }
@@ -67,7 +67,7 @@ export function register(registry: OpRegistry) {
     opAttrs: { [OpAttrKey.SEQUENTIAL_REGION]: true },
     hasRegions: true,
     numRegions: 1,
-    sideEffects: SideEffectKind.CONTROL,
+    traits: [OpTrait.RECURSIVE_MEMORY_EFFECTS],
     attrs: [
       { name: 'num_carry', type: 'number', required: true },
       { name: 'num_xs', type: 'number', required: true }

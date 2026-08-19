@@ -7,24 +7,21 @@ import type { AnalysisCtor, AnalysisDeps } from './analysis_manager.js';
 import type { UseDefResult } from './use_def.js';
 
 export type LiveInterval = { start: number; end: number };
+type PressureEvent = { idx: number; delta: number; value: Value };
 
 export class LivenessResult {
-  liveIn: Map<Operation, Set<Value>>;
-  liveOut: Map<Operation, Set<Value>>;
   intervals: Map<Value, LiveInterval>;
   opIndex: Map<Operation, number>;
   peakPressure: number;
-  peakOp: Operation | null;
-  pressureAtOp: Map<Operation, number>;
+  peakIndex: number;
+  liveAtPeak: Set<Value>;
 
-  constructor(liveIn: Map<Operation, Set<Value>>, liveOut: Map<Operation, Set<Value>>, intervals: Map<Value, LiveInterval>, opIndex: Map<Operation, number>, peakPressure: number, peakOp: Operation | null, pressureAtOp: Map<Operation, number>) {
-    this.liveIn = liveIn;
-    this.liveOut = liveOut;
+  constructor(intervals: Map<Value, LiveInterval>, opIndex: Map<Operation, number>, peakPressure: number, peakIndex: number, liveAtPeak: Set<Value>) {
     this.intervals = intervals;
     this.opIndex = opIndex;
     this.peakPressure = peakPressure;
-    this.peakOp = peakOp;
-    this.pressureAtOp = pressureAtOp;
+    this.peakIndex = peakIndex;
+    this.liveAtPeak = liveAtPeak;
   }
 
   interfere(a: Value, b: Value): boolean {
@@ -37,13 +34,15 @@ export class LivenessResult {
     return false;
   }
 
-  liveAtOp(op: Operation): Set<Value> {
-    return this.liveIn.get(op) || new Set();
-  }
-
   intervalOf(value: Value): LiveInterval | null {
     return this.intervals.get(value) || null;
   }
+}
+
+function valueBytes(value: Value): number {
+  if (!(value.type instanceof TensorType)) return 0;
+  const bytes = value.type.sizeInBytes() as number;
+  return bytes === DYNAMIC || bytes <= 0 ? 0 : bytes;
 }
 
 export class LivenessAnalysis {
@@ -82,78 +81,47 @@ export class LivenessAnalysis {
     return { intervals, opIndex };
   }
 
+  static sweepPressure(intervals: ReadonlyMap<Value, LiveInterval>, length: number): { peakPressure: number; peakIndex: number; liveAtPeak: Set<Value> } {
+    const events: PressureEvent[] = [];
+    for (const [value, intv] of intervals) {
+      const bytes = valueBytes(value);
+      if (bytes === 0) continue;
+      events.push({ idx: intv.start, delta: bytes, value });
+      events.push({ idx: intv.end + 1, delta: -bytes, value });
+    }
+    events.sort((a, b) => a.idx - b.idx || a.delta - b.delta);
+
+    let pressure = 0;
+    let peakPressure = 0;
+    let peakIndex = 0;
+    const live = new Set<Value>();
+    const liveAtPeak = new Set<Value>();
+
+    let ei = 0;
+    for (let i = -1; i <= length; i++) {
+      while (ei < events.length && events[ei].idx <= i) {
+        const event = events[ei];
+        pressure += event.delta;
+        if (event.delta > 0) live.add(event.value);
+        else live.delete(event.value);
+        ei++;
+      }
+      if (pressure > peakPressure) {
+        peakPressure = pressure;
+        peakIndex = i;
+        liveAtPeak.clear();
+        for (const v of live) liveAtPeak.add(v);
+      }
+    }
+
+    return { peakPressure, peakIndex, liveAtPeak };
+  }
+
   static compute(func: GraphFunction, deps: AnalysisDeps = {}): LivenessResult {
     const useDef = (deps.useDef as UseDefResult | undefined) || UseDefAnalysis.compute(func);
     const topo = useDef.topologicalOrder;
-
     const { intervals, opIndex } = LivenessAnalysis.buildIntervals(func, topo);
-
-    const liveIn = new Map<Operation, Set<Value>>();
-    const liveOut = new Map<Operation, Set<Value>>();
-    for (const op of topo) {
-      liveIn.set(op, new Set<Value>());
-      liveOut.set(op, new Set<Value>());
-    }
-
-    for (let i = topo.length - 1; i >= 0; i--) {
-      const op = topo[i];
-      const currentOut = liveOut.get(op) as Set<Value>;
-
-      const users = useDef.opUsers.get(op);
-      if (users) {
-        for (const user of users) {
-          const userIn = liveIn.get(user);
-          if (userIn) {
-            for (const v of userIn) {
-              currentOut.add(v);
-            }
-          }
-        }
-      }
-
-      const currentIn = liveIn.get(op) as Set<Value>;
-      for (const v of currentOut) {
-        currentIn.add(v);
-      }
-      for (let j = 0; j < op.numResults; j++) {
-        currentIn.delete(op.getResult(j));
-      }
-      for (let j = 0; j < op.numOperands; j++) {
-        currentIn.add(op.getOperand(j));
-      }
-    }
-
-    for (const [op, idx] of opIndex) {
-      const activeVars = liveIn.get(op) as Set<Value>;
-      for (const v of activeVars) {
-        const intv = intervals.get(v);
-        if (intv && intv.end < idx) intv.end = idx;
-      }
-    }
-
-    let peakPressure = 0;
-    let peakOp: Operation | null = null;
-    const pressureAtOp = new Map<Operation, number>();
-    for (let i = 0; i < topo.length; i++) {
-      const op = topo[i];
-      const live = liveIn.get(op) as Set<Value>;
-      let bytes = 0;
-      for (const v of live) {
-        if (v.type instanceof TensorType) {
-          const s = v.type.sizeInBytes();
-          if (s !== DYNAMIC) bytes += s;
-        }
-      }
-      pressureAtOp.set(op, bytes);
-      if (bytes > peakPressure) {
-        peakPressure = bytes;
-        peakOp = op;
-      }
-    }
-
-    return new LivenessResult(
-      liveIn, liveOut, intervals, opIndex,
-      peakPressure, peakOp, pressureAtOp
-    );
+    const { peakPressure, peakIndex, liveAtPeak } = LivenessAnalysis.sweepPressure(intervals, topo.length);
+    return new LivenessResult(intervals, opIndex, peakPressure, peakIndex, liveAtPeak);
   }
 }

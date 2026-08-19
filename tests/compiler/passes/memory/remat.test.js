@@ -265,7 +265,7 @@ describe('RematerializationPass interval pressure', () => {
 
     const pass = new RematerializationPass({ memoryBudget: 1 });
     const useDef = UseDefAnalysis.compute(func);
-    const { peakIdx, candidates } = pass._analyzeIntervalPressure(func, useDef);
+    const { peakIdx, candidates } = pass._analyzeIntervalPressure(func);
     const { intervals } = LivenessAnalysis.buildIntervals(func, useDef.topologicalOrder);
 
     expect(candidates.length).toBeGreaterThan(0);

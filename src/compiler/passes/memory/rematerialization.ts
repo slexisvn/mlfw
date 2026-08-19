@@ -4,7 +4,6 @@ import { TensorType, DYNAMIC } from '../../ir/graph/types.js';
 import { registry } from '../../ir/graph/ops.js';
 
 import { TraceLevel } from '../../pipeline/trace.js';
-import { UseDefAnalysis } from '../../analysis/use_def.js';
 import { LivenessAnalysis } from '../../analysis/liveness.js';
 import { isConstantOp, isTerminatorOp } from '../../ir/graph/op_traits.js';
 import type { GraphFunction } from '../../ir/graph/function.js';
@@ -21,9 +20,7 @@ export type RematerializationOpts = {
   maxRecomputeCost?: number;
   excludeOps?: ReadonlySet<string>;
 };
-type UseDefResult = ReturnType<typeof UseDefAnalysis.compute>;
 type OpOrder = ReturnType<typeof LivenessAnalysis.buildIntervals>['opIndex'];
-type PressureEvent = { idx: number; delta: number; value: Value };
 type RematCandidate = {
   value: Value;
   definingOp: Operation;
@@ -52,6 +49,7 @@ export class RematerializationPass extends FunctionPass {
 
   constructor(config: RematerializationOpts | RematerializationConfig = {}) {
     super('RematerializationPass');
+    this.requiredAnalyses = [LivenessAnalysis];
     this.config = config instanceof RematerializationConfig
       ? config
       : new RematerializationConfig(config);
@@ -67,8 +65,7 @@ export class RematerializationPass extends FunctionPass {
     let lastPeak = 0;
 
     while (iterations < this.config.maxIterations) {
-      const useDef = UseDefAnalysis.compute(graphFunc);
-      const { peakPressure, candidates, opIndex } = this._analyzeIntervalPressure(graphFunc, useDef);
+      const { peakPressure, candidates, opIndex } = this._analyzeIntervalPressure(graphFunc, analysisManager);
       lastPeak = peakPressure;
       if (peakPressure <= this.config.memoryBudget) break;
       if (candidates.length === 0) break;
@@ -91,41 +88,9 @@ export class RematerializationPass extends FunctionPass {
     return changed ? PassResult.CHANGED : PassResult.UNCHANGED;
   }
 
-  _analyzeIntervalPressure(func: GraphFunction, useDef: UseDefResult): PressureAnalysis {
-    const topo = useDef.topologicalOrder;
-    const { intervals, opIndex } = LivenessAnalysis.buildIntervals(func, topo);
-
-    const events: PressureEvent[] = [];
-    for (const [value, intv] of intervals) {
-      if (!(value.type instanceof TensorType)) continue;
-      const bytes = value.type.sizeInBytes() as number;
-      if (bytes === DYNAMIC || bytes <= 0) continue;
-      events.push({ idx: intv.start, delta: bytes, value });
-      events.push({ idx: intv.end + 1, delta: -bytes, value });
-    }
-    events.sort((a, b) => a.idx - b.idx || a.delta - b.delta);
-
-    let pressure = 0;
-    let peakPressure = 0;
-    let peakIdx = 0;
-    const liveAtPeak = new Set<Value>();
-    const currentLive = new Set<Value>();
-
-    let ei = 0;
-    for (let i = -1; i <= topo.length; i++) {
-      while (ei < events.length && events[ei].idx <= i) {
-        pressure += events[ei].delta;
-        if (events[ei].delta > 0 && events[ei].value) currentLive.add(events[ei].value);
-        if (events[ei].delta < 0 && events[ei].value) currentLive.delete(events[ei].value);
-        ei++;
-      }
-      if (pressure > peakPressure) {
-        peakPressure = pressure;
-        peakIdx = i;
-        liveAtPeak.clear();
-        for (const v of currentLive) liveAtPeak.add(v);
-      }
-    }
+  _analyzeIntervalPressure(func: GraphFunction, analysisManager?: AnalysisManager): PressureAnalysis {
+    const liveness = this.getAnalysis(LivenessAnalysis, func, analysisManager);
+    const { peakPressure, peakIndex: peakIdx, liveAtPeak, opIndex } = liveness;
 
     const candidates: RematCandidate[] = [];
     for (const value of liveAtPeak) {
