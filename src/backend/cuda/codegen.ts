@@ -493,7 +493,10 @@ export class CUDACodegen {
         const a = this._exprToC(node.a);
         if (!node.b) return `(${node.op}${a})`;
         const b = this._exprToC(node.b);
-        if (node.op === '//') return `(${a} / ${b})`;
+        if (node.op === '//') return `(((${a}) - ((((${a}) % (${b})) + (${b})) % (${b}))) / (${b}))`;
+        if (node.op === '%') return `((((${a}) % (${b})) + (${b})) % (${b}))`;
+        if (node.op === 'tdiv') return `(${a} / ${b})`;
+        if (node.op === 'tmod') return `(${a} % ${b})`;
         return `(${a} ${node.op} ${b})`;
       }
       case 'CompareNode': return `(${this._exprToC(node.a)} ${cCompareOp(node.direction)} ${this._exprToC(node.b)})`;

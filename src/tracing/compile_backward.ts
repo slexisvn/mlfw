@@ -1,4 +1,4 @@
-import { _traceCore } from './compile.js';
+import { _traceCore, resolveDynamicShapes } from './compile.js';
 import { Compiler } from '../compiler/pipeline/compiler.js';
 import { CPUTarget } from '../backend/target.js';
 import { GraphModule } from '../compiler/ir/graph/module.js';
@@ -94,7 +94,7 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
   const mode = opts.mode || 'separate';
   const rematPolicy = opts.rematPolicy || new RematPolicy(opts.remat || {});
   const compilerOpts = { target, ...opts, backward: undefined, mode: undefined, rematPolicy: undefined, remat: undefined };
-  const dynamicShapes = opts.dynamic_shapes || null;
+  const dynamicShapes = resolveDynamicShapes(opts);
 
   const _cacheEntries: BackwardMeta[] = [];
   let _savedValues: SavedContext | null = null;

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { tensor } from '../../../src/index.js';
+import { tensor, manual_seed } from '../../../src/index.js';
 import * as nn from '../../../src/nn/index.js';
 import * as T from '../../../src/tensor/ops/ops.js';
 import { ones } from '../../../src/tensor/factory/creation_ops.js';
@@ -186,7 +186,9 @@ function probeIndices(n) {
 describe('model-level VJP matches finite differences (inputs and parameters)', () => {
   for (const c of CASES) {
     it(c.name, () => {
-      const rng = mulberry32(c.name.length * 6577 + 13);
+      const seed = c.name.length * 6577 + 13;
+      manual_seed(seed);
+      const rng = mulberry32(seed);
       const { fwd, shapes } = c.build(rng);
       const datas = shapes.map((s) => randomNested(rng, s));
       const inputs = datas.map((d) => tensor(d));
@@ -213,9 +215,20 @@ describe('model-level VJP matches finite differences (inputs and parameters)', (
             write(base);
             return v;
           };
-          const numeric = (at(EPS) - at(-EPS)) / (2 * EPS);
-          const err = Math.abs(numeric - analytic[k]) / (1 + Math.abs(numeric));
-          expect(err, `${label}[${k}]: numeric=${numeric} analytic=${analytic[k]}`).toBeLessThan(TOL);
+          const up = at(EPS), here = at(0), down = at(-EPS);
+          const central = (up - down) / (2 * EPS);
+          const right = (up - here) / EPS;
+          const left = (here - down) / EPS;
+          const err = (numeric) => Math.abs(numeric - analytic[k]) / (1 + Math.abs(numeric));
+
+          if (Math.abs(right - left) / (1 + Math.abs(central)) < TOL) {
+            expect(err(central), `${label}[${k}]: numeric=${central} analytic=${analytic[k]}`).toBeLessThan(TOL);
+          } else {
+            expect(
+              Math.min(err(left), err(right)),
+              `${label}[${k}]: kink between one-sided slopes ${left} and ${right}, analytic=${analytic[k]} matches neither`,
+            ).toBeLessThan(TOL);
+          }
         }
       };
 

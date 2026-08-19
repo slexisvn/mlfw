@@ -76,9 +76,11 @@ describe('CUDACodegen._exprToC', () => {
     expect(exprToC(neg)).toBe('(-x)');
   });
 
-  it('renders integer division as C division', () => {
-    const div = new MathOpNode('//', new VariableNode('x', 'index'), new IntImmNode(4));
-    expect(exprToC(div)).toBe('(x / 4)');
+  it('renders tdiv as C division and // with the floor correction', () => {
+    const trunc = new MathOpNode('tdiv', new VariableNode('x', 'index'), new IntImmNode(4));
+    const floor = new MathOpNode('//', new VariableNode('x', 'index'), new IntImmNode(4));
+    expect(exprToC(trunc)).toBe('(x / 4)');
+    expect(exprToC(floor)).toContain('%');
   });
 
   it('renders nested expressions', () => {

@@ -915,8 +915,10 @@ export class WebGPUCodegen {
         if (node.op === '||') return `(${this._boolExpr(node.a)} || ${this._boolExpr(node.b)})`;
         const a = this._numericExpr(node.a);
         const b = this._numericExpr(node.b);
-        if (node.op === '//') return `(${a} / ${b})`;
-        if (node.op === '%') return `(${a} % ${b})`;
+        if (node.op === '//') return `(((${a}) - ((((${a}) % (${b})) + (${b})) % (${b}))) / (${b}))`;
+        if (node.op === '%') return `((((${a}) % (${b})) + (${b})) % (${b}))`;
+        if (node.op === 'tdiv') return `(${a} / ${b})`;
+        if (node.op === 'tmod') return `(${a} % ${b})`;
         return `(${a} ${node.op} ${b})`;
       }
       case 'CompareNode': return `(${this._numericExpr(node.a)} ${cCompareOp(node.direction)} ${this._numericExpr(node.b)})`;

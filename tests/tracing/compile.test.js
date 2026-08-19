@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   tensor, Linear, Sequential, ReLU, add, relu, sum, LSTM, GRU, TraceLevel,
 } from '../../src/index.js';
-import { compile, _traceCore } from '../../src/tracing/compile.js';
+import { compile, trace, _traceCore } from '../../src/tracing/compile.js';
 import { foldWeightParams } from '../../src/tracing/fold_params.js';
 import { tensorToContiguous } from '../../src/dispatcher/jit_dispatch.js';
 import { WasmTarget, CPUTarget, CUDATarget } from '../../src/backend/target.js';
@@ -385,4 +385,35 @@ describe('RNN modules compile without an explicit initial state', () => {
       });
     }
   }
+});
+
+describe('dynamic shape specs are honoured under either option spelling', () => {
+  const dynDim = (graph) => {
+    const fn = graph.functions().next().value;
+    return fn.inputTypes[0].shape;
+  };
+
+  it('trace accepts dynamic_shapes, the spelling compile documents', () => {
+    const x = tensor([[1, 2, 3], [4, 5, 6]]);
+    const snake = trace((t) => relu(t), [x], { dynamic_shapes: [new Set([0])] });
+    const camel = trace((t) => relu(t), [x], { dynamicShapes: [new Set([0])] });
+    const fixed = trace((t) => relu(t), [x]);
+
+    expect(dynDim(snake)).toEqual([-1, 3]);
+    expect(dynDim(camel)).toEqual([-1, 3]);
+    expect(dynDim(fixed)).toEqual([2, 3]);
+  });
+
+  it('a graph traced with dynamic_shapes serves batch sizes it never saw', async () => {
+    const mk = (rows) => tensor(Array.from({ length: rows }, (_, i) => [i, i + 1, i + 2]));
+    const fwd = (t) => sum(relu(t), 1);
+    const compiled = compile({ forward: fwd }, [mk(2)], { target: CPUTarget(), dynamic_shapes: [new Set([0])] });
+
+    for (const rows of [2, 5, 9]) {
+      const x = mk(rows);
+      const eager = Array.from(fwd(x).contiguous().data);
+      const out = Array.from((await compiled(x)).data);
+      expect(out).toEqual(eager);
+    }
+  });
 });

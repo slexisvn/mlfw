@@ -1,4 +1,5 @@
 import { withFuncAttrs } from '../func_attrs.js';
+import { floorDiv, floorMod } from '../../../util/divmod.js';
 import type { Buffer, BufferRegionLike } from './buffer.js';
 
 export const ForKind = Object.freeze({
@@ -398,8 +399,8 @@ export function mathOp(op: string, a: TirNode, b: TirNode | null): TirNode {
       case '+': return new IntImmNode(av + bv);
       case '-': return new IntImmNode(av - bv);
       case '*': return new IntImmNode(av * bv);
-      case '//': if (bv !== 0) return new IntImmNode(Math.trunc(av / bv)); break;
-      case '%': if (bv !== 0) return new IntImmNode(((av % bv) + bv) % bv); break;
+      case '//': if (bv !== 0) return new IntImmNode(floorDiv(av, bv)); break;
+      case '%': if (bv !== 0) return new IntImmNode(floorMod(av, bv)); break;
     }
   }
 

@@ -5,11 +5,29 @@ import { DispatchKey, DispatchKeySet } from '../dispatcher/dispatch_key.js';
 import { META_DEVICE } from '../tensor/types/device.js';
 import { computeStrides } from '../tensor/utils/shape_utils.js';
 import { DYNAMIC } from '../compiler/ir/graph/types.js';
-import type { DType } from '../tensor/types/dtype.js';
+import type { DType, NumericTypedArray } from '../tensor/types/dtype.js';
 import type { Tracer } from './tracer.js';
 import type { IRValueLike, SymbolicShape } from './types.js';
 
 const TRACING_KEY = DispatchKeySet.fromKey(DispatchKey.TRACING);
+
+function _formatShape(shape: readonly number[], symbolicShape: SymbolicShape): string {
+  const dims = shape.map((d, i) => {
+    if (d !== DYNAMIC) return String(d);
+    const sym = symbolicShape && i < symbolicShape.length ? symbolicShape[i] : null;
+    return typeof sym === 'string' ? sym : '?';
+  });
+  return `[${dims.join(', ')}]`;
+}
+
+const _NO_VALUE_CAUSE = 'The usual cause is data-dependent control flow: a branch or loop condition computed from tensor contents. A trace cannot capture that, because it records whichever path ran at trace time and silently reuses it for every later input.';
+
+const _NO_VALUE_REMEDY = 'Rewrite the decision as tensor math (where), or express the loop with a region-carrying op: scan (src/tracing/scan.ts) records the loop body as a graph region instead of reading a value. If what you need is a dimension rather than an element, trace with dynamic_shapes so the size stays symbolic.';
+
+function _valueUnavailable(op: string, shape: string, dtype: DType): never {
+  const what = `${op} is not available on a symbolic tensor: tracing records operations instead of computing them, so this tensor (shape ${shape}, dtype ${dtype}) carries no value to read.`;
+  throw new Error(`${what}\n${_NO_VALUE_CAUSE}\n${_NO_VALUE_REMEDY}`);
+}
 
 export class SymbolicTensor extends Tensor {
   private _irValue: IRValueLike;
@@ -59,5 +77,33 @@ export class SymbolicTensor extends Tensor {
 
   get isSymbolic(): boolean {
     return true;
+  }
+
+  get data(): NumericTypedArray | null {
+    return this._noValue('.data');
+  }
+
+  get storage(): Storage {
+    return this._noValue('.storage');
+  }
+
+  item(): number | bigint {
+    return this._noValue('item()');
+  }
+
+  toArray(): ReturnType<Tensor['toArray']> {
+    return this._noValue('toArray()');
+  }
+
+  _select(dim: number, index: number): Tensor {
+    return this._noValue(`_select(${dim}, ${index})`);
+  }
+
+  [Symbol.iterator](): Generator<Tensor> {
+    return this._noValue('iterating a tensor');
+  }
+
+  private _noValue(op: string): never {
+    return _valueUnavailable(op, _formatShape(super.shape, this._symbolicShape), this.dtype);
   }
 }

@@ -14,6 +14,7 @@ import type { CodegenFunc } from '../codegen_utils.js';
 import type { TargetFeatures } from '../target.js';
 
 const _HALF_DTYPES = new Set(['f16', 'bf16']);
+const INT_DIV_OPS = new Set(['/', '//', '%', 'tdiv', 'tmod']);
 
 type SimdOpKey = keyof SimdInfo;
 type InstrTable = Readonly<Record<string, string | undefined>>;
@@ -1085,8 +1086,10 @@ export class WasmCodegen {
 
     const isFloat = prefix === 'f32' || prefix === 'f64';
     if (!isFloat) {
-      if (node.op === '/' || node.op === '//') { this._emitIntDiv(node, prefix); return; }
-      if (node.op === '%') { this._emitIntRem(node, prefix); return; }
+      if (node.op === '/' || node.op === 'tdiv') { this._emitIntDiv(node, prefix, false); return; }
+      if (node.op === '//') { this._emitIntDiv(node, prefix, true); return; }
+      if (node.op === 'tmod') { this._emitIntRem(node, prefix, false); return; }
+      if (node.op === '%') { this._emitIntRem(node, prefix, true); return; }
     }
 
     this._emitCoercedTo(node.a, prefix);
@@ -1210,54 +1213,104 @@ export class WasmCodegen {
 
   _isIntDivNode(n: IRStmtNode): boolean {
     if (n.type !== 'MathOpNode' || !n.b) return false;
-    if (n.op !== '/' && n.op !== '//' && n.op !== '%') return false;
+    if (!INT_DIV_OPS.has(n.op)) return false;
     const prefix = this._joinPrefix(this._exprPrefix(n.a), this._exprPrefix(n.b));
     return prefix === 'i32' || prefix === 'i64';
   }
 
-  _emitIntDiv(node: MathOpNode, prefix: string): void {
+  _emitIntDivOperands(node: MathOpNode, prefix: string, a: string, b: string): void {
     const depth = this._intDivEmitDepth || 0;
-    const a = '_idiv_a' + depth, b = '_idiv_b' + depth;
     this._intDivEmitDepth = depth + 1;
     this._emitCoercedTo(node.a, prefix); this._emit('local.set $' + a);
     this._emitCoercedTo(node.b, prefix); this._emit('local.set $' + b);
     this._intDivEmitDepth = depth;
+  }
+
+  _emitSafeDivisor(prefix: string, a: string, b: string, guardOverflow: boolean): void {
     const MIN = prefix === 'i64' ? '-9223372036854775808' : '-2147483648';
-    this._emit('(local.get $' + a + ')');
     this._emit('(' + prefix + '.const 1)');
     this._emit('(local.get $' + b + ')');
     this._emit('(local.get $' + b + ')'); this._emit(prefix + '.eqz');
-    this._emit('(local.get $' + a + ')'); this._emit('(' + prefix + '.const ' + MIN + ')'); this._emit(prefix + '.eq');
-    this._emit('(local.get $' + b + ')'); this._emit('(' + prefix + '.const -1)'); this._emit(prefix + '.eq');
-    this._emit('i32.and');
-    this._emit('i32.or');
+    if (guardOverflow) {
+      this._emit('(local.get $' + a + ')'); this._emit('(' + prefix + '.const ' + MIN + ')'); this._emit(prefix + '.eq');
+      this._emit('(local.get $' + b + ')'); this._emit('(' + prefix + '.const -1)'); this._emit(prefix + '.eq');
+      this._emit('i32.and');
+      this._emit('i32.or');
+    }
     this._emit('select');
-    this._emit(prefix + '.div_s');
-    this._emit('local.set $' + a);
+  }
+
+  _emitZeroWhenDivisorZero(prefix: string, value: string, b: string): void {
     this._emit('(' + prefix + '.const 0)');
-    this._emit('(local.get $' + a + ')');
+    this._emit('(local.get $' + value + ')');
     this._emit('(local.get $' + b + ')'); this._emit(prefix + '.eqz');
     this._emit('select');
   }
 
-  _emitIntRem(node: MathOpNode, prefix: string): void {
-    const depth = this._intDivEmitDepth || 0;
-    const a = '_idiv_a' + depth, b = '_idiv_b' + depth;
-    this._intDivEmitDepth = depth + 1;
-    this._emitCoercedTo(node.a, prefix); this._emit('local.set $' + a);
-    this._emitCoercedTo(node.b, prefix); this._emit('local.set $' + b);
-    this._intDivEmitDepth = depth;
+  _emitSignsDifferAndNonZero(prefix: string, a: string, b: string, r: string): void {
     this._emit('(local.get $' + a + ')');
-    this._emit('(' + prefix + '.const 1)');
     this._emit('(local.get $' + b + ')');
-    this._emit('(local.get $' + b + ')'); this._emit(prefix + '.eqz');
-    this._emit('select');
-    this._emit(prefix + '.rem_s');
-    this._emit('local.set $' + a);
+    this._emit(prefix + '.xor');
     this._emit('(' + prefix + '.const 0)');
+    this._emit(prefix + '.lt_s');
+    this._emit('(local.get $' + r + ')');
+    this._emit(prefix + '.eqz');
+    this._emit('i32.eqz');
+    this._emit('i32.and');
+  }
+
+  _emitIntDiv(node: MathOpNode, prefix: string, floor: boolean): void {
+    const depth = this._intDivEmitDepth || 0;
+    const a = '_idiv_a' + depth, b = '_idiv_b' + depth, r = '_idiv_r' + depth;
+    this._emitIntDivOperands(node, prefix, a, b);
+
     this._emit('(local.get $' + a + ')');
-    this._emit('(local.get $' + b + ')'); this._emit(prefix + '.eqz');
-    this._emit('select');
+    this._emitSafeDivisor(prefix, a, b, true);
+    this._emit(prefix + '.div_s');
+    this._emit('local.set $' + r);
+
+    if (floor) {
+      this._emit('(local.get $' + r + ')');
+      this._emit('(local.get $' + r + ')');
+      this._emit('(local.get $' + b + ')');
+      this._emit(prefix + '.mul');
+      this._emit('local.set $' + r);
+      this._emit('(local.get $' + a + ')');
+      this._emit('(local.get $' + r + ')');
+      this._emit(prefix + '.sub');
+      this._emit('local.set $' + r);
+      this._emit('(' + prefix + '.const 1)');
+      this._emit('(' + prefix + '.const 0)');
+      this._emitSignsDifferAndNonZero(prefix, a, b, r);
+      this._emit('select');
+      this._emit(prefix + '.sub');
+      this._emit('local.set $' + r);
+    }
+
+    this._emitZeroWhenDivisorZero(prefix, r, b);
+  }
+
+  _emitIntRem(node: MathOpNode, prefix: string, floor: boolean): void {
+    const depth = this._intDivEmitDepth || 0;
+    const a = '_idiv_a' + depth, b = '_idiv_b' + depth, r = '_idiv_r' + depth;
+    this._emitIntDivOperands(node, prefix, a, b);
+
+    this._emit('(local.get $' + a + ')');
+    this._emitSafeDivisor(prefix, a, b, false);
+    this._emit(prefix + '.rem_s');
+    this._emit('local.set $' + r);
+
+    if (floor) {
+      this._emit('(local.get $' + r + ')');
+      this._emit('(local.get $' + b + ')');
+      this._emit('(' + prefix + '.const 0)');
+      this._emitSignsDifferAndNonZero(prefix, a, b, r);
+      this._emit('select');
+      this._emit(prefix + '.add');
+      this._emit('local.set $' + r);
+    }
+
+    this._emitZeroWhenDivisorZero(prefix, r, b);
   }
 
   _prescanIntMinMax(root: IRStmtNode): void {
@@ -1276,6 +1329,7 @@ export class WasmCodegen {
         const t = wasmType(this._joinPrefix(this._exprPrefix((n as unknown as MathOpNode).a), this._exprPrefix((n as unknown as MathOpNode).b)));
         this._ensureLocal('_idiv_a' + scope.divDepth, t);
         this._ensureLocal('_idiv_b' + scope.divDepth, t);
+        this._ensureLocal('_idiv_r' + scope.divDepth, t);
         return { depth: scope.depth, divDepth: scope.divDepth + 1 };
       }
       return scope;

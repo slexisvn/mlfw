@@ -146,7 +146,7 @@ describe('RewriteSimplify splits an affine index by its divisor', () => {
   it('refuses to split when the remainder can reach the divisor', () => {
     const s = new RewriteSimplify(analyzerForLoops(new Map([['io', 4], ['ii', 64]])));
     const out = s.simplify(fmod(add(mul(v('io'), c(32)), v('ii')), c(32)));
-    expect(out).toMatchObject({ type: 'MathOpNode', op: '%' });
+    expect(out).toMatchObject({ type: 'MathOpNode', op: 'tmod' });
   });
 
   it('refuses to split when the inner variable is unbounded', () => {

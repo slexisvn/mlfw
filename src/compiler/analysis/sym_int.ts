@@ -1,3 +1,5 @@
+import { floorDiv, floorMod } from '../../util/divmod.js';
+
 const SYM_INT_METHOD_NAMES: Readonly<Record<string, string>> = {
   ceildiv: 'ceilDiv'
 };
@@ -63,7 +65,7 @@ export class SymInt {
 
   static div(a: SymExpr, b: SymExpr): SymExpr {
     if (b === 0) throw new Error('SymInt.div: division by zero');
-    if (typeof a === 'number' && typeof b === 'number') return Math.floor(a / b);
+    if (typeof a === 'number' && typeof b === 'number') return floorDiv(a, b);
     if (a === 0) return 0;
     if (b === 1) return a;
     if (SymInt.equals(a, b)) return 1;
@@ -72,7 +74,7 @@ export class SymInt {
 
   static mod(a: SymExpr, b: SymExpr): SymExpr {
     if (b === 0) throw new Error('SymInt.mod: modulo by zero');
-    if (typeof a === 'number' && typeof b === 'number') return ((a % b) + b) % b;
+    if (typeof a === 'number' && typeof b === 'number') return floorMod(a, b);
     if (a === 0) return 0;
     if (b === 1) return 0;
     if (SymInt.equals(a, b)) return 0;

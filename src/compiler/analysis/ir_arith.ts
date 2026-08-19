@@ -14,7 +14,8 @@ type ComparePredicates = Readonly<Record<string, BoundPredicate | undefined>>;
 
 export type DivModSplit = { quotient: TirNode; remainder: TirNode };
 
-const MATHOP_TO_SYM: Readonly<Record<string, SymBinaryName | undefined>> = { '+': 'add', '-': 'sub', '*': 'mul', '//': 'div', '%': 'mod' };
+const MATHOP_TO_SYM: Readonly<Record<string, SymBinaryName | undefined>> = { '+': 'add', '-': 'sub', '*': 'mul', '//': 'div', '%': 'mod', 'tdiv': 'div', 'tmod': 'mod' };
+const DIVMOD_MATHOPS = new Set(['//', '%', 'tdiv', 'tmod']);
 const COMPARE_MATHOPS = new Set(['<', '<=', '>', '>=', '==', '!=']);
 const MATHOP_TO_DIRECTION: Readonly<Record<string, string>> = { '<': 'lt', '<=': 'le', '>': 'gt', '>=': 'ge', '==': 'eq', '!=': 'ne' };
 
@@ -41,7 +42,7 @@ export function irToSymInt(node: TirNode | number | null | undefined): SymExpr |
       if (a === null) return null;
       const b = irToSymInt(math.b);
       if (b === null) return null;
-      if (math.op === '//' || math.op === '%') {
+      if (DIVMOD_MATHOPS.has(math.op)) {
         if (typeof b !== 'number' || b <= 0) return null;
       }
       return SymInt[sym](a, b);
@@ -161,6 +162,14 @@ function affineDivMod(analyzer: Analyzer, node: TirNode, divisor: number): DivMo
   return { quotient: quotient(), remainder: remainderNode };
 }
 
+function nonNegativeDivMod(analyzer: Analyzer, node: MathOpNode): MathOpNode | null {
+  if (node.op !== '//' && node.op !== '%') return null;
+  const divisor = node.b as IntImmNode | null;
+  if (!divisor || divisor.type !== 'IntImmNode' || divisor.value <= 0) return null;
+  if (!boundWithin(analyzer, node.a, 0, Infinity)) return null;
+  return new MathOpNode(node.op === '//' ? 'tdiv' : 'tmod', node.a, node.b as TirNode);
+}
+
 function boundWithin(analyzer: Analyzer, node: TirNode, lo: number, hi: number): boolean {
   const b = irBound(analyzer, node);
   if (b === null) return false;
@@ -216,6 +225,8 @@ export class RewriteSimplify {
       }
       const split = affineDivMod(this.analyzer, folded.a, c);
       if (split) return folded.op === '//' ? split.quotient : split.remainder;
+      const truncated = nonNegativeDivMod(this.analyzer, folded);
+      if (truncated) return truncated;
     }
     if (COMPARE_MATHOPS.has(folded.op)) {
       if (proveTrue(this.analyzer, folded)) return new IntImmNode(1);

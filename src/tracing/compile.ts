@@ -52,6 +52,10 @@ function _ensureTracing(): void {
   }
 }
 
+export function resolveDynamicShapes(opts?: CompileOptions): DynamicShapes {
+  return opts?.dynamicShapes ?? opts?.dynamic_shapes ?? null;
+}
+
 function _normalizeDynamicShapes(dynamicShapes: DynamicShapes, exampleInputs: readonly Tensor[]): (Set<number> | null)[] {
   if (!dynamicShapes) return new Array(exampleInputs.length).fill(null);
 
@@ -76,7 +80,7 @@ export function _traceCore(fn: TraceFunction, exampleInputs: readonly Tensor[], 
 
   const name = opts?.name || fn.name || 'traced';
   const tracer = new Tracer(name);
-  const dynamicShapes = _normalizeDynamicShapes(opts?.dynamicShapes, exampleInputs);
+  const dynamicShapes = _normalizeDynamicShapes(resolveDynamicShapes(opts), exampleInputs);
 
   for (let i = 0; i < exampleInputs.length; i++) {
     tracer.createInput(exampleInputs[i].shape, exampleInputs[i].dtype, dynamicShapes[i]);
@@ -276,7 +280,7 @@ export function compile(model: CompilableModel, exampleInputs?: Tensor[], opts: 
 
   const target = opts?.target ?? CPUTarget();
   const compilerOpts: Record<string, unknown> & { target: unknown } = { target, ...opts };
-  const dynamicShapes = opts?.dynamic_shapes || null;
+  const dynamicShapes = resolveDynamicShapes(opts);
   const shapeBuckets = opts?.shapeBuckets || null;
   const foldWeights = opts?.foldWeights ?? opts?.quantization?.foldWeights ?? false;
   const tuneOptimizations = opts?.tuneOptimizations ?? false;

@@ -75,14 +75,18 @@ describe('WebGPUCodegen._exprToWGSL', () => {
     expect(exprToWGSL(neg)).toBe('(-x)');
   });
 
-  it('renders integer division', () => {
-    const div = new MathOpNode('//', new VariableNode('x', 'index'), new IntImmNode(4));
+  it('renders tdiv and tmod as plain WGSL division and remainder', () => {
+    const div = new MathOpNode('tdiv', new VariableNode('x', 'index'), new IntImmNode(4));
+    const mod = new MathOpNode('tmod', new VariableNode('x', 'index'), new IntImmNode(4));
     expect(exprToWGSL(div)).toBe('(x / 4)');
+    expect(exprToWGSL(mod)).toBe('(x % 4)');
   });
 
-  it('renders modulo', () => {
+  it('renders // and % with the floor correction', () => {
+    const div = new MathOpNode('//', new VariableNode('x', 'index'), new IntImmNode(4));
     const mod = new MathOpNode('%', new VariableNode('x', 'index'), new IntImmNode(4));
-    expect(exprToWGSL(mod)).toBe('(x % 4)');
+    expect(exprToWGSL(div)).toContain('%');
+    expect(exprToWGSL(mod)).toContain('+ (4)');
   });
 
   it('renders nested expressions', () => {

@@ -473,7 +473,9 @@ export class CPUCodegen {
               else if (node.op === '*' && b === '1') { vals.push(a as string); }
               else if (node.op === '*' && a === '1') { vals.push(b as string); }
               else if (node.op === '%') vals.push(`((${a} % ${b} + ${b}) % ${b})`);
-              else if (node.op === '//') vals.push(`((${a} / ${b}) | 0)`);
+              else if (node.op === '//') vals.push(`Math.floor(${a} / ${b})`);
+              else if (node.op === 'tmod') vals.push(`(${a} % ${b})`);
+              else if (node.op === 'tdiv') vals.push(`((${a} / ${b}) | 0)`);
               else vals.push(`(${a} ${node.op} ${b})`);
             }
           }

@@ -85,9 +85,11 @@ describe('CPUCodegen._exprToJS', () => {
     expect(exprToJS(node)).toBe('((x % 4 + 4) % 4)');
   });
 
-  it('renders integer division with truncation', () => {
-    const node = new MathOpNode('//', new VariableNode('x', 'index'), new IntImmNode(4));
-    expect(exprToJS(node)).toBe('((x / 4) | 0)');
+  it('renders // as floor division and tdiv as truncating division', () => {
+    const floor = new MathOpNode('//', new VariableNode('x', 'index'), new IntImmNode(4));
+    const trunc = new MathOpNode('tdiv', new VariableNode('x', 'index'), new IntImmNode(4));
+    expect(exprToJS(floor)).toBe('Math.floor(x / 4)');
+    expect(exprToJS(trunc)).toBe('((x / 4) | 0)');
   });
 
   it('simplifies x + 0 → x', () => {
