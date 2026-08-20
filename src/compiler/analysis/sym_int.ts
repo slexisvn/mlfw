@@ -15,6 +15,56 @@ export type SymExpr = number | SymInt;
 type BinarySymOp = (a: SymExpr, b: SymExpr) => SymExpr;
 type UnarySymOp = (a: SymExpr) => SymExpr;
 
+function mulFactors(expr: SymExpr, out: SymExpr[]): SymExpr[] {
+  if (expr instanceof SymInt && expr.type === 'mul') {
+    mulFactors(expr.args[0], out);
+    mulFactors(expr.args[1], out);
+    return out;
+  }
+  out.push(expr);
+  return out;
+}
+
+function splitProduct(expr: SymExpr): { constant: number; symbols: SymExpr[] } {
+  let constant = 1;
+  const symbols: SymExpr[] = [];
+  for (const f of mulFactors(expr, [])) {
+    if (typeof f === 'number') constant *= f;
+    else symbols.push(f);
+  }
+  return { constant, symbols };
+}
+
+function rebuildProduct(constant: number, symbols: readonly SymExpr[]): SymExpr {
+  let out: SymExpr = constant;
+  for (const s of symbols) out = SymInt.mul(out, s);
+  return out;
+}
+
+function cancelProductDiv(a: SymExpr, b: SymExpr): SymExpr {
+  const num = splitProduct(a);
+  const den = splitProduct(b);
+  let cancelled = false;
+
+  for (let i = den.symbols.length - 1; i >= 0; i--) {
+    const at = num.symbols.findIndex(s => SymInt.equals(s, den.symbols[i]));
+    if (at < 0) continue;
+    num.symbols.splice(at, 1);
+    den.symbols.splice(i, 1);
+    cancelled = true;
+  }
+  if (den.constant !== 1 && num.constant % den.constant === 0) {
+    num.constant /= den.constant;
+    den.constant = 1;
+    cancelled = true;
+  }
+  if (!cancelled) return new SymInt('div', null, [a, b]);
+
+  const numerator = rebuildProduct(num.constant, num.symbols);
+  if (den.constant === 1 && den.symbols.length === 0) return numerator;
+  return new SymInt('div', null, [numerator, rebuildProduct(den.constant, den.symbols)]);
+}
+
 export class SymInt {
   type: SymIntOp;
   name: string | null;
@@ -69,7 +119,7 @@ export class SymInt {
     if (a === 0) return 0;
     if (b === 1) return a;
     if (SymInt.equals(a, b)) return 1;
-    return new SymInt('div', null, [a, b]);
+    return cancelProductDiv(a, b);
   }
 
   static mod(a: SymExpr, b: SymExpr): SymExpr {

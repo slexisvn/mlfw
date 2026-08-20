@@ -136,6 +136,17 @@ describe('dynamic dimensions stay symbolic unless the model reads them', () => {
     expect(core.outputSymShapes[0][0]).toBe('s0');
     expect(core.outputTypes[0].shape[0]).toBe(-1);
   });
+
+  it('an inferred reshape dimension stays symbolic instead of multiplying the dynamic sentinel', () => {
+    const core = traceDynamic((x) => nn.F.relu(ops.reshape(x, [-1])), [randomTensor(rng(18), [4, 3])]);
+    expect(core.outputTypes[0].shape).toEqual([-1]);
+    expect(core.shapeEnv.hintOf(core.outputSymShapes[0][0])).toBe(12);
+    expect(eqGuardsOnSymbols(core.shapeEnv).length).toBe(0);
+
+    const kept = traceDynamic((x) => ops.reshape(x, [-1, 3]), [randomTensor(rng(19), [4, 3])]);
+    expect(kept.outputTypes[0].shape).toEqual([-1, 3]);
+    expect(kept.outputSymShapes[0][0]).toBe('s0');
+  });
 });
 
 describe('a specialized model recompiles for a new batch size', () => {
@@ -151,6 +162,22 @@ describe('a specialized model recompiles for a new batch size', () => {
       const eager = flat(await fwd(...inputs));
       const got = flat(await compiled(...inputs));
       const { worst, at } = maxRelErr(eager, got);
+      expect(worst, `batch ${batch} idx ${at}`).toBeLessThan(TOL);
+    }
+  });
+
+  it('a reshape with an inferred dimension follows the batch size', async () => {
+    const fwd = (x) => nn.F.relu(ops.reshape(x, [-1]));
+    const compiled = compile({ forward: fwd }, [randomTensor(rng(20), [4, 3])], {
+      target: CPUTarget(), dynamic_shapes: [new Set([0])],
+    });
+    if (compiled._ready) await compiled._ready;
+
+    for (const batch of [4, 6, 1]) {
+      const inputs = [randomTensor(rng(300 + batch), [batch, 3])];
+      const got = await compiled(...inputs);
+      expect(got.shape).toEqual([batch * 3]);
+      const { worst, at } = maxRelErr(flat(await fwd(...inputs)), flat(got));
       expect(worst, `batch ${batch} idx ${at}`).toBeLessThan(TOL);
     }
   });

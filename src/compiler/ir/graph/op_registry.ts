@@ -64,7 +64,7 @@ export type InferResultTypesFn = (
   explicitResultTypes: readonly IRType[] | null,
 ) => readonly IRType[] | null;
 
-export type SymbolicDim = Dim | null;
+export type SymbolicDim = Dim | string | null;
 export type PropagatedShape = readonly SymbolicDim[];
 
 export type PropagateSymbolicShapesFn = (

@@ -1,7 +1,8 @@
-import { TensorType, typeToString } from './types.js';
+import { TensorType, DYNAMIC, typeToString } from './types.js';
 import { Value } from './value.js';
 import { registry } from './ops.js';
 import { verifyTraits } from './trait_verifier.js';
+import type { IRType } from './types.js';
 import type { Block } from './block.js';
 import type { Operation } from './operation.js';
 import type { GraphFunction } from './function.js';
@@ -61,6 +62,9 @@ export function verifyFunction(func: GraphFunction, errors: VerificationError[] 
     }
   }
 
+  for (let i = 0; i < func.inputTypes.length; i++) verifyShape(func.inputTypes[i], `Input ${i}`, null, func, errors);
+  for (let i = 0; i < func.outputTypes.length; i++) verifyShape(func.outputTypes[i], `Output ${i}`, null, func, errors);
+
   const definedValues = new Set<Value>();
   for (const arg of func.entryBlock.arguments) {
     definedValues.add(arg);
@@ -104,6 +108,19 @@ export function verifyFunction(func: GraphFunction, errors: VerificationError[] 
   }
 
   return errors;
+}
+
+function verifyShape(type: IRType, label: string, op: Operation | null, func: GraphFunction, errors: VerificationError[]): void {
+  if (!(type instanceof TensorType)) return;
+  for (let i = 0; i < type.shape.length; i++) {
+    const d = type.shape[i];
+    if (typeof d === 'number' && d < 0 && d !== DYNAMIC) {
+      errors.push(new VerificationError(
+        `${label} dimension ${i} is ${d}: only ${DYNAMIC} denotes an unknown extent (${typeToString(type)})`,
+        op, func
+      ));
+    }
+  }
 }
 
 function collectScopeDefs(block: Block, scope: Set<Value>): void {
@@ -199,10 +216,12 @@ function verifyOperation(op: Operation, func: GraphFunction, definedValues: Set<
     const result = op.getResult(i);
     if (!result) {
       errors.push(new VerificationError(`Result ${i} is null`, op, func));
+      continue;
     }
-    if (result && result.definingOp !== op) {
+    if (result.definingOp !== op) {
       errors.push(new VerificationError(`Result ${i} definingOp mismatch`, op, func));
     }
+    verifyShape(result.type, `Result ${i}`, op, func, errors);
   }
 
   const opDef = registry.get(op.opName);

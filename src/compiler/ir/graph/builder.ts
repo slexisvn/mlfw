@@ -39,8 +39,10 @@ function alignSymbolicShape(resultShape: Shape, operandShapes: ReadonlyMap<Value
     out[i] = DYNAMIC;
     for (const symShape of operandShapes.values()) {
       const srcIdx = i - (resultShape.length - symShape.length);
-      if (srcIdx >= 0 && srcIdx < symShape.length && typeof symShape[srcIdx] === 'string') {
-        out[i] = symShape[srcIdx];
+      if (srcIdx < 0 || srcIdx >= symShape.length) continue;
+      const sym = symShape[srcIdx];
+      if (sym !== null && sym !== undefined && typeof sym !== 'number') {
+        out[i] = sym;
         break;
       }
     }

@@ -30,7 +30,7 @@ Terms are grouped by what they describe: data, programs, transformations, execut
 
 **IR** (intermediate representation). A data structure representing a program, designed to be analysed and transformed rather than read or executed. This compiler has three: Graph IR, TIR, LIR (Chapter 6).
 
-**Operation** (op). One node of the graph: a name, operands, results, and attributes. `add`, `dot`, `reduce`, `fusion` are operations. Registered in [`src/compiler/ir/graph/ops/`](../../../src/compiler/ir/graph/ops/); 64 of them as of 2026-08-19.
+**Operation** (op). One node of the graph: a name, operands, results, and attributes. `add`, `dot`, `reduce`, `fusion` are operations. Registered in [`src/compiler/ir/graph/ops/`](../../../src/compiler/ir/graph/ops/); 96 of them as of 2026-08-19.
 
 **Operand / result.** The inputs and outputs of an operation. In `%7 = add(%6, %2)`, the operands are `%6` and `%2` and the single result is `%7`.
 
@@ -129,4 +129,4 @@ Some words in circulation are ambiguous enough to be worth naming and setting as
 
 **Part I ends here.** You have the motivation (Chapter 4), the mechanism that makes it possible (Chapter 5), the structure that organizes it (Chapter 6), and the vocabulary (Chapter 7).
 
-**Next:** Part II — Representing programs, which builds the Graph IR properly: values and SSA, the object model, types, operations as a dialect, verification, and the textual format.
+**Next:** [Part II — Representing programs](../../part2/README.md), which builds the Graph IR properly: values and SSA, the object model, types, operations as a dialect, verification, and the textual format.

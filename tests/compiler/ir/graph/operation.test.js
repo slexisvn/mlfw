@@ -82,3 +82,100 @@ describe('IRBuilder result-type inference errors carry operand context', () => {
     expect(err.message).toContain('[4]:f32');
   });
 });
+
+describe('the use list is maintained by construction', () => {
+  it('records one use per operand position and drops it on erase', () => {
+    const t = f32([4]);
+    const func = buildFunction('uses', [t, t], [t], (b, args) => {
+      const sum = b.add(args[0], args[1]);
+      b.returnOp([sum.getResult(0)]);
+    });
+    const add = func.findOp(o => o.opName === 'add');
+    const [lhs, rhs] = func.args;
+
+    expect(lhs.useCount).toBe(1);
+    expect(lhs.getUsers()).toEqual([add]);
+    expect(rhs.getUsers()).toEqual([add]);
+
+    const self = new Operation('mul', [lhs, lhs], [t]);
+    expect(lhs.useCount).toBe(3);
+    self.dropAllOperands();
+    expect(lhs.useCount).toBe(1);
+  });
+
+  it('erase refuses while a result still has users, and succeeds once it does not', () => {
+    const t = f32([4]);
+    const func = buildFunction('erase', [t, t], [t], (b, args) => {
+      const sum = b.add(args[0], args[1]);
+      b.returnOp([sum.getResult(0)]);
+    });
+    const add = func.findOp(o => o.opName === 'add');
+
+    expect(() => add.erase()).toThrow(/result 0 still has uses/);
+
+    add.getResult(0).replaceAllUsesWith(func.args[0]);
+    expect(add.getResult(0).hasUses).toBe(false);
+    add.erase();
+    expect(func.findOp(o => o.opName === 'add')).toBe(null);
+  });
+
+  it('replaceAllUsesWith rewires every consumer and bumps the function version', () => {
+    const t = f32([4]);
+    const func = buildFunction('rauw', [t, t], [t], (b, args) => {
+      const sum = b.add(args[0], args[1]);
+      const twice = b.mul(sum.getResult(0), sum.getResult(0));
+      b.returnOp([twice.getResult(0)]);
+    });
+    const add = func.findOp(o => o.opName === 'add');
+    const mul = func.findOp(o => o.opName === 'mul');
+    const before = func.version;
+
+    expect(add.getResult(0).useCount).toBe(2);
+    add.getResult(0).replaceAllUsesWith(func.args[0]);
+
+    expect(mul.getOperand(0)).toBe(func.args[0]);
+    expect(mul.getOperand(1)).toBe(func.args[0]);
+    expect(add.getResult(0).useCount).toBe(0);
+    expect(func.args[0].useCount).toBe(3);
+    expect(func.version).toBeGreaterThan(before);
+  });
+});
+
+describe('structural identity is what CSE compares', () => {
+  const t = f32([4]);
+
+  function twoOps(opName) {
+    let ops = null;
+    buildFunction('pair', [t, t], [t], (b, args) => {
+      const first = b._buildOp(opName, [args[0], args[1]], [t]);
+      const second = b._buildOp(opName, [args[1], args[0]], [t]);
+      ops = [first, second];
+      b.returnOp([first.getResult(0)]);
+    });
+    return ops;
+  }
+
+  it('a commutative op is equal to itself with the operands swapped', () => {
+    const [a, b] = twoOps('add');
+    expect(a.structuralEquals(b)).toBe(true);
+    expect(a.structuralHash()).toBe(b.structuralHash());
+  });
+
+  it('a non-commutative op is not', () => {
+    const [a, b] = twoOps('sub');
+    expect(a.structuralEquals(b)).toBe(false);
+  });
+
+  it('two operations carrying regions are never structurally equal', () => {
+    const region = () => {
+      const r = new Region();
+      const block = new Block([t]);
+      r.addBlock(block);
+      block.pushOp(new Operation('neg', [block.arguments[0]], [t]));
+      return r;
+    };
+    const a = new Operation('fusion', [], [t], null, [region()]);
+    const b = new Operation('fusion', [], [t], null, [region()]);
+    expect(a.structuralEquals(b)).toBe(false);
+  });
+});

@@ -52,13 +52,13 @@ You have already seen the second and the fifth, in Chapter 2's labs. The middle 
 
 Sizes measured 2026-08-19. They tell you where the weight of the system is, which is a useful thing to know before you go exploring.
 
-### `src/compiler/` — 36,152 lines
+### `src/compiler/` — 36,166 lines
 
 | Directory | Files | Lines | What lives there |
 |---|---:|---:|---|
-| [`ir/`](../../../src/compiler/ir/) | 51 | 9,034 | The three representations: their node types, verifiers, printers, parser |
+| [`ir/`](../../../src/compiler/ir/) | 51 | 9,035 | The three representations: their node types, verifiers, printers, parser |
 | [`passes/`](../../../src/compiler/passes/) | 70 | 12,057 | Every transformation: fusion, simplification, lowering, memory planning, quantization |
-| [`analysis/`](../../../src/compiler/analysis/) | 20 | 3,704 | Everything that computes facts without changing anything: use-def, liveness, dependence, index arithmetic |
+| [`analysis/`](../../../src/compiler/analysis/) | 20 | 3,717 | Everything that computes facts without changing anything: use-def, liveness, dependence, index arithmetic |
 | [`schedule/`](../../../src/compiler/schedule/) | 12 | 3,641 | The scheduling language — how a loop nest is reshaped, and the legality rules that constrain it |
 | [`autotune/`](../../../src/compiler/autotune/) | 22 | 3,601 | Search over schedules: sketches, cost models, evolutionary search, the tuning database |
 | [`ad/`](../../../src/compiler/ad/) | 17 | 2,636 | Automatic differentiation: VJP rules, backward graph construction, checkpointing |
@@ -70,9 +70,9 @@ If you read only one directory to understand how the whole thing is wired, read 
 
 | Directory | Lines | Role |
 |---|---:|---|
-| [`src/backend/`](../../../src/backend/) | 5,370 | Four code generators (CPU, WASM, CUDA, WebGPU) plus target descriptions |
+| [`src/backend/`](../../../src/backend/) | 5,431 | Four code generators (CPU, WASM, CUDA, WebGPU) plus target descriptions |
 | [`src/runtime/`](../../../src/runtime/) | 4,512 | Loading and running generated kernels; device memory; the Node/browser split |
-| [`src/tracing/`](../../../src/tracing/) | 1,791 | Turning eager user code into a Graph IR module; dynamic shapes; guards |
+| [`src/tracing/`](../../../src/tracing/) | 1,841 | Turning eager user code into a Graph IR module; dynamic shapes; guards |
 | [`src/dispatcher/`](../../../src/dispatcher/) | 1,616 | Choosing an implementation per operation and device, PyTorch-style |
 | [`src/tensor/`](../../../src/tensor/), [`src/kernels/`](../../../src/kernels/) | 5,079 | Eager execution — the baseline the compiler is measured against |
 | `src/nn/`, `src/optim/`, `src/lightning/`, `src/data/` | 6,974 | Model building and training. Callers of everything above; not subjects of this book |
@@ -253,7 +253,7 @@ A few facts worth knowing before you read source, all measured 2026-08-19:
 
 - **TypeScript throughout, `strict` mode, no `any`.** Types are part of the documentation: a function signature usually tells you what an argument is without reading further.
 - **Tests are the specification.** 302 test files, 5,131 tests for the default projects. Behaviour asserted by a test is behaviour you can rely on.
-- **Almost no comments, by design.** 38 comment lines in 67,708 lines of source. The codebase explains itself through naming and structure rather than prose. That is a deliberate choice, and it is part of why this book exists: the *what* lives in the code, the *why* lives here.
+- **Almost no comments, by design.** 38 comment lines in 67,852 lines of source. The codebase explains itself through naming and structure rather than prose. That is a deliberate choice, and it is part of why this book exists: the *what* lives in the code, the *why* lives here.
 - **Registries everywhere.** Operations, lowering rules, VJP rules, passes and code generators are all registered into tables rather than hard-wired. Chapter 11 explains the pattern; it is the reason the compiler can be extended without editing its core.
 
 ## 3.8 Read the tests
@@ -269,4 +269,4 @@ From here the book descends the diagram. Part I asks why any of this machinery i
 
 ---
 
-**Next:** Part I — Why machine learning needs a compiler, which returns to the 1.21× from Chapter 2 and explains exactly where the time went.
+**Next:** Part I — Why machine learning needs a compiler, which returns to Chapter 2's four speedups — 2.57× and 1.08×, then 14.54× and 4.57× for the same twelve operations with two `tanh` calls removed — and explains exactly where the time went.

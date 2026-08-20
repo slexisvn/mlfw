@@ -30,5 +30,8 @@ await compiled._ready;
 const source = compiled.source();
 console.log('\n=== what survived compilation ===');
 console.log(source);
-console.log(`unused weight buffers still in the signature, never read: ` +
-            `${['buf_3', 'buf_5'].filter(b => source.split('\n').slice(2).join('\n').includes(b)).length === 0 ? 'yes' : 'no'}`);
+const signature = source.match(/function \w+\(([^)]*)\)/)[1].split(', ');
+const body = source.slice(source.indexOf('{'));
+console.log(`
+parameters in the signature : ${signature.length}`);
+console.log(`never read in the body      : ${signature.filter(b => !body.includes(b)).join(', ')}`);

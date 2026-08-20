@@ -75,6 +75,7 @@ The remaining projects are hardware-gated:
 | `npm run test:cuda` | NVIDIA GPU + CUDA runtime | Test blocks skip |
 | `npm run test:webgpu` | Chrome/Chromium | Test blocks skip |
 | `npm run test:stress` | Time and memory | Slow; not part of the default check |
+| `npm run test:perf` | Time | Asserts the *shape* of scaling, not absolute timings; Chapter 4 points you at it |
 
 Prefer `npm run test:unit` and `npm run test:e2e` as your everyday check. Plain `npm test` also includes the WebGPU project, which will report failures on a machine with no browser available — a fact about your machine, not about the code.
 

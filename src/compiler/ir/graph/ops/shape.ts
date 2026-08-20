@@ -1,8 +1,18 @@
 import { OpDef, OpTrait } from '../op_registry.js';
 import type { OpAttrRecord, OpRegistry, SymbolicDim } from '../op_registry.js';
-import { TensorType, DYNAMIC } from '../types.js';
-import type { AttrValue } from '../types.js';
+import { TensorType, DYNAMIC, resolveInferredDims, shapeProduct } from '../types.js';
+import { SymInt } from '../../../analysis/sym_int.js';
+import type { AttrValue, Dim, Shape } from '../types.js';
 import * as pat from '../patterns.js';
+
+function namedDimToSym(dim: SymbolicDim): Dim {
+  if (typeof dim === 'string') return SymInt.var(dim);
+  return dim === null ? DYNAMIC : dim;
+}
+
+function symToNamedDim(dim: Dim): SymbolicDim {
+  return dim instanceof SymInt && dim.type === 'var' ? dim.name as string : dim;
+}
 
 export function register(registry: OpRegistry) {
   registry.register(new OpDef({
@@ -112,9 +122,9 @@ export function register(registry: OpRegistry) {
       if (operandTypes.length !== 1) return null;
       const inp = operandTypes[0];
       if (!(inp instanceof TensorType)) return null;
-      const shape = (attrs.get ? attrs.get('new_shape') : (attrs as unknown as OpAttrRecord).new_shape) as readonly number[];
+      const shape = (attrs.get ? attrs.get('new_shape') : (attrs as unknown as OpAttrRecord).new_shape) as Shape;
       if (!shape) return null;
-      return [new TensorType(shape, inp.dtype)];
+      return [new TensorType(resolveInferredDims(shape, inp.shape), inp.dtype)];
     },
     verify(op) {
       const errs = [];
@@ -122,16 +132,17 @@ export function register(registry: OpRegistry) {
       if (op.numOperands !== 1) errs.push('reshape expects 1 operand');
       if (errs.length === 0) {
         const inp = op.getOperand(0).type;
-        const newShape = op.getAttr<readonly number[]>('new_shape')!;
-        if (inp instanceof TensorType && inp.isFullyStatic) {
-          const dynCount = newShape.filter(d => d === DYNAMIC).length;
-          if (dynCount > 1) errs.push('reshape can have at most one dynamic dimension');
-          if (dynCount === 0) {
-            const inNumel = inp.numel();
-            const outNumel = newShape.reduce((a, b) => a * b, 1);
-            if (inNumel !== outNumel) {
-              errs.push(`reshape numel mismatch: input ${inNumel} vs output ${outNumel}`);
-            }
+        const newShape = op.getAttr<Shape>('new_shape')!;
+        const dynCount = newShape.filter(d => d === DYNAMIC).length;
+        if (dynCount > 1) {
+          errs.push('reshape can have at most one dynamic dimension');
+        } else if (inp instanceof TensorType && inp.isFullyStatic) {
+          const resolved = resolveInferredDims(newShape, inp.shape);
+          const outNumel = shapeProduct(resolved, DYNAMIC);
+          if (resolved.some(d => d === DYNAMIC)) {
+            errs.push(`reshape cannot infer a dimension: ${inp.numel()} elements do not divide evenly into [${newShape.join(', ')}]`);
+          } else if (outNumel !== DYNAMIC && outNumel !== inp.numel()) {
+            errs.push(`reshape numel mismatch: input ${inp.numel()} vs output ${outNumel}`);
           }
         }
       }
@@ -140,17 +151,9 @@ export function register(registry: OpRegistry) {
     propagateSymbolicShapes(op, shapes) {
       const inShape = shapes.get(op.getOperand(0));
       if (!inShape) return null;
-      const newShape = op.getAttr<readonly number[]>('new_shape')!;
-      const resShape = [];
-      for (let d of newShape) {
-        if (d === -1) {
-          const symVar = inShape.find(id => typeof id !== 'number');
-          resShape.push(symVar || -1);
-        } else {
-          resShape.push(d);
-        }
-      }
-      return [resShape];
+      const newShape = op.getAttr<Shape>('new_shape')!;
+      const resolved = resolveInferredDims(newShape.map(namedDimToSym), inShape.map(namedDimToSym));
+      return [resolved.map(symToNamedDim)];
     },
     getCanonicalizationPatterns() { return [new pat.FoldTrivialReshape(), new pat.ReshapeReshape()]; },
     fold(constValues) { return constValues[0]; }

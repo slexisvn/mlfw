@@ -36,7 +36,7 @@ This framework takes the tracing corner. Tracing wins on implementation cost and
 
 ## 5.3 How tracing works here
 
-The trick is a tensor that is not a tensor. [`src/tracing/symbolic_tensor.ts`](../../../src/tracing/symbolic_tensor.ts):
+The trick is a tensor that is not a tensor — [`src/tracing/symbolic_tensor.ts:32`](../../../src/tracing/symbolic_tensor.ts):
 
 ```ts
 export class SymbolicTensor extends Tensor {
@@ -52,7 +52,7 @@ export class SymbolicTensor extends Tensor {
 
 Read the second line of the constructor body carefully: `Storage.allocate(0, ...)`. **Zero bytes.** A `SymbolicTensor` has a shape, a dtype and a device, and no data whatsoever. It is a claim about a value rather than a value.
 
-What makes it work is a getter further down the class:
+What makes it work is a getter further down the class — [`symbolic_tensor.ts:74`](../../../src/tracing/symbolic_tensor.ts):
 
 ```ts
   get dispatchKeySet(): DispatchKeySet {
@@ -242,7 +242,7 @@ The alternative is to not specialize at all:
 with dynamic_shapes: one kernel served     : 4x2, 8x2, 16x2, 32x2
 ```
 
-With `dynamic_shapes: [true]`, the batch dimension becomes a *symbolic* value: the generated kernel takes the size as a runtime parameter, and one kernel serves every batch. You trade generated-code quality for compilations avoided — loop bounds are no longer constants, so bounds cannot be used to unroll, vectorize or tile as aggressively.
+With `dynamic_shapes: [true]`, every dimension of that input becomes *dynamic*: the generated kernel takes the sizes as runtime parameters, and one kernel serves every batch. (`true` is the shorthand for the whole input; `new Set([0])` marks one dimension, which is what you usually mean by "the batch size varies". Chapter 10 compares the two.) You trade generated-code quality for compilations avoided — loop bounds are no longer constants, so bounds cannot be used to unroll, vectorize or tile as aggressively.
 
 This trade — **specialize and recompile, or generalize and lose information** — recurs in every part of the book. It is the same trade a JIT for a dynamic language makes, for the same reasons.
 

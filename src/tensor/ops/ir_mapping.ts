@@ -120,7 +120,7 @@ const IR_BUILDERS: Readonly<Record<string, IrBuilder>> = Object.freeze({
     });
     return callMethod(b, 'concat', expanded, dim);
   },
-  reshape: (b, a, s) => b.reshape(a[0], resolveShape((s.shape ?? s.new_shape) as readonly number[], a[0].type.shape)),
+  reshape: (b, a, s) => b.reshape(a[0], (s.shape ?? s.new_shape) as readonly number[]),
   transpose: (b, a, s) => {
     const rank = a[0].type.rank;
     const d0 = normalizeDim(s?.dim0 as number ?? 0, rank);
@@ -190,20 +190,6 @@ const IR_BUILDERS: Readonly<Record<string, IrBuilder>> = Object.freeze({
 
 function normalizeDim(dim: number, rank: number): number {
   return dim < 0 ? rank + dim : dim;
-}
-
-function resolveShape(shape: readonly number[], inputShape: readonly number[]): number[] {
-  let known = 1;
-  let infer = -1;
-  let total = 1;
-  for (const d of inputShape) total *= d;
-  const out = [...shape];
-  for (let i = 0; i < out.length; i++) {
-    if (out[i] === -1) infer = i;
-    else known *= out[i];
-  }
-  if (infer >= 0) out[infer] = known === 0 ? 0 : total / known;
-  return out;
 }
 
 function normalizeInsertDim(dim: number, rank: number): number {

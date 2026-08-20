@@ -45,3 +45,42 @@ describe('SymInt — substitute folds ceildiv when args become numeric', () => {
     expect(SymInt.evaluate(expr, new Map([['n', 9]]))).toBe(3);
   });
 });
+
+describe('SymInt — division cancels the factors it can prove away', () => {
+  const n = SymInt.var('n');
+  const m = SymInt.var('m');
+
+  it('cancels a symbol that appears in both products', () => {
+    expect(SymInt.equals(SymInt.div(SymInt.mul(n, 3), n), 3)).toBe(true);
+    expect(SymInt.equals(SymInt.div(SymInt.mul(SymInt.mul(n, m), 4), SymInt.mul(m, 4)), n)).toBe(true);
+  });
+
+  it('cancels a constant factor only when it divides evenly', () => {
+    expect(SymInt.equals(SymInt.div(SymInt.mul(SymInt.mul(n, 2), 10), 20), n)).toBe(true);
+    const partial = SymInt.div(SymInt.mul(n, 2), 4);
+    expect(partial).toBeInstanceOf(SymInt);
+    expect(partial.type).toBe('div');
+  });
+
+  it('leaves an expression it cannot cancel alone', () => {
+    const kept = SymInt.div(SymInt.mul(n, 3), m);
+    expect(kept.type).toBe('div');
+    expect(SymInt.equals(kept.args[0], SymInt.mul(n, 3))).toBe(true);
+    expect(SymInt.equals(kept.args[1], m)).toBe(true);
+  });
+
+  it('agrees with evaluation on every simplification it makes', () => {
+    const env = new Map([['n', 7], ['m', 5]]);
+    for (const [num, den] of [
+      [SymInt.mul(n, 3), n],
+      [SymInt.mul(SymInt.mul(n, m), 4), SymInt.mul(m, 4)],
+      [SymInt.mul(SymInt.mul(n, 2), 10), 20],
+      [SymInt.mul(n, 2), 4],
+      [SymInt.mul(n, 3), m],
+    ]) {
+      const simplified = SymInt.div(num, den);
+      const literal = new SymInt('div', null, [num, den]);
+      expect(SymInt.evaluate(simplified, env)).toBe(SymInt.evaluate(literal, env));
+    }
+  });
+});

@@ -124,7 +124,7 @@ Compilers respond in one of three ways, and this one uses all three.
 
 **Fix a good order by hand.** The pipeline is a list, written down and defended by tests. That is [`src/compiler/pipeline/graph_pipeline.ts`](../../../src/compiler/pipeline/graph_pipeline.ts).
 
-**Iterate to a fixed point.** Where transformations enable each other, run them repeatedly until nothing changes:
+**Iterate to a fixed point.** Where transformations enable each other, run them repeatedly until nothing changes — [`graph_pipeline.ts:39`](../../../src/compiler/pipeline/graph_pipeline.ts):
 
 ```ts
   passes.push(new FixedPointGroup('canonicalize', [
@@ -160,7 +160,7 @@ Three representations mean three sets of node types, three verifiers, three prin
 
 The alternative is worse in a specific way. A single IR expressive enough for everything — operations *and* loops *and* addresses — forces every pass to handle every level of detail. A fusion pass would have to know what to do when its operands are already loop nests. In practice that is where compilers go to die, and the discipline of "each level says less than the last, and says it more precisely" is what keeps each pass small enough to be correct.
 
-There is one honest caveat, and this codebase supplied a textbook instance of it. Each lowering is a place where the compiler can silently disagree with itself: TIR assumes something about an operation, and a backend implements it differently. Integer division was exactly that. The symbolic layer folded `//` as floor division, TIR's constant folder used truncation, the CPU backend emitted truncation for `//` but floor for `%`, and CUDA, WebAssembly and WGSL emitted truncation for both — four levels, three incompatible definitions, no test failing anywhere, because every index this compiler generates happens to be non-negative and the definitions only diverge on negative operands. Chapter 35 tells the full story, including the fix: one definition in `src/util/divmod.ts` that every level now calls.
+There is one honest caveat, and this codebase supplied a textbook instance of it. Each lowering is a place where the compiler can silently disagree with itself: TIR assumes something about an operation, and a backend implements it differently. Integer division was exactly that. The symbolic layer folded `//` as floor division, TIR's constant folder used truncation, the CPU backend emitted truncation for `//` but floor for `%`, and CUDA, WebAssembly and WGSL emitted truncation for both — four levels, three incompatible definitions, no test failing anywhere, because every index this compiler generates happens to be non-negative and the definitions only diverge on negative operands. Chapter 35 tells the full story, including the fix: one scalar definition in [`src/util/divmod.ts`](../../../src/util/divmod.ts), which `SymInt` and TIR constant folding call directly and which the four backends now match expression for expression — every one of them emits `((a % b) + b) % b` for `%` and reserves truncation for the separate `tdiv`/`tmod` pair.
 
 Levels buy modularity, and they charge for it in interface agreements that nothing checks automatically. The agreement here was never written down, so nothing noticed when three of the four parties disagreed about it.
 

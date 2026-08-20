@@ -6,7 +6,10 @@ Status: overview plan. Chapter-level detail (section headings, figures, lab scri
 |---|---|
 | [Part 0 — Orientation](part0/README.md) | **written** — 3 chapters, 5 runnable labs |
 | [Part I — Why ML needs a compiler](part1/README.md) | **written** — 4 chapters, 7 runnable labs |
-| Parts II–XII | outlined below, not yet written |
+| [Part II — Representing programs](part2/README.md) | **written** — 6 chapters, 11 runnable labs |
+| [Part III — The transformation infrastructure](part3/README.md) | **written** — 5 chapters, 12 runnable labs |
+| [Part IV — Graph-level optimization](part4/README.md) | **written** — 8 chapters, 15 runnable labs |
+| Parts V–XII | outlined below, not yet written |
 
 ## Locked decisions
 
@@ -55,7 +58,7 @@ Parts VII and VIII promote the example to a large matmul plus softmax when tilin
 
 ### Repo baseline (2026-08-19)
 
-36,152 LOC in `src/compiler`; 64 graph ops; 33 pass classes; 63 VJP rules plus `stop_gradient` and 8 declared gradient barriers; 32 lowering rules; 23 schedule primitives; 5,131 tests passing across 302 files; `tsc --noEmit` clean under `strict`.
+36,166 LOC in `src/compiler`; 96 graph ops; 31 concrete pass classes (21 graph, 9 TIR, 1 LIR); 63 VJP rules plus `stop_gradient` and 8 declared gradient barriers; 32 lowering rules; 23 schedule primitives; 5,131 tests passing across 302 files; `tsc --noEmit` clean under `strict`.
 
 ---
 
@@ -75,42 +78,52 @@ Parts VII and VIII promote the example to a large matmul plus softmax when tilin
    *Formal:* Definition (lowering, irreversible), Definition (phase-ordering problem), Theorem (no fixed order is optimal for all programs).
 7. [**Vocabulary**](part1/ch07-vocabulary/README.md) — every term used in the book, grouped by data / programs / transformations / execution / performance, each with the code that implements it.
 
-## Part II — Representing programs (6 chapters)
+## Part II — Representing programs (6 chapters) — **written**, see [part2/](part2/README.md)
 
-8. **SSA and dataflow** — why "each value defined exactly once" makes analysis tractable.
-   *Formal:* Definition of SSA form; Definition of a dataflow region; Theorem: an acyclic use-def graph admits a topological execution order, so textual order carries no semantics.
-9. **Value, Operation, Block, Region, Function, Module** — the object model, [ir/graph/](../src/compiler/ir/graph/).
-10. **The type system** — TensorType, dtypes, static / dynamic / symbolic dimensions, layout, [ir/graph/types.ts](../src/compiler/ir/graph/types.ts).
-    *Formal:* shape compatibility as a partial order; broadcasting as a join.
-11. **Ops as a dialect** — traits, `verify`, `inferResultTypes`, `fold`, canonicalization patterns, [op_registry.ts](../src/compiler/ir/graph/op_registry.ts).
-12. **What "valid IR" means** — the verifier as executable specification, [verifier.ts](../src/compiler/ir/graph/verifier.ts).
-    *Formal:* the invariant set the verifier enforces; why scope-plus-acyclicity is the right check for a dataflow IR and dominance is not required.
-13. **IR as text** — print it, edit it by hand, parse it back, [printer.ts](../src/compiler/ir/graph/printer.ts) / [parser.ts](../src/compiler/ir/graph/parser.ts).
+8. [**SSA and dataflow**](part2/ch08-ssa-and-dataflow/README.md) — why "each value defined exactly once" makes analysis tractable; the intrusive use list; and the lab that prints a function backwards and re-parses it.
+   *Formal:* Definition (SSA form), Definition (use-def graph), Lemma (O(1) producer, O(k) consumers), Theorem 8.4 (textual order carries no semantics, stated here), Counterexample (a shared mutable buffer).
+9. [**Value, Operation, Block, Region, Function, Module**](part2/ch09-object-model/README.md) — the object model, [ir/graph/](../src/compiler/ir/graph/); the intrusive operation list, the version counter every edit bumps, and what a region can see.
+   *Formal:* Definition 9.1 (region scope isolation, stated here).
+10. [**The type system**](part2/ch10-type-system/README.md) — TensorType, dtypes, static / dynamic / symbolic dimensions, layout, [ir/graph/types.ts](../src/compiler/ir/graph/types.ts).
+    *Formal:* Definition (specificity order — a genuine partial order on dimensions), Definition (compatibility as unifiability), Theorem 10.3 (compatibility is **not** transitive, hence not a partial order — the outline's earlier phrasing was wrong and the chapter says so), Definition (broadcast order), Counterexample (`broadcastDim(?, 4) = 4` is an assumption delegated to a guard).
+11. [**Ops as a dialect**](part2/ch11-ops-as-a-dialect/README.md) — traits, `verify`, `inferResultTypes`, `fold`, canonicalization patterns, [op_registry.ts](../src/compiler/ir/graph/op_registry.ts); `add` and `sub` differing by one word, and CSE behaving differently because of it.
+    *Formal:* Definition 11.1 (op registry).
+12. [**What "valid IR" means**](part2/ch12-valid-ir/README.md) — the verifier as executable specification, [verifier.ts](../src/compiler/ir/graph/verifier.ts); three checkers at three moments, and the seven-way break lab that shows which catches what.
+    *Formal:* the four load-bearing invariants; Theorem 12.1 (scope plus acyclicity suffices, stated here) — why dominance is not required here.
+13. [**IR as text**](part2/ch13-ir-as-text/README.md) — print it, edit it by hand, parse it back, [printer.ts](../src/compiler/ir/graph/printer.ts) / [parser.ts](../src/compiler/ir/graph/parser.ts); the parser is two-phase because the IR is a DAG.
+    *Formal:* Definition 13.1 (lossless round-trip, stated here).
 
-## Part III — The transformation infrastructure (5 chapters)
+## Part III — The transformation infrastructure (5 chapters) — **written**, see [part3/](part3/README.md)
 
-14. **What a pass is** — Module vs Function passes, the CHANGED / UNCHANGED / FAILED contract, [passes/pass.ts](../src/compiler/passes/pass.ts).
-15. **The pass manager** — ordering, fixed-point groups, per-pass verification, [pass_manager.ts](../src/compiler/passes/pass_manager.ts).
-    *Formal:* Theorem: a fixed-point group terminates; the monotone measure that makes it terminate, and why an iteration cap is still needed.
-16. **Analyses and the invalidation problem** — the hardest correctness problem in pass infrastructure, [analysis_manager.ts](../src/compiler/analysis/analysis_manager.ts).
-    *Formal:* Definition of a preserved analysis; Theorem: staleness propagates along the dependency DAG, hence transitive invalidation is required.
-17. **Pattern rewriting** — match, rewrite, canonical form, [ir/rewrite/](../src/compiler/ir/rewrite/).
-    *Formal:* confluence and termination of a rewrite set; why canonicalization must be terminating.
-18. **Watching the compiler work** — trace levels, IR snapshots, `explain`, resilient mode, [pipeline/trace.ts](../src/compiler/pipeline/trace.ts).
+14. [**What a pass is**](part3/ch14-what-a-pass-is/README.md) — module vs function passes, the CHANGED / UNCHANGED / FAILED contract, [passes/pass.ts](../src/compiler/passes/pass.ts); the ledger that shows 11 of 15 pass runs changing nothing, and `PassContext` as the switch that turns one off from outside.
+    *Formal:* Definition 14.1 (pass, with the one-way verdict implication, stated here), Definition 14.2 (pass granularity, stated here).
+15. [**The pass manager**](part3/ch15-the-pass-manager/README.md) — ordering, fixed-point groups, per-pass verification, [pass_manager.ts](../src/compiler/passes/pass_manager.ts); the three qualities of answer you get from the three verification levels.
+    *Formal:* Definition 15.1 (pass pipeline), Definition 15.2 (fixed-point group), Lemma 15.3 (convergence costs one extra round, stated here), Theorem 15.4 (termination — and the honest finding that the iteration cap **is** the termination argument, because no monotone measure exists), Counterexample (`canonicalize: CHANGED 10 -> 10`).
+16. [**Analyses and the invalidation problem**](part3/ch16-analyses-and-invalidation/README.md) — the hardest correctness problem in pass infrastructure, [analysis_manager.ts](../src/compiler/analysis/analysis_manager.ts).
+    *Formal:* Definition 16.1 (analysis), Definition 16.2 (preserved analysis), Theorem 16.3 (transitive invalidation is required, stated here), Definition 16.4 (mutation version, stated here), Counterexample (a preservation that cannot be honoured serves 10 of 14 passes a stale answer, and nothing catches it).
+17. [**Pattern rewriting**](part3/ch17-pattern-rewriting/README.md) — match, rewrite, canonical form, [ir/rewrite/](../src/compiler/ir/rewrite/); the worklist that turns independent rules into a cascade, and traits generating canonicalization patterns from the registry.
+    *Formal:* Definition 17.1 (rewrite rule), Definition 17.2 (normal form), Theorem 17.3 (Newman's Lemma — *(Newman, 1942)*), and the stated limit that neither termination nor confluence is proved here; both are bounded.
+18. [**Watching the compiler work**](part3/ch18-watching-the-compiler/README.md) — trace levels, IR snapshots, `explain`, resilient mode, [pipeline/trace.ts](../src/compiler/pipeline/trace.ts).
+    *Formal:* Definition 18.1 (trace level, with the monotonicity constraint), Definition 18.2 (explanation — a decision plus the terms the decision procedure used, stated here), Definition 18.3 (transactional compilation, stated here).
 
-## Part IV — Graph-level optimization (8 chapters)
+## Part IV — Graph-level optimization (8 chapters) — **written**, see [part4/](part4/README.md)
 
-19. **Constant folding, CSE, DCE** — and why memory effects make DCE non-trivial, [passes/simplify/](../src/compiler/passes/simplify/), [analysis/memory_effect.ts](../src/compiler/analysis/memory_effect.ts).
-20. **Algebraic simplification meets IEEE 754** — why `x - x` is not always zero, and what a fast-math flag really licenses, [simplify/algebraic.ts](../src/compiler/passes/simplify/algebraic.ts).
-    *Formal:* which identities hold over floats, which only over the reals; NaN and signed-zero counterexamples.
-21. **Decomposition** — big ops into primitives, and when that loses information a library call would have kept.
-22. **Fusion I: why it is the single most valuable optimization** — arithmetic intensity, the roofline argument.
-    *Formal:* the memory-traffic model; Theorem: fusing a producer-consumer pair removes one full tensor round-trip.
-23. **Fusion II: legality** — the cycle problem and incremental topological ordering, [graph_cycles.ts](../src/compiler/passes/fusion/graph_cycles.ts).
-    *Formal:* Theorem: contracting a producer-consumer pair is legal iff it introduces no cycle; the Pearce–Kelly invariant and its amortized bound.
-24. **Fusion III: the three strategies in mlfw** — dominator, priority, multi-output and epilogue fusion, plus the cost model that picks, [passes/fusion/](../src/compiler/passes/fusion/).
-25. **Layout** — NCHW vs NHWC vs blocked, propagation and insertion of transforms, [passes/layout/](../src/compiler/passes/layout/).
-26. **Three optional pipelines in outline** — rematerialization, quantization, partitioning and BYOC. One chapter of overview; each gets a deep appendix.
+19. [**Constant folding, CSE, DCE**](part4/ch19-fold-cse-dce/README.md) — and why memory effects make DCE non-trivial, [passes/simplify/](../src/compiler/passes/simplify/), [analysis/memory_effect.ts](../src/compiler/analysis/memory_effect.ts); a dead `scatter` and its whole index subgraph surviving a pass whose job is removing them.
+    *Formal:* Definition 19.1 (constant-foldable), Definition 19.2 (redundant), Definition 19.3 (dead), Theorem 19.4 (soundness of DCE, stated here) and the asymmetry it exposes, Corollary 19.5 (DCE is a fixed point).
+20. [**Algebraic simplification meets IEEE 754**](part4/ch20-algebra-and-ieee754/README.md) — why `x - x` is not always zero, and what a fast-math flag really licenses, [simplify/algebraic.ts](../src/compiler/passes/simplify/algebraic.ts).
+    *Formal:* Theorem 20.1 (identities valid over floats), Theorem 20.2 (identities not valid, with the NaN, ±∞ and signed-zero counterexamples), Definition 20.3 (fast-math licence, stated here). Measured: two rewrites that fire with the licence withheld, one in a graph pattern and one in a backend's string peephole.
+21. [**Decomposition**](part4/ch21-decomposition/README.md) — big ops into primitives, and when that loses information a library call would have kept.
+    *Formal:* Definition 21.1 (decomposition rule), Definition 21.2 (primitive set, stated here), Definition 21.3 (lossy vs neutral decomposition, stated here); the numerical-form note, since `softmax`'s rule is where max-subtraction is decided for every backend.
+22. [**Fusion I: why it is the single most valuable optimization**](part4/ch22-fusion-why/README.md) — arithmetic intensity, the roofline argument, measured 2.55× flat across four orders of magnitude.
+    *Formal:* Definition 22.1 (memory traffic), Definition 22.2 (fusion of a group), Theorem 22.3 (one round trip removed per internalized value, stated here), Corollary 22.4 (a chain of k gains a factor k).
+23. [**Fusion II: legality**](part4/ch23-fusion-legality/README.md) — the cycle problem and incremental topological ordering, [graph_cycles.ts](../src/compiler/passes/fusion/graph_cycles.ts).
+    *Formal:* Definition 23.1 (contraction), Theorem 23.2 (legal iff the contraction is acyclic), Definition 23.3 (incremental topological order), Theorem 23.4 (Pearce–Kelly, *(Pearce and Kelly, 2006)*), Corollary 23.5 (windowed cycle detection, stated here). Measured exponent 1.59 — and the finding that the cost is candidate re-evaluation, not the cycle check.
+24. [**Fusion III: the three strategies in mlfw**](part4/ch24-fusion-strategies/README.md) — dominator, priority, multi-output and epilogue fusion, plus the cost model that picks, [passes/fusion/](../src/compiler/passes/fusion/).
+    *Formal:* Definition 24.1 (fusion partition), Theorem 24.2 (NP-hard, classical), Definition 24.3 (monotone candidate set, stated here), Definition 24.4 (stale candidate, stated here). Measured: 2.4× between the default strategy and the same strategy with one cost-model constant corrected.
+25. [**Layout**](part4/ch25-layout/README.md) — NCHW vs NHWC vs blocked, propagation and insertion of transforms, [passes/layout/](../src/compiler/passes/layout/); off by default, inert when enabled, and slower when properly enabled.
+    *Formal:* Definition 25.1 (layout as a permutation), Definition 25.2 (layout assignment problem, stated here), Theorem 25.3 (NP-hard as multiway cut, classical), Definition 25.4 (greedy propagation with local accept, stated here).
+26. [**Three optional pipelines in outline**](part4/ch26-optional-pipelines/README.md) — rematerialization, quantization, partitioning and BYOC. One chapter of overview; each gets a deep appendix.
+    *Formal:* Definition 26.1 (rematerialization), Theorem 26.2 (√n checkpointing, *(Chen et al., 2016)*), Definition 26.3 (affine quantization), Definition 26.4 (calibration), Definition 26.5 (partition) plus the convexity note that makes Theorem 23.2 reappear unchanged.
 
 ## Part V — Automatic differentiation (5 chapters)
 
@@ -186,18 +199,27 @@ Parts VII and VIII promote the example to a large matmul plus softmax when tilin
 ## Part XII — Being sure it is right (4 chapters)
 
 64. **Verification** — boundary checks and per-pass checks, and what each catches, [pipeline/invariant_check.ts](../src/compiler/pipeline/invariant_check.ts).
-65. **Differential testing** — compiled vs eager vs finite differences, [tests/e2e/](../../tests/e2e/).
+65. **Differential testing** — compiled vs eager vs finite differences, [tests/e2e/](../tests/e2e/).
     *Formal:* finite-difference error as a function of step size; how to pick a tolerance that is neither vacuous nor flaky.
 66. **Fuzzing, scaling tests, and numerical conformance** — including tests that assert an algorithm is not accidentally quadratic.
 67. **Debugging a wrong answer** — a repeatable bisection procedure from wrong output down to the offending pass.
 
 ## Appendices
 
-- **A. Op reference** — all 64 ops: operands, results, attributes, traits, VJP status. *Generated from the registry.*
+- **A. Op reference** — all 96 ops: operands, results, attributes, traits, VJP status. *Generated from the registry.*
 - **B. Pass catalog** — every pass, its pipeline position, required and preserved analyses. *Generated.*
 - **C. Glossary** — every defined term with the chapter that defines it.
 - **D. File-to-chapter map** — for readers who arrive from the source rather than the table of contents.
-- **E. Known limits and open work** — carried from the compiler review; each entry names the chapter it constrains. Current entries: interval arithmetic answering "unknown" where a stronger analysis would prove safety (Chapter 37). *Closed:* `//` and `%` disagreeing between the symbolic layer, constant folding and the four backends — now floor everywhere, from one definition, with `tdiv`/`tmod` carrying truncation where it is provably equivalent (Chapters 35, 36, 54–58); reading a value from a symbolic tensor failing with an uninformative `Cannot read properties of null` — `SymbolicTensor` now overrides the value-reading accessors and names data-dependent control flow (Chapter 5).
+- **E. Known limits and open work** — carried from the compiler review; each entry names the chapter it constrains. Current entries: interval arithmetic answering "unknown" where a stronger analysis would prove safety (Chapter 37).
+
+  *Found while writing Part IV, each reproducible by a lab in that part, none fixed in the code the book describes:*
+  1. `AddZero` (`patterns.ts:167`) applies `x + 0 → x` with no fast-math gate; unsound for `−0`, where IEEE gives `+0`. Its three neighbouring rules take the gate. (Chapter 20)
+  2. The CPU backend's expression peephole (`backend/cpu/codegen.ts:472`) folds `x * 0 → 0` on rendered strings, with no dtype and no flag in scope; `∞ × 0` and `NaN × 0` become `0`. No other backend does this, so CPU and CUDA disagree on non-finite inputs. (Chapters 20, 65)
+  3. `scatter` declares `sideEffects: WRITE` (`ops/shape.ts:368`) although its lowering writes only its own output buffer; a dead `scatter` and its whole index-computation subgraph survive DCE, CSE and folding. (Chapter 19)
+  4. `target.sharedMemoryBytes || …` (`fusion_cost.ts:62`, `priority_fusion.ts:62`) reads a CPU's declared `0` as "unspecified" and applies a 48 KiB GPU shared-memory budget; measured 2.4× on a three-operation diamond. (Chapter 24)
+  5. `layoutAwareOps` is empty for every shipped target (`target.ts:129`), so `LayoutTransformPass` proposes conversions and discards all of them, reporting UNCHANGED — indistinguishable from having nothing to do. (Chapter 25)
+  6. `RematerializationPass` exits identically whether it met its `memoryBudget` or ran out of candidates; asked for 128 KiB it delivered 512 KiB and reported success. (Chapter 26)
+  7. Quantization's `calibrationData` is unusable through the public `compile()` path: `collectCalibration` (`calibrate_exec.ts:101`) passes the batch as the graph's complete argument list, but a traced model's captured parameters are arguments too. Without calibration the default `[-6, 6]` activation range gives 18% relative error, silently. (Chapter 26) *Closed:* `//` and `%` disagreeing between the symbolic layer, constant folding and the four backends — now floor everywhere, from one definition, with `tdiv`/`tmod` carrying truncation where it is provably equivalent (Chapters 35, 36, 54–58); reading a value from a symbolic tensor failing with an uninformative `Cannot read properties of null` — `SymbolicTensor` now overrides the value-reading accessors and names data-dependent control flow (Chapter 5).
 - **F. Walkthrough: adding an operation end to end** — one new op taken through definition, verification, canonicalization, VJP rule, lowering, scheduling and four backends, in a single continuous exercise. Chapter 1 promises the reader they will be able to do this; the chapters teach the pieces separately, and this appendix is where they are assembled.
 
 ---
@@ -221,7 +243,7 @@ Not 1 → 67. The technical spine first, because it fixes the vocabulary everyth
 
 ### Generated content
 
-Appendices A and B must be generated from `registry` and the pipeline builders, not written by hand — 64 ops and 33 passes drift within weeks. Plan a small script under `docs/tools/` and regenerate on every release.
+Appendices A and B must be generated from `registry` and the pipeline builders, not written by hand — 96 ops and 33 passes drift within weeks, and a hand count silently misses every op registered inside a loop, which is how an earlier draft of this outline came to claim 64. Plan a small script under `docs/tools/` and regenerate on every release.
 
 ### Size estimate
 

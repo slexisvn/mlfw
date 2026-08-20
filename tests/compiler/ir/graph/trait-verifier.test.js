@@ -87,6 +87,11 @@ describe('a trait that does not hold is reported', () => {
     expect(messages.some(m => /idempotent/.test(m) && /would not preserve types/.test(m))).toBe(true);
   });
 
+  it('CONSTANT catches a constant op that reads an operand', () => {
+    const { messages } = messagesFor('constant', [f32([4])], [f32([4])]);
+    expect(messages.some(m => /a constant op must have no operands, got 1/.test(m))).toBe(true);
+  });
+
   it('VIEW catches a view op that changes dtype', () => {
     const { messages } = messagesFor('reshape', [f32([4])], [i32([4])], { new_shape: [4] });
     expect(messages.some(m => /view/.test(m) && /cannot change dtype/.test(m))).toBe(true);

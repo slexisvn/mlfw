@@ -2,7 +2,7 @@
 
 Chapter 2 measured a twelve-operation chain running 2.57× faster compiled than eager at 16 × 16, and only 1.08× faster at 512 × 512 — and then the same chain, with two function calls swapped out, running 14.54× and 4.57× faster at those same sizes. This chapter explains all four numbers, and by the end you will be able to predict them.
 
-That is a strong claim, so here is the test we will hold ourselves to. Near the end of the chapter we will predict the runtime of a twelve-operation chain from two measured constants, before running it. The prediction lands within 0.2%.
+That is a strong claim, so here is the test we will hold ourselves to. Near the end of the chapter we will predict the runtime of a twelve-operation chain from two measured constants, before running it — and we will keep the model only to the accuracy it actually earns, which turns out to be the right *ranking* and the right *order of magnitude*, not the third digit.
 
 ## 4.1 The problem: what does one operation cost?
 
@@ -93,6 +93,8 @@ Here α/β ≈ 888 elements — a 30 × 30 tensor. Every operation on anything s
 
 ## 4.4 Lab 3 — The first call is not like the others
 
+*(Out of order on purpose: this lab belongs to the argument of §4.2, and Lab 2 belongs to the argument of §4.7. Run them in whichever order you read them.)*
+
 ```bash
 node docs/part1/ch04-eager-execution/labs/03-eager-is-compiled-too.mjs
 ```
@@ -176,16 +178,18 @@ twelve elementwise operations on a 1024x1024 tensor (4 MB)
   12 cheap ops            32.2           7.2        4.47x
 ```
 
-**The same compiler, on the same shape, delivers 1.10× or 4.47× depending on two function calls.**
+**The same compiler, on the same shape, delivers 1.10× or 4.47× depending on two function calls.** (The 4.47× reproduces within a few percent anywhere; the 1.10× is a coin toss around 1.0 and §4.10 says why.)
 
 Now use the model from §4.3 and §4.6 to predict those eager numbers before looking at them. Measured constants: an `add` at this size costs 2.62 ms, a `tanh` costs 26.95 ms.
 
 - Twelve cheap operations: 12 × 2.62 = **31.4 ms**. Measured: 32.2 ms.
 - Ten cheap operations plus two `tanh`: 10 × 2.62 + 2 × 26.95 = 26.2 + 53.9 = **80.1 ms**. Measured: 80.2 ms.
 
-The second prediction is within 0.2%. A model this simple has no business being that accurate, and the reason it is tells you something real about eager execution: **there is nothing else going on.** Eager execution is exactly the sum of its operations, because each one runs to completion in isolation before the next begins. No overlap, no reuse, no interaction. That is the property compilation removes.
+Both predictions land within three percent on this run, and the second within 0.2%. Do not read too much into that third digit — the next box shows it does not survive re-measurement — but do read the shape of it. A model that says nothing except *add up the operations* gets the total roughly right, and the reason tells you something real about eager execution: **there is very little else going on.** Eager execution is close to the sum of its operations, because each one runs to completion in isolation before the next begins. No overlap, no reuse, almost no interaction. That is the property compilation removes.
 
-> **Does this reproduce?** The tables above come from one session. Running both labs again on the same machine a day later gave different constants — α = 1.90 μs, β = 2.51 ns, `add` at 2.60 ms, `tanh` at 10.4× — a drift of five to fifteen percent, which is what you should expect from wall-clock measurement on a general-purpose machine. The predictions were re-derived from the *new* constants and checked against the *new* measurements: 12 × 2.60 = 31.2 ms predicted against 31.0 measured, and 10 × 2.60 + 2 × 26.91 = 79.8 predicted against 79.0 measured. Both within one percent. The individual numbers in this chapter are disposable; the model that generates them is not, and that is the thing to take away.
+> **Does this reproduce? Partly, and the part that fails is instructive.** The tables above come from one session. Re-running both labs on a different machine — Node 24.9, three paired runs of Lab 1 and Lab 2 — reproduced every structural claim and none of the precision. The constants drifted as expected (α = 1.34 μs, β = 1.62 ns, `add` 1.65–1.99 ms, `tanh` 11–15× `add`). But the predictions came out 10% to 60% away from measurement, in both directions: 12 × 1.99 = 23.9 ms predicted against 21.8 measured, and 10 × 1.99 + 2 × 24.38 = 68.7 ms predicted against 42.9 measured.
+>
+> So the sum-of-operations model is not the 0.2%-accurate instrument the first run makes it look like. What it reliably gets right is the ordering and the rough magnitude: the `tanh` chain always costs about twice the cheap chain, `tanh` always dominates the total when it is present, and the cheap chain always fuses several times better than the `tanh` chain. What it gets wrong is any specific total, by up to a factor of 1.6 — because §4.10's caveat is real and load-bearing: `add` and `tanh` were timed *alone*, and an operation inside a twelve-deep chain competes for cache with eleven others. The individual numbers in this chapter are disposable. The model is worth carrying for what it ranks, not for what it predicts, and §4.10 returns to why that distinction is the whole subject of Part VIII.
 
 For the compiled numbers, apply Amdahl's law.
 
@@ -243,7 +247,7 @@ That precondition is not free either. Getting it costs you dynamism, and the bil
 
 ## 4.10 Traps and limits
 
-- **These constants are this machine's.** α, β and the cost of `tanh` will differ on your hardware and your Node version. The *structure* — a fixed cost, a marginal cost, a break-even point, expensive transcendentals — is what transfers.
+- **These constants are this machine's, and so is the sign of the `tanh` result.** α, β and the cost of `tanh` will differ on your hardware and your Node version. The *structure* — a fixed cost, a marginal cost, a break-even point, expensive transcendentals — is what transfers. The 1.10× in §4.7 does not: on a second machine the same lab reported 0.95×, 0.99× and 1.07× across three runs, meaning fusion sometimes made the `tanh` chain *slower*. That is not a contradiction of the argument, it is the argument's conclusion taken one step further — when almost all the time is in work an optimization cannot touch, the optimization's own overhead is free to dominate what little is left.
 - **`add` and `tanh` were measured in isolation.** In a real model, operations compete for cache with everything around them, and measurements taken alone can flatter or slander an operation. Chapter 46 returns to this when it builds a cost model the autotuner has to trust.
 - **The fused model was fitted on cheap operations, and does not extrapolate.** Applying `T_fused = M + k·c` to the `tanh` chain — substituting the measured cost of a `tanh` for `c` on two of the twelve terms — predicts about 55 ms against a measured 73 ms. Something the model does not represent is costing 18 ms. Candidate explanations: the generated code calls `Math.tanh` in a context the engine optimizes less well than the one-operation kernel does, or the long fused expression puts pressure on registers. The honest position is that we do not know which, and that a cost model is a hypothesis you keep testing, not a fact you have established. Part VIII is about compilers that face this problem at scale, and their answer is to stop predicting and start measuring.
 - **The roofline model ignores latency.** It assumes you can saturate either compute or bandwidth. A dependent chain of scalar operations saturates neither, and no roofline predicts it.

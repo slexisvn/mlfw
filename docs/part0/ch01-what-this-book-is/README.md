@@ -99,7 +99,7 @@ That combination — small enough to read in full, complete enough to be real �
 
 ## 1.5 The shape of every chapter
 
-From Part I onward, every chapter is built the same way. (Part 0 is the exception: these three chapters orient you rather than teach a mechanism.) The structure is a promise: you will never meet a term before you have seen the problem it solves.
+From Part I onward, every chapter that teaches a mechanism is built the same way. (Part 0 is one exception: these three chapters orient you rather than teach a mechanism. The vocabulary chapters — 7, and the glossary in Appendix C — are the other: a list of definitions has no problem to motivate and no lab to run.) The structure is a promise: you will never meet a term before you have seen the problem it solves.
 
 1. **Problem.** A concrete situation, usually measurable. "Five elementwise operations means five passes over memory."
 2. **Intuition.** A picture or an analogy. No formalism.

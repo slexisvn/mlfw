@@ -88,6 +88,39 @@ export function symbolicShapeProduct(shape: Shape): number | SymIntValue {
   return prod;
 }
 
+export function resolveInferredDims(shape: Shape, sourceShape: Shape): Dim[] {
+  const out: Dim[] = [...shape];
+  let inferAt = -1;
+  for (let i = 0; i < out.length; i++) {
+    if (out[i] !== DYNAMIC) continue;
+    if (inferAt >= 0) return out;
+    inferAt = i;
+  }
+  if (inferAt < 0) return out;
+
+  const total = symbolicShapeProduct(sourceShape);
+  if (total === DYNAMIC) return out;
+
+  let known: number | SymIntValue = 1;
+  for (let i = 0; i < out.length; i++) {
+    if (i === inferAt) continue;
+    const d = out[i];
+    if (typeof d === 'number' ? d < 0 : !(d instanceof SymInt)) return out;
+    known = SymInt.mul(known, d);
+  }
+  if (known === 0) {
+    out[inferAt] = 0;
+    return out;
+  }
+  if (typeof total === 'number' && typeof known === 'number') {
+    if (total % known !== 0) return out;
+    out[inferAt] = total / known;
+    return out;
+  }
+  out[inferAt] = SymInt.div(total, known);
+  return out;
+}
+
 export function scalarBytes(dtype: ScalarDType): number {
   const b = SCALAR_BYTES[dtype];
   if (b === undefined) throw new Error(`Unknown dtype: ${dtype}`);
