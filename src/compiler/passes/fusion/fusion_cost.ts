@@ -40,6 +40,11 @@ const DEFAULT_BENEFIT_WEIGHTS = Object.freeze({
   launch: 1000,
 });
 
+function deviceLimit(stated: number | undefined, whenUnspecified: number): number {
+  if (stated === undefined) return whenUnspecified;
+  return stated === 0 ? Infinity : stated;
+}
+
 export class FusionCostModel {
   memoryBandwidthGBs: number;
   computeTFLOPs: number;
@@ -58,8 +63,8 @@ export class FusionCostModel {
     this.computeTFLOPs = config.computeTFLOPs || 15;
     this.launchOverheadUs = config.launchOverheadUs || 5;
     this.minBenefitRatio = config.minBenefitRatio || 1.05;
-    this.maxRegistersPerThread = config.maxRegistersPerThread || 255;
-    this.maxSharedMemory = config.maxSharedMemory || 49152;
+    this.maxRegistersPerThread = deviceLimit(config.maxRegistersPerThread, 255);
+    this.maxSharedMemory = deviceLimit(config.maxSharedMemory, 49152);
     this.maxCodeSizeOps = config.maxCodeSizeOps || 256;
     this.hasLibraryOp = config.hasLibraryOp || (() => false);
     this.registerBytesPerOp = config.registerBytesPerOp || 8;

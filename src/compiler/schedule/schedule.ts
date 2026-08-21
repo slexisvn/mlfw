@@ -3,6 +3,7 @@ import {
   VariableNode, IntImmNode, MathOpNode, ForKind, IterVarKind, IfThenElseNode, AllocateNode, LetStmtNode
 } from '../ir/tensor/nodes.js';
 import { Buffer } from '../ir/tensor/buffer.js';
+import type { BufferRegionLike } from '../ir/tensor/buffer.js';
 import { ScheduleTrace } from './trace.js';
 import { ScheduleValidator } from './validator.js';
 import { ScheduleState } from './schedule_state.js';
@@ -11,7 +12,7 @@ import { loopCarriedDependence, reorderLegality, collectVarsUsed, IterVarPolicy 
 import { cloneIRShared } from '../ir/clone_ir.js';
 import { transform as irTransform, walk as irWalk } from '../ir/ir_visitor.js';
 import { FuncAttr } from '../ir/func_attrs.js';
-import { AccessKind, loadedBuffers } from '../analysis/buffer_access.js';
+import { AccessKind, loadedBuffers, isStaticLevel } from '../analysis/buffer_access.js';
 import { LinearForm, mixedRadixDecomposition, linearFormToNode } from '../analysis/iter_map.js';
 import type { IRNode } from '../ir/ir_visitor.js';
 import type { TirNode, PrimFunc } from '../ir/tensor/nodes.js';
@@ -104,7 +105,7 @@ function recoverIterVar(indexExpr: TirNode, decomposition: RadixDecomposition, f
 function invertWriteIndices(access: BufferAccess): RadixDecomposition[] | null {
   const varRanges = new Map<string, VarRange>();
   for (const level of access.iterSpace) {
-    if (level) varRanges.set(level.name, [level.min, level.extent]);
+    if (isStaticLevel(level)) varRanges.set(level.name, [level.min, level.extent]);
   }
   const decompositions: RadixDecomposition[] = [];
   for (const form of access.forms) {
@@ -118,7 +119,7 @@ function invertWriteIndices(access: BufferAccess): RadixDecomposition[] | null {
 function producerVarForms(access: BufferAccess, blockInfo: BlockBindingInfo | null): VarForms | null {
   const forms = new Map<string, LinearForm>();
   for (const level of access.iterSpace) {
-    if (level) forms.set(level.name, LinearForm.variable(level.name));
+    if (isStaticLevel(level)) forms.set(level.name, LinearForm.variable(level.name));
   }
   if (blockInfo) {
     for (const binding of blockInfo.bindings) {
@@ -157,7 +158,7 @@ function inlineStoreValue(funcBody: TirNode, store: BufferStoreNode, decompositi
   return counter.n;
 }
 
-function dropBufferReads(funcBody: TirNode, bufName: string): void {
+function retargetBufferReads(funcBody: TirNode, bufName: string, inherited: readonly BufferRegionLike[]): void {
   const stack: (TirNode | null | undefined)[] = [funcBody];
   while (stack.length > 0) {
     const node = stack.pop();
@@ -165,7 +166,15 @@ function dropBufferReads(funcBody: TirNode, bufName: string): void {
     const blk = node as BlockNode;
     if (node.type === 'BlockNode' && blk.reads) {
       const kept = blk.reads.filter((r) => !(r.buffer && r.buffer.name === bufName));
-      if (kept.length !== blk.reads.length) blk.reads = kept;
+      if (kept.length !== blk.reads.length) {
+        const present = new Set(kept.map((r) => r.buffer && r.buffer.name));
+        for (const r of inherited) {
+          if (!r.buffer || present.has(r.buffer.name)) continue;
+          present.add(r.buffer.name);
+          kept.push({ ...r });
+        }
+        blk.reads = kept;
+      }
     }
     const slots = node as unknown as NodeSlots;
     if (slots.body) stack.push(slots.body as TirNode);
@@ -876,7 +885,7 @@ export class Schedule {
       total += inlineStoreValue(this.func.body, store, decompositions, varForms);
     }
     if (total === 0) throw new Error(`${primitive}: block '${producerName}' has no consumers to inline into`);
-    for (const { store } of plan.plans) dropBufferReads(this.func.body, store.buffer.name);
+    for (const { store } of plan.plans) retargetBufferReads(this.func.body, store.buffer.name, plan.prod.reads);
     this._removeBlockNest(producerName, plan.sref);
     if (!this._replaying) this.trace.record(primitive, [producerName]);
   }

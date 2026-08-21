@@ -122,15 +122,15 @@ If nothing between the two ranks feeds the upper endpoint, the merged group simp
 | Check | Kind | Where |
 |---|---|---|
 | would create a cycle | **legality** | `graph_cycles.ts` |
-| producer or consumer has a control-flow region | legality | [`fusion_analysis.ts:103`](../../../src/compiler/passes/fusion/fusion_analysis.ts) |
-| operation has no lowering rule | implementation limit | [`fusion_analysis.ts:115`](../../../src/compiler/passes/fusion/fusion_analysis.ts) |
-| operation is `OPAQUE` (`dot`, `conv`) | implementation limit | [`fusion_analysis.ts:122`](../../../src/compiler/passes/fusion/fusion_analysis.ts) |
-| pattern kinds incompatible | implementation limit | [`fusion_analysis.ts:132`](../../../src/compiler/passes/fusion/fusion_analysis.ts) |
-| shapes incompatible | legality | [`fusion_analysis.ts:177`](../../../src/compiler/passes/fusion/fusion_analysis.ts) |
-| group exceeds `maxFusionSize` | cost heuristic | [`fusion_analysis.ts:152`](../../../src/compiler/passes/fusion/fusion_analysis.ts) |
-| more than one reduction in the group | implementation limit | [`fusion_analysis.ts:167`](../../../src/compiler/passes/fusion/fusion_analysis.ts) |
+| producer or consumer has a control-flow region | legality | [`fusion_analysis.ts:100`](../../../src/compiler/passes/fusion/fusion_analysis.ts) |
+| operation has no lowering rule | implementation limit | [`fusion_analysis.ts:112`](../../../src/compiler/passes/fusion/fusion_analysis.ts) |
+| operation is `OPAQUE` (`dot`, `conv`) | implementation limit | [`fusion_analysis.ts:119`](../../../src/compiler/passes/fusion/fusion_analysis.ts) |
+| pattern kinds incompatible | implementation limit | [`fusion_analysis.ts:129`](../../../src/compiler/passes/fusion/fusion_analysis.ts) |
+| shapes incompatible | legality | [`fusion_analysis.ts:174`](../../../src/compiler/passes/fusion/fusion_analysis.ts) |
+| group exceeds `maxFusionSize` | cost heuristic | [`fusion_analysis.ts:149`](../../../src/compiler/passes/fusion/fusion_analysis.ts) |
+| more than one reduction in the group | implementation limit | [`fusion_analysis.ts:164`](../../../src/compiler/passes/fusion/fusion_analysis.ts) |
 
-The middle rows matter because they are all reported through the same `{legal, reason}` channel, and a reader debugging a missing fusion will read "cannot fuse pattern kReduction -> kReduction" as a law of nature when it is a statement about what the lowering can currently emit. The pattern lattice is the clearest case ([`fusion_analysis.ts:33`](../../../src/compiler/passes/fusion/fusion_analysis.ts)):
+The middle rows matter because they are all reported through the same `{legal, reason}` channel, and a reader debugging a missing fusion will read "cannot fuse pattern kReduction -> kReduction" as a law of nature when it is a statement about what the lowering can currently emit. The pattern lattice is the clearest case ([`fusion_analysis.ts:32`](../../../src/compiler/passes/fusion/fusion_analysis.ts)):
 
 ```ts
 export function canFusePatterns(pKind: string, cKind: string): boolean {
@@ -229,7 +229,7 @@ over the whole 8x span: exponent 1.59
 
 Sub-quadratic, and not by much. A genuinely `O(n²)` algorithm on this workload would read 2.0 and hold there; 1.59 with a middle segment at 1.90 says something in the pass is close to quadratic and something else is not.
 
-The something is not the cycle check. This program is the worst case for a different part of the engine: a single chain in which *every* operation ends up in one group, so after each merge the engine re-evaluates candidate edges by walking the whole group again ([`priority_fusion.ts:144`](../../../src/compiler/passes/fusion/priority_fusion.ts)):
+The something is not the cycle check. This program is the worst case for a different part of the engine: a single chain in which *every* operation ends up in one group, so after each merge the engine re-evaluates candidate edges by walking the whole group again ([`priority_fusion.ts:142`](../../../src/compiler/passes/fusion/priority_fusion.ts)):
 
 ```ts
     const reEval = (group: FusionGroup, root: number): void => {
@@ -247,10 +247,10 @@ That is worth stating as a general point about performance work on compilers: **
 
 ## 23.7 Traps and limits
 
-- **`maxFusionSize` is 512 and it silently caps the measurement above.** [`fusion_analysis.ts:83`](../../../src/compiler/passes/fusion/fusion_analysis.ts) defaults it, so a chain longer than 512 operations stops merging partway and the timing flattens. §23.6 stops at 513 operations for that reason; extending the sweep further measures the cap, not the algorithm.
-- **The cycle check is the *only* check `GraphCycles` performs.** It knows nothing about shapes, kinds, or cost. Everything in §23.4's table above the cycle row is enforced elsewhere, and the engine calls them in a specific order — `legality.canFuse`, then `costModel.shouldFuse`, then `wouldCreateCycle` ([`priority_fusion.ts:200`](../../../src/compiler/passes/fusion/priority_fusion.ts)) — so the cheapest-to-evaluate check runs last. Reversing that order would save work on graphs where cycles are common.
+- **`maxFusionSize` is 512 and it silently caps the measurement above.** [`fusion_analysis.ts:81`](../../../src/compiler/passes/fusion/fusion_analysis.ts) defaults it, so a chain longer than 512 operations stops merging partway and the timing flattens. §23.6 stops at 513 operations for that reason; extending the sweep further measures the cap, not the algorithm.
+- **The cycle check is the *only* check `GraphCycles` performs.** It knows nothing about shapes, kinds, or cost. Everything in §23.4's table above the cycle row is enforced elsewhere, and the engine calls them in a specific order — `legality.canFuse`, then `costModel.shouldFuse`, then `wouldCreateCycle` ([`priority_fusion.ts:198`](../../../src/compiler/passes/fusion/priority_fusion.ts)) — so the cheapest-to-evaluate check runs last. Reversing that order would save work on graphs where cycles are common.
 - **`_reorder` uses Kahn's algorithm on the window and writes back into the same slots.** If the window contains a vertex whose representative has changed (`this.find(nd) !== nd`), its slot is released ([`graph_cycles.ts:143`](../../../src/compiler/passes/fusion/graph_cycles.ts)). Slots therefore accumulate holes as merges proceed, and `_nodeAtRank` is a sparse array with `-1` entries — correct, and it means the rank space never compacts.
-- **Two reductions never fuse, and that is an emitter limitation.** The `maxReductions` default is 1 ([`priority_fusion.ts:51`](../../../src/compiler/passes/fusion/priority_fusion.ts)). A softmax's two reductions could in principle share a pass over the data; they do not, because the lowering has no way to emit two reduction loops in one block.
+- **Two reductions never fuse, and that is an emitter limitation.** The `maxReductions` default is 1 ([`priority_fusion.ts:50`](../../../src/compiler/passes/fusion/priority_fusion.ts)). A softmax's two reductions could in principle share a pass over the data; they do not, because the lowering has no way to emit two reduction loops in one block.
 - **A refused fusion is silent under the default strategy.** Chapter 18 covered this: `priority` explains only its successes. On the `CycleCreating` program above, the compiler makes a decision with real performance consequences and emits no event at any trace level to say it did.
 
 ## 23.8 Read the tests

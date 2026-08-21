@@ -8,7 +8,8 @@ import type { Buffer } from '../ir/tensor/buffer.js';
 export const AccessKind = Object.freeze({ READ: 'read', WRITE: 'write' });
 
 export type AccessKindValue = (typeof AccessKind)[keyof typeof AccessKind];
-export type IterLevel = { name: string; min: number; extent: number; node: TirNode } | null;
+export type IterLevel = { name: string | null; min: number | null; extent: number | null; node: TirNode };
+export type StaticIterLevel = { name: string; min: number; extent: number; node: TirNode };
 export type IterBinding = { name: string; form: LinearForm | null; kind: string | undefined };
 export type AccessRegion = [number, number] | null;
 
@@ -178,11 +179,12 @@ export function collectBufferAccesses(root: TirNode, env: BufferAccessEnv = null
           const extent = constValue(node.extent);
           const known = min !== null && extent !== null;
           if (node.loopVar) {
-            bind(node.loopVar.name, known ? [min, extent] : null, known ? LinearForm.variable(node.loopVar.name) : null);
-            if (known) loopStack.push({ name: node.loopVar.name, min, extent, node });
-            else loopStack.push(null);
+            const name = node.loopVar.name;
+            bind(name, known ? [min, extent] : null, LinearForm.variable(name));
+            if (known) loopStack.push({ name, min, extent, node });
+            else loopStack.push({ name, min: null, extent: null, node });
           } else {
-            loopStack.push(null);
+            loopStack.push(opaqueLevel(node));
           }
           break;
         }
@@ -213,7 +215,7 @@ export function collectBufferAccesses(root: TirNode, env: BufferAccessEnv = null
           break;
         case 'AllocateNode': {
           const enclosing = new Set<TirNode>();
-          for (const level of loopStack) if (level) enclosing.add(level.node);
+          for (const level of loopStack) enclosing.add(level.node);
           allocatedUnder.set(node.buffer, enclosing);
           break;
         }
@@ -244,6 +246,14 @@ export function collectBufferAccesses(root: TirNode, env: BufferAccessEnv = null
   });
 
   return { order, byBuffer, byBlock, indexLoaded, allocatedUnder };
+}
+
+export function isStaticLevel(level: IterLevel): level is StaticIterLevel {
+  return level.name !== null && level.min !== null && level.extent !== null;
+}
+
+export function opaqueLevel(node: TirNode): IterLevel {
+  return { name: null, min: null, extent: null, node };
 }
 
 export function isPrivateToLoop(result: BufferAccessResult, buffer: Buffer, loop: TirNode): boolean {

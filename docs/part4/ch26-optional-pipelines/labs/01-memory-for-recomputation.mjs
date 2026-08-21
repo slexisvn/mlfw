@@ -25,7 +25,7 @@ async function best(fn, reps) {
 }
 
 async function study(label, budget) {
-  let ir = null, report = null, memory = null;
+  let ir = null, report = null, memory = null, warning = null;
   const compiled = compile(new Reused(), [a], {
     target: CPUTarget(),
     fusion: { enabled: false },
@@ -40,6 +40,7 @@ async function study(label, budget) {
         if (e.type === 'ir_snapshot') ir = e.text;
         if (e.type === 'pass_detail' && e.passName === 'RematerializationPass') report = e;
         if (e.type === 'memory') memory = e;
+        if (e.type === 'warning' && e.phase === 'rematerialization') warning = e;
       },
     },
   });
@@ -52,6 +53,7 @@ async function study(label, budget) {
   console.log(`  graph: ${ops.length} operations -- ${ops.join(', ')}`);
   if (report) console.log(`  pass: ${report.iterations} rematerialization(s), live pressure ${report.peakPressure} bytes against a budget of ${report.budget}`);
   console.log(`  planned peak memory: ${memory.peakMemory} bytes across ${memory.totalTemporaries} temporaries`);
+  if (warning) console.log(`  warning: ${warning.message}`);
   console.log(`  ${ms.toFixed(3)} ms\n`);
 }
 

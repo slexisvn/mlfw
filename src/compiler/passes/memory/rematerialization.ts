@@ -76,6 +76,12 @@ export class RematerializationPass extends FunctionPass {
       iterations++;
     }
 
+    if (this.trace && lastPeak > this.config.memoryBudget) {
+      this.trace.warn('rematerialization', graphFunc.name,
+        `budget not met: peak live pressure is ${lastPeak} bytes against a budget of ${this.config.memoryBudget} bytes`,
+        { peakPressure: lastPeak, budget: this.config.memoryBudget, iterations });
+    }
+
     if (this.trace && this.trace.level >= TraceLevel.DEBUG) {
       this.trace.emit({
         type: 'pass_detail', passName: this.name,

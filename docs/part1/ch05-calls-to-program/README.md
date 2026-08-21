@@ -188,9 +188,9 @@ The underlying limitation, however, is not a bug — it is inherent, and every t
 
 > **Definition 5.2 (Control-flow path).** The *control-flow path* taken by *f* at input *x* is the sequence of host-language branches evaluated during execution of *f(x)*.
 
-> **Theorem 5.3 (Trace validity; stated here).** Let *G* be a trace of *f* at *x*. Then *G* computes *f(y)* for every input *y* that (i) takes the same control-flow path as *x*, and (ii) has the same shapes and dtypes as *x*.
+> **Theorem 5.3 (Trace validity; stated here).** Let *G* be a trace of *f* at *x*, taken in host environment *E* — everything *f* reads without receiving it as an argument. Then *G* computes *f(y)* for every input *y* that (i) takes the same control-flow path as *x* and (ii) has the same shapes and dtypes as *x*, provided (iii) *f* is a function of its arguments and *E* alone, and *E* is unchanged since the trace.
 >
-> *Proof sketch.* Along a fixed control-flow path, *f* performs a fixed sequence of tensor operations whose operands are determined by data dependencies alone; *G* records precisely that sequence and those dependencies. Condition (ii) holds because each recorded operation was resolved against concrete shapes and dtypes at trace time. ∎
+> *Proof sketch.* Along a fixed control-flow path, *f* performs a fixed sequence of tensor operations whose operands are determined by data dependencies alone; *G* records precisely that sequence and those dependencies. Condition (ii) holds because each recorded operation was resolved against concrete shapes and dtypes at trace time. Condition (iii) is what makes those operations a function of *y* at all: whatever *f* reads from *E* is read once, during the trace, and enters *G* as a constant — so a change to *E*, or a value that differs on every read, is a change to *f* that *G* has no way to represent. ∎
 
 The branch above at least failed loudly. The dangerous version of condition (i) is the one that does not, and the same lab demonstrates it:
 
@@ -212,7 +212,23 @@ flag=false   eager -1,-2,-3,-4   compiled 10,20,30,40   <-- compiled is stale
 
 If that example looks artificial, substitute `this.training` for `this.flag` and it becomes the single most common way to get wrong answers out of a traced model. Dropout and batch normalization behave differently in training and evaluation, and a model traced in one mode and used in the other computes the wrong thing without complaint.
 
-So the two conditions of Theorem 5.3 receive very different treatment in practice. Condition (ii), shapes, is enforced automatically by guards (§5.6) — the framework checks it on every call. Condition (i), the control-flow path, is enforced only when the branch happens to read a tensor value, which is a loud failure; branches on host state fall outside the mechanism entirely and are left to the user's discipline. That asymmetry is worth remembering, because it is not specific to this framework — it is a property of tracing.
+`ModeDependent` at least fails a condition the theorem names: there is a branch, and its path changed. The quieter failure has no branch in it at all, and the same lab prints it:
+
+```js
+class Scaled extends Module {
+  constructor() { super(); this.scale = 2; }
+  forward(t) { return t.mul(this.scale); }
+}
+```
+
+```
+scale=2      eager 2,4,6,8   compiled 2,4,6,8
+scale=5      eager 5,10,15,20   compiled 2,4,6,8   <-- compiled is stale
+```
+
+`this.scale` is read, not branched on, so it is folded into `G` as a constant and the control-flow path is the same for every input and every value of `scale`. Conditions (i) and (ii) both hold. The artifact is stale anyway, and what it violates is condition (iii). A random draw taken inside `forward` fails the same way for the same reason: `randn` called during the trace produces one tensor of numbers, that tensor is what `G` contains, and the compiled artifact returns the identical "noise" on every call.
+
+So the three conditions of Theorem 5.3 receive very different treatment in practice. Condition (ii), shapes, is enforced automatically by guards (§5.6) — the framework checks it on every call. Condition (i), the control-flow path, is enforced only when the branch happens to read a tensor value, which is a loud failure; branches on host state fall outside the mechanism entirely. Condition (iii) is not enforced at all, and cannot be by this design: nothing records what `forward` read from its environment, so nothing can notice that it changed. Two of the three are left to the user's discipline, and that asymmetry is worth remembering, because it is not specific to this framework — it is a property of tracing.
 
 ## 5.6 Lab 3 — Guards, and paying for shapes
 
@@ -297,14 +313,14 @@ Collecting the chapter: once the computation exists as a graph rather than a seq
 
 None of these is available to an interpreter running one operation at a time, at any level of engineering effort. They are consequences of the representation, not of cleverness.
 
-And the price is Theorem 5.3: what you compiled is correct only for inputs that resemble the one you traced, in two precise senses — same path, same shapes — with guards to enforce the resemblance.
+And the price is Theorem 5.3: what you compiled is correct only for inputs that resemble the one you traced — same path, same shapes — and only while the model is still the one you traced. Guards enforce the shapes. The other two are yours to keep.
 
 ## 5.9 Traps and limits
 
 - **Tracing records tensor operations only.** A `console.log` in `forward` runs at trace time and never again. Python-side, or in this case JavaScript-side, effects are invisible to the graph. This is a frequent source of confusion when someone adds a print statement to a compiled model and sees nothing.
-- **Mutating the model after compiling does not recompile it.** Counterexample 5.4 is the general case: changing `this.training`, swapping a submodule, or editing any host-level attribute that `forward` reads leaves the compiled artifact untouched and stale. Recompile deliberately after any such change.
+- **Mutating the model after compiling does not recompile it.** This is condition (iii) of Theorem 5.3, and Counterexample 5.4 is only its loudest case: changing `this.training`, swapping a submodule, or editing any host-level attribute that `forward` reads — whether it is branched on or merely multiplied by — leaves the compiled artifact untouched and stale. Recompile deliberately after any such change.
 - **The trace is as long as the execution.** A `for` loop over 1000 timesteps written as a host loop produces 1000 copies of the body in the graph, and compilation time grows accordingly. That is the practical argument for `scan`, independent of correctness.
-- **Randomness is captured as it happened.** If `forward` samples noise, the trace records the operations that produced it — you must check whether the sampling became part of the graph or was frozen into a constant. Chapter 63 returns to this when training compiled models.
+- **Randomness is captured as it happened.** If `forward` samples noise, the sampling runs once, during the trace, and the numbers it produced are what the graph contains: the compiled artifact returns the identical "noise" on every call while the eager model returns a fresh draw. That is condition (iii) again, and it is the one case where a model that looks stochastic is silently deterministic. Chapter 63 returns to it when training compiled models.
 - **A value read inside `trace` is always a design question, never a bug to work around.** The error from §5.5 names the accessor and the cause, but it cannot tell you which of the two remedies you want. Reach for `where` when the decision is per-element, for `scan` when it is a loop, and for `dynamic_shapes` when what you were reaching for was a size rather than an element.
 
 ## 5.10 Read the tests

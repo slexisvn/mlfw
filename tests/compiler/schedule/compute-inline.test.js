@@ -23,6 +23,10 @@ function countLoads(node, name) {
   return c;
 }
 
+function declaredReads(block) {
+  return block.reads.map((r) => r.buffer.name).sort();
+}
+
 function buildProducerConsumer() {
   resetVarCounter();
   const A = new Buffer('A', [8], 'float32', 'global');
@@ -129,7 +133,42 @@ describe('schedule: compute_inline / compute_at / reverse_compute_at', () => {
     expect(countLoads(sch.func.body, 'P')).toBe(0);
     expect(countLoads(sch.func.body, 'Q')).toBe(0);
     expect(countLoads(sch.func.body, 'A')).toBe(2);
+    expect(declaredReads(sch.getBlock('cp'))).toEqual(['A']);
+    expect(declaredReads(sch.getBlock('cq'))).toEqual(['A']);
     expect(() => sch.getBlock('fuse')).toThrow();
+  });
+
+  it('gives the consumer the producer inputs it now loads, in its declared read set', () => {
+    const sch = buildProducerConsumer();
+    expect(declaredReads(sch.getBlock('cb'))).toEqual(['B']);
+
+    sch.computeInline('pb');
+
+    const cb = sch.getBlock('cb');
+    expect(declaredReads(cb)).toEqual(['A']);
+    expect(countLoads(cb.body, 'A')).toBe(1);
+    expect(countLoads(cb.body, 'B')).toBe(0);
+  });
+
+  it('does not duplicate an input the consumer already declared', () => {
+    resetVarCounter();
+    const A = new Buffer('A', [8], 'float32', 'global');
+    const B = new Buffer('B', [8], 'float32', 'global');
+    const C = new Buffer('C', [8], 'float32', 'global');
+    const pi = new VariableNode('pi', 'int32');
+    const pBlock = new BlockNode('pb', [{ iterVar: pi, binding: pi }], [{ buffer: A }], [{ buffer: B }],
+      new BufferStoreNode(B, [pi], new MathOpNode('*', new BufferLoadNode(A, [pi]), new IntImmNode(2))));
+    const pNest = new ForNode(pi, new IntImmNode(0), new IntImmNode(8), ForKind.SERIAL, pBlock);
+    const ci = new VariableNode('ci', 'int32');
+    const cBlock = new BlockNode('cb', [{ iterVar: ci, binding: ci }], [{ buffer: B }, { buffer: A }], [{ buffer: C }],
+      new BufferStoreNode(C, [ci], new MathOpNode('+', new BufferLoadNode(B, [ci]), new BufferLoadNode(A, [ci]))));
+    const cNest = new ForNode(ci, new IntImmNode(0), new IntImmNode(8), ForKind.SERIAL, cBlock);
+    const sch = new Schedule(new PrimFunc('f', [], new SeqNode([pNest, cNest])));
+
+    sch.computeInline('pb');
+
+    expect(declaredReads(sch.getBlock('cb'))).toEqual(['A']);
+    expect(countLoads(sch.getBlock('cb').body, 'A')).toBe(2);
   });
 
   it('refuses to inline a self-referential (recurrence) producer', () => {

@@ -16,9 +16,9 @@ import type { PassResultValue, PassTarget } from '../pass.js';
 import type { CompileTarget } from '../../pipeline/pipeline_types.js';
 
 type QuantParams = InstanceType<typeof QuantizationParams>;
-type CalibrationSource = {
+export type CalibrationSource = {
   hasData(value: Value): boolean;
-  getQuantParams(value: Value, scheme: QuantizationSchemeValue, dtype: ScalarDType): QuantParams;
+  getQuantParams(value: Value, scheme: QuantizationSchemeValue, dtype: ScalarDType): QuantParams | null;
 };
 type QuantAttrs = Record<string, AttrValue>;
 type SensitivityResult = { isSensitive(op: Operation, threshold: number): boolean };

@@ -8,7 +8,7 @@ import type { PassResultValue, PassTarget } from '../pass.js';
 
 function buildAlgebraicPatterns(fastMath: boolean): PatternSet {
   const set = new PatternSet();
-  set.add(new pat.AddZero());
+  set.add(new pat.AddZero(fastMath));
   set.add(new pat.SubZero());
   set.add(new pat.SubSelf(fastMath));
   set.add(new pat.MulOne());

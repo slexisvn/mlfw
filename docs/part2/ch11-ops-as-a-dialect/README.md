@@ -274,16 +274,24 @@ traced:
     %4 = mul(%2, %3) : tensor<2x2xf32>
     return(%4)
 
-passes: canonicalize: 5 -> 3, dce: 3 -> 1
+passes: canonicalize: 5 -> 4, dce: 4 -> 3
 after graph passes:
 module @Identity {
   func @Identity(%0: tensor<2x2xf32>) -> (tensor<2x2xf32>) {
-    return(%0)
+    %1 = constant() {tensor_type = tensor<xf32>, value = 0} : tensor<xf32>
+    %2 = add(%0, %1) : tensor<2x2xf32>
+    return(%2)
   }
 }
 ```
 
-Five operations to one. `AddZero` rewrote `add(%0, %1)` to just `%0`; `MulOne` did the same for the multiply; DCE swept the two orphaned constants. The function is now the identity, and the generated kernel will do nothing at all.
+Five operations to three, and **one of the two identities survived**. `MulOne` rewrote `mul(%2, %3)` to just `%2` and DCE swept the orphaned `1`; the `add` of zero is still there.
+
+That asymmetry is the whole point of the example, and it is not about traits. Both patterns are registered the same way, on the same kind of declaration, and the canonicalizer tried both. `MulOne` fired because `x × 1 = x` is true of the numbers a machine actually has. `AddZero` declined because `x + 0 = x` is *not*: for `x = −0`, IEEE 754 gives `(−0) + (+0) = +0`, so rewriting the add away would change the sign bit of a zero. The pattern asks for the operand's dtype, sees `f32`, finds no fast-math licence, and refuses.
+
+Chapter 20 is where that distinction gets its name and its four counterexamples. What Chapter 11 shows is the mechanism underneath it: a canonicalization pattern is not a syntactic rewrite that always applies, it is a rewrite *plus a condition*, and the condition can consult the type the registry attached to the value. Change the dtype to an integer and the same `AddZero` fires, because two's complement has one zero.
+
+**Try this.** Re-run the lab with `optimization: { fastMath: true }` in the compile options and watch the graph collapse to `return(%0)` — that is the licence being granted, nine chapters early.
 
 **Second, the transpose you have been watching since Chapter 1.** A `Linear` layer traces as `transpose` then `dot`:
 

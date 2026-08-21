@@ -124,7 +124,7 @@ Compilers respond in one of three ways, and this one uses all three.
 
 **Fix a good order by hand.** The pipeline is a list, written down and defended by tests. That is [`src/compiler/pipeline/graph_pipeline.ts`](../../../src/compiler/pipeline/graph_pipeline.ts).
 
-**Iterate to a fixed point.** Where transformations enable each other, run them repeatedly until nothing changes — [`graph_pipeline.ts:39`](../../../src/compiler/pipeline/graph_pipeline.ts):
+**Iterate to a fixed point.** Where transformations enable each other, run them repeatedly until nothing changes — [`graph_pipeline.ts:41`](../../../src/compiler/pipeline/graph_pipeline.ts):
 
 ```ts
   passes.push(new FixedPointGroup('canonicalize', [

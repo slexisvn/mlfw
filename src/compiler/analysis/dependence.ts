@@ -1,4 +1,4 @@
-import { AccessKind } from './buffer_access.js';
+import { AccessKind, isStaticLevel } from './buffer_access.js';
 import { mixedRadixDecomposition } from './iter_map.js';
 import type { LinearForm, VarRange } from './iter_map.js';
 import type { BufferAccess, AccessKindValue, IterLevel } from './buffer_access.js';
@@ -17,7 +17,6 @@ export const DepKind = Object.freeze({
 
 export type DirectionMask = number;
 export type DepKindValue = (typeof DepKind)[keyof typeof DepKind];
-type LoopLevel = NonNullable<IterLevel>;
 type Coefficients = { coeffs: number[]; foreign: boolean };
 
 export class Dependence {
@@ -25,10 +24,10 @@ export class Dependence {
   src: BufferAccess;
   dst: BufferAccess;
   kind: DepKindValue;
-  loops: LoopLevel[];
+  loops: IterLevel[];
   masks: DirectionMask[];
 
-  constructor(buffer: Buffer, src: BufferAccess, dst: BufferAccess, kind: DepKindValue, loops: LoopLevel[], masks: DirectionMask[]) {
+  constructor(buffer: Buffer, src: BufferAccess, dst: BufferAccess, kind: DepKindValue, loops: IterLevel[], masks: DirectionMask[]) {
     this.buffer = buffer;
     this.src = src;
     this.dst = dst;
@@ -53,20 +52,18 @@ function gcd(a: number, b: number): number {
   return a;
 }
 
-function commonNest(srcSpace: readonly IterLevel[], dstSpace: readonly IterLevel[]): LoopLevel[] {
+function commonNest(srcSpace: readonly IterLevel[], dstSpace: readonly IterLevel[]): IterLevel[] {
   const n = Math.min(srcSpace.length, dstSpace.length);
-  const loops: LoopLevel[] = [];
+  const loops: IterLevel[] = [];
   for (let i = 0; i < n; i++) {
-    const a = srcSpace[i];
-    const b = dstSpace[i];
-    if (a === null || b === null || a.node !== b.node) break;
-    loops.push(a);
+    if (srcSpace[i].node !== dstSpace[i].node) break;
+    loops.push(srcSpace[i]);
   }
   return loops;
 }
 
-function coefficients(form: LinearForm, levelIndex: ReadonlyMap<string, number>): Coefficients {
-  const coeffs: number[] = new Array(levelIndex.size).fill(0);
+function coefficients(form: LinearForm, levelIndex: ReadonlyMap<string, number>, levels: number): Coefficients {
+  const coeffs: number[] = new Array(levels).fill(0);
   let foreign = false;
   for (const [name, coeff] of form.terms) {
     const level = levelIndex.get(name);
@@ -78,12 +75,12 @@ function coefficients(form: LinearForm, levelIndex: ReadonlyMap<string, number>)
 
 const INDEPENDENT = Symbol('independent');
 
-function subscriptDirections(srcForm: LinearForm | null | undefined, dstForm: LinearForm | null | undefined, loops: readonly LoopLevel[], levelIndex: ReadonlyMap<string, number>, varRanges: ReadonlyMap<string, VarRange>): DirectionMask[] | typeof INDEPENDENT {
+function subscriptDirections(srcForm: LinearForm | null | undefined, dstForm: LinearForm | null | undefined, loops: readonly IterLevel[], levelIndex: ReadonlyMap<string, number>, varRanges: ReadonlyMap<string, VarRange>): DirectionMask[] | typeof INDEPENDENT {
   const n = loops.length;
   if (!srcForm || !dstForm) return new Array<DirectionMask>(n).fill(ANY_DIRECTION);
 
-  const src = coefficients(srcForm, levelIndex);
-  const dst = coefficients(dstForm, levelIndex);
+  const src = coefficients(srcForm, levelIndex, n);
+  const dst = coefficients(dstForm, levelIndex, n);
   const delta = dstForm.offset - srcForm.offset;
 
   const involved: number[] = [];
@@ -101,12 +98,13 @@ function subscriptDirections(srcForm: LinearForm | null | undefined, dstForm: Li
     const k = involved[0];
     const a = src.coeffs[k];
     const b = dst.coeffs[k];
-    const extent = loops[k].extent;
+    const { min, extent } = loops[k];
+    const ranged = min !== null && extent !== null;
 
     if (a === b) {
       if (delta % a !== 0) return INDEPENDENT;
       const distance = -delta / a;
-      if (Math.abs(distance) >= extent) return INDEPENDENT;
+      if (ranged && Math.abs(distance) >= extent) return INDEPENDENT;
       masks[k] = distance > 0 ? Direction.LT : (distance === 0 ? Direction.EQ : Direction.GT);
       return masks;
     }
@@ -114,14 +112,14 @@ function subscriptDirections(srcForm: LinearForm | null | undefined, dstForm: Li
     if (b === 0) {
       if (delta % a !== 0) return INDEPENDENT;
       const iv = delta / a;
-      if (iv < loops[k].min || iv >= loops[k].min + extent) return INDEPENDENT;
+      if (ranged && (iv < min || iv >= min + extent)) return INDEPENDENT;
       return masks;
     }
 
     if (a === 0) {
       if (delta % b !== 0) return INDEPENDENT;
       const jv = -delta / b;
-      if (jv < loops[k].min || jv >= loops[k].min + extent) return INDEPENDENT;
+      if (ranged && (jv < min || jv >= min + extent)) return INDEPENDENT;
       return masks;
     }
 
@@ -153,8 +151,10 @@ export function accessDependence(src: BufferAccess, dst: BufferAccess): Dependen
   const levelIndex = new Map<string, number>();
   const varRanges = new Map<string, VarRange>();
   for (let i = 0; i < loops.length; i++) {
-    levelIndex.set(loops[i].name, i);
-    varRanges.set(loops[i].name, [loops[i].min, loops[i].extent]);
+    const level = loops[i];
+    if (level.name === null) continue;
+    levelIndex.set(level.name, i);
+    if (isStaticLevel(level)) varRanges.set(level.name, [level.min, level.extent]);
   }
 
   const rank = Math.max(src.forms.length, dst.forms.length);

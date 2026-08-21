@@ -60,12 +60,12 @@ describe('reshape chain + trivial fold interaction', () => {
 });
 
 describe('transpose + neg + add-zero multi-pattern', () => {
-  it('identity transpose, double neg, and add-zero all fire to return x', () => {
-    const t = new TensorType([4, 8], ScalarType.F32);
+  it('identity transpose, double neg, and add-zero all fire to return x (int only)', () => {
+    const t = new TensorType([4, 8], ScalarType.I32);
     const func = buildFunction('f', [t], [t], (b, args) => {
       const transposed = b.transpose(args[0], [0, 1]);
       const nn = b.neg(b.neg(transposed.getResult(0)).getResult(0));
-      const zero = b.scalarConstant(0, ScalarType.F32);
+      const zero = b.scalarConstant(0, ScalarType.I32);
       b.returnOp([b.add(nn.getResult(0), zero.getResult(0)).getResult(0)]);
     });
 
@@ -76,10 +76,10 @@ describe('transpose + neg + add-zero multi-pattern', () => {
 });
 
 describe('commutative swap enables further pattern', () => {
-  it('add(0, x) → commutative swap → add(x, 0) → add-zero elimination → x', () => {
-    const t = new TensorType([4], ScalarType.F32);
+  it('add(0, x) → commutative swap → add(x, 0) → add-zero elimination → x (int only)', () => {
+    const t = new TensorType([4], ScalarType.I32);
     const func = buildFunction('f', [t], [t], (b, args) => {
-      const zero = b.scalarConstant(0, ScalarType.F32);
+      const zero = b.scalarConstant(0, ScalarType.I32);
       b.returnOp([b.add(zero.getResult(0), args[0]).getResult(0)]);
     });
 

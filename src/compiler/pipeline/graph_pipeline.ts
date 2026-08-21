@@ -12,21 +12,23 @@ import { DominatorFusionPass } from '../passes/fusion/dominator_fusion.js';
 import { PriorityFusionPass } from '../passes/fusion/priority_fusion.js';
 import { LayoutTransformPass } from '../passes/layout/layout_transform.js';
 import { QuantizationPass } from '../passes/quantization/quantization_pass.js';
+import { CalibrationPass } from '../passes/quantization/calibration_pass.js';
 import { DecompositionPass } from '../passes/decompose/decomposition_pass.js';
 import { RematerializationPass } from '../passes/memory/rematerialization.js';
 import { CallInlinerPass } from '../passes/inline/call_inliner.js';
 import { activeExternalCodegenProviders } from './external_codegen.js';
 import { graphPassesForPhase } from './graph_pass_registry.js';
+import type { CompileFn } from '../analysis/calibrate_exec.js';
 import type { CompilerContext } from './compiler_context.js';
 import type { CompilerConfig, CompileTarget, FusionAwareTarget, GraphPass, PassPhase } from './pipeline_types.js';
 
-export type GraphPipelineOpts = Readonly<{ context?: CompilerContext | null }>;
+export type GraphPipelineOpts = Readonly<{ context?: CompilerContext | null; compileFn?: CompileFn | null }>;
 
 type GraphPipelineTarget = FusionAwareTarget;
 
 const DEFAULT_LAUNCH_OVERHEAD_US = 5;
 
-export function buildGraphPipeline(config: CompilerConfig, target: GraphPipelineTarget | null, { context = null }: GraphPipelineOpts = {}): GraphPass[] {
+export function buildGraphPipeline(config: CompilerConfig, target: GraphPipelineTarget | null, { context = null, compileFn = null }: GraphPipelineOpts = {}): GraphPass[] {
   const passesForPhase = context
     ? (phase: PassPhase) => context.passesForPhase(phase, config, target as CompileTarget)
     : (phase: PassPhase) => graphPassesForPhase(phase, config, target as CompileTarget);
@@ -50,7 +52,18 @@ export function buildGraphPipeline(config: CompilerConfig, target: GraphPipeline
   }
 
   if (config.quantization.enabled) {
-    passes.push(new QuantizationPass({ ...config.quantization, target }));
+    const quantize = new QuantizationPass({ ...config.quantization, target });
+    const batches = config.quantization.calibrationData as readonly unknown[] | undefined;
+    if (batches && !quantize.config.calibration && target) {
+      passes.push(new CalibrationPass({
+        quantConfig: quantize.config,
+        batches,
+        mode: config.quantization.calibrationMode as string | undefined,
+        target,
+        compileFn: compileFn || undefined,
+      }));
+    }
+    passes.push(quantize);
     passes.push(new CanonicalizePass());
     passes.push(new DCEPass());
   }

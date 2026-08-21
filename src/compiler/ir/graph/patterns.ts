@@ -165,8 +165,10 @@ export class CanonicalizeCompare extends Pattern {
 }
 
 export class AddZero extends Pattern {
-  constructor() { super('add_zero', 5); this.rootOpName = 'add'; }
+  fastMath: boolean;
+  constructor(fastMath = false) { super('add_zero', 5); this.rootOpName = 'add'; this.fastMath = fastMath; }
   override match(op: Operation): boolean {
+    if (!isDtypeInt((op.getResult(0).type as TensorType).dtype) && !this.fastMath) return false;
     return isConstantVal(op.getOperand(1).definingOp, 0) || isConstantVal(op.getOperand(0).definingOp, 0);
   }
   override rewrite(op: Operation, builder: IRBuilder): boolean {

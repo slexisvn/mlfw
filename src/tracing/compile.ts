@@ -308,6 +308,18 @@ export function compile(model: CompilableModel, exampleInputs?: Tensor[], opts: 
     return error;
   }
 
+  function _bindCalibrationParams(base: Record<string, unknown>, params: readonly Tensor[]): Record<string, unknown> {
+    const q = base.quantization as { calibrationData?: readonly unknown[] } | undefined;
+    if (!q || !q.calibrationData) return base;
+    const asArray = (v: unknown) => (ArrayBuffer.isView(v) ? v : tensorToContiguous(v as Tensor));
+    const paramArrays = params.map(asArray);
+    const calibrationData = q.calibrationData.map((batch) => {
+      const given = Array.isArray(batch) ? batch : [batch];
+      return [...given.map(asArray), ...paramArrays];
+    });
+    return { ...base, quantization: { ...q, calibrationData } };
+  }
+
   const quantizing = !!(opts?.quantization as { enabled?: boolean } | undefined)?.enabled;
   const linksConstants = quantizing || !!(target as { supportsConstBuffers?: boolean })?.supportsConstBuffers;
   const foldPredicate = weightPredicate(linksConstants ? Infinity : MAX_FOLDABLE_ELEMENTS);
@@ -323,7 +335,7 @@ export function compile(model: CompilableModel, exampleInputs?: Tensor[], opts: 
     const module = overrides
       ? cloneGraphModule(prepared.graph as unknown as GraphModule)
       : prepared.graph as unknown as GraphModule;
-    const result = new Compiler(opts as never).compile(module) as unknown as CompiledResult;
+    const result = new Compiler(_bindCalibrationParams(opts, prepared.capturedParams) as never).compile(module) as unknown as CompiledResult;
     return {
       result,
       graph: module as unknown as GraphModuleLike,

@@ -10,7 +10,6 @@ export type FusionKindValue = (typeof FusionKind)[keyof typeof FusionKind];
 export type FusionLegalityResult = { legal: boolean; reason?: string };
 export type TargetCapabilities = {
   maxFusionSize?: number;
-  maxSharedMemory?: number;
   allowReductionFusion?: boolean;
 };
 
@@ -75,13 +74,11 @@ const LEGAL_TRUE: FusionLegalityResult = Object.freeze({ legal: true });
 
 export class FusionLegality {
   maxFusionSize: number;
-  maxSharedMemory: number;
   allowReductionFusion: boolean;
   private _lowerableCache: Map<string, boolean>;
 
   constructor(targetCapabilities: TargetCapabilities = {}) {
     this.maxFusionSize = targetCapabilities.maxFusionSize || 512;
-    this.maxSharedMemory = targetCapabilities.maxSharedMemory || 49152;
     this.allowReductionFusion = targetCapabilities.allowReductionFusion !== false;
     this._lowerableCache = new Map();
   }

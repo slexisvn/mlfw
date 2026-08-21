@@ -13,10 +13,10 @@ function retVal(func) {
 }
 
 describe('add identity (x + 0 = x)', () => {
-  it('eliminates add when scalar zero is rhs and types match', () => {
-    const t = new TensorType([4, 8], ScalarType.F32);
+  it('eliminates add when scalar zero is rhs and types match (int only)', () => {
+    const t = new TensorType([4, 8], ScalarType.I32);
     const func = buildFunction('f', [t], [t], (b, args) => {
-      const zero = b.scalarConstant(0, ScalarType.F32);
+      const zero = b.scalarConstant(0, ScalarType.I32);
       const sum = b.add(args[0], zero.getResult(0));
       b.returnOp([sum.getResult(0)]);
     });
@@ -27,10 +27,10 @@ describe('add identity (x + 0 = x)', () => {
     expect(func.findOp(op => op.opName === 'add')).toBeNull();
   });
 
-  it('eliminates add when scalar zero is lhs (commutative swap first)', () => {
-    const t = new TensorType([4], ScalarType.F32);
+  it('eliminates add when scalar zero is lhs (commutative swap first, int only)', () => {
+    const t = new TensorType([4], ScalarType.I32);
     const func = buildFunction('f', [t], [t], (b, args) => {
-      const zero = b.scalarConstant(0, ScalarType.F32);
+      const zero = b.scalarConstant(0, ScalarType.I32);
       const sum = b.add(zero.getResult(0), args[0]);
       b.returnOp([sum.getResult(0)]);
     });
@@ -40,21 +40,31 @@ describe('add identity (x + 0 = x)', () => {
     expect(retVal(func)).toBe(func.args[0]);
   });
 
-  it('does NOT eliminate when non-zero operand type differs from result', () => {
-    const scalarT = new TensorType([], ScalarType.F32);
-    const vecT = new TensorType([4], ScalarType.F32);
-    const func = buildFunction('f', [], [vecT], (b) => {
+  it('does NOT eliminate on floats, where x + 0 loses the sign of -0', () => {
+    const t = new TensorType([4, 8], ScalarType.F32);
+    const func = buildFunction('f', [t], [t], (b, args) => {
       const zero = b.scalarConstant(0, ScalarType.F32);
-      const five = b.scalarConstant(5, ScalarType.F32);
+      b.returnOp([b.add(args[0], zero.getResult(0)).getResult(0)]);
+    });
+
+    run(func);
+
+    expect(retVal(func).definingOp.opName).toBe('add');
+  });
+
+  it('does NOT eliminate when the non-zero operand type differs from the result', () => {
+    const vecT = new TensorType([4], ScalarType.I32);
+    const func = buildFunction('f', [], [vecT], (b) => {
+      const zero = b.constant(0, vecT);
+      const five = b.scalarConstant(5, ScalarType.I32);
       const sum = b.add(five.getResult(0), zero.getResult(0));
       b.returnOp([sum.getResult(0)]);
     });
 
     run(func);
 
-    expect(func.findOp(op => op.opName === 'add')).toBeNull();
-    expect(retVal(func).definingOp.opName).toBe('constant');
-    expect(retVal(func).definingOp.getAttr('value')).toBe(5);
+    expect(retVal(func).definingOp.opName).toBe('add');
+    expect(retVal(func).type.equals(vecT)).toBe(true);
   });
 });
 

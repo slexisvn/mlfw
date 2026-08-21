@@ -19,13 +19,19 @@ export type CalibrationOpts = Readonly<{
 const DEFAULT_QUANTIZABLE_OPS = new Set(['dot', 'conv', 'add', 'mul', 'sub']);
 
 function activationTargets(func: GraphFunction, quantizableOps: ReadonlySet<string>): Value[] {
+  const entry = func.entryBlock;
+  const capturable = new Set<Value>(entry.arguments);
+  for (const op of entry.ops()) {
+    for (let i = 0; i < op.numResults; i++) capturable.add(op.getResult(i));
+  }
+
   const targets: Value[] = [];
   const seen = new Set<Value>();
-  for (const op of func.ops()) {
+  for (const op of entry.ops()) {
     if (!quantizableOps.has(op.opName)) continue;
     for (let i = 0; i < op.numOperands; i++) {
       const v = op.getOperand(i);
-      if (seen.has(v)) continue;
+      if (seen.has(v) || !capturable.has(v)) continue;
       if (!(v.type instanceof TensorType) || !isFloatType(v.type.dtype)) continue;
       const def = v.definingOp;
       if (def && def.opName === 'constant') continue;

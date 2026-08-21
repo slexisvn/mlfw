@@ -24,6 +24,8 @@ Terms are grouped by what they describe: data, programs, transformations, execut
 
 **Layout.** How a tensor's logical dimensions map onto memory. The same 4-D activation can be stored as NCHW or NHWC; the choice changes which access patterns are contiguous, and therefore which kernels are fast. Chapter 25.
 
+**Broadcasting.** The rule that lets an elementwise operation combine tensors of different shapes by treating any dimension of size 1 as if it repeated. `[4, 3] + [1, 3]` adds the single row to every row; `[4, 3] + scalar` adds the scalar to every element. No data is copied — the size-1 axis is simply read with the index `0` every time. Chapter 10 gives the dimension rule as an order; Chapter 34 shows that a broadcast never becomes a loop.
+
 **Buffer.** A named region of memory with a shape and dtype, as seen inside TIR. The difference between a tensor and a buffer is the difference between a *value* and *the storage holding it* — the graph has tensors, TIR has buffers. [`src/compiler/ir/tensor/buffer.ts`](../../../src/compiler/ir/tensor/buffer.ts).
 
 ## 7.2 Programs
@@ -68,7 +70,7 @@ Terms are grouped by what they describe: data, programs, transformations, execut
 
 **Schedule.** A description of *how* a computation is to be executed — loop order, tiling, vectorization, thread binding — as distinct from *what* it computes. Chapters 38–43.
 
-**Schedule primitive.** One editing operation on a schedule: `split`, `reorder`, `fuse`, `tile`, `vectorize`, `bind`, `cache_read`, `rfactor`. 23 of them here.
+**Schedule primitive.** One editing operation on a schedule: `split`, `reorder`, `fuse`, `tile`, `vectorize`, `bind`, `cache_read`, `rfactor`. 22 of them here.
 
 **Legality.** Whether a transformation preserves the program's meaning. Not the same as *profitable*: a legal transformation may make the program slower, and an illegal one may make it faster and wrong. Chapter 42.
 

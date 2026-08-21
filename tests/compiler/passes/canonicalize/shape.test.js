@@ -122,10 +122,10 @@ describe('trivial transpose folding', () => {
 });
 
 describe('cross-pattern interaction', () => {
-  it('add-zero elimination followed by trivial reshape fold chains correctly', () => {
-    const t = new TensorType([4, 8], ScalarType.F32);
+  it('add-zero elimination followed by trivial reshape fold chains correctly (int only)', () => {
+    const t = new TensorType([4, 8], ScalarType.I32);
     const func = buildFunction('f', [t], [t], (b, args) => {
-      const zero = b.scalarConstant(0, ScalarType.F32);
+      const zero = b.scalarConstant(0, ScalarType.I32);
       const sum = b.add(args[0], zero.getResult(0));
       b.returnOp([b.reshape(sum.getResult(0), [4, 8]).getResult(0)]);
     });

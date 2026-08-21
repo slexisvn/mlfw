@@ -176,9 +176,11 @@ To say what that relation is, order dimensions by how much they claim:
 
 > **Definition 10.1 (Specificity order).** Write `d ⊑ e` when `d` is `?` or `d = e`. This is a partial order on dimensions: reflexive, antisymmetric, transitive, with `?` as least element. Extend it componentwise to shapes of equal rank. A symbolic dimension sits with `?` rather than with the numbers: two symbols are related only when they are structurally equal, and a symbol is never provably different from anything.
 
-> **Definition 10.2 (Compatibility).** Two shapes of equal rank are *compatible* when they have a common upper bound under ⊑ — that is, when there is a shape at least as specific as both. Equivalently, when they unify.
+> **Definition 10.2 (Compatibility).** Two shapes of equal rank are *compatible* when they have a common upper bound under ⊑ — that is, when there is a shape at least as specific as both. Equivalently, and this is the reading the code implements: when no dimension pair can be *proved* different.
 
-`shapeCompatible` decides exactly Definition 10.2, and the least such upper bound is what type inference propagates: `[?, 3]` and `[4, ?]` unify to `[4, 3]`, and every unknown that a caller resolves makes the whole function more specific.
+`shapeCompatible` decides exactly Definition 10.2, and the least such upper bound is what type inference propagates: `[?, 3]` and `[4, ?]` meet at `[4, 3]`, and every unknown that a caller resolves makes the whole function more specific.
+
+It is worth naming what this is *not*, because the obvious guess is wrong. Compatibility is not unification. Definition 10.1 puts a symbolic dimension next to `?`, and it does so at each occurrence independently — nothing records that the two `n`s in `[n, n]` are the same `n`. So `[n, n]` is compatible with `[4, 5]`: neither pair is two known numbers, so neither is rejected, even though no value of `n` could satisfy both. A unifier would answer no here; `shapeCompatible` answers "I cannot prove otherwise", and those are different claims. Deciding the first would need a solver over the symbolic layer of Chapter 37, and nothing in the type system reaches for one.
 
 Now the trap.
 
@@ -219,13 +221,15 @@ export function broadcastDim(a: Dim, b: Dim): Dim | null {
 }
 ```
 
-> **Definition 10.4 (Broadcast order).** Write `d ⊴ e` when `d = 1` or `d = e`. `broadcastDim` computes the least upper bound of `d` and `e` under ⊴ when one exists, and returns `null` when it does not.
+> **Definition 10.4 (Broadcast order).** Write `d ⊴ e` when `d = 1` or `d = e`. **On known dimensions**, `broadcastDim` computes the least upper bound of `d` and `e` under ⊴ when one exists, and returns `null` when it does not. Its last three lines leave that order rather than extending it, and Counterexample 10.5 is what they do instead.
 
-So broadcasting is a join — a genuine one, in a lattice whose bottom is `1` rather than `?`. `TensorType.broadcastShape` ([`types.ts:328`](../../../src/compiler/ir/graph/types.ts)) lifts it to whole shapes, right-aligning ranks so that a `[8]` bias joins a `[2, 8]` activation. That is precisely what happened at `%7` in Lab 1: `add([2,8], [8]) : [2,8]`.
+So on known dimensions broadcasting is a join — a genuine one, in a lattice whose bottom is `1` rather than `?`. `TensorType.broadcastShape` ([`types.ts:328`](../../../src/compiler/ir/graph/types.ts)) lifts it to whole shapes, right-aligning ranks so that a `[8]` bias joins a `[2, 8]` activation. That is precisely what happened at `%7` in Lab 1: `add([2,8], [8]) : [2,8]`.
 
 Two orders, then, doing different jobs: **specificity** decides whether a type may be used where another was expected, and **broadcast** decides what shape an elementwise operation produces. `1` is special in one and not the other; `?` is special in the other and not the one. Conflating them produces a compiler that thinks `[1, 8]` and `[4, 8]` are interchangeable everywhere, which they are not.
 
 > **Counterexample 10.5.** `broadcastDim(DYNAMIC, 4)` returns `4`, not `DYNAMIC`. Read as a claim, that says: *if this dimension is not 4 at run time, it must be 1.* That is an assumption, not a deduction — the unknown could turn out to be 7, and then the operation is simply invalid. The compiler is choosing the useful answer and delegating the check to the guard that fires before the compiled artifact is reused (Definition 5.5). The alternative, propagating `DYNAMIC`, would be sound and would also make every downstream shape unknown, which is to say useless.
+>
+> Two symbols err the opposite way: `broadcastDim(n, m)` returns `DYNAMIC`, which is no more an upper bound under ⊴ than `4` was, but discards both claims rather than betting on one. So on `?` and on symbols the function is not computing a join at all. It picks the shape the program most likely meant, and leaves the check to run time.
 
 ## 10.6 Lab 2 — Static, dynamic, and what changes
 

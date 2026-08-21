@@ -3,6 +3,7 @@ import { buildFunction } from '../../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../../src/compiler/ir/graph/types.js';
 import { FusionCostModel } from '../../../../src/compiler/passes/fusion/fusion_cost.js';
 import { FusionGroup } from '../../../../src/compiler/passes/fusion/fusion_groups.js';
+import { CPUTarget, CUDATarget } from '../../../../src/backend/target.js';
 
 function ops(func) {
   const list = [];
@@ -153,5 +154,46 @@ describe('FusionCostModel.shouldFuse', () => {
       b.returnOp([b.neg(sum.getResult(0)).getResult(0)]);
     });
     expect(new FusionCostModel({ maxRegistersPerThread: 1 }).shouldFuse(makeGroup(ops(func))).fuse).toBe(false);
+  });
+});
+
+describe('FusionCostModel per-thread budgets a target may not expose', () => {
+  function diamond() {
+    const t = new TensorType([256, 256], ScalarType.F32);
+    return buildFunction('f', [t, t], [t], (b, args) => {
+      const s = b.add(args[0], args[1]);
+      const m = b.mul(s.getResult(0), args[0]);
+      b.returnOp([b.add(m.getResult(0), s.getResult(0)).getResult(0)]);
+    });
+  }
+
+  it('an intermediate reused inside the group is charged as shared memory', () => {
+    const cost = new FusionCostModel().estimateGroupCost(makeGroup(ops(diamond())));
+    expect(cost.sharedMemoryUsage).toBe(256 * 256 * 4);
+  });
+
+  it('fuse=false when that charge exceeds the shared memory a GPU states it has', () => {
+    const decision = new FusionCostModel({ maxSharedMemory: CUDATarget().sharedMemoryBytes })
+      .shouldFuse(makeGroup(ops(diamond())));
+    expect(decision.fuse).toBe(false);
+    expect(decision.reason).toMatch(/shared memory/);
+  });
+
+  it('fuse=true on a target that states no shared memory, which is not a 48 KiB budget', () => {
+    expect(CPUTarget().sharedMemoryBytes).toBe(0);
+    const decision = new FusionCostModel({ maxSharedMemory: CPUTarget().sharedMemoryBytes })
+      .shouldFuse(makeGroup(ops(diamond())));
+    expect(decision.fuse).toBe(true);
+  });
+
+  it('a target stating no per-thread register file gets no register limit, not 255', () => {
+    expect(CPUTarget().registersPerThread).toBe(0);
+    expect(new FusionCostModel({ maxRegistersPerThread: CPUTarget().registersPerThread }).maxRegistersPerThread).toBe(Infinity);
+    expect(new FusionCostModel({ maxRegistersPerThread: CUDATarget().registersPerThread }).maxRegistersPerThread).toBe(255);
+    expect(new FusionCostModel().maxRegistersPerThread).toBe(255);
+  });
+
+  it('an unstated shared memory budget still falls back to the GPU default', () => {
+    expect(new FusionCostModel().shouldFuse(makeGroup(ops(diamond()))).fuse).toBe(false);
   });
 });

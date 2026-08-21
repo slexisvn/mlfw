@@ -101,7 +101,7 @@ this happens:
       ...
 ```
 
-and each phase is an object with a name, an optional condition, and a body — `compiler.ts:329`:
+and each phase is an object with a name, an optional condition, and a body — `compiler.ts:321`:
 
 ```ts
       {
@@ -113,19 +113,21 @@ and each phase is an object with a name, an optional condition, and a body — `
 
 The complete phase list, in order, is:
 
-`verify:pre` → `calibrate` → `graphPasses` → `partition` → `split` → `verify:post` → `lowering` → `tirPasses` → `verify:tensor` → `lirLowering` → `lirPasses` → `verify:lir` → `codegen` → `relaunchOnSerialization` → `planBufferAssignment`
+`verify:pre` → `graphPasses` → `partition` → `split` → `verify:post` → `lowering` → `tirPasses` → `verify:tensor` → `lirLowering` → `lirPasses` → `verify:lir` → `codegen` → `relaunchOnSerialization` → `planBufferAssignment`
 
 Read that list as a table of contents for Parts IV through X. Notice three things about it.
 
 **Verification is interleaved, not appended.** `verify:pre`, `verify:post`, `verify:tensor`, `verify:lir` — the compiler checks that its own output is well-formed at every level boundary. Chapter 64 explains why this is the single highest-value habit in compiler engineering: it converts "the model produced garbage" into "pass X produced invalid IR", which is a debuggable statement.
 
-**Some phases are conditional.** `calibrate` only runs when quantization needs statistics; `partition` only when the program is being split across multiple targets. The `when` field is how the pipeline stays one list instead of a nest of branches.
+**Some phases are conditional.** `partition` only runs when the program is being split across multiple targets; the four `verify:` phases only when verification is on. The `when` field is how the pipeline stays one list instead of a nest of branches.
 
 **One phase can rewind the pipeline.** `relaunchOnSerialization` exists because a GPU kernel can turn out, after code generation, to be unrunnable at its chosen launch geometry. Rather than fail, the compiler splits the graph and re-enters at `lowering`. Chapter 43 tells that story; note for now that the pipeline is a loop with a restart, not a straight line.
 
-### Nothing is compiled unless you ask
+### The whole-program compiler runs only when you ask
 
-This is worth stating plainly, because it shapes how you should read everything that follows. `model.forward(x)` does **not** invoke the compiler. It runs eagerly: each operation dispatches to a hand-written kernel, computes immediately, and returns a tensor. That path lives in `src/tensor/` and `src/kernels/`, and it is the baseline every measurement in this book is compared against.
+This is worth stating plainly, because it shapes how you should read everything that follows. `model.forward(x)` does **not** invoke the *whole-program* compiler. It runs eagerly: each operation is dispatched on its own, computes immediately, and returns a tensor. That path lives in `src/tensor/`, `src/dispatcher/` and `src/kernels/`, and it is the baseline every measurement in this book is compared against.
+
+Eagerly does not mean interpreted. Most arithmetic operations reach the same code generator the compiler uses, one operation at a time, compiled on first use at each new shape and cached — §4.2 walks that path and §4.4 measures the first call against the steady state. Operations that already have a hand-written kernel keep it. What `compile()` adds is not compilation; it is *seeing more than one operation at a time*.
 
 The compiler runs only when you ask for it — by calling `compile(model, inputs)`, or by passing `compile: true` to a `Trainer`. Both give you back something callable that behaves like the model, and the two paths are expected to agree; §2.8 lists the tests that hold them to it.
 
@@ -269,4 +271,4 @@ From here the book descends the diagram. Part I asks why any of this machinery i
 
 ---
 
-**Next:** Part I — Why machine learning needs a compiler, which returns to Chapter 2's four speedups — 2.57× and 1.08×, then 14.54× and 4.57× for the same twelve operations with two `tanh` calls removed — and explains exactly where the time went.
+**Next:** [Part I — Why machine learning needs a compiler](../../part1/README.md), which returns to Chapter 2's four speedups — 2.57× and 1.08×, then 14.54× and 4.57× for the same twelve operations with two `tanh` calls removed — and explains exactly where the time went.

@@ -4,7 +4,7 @@ import {
 
 manual_seed(0);
 
-const x = tensor([[1, 2], [3, 4]]);
+const x = tensor([[1, 2], [3, 4]], { dtype: 'i32' });
 
 class LongWayRound extends Module {
   forward(a) { return a.transpose(1, 0).transpose(1, 0).add(0).mul(1); }

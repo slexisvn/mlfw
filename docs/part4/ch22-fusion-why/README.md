@@ -1,6 +1,6 @@
 # Chapter 22 — Fusion I: why it is the single most valuable optimization
 
-Chapter 4 measured an eager operation and found `T(n) = α + βn`: a fixed cost plus a per-element cost. Chapter 21 just multiplied the number of operations in the graph by eight. This chapter is where that becomes affordable, and where the largest number in this book gets explained.
+Chapter 4 measured an eager operation and found `T(n) = α + βn`: a fixed cost plus a per-element cost. Chapter 21 just multiplied the number of operations in the graph by five, and by nine for a `layer_norm`. This chapter is where that becomes affordable, and where the largest number in this book gets explained.
 
 The claim is narrow and checkable. For the elementwise operations that make up most of a decomposed network, `β` is almost entirely **memory traffic**, and traffic is the one cost a compiler can remove without doing anything clever about the arithmetic.
 
@@ -17,7 +17,7 @@ r  = t3 + x
 
 Executed one at a time, each is a loop that reads its operands from memory and writes its result to memory. Four loops, each touching three tensors: **twelve tensor-sized transfers**.
 
-Now look at what the program actually needs. It consumes `x` and `y` and produces `r`. Everything else — `t1`, `t2`, `t3` — exists only to be handed to the next operation. Nine of the twelve transfers are the compiler storing a value and immediately loading it back.
+Now look at what the program actually needs. It consumes `x` and `y` and produces `r`; three transfers. The other nine are avoidable, and they are avoidable for two different reasons. Six of them are `t1`, `t2` and `t3` — values that exist only to be handed to the next operation, so the compiler stores each one and immediately loads it back. The remaining three are `x` and `y` themselves: `x` is read by three of the four loops and `y` by two, and each of those loops fetches it from memory again. Keep that split in mind; §22.3 is the theorem that counts both kinds, and stating only the first is the easy way to get it wrong.
 
 If instead you write one loop:
 
@@ -46,21 +46,28 @@ This is a model, and it is worth being explicit about what it assumes: that ever
 
 > **Definition 22.2 (Fusion of a group).** Let `G` be a set of operations. Its *inputs* are the values used by an operation in `G` and produced outside it; its *outputs* are the values produced in `G` and used outside it, or returned. Fusing `G` replaces its operations with one kernel whose traffic is the bytes of its inputs plus the bytes of its outputs.
 
-> **Theorem 22.3 (Fusion removes one round trip per internalized edge, stated here).** Let `G` be fused, and let `V` be the set of values produced inside `G` and used only inside `G`. Then
+The accounting is easier to get right if you stop thinking about edges and think about *touches*. Before fusion, a value costs a transfer every time an operation in the group touches it — once for the operation that produces it, once for each operation that reads it. After fusion there is one kernel, so it costs a transfer only if it crosses the boundary. Write `writes_G(w) ∈ {0,1}` for whether an operation in `G` produces `w`, and `reads_G(w)` for how many operations in `G` take `w` as an operand.
+
+> **Theorem 22.3 (What fusion removes, stated here).** Let `G` be fused, and let `∂G` be its inputs and outputs in the sense of Definition 22.2. For every value `w` touched by an operation in `G`,
 >
-> `traffic_unfused(G) − traffic_fused(G) = 2 · Σ_{v ∈ V} bytes(v)`
+> `traffic_unfused(G) − traffic_fused(G) = Σ_w (writes_G(w) + reads_G(w) − [w ∈ ∂G]) · bytes(w)`
 >
-> — one write and one read per internalized value.
+> where `[w ∈ ∂G]` is 1 if `w` crosses the boundary and 0 otherwise. Every term is non-negative.
 
-*Proof sketch.* Before fusion, every operation contributes the bytes of its operands plus the bytes of its results. A value `v ∈ V` is the result of one operation in `G` (one write) and an operand of at least one operation in `G` (at least one read); after fusion it is neither an input nor an output of the group, so it contributes nothing. A value produced in `G` but used outside remains an output and is unchanged; a value read from outside remains an input. ∎
+*Proof sketch.* Before fusion, every operation contributes the bytes of its operands plus the bytes of its results, so `w` is charged exactly `writes_G(w) + reads_G(w)` times. After fusion, Definition 22.2 charges the group once for each distinct input and once for each distinct output, so `w` is charged `[w ∈ ∂G]` times. Subtracting gives the sum. Non-negativity: a boundary value is either an input, hence read by at least one operation in `G`, or an output, hence produced by one — either way its bracket is at most `writes_G(w) + reads_G(w)`. ∎
 
-The `at least one read` is where the theorem is conservative in the framework's favour and where the implementation is not: a value used *twice* inside the group saves two reads, but the fused kernel must either keep it live or recompute it. That is the same distinction Chapter 24 will pay for.
+Two special cases carry almost all the intuition, and it is worth naming them because it is easy to state only the first and think you are done.
 
-> **Corollary 22.4 (Chains are the ideal case).** For a chain of `k` elementwise operations over `n`-element tensors of `b` bytes each, where every intermediate is used once, unfused traffic is `3knb` (two reads and one write per operation, in the binary case) and fused traffic is `3nb`. The ratio is `k`.
+- **An internalized value** — produced in `G`, read once in `G`, used nowhere else — contributes `1 + 1 − 0 = 2`: the write and the read that fusion deletes. This is the round trip everyone means when they say fusion removes an intermediate.
+- **A repeated external input** — read by `k` operations in `G`, produced outside — contributes `0 + k − 1 = k − 1`: the fused kernel loads it once where `k` loops each loaded it separately.
 
-Which gives the headline: **fusing a chain of `k` operations reduces memory traffic by a factor of `k`**, and for memory-bound kernels the runtime follows.
+The second case is the one that gets dropped, and dropping it understates the saving badly on exactly the graphs fusion is for. §22.5's chain reads `x` in three of its four operations and `y` in two, so three of the nine tensor round trips it removes — a third of the total — are of the second kind. The theorem also credits a value read *twice* inside the group with `1 + 2 = 3` transfers saved, which is right for traffic and is precisely where the implementation disagrees: it charges that value as shared-memory pressure instead and may refuse the fusion outright. That is the distinction Chapter 24 will pay 2.4× for.
 
-The cost model in the compiler computes exactly Theorem 22.3's difference ([`fusion_cost.ts:235`](../../../src/compiler/passes/fusion/fusion_cost.ts)):
+> **Corollary 22.4 (Chains are the ideal case).** For a chain of `k` elementwise binary operations over `n`-element tensors of `b` bytes each, where every intermediate is used once, unfused traffic is `3knb` — two reads and one write per operation. Fused traffic is `(i + 1)nb`, where `i` is the number of *distinct* external inputs, so the ratio is `3k / (i + 1)`. In the case §22.5 measures, where the whole chain is written over the same two tensors, `i = 2` and the ratio is exactly `k`.
+
+Which gives the headline: **fusing a chain of `k` operations over a fixed set of inputs reduces memory traffic by a factor of `k`**, and for memory-bound kernels the runtime follows. A chain that pulls in a fresh tensor at every step keeps those inputs and saves less.
+
+The cost model in the compiler computes Theorem 22.3's difference exactly, because it charges every operation for its own operands and its own results ([`fusion_cost.ts:235`](../../../src/compiler/passes/fusion/fusion_cost.ts)):
 
 ```ts
       memorySaved: totalBytes - fusedBytes,
@@ -87,7 +94,7 @@ The cost model in the compiler computes exactly Theorem 22.3's difference ([`fus
 
 Note `if (bytes !== DYNAMIC)`. A tensor with a symbolic dimension (Chapter 10) contributes **zero** to the traffic estimate, because the compiler does not know how big it is. A fully dynamic graph therefore looks free to this model, and every fusion decision on it is made on the launch-saving term alone. That is a real limitation with a real cause and no warning attached to it.
 
-The group-level estimate ([`fusion_cost.ts:125`](../../../src/compiler/passes/fusion/fusion_cost.ts)) computes four more quantities beyond traffic: recomputation cost for values used more than once internally, peak live values as a proxy for register pressure, shared-memory bytes for internally reused values, and a parallelism-loss term when a reduction and an elementwise operation of different sizes end up together. The decision procedure ([`fusion_cost.ts:243`](../../../src/compiler/passes/fusion/fusion_cost.ts)) is a series of vetoes, the last of which is the only one that mentions benefit at all ([`fusion_cost.ts:270`](../../../src/compiler/passes/fusion/fusion_cost.ts)):
+The group-level estimate ([`fusion_cost.ts:125`](../../../src/compiler/passes/fusion/fusion_cost.ts)) computes four more quantities beyond traffic: recomputation cost for values used more than once internally, peak live values as a proxy for register pressure, shared-memory bytes for internally reused values, and a parallelism-loss term when a reduction and an elementwise operation of different sizes end up together. The decision procedure ([`fusion_cost.ts:244`](../../../src/compiler/passes/fusion/fusion_cost.ts)) is a series of vetoes, the last of which is the only one that mentions benefit at all ([`fusion_cost.ts:270`](../../../src/compiler/passes/fusion/fusion_cost.ts)):
 
 ```ts
     if (cost.memorySaved <= 0 && cost.launchSaved <= 0) {
@@ -132,7 +139,9 @@ module @Chain {
 
 Two operands in, one result out, four operations inside, three intermediates that never leave the region. Definition 22.2, in IR.
 
-Counting by hand: twelve round trips become three, so the model predicts nine tensors of traffic removed per call, independent of size. Now the measurement, sweeping the tensor from 4 KiB to 16 MiB:
+Counting by hand: twelve round trips become three, so the model predicts nine tensors of traffic removed per call, independent of size. Theorem 22.3 gets there in two kinds of term — six transfers from the three internalized intermediates, three more from the repeated reads of `x` and `y` — and the `traffic saved` column below is the compiler's own arithmetic agreeing to the byte. Count only the intermediates and you would predict six, which is what makes the second kind worth stating.
+
+Now the measurement, sweeping the tensor from 4 KiB to 16 MiB:
 
 ```
 elements   tensor    unfused   fused    speedup   traffic saved
@@ -148,7 +157,7 @@ Three things to take from this table, and the third is the most important.
 
 **The speedup is real and large.** Two and a half times, for a transformation that changed no arithmetic whatsoever. Nothing else in Part IV comes close: Chapter 19's three passes removed operations that were doing nothing, and this one removed nothing at all — it only changed where the numbers live between operations.
 
-**The speedup is flat across four orders of magnitude.** From 64 KiB to 16 MiB the ratio sits between 2.45 and 2.56. That flatness is the model being right: traffic saved scales linearly with `n`, traffic total scales linearly with `n`, so the ratio is a constant. A speedup that depended on size would mean the model had missed the dominant term.
+**The speedup is flat once the tensors leave cache.** From 64 KiB to 16 MiB — a 256-fold span — the ratio sits between 2.45 and 2.56 on the machine that produced this table, and stays in a similarly narrow band on others. That flatness is the model being right: traffic saved scales linearly with `n`, traffic total scales linearly with `n`, so the ratio is a constant. A speedup that climbed or fell steadily with size would mean the model had missed the dominant term.
 
 **And it is 2.55, not the 4.0 the traffic ratio predicts.** The model says twelve transfers become three. The clock says 2.55. The gap is the model's assumption: `T ∝ bytes` holds for a kernel that is purely memory-bound, and these kernels also execute four arithmetic operations and a loop per element, which the fused version still does. Traffic went down 4×; the part of the runtime that was traffic went down 4×; the rest did not. Chapter 4's roofline says the same thing in one sentence: you can only remove the memory-bound part of a memory-bound kernel.
 
@@ -160,7 +169,7 @@ The small end is the other boundary. At 4 KiB the two tensors fit in L1, so the 
 
 Three consequences worth carrying forward.
 
-**Decomposition becomes free.** Chapter 21 turned one `softmax` into ten operations and the pipeline turned it back into one kernel. The reason that is not a disaster is this chapter: the ten operations were elementwise and reduction operations over the same shape, so their intermediates were internalizable, so fusing them cost nothing that the original `softmax` kernel would not also have paid.
+**Decomposition becomes free.** Chapter 21 turned one `softmax` into nine operations and the pipeline turned it back into one kernel. The reason that is not a disaster is this chapter: the nine operations were elementwise and reduction operations over the same shape, so their intermediates were internalizable, so fusing them cost nothing that the original `softmax` kernel would not also have paid.
 
 **The graph's operation count stops being a proxy for cost.** After fusion, a graph of six operations may be one kernel or six; the number that matters is the number of *regions* and what is inside them. Every measurement from here on counts kernels, not operations.
 

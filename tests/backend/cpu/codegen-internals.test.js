@@ -92,14 +92,17 @@ describe('CPUCodegen._exprToJS', () => {
     expect(exprToJS(trunc)).toBe('((x / 4) | 0)');
   });
 
-  it('simplifies x + 0 → x', () => {
-    const node = new MathOpNode('+', new VariableNode('x', 'f32'), new IntImmNode(0));
-    expect(exprToJS(node)).toBe('x');
+  it('simplifies x + 0 → x on integer index arithmetic', () => {
+    expect(exprToJS(new MathOpNode('+', idx('x'), new IntImmNode(0)))).toBe('x');
   });
 
-  it('simplifies 0 + x → x', () => {
-    const node = new MathOpNode('+', new IntImmNode(0), new VariableNode('x', 'f32'));
-    expect(exprToJS(node)).toBe('x');
+  it('simplifies 0 + x → x on integer index arithmetic', () => {
+    expect(exprToJS(new MathOpNode('+', new IntImmNode(0), idx('x')))).toBe('x');
+  });
+
+  it('keeps x + 0 and 0 + x on floats, where the identity fails at -0', () => {
+    expect(exprToJS(new MathOpNode('+', new VariableNode('x', 'f32'), new IntImmNode(0)))).toBe('(x + 0)');
+    expect(exprToJS(new MathOpNode('+', new IntImmNode(0), new VariableNode('x', 'f32')))).toBe('(0 + x)');
   });
 
   it('simplifies x - 0 → x', () => {
@@ -107,14 +110,21 @@ describe('CPUCodegen._exprToJS', () => {
     expect(exprToJS(node)).toBe('x');
   });
 
-  it('simplifies x * 0 → 0', () => {
-    const node = new MathOpNode('*', new VariableNode('x', 'f32'), new IntImmNode(0));
-    expect(exprToJS(node)).toBe('0');
+  it('simplifies x * 0 → 0 on integer index arithmetic', () => {
+    expect(exprToJS(new MathOpNode('*', idx('x'), new IntImmNode(0)))).toBe('0');
   });
 
-  it('simplifies 0 * x → 0', () => {
-    const node = new MathOpNode('*', new IntImmNode(0), new VariableNode('x', 'f32'));
-    expect(exprToJS(node)).toBe('0');
+  it('simplifies 0 * x → 0 on integer index arithmetic', () => {
+    expect(exprToJS(new MathOpNode('*', new IntImmNode(0), idx('x')))).toBe('0');
+  });
+
+  it('simplifies x * 0 → 0n on i64, matching the operand width', () => {
+    expect(exprToJS(new MathOpNode('*', new VariableNode('x', 'i64'), new IntImmNode(0)))).toBe('0n');
+  });
+
+  it('keeps x * 0 and 0 * x on floats, where the identity fails at NaN and infinity', () => {
+    expect(exprToJS(new MathOpNode('*', new VariableNode('x', 'f32'), new IntImmNode(0)))).toBe('(x * 0)');
+    expect(exprToJS(new MathOpNode('*', new IntImmNode(0), new VariableNode('x', 'f32')))).toBe('(0 * x)');
   });
 
   it('simplifies x * 1 → x', () => {

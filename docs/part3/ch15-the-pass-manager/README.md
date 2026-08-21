@@ -85,7 +85,7 @@ Definition 15.2, line for line. Note the last two lines before the return: falli
 
 ### The pipeline is built, not written
 
-[`buildGraphPipeline`](../../../src/compiler/pipeline/graph_pipeline.ts) is a function from `(config, target)` to a list of passes. Here is the middle of it ([`graph_pipeline.ts:37`](../../../src/compiler/pipeline/graph_pipeline.ts)):
+[`buildGraphPipeline`](../../../src/compiler/pipeline/graph_pipeline.ts) is a function from `(config, target)` to a list of passes. Here is the middle of it ([`graph_pipeline.ts:39`](../../../src/compiler/pipeline/graph_pipeline.ts)):
 
 ```ts
   passes.push(new CallInlinerPass());
@@ -148,12 +148,14 @@ node docs/part3/ch15-the-pass-manager/labs/01-the-fixed-point-group.mjs
 The program is chosen to need more than one round:
 
 ```js
+const x = tensor([[1, 2], [3, 4]], { dtype: 'i32' });
+
 class ThereAndBackAgain extends Module {
   forward(a) { return a.transpose(1, 0).transpose(1, 0).add(0); }
 }
 ```
 
-Two transposes that cancel, and an add of zero. With the default bound of 8:
+Two transposes that cancel, and an add of zero. The integer dtype is load-bearing and Chapter 20 is where it is explained: `x + 0` is an identity on integers and not on floats, where it maps `−0` to `+0`, so the rule that removes the add declines on an `f32` tensor. With the default bound of 8:
 
 ```
 === maxSimplifyIterations: 8 ===
@@ -176,7 +178,7 @@ Two transposes that cancel, and an add of zero. With the default bound of 8:
   cse                  UNCHANGED 1 -> 1
   dce                  UNCHANGED 1 -> 1
 module @ThereAndBackAgain {
-  func @ThereAndBackAgain(%0: tensor<2x2xf32>) -> (tensor<2x2xf32>) {
+  func @ThereAndBackAgain(%0: tensor<2x2xi32>) -> (tensor<2x2xi32>) {
     return(%0)
   }
 }
@@ -198,8 +200,8 @@ Now the same program with the bound set to 1:
   dce                  CHANGED   4 -> 2
   canonicalize:max-iter UNCHANGED -1 -> -1
 module @ThereAndBackAgain {
-  func @ThereAndBackAgain(%0: tensor<2x2xf32>) -> (tensor<2x2xf32>) {
-    %1 = transpose(%0) {permutation = [0, 1]} : tensor<2x2xf32>
+  func @ThereAndBackAgain(%0: tensor<2x2xi32>) -> (tensor<2x2xi32>) {
+    %1 = transpose(%0) {permutation = [0, 1]} : tensor<2x2xi32>
     return(%1)
   }
 }
@@ -307,7 +309,7 @@ The pass manager runs graph passes. It is not the top of the pipeline. [`Compile
       },
 ```
 
-Fifteen phases, in order: `verify:pre`, `calibrate`, `graphPasses`, `partition`, `split`, `verify:post`, `lowering`, `tirPasses`, `verify:tensor`, `lirLowering`, `lirPasses`, `verify:lir`, `codegen`, `relaunchOnSerialization`, `planBufferAssignment`. Four of them are verifications, at the four IR boundaries. Two of them — `tirPasses` and `lirPasses` — are entire other pass managers ([`TirPassManager`](../../../src/compiler/passes/tir_pass_manager.ts), Chapter 32) driving the passes of the next IR down.
+Fourteen phases, in order: `verify:pre`, `graphPasses`, `partition`, `split`, `verify:post`, `lowering`, `tirPasses`, `verify:tensor`, `lirLowering`, `lirPasses`, `verify:lir`, `codegen`, `relaunchOnSerialization`, `planBufferAssignment`. Four of them are verifications, at the four IR boundaries. Two of them — `tirPasses` and `lirPasses` — are entire other pass managers ([`TirPassManager`](../../../src/compiler/passes/tir_pass_manager.ts), Chapter 32) driving the passes of the next IR down.
 
 The phase list is data, and one field explains why. `ctx.restartFrom` ([`compiler.ts:291`](../../../src/compiler/pipeline/compiler.ts)) lets a phase ask the driver to jump back to an earlier phase and re-run from there:
 
@@ -325,7 +327,7 @@ That is used by exactly one phase today: `relaunchOnSerialization`, which discov
 
 - **The iteration cap is the only termination argument, and it is per group, not per pass.** A single pass that never settles internally is bounded by its own budget instead — the pattern applicator's `safetyBudget` ([`passes/rewrite/pattern.ts:30`](../../../src/compiler/passes/rewrite/pattern.ts)), Chapter 17. Two independent budgets, two independent silent-give-up paths, each with its own log line.
 - **`maxIterations` counts rounds, not work.** A group of five passes with a bound of 8 can run 40 passes. On a large graph, most of them reporting UNCHANGED, that is 40 traversals; with `each-pass` verification it is 40 more.
-- **A `FunctionPass` that fails stops the whole module in strict mode.** [`pass_manager.ts:188`](../../../src/compiler/passes/pass_manager.ts) breaks out of the loop over functions on the first failure. The resilient path ([`pass_manager.ts:157`](../../../src/compiler/passes/pass_manager.ts)) instead marks that function failed and carries on with the others — Chapter 18.
+- **A `FunctionPass` that fails stops the whole module in strict mode.** [`pass_manager.ts:192`](../../../src/compiler/passes/pass_manager.ts) breaks out of the loop over functions on the first failure. The resilient path ([`pass_manager.ts:157`](../../../src/compiler/passes/pass_manager.ts)) instead marks that function failed and carries on with the others — Chapter 18.
 - **Instrumentation exists and nothing uses it.** `addInstrument` and the `runBeforePass`/`runAfterPass` hooks ([`pass_manager.ts:82`](../../../src/compiler/passes/pass_manager.ts)) are a second observation mechanism alongside the trace log, with no callers in `src/`. If you need to hang something on every pass, this is the designed place; it is also untested by anything but its own absence.
 - **Op counts in the trace are computed only at `VERBOSE` and above** ([`pass_manager.ts:117`](../../../src/compiler/passes/pass_manager.ts): `const opsBefore = verbose ? countOps(module) : -1`). `countOps` walks every function, so this is a real cost and it is correctly gated — but it also means the `-1` you see in a `max-iter` line is a sentinel, not a count.
 - **The three pass managers do not share code.** `PassManager`, `TirPassManager` and the LIR manager each implement their own loop, their own error handling, and their own per-pass verification. They agree on behaviour by convention. Only the graph manager has fixed-point groups and an analysis manager at all.

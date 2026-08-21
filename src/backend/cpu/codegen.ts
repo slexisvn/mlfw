@@ -1,6 +1,7 @@
 import { ForKind } from '../../compiler/ir/tensor/nodes.js';
 import { jsTypedArray, isJSMathFunc, isDtypeInt, dtypeBytes, jsCompareOp } from '../../util/dtype_map.js';
 import { flattenRowMajorIndex } from '../index_emit.js';
+import { inferDtype } from '../../compiler/ir/lir/nodes.js';
 import { walk } from '../../compiler/ir/ir_visitor.js';
 import { dynamicDimProduct, resolveShapeParam, isZeroFillBody } from '../codegen_utils.js';
 
@@ -467,11 +468,13 @@ export class CPUCodegen {
             if (!node.b) { vals.push(`(${node.op}${vals.pop()})`); }
             else {
               const b = vals.pop(), a = vals.pop();
-              if ((node.op === '+' || node.op === '-') && b === '0') { vals.push(a as string); }
-              else if (node.op === '+' && a === '0') { vals.push(b as string); }
-              else if (node.op === '*' && (a === '0' || b === '0')) { vals.push('0'); }
+              const dtype = inferDtype(node);
+              const foldsZero = isDtypeInt(dtype) && (a === '0' || b === '0');
+              if (node.op === '-' && b === '0') { vals.push(a as string); }
               else if (node.op === '*' && b === '1') { vals.push(a as string); }
               else if (node.op === '*' && a === '1') { vals.push(b as string); }
+              else if (foldsZero && node.op === '+') { vals.push((b === '0' ? a : b) as string); }
+              else if (foldsZero && node.op === '*') { vals.push(this._zeroLit(dtype)); }
               else if (node.op === '%') vals.push(`((${a} % ${b} + ${b}) % ${b})`);
               else if (node.op === '//') vals.push(`Math.floor(${a} / ${b})`);
               else if (node.op === 'tmod') vals.push(`(${a} % ${b})`);

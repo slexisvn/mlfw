@@ -21,6 +21,10 @@ export class Storage {
     return this._impl;
   }
 
+  setPendingFill(fill: (() => void) | null) {
+    this._impl.setPendingFill(fill);
+  }
+
   get data(): NumericTypedArray | null {
     return this._impl.data;
   }

@@ -9,11 +9,12 @@ function build() {
   return new Sequential(new Linear(32, 64), new ReLU(), new Linear(64, 16));
 }
 
-async function study(label, quantization) {
+async function study(label, quantization, foldWeights = false) {
   let ir = null;
   const compiled = compile(build(), [x], {
     target: CPUTarget(),
     quantization,
+    foldWeights,
     trace: {
       level: TraceLevel.DEBUG,
       irSnapshot: { afterGraphPasses: true },
@@ -28,14 +29,24 @@ async function study(label, quantization) {
   return out;
 }
 
-const reference = await study('float32', undefined);
-const quantized = await study('int8, default activation range',
-  { enabled: true, quantizableOps: new Set(['dot']) });
+const quant = { enabled: true, quantizableOps: new Set(['dot']) };
 
-let err = 0, mag = 0;
-for (let i = 0; i < reference.length; i++) {
-  err += Math.abs(quantized[i] - reference[i]);
-  mag += Math.abs(reference[i]);
+const reference = await study('float32', undefined);
+const RUNS = [
+  ['int8, default activation range', quant, false],
+  ['int8, calibration', { ...quant, calibrationData: [[x]] }, false],
+  ['int8, folded weights', quant, true],
+  ['int8, folded weights + calibration', { ...quant, calibrationData: [[x]] }, true],
+];
+
+console.log();
+for (const [label, quantization, foldWeights] of RUNS) {
+  const out = await study(label, quantization, foldWeights);
+  let err = 0, mag = 0;
+  for (let i = 0; i < reference.length; i++) {
+    err += Math.abs(out[i] - reference[i]);
+    mag += Math.abs(reference[i]);
+  }
+  console.log(`  relative error against float32: ${(100 * err / mag).toFixed(2)}%`);
+  console.log(`  first output element: ${reference[0]} -> ${out[0]}\n`);
 }
-console.log(`\nrelative error against the float32 result: ${(100 * err / mag).toFixed(2)}%`);
-console.log(`first output element: ${reference[0]} -> ${quantized[0]}`);

@@ -12,7 +12,7 @@ Nobody writes redundant code on purpose. It arrives anyway, from three direction
 
 **The user writes it without noticing.** A term appears twice in an expression; a helper is called twice with the same arguments; a debugging line survives a refactor.
 
-**The framework generates it.** Chapter 21's decomposition turns one `softmax` into ten operations, and two `softmax` calls on the same tensor become twenty operations of which ten are duplicates. Every `ReLU` emits a scalar zero constant and a broadcast of it, and a network with sixteen ReLUs emits sixteen of each.
+**The framework generates it.** Chapter 21's decomposition turns one `softmax` into nine operations, and two `softmax` calls on the same tensor become eighteen operations of which nine are duplicates. Every `ReLU` emits a scalar zero constant and a broadcast of it, and a network with sixteen ReLUs emits sixteen of each.
 
 **Earlier passes leave it behind.** Chapter 11's canonicalization rewrites a `dot`'s contracting dimensions so the `transpose` feeding it becomes unnecessary — but canonicalization does not delete the transpose, it merely stops using it. Somebody has to sweep.
 
@@ -216,7 +216,7 @@ module @Wasteful {
 
 Three things are worth reading carefully.
 
-**Folding changed the graph without changing its size.** `18 -> 18`, `foldedCount=2`. Each `broadcast_in_dim` of a scalar zero became a `constant` of the full `2x2` shape — one operation replaced by one operation. And note what that means for a real tensor: folding a broadcast *materializes* the broadcast result. On a `2x2` that is 16 bytes; on the activation of a transformer layer it is megabytes of constant data in the compiled artifact. The pass has no size limit, and Chapter 62's weight folding is where the framework confronts the same question deliberately.
+**Folding changed the graph without changing its size.** `18 -> 18`, `foldedCount=2`. Each `broadcast_in_dim` of a scalar zero became a `constant` of the full `2x2` shape — one operation replaced by one operation. And note what that means for a real tensor: folding a broadcast *materializes* the broadcast result. On a `2x2` that is 16 bytes; on the activation of a transformer layer it is megabytes of constant data in the compiled artifact. The pass has no size limit, and Chapter 61's weight folding is where the framework confronts the same question deliberately.
 
 **CSE removed nearly half the graph.** Seven operations, because the duplicate `mul`, `add`, `maximum` and their four constants all collapsed. The result is `add(%6, %6)` — one value used twice, which is the same shape Chapter 11's commutativity lab produced.
 

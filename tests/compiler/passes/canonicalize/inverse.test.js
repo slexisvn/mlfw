@@ -58,11 +58,11 @@ describe('fixed-point convergence', () => {
     expect(run(func)).toBe(PassResult.UNCHANGED);
   });
 
-  it('neg(neg) + add(_, 0) chain collapses to just x', () => {
-    const t = new TensorType([4], ScalarType.F32);
+  it('neg(neg) + add(_, 0) chain collapses to just x (int only)', () => {
+    const t = new TensorType([4], ScalarType.I32);
     const func = buildFunction('f', [t], [t], (b, args) => {
       const nn = b.neg(b.neg(args[0]).getResult(0));
-      const zero = b.scalarConstant(0, ScalarType.F32);
+      const zero = b.scalarConstant(0, ScalarType.I32);
       b.returnOp([b.add(nn.getResult(0), zero.getResult(0)).getResult(0)]);
     });
 
@@ -157,12 +157,12 @@ describe('pass behavior', () => {
   });
 
   it('no dangling values after multi-pattern canonicalization', () => {
-    const t = new TensorType([4], ScalarType.F32);
+    const t = new TensorType([4], ScalarType.I32);
     const func = buildFunction('f', [t, t], [t], (b, args) => {
       const nn = b.neg(b.neg(args[0]).getResult(0));
-      const zero = b.scalarConstant(0, ScalarType.F32);
+      const zero = b.scalarConstant(0, ScalarType.I32);
       const sum = b.add(nn.getResult(0), zero.getResult(0));
-      const one = b.scalarConstant(1, ScalarType.F32);
+      const one = b.scalarConstant(1, ScalarType.I32);
       b.returnOp([b.mul(sum.getResult(0), one.getResult(0)).getResult(0)]);
     });
 

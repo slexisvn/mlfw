@@ -4,7 +4,7 @@ import {
 
 manual_seed(0);
 
-const x = tensor([[1, 2], [3, 4]]);
+const x = tensor([[1, 2], [3, 4]], { dtype: 'i32' });
 
 class ThereAndBackAgain extends Module {
   forward(a) { return a.transpose(1, 0).transpose(1, 0).add(0); }
@@ -38,5 +38,5 @@ async function run(label, maxIterations) {
   console.log(ir);
 }
 
-await run('capped', 1);
 await run('default', 8);
+await run('capped', 1);

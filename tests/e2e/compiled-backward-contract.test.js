@@ -133,6 +133,70 @@ describe('compiled backward gradients agree with finite differences', () => {
   }
 });
 
+describe('joint mode runs its single kernel with the real cotangent', () => {
+  async function settle(v) { return v && v.then ? await v : v; }
+
+  const trunk = new nn.Linear(12, 16), headA = new nn.Linear(16, 4), headB = new nn.Linear(16, 3);
+  const fwd = (x) => { const h = relu(trunk.forward(x)); return [headA.forward(h), headB.forward(h)]; };
+  const inputs = [randomTensor(mulberry32(5), [4, 12])];
+  const OUT_SHAPES = [[4, 4], [4, 3]];
+
+  function compiled(mode) {
+    return compileWithBackward({ forward: fwd }, inputs, { target: CPUTarget(), mode });
+  }
+
+  async function separateReference() {
+    const cf = compiled('separate');
+    const out = await settle(cf(...inputs));
+    const grads = await settle(cf.backward(...OUT_SHAPES.map((s) => ones(s))));
+    return { outputs: flatAll(out), gradients: flatAll(grads) };
+  }
+
+  it('forward outputs match separate mode when backward is never called', async () => {
+    const reference = await separateReference();
+    expect(flatAll(await settle(compiled('joint')(...inputs)))).toEqual(reference.outputs);
+  });
+
+  it('forward outputs stay correct when they are read only after backward', async () => {
+    const reference = await separateReference();
+    const cf = compiled('joint');
+    const out = await settle(cf(...inputs));
+    await settle(cf.backward(...OUT_SHAPES.map((s) => ones(s))));
+    expect(flatAll(out)).toEqual(reference.outputs);
+  });
+
+  it('gradients match separate mode whether or not the outputs were read first', async () => {
+    const reference = await separateReference();
+
+    const unread = compiled('joint');
+    const unreadOut = await settle(unread(...inputs));
+    const unreadGrads = await settle(unread.backward(...OUT_SHAPES.map((s) => ones(s))));
+
+    const read = compiled('joint');
+    const readOut = await settle(read(...inputs));
+    flatAll(readOut);
+    const readGrads = await settle(read.backward(...OUT_SHAPES.map((s) => ones(s))));
+
+    expect(flatAll(unreadGrads)).toEqual(reference.gradients);
+    expect(flatAll(readGrads)).toEqual(reference.gradients);
+    expect(flatAll(unreadOut)).toEqual(reference.outputs);
+  });
+
+  it('repeated backward calls return independent gradient tensors', async () => {
+    const cf = compiled('joint');
+    const out = await settle(cf(...inputs));
+    const shapes = out.map((t) => t.shape);
+
+    const first = await settle(cf.backward(...shapes.map((s) => ones(s))));
+    const firstValues = flatAll(first);
+    const second = await settle(cf.backward(...shapes.map((s) => zeros(s))));
+
+    expect(flatAll(second).every((v) => v === 0)).toBe(true);
+    expect(flatAll(first)).toEqual(firstValues);
+    expect(firstValues.some((v) => v !== 0)).toBe(true);
+  });
+});
+
 describe('backward before forward is rejected', () => {
   it('names the missing forward pass', () => {
     const { fwd } = multiHead();

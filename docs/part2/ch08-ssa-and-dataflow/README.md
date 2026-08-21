@@ -36,7 +36,7 @@ This is *static single assignment* form, and it is the single most consequential
 
 > **Definition 8.1 (SSA form; classical, after Cytron et al., 1991).** A program is in *static single assignment* form when every value is defined by exactly one instruction, and every use of a value refers unambiguously to that definition.
 
-> **Definition 8.2 (Use-def graph).** The *use-def graph* of a program in SSA form is the directed graph whose nodes are operations and whose edges run from each operation to the operations producing its operands.
+> **Definition 8.2 (Use-def and def-use graphs).** The *use-def graph* of a program in SSA form is the directed graph whose nodes are operations and whose edges run from each operation to the operations producing its operands. The *def-use graph* is its reverse: an edge from each operation to the operations consuming its results. The two carry the same information and are read in opposite directions, so which one a compiler stores is an engineering choice — and this one stores the second, since a `Value` holds a list of its users.
 
 ## 8.3 In mlfw: a value is a node with a list of users
 
@@ -152,9 +152,9 @@ value      defined by            used by
 values claimed by more than one producer: 0
 ```
 
-That table *is* the use-def graph. Read it as edges and the program's shape appears: `%1 → transpose → %5 → dot`, and separately `%3 → transpose → %11 → dot`, the two `Linear` layers, structurally identical and independent.
+That table is both graphs at once, one per column: `defined by` is the use-def edge out of each value, `used by` is the def-use edge. Read the def-use direction and the program's shape appears — `%1 → transpose → %5 → dot`, and separately `%3 → transpose → %11 → dot`, the two `Linear` layers, structurally identical and independent. The second half of the lab reads the other direction, following `definingOp` back from the return.
 
-The second half of the lab runs the same walk on Chapter 5's dead-branch model, this time starting from the returned value and following `definingOp` backwards:
+That backwards walk, run on Chapter 5's dead-branch model:
 
 ```
 the same walk on a model with a branch nobody reads:

@@ -89,7 +89,7 @@ Explanations get the cheaper version of the same idea ([`trace.ts:121`](../../..
   get explainsEnabled(): boolean { return this.level >= TraceLevel.DEBUG; }
 ```
 
-and the call sites are expected to ask *before* building the message ([`priority_fusion.ts:245`](../../../src/compiler/passes/fusion/priority_fusion.ts)):
+and the call sites are expected to ask *before* building the message ([`priority_fusion.ts:243`](../../../src/compiler/passes/fusion/priority_fusion.ts)):
 
 ```ts
   _explain(group: FusionGroup): void {
@@ -132,7 +132,7 @@ One line makes the compile transactional. `Compiler.compile` reads the mode ([`c
 
 In strict mode the compiler edits the caller's module in place, which is fast and which is why a strict-mode failure can leave that module wrecked. In resilient mode it works on a clone, and the caller's module is untouched no matter what happens — Definition 18.3's first clause, bought with one copy.
 
-The second clause is the pass manager's ([`pass_manager.ts:157`](../../../src/compiler/passes/pass_manager.ts)), which wraps each function's pass run in a `try` and, on a throw, records a `CompilationError` and adds the function to `ctx.failedFunctions`. Every later pass skips it ([`pass_manager.ts:152`](../../../src/compiler/passes/pass_manager.ts): `if (ctx.failedFunctions.has(func.name)) continue;`), and so does every later *phase* ([`compiler.ts:480`](../../../src/compiler/pipeline/compiler.ts)). And the half-rewritten function is replaced with a fresh copy of the original ([`compiler.ts:450`](../../../src/compiler/pipeline/compiler.ts)):
+The second clause is the pass manager's ([`pass_manager.ts:157`](../../../src/compiler/passes/pass_manager.ts)), which wraps each function's pass run in a `try` and, on a throw, records a `CompilationError` and adds the function to `ctx.failedFunctions`. Every later pass skips it ([`pass_manager.ts:152`](../../../src/compiler/passes/pass_manager.ts): `if (ctx.failedFunctions.has(func.name)) continue;`), and so does every later *phase* ([`compiler.ts:454`](../../../src/compiler/pipeline/compiler.ts)). And the half-rewritten function is replaced with a fresh copy of the original ([`compiler.ts:424`](../../../src/compiler/pipeline/compiler.ts)):
 
 ```ts
           if (resilient && original && original !== graphModule) {
@@ -164,7 +164,18 @@ ir_snapshot           0       0       0       2
 TOTAL                 0      26      43      50
 ```
 
-Definition 18.1 in a table: each column is a superset of the one to its left. Nothing is reworded, nothing disappears, and 26 events is enough to see the whole shape of a compile. The twenty-two phase events are eleven start/end pairs — fewer than the fifteen entries in Chapter 15's phase list, because the phases that only check something (`verify:pre`, `verify:post`, `split`) do not announce themselves, while each TIR pass announces its own phase and so `scheduling` appears twice.
+Definition 18.1 in a table: each column is a superset of the one to its left. Nothing is reworded, nothing disappears, and 26 events is enough to see the whole shape of a compile.
+
+The twenty-two phase events are eleven start/end pairs, and it is worth resisting the obvious guess about which eleven. They are:
+
+```
+compile  graphPasses  lowering  scheduling  scheduling  simplify
+memoryScheduling  memoryPlanning  lirLowering  lirSimplify  codegen
+```
+
+Only four of those — `graphPasses`, `lowering`, `lirLowering`, `codegen` — are entries in Chapter 15's fourteen-phase list. `compile` is the outer bracket around the whole run and is not in that list at all, and the remaining six are TIR and LIR *passes* announcing a phase of their own, because both of those managers call `phaseStart(pass.phase)` per pass ([`tir_pass_manager.ts:51`](../../../src/compiler/passes/tir_pass_manager.ts), [`lir_pass_manager.ts:48`](../../../src/compiler/passes/lir_pass_manager.ts)). `scheduling` appears twice because two different TIR passes declare that same phase name — `InlineReindexPass` ([`inline_reindex_pass.ts:58`](../../../src/compiler/passes/schedule/inline_reindex_pass.ts)) and `SchedulePass` ([`schedule_pass.ts:18`](../../../src/compiler/passes/schedule/schedule_pass.ts)).
+
+Going the other way, ten of Chapter 15's fourteen phases emit nothing: `verify:pre`, `verify:post`, `verify:tensor`, `verify:lir`, `split`, `tirPasses`, `lirPasses`, `relaunchOnSerialization` and `planBufferAssignment` never call `phaseStart` at all, and `partition` does ([`compiler.ts:446`](../../../src/compiler/pipeline/compiler.ts)) but is guarded off in a default compile. So the phase *stream* and the phase *list* are two different enumerations that happen to share four names — which is worth knowing before you try to reconstruct the pipeline from a trace.
 
 The second half prints one event of each type, which is the fastest way to learn what is available:
 
@@ -252,7 +263,7 @@ The second error is the interesting one. In strict mode you would never have lea
 - **`explain` has seven call sites.** Fusion (three strategies), scheduling (two), tensorization, and the serialization relaunch. Lowering, memory planning, layout and code generation make decisions and explain none of them. The mechanism is good; the coverage is a fraction of the decisions a wrong number could come from.
 - **The priority fusion engine explains only its successes.** `explain('fusion', ops, 'fused', null, …)` — the reason is always `null`, and a pair the engine *declined* to fuse produces no event at all. The dominator strategy reports both outcomes with reasons ([`dominator_fusion.ts:96`](../../../src/compiler/passes/fusion/dominator_fusion.ts)). Since priority is the default, the default configuration is the least explicable one.
 - **A `pass` event's `durationMs` measures more than the pass, and less than the pass costs.** The clock starts before the manager fetches the pass's required analyses ([`pass_manager.ts:155`](../../../src/compiler/passes/pass_manager.ts)) and stops as soon as `run` returns ([`pass_manager.ts:181`](../../../src/compiler/passes/pass_manager.ts)), so the figure includes any analysis computed on this pass's behalf — which may be a cache hit for one pass and a full traversal for the next — and excludes the invalidation and the per-pass verification that follow. Two passes' durations are not comparable quantities.
-- **Warnings are `INFO`-level and easy to miss.** `TraceLog.warn` ([`trace.ts:113`](../../../src/compiler/pipeline/trace.ts)) has five call sites, and two of them report something you would very much want to know: *kernel serialized to a single thread* ([`compiler.ts:687`](../../../src/compiler/pipeline/compiler.ts)) and *the graph cannot be split any further* ([`compiler.ts:571`](../../../src/compiler/pipeline/compiler.ts)). Both are performance cliffs of an order of magnitude, both are delivered as events into a sink that is `() => {}` by default, and neither is surfaced anywhere else. If you compile with no trace configured, a compiler that has decided to run your GPU kernel on one thread will not mention it.
+- **Warnings are `INFO`-level and easy to miss.** `TraceLog.warn` ([`trace.ts:113`](../../../src/compiler/pipeline/trace.ts)) has five call sites, and two of them report something you would very much want to know: *kernel serialized to a single thread* ([`compiler.ts:661`](../../../src/compiler/pipeline/compiler.ts)) and *the graph cannot be split any further* ([`compiler.ts:545`](../../../src/compiler/pipeline/compiler.ts)). Both are performance cliffs of an order of magnitude, both are delivered as events into a sink that is `() => {}` by default, and neither is surfaced anywhere else. If you compile with no trace configured, a compiler that has decided to run your GPU kernel on one thread will not mention it.
 - **Resilient mode costs a full module clone even when nothing fails.** `cloneGraphModule` runs before the first pass, unconditionally, whenever `errorMode` is `resilient`. It also means analyses cached against the original module's functions are useless, because the clone's functions are different objects (Chapter 16).
 - **A failed function is skipped, not compiled unoptimized.** The restore in `_runGraphPasses` puts the original IR back into the module so the module stays valid, but `failedFunctions` still contains the name, and lowering skips it. There is no "fall back to the unoptimized version" path — a failure removes the function from the output, it does not degrade it.
 

@@ -118,6 +118,70 @@ describe('affine dependence testing against brute-force enumeration of the itera
   });
 });
 
+describe('a loop extent that is not an integer literal', () => {
+  function selfUpdateFuncWithSymbolicExtent(names, extents, shape, writeOffsets, readOffsets, symbolicLevel) {
+    const A = new Buffer('A', shape, 'float32', 'global');
+    const writeIdx = writeOffsets.map(([n, k]) => shift(names[n], k));
+    const readIdx = readOffsets.map(([n, k]) => shift(names[n], k));
+    let node = new BufferStoreNode(A, writeIdx, add(new BufferLoadNode(A, readIdx), i32(1)));
+    for (let d = names.length - 1; d >= 0; d--) {
+      const extent = d === symbolicLevel ? v(`${names[d]}_extent`) : i32(extents[d]);
+      node = new ForNode(v(names[d]), i32(0), extent, ForKind.SERIAL, node);
+    }
+    return new PrimFunc('f', [], node, new Map([['A', A]]));
+  }
+
+  function nestLoops(func) {
+    const loops = [];
+    for (let node = func.body; node && node.type === 'ForNode'; node = node.body) loops.push(node);
+    return loops;
+  }
+
+  it('keeps the symbolic level in the direction vector instead of truncating the nest there', () => {
+    const func = selfUpdateFuncWithSymbolicExtent(['i', 'j'], [6, 6], [6, 6], [[0, 0], [1, 0]], [[0, -1], [1, 0]], 0);
+    const { write, read } = writeReadPair(func);
+    const dep = accessDependence(write, read);
+
+    expect(dep.loops.map((l) => l.name)).toEqual(['i', 'j']);
+    expect(dep.masks).toEqual([Direction.LT, Direction.EQ]);
+  });
+
+  it('reports a symbolic reduction level as loop-carried rather than as no dependence at all', () => {
+    const C = new Buffer('C', [4, 4], 'float32', 'global');
+    const A = new Buffer('A', [4, 4], 'float32', 'global');
+    const store = new BufferStoreNode(C, [v('m'), v('n')],
+      new MathOpNode('+', new BufferLoadNode(C, [v('m'), v('n')]), new BufferLoadNode(A, [v('m'), v('k')])));
+    let body = new ForNode(v('k'), i32(0), v('k_extent'), ForKind.SERIAL, store);
+    body = new ForNode(v('n'), i32(0), i32(4), ForKind.SERIAL, body);
+    body = new ForNode(v('m'), i32(0), i32(4), ForKind.SERIAL, body);
+    const func = new PrimFunc('f', [], body, new Map([['C', C], ['A', A]]));
+    const deps = dependences(collectBufferAccesses(func.body).byBuffer);
+    const loops = nestLoops(func);
+
+    expect(carriesDependence(deps, loops[2])).not.toBeNull();
+    expect(carriesDependence(deps, loops[0])).toBeNull();
+    expect(carriesDependence(deps, loops[1])).toBeNull();
+  });
+
+  it('drops the distance-against-extent refinement, keeping a dependence a literal extent rules out', () => {
+    const literal = selfUpdateFuncWithSymbolicExtent(['i'], [8], [16], [[0, 0]], [[0, 8]], -1);
+    const symbolic = selfUpdateFuncWithSymbolicExtent(['i'], [8], [16], [[0, 0]], [[0, 8]], 0);
+    const pair = writeReadPair(literal);
+    const symbolicPair = writeReadPair(symbolic);
+
+    expect(accessDependence(pair.write, pair.read)).toBeNull();
+    expect(accessDependence(symbolicPair.write, symbolicPair.read).masks).toEqual([Direction.GT]);
+  });
+
+  it('refuses an interchange whose legality rests on the unknown extent', () => {
+    const func = selfUpdateFuncWithSymbolicExtent(['i', 'j'], [6, 6], [6, 6], [[0, 0], [1, 0]], [[0, -1], [1, 1]], 0);
+    const deps = dependences(collectBufferAccesses(func.body).byBuffer);
+    const loops = nestLoops(func);
+
+    expect(permutationPreservesDependences(deps, loops, [loops[1], loops[0]])).not.toBeNull();
+  });
+});
+
 describe('Allen-Kennedy permutation legality from direction vectors', () => {
   function nestLoops(func) {
     const loops = [];

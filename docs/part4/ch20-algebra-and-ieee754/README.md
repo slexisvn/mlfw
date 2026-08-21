@@ -32,7 +32,7 @@ So the design is: rules that are valid under position one are always on; rules t
 
 ## 20.3 Theory: which identities survive
 
-Write `≡` for "produces the same bits for every input, in every rounding mode".
+Write `≡` for "produces the same bits for every input", with two exclusions stated once and relied on below. A *signalling* NaN is excluded, because every arithmetic operation quiets one, so `x × 1` returns a quiet NaN where the rewrite returns the signalling one it started with. NaN *payloads* are excluded too, because WebAssembly permits an implementation to return a canonical NaN instead of propagating an operand's bits. Admit either and every identity in Theorem 20.1 fails except negation, which is why the relation is defined to stand outside them: neither is reachable from a tensor program this compiler accepts.
 
 > **Theorem 20.1 (Identities valid over floats).** For IEEE 754 binary arithmetic with default rounding:
 > - `x × 1 ≡ x`
@@ -50,7 +50,9 @@ Write `≡` for "produces the same bits for every input, in every rounding mode"
 
 Note the shape of these. `x + 0` fails only on signed zero — a quiet, single-bit difference that surfaces only if something downstream divides by the result or inspects its sign. The other three fail loudly, turning a NaN into a number, which is worse: a NaN is a diagnostic, and erasing it converts a detectable failure into a plausible wrong answer.
 
-> **Definition 20.3 (Fast-math licence, stated here).** A *fast-math licence* is a user assertion that the program's values are finite and that signed zero is not observed. Under it, the compiler may apply identities that hold over the reals, and results may differ from IEEE 754 in bits, in NaN propagation, and in signed zero.
+> **Definition 20.3 (Fast-math licence, stated here).** A *fast-math licence* is a user assertion about every value the program computes, intermediates included and not only its inputs and outputs: that none is infinite or NaN, that signed zero is never observed, and that every operation is applied inside its domain — no division by zero, no logarithm of a non-positive number. Under it, the compiler may apply identities that hold over the reals, and results may differ from IEEE 754 in bits, in NaN propagation, and in signed zero.
+
+Each clause pays for a different rule, and the third is the one that is easy to leave out. Finiteness alone licenses `x − x → 0` and `x × 0 → 0`; the signed-zero clause licenses `x + 0 → x`; but `x ÷ x → 1` needs `x ≠ 0`, and zero is perfectly finite, while `exp(log x) → x` needs `x > 0`. A licence phrased only in terms of finiteness would gate those three rules behind an assertion that does not imply them.
 
 The important word is *assertion*. The compiler does not verify finiteness — it cannot, in general — so the licence transfers responsibility rather than establishing a fact. That is exactly how `-ffast-math` works in C compilers, and it is why the flag is per-compilation and not per-operation.
 
@@ -66,7 +68,7 @@ Two things that are **not** licensed by any flag in this compiler, and are worth
 ```ts
 function buildAlgebraicPatterns(fastMath: boolean): PatternSet {
   const set = new PatternSet();
-  set.add(new pat.AddZero());
+  set.add(new pat.AddZero(fastMath));
   set.add(new pat.SubZero());
   set.add(new pat.SubSelf(fastMath));
   set.add(new pat.MulOne());
@@ -88,7 +90,7 @@ function buildAlgebraicPatterns(fastMath: boolean): PatternSet {
 }
 ```
 
-Three of the sixteen are only *present* under fast-math; two more are present always and *decide for themselves*. `SubSelf` ([`patterns.ts:199`](../../../src/compiler/ir/graph/patterns.ts)):
+Three of the sixteen are only *present* under fast-math; three more are present always and *decide for themselves*. `SubSelf` ([`patterns.ts:201`](../../../src/compiler/ir/graph/patterns.ts)):
 
 ```ts
   override match(op: Operation): boolean {
@@ -97,9 +99,9 @@ Three of the sixteen are only *present* under fast-math; two more are present al
   }
 ```
 
-`x − x → 0` is applied unconditionally **for integers** — where it is simply true, there being no NaN and no signed zero in two's complement — and otherwise only under the licence. `MulZero` ([`patterns.ts:235`](../../../src/compiler/ir/graph/patterns.ts)) is the same shape. This is the right design: the licence is consulted per rule, and the dtype does half the work, so integer code gets the aggressive rewrites for free.
+`x − x → 0` is applied unconditionally **for integers** — where it is simply true, there being no NaN and no signed zero in two's complement — and otherwise only under the licence. `MulZero` ([`patterns.ts:237`](../../../src/compiler/ir/graph/patterns.ts)) and `AddZero` are the same shape, the last of them only since §20.6. This is the right design: the licence is consulted per rule, and the dtype does half the work, so integer code gets the aggressive rewrites for free.
 
-The flag reaches the pass from the compiler configuration, in one line of the pipeline builder ([`graph_pipeline.ts:41`](../../../src/compiler/pipeline/graph_pipeline.ts)):
+The flag reaches the pass from the compiler configuration, in one line of the pipeline builder ([`graph_pipeline.ts:43`](../../../src/compiler/pipeline/graph_pipeline.ts)):
 
 ```ts
     new AlgebraicSimplificationPass({ fastMath: config.optimization.fastMath }),
@@ -118,33 +120,33 @@ Six identities, applied to a tensor containing exactly the values that break the
 ```
 === default: fastMath off ===
 input     [NaN, Infinity, -Infinity, -0]
-x + 0    eager [NaN, Infinity, -Infinity, 0]  compiled [NaN, Infinity, -Infinity, -0] <-- DIFFERENT
+x + 0    eager [NaN, Infinity, -Infinity, 0]  compiled [NaN, Infinity, -Infinity, 0]  
 x - 0    eager [NaN, Infinity, -Infinity, -0] compiled [NaN, Infinity, -Infinity, -0] 
 x * 1    eager [NaN, Infinity, -Infinity, -0] compiled [NaN, Infinity, -Infinity, -0] 
-x * 0    eager [NaN, NaN, NaN, -0]            compiled [0, 0, 0, 0]                   <-- DIFFERENT
+x * 0    eager [NaN, NaN, NaN, -0]            compiled [NaN, NaN, NaN, -0]            
 x - x    eager [NaN, NaN, NaN, 0]             compiled [NaN, NaN, NaN, 0]             
 x / x    eager [NaN, NaN, NaN, NaN]           compiled [NaN, NaN, NaN, NaN]           
 ```
 
 Read the eager column first: it is Theorems 20.1 and 20.2 as measurements. `x − 0` preserves `−0`; `x + 0` turns it into `+0`; `∞ × 0` and `∞ − ∞` and `∞/∞` are all NaN. Nothing here is surprising if you know IEEE 754, and all of it is surprising if you only know algebra.
 
-Now the compiled column, with fast-math **off**:
+Now the compiled column, with fast-math **off**: every row agrees.
 
-- **`x − 0` and `x × 1` agree.** Theorem 20.1's rules applied, results identical. This is the system working.
-- **`x − x` and `x ÷ x` agree.** The patterns are present but declined, because the dtype is `f32` and the licence was not granted. The compiled kernel actually performs the subtraction and the division. This is the gate working.
-- **`x + 0` differs**, on `−0`.
-- **`x × 0` differs**, on everything but the zero.
+- **`x − 0` and `x × 1` agree** because Theorem 20.1's rules applied and the results are identical. This is the system working.
+- **`x + 0`, `x × 0`, `x − x` and `x ÷ x` agree** because all four patterns are present and all four declined: the dtype is `f32` and the licence was not granted. The compiled kernel actually performs the addition, the multiplication, the subtraction and the division. This is the gate working.
+
+Two of those four rows read `DIFFERENT` in the first draft of this chapter, and §20.6 is the account of why. Both are now fixed, and the rows above are what the fixes are worth: on fast-math-off, a compiled program and an eager one agree bit for bit on `−0`, `±∞` and NaN.
 
 And with fast-math **on**:
 
 ```
+x + 0    eager [NaN, Infinity, -Infinity, 0]  compiled [NaN, Infinity, -Infinity, -0] <-- DIFFERENT
+x * 0    eager [NaN, NaN, NaN, -0]            compiled [0, 0, 0, 0]                   <-- DIFFERENT
 x - x    eager [NaN, NaN, NaN, 0]             compiled [0, 0, 0, 0]                   <-- DIFFERENT
 x / x    eager [NaN, NaN, NaN, NaN]           compiled [1, 1, 1, 1]                   <-- DIFFERENT
 ```
 
-`x − x` and `x ÷ x` now diverge — which is not a bug, it is the licence being exercised. The user asserted their values are finite; the compiler took them at their word and replaced two elementwise kernels with a constant. That is the whole trade, visible in four numbers.
-
-Which leaves two rows that differ in *both* modes.
+Four rows diverge — which is not a bug, it is the licence being exercised. The user asserted their values are finite; the compiler took them at their word and replaced four elementwise kernels with a constant or a copy. That is the whole trade, and the two columns are now a clean statement of it: the identities Theorem 20.2 forbids fire exactly when they are licensed, and never otherwise.
 
 ## 20.6 Lab 2 — Where the rewrite happened
 
@@ -152,49 +154,59 @@ Which leaves two rows that differ in *both* modes.
 node docs/part4/ch20-algebra-and-ieee754/labs/02-where-the-rewrite-happened.mjs
 ```
 
-The two anomalies have different causes, and the lab separates them by following one program through three representations.
+The two identities that used to break had different causes, and the lab separates them by following one program through three representations. Here is the fixed pipeline:
 
 ```
 === x + 0 ===
 traced:      constant -> add -> return
-after passes: return(%0)
+after passes: %1 = constant() {tensor_type = tensor<xf32>, value = 0} : tensor<xf32> | %2 = add(%0, %1) : tensor<1x2xf32> | return(%2)
 kernel:
-   buf_3[i1_5] = buf_1[i1_5];
+   buf_3[i1_6] = (buf_1[i1_6] + 0);
 
 === x * 0 ===
 traced:      constant -> mul -> return
 after passes: %1 = constant() {tensor_type = tensor<xf32>, value = 0} : tensor<xf32> | %2 = mul(%0, %1) : tensor<1x2xf32> | return(%2)
 kernel:
-   buf_3[i1_6] = 0;
+   buf_3[i1_6] = (buf_1[i1_6] * 0);
 ```
 
-**`x + 0` is a graph-level rewrite.** After the graph passes the function is `return(%0)` — the add is gone. The pattern responsible is `AddZero` ([`patterns.ts:167`](../../../src/compiler/ir/graph/patterns.ts)):
+Both operations survive every layer, and the kernel performs both. Read that as the target state, then read what each row used to say.
+
+**`x + 0` was a graph-level rewrite.** The graph after the passes read `return(%0)` — the add was gone, and the kernel was a copy. The pattern responsible is `AddZero` ([`patterns.ts:167`](../../../src/compiler/ir/graph/patterns.ts)), which took no `fastMath` argument and consulted no dtype, while `SubZero` immediately below it and `SubSelf` and `MulZero` below that all did. By Theorem 20.2 it needs one: `(−0) + (+0) = +0` and the rewrite yields `−0`. It now carries the same check its three neighbours already had:
 
 ```ts
 export class AddZero extends Pattern {
-  constructor() { super('add_zero', 5); this.rootOpName = 'add'; }
+  fastMath: boolean;
+  constructor(fastMath = false) { super('add_zero', 5); this.rootOpName = 'add'; this.fastMath = fastMath; }
   override match(op: Operation): boolean {
+    if (!isDtypeInt((op.getResult(0).type as TensorType).dtype) && !this.fastMath) return false;
     return isConstantVal(op.getOperand(1).definingOp, 0) || isConstantVal(op.getOperand(0).definingOp, 0);
   }
 ```
 
-Compare it to `SubZero` immediately below, and to `SubSelf` and `MulZero`, all of which take a `fastMath` argument. `AddZero` does not. By Theorem 20.2 it needs one: `(−0) + (+0) = +0` and the rewrite yields `−0`. The neighbouring rule for subtraction is sound and needs no gate; the addition rule is not and has none. On the evidence, this is an oversight rather than a decision — the rule is one line away from three rules that got it right.
+The default is the sound behaviour, integers only, which matters because `add`'s canonicalization list constructs the pattern with no arguments ([`ops/arithmetic.ts:29`](../../../src/compiler/ir/graph/ops/arithmetic.ts)) and canonicalize has no licence to pass it. The algebraic pass, which does, forwards its `fastMath` flag ([`simplify/algebraic.ts:11`](../../../src/compiler/passes/simplify/algebraic.ts)).
 
-**`x × 0` is not a graph-level rewrite at all.** The graph after every pass still contains `mul(%0, %1)` — `MulZero` was present, checked the dtype, found `f32`, found no licence, and correctly declined. Lowering keeps the multiply, and so does scheduling; the TensorIR reads `buf_3[v0_7, v1_8] = (buf_1[0, v1_8] * buf_4[])`. The multiply survives every layer the flag is visible in.
-
-Then the CPU code generator emits its expression, and hits this ([`backend/cpu/codegen.ts:472`](../../../src/backend/cpu/codegen.ts)):
+**`x × 0` was never a graph-level rewrite at all.** The graph after every pass still contains `mul(%0, %1)` — `MulZero` was present, checked the dtype, found `f32`, found no licence, and correctly declined. Lowering keeps the multiply, and so does scheduling; the TensorIR reads `buf_3[v0_7, v1_8] = (buf_1[0, v1_8] * buf_4[])`. The multiply survived every layer the flag is visible in, and then the CPU code generator flattened it in the last one ([`backend/cpu/codegen.ts:470`](../../../src/backend/cpu/codegen.ts)):
 
 ```ts
               else if (node.op === '*' && (a === '0' || b === '0')) { vals.push('0'); }
 ```
 
-`a` and `b` here are *rendered strings*. There is no dtype at this point, no operation registry, and no compiler configuration — just two pieces of JavaScript text, one of which happens to read `0`. The identity Theorem 20.2 forbids is applied by a peephole that could not have consulted the flag even if it wanted to.
+`a` and `b` here are *rendered strings*, and the branch fired on any operand that happened to render as `0`. But this peephole does not only render values: the same `_exprToJS` renders every index expression in every CPU kernel, and there `+ 0` and `× 0` are integer arithmetic, where Theorem 20.1 does hold. Deleting the branch outright is therefore the wrong fix — it leaves index expressions reading `buf_3[((0 * 2) + i1_6)]` and costs a dozen kernel-quality tests. What the branch was missing is the check `MulZero` already has, and the dtype is available after all: `inferDtype` ([`ir/lir/nodes.ts:190`](../../../src/compiler/ir/lir/nodes.ts)) walks a `MathOpNode` down to its leaves, which is how the WASM backend already picks its numeric prefix. The zero identities are now gated on it:
 
-The CUDA backend has no such peephole; its `MathOpNode` case emits `(${a} ${node.op} ${b})` and stops ([`backend/cuda/codegen.ts:492`](../../../src/backend/cuda/codegen.ts)). So the same program, compiled for two targets, produces `0` on one and `NaN` on the other for a non-finite input. That is a differential-testing finding in the sense of Chapter 65 — the two backends disagree, and the test that would catch it is one that feeds non-finite inputs to both.
+```ts
+              const dtype = inferDtype(node);
+              const foldsZero = isDtypeInt(dtype) && (a === '0' || b === '0');
+              ...
+              else if (foldsZero && node.op === '+') { vals.push((b === '0' ? a : b) as string); }
+              else if (foldsZero && node.op === '*') { vals.push(this._zeroLit(dtype)); }
+```
 
-Both anomalies are recorded in the outline's Appendix E. Neither is fixed in the code this book describes, because a book that quietly patches its subject is a book you cannot check.
+`x - 0`, `x * 1` and `1 * x` stayed ungated, because Theorem 20.1 makes them sound for floats too. And `_zeroLit` replaces the bare `'0'`, which was a second latent bug in the same branch: an `i64` kernel folding `x * 0` used to emit a `Number` zero into BigInt arithmetic.
 
-**Try this.** Run the same two programs against `WasmTarget()`. WebAssembly's code generator has no zero peephole either — predict which of the two anomalies survives the change of target, and which does not.
+The CUDA backend never had the peephole; its `MathOpNode` case emits `(${a} ${node.op} ${b})` and stops ([`backend/cuda/codegen.ts:492`](../../../src/backend/cuda/codegen.ts)). So the same program, compiled for two targets, produced `0` on one and `NaN` on the other for a non-finite input. That is a differential-testing finding in the sense of Chapter 65 — the two backends disagreed, and the test that catches it is one that feeds non-finite inputs to both. That test now exists, in the `SPECIAL` block of [`tests/e2e/differential.test.js`](../../../tests/e2e/differential.test.js), together with a comparison that can tell `−0` from `+0`. The old one could not, which is half the reason the row survived this long.
+
+**Try this.** Run the same two programs against `WasmTarget()`. WebAssembly's code generator never had a zero peephole — predict which of the three representations differs from the CPU listing above, and confirm the two targets now agree on all four inputs.
 
 ## 20.7 The general lesson: an identity has a level
 
@@ -213,10 +225,10 @@ The rule that falls out: **an algebraic rewrite belongs at the highest level tha
 
 ## 20.8 Traps and limits
 
-- **`AddZero` is not fast-math gated and should be** ([`patterns.ts:167`](../../../src/compiler/ir/graph/patterns.ts)). §20.6 is the demonstration. The fix is the one-line dtype-or-licence check its three neighbours already have.
-- **The CPU backend folds `x * 0`, `x + 0`, `x - 0`, `x * 1` on rendered strings** ([`codegen.ts:470`](../../../src/backend/cpu/codegen.ts)). Three of the four are sound by Theorem 20.1; the multiply-by-zero is not, and no other backend does it.
+- **An identity's soundness is a property of the dtype, and two of the six rules had lost track of it** ([`patterns.ts:167`](../../../src/compiler/ir/graph/patterns.ts), [`codegen.ts:470`](../../../src/backend/cpu/codegen.ts)). §20.6 is the account of both. Neither was a hard bug to fix once located, and neither was locatable without a test that feeds `−0` and `±∞`; the general trap is that a rule written for integers is one copy-paste away from a rule that fires on floats.
+- **The zero identities in the CPU backend are gated on an inferred dtype, not a declared one.** `inferDtype` walks a `MathOpNode` to its leaves and falls back to `'f32'` for any node kind it does not recognize ([`ir/lir/nodes.ts:190`](../../../src/compiler/ir/lir/nodes.ts)). The fallback is the safe direction — an unrecognized node is treated as float and the identity declines — but it means a new integer-valued LIR node kind silently loses the index-arithmetic folding until it is added to the switch.
 - **`fastMath` is one global flag.** There is no per-operation, per-function or per-region control, so a model with one numerically delicate layer either gives up fast-math everywhere or accepts it everywhere. This is the same limitation C compilers have, and the same workaround applies: compile the delicate part separately.
-- **The licence is asserted and never checked.** Nothing verifies finiteness, and nothing warns when a fast-math rewrite fires on a graph whose inputs the compiler has actually seen. The optimization gate (Chapter 62) *does* verify candidate optimizations numerically before keeping them — that machinery exists, and fast-math does not use it.
+- **The licence is asserted and never checked.** Nothing verifies finiteness, and nothing warns when a fast-math rewrite fires on a graph whose inputs the compiler has actually seen. The optimization gate (Chapter 61) *does* verify candidate optimizations numerically before keeping them — that machinery exists, and fast-math does not use it.
 - **Integer division is not simplified at all.** `DivSelf` is fast-math-only, so `x / x` for integers is left alone even though the only exception is `x = 0`, which is a trap on most hardware rather than a wrong value. Conservative, and inconsistent with `SubSelf`'s treatment of integers.
 - **Reassociation is absent, and that is deliberate.** `ASSOCIATIVE` is declared on `add` and `mul` (Chapter 11), and the only pattern that uses it, `AssociativeConstantReassoc`, reassociates *constants* — it requires both reassociated operands to be constant operations and folds them ([`patterns.ts:491`](../../../src/compiler/ir/graph/patterns.ts)). No pass reassociates a float sum of runtime values, under any flag.
 
@@ -224,7 +236,7 @@ The rule that falls out: **an algebraic rewrite belongs at the highest level tha
 
 - [`tests/compiler/passes/simplify/`](../../../tests/compiler/passes/simplify/) — the algebraic patterns, including which ones require `fastMath`.
 - [`tests/compiler/ir/rewrite/pattern.test.js`](../../../tests/compiler/ir/rewrite/pattern.test.js) — the applicator behaviour these rules rely on, from Chapter 17.
-- [`tests/e2e/`](../../../tests/e2e/) — the differential tests that compare compiled against eager. Note what they feed: ordinary finite tensors. A test that would have caught §20.6 is one that feeds `NaN` and `±∞`, and Chapter 65 argues for exactly that.
+- [`tests/e2e/differential.test.js`](../../../tests/e2e/differential.test.js) — the differential tests that compare compiled against eager. Most of them feed ordinary finite tensors; the `SPECIAL` block feeds `NaN`, `±∞` and `−0` through each identity in §20.5 on both CPU and WASM, and its comparison distinguishes `−0` from `+0`. That block is what holds §20.6 closed, and Chapter 65 argues for more of it.
 
 ---
 

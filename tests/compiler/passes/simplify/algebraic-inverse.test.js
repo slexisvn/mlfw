@@ -80,17 +80,19 @@ describe('fastMath gate re-enables IEEE-unsound rewrites only when opted in', ()
     expect(retVal(fast).definingOp.opName).not.toBe('div');
   });
 
-  it('float sub(x, x) and mul(x, 0) stay by default, fold under fastMath', () => {
+  it('float add(x, 0), sub(x, x) and mul(x, 0) stay by default, fold under fastMath', () => {
     const t = new TensorType([4], ScalarType.F32);
-    const subDef = buildFunction('f', [t], [t], (b, args) => {
-      b.returnOp([b.sub(args[0], args[0]).getResult(0)]);
-    });
-    expect(run(subDef)).toBe(PassResult.UNCHANGED);
+    const zero = (b) => b.scalarConstant(0, ScalarType.F32).getResult(0);
+    const bodies = {
+      'add(x, 0)': (b, args) => b.returnOp([b.add(args[0], zero(b)).getResult(0)]),
+      'sub(x, x)': (b, args) => b.returnOp([b.sub(args[0], args[0]).getResult(0)]),
+      'mul(x, 0)': (b, args) => b.returnOp([b.mul(args[0], zero(b)).getResult(0)]),
+    };
 
-    const subFast = buildFunction('f', [t], [t], (b, args) => {
-      b.returnOp([b.sub(args[0], args[0]).getResult(0)]);
-    });
-    expect(runFast(subFast)).toBe(PassResult.CHANGED);
+    for (const [name, body] of Object.entries(bodies)) {
+      expect(run(buildFunction('f', [t], [t], body)), name).toBe(PassResult.UNCHANGED);
+      expect(runFast(buildFunction('f', [t], [t], body)), name).toBe(PassResult.CHANGED);
+    }
   });
 });
 

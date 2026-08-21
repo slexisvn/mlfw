@@ -130,6 +130,88 @@ describe('loop-carried dependences the old name-matching reduction check could n
   });
 });
 
+describe('a loop whose extent is symbolic is checked for dependences like any other', () => {
+  beforeEach(() => resetVarCounter());
+
+  function matmulSymbolicK(M = 8, N = 8) {
+    const A = new Buffer('A', [M, 8], 'float32', 'global');
+    const B = new Buffer('B', [8, N], 'float32', 'global');
+    const C = new Buffer('C', [M, N], 'float32', 'global');
+    const m = new VariableNode('m', 'int32');
+    const n = new VariableNode('n', 'int32');
+    const k = new VariableNode('k', 'int32');
+    const K = new VariableNode('K', 'int32');
+    const prod = new MathOpNode('*', new BufferLoadNode(A, [m, k]), new BufferLoadNode(B, [k, n]));
+    const acc = new MathOpNode('+', new BufferLoadNode(C, [m, n]), prod);
+    const body = new BufferStoreNode(C, [m, n], acc);
+    const init = new BufferStoreNode(C, [m, n], new IntImmNode(0));
+    const iterVars = [{ iterVar: m, binding: m }, { iterVar: n, binding: n }, { iterVar: k, binding: k }];
+    const block = new BlockNode('mm', iterVars, [{ buffer: A }, { buffer: B }], [{ buffer: C }], body, init);
+    let nest = new ForNode(k, new IntImmNode(0), K, ForKind.SERIAL, block);
+    nest = new ForNode(n, new IntImmNode(0), new IntImmNode(N), ForKind.SERIAL, nest);
+    nest = new ForNode(m, new IntImmNode(0), new IntImmNode(M), ForKind.SERIAL, nest);
+    return new PrimFunc('mm', [K], nest, new Map([['A', A], ['B', B], ['C', C]]));
+  }
+
+  function rowwiseSymbolicBatch(offset) {
+    const A = new Buffer('A', [8, 8], 'float32', 'global');
+    const b = new VariableNode('b', 'int32');
+    const j = new VariableNode('j', 'int32');
+    const N = new VariableNode('N', 'int32');
+    const read = offset === 0 ? j : new MathOpNode('+', j, new IntImmNode(offset));
+    const store = new BufferStoreNode(A, [b, j], new MathOpNode('+', new BufferLoadNode(A, [b, read]), new IntImmNode(1)));
+    const iterVars = [{ iterVar: b, binding: b }, { iterVar: j, binding: j }];
+    const block = new BlockNode('ew', iterVars, [{ buffer: A }], [{ buffer: A }], store);
+    let nest = new ForNode(j, new IntImmNode(0), new IntImmNode(8), ForKind.SERIAL, block);
+    nest = new ForNode(b, new IntImmNode(0), N, ForKind.SERIAL, nest);
+    return new PrimFunc('ew', [N], nest, new Map([['A', A]]));
+  }
+
+  it('refuses to parallelize the reduction loop k when its extent is a symbol', () => {
+    const sch = new Schedule(matmulSymbolicK());
+    const loops = loopByName(sch, 'mm');
+    expect(() => sch.parallelize(loops.k)).toThrow(/loop 'k' carries a \w+ dependence on buffer 'C'/);
+    expect(loops.k.kind).toBe(ForKind.SERIAL);
+  });
+
+  it('still allows parallelizing the spatial loop m above a symbolic reduction loop', () => {
+    const sch = new Schedule(matmulSymbolicK());
+    const loops = loopByName(sch, 'mm');
+    expect(() => sch.parallelize(loops.m)).not.toThrow();
+    expect(loops.m.kind).toBe(ForKind.PARALLEL);
+  });
+
+  it('allows parallelizing a symbolic batch loop whose iterations touch disjoint rows', () => {
+    const sch = new Schedule(rowwiseSymbolicBatch(0));
+    const loops = loopByName(sch, 'ew');
+    expect(() => sch.parallelize(loops.b)).not.toThrow();
+    expect(loops.b.kind).toBe(ForKind.PARALLEL);
+  });
+
+  it('refuses to parallelize the recurrence inside a symbolic batch loop', () => {
+    const sch = new Schedule(rowwiseSymbolicBatch(-1));
+    const loops = loopByName(sch, 'ew');
+    expect(() => sch.parallelize(loops.j)).toThrow(/loop 'j' carries a \w+ dependence on buffer 'A'/);
+    expect(() => sch.parallelize(loops.b)).not.toThrow();
+  });
+
+  it('refuses an interchange that a symbolic outer level makes lexicographically negative', () => {
+    const A = new Buffer('A', [8, 8], 'float32', 'global');
+    const b = new VariableNode('b', 'int32');
+    const j = new VariableNode('j', 'int32');
+    const N = new VariableNode('N', 'int32');
+    const read = new BufferLoadNode(A, [new MathOpNode('-', b, new IntImmNode(1)), new MathOpNode('+', j, new IntImmNode(1))]);
+    const store = new BufferStoreNode(A, [b, j], new MathOpNode('+', read, new IntImmNode(1)));
+    const block = new BlockNode('sk', [{ iterVar: b, binding: b }, { iterVar: j, binding: j }], [{ buffer: A }], [{ buffer: A }], store);
+    let nest = new ForNode(j, new IntImmNode(0), new IntImmNode(8), ForKind.SERIAL, block);
+    nest = new ForNode(b, new IntImmNode(0), N, ForKind.SERIAL, nest);
+    const sch = new Schedule(new PrimFunc('sk', [N], nest, new Map([['A', A]])));
+    const loops = loopByName(sch, 'sk');
+
+    expect(() => sch.reorder(loops.j, loops.b)).toThrow(/violates a \w+ dependence on buffer 'A'/);
+  });
+});
+
 describe('iteration-variable kinds decide what a reduction axis may become', () => {
   beforeEach(() => resetVarCounter());
 

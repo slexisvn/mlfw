@@ -15,7 +15,6 @@ import type { FusionAwareTarget } from '../../pipeline/pipeline_types.js';
 export type FusionPassConfig = {
   target?: Partial<FusionAwareTarget> | null;
   maxFusionSize?: number;
-  maxSharedMemory?: number;
   libraryOps?: ReadonlySet<string>;
   allowReductionFusion?: boolean;
   cost?: FusionCostConfig;
@@ -30,8 +29,7 @@ export class FusionPass extends FunctionPass {
     super('FusionPass');
     const target = config.target || {};
     this.legality = new FusionLegality({
-      maxFusionSize: target.maxFusionSize || config.maxFusionSize,
-      maxSharedMemory: target.sharedMemoryBytes || config.maxSharedMemory,
+      maxFusionSize: target.maxFusionSize ?? config.maxFusionSize,
       allowReductionFusion: config.allowReductionFusion,
     });
     this.costModel = new FusionCostModel({

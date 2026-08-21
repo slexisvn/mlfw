@@ -39,7 +39,7 @@ export class DominatorFusionPass extends FunctionPass {
     super('DominatorFusionPass');
     this.requiredAnalyses = [UseDefAnalysis, PostDominanceAnalysis];
     const target = config.target || {};
-    this.maxFusionSize = target.maxFusionSize || config.maxFusionSize || 512;
+    this.maxFusionSize = target.maxFusionSize ?? config.maxFusionSize ?? 512;
     this.maxReductions = config.maxReductions || 1;
     this.hasLibraryOp = target.hasLibraryOp ? (opName: string) => (target.hasLibraryOp as (n: string) => boolean)(opName) : (config.hasLibraryOp || (() => false));
     this.costModel = new FusionCostModel({

@@ -92,7 +92,7 @@ On a CPU, a matrix multiply wants its *right-hand* operand column-major, so the 
 
 ### Propagation
 
-[`analysis/layout_analysis.ts`](../../../src/compiler/analysis/layout_analysis.ts) is Definition 25.4's first two steps. Function arguments start row-major or with whatever their type carries ([`layout_analysis.ts:58`](../../../src/compiler/analysis/layout_analysis.ts)), then the topological walk assigns ([`layout_analysis.ts:82`](../../../src/compiler/analysis/layout_analysis.ts)):
+[`analysis/layout_analysis.ts`](../../../src/compiler/analysis/layout_analysis.ts) is Definition 25.4's first two steps. Function arguments start row-major or with whatever their type carries ([`layout_analysis.ts:58`](../../../src/compiler/analysis/layout_analysis.ts)), then the topological walk assigns ([`layout_analysis.ts:84`](../../../src/compiler/analysis/layout_analysis.ts)):
 
 ```ts
       const def = registry.get(op.opName);
@@ -195,7 +195,7 @@ So layout is switched off twice: once by a config flag, and once by an empty set
 
 That is not a mystery, and it is not the pass malfunctioning. Look at where the transforms went: the weights are *function arguments*, so a `layout_transform` on a weight runs on **every call**. The model priced the conversion at `2 × numEl` against a benefit of `4 × numEl` and concluded it was worth it — a judgement that would be right if the conversion happened once and the benefit accrued forever, and is wrong when both happen once per call. And the benefit side is speculative anyway: it assumes the CPU matmul kernel exploits a column-major right-hand operand, and Chapter 54's generated matmul does not — it indexes with whatever strides the layout gives it, so a "preferred" layout buys nothing at all.
 
-**Try this.** Declare `layoutAwareOps = {dot}` and set the weights as compile-time constants using `foldWeights: true` (Chapter 62), so the transform can be hoisted out of the call. Then measure again.
+**Try this.** Declare `layoutAwareOps = {dot}` and set the weights as compile-time constants using `foldWeights: true` (Chapter 61), so the transform can be hoisted out of the call. Then measure again.
 
 ## 25.6 Why this chapter is short, and honest
 
@@ -203,7 +203,7 @@ Layout is a genuinely large subject — blocked layouts, tensor-core tile shapes
 
 That is worth stating plainly rather than dressing up, because it is the normal state of a compiler optimization at this stage of its life, and recognizing it is a skill. The diagnostic question is not "is the pass correct" — it is — but **"is there a kernel downstream that will actually be faster?"** Layout transformation pays only when some consumer has a specialized implementation keyed to the layout. Absent that, the transform is a pure cost, and the measurement in §25.5 is what a pure cost looks like.
 
-The repository's own record agrees: an optimization gate (Chapter 62) that compiles candidate configurations and keeps the winner found layout worth 1.18× on a small CNN and nothing elsewhere, which is why it is not on by default. That gate is the right mechanism for a decision like this — measure, don't model — and Chapter 46 argues the general case.
+The repository's own record agrees: an optimization gate (Chapter 61) that compiles candidate configurations and keeps the winner found layout worth 1.18× on a small CNN and nothing elsewhere, which is why it is not on by default. That gate is the right mechanism for a decision like this — measure, don't model — and Chapter 46 argues the general case.
 
 ## 25.7 Traps and limits
 

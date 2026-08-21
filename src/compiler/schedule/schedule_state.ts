@@ -7,6 +7,7 @@ import { LinearForm, toLinearForm, composeForm, coverRangeOfForm } from '../anal
 import type { VarRange } from '../analysis/iter_map.js';
 import type { TirNode, PrimFunc, ForNode, BlockNode, IntImmNode, ForKindValue } from '../ir/tensor/nodes.js';
 import type { Buffer } from '../ir/tensor/buffer.js';
+import { opaqueLevel } from '../analysis/buffer_access.js';
 import type { BufferAccessResult, BufferAccessEnv, IterLevel, BlockAccessInfo } from '../analysis/buffer_access.js';
 import type { Dependence } from '../analysis/dependence.js';
 import type { BlockScope, BlockInfo } from './block_scope.js';
@@ -96,12 +97,17 @@ export class ScheduleState {
         const loop = s.node as ForNode;
         const min = constExtent(loop.min);
         const extent = constExtent(loop.extent);
-        if (loop.loopVar && min !== null && extent !== null) {
-          loopRanges.set(loop.loopVar.name, [min, extent]);
-          varForms.set(loop.loopVar.name, LinearForm.variable(loop.loopVar.name));
-          iterSpace.push({ name: loop.loopVar.name, min, extent, node: loop });
+        if (!loop.loopVar) {
+          iterSpace.push(opaqueLevel(loop));
+          continue;
+        }
+        const name = loop.loopVar.name;
+        varForms.set(name, LinearForm.variable(name));
+        if (min !== null && extent !== null) {
+          loopRanges.set(name, [min, extent]);
+          iterSpace.push({ name, min, extent, node: loop });
         } else {
-          iterSpace.push(null);
+          iterSpace.push({ name, min: null, extent: null, node: loop });
         }
         continue;
       }

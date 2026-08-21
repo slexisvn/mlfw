@@ -22,7 +22,7 @@ A graph IR is a set of **values**, each produced by exactly one **operation** �
 - **SSA and the use-def graph** (Definition 8.1), which every analysis in Parts III–V walks.
 - **Theorem 8.4** — textual order carries no semantics — which is the licence for every reordering pass in the book.
 - **Regions** (Chapter 9), without which fusion has nowhere to put the operations it merges and `scan` has to be unrolled.
-- **Shape compatibility as a partial order and broadcasting as a join** (Chapter 10), which is what type inference computes.
+- **The specificity order on dimensions as a partial order, and the least upper bound in it as what type inference propagates** (Definitions 10.1–10.2). *Compatibility* — the relation `shapeCompatible` actually decides — is reflexive and symmetric and **not** transitive, so it is not a partial order at all; Theorem 10.3 is the counterexample.
 - **Traits as queryable data** (Chapter 11), which is why the fusion engine in Part IV works on operations nobody had written when it was designed.
 - **The invariant set** (Chapter 12), which the pipeline checks at four boundaries and which Chapter 64 turns into a debugging procedure.
 

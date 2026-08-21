@@ -4,7 +4,7 @@ import {
 
 manual_seed(0);
 
-const x = tensor([[1, 2], [3, 4]]);
+const x = tensor([[1, 2], [3, 4]], { dtype: 'i32' });
 
 const spellings = {
   'a * a':                         (a) => a.mul(a),

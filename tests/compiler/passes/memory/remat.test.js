@@ -85,6 +85,43 @@ describe('RematerializationPass budget gate', () => {
   });
 });
 
+describe('RematerializationPass budget reporting', () => {
+  function compileUnderBudget(memoryBudgetBytes) {
+    const t = new TensorType([1024, 1024], ScalarType.F32);
+    const func = buildFunction('big', [t], [t], (b, args) => {
+      const a = b.relu(args[0]);
+      const c = b.exp(a.getResult(0));
+      const d = b.neg(a.getResult(0));
+      b.returnOp([b.add(c.getResult(0), d.getResult(0)).getResult(0)]);
+    });
+
+    const events = [];
+    const result = compileGraph(func, CPUTarget({ memoryBudgetBytes }), {
+      optimization: { rematerialization: true },
+      trace: { level: TraceLevel.DEBUG, sink: (e) => events.push(e) },
+    });
+    return { result, warnings: events.filter(e => e.type === 'warning' && e.phase === 'rematerialization') };
+  }
+
+  it('warns with both the achieved peak and the budget when the budget is not met', () => {
+    const { warnings } = compileUnderBudget(4096);
+
+    expect(warnings.length).toBe(1);
+    expect(warnings[0].detail.budget).toBe(4096);
+    expect(warnings[0].detail.peakPressure).toBeGreaterThan(4096);
+    expect(warnings[0].message).toContain(String(warnings[0].detail.peakPressure));
+    expect(warnings[0].message).toContain('4096');
+  });
+
+  it('stays silent when the budget is met', () => {
+    expect(compileUnderBudget(1024 * 1024 * 1024).warnings).toEqual([]);
+  });
+
+  it('treats a missed budget as a warning, not a compilation failure', () => {
+    expect(compileUnderBudget(4096).result.listKernels().length).toBeGreaterThan(0);
+  });
+});
+
 describe('RematerializationPass cloning', () => {
   it('clones op for second use when budget is tight', () => {
     const t = new TensorType([1024, 1024], ScalarType.F32);

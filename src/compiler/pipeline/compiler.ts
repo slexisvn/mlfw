@@ -16,7 +16,7 @@ import { activeExternalCodegenProviders } from './external_codegen.js';
 import type { ExternalKernelInfo } from './external_codegen.js';
 import { RuntimeModule } from '../../runtime/runtime.js';
 import { CalibrationCollector } from '../analysis/calibration.js';
-import { collectCalibration } from '../analysis/calibrate_exec.js';
+import type { CompileFn } from '../analysis/calibrate_exec.js';
 import { GraphPartitionPass, PartitionMaterializationPass } from '../passes/partition/partition_pass.js';
 import { splitGraph } from './graph_split.js';
 import { splitGraphForNative } from '../passes/partition/cublas_split.js';
@@ -314,14 +314,6 @@ export class Compiler {
         run: (ctx: CompileContext) => ctx.compiler._verifyGraph(ctx.working, 'before graph passes', ctx.trace, ctx.errors, ctx.failed, ctx.resilient),
       },
       {
-        name: 'calibrate',
-        when: (ctx: CompileContext) => {
-          const q = ctx.compiler.config.quantization;
-          return !!(q.enabled && q.calibrationData && !q.calibration);
-        },
-        run: (ctx: CompileContext) => ctx.compiler._runCalibration(ctx.working, ctx.trace),
-      },
-      {
         name: 'graphPasses',
         run: (ctx: CompileContext) => ctx.compiler._runGraphPasses(ctx.working, ctx.original, ctx.trace, ctx.errors, ctx.failed, ctx.resilient),
       },
@@ -407,29 +399,11 @@ export class Compiler {
     return collector;
   }
 
-  _runCalibration(graphModule: GraphModule, trace: TraceLog): void {
-    const q = this.config.quantization;
-    const entry = graphModule.functionNames()[0];
-    const func = graphModule.getFunction(entry);
-    if (!func) return;
-
-    trace.phaseStart('calibrate');
-    const t0 = performance.now();
-    const target = this.config.target;
-    const compileFn = (mod: GraphModule, tgt: CompileTarget) => new Compiler({ target: tgt, verify: this.config.verify }).compile(mod);
-    const result = collectCalibration(func, target, q.calibrationData as readonly unknown[], {
-      mode: (q.calibrationMode as string) || 'minmax',
-      quantizableOps: q.quantizableOps as ReadonlySet<string> | undefined,
-      compileFn: compileFn as never,
-    });
-    this.config.quantization = { ...q, calibration: result };
-    trace.phaseEnd('calibrate', performance.now() - t0);
-  }
-
   _runGraphPasses(graphModule: GraphModule, original: GraphModule, trace: TraceLog, errors: CompilationError[], failed: Set<string>, resilient: boolean): void {
     const pm = new PassManager();
 
-    for (const p of buildGraphPipeline(this.config, this.config.target, { context: this.context })) {
+    const compileFn: CompileFn = (mod, tgt) => new Compiler({ target: tgt as CompileTarget, verify: this.config.verify }).compile(mod);
+    for (const p of buildGraphPipeline(this.config, this.config.target, { context: this.context, compileFn })) {
       pm.addPass(p);
     }
 

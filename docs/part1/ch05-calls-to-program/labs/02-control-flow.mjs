@@ -50,3 +50,17 @@ await compiled._ready;
 console.log(`flag=true    eager ${mode.forward(x).data.join(',')}   compiled ${(await compiled(x)).data.join(',')}`);
 mode.flag = false;
 console.log(`flag=false   eager ${mode.forward(x).data.join(',')}   compiled ${(await compiled(x)).data.join(',')}   <-- compiled is stale`);
+
+class Scaled extends Module {
+  constructor() { super(); this.scale = 2; }
+  forward(t) { return t.mul(this.scale); }
+}
+
+console.log('\n=== host state read rather than branched on: same staleness, no branch at all ===');
+const scaled = new Scaled();
+const compiledScaled = compile(scaled, [x], { target: CPUTarget() });
+await compiledScaled._ready;
+
+console.log(`scale=2      eager ${scaled.forward(x).data.join(',')}   compiled ${(await compiledScaled(x)).data.join(',')}`);
+scaled.scale = 5;
+console.log(`scale=5      eager ${scaled.forward(x).data.join(',')}   compiled ${(await compiledScaled(x)).data.join(',')}   <-- compiled is stale`);

@@ -88,8 +88,10 @@ The split between `match` and `rewrite` is not decoration, and `AddZero` shows w
 
 ```ts
 export class AddZero extends Pattern {
-  constructor() { super('add_zero', 5); this.rootOpName = 'add'; }
+  fastMath: boolean;
+  constructor(fastMath = false) { super('add_zero', 5); this.rootOpName = 'add'; this.fastMath = fastMath; }
   override match(op: Operation): boolean {
+    if (!isDtypeInt((op.getResult(0).type as TensorType).dtype) && !this.fastMath) return false;
     return isConstantVal(op.getOperand(1).definingOp, 0) || isConstantVal(op.getOperand(0).definingOp, 0);
   }
   override rewrite(op: Operation, builder: IRBuilder): boolean {
@@ -124,15 +126,17 @@ export class AddZero extends Pattern {
 
 Both lists are kept sorted by descending benefit, so the merge is linear rather than a re-sort, and the returned order is the order the applicator will try. For a set of 30 patterns and an `add`, this hands back the two or three that could possibly apply.
 
-The benefits in use are a three-level scale rather than a fine ranking:
+The benefits in use are a coarse scale rather than a fine ranking:
 
 | Benefit | Patterns | What they do |
 |---|---|---|
+| 20 | `quantize_dequantize_identity` | delete a `quantize` that undoes the `dequantize` feeding it |
+| 15 | `constant_quantize`, `dequantize_fold_into_dot` | fold a quantization boundary into the constant or the `dot` beside it |
 | 10 | `transpose_transpose`, `fold_trivial_reshape`, `fold_transpose_into_dot`, `idempotent_self`, … | remove an operation outright |
 | 5–6 | `add_zero`, `mul_one`, `div_one`, `commutative_constant_right`, … | algebraic identities and normalizations |
 | 4 | `add_neg_to_sub`, `associative_constant_reassoc`, … | reshuffles that enable other rules |
 
-Read top-down that is a policy: prefer deleting to rewriting, and prefer rewriting to reassociating. It is a reasonable policy and it is not derived from anything.
+Read top-down that is a policy: prefer deleting to rewriting, prefer rewriting to reassociating, and put the quantization rules above everything because a quantize left in place blocks all of it (Chapter 26). The bottom three rows are the whole of [`patterns.ts`](../../../src/compiler/ir/graph/patterns.ts); the top two come from the quantization pattern file and reach the canonicalizer through `quantize`'s and `dot`'s registry entries. It is a reasonable policy and it is not derived from anything.
 
 ### The driver
 
@@ -199,7 +203,18 @@ function traitPatternsFor(def: OpDef): Pattern[] {
 
 This is Chapter 11's argument arriving at its destination. Nobody wrote "`maximum` may have its constant moved to the right". `maximum` declares `COMMUTATIVE`, and a pattern instance is *generated* for it, rooted at its name so the index still works. Register a new commutative operation tomorrow and it gets a canonicalization rule with no further code. The rest of the set comes from `def.getCanonicalizationPatterns()` — the per-operation rules the op author wrote — and the whole thing is built once and cached.
 
-The other pattern pass builds its set from an explicit list instead ([`simplify/algebraic.ts:9`](../../../src/compiler/passes/simplify/algebraic.ts)), 13 patterns, plus three more when `fastMath` is on. The division of labour between the two is by *licence*, not by mechanism: `algebraic_simplify` holds the rules that are only valid under an assumption a user has to opt into (Chapter 20), and `canonicalize` holds the ones that are unconditionally true.
+The other pattern pass builds its set from an explicit list instead ([`simplify/algebraic.ts:9`](../../../src/compiler/passes/simplify/algebraic.ts)), 13 patterns, plus three more when `fastMath` is on.
+
+The tempting story is that the division of labour is by *licence* — that `algebraic_simplify` holds the rules needing an assumption the user opts into (Chapter 20) and `canonicalize` holds the unconditional ones. Print both sets and that story does not survive:
+
+| | |
+|---|---|
+| In **both** sets (8) | `AddZero`, `SubZero`, `SubSelf`, `MulOne`, `MulZero`, `DivOne`, `DoubleNeg`, `ReshapeReshape` |
+| Only in `algebraic_simplify` (5) | `TransposeTranspose`, `MulNegNeg`, `AddNegToSub`, `SubNegToAdd`, `DoubleConvert` |
+
+All five of the algebraic-only rules are unconditionally true; none of them needs a licence. Of the thirteen, only `SubSelf` and `MulZero` consult `fastMath` at all, and both default to firing on integers only, where the identity holds outright. The genuinely licensed rules are the *three* that are absent from the set entirely unless `fastMath` is on — `DivSelf`, `ExpLog`, `LogExp` — and the licence gate is the `if (fastMath)` in the builder, not the choice of pass.
+
+So the real division is: **`canonicalize` gets whatever an operation declares in its registry entry, and `algebraic_simplify` gets whatever somebody added to a list**, with an eight-rule overlap where both happened. §17.7 returns to what that costs.
 
 ### Matching more than one operation
 
@@ -229,17 +244,17 @@ const LOG_EXP_PAT = isOp('log', isOp('exp', wildcard()));
 node docs/part3/ch17-pattern-rewriting/labs/01-a-rewrite-cascade.mjs
 ```
 
-Four identities stacked on one input — `transpose(transpose(a)) + 0) * 1` — traced to seven operations:
+Four identities stacked on one input — `transpose(transpose(a)) + 0) * 1` — on an `i32` tensor, because `x + 0` is an identity on integers and not on floats (Chapter 20). Traced to seven operations:
 
 ```
 module @traced {
-  func @traced(%0: tensor<2x2xf32>) -> (tensor<2x2xf32>) {
-    %1 = transpose(%0) {permutation = [1, 0]} : tensor<2x2xf32>
-    %2 = transpose(%1) {permutation = [1, 0]} : tensor<2x2xf32>
-    %3 = constant() {tensor_type = tensor<xf32>, value = 0} : tensor<xf32>
-    %4 = add(%2, %3) : tensor<2x2xf32>
-    %5 = constant() {tensor_type = tensor<xf32>, value = 1} : tensor<xf32>
-    %6 = mul(%4, %5) : tensor<2x2xf32>
+  func @traced(%0: tensor<2x2xi32>) -> (tensor<2x2xi32>) {
+    %1 = transpose(%0) {permutation = [1, 0]} : tensor<2x2xi32>
+    %2 = transpose(%1) {permutation = [1, 0]} : tensor<2x2xi32>
+    %3 = constant() {tensor_type = tensor<xi32>, value = 0} : tensor<xi32>
+    %4 = add(%2, %3) : tensor<2x2xi32>
+    %5 = constant() {tensor_type = tensor<xi32>, value = 1} : tensor<xi32>
+    %6 = mul(%4, %5) : tensor<2x2xi32>
     return(%6)
   }
 }
@@ -256,7 +271,7 @@ At `DEBUG`, the applicator reports what it did:
 
 === after graph passes ===
 module @LongWayRound {
-  func @LongWayRound(%0: tensor<2x2xf32>) -> (tensor<2x2xf32>) {
+  func @LongWayRound(%0: tensor<2x2xi32>) -> (tensor<2x2xi32>) {
     return(%0)
   }
 }
@@ -282,22 +297,22 @@ Definition 17.2, tested. Four different programs, all computing `a * a`, written
 === a * a ===
   traced:      2 operations
   canonical:
-    %1 = mul(%0, %0) : tensor<2x2xf32>
+    %1 = mul(%0, %0) : tensor<2x2xi32>
     return(%1)
 === transpose(transpose(a)) * a ===
   traced:      4 operations
   canonical:
-    %1 = mul(%0, %0) : tensor<2x2xf32>
+    %1 = mul(%0, %0) : tensor<2x2xi32>
     return(%1)
 === (a + 0) * (a * 1) ===
   traced:      6 operations
   canonical:
-    %1 = mul(%0, %0) : tensor<2x2xf32>
+    %1 = mul(%0, %0) : tensor<2x2xi32>
     return(%1)
 === reshape(reshape(a)) * (a - 0) ===
   traced:      6 operations
   canonical:
-    %1 = mul(%0, %0) : tensor<2x2xf32>
+    %1 = mul(%0, %0) : tensor<2x2xi32>
     return(%1)
 
 4 spellings collapsed to 1 canonical form(s).
@@ -318,7 +333,7 @@ And it is worth being precise about what the lab does and does not show. It show
 - **`match` is called before every `rewrite` and both may walk the graph.** There is no shared state between them: `AddZero` tests `isConstantVal` in `match` and again in `rewrite`. For cheap predicates this is fine and it keeps `match` side-effect free, which is what makes trying patterns in benefit order safe. For an expensive match, it is a doubling.
 - **The applicator does not recurse into regions during rewriting, only during collection.** The worklist is seeded from `opsRecursive()`, so operations inside a `fusion` or `scan` region *are* visited; but the re-enqueue walk after a rewrite uses `block._head`/`_next` within one block. A rewrite that changes something in a sibling region will not re-enqueue across the boundary.
 - **`maxIterations` is passed to the applicator and is not an iteration count.** `applyPatterns(func, 10, trace)` uses the argument only to size the safety budget ([`pattern.ts:30`](../../../src/compiler/passes/rewrite/pattern.ts)). There is no outer loop over the worklist; the worklist *is* the loop. The parameter name is a leftover from an earlier design and the tests still describe rounds in its terms.
-- **Which set a rule lives in is not always principled.** `reshape` declares both of its rules — `FoldTrivialReshape` and `ReshapeReshape` — as canonicalization patterns ([`ops/shape.ts:158`](../../../src/compiler/ir/graph/ops/shape.ts)), while `transpose` declares only `FoldTrivialTranspose` ([`ops/shape.ts:184`](../../../src/compiler/ir/graph/ops/shape.ts)) and leaves the structurally identical `TransposeTranspose` to the algebraic pass. Both rules are unconditionally valid; there is no licence argument separating them. The observable consequence is in Chapter 15's lab: `transpose(transpose(x))` takes three rounds of the fixed-point group to disappear, and `reshape(reshape(x))` takes two.
+- **Which set a rule lives in is not always principled, and eight rules are in both.** §17.4 has the table. The clearest single case: `reshape` declares both of its rules — `FoldTrivialReshape` and `ReshapeReshape` — as canonicalization patterns ([`ops/shape.ts:158`](../../../src/compiler/ir/graph/ops/shape.ts)), while `transpose` declares only `FoldTrivialTranspose` ([`ops/shape.ts:184`](../../../src/compiler/ir/graph/ops/shape.ts)) and leaves the structurally identical `TransposeTranspose` to the algebraic pass. Both rules are unconditionally valid; there is no licence argument separating them. The observable consequence is in Chapter 15's lab: `transpose(transpose(x))` takes three rounds of the fixed-point group to disappear, and `reshape(reshape(x))` takes two — the transpose pair has to bounce between two passes, the reshape pair does not. The eight duplicated rules are the mirror-image cost: each is tried twice per round, in two different passes, and whichever runs first is the one that ever fires.
 - **Half the combinator language has no users.** `isOp` and `wildcard` build the five two-deep matchers above; `capture`, `alt` and `hasAttr` are implemented and tested and called from nowhere in `src/`. And every pattern that needs to *read* what it matched — including `FoldTransposeIntoDot`, the most valuable one in the set ([`patterns.ts:413`](../../../src/compiler/ir/graph/patterns.ts)) — walks `definingOp` by hand instead, because a `match` that returns a boolean cannot hand its bindings to `rewrite`. That is the missing piece: the matcher language can bind, and the `Pattern` interface has nowhere to put a binding.
 
 ## 17.8 Read the tests

@@ -71,6 +71,8 @@ type JointSavedContext = {
   outputShapes: number[][];
   device: Device;
   compiled: JointMeta;
+  runJoint: (gradArrays: readonly NumericTypedArray[], outBufs: readonly NumericTypedArray[]) => AsyncKernelResult;
+  pending: boolean;
 };
 type SavedContext = SeparateForwardContext | JointSavedContext;
 type FunctionBuilderResult = {
@@ -215,12 +217,32 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
     return [...compiled.outputTypes[i].shape as readonly number[]];
   }
 
-  function _runK(result: CompiledResult, funcName: string, allArgs: RuntimeArg[]): AsyncKernelResult {
+  function _kernelIsAsync(result: CompiledResult, funcName: string): boolean {
     const mod = result.module || result;
-    if (mod.executionPlan) return mod.runPlanAsync(mod.executionPlan, allArgs);
-    if (result.isAsync(funcName)) return result.runAsync(funcName, ...allArgs);
-    result.run(funcName, ...allArgs);
-    return null;
+    return !!mod.executionPlan || result.isAsync(funcName);
+  }
+
+  function _runK(result: CompiledResult, funcName: string, allArgs: RuntimeArg[]): AsyncKernelResult {
+    if (!_kernelIsAsync(result, funcName)) {
+      result.run(funcName, ...allArgs);
+      return null;
+    }
+    const mod = result.module || result;
+    return mod.executionPlan
+      ? mod.runPlanAsync(mod.executionPlan, allArgs)
+      : result.runAsync(funcName, ...allArgs);
+  }
+
+  function _allocOutputs(types: readonly TensorType[]): { arrays: NumericTypedArray[]; shapes: number[][] } {
+    const arrays = new Array<NumericTypedArray>(types.length);
+    const shapes = new Array<number[]>(types.length);
+    for (let i = 0; i < types.length; i++) {
+      const shape = [...types[i].shape as readonly number[]];
+      const Ctor = typedArrayCtor(types[i].dtype);
+      arrays[i] = new Ctor(Math.max(computeNumel(shape), 1));
+      shapes[i] = shape;
+    }
+    return { arrays, shapes };
   }
 
   function _executeSeparateForward(compiled: SeparateMeta, inputs: readonly Tensor[]): MaybePromise<SeparateForwardContext> {
@@ -359,38 +381,37 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
     const paramArrays = params.map((t: Tensor) => tensorToContiguous(t));
 
     const jointFunc = compiled.jointFunc;
-    const numOutputs = jointFunc.outputTypes.length;
-    const outputArrays = new Array<NumericTypedArray>(numOutputs);
-    const outputShapes = new Array<number[]>(numOutputs);
-    for (let i = 0; i < numOutputs; i++) {
-      const shape = [...jointFunc.outputTypes[i].shape as readonly number[]];
-      const dtype = jointFunc.outputTypes[i].dtype;
-      const numel = computeNumel(shape);
-      const Ctor = typedArrayCtor(dtype);
-      outputArrays[i] = new Ctor(Math.max(numel, 1));
-      outputShapes[i] = shape;
-    }
+    const { arrays: outputArrays, shapes: outputShapes } = _allocOutputs(jointFunc.outputTypes);
+    const gradOutputArrays = _allocOutputs(compiled.outputTypes.slice(0, compiled.numForwardOutputs)).arrays;
 
-    const gradOutputArrays = new Array<NumericTypedArray>(compiled.numForwardOutputs);
-    for (let i = 0; i < compiled.numForwardOutputs; i++) {
-      const type = compiled.outputTypes[i];
-      const numel = computeNumel(type.shape as readonly number[]);
-      const Ctor = typedArrayCtor(type.dtype);
-      gradOutputArrays[i] = new Ctor(Math.max(numel, 1));
-    }
+    const ctx: JointSavedContext = {
+      inputArrays, paramArrays, gradOutputArrays, outputArrays, outputShapes, device, compiled,
+      runJoint: (gradArrays, outBufs) => _runK(
+        compiled.result, funcName,
+        [...inputArrays, ...paramArrays, ...gradArrays, ...outBufs],
+      ),
+      pending: !_kernelIsAsync(compiled.result, funcName),
+    };
+    _savedValues = ctx;
 
-    _savedValues = { inputArrays, paramArrays, gradOutputArrays, outputArrays, outputShapes, device, compiled };
-
-    const allArgs: RuntimeArg[] = [...inputArrays, ...paramArrays, ...gradOutputArrays, ...outputArrays];
     const build = () => {
       const fwdOutputs = [];
       for (let i = 0; i < compiled.numForwardOutputs; i++) {
-        fwdOutputs.push(wrapResult(outputArrays[i], outputShapes[i], jointFunc.outputTypes[i].dtype, device));
+        const out = wrapResult(outputArrays[i], outputShapes[i], jointFunc.outputTypes[i].dtype, device);
+        out.storage.setPendingFill(() => { if (ctx.pending) _settleJoint(ctx, ctx.gradOutputArrays, outputArrays); });
+        fwdOutputs.push(out);
       }
       return fwdOutputs.length === 1 ? fwdOutputs[0] : fwdOutputs;
     };
-    const pending = _runK(compiled.result, funcName, allArgs);
+
+    if (ctx.pending) return build();
+    const pending = ctx.runJoint(gradOutputArrays, outputArrays);
     return pending ? pending.then(build) : build();
+  }
+
+  function _settleJoint(ctx: JointSavedContext, gradArrays: readonly NumericTypedArray[], outBufs: readonly NumericTypedArray[]): AsyncKernelResult {
+    ctx.pending = false;
+    return ctx.runJoint(gradArrays, outBufs);
   }
 
   const typedForward = compiledForward as typeof compiledForward & {
@@ -432,40 +453,18 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
   };
 
   function _executeJointBackward(compiled: JointMeta, gradOutputs: readonly Tensor[], savedCtx: JointSavedContext): MaybePromise<TensorOutput[]> {
-    const { inputArrays, paramArrays, outputArrays, outputShapes, device } = savedCtx;
-
+    const { outputArrays, device } = savedCtx;
     const gradArrays = gradOutputs.map((t: Tensor) => tensorToContiguous(t));
-    for (let i = 0; i < gradArrays.length; i++) {
-      (savedCtx.gradOutputArrays[i] as { set(values: unknown): void }).set(gradArrays[i]);
-    }
 
     const jointFunc = compiled.jointFunc;
-    const numOutputs = jointFunc.outputTypes.length;
-    const newOutputArrays = new Array<NumericTypedArray>(numOutputs);
-    const newOutputShapes = new Array<number[]>(numOutputs);
-    for (let i = 0; i < numOutputs; i++) {
-      const shape = [...jointFunc.outputTypes[i].shape as readonly number[]];
-      const dtype = jointFunc.outputTypes[i].dtype;
-      const numel = computeNumel(shape);
-      const Ctor = typedArrayCtor(dtype);
-      newOutputArrays[i] = new Ctor(Math.max(numel, 1));
-      newOutputShapes[i] = shape;
-    }
+    const gradInputTypes = jointFunc.outputTypes.slice(compiled.numForwardOutputs);
+    const { arrays: gradInputArrays, shapes: gradInputShapes } = _allocOutputs(gradInputTypes);
+    const outBufs = [...outputArrays.slice(0, compiled.numForwardOutputs), ...gradInputArrays];
 
-    const allArgs: RuntimeArg[] = [...inputArrays, ...paramArrays, ...gradArrays, ...newOutputArrays];
-    const build = () => {
-      const gradInputs = [];
-      for (let i = compiled.numForwardOutputs; i < numOutputs; i++) {
-        gradInputs.push(wrapResult(
-          newOutputArrays[i],
-          newOutputShapes[i],
-          jointFunc.outputTypes[i].dtype,
-          device
-        ));
-      }
-      return gradInputs;
-    };
-    const pending = _runK(compiled.result, compiled.result.listKernels()[0], allArgs);
+    const build = () => gradInputArrays.map(
+      (arr, i) => wrapResult(arr, gradInputShapes[i], gradInputTypes[i].dtype, device)
+    );
+    const pending = _settleJoint(savedCtx, gradArrays, outBufs);
     return pending ? pending.then(build) : build();
   }
 

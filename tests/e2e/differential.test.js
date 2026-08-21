@@ -80,10 +80,15 @@ const SPECIAL = [
   { name: 'exp_log_neg', data: [-1, -2, 0.5, 1], fwd: (x) => exp(log(x)) },
   { name: 'div_self_relu', data: [-1, 2, -3, 4], fwd: (x) => { const r = relu(x); return div(r, r); } },
   { name: 'mul_zero_inf', data: [Infinity, 1, NaN, 2], fwd: (x) => mul(x, sub(x, x)) },
+  { name: 'add_zero_signed', data: [-0, 0, NaN, -Infinity], fwd: (x) => x.add(0) },
+  { name: 'sub_zero_signed', data: [-0, 0, NaN, Infinity], fwd: (x) => x.sub(0) },
+  { name: 'mul_zero_nonfinite', data: [NaN, Infinity, -Infinity, -0], fwd: (x) => x.mul(0) },
+  { name: 'mul_one_nonfinite', data: [NaN, Infinity, -Infinity, -0], fwd: (x) => x.mul(1) },
 ];
 
 function eqIEEE(a, b) {
   if (Number.isNaN(a)) return Number.isNaN(b);
+  if (a === 0) return Object.is(a, b);
   if (!Number.isFinite(a)) return a === b;
   return Math.abs(a - b) / (1 + Math.abs(a)) < 1e-4;
 }

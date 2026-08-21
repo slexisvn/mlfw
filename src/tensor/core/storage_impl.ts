@@ -41,6 +41,7 @@ export class StorageImpl {
   private readonly _device: Device;
   private readonly _allocator: Allocator;
   private _refCount: number;
+  private _pendingFill: (() => void) | null;
 
   static setHostReadHook(fn: ((data: NumericTypedArray) => void) | null) { StorageImpl.#hostReadHook = fn; }
 
@@ -50,6 +51,18 @@ export class StorageImpl {
     this._device = device;
     this._allocator = allocator;
     this._refCount = 1;
+    this._pendingFill = null;
+  }
+
+  setPendingFill(fill: (() => void) | null) {
+    this._pendingFill = fill;
+  }
+
+  private _resolvePendingFill(): void {
+    const fill = this._pendingFill;
+    if (!fill) return;
+    this._pendingFill = null;
+    fill();
   }
 
   static allocate(nbytes: number, dtype: DType, device: Device): StorageImpl {
@@ -86,11 +99,13 @@ export class StorageImpl {
   }
 
   get data(): NumericTypedArray | null {
+    this._resolvePendingFill();
     if (StorageImpl.#hostReadHook && this._data) StorageImpl.#hostReadHook(this._data);
     return this._data;
   }
 
   get rawData(): NumericTypedArray | null {
+    this._resolvePendingFill();
     return this._data;
   }
 
@@ -127,6 +142,7 @@ export class StorageImpl {
   }
 
   clone(): StorageImpl {
+    this._resolvePendingFill();
     const allocator = getAllocator(this._device.type);
     let newData = null;
     if (this._data) {

@@ -48,10 +48,10 @@ describe('ReshapeReshape in algebraic pass', () => {
 });
 
 describe('cross-pattern: reshape + arithmetic in algebraic', () => {
-  it('add(x, 0) and reshape(reshape) both fire in same pass', () => {
-    const t = new TensorType([4, 8], ScalarType.F32);
-    const func = buildFunction('f', [t], [new TensorType([32], ScalarType.F32)], (b, args) => {
-      const zero = b.scalarConstant(0, ScalarType.F32);
+  it('add(x, 0) and reshape(reshape) both fire in same pass (int only)', () => {
+    const t = new TensorType([4, 8], ScalarType.I32);
+    const func = buildFunction('f', [t], [new TensorType([32], ScalarType.I32)], (b, args) => {
+      const zero = b.scalarConstant(0, ScalarType.I32);
       const d = b.add(args[0], zero.getResult(0));
       const r1 = b.reshape(d.getResult(0), [2, 16]);
       b.returnOp([b.reshape(r1.getResult(0), [32]).getResult(0)]);
@@ -69,10 +69,10 @@ describe('cross-pattern: reshape + arithmetic in algebraic', () => {
 });
 
 describe('AddZero and friends in algebraic context', () => {
-  it('add(x, 0) eliminates in algebraic pass (not just canonicalize)', () => {
-    const t = new TensorType([4], ScalarType.F32);
+  it('add(x, 0) eliminates in algebraic pass, not just canonicalize (int only)', () => {
+    const t = new TensorType([4], ScalarType.I32);
     const func = buildFunction('f', [t], [t], (b, args) => {
-      const zero = b.scalarConstant(0, ScalarType.F32);
+      const zero = b.scalarConstant(0, ScalarType.I32);
       b.returnOp([b.add(args[0], zero.getResult(0)).getResult(0)]);
     });
 

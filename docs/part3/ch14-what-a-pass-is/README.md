@@ -75,7 +75,7 @@ export class Pass {
   private _ownAnalyses: AnalysisManager | null;
 ```
 
-Seven fields, and each one is a question the driver will ask before or after running it:
+Seven fields. Six of them are a question the driver will ask before or after running the pass:
 
 | Field | The question | Answered in |
 |---|---|---|
@@ -85,6 +85,8 @@ Seven fields, and each one is a question the driver will ask before or after run
 | `optLevel` | At which optimization level do you belong? | §14.4 |
 | `trace` | Where do you write your explanation? | Chapter 18 |
 | `_ownAnalyses` | What do you do if nobody gave you a manager? | Chapter 16 |
+
+The seventh, `invalidatedAnalyses`, is not in the table because nothing asks it. It is declared on every pass and read by nothing in `src/`; §16.7 comes back to it.
 
 And the method that does the work ([`pass.ts:52`](../../../src/compiler/passes/pass.ts)):
 
@@ -114,7 +116,7 @@ They exist to be tested for. The pass manager branches on `pass instanceof Modul
 
 ### Who is a pass
 
-31 classes in `src/compiler` extend one of these bases, spread over three IR levels:
+31 classes in `src/compiler` are passes, spread over three IR levels. Twenty-one of them extend the two bases above; the other ten extend separate hierarchies, for reasons the paragraph after the table gives:
 
 | Level | Base class | Count | Where |
 |---|---|---|---|
@@ -292,7 +294,7 @@ Three programs, one answer, three different amounts of work. This is what a pass
 - **`run` may lie about UNCHANGED and nothing checks.** Definition 14.1's implication is a contract, not an invariant. A pass that mutates and reports UNCHANGED will not be caught by verification — the IR is still valid, just different from what the driver believes. The one thing that saves you is that analyses are keyed by a mutation counter rather than by the verdict (Chapter 16), so a lying pass still invalidates the cache. That is a defence in depth that happens to work, not a designed check.
 - **The `PassContext.config` map cannot be read by a pass at all.** [`pass.ts:61`](../../../src/compiler/passes/pass.ts) declares it and the constructor fills it from the caller's options ([`pass.ts:67`](../../../src/compiler/passes/pass.ts)) — but the flow of control only ever goes the other way: the manager hands a *pass* to `shouldRun`, and never hands the context to a pass. Per-pass configuration is done by constructor arguments in [`buildGraphPipeline`](../../../src/compiler/pipeline/graph_pipeline.ts) instead. Two mechanisms for one job, one of them unreachable.
 - **A `FunctionPass` is run function-by-function but not in parallel.** [`pass_manager.ts:151`](../../../src/compiler/passes/pass_manager.ts) is an ordinary `for (const func of module)`. The granularity distinction licenses parallelism; nothing here takes it.
-- **Mutating a pass object from `shouldRun` is not what the hook is for.** Lab 3 below uses it as intended — a predicate. Lab 2, and four labs in Chapters 15, 16 and 18, instead wrap `pass.run` from inside `shouldRun`, because it is the only way to reach a pass object from outside the package. It works because `shouldRun` receives the real object, and it is the right thing for a lab. It is the wrong thing in production code: `shouldRun` is a predicate, and a predicate with side effects is a trap for the next reader.
+- **Mutating a pass object from `shouldRun` is not what the hook is for.** §14.7's lab uses it as intended — a predicate. Lab 2, and four labs in Chapters 15, 16 and 18, instead wrap `pass.run` from inside `shouldRun`, because it is the only way to reach a pass object from outside the package. It works because `shouldRun` receives the real object, and it is the right thing for a lab. It is the wrong thing in production code: `shouldRun` is a predicate, and a predicate with side effects is a trap for the next reader.
 
 ## 14.9 Read the tests
 

@@ -22,7 +22,6 @@ export type PriorityFusionConfig = {
   target?: Partial<FusionAwareTarget> | null;
   maxReductions?: number;
   maxFusionSize?: number;
-  maxSharedMemory?: number;
   libraryOps?: ReadonlySet<string>;
   allowReductionFusion?: boolean;
   benefitWeights?: Partial<BenefitWeights>;
@@ -50,8 +49,7 @@ export class PriorityFusionPass extends FunctionPass {
     const target = config.target || {};
     this.maxReductions = config.maxReductions ?? 1;
     this.legality = new FusionLegality({
-      maxFusionSize: target.maxFusionSize || config.maxFusionSize,
-      maxSharedMemory: target.sharedMemoryBytes || config.maxSharedMemory,
+      maxFusionSize: target.maxFusionSize ?? config.maxFusionSize,
       allowReductionFusion: config.allowReductionFusion,
     });
     const benefitWeights = (target.getAttr && target.getAttr<Partial<BenefitWeights>>('fusionBenefitWeights')) || config.benefitWeights;

@@ -1,8 +1,8 @@
 # Chapter 21 — Decomposition
 
-Every optimization in Chapters 19, 20 and 22 through 24 makes the graph smaller. This one makes it eight times bigger, on purpose, and it runs second in the pipeline — before any of them.
+Every optimization in Chapters 19, 20 and 22 through 24 makes the graph smaller. This one makes it about five times bigger — nine times for a `layer_norm` — on purpose, and it runs second in the pipeline, before any of them.
 
-The reason is a claim about optimization in general: **a pass can only exploit structure it can see.** An operation named `softmax` is a wall. Nothing inside it can be fused with a neighbour, no algebraic identity can reach it, no constant can propagate through it. Break it into ten primitives and every one of those becomes possible — at the cost of throwing away the one thing the name was carrying, which is that somebody may have written a very good `softmax` kernel.
+The reason is a claim about optimization in general: **a pass can only exploit structure it can see.** An operation named `softmax` is a wall. Nothing inside it can be fused with a neighbour, no algebraic identity can reach it, no constant can propagate through it. Break it into nine primitives and every one of those becomes possible — at the cost of throwing away the one thing the name was carrying, which is that somebody may have written a very good `softmax` kernel.
 
 ## 21.1 The problem: 96 operations, and every pass has to handle all of them
 
@@ -20,7 +20,7 @@ Decomposition is the first half of a three-step trade the rest of Part IV comple
 2. **Optimize.** Every pass downstream now works on a vocabulary it fully understands. Fusion in particular can group across what used to be an operation boundary.
 3. **Re-collapse.** Fusion puts the pieces back into single kernels — not the ones you started with, but ones chosen by a cost model that could see the whole neighbourhood.
 
-Step 3 is what makes step 1 affordable, and it is why this chapter sits where it does. Without a good fusion engine, decomposition is a machine for turning one kernel into ten.
+Step 3 is what makes step 1 affordable, and it is why this chapter sits where it does. Without a good fusion engine, decomposition is a machine for turning one kernel into nine.
 
 The information you lose in step 1 is real, though, and it is worth naming precisely: after decomposition, **there is no `softmax` in the graph**. A backend holding a hand-tuned fused softmax kernel has nothing to match against. Chapter 58's external-codegen interface exists partly to buy that back, and §21.7 shows the escape hatch that exists for it here.
 
@@ -117,7 +117,7 @@ A target that implements `softmax` natively — a GPU with a library kernel — 
 ## 21.5 Lab 1 — One operation becomes ten, and then one kernel
 
 ```bash
-node docs/part4/ch21-decomposition/labs/01-one-op-becomes-seven.mjs
+node docs/part4/ch21-decomposition/labs/01-one-op-becomes-ten.mjs
 ```
 
 The user writes one operation:
@@ -140,6 +140,8 @@ The pass reports what it did, and the graph grows fivefold:
   DecompositionPass: 2 -> 10 ops
 ```
 
+Three numbers describe the same expansion and it is worth fixing which is which now, because all three appear in this chapter. The rule in §21.4 emits **seven** operations. Two of its `b.scalarConstant` calls emit a `constant` each, so **nine** operations replace the `softmax`. The `return` was always there, so the function goes from **two** operations to **ten**. Counts printed by the pass are whole-function counts; counts in prose about a rule are what the rule wrote.
+
 And here is what the *rest of Part IV* does with those ten:
 
 ```
@@ -147,6 +149,9 @@ module @Softmax {
   func @Softmax(%0: tensor<2x3xf32>) -> (tensor<2x3xf32>) {
     %1 = constant() {tensor_type = tensor<xf32>, value = -inf} : tensor<xf32>
     %2 = reduce(%0, %1) {dimensions = [1], reduce_type = "max"} : tensor<2xf32>
+    {
+      ^bb(%3: tensor<xf32>, %4: tensor<xf32>):
+    }
     %5 = constant() {tensor_type = tensor<xf32>, value = 0} : tensor<xf32>
     %6 = fusion(%2, %0, %5) {fusion_kind = "kReduction"} : tensor<2x3xf32>
     {
@@ -155,6 +160,9 @@ module @Softmax {
       %11 = sub(%8, %10) : tensor<2x3xf32>
       %12 = exp(%11) : tensor<2x3xf32>
       %13 = reduce(%12, %9) {dimensions = [1], reduce_type = "sum"} : tensor<2xf32>
+      {
+        ^bb(%14: tensor<xf32>, %15: tensor<xf32>):
+      }
       %16 = broadcast_in_dim(%13) {broadcast_dimensions = [0], result_shape = [2, 3]} : tensor<2x3xf32>
       %17 = div(%12, %16) : tensor<2x3xf32>
       yield(%17)
@@ -164,6 +172,8 @@ module @Softmax {
 }
 kernels emitted: 1
 ```
+
+The two empty `^bb` blocks are `reduce`'s combiner regions, printed with no body because the reduction is named by its `reduce_type` attribute rather than spelled out — Chapter 13's printer showing you a region that exists and holds nothing.
 
 Six of the seven emitted operations are inside a single `kReduction` fusion region — including the *second* reduction, the sum, which is fused together with the broadcast, the subtract, the exponential and the divide. Only the max reduction stayed outside. One kernel comes out, and it computes a numerically stable softmax.
 
@@ -195,7 +205,7 @@ The column that matters is the last one: **every case ends as a single kernel.**
 
 Two rows are the control group. `tanh` is a primitive — no rule, no expansion, and it was already one kernel. And `elu` traced to six operations rather than one, because `nn.ELU` builds itself out of primitives in the *module*, before tracing ever reaches an `elu` node; its decomposition rule exists and never fires on this path. Two ways of spelling the same policy, one in the framework and one in the compiler, and the graph cannot tell them apart afterwards.
 
-Note also that "after all passes" is well above "traced" for every decomposed case — 5 operations for a softmax that arrived as 1. The graph did not return to its original size, and it did not need to: what matters is how many *kernels* it becomes, and the operations left at graph level are fusion regions and the reductions that could not join them.
+Note also that "after all passes" is well above "traced" for every decomposed case — 5 operations for a softmax that arrived as 2, counting the `return` in both, as every column of this table does. The graph did not return to its original size, and it did not need to: what matters is how many *kernels* it becomes, and the operations left at graph level are fusion regions and the reductions that could not join them.
 
 ## 21.7 Lab 3 — Keeping an operation whole
 
