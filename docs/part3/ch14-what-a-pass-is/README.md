@@ -38,9 +38,21 @@ The verdict is the part that does the most work, and it is worth being clear abo
 
 ## 14.3 Theory
 
-> **Definition 14.1 (Pass).** A *pass* is a named partial function `P : IR → IR` applied by mutation, together with a *verdict function* `v : IR → {UNCHANGED, CHANGED, FAILED}` such that `v(m) = UNCHANGED` implies `P(m) = m`.
+> **Definition 14.1 (Pass).** **(stated here)** Write `obs(m)` for the *observable state* of a module: the operations it contains, their names, operands, results, attributes and regions, and the function signatures around them — everything Chapter 13's printer can see, and nothing else. A *pass* is a named procedure `P` that mutates a module in place, together with a *verdict function* `v : IR → {UNCHANGED, CHANGED, FAILED}` such that
+>
+> `v(m) = UNCHANGED` implies `obs(m` after `P) = obs(m` before `P)`.
 
-The implication runs one way only, and deliberately. Reporting CHANGED when nothing changed is legal and merely wasteful; reporting UNCHANGED when something changed is a bug that will show up somewhere else entirely, as a stale analysis or a skipped verification. Compiler infrastructure is full of contracts shaped like this: cheap to over-report, catastrophic to under-report.
+**The equation has to be written over `obs`, not over `m`.** A pass mutates the module it is handed and returns nothing; the object afterwards is the *same object* it was before, at the same address, no matter what happened to its contents. So a condition of the form `P(m) = m` — read with `=` as identity — is satisfied by every pass ever written, including one that deleted the entire function body, and it constrains nothing. What UNCHANGED actually promises is that the *content* is unchanged, which is why the definition names the equivalence it means. This is not pedantry about notation: it is the difference between a contract and a tautology, and the whole of §14.3 is about a driver that trusts the contract.
+
+The implication runs one way only, and deliberately. Reporting CHANGED when nothing changed is legal and merely wasteful; reporting UNCHANGED when something changed is a bug. Compiler infrastructure is full of contracts shaped like this: cheap to over-report, catastrophic to under-report.
+
+**And it is worth following a false UNCHANGED all the way to its symptom, because the symptom does not look like the cause.** Suppose a pass edits the IR and reports UNCHANGED. Three things happen, in this order:
+
+1. **Analyses are not invalidated.** The pass manager only invalidates on CHANGED ([`pass_manager.ts:137`](../../../src/compiler/passes/pass_manager.ts)). Every cached fact computed before the edit remains servable — a liveness set naming values that no longer exist, a dominance relation over a graph that has been rewired.
+2. **The IR is not re-verified.** Verification is also keyed on CHANGED (Chapter 15 §15.4). If the edit left the module invalid, nothing notices *here*.
+3. **The next pass runs.** It queries a stale analysis, or trips over the invalid structure, and the verifier that finally fires attributes the damage to *it*.
+
+The result is a bug report naming the wrong pass. The pass that is running when the verifier complains is the one the trace blames, the one whose name appears in the error, and the one somebody spends an afternoon reading — while the pass that actually broke the module reported "nothing to see here" and left the scene. This is why the verdict is worth more care than it appears to deserve: it is not a status message, it is the sole input to the two mechanisms that would otherwise have caught the mistake. When in doubt, report CHANGED.
 
 Why three values rather than two? Because "I did not change anything" and "I could not do my job" are different facts and lead to different actions. UNCHANGED means the driver may proceed and may keep everything it knows. FAILED means the IR is in an unknown state: analyses computed over it must be thrown away, and the driver has to decide whether to abandon the compilation or quarantine what broke. Collapsing them loses the distinction exactly when you need it.
 

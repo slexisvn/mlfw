@@ -1,4 +1,4 @@
-import { _traceCore, resolveDynamicShapes } from './compile.js';
+import { _traceCore, resolveDynamicShapes, inputSignatureOf, signatureMatches } from './compile.js';
 import { Compiler } from '../compiler/pipeline/compiler.js';
 import { CPUTarget } from '../backend/target.js';
 import { GraphModule } from '../compiler/ir/graph/module.js';
@@ -6,8 +6,9 @@ import { BackwardGraphBuilder } from '../compiler/ad/backward_builder.js';
 import { IRBuilder } from '../compiler/ir/graph/builder.js';
 import { JointGraphBuilder } from '../compiler/ad/joint_builder.js';
 import { RematPolicy } from '../compiler/ad/remat_policy.js';
+import type { InputSignature } from './types.js';
 import '../compiler/ad/index.js';
-import { tensorToContiguous, wrapResult } from '../dispatcher/jit_dispatch.js';
+import { tensorToContiguous, tensorToContiguousCopy, wrapResult } from '../dispatcher/jit_dispatch.js';
 import { typedArrayCtor } from '../tensor/types/dtype.js';
 import { computeNumel } from '../tensor/utils/shape_utils.js';
 import { userArgIndexBounds } from '../compiler/analysis/index_bounds.js';
@@ -38,6 +39,7 @@ type SeparateMeta = {
   shapeEnv: TracedCore['shapeEnv'];
   outputSymShapes: readonly SymbolicShape[];
   indexBounds: readonly ArgIndexBound[];
+  inputSignature: InputSignature;
 };
 type JointMeta = {
   mode: 'joint';
@@ -52,6 +54,7 @@ type JointMeta = {
   shapeEnv: TracedCore['shapeEnv'];
   outputSymShapes: readonly SymbolicShape[];
   indexBounds: readonly ArgIndexBound[];
+  inputSignature: InputSignature;
 };
 type BackwardMeta = SeparateMeta | JointMeta;
 type ArgSpec = { shape: number[]; dtype: DType };
@@ -119,6 +122,7 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
       compiled.shapeEnv = t.shapeEnv;
       compiled.outputSymShapes = t.outputSymShapes;
       compiled.indexBounds = indexBounds;
+      compiled.inputSignature = inputSignatureOf(inputs);
       return compiled;
     };
 
@@ -183,6 +187,7 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
       shapeEnv: traced.shapeEnv,
       outputSymShapes: traced.outputSymShapes,
       indexBounds: [],
+      inputSignature: [],
     };
   }
 
@@ -207,6 +212,7 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
       shapeEnv: traced.shapeEnv,
       outputSymShapes: traced.outputSymShapes,
       indexBounds: [],
+      inputSignature: [],
     };
   }
 
@@ -250,7 +256,7 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
     const funcName = kernels[0];
     const device = (inputs.length > 0 ? inputs[0].device : 'cpu') as Device;
 
-    const inputArrays = inputs.map((t: Tensor) => tensorToContiguous(t));
+    const inputArrays = inputs.map((t: Tensor) => tensorToContiguousCopy(t));
     const params = compiled.capturedParams;
     const paramArrays = params.map((t: Tensor) => tensorToContiguous(t));
 
@@ -328,8 +334,10 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
   }
 
   function _findCachedEntry(inputs: readonly Tensor[]): BackwardMeta | null {
+    const signature = inputSignatureOf(inputs);
     for (let i = 0; i < _cacheEntries.length; i++) {
       const entry = _cacheEntries[i];
+      if (!signatureMatches(entry.inputSignature, signature)) continue;
       entry.shapeEnv.bindInputShapes(inputs);
       const { passed } = entry.shapeEnv.evaluateGuards();
       if (passed) return entry;
@@ -376,7 +384,7 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
     const funcName = kernels[0];
     const device = (inputs.length > 0 ? inputs[0].device : 'cpu') as Device;
 
-    const inputArrays = inputs.map((t: Tensor) => tensorToContiguous(t));
+    const inputArrays = inputs.map((t: Tensor) => tensorToContiguousCopy(t));
     const params = compiled.capturedParams;
     const paramArrays = params.map((t: Tensor) => tensorToContiguous(t));
 

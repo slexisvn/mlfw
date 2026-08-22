@@ -23,7 +23,7 @@ import { CPUTarget, WasmTarget, WebGPUTarget } from '../../../src/backend/target
 import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
-import { TuningDatabase, TuningRecord, CODEGEN_VERSION } from '../../../src/compiler/autotune/tuning_db.js';
+import { TuningDatabase, TuningRecord, CODEGEN_VERSION, SCHEDULE_SEMANTICS_VERSION } from '../../../src/compiler/autotune/tuning_db.js';
 import { RandomSearch, EvolutionarySearch } from '../../../src/compiler/autotune/search.js';
 import { Deadline } from '../../../src/compiler/autotune/budget.js';
 import { TraceLevel } from '../../../src/compiler/pipeline/trace.js';
@@ -222,6 +222,24 @@ describe('TuningDatabase versioning + disk persistence', () => {
 
     const stale = TuningDatabase.deserialize({ ...blob, codegenVersion: 'stale-codegen-xyz' });
     expect(stale.size).toBe(0);
+  });
+
+  it('invalidates all records when the schedule primitives no longer mean what they meant', () => {
+    const db = new TuningDatabase(1);
+    db.store('k', new TuningRecord('k', 'mlt_cpu', { tile: 8 }, 3.0, null, 1));
+    const blob = db.serialize();
+    expect(blob.scheduleSemanticsVersion).toBe(SCHEDULE_SEMANTICS_VERSION);
+
+    expect(TuningDatabase.deserialize(blob).size).toBe(1);
+    expect(TuningDatabase.deserialize({ ...blob, scheduleSemanticsVersion: 'mlfw-schedule-0' }).size).toBe(0);
+  });
+
+  it('rejects a database written before the semantics version existed', () => {
+    const db = new TuningDatabase(1);
+    db.store('k', new TuningRecord('k', 'mlt_cpu', { tile: 8 }, 3.0, null, 1));
+    const { scheduleSemanticsVersion, ...legacy } = db.serialize();
+
+    expect(TuningDatabase.deserialize(legacy).size).toBe(0);
   });
 
   it('persists to disk and reloads for reuse across sessions', () => {

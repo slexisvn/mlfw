@@ -7,7 +7,7 @@ Chapter 32 left one line unexplained:
     if (!rule) throw new Error(`No lowering rule defined for op: ${op.opName}`);
 ```
 
-This chapter is what is on the other side of that lookup: 66 rules covering 96 registered operations, a selection mechanism with two override points, and a handful of shared builders that mean the 66 rules are much less than 66 independent programs.
+This chapter is what is on the other side of that lookup: 68 rules covering 96 registered operations, a selection mechanism with two override points, and a handful of shared builders that mean those 68 rules are much less than 68 independent programs.
 
 ## 34.1 The problem: 96 operations, one loop language
 
@@ -48,7 +48,7 @@ Coverage is not "every registered operation has a rule". It is a joint property 
 
 *Argument.* The driver reaches its rule lookup for exactly the operations in `E`, minus terminators and constants, which it handles itself; it throws exactly when that lookup returns nothing. So a failure is possible precisely when some member of `E` is outside `R`. ∎
 
-The statement is nearly a tautology and is worth writing down anyway, because of which two things it puts on the same line. `R` is a property of the *registry* — 66 names, all in `passes/lowering/`. `E` is a property of the *pipeline* — which passes are enabled, in what order, for this target and this configuration. Neither file knows about the other, and the correctness condition mentions both.
+The statement is nearly a tautology and is worth writing down anyway, because of which two things it puts on the same line. `R` is a property of the *registry* — 68 names, all in `passes/lowering/`. `E` is a property of the *pipeline* — which passes are enabled, in what order, for this target and this configuration. Neither file knows about the other, and the correctness condition mentions both.
 
 The consequence is the practical one: **turning off a pass can make lowering fail.** Disable decomposition and `softmax` reaches a phase with no rule for it. Nothing in the decomposition pass says "lowering depends on me", and nothing in the lowering registry says "I assume decomposition ran". That coupling is the reason §34.6's table has two halves.
 
@@ -108,7 +108,7 @@ So there are two ways to change how an operation lowers without touching the reg
 
 ### The skeletons
 
-Five shared constructors carry most of the 66 rules.
+Five shared constructors carry most of those rules.
 
 | Skeleton | Line | Used by |
 |---|---|---|
@@ -159,7 +159,7 @@ const ELEMENTWISE_SCALAR_OPS: Record<string, string> = {
 
 `iota`'s entry is a placeholder that throws if it is ever called ([`rules/fusion.ts:58`](../../../src/compiler/passes/lowering/rules/fusion.ts)) — it exists so that `canLowerAsElementwiseFusion` says yes, and `lowerFusion`'s index-aware path substitutes the loop variable directly instead of building an expression from operands. An `iota` inside a fusion is the one inner operation whose value depends on *where* it is, not on what it read.
 
-## 34.5 Where the 66 rules live
+## 34.5 Where the rules live
 
 | File | Rules | Operations |
 |---|---|---|
@@ -174,12 +174,28 @@ const ELEMENTWISE_SCALAR_OPS: Record<string, string> = {
 | [`rules/layout.ts`](../../../src/compiler/passes/lowering/rules/layout.ts) | 1 | `layout_transform` |
 | [`rules/attention.ts`](../../../src/compiler/passes/lowering/rules/attention.ts) | 1 + 1 | `scaled_dot_product_attention`, generic and CUDA |
 
-Sixty-six operations of the registry's 96 have a rule. The other thirty split exactly in two, and the arithmetic closes:
+### The taxonomy, stated once
 
-- **Decomposed — 21.** `softmax`, `log_softmax`, `sigmoid`, `silu`, `gelu`, `celu`, `elu`, `selu`, `mish`, `leaky_relu`, `hardsigmoid`, `hardswish`, `layer_norm`, `batch_norm`, `one_hot`, `where`, `split`, `embedding`, `stop_gradient`, `all_reduce`, `all_gather`. Each has a `registerDecomposition` entry ([`passes/decompose/`](../../../src/compiler/passes/decompose/)) and Chapter 21 replaces it with primitives before lowering runs.
-- **Structural — 9.** `return`, `yield`, `tuple`, `get_tuple_element`, `call`, `constant`, `scalar_constant`, `fusion`, `custom_call`. Handled by the driver, by the region-lowering path, or routed to external codegen (Chapter 58).
+Several parts of this book quote counts from this table, and they have drifted against each other in the past, so here is the partition and the predicate that decides each class. Every registered operation falls in exactly one:
 
-66 + 21 + 9 = 96, with nothing left over. That is Proposition 34.4 checked by counting rather than by trusting: the set of operations with no rule and no removal path is empty.
+> **Definition 34.6 (Lowering coverage classes).** **(stated here)** For each operation `n` in the registry:
+> - `n` is **ruled** if `hasLoweringRule(n)` — the lowering registry can produce a loop nest for it.
+> - `n` is **decomposed** if it is not ruled and `hasDecomposition(n)` — Chapter 21 rewrites it into primitives before lowering sees it.
+> - `n` is **structural** otherwise — the driver, the region-lowering path or external codegen handles it, and it never reaches a rule lookup.
+>
+> Coverage (Proposition 34.4) is the claim that no fourth class exists: no operation is unruled, undecomposed and unhandled.
+
+Both predicates are exported, so the partition is checkable rather than asserted. Measured on 2026-08-21:
+
+| Class | Count | Members |
+|---|---:|---|
+| **ruled** | 68 | the table above |
+| **decomposed** | 21 | `softmax`, `log_softmax`, `sigmoid`, `silu`, `gelu`, `celu`, `elu`, `selu`, `mish`, `leaky_relu`, `hardsigmoid`, `hardswish`, `layer_norm`, `batch_norm`, `one_hot`, `where`, `split`, `embedding`, `stop_gradient`, `all_reduce`, `all_gather` |
+| **structural** | 7 | `return`, `yield`, `tuple`, `get_tuple_element`, `call`, `fusion`, `custom_call` |
+
+**68 + 21 + 7 = 96, with nothing left over.** That is Proposition 34.4 checked by counting rather than by trusting: the set of operations with no rule and no removal path is empty.
+
+> **These numbers move, and the sum does not.** An operation migrating between classes — `constant` and `scalar_constant` gaining lowering rules, say — changes *two* of the three counts in step while the total stays pinned by the registry. That is the useful property of a partition: the arithmetic closing is a permanent check, while any individual class count is a fact about the implementation on a date. Quote a class count with its date, or derive it from the predicates.
 
 ## 34.6 Lab — the catalogue
 

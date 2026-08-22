@@ -27,7 +27,6 @@ function analyzeKernel(src) {
   const issues = [];
   if (/\(0\s*-\s*\w/.test(src)) issues.push('NEG_NOISE');
   if (/\*\s*1\b(?!\.)/.test(src)) issues.push('MUL_ONE');
-  if (/\+\s*0(?!\.\d*[1-9])\b/.test(src)) issues.push('ADD_ZERO');
   return { loops, temps, lines, issues };
 }
 

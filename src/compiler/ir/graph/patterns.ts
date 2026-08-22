@@ -491,9 +491,11 @@ export class IdempotentSelf extends Pattern {
 }
 
 export class AssociativeConstantReassoc extends Pattern {
-  constructor(opName: string) {
+  fastMath: boolean;
+  constructor(opName: string, fastMath = false) {
     super(`associative_constant_reassoc_${opName}`, 4);
     this.rootOpName = opName;
+    this.fastMath = fastMath;
   }
   _parts(op: Operation): { inner: Operation; x: Value; outerConst: Operation; innerConst: Operation } | null {
     if (op.numOperands !== 2) return null;
@@ -517,10 +519,12 @@ export class AssociativeConstantReassoc extends Pattern {
     return def.fold([a, b], op.attributes, [parts.innerConst, parts.outerConst]);
   }
   override match(op: Operation): boolean {
+    if (!isDtypeInt((op.getResult(0).type as TensorType).dtype) && !this.fastMath) return false;
     const parts = this._parts(op);
     return parts !== null && this._folded(op, parts) !== undefined;
   }
   override rewrite(op: Operation, builder: IRBuilder): boolean {
+    if (!isDtypeInt((op.getResult(0).type as TensorType).dtype) && !this.fastMath) return false;
     const parts = this._parts(op);
     if (!parts) return false;
     const value = this._folded(op, parts);

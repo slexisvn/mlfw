@@ -2,7 +2,14 @@
 
 `schedule.parallelize('i1_7')` has to find a loop called `i1_7`, decide whether marking it parallel is legal, mark it, and leave every other query about the function still answerable. Doing that by walking the IR each time is correct and quadratic: a schedule of *k* primitives on a function of *n* nodes costs O(kn), and Part VIII will run schedules of a dozen primitives thousands of times.
 
-This chapter is about the two indexes that make it O(k·depth) instead, and about how much of the second one is currently unused.
+This chapter is about the two indexes that reduce that cost, and about how much of the second one is currently unused.
+
+**One correction to make before the chapter makes the claim, because the tempting figure is `O(k·depth)` and it is not what this implementation achieves.** Two costs sit on top of the tree lookup, and both are proportional to the work a primitive does rather than to the depth at which it does it:
+
+- **`replaceNode` walks the replacement subtree.** Patching the shadow tree unregisters the srefs under the old node and *walks the new node* to build fresh ones (§39.4). That is `O(size of the replaced subtree)`, not `O(depth)`. For `split` the subtree is two loops and a body; for `rfactor` it is two complete nests. And when the old node is not found the fallback is `rebuildFrom`, which is `O(n)`.
+- **Every primitive clears every memo.** `ScheduleState.invalidate` drops six cached analyses wholesale (§39.5), so the next legality query recomputes buffer accesses and dependences from scratch over the nest it asks about.
+
+So the honest bound is: **the tree gives `O(depth)` *lookup*, and the rest of a primitive's cost is proportional to the subtree it rewrites plus whatever analysis the next query has to redo.** That is still a large improvement on re-walking the whole function for every query — which is the point of the chapter — and it is not a per-primitive constant. §39.5 is where the memo behaviour is measured and §39.7 is honest about what "incremental" covers.
 
 ## 39.1 The problem: a tree that is edited from the middle
 
@@ -139,6 +146,10 @@ A `@recurrence` loop — the sequential time axis a `scan` lowers to (Chapter 34
 ```
 
 Every primitive calls it. This is Chapter 16's invalidation problem in its simplest possible form: one bit, cleared on every write, so nothing can be stale. The cost is that a rule applying five primitives to one block recomputes the buffer accesses five times, and Part VIII pays it thousands of times over.
+
+**And it is worth being exact about which half of this chapter is incremental, because the two indexes behave differently.** The *sref tree* is genuinely maintained: a replacement patches the affected subtree and everything outside it keeps its identity, its parent pointer and its position. The *analyses over that tree* are not maintained at all — they are thrown away and recomputed on demand. So "the schedule edits a nest from the middle without invalidating everything else" is true of the structure and false of the derived facts, and a reader who takes the chapter's title as a claim about both will over-estimate what a primitive costs to apply.
+
+The one place the second half is incremental is `nestAnalysis`, immediately below, which is keyed per loop node so that a legality question about one nest does not recompute the others.
 
 `nestAnalysis` ([`schedule_state.ts:122`](../../../src/compiler/schedule/schedule_state.ts)) is the one memo with a key: it caches per loop node, because a legality question is about one nest and not the function.
 

@@ -38,13 +38,23 @@ Let `F` be a forward function with operations `o₁…o_n` in topological order.
 
 Two remarks the theorem does not make, and both matter here.
 
-**It is a statement about chains.** A general DAG has no notion of "the first `√n` operations", and a segment cut across a wide graph can have a boundary set far larger than one value. Definition 30.2's boundary set is computed, not assumed, and §30.7 is about what that costs.
+**It is a statement about chains, and this chapter's pass is not a chain algorithm.** A general DAG has no notion of "the first `√n` operations", and a segment cut across a wide graph can have a boundary set far larger than one value. Definition 30.2's boundary set is computed, not assumed, and §30.7 is about what that costs.
+
+That distinction is worth making sharply, because Theorem 30.3 is the famous result and it is tempting to attach its bound to whatever code sits nearest. The shipped path is not a segmentation algorithm at all: it is a *policy* consulted once per operation — "should this value be recomputed rather than saved?" — and a resolver that recurses through operands until it hits something saved. It has no segments, no `k`, and therefore no `√n`. **Theorem 30.3 bounds a construction this compiler does not perform**, and it appears here because it is the idea the policies are groping towards and the benchmark any future segmenter should be measured against. The `√n` segmenter that *would* implement it exists in [`checkpoint_policy.ts`](../../../src/compiler/ad/checkpoint_policy.ts), is tested, and §30.7 explains why nothing can reach it.
 
 **It says nothing about which segmentation is best.** Choosing cuts to minimize memory subject to a time budget is a discrete optimization problem; `√n` is the closed-form answer for the uniform chain and a heuristic otherwise.
 
-> **Definition 30.4 (Rematerialization is exact, stated here).** Recomputing a value from the same inputs by the same operations yields the same value. Rematerialization therefore changes memory and time and does not change the gradient.
+> **Definition 30.4 (Rematerialization is exact).** **(stated here)** Let every operation on the recomputed subgraph be **pure** — a function of its operands alone — and **deterministic**, and let it be evaluated under the same numerical mode (Definition 1.4) as the original. Then recomputing a value from the same inputs by the same operations yields a bit-identical value, so rematerialization changes memory and time and does not change the gradient.
 
 That is worth stating because the other two trades in this book do not have it: quantization changes the answer and layout changes the addresses. Remat is the rare trade that is invisible in the output, and §30.5 checks it.
+
+**But the hypotheses are hypotheses, and nothing here enforces them.** Three ways the equality fails, in increasing order of how likely you are to meet them:
+
+- **Randomness.** A `dropout` mask, or anything drawing from the RNG, is not deterministic. Recomputing it draws a *different* mask, so the backward pass differentiates a different function from the one the forward pass ran. Note this is not the same failure as Chapter 5 §5.5's captured-noise problem: there the value was frozen at trace time, here it would be re-drawn at run time. Frameworks that support remat handle this by saving and replaying the RNG state; this one has no such mechanism, and no check that would notice.
+- **Side effects.** An operation that writes to a buffer executes its write twice. `hasSideEffect` exists on every `OpDef` (Chapter 19), and the remat path does not consult it — the candidate predicate in `_materialize` recurses through `definingOp` until it reaches a saved value, with a cycle guard and no purity test.
+- **A changed numerical mode.** The recomputed subgraph is ordinary IR and is optimized like ordinary IR. If a rewrite fires on the copy that did not fire on the original — or fires differently because the copy sits in a different fusion group — the two evaluations are N1-equivalent at best, and Chapter 20's reassociation defect makes N2 reachable. The bit-identical claim is then false, quietly and by a small amount.
+
+In practice the graphs this pass is pointed at are pure arithmetic, which is why none of the three has bitten. The honest status is: **Definition 30.4 is a precondition the caller must meet, not an invariant the compiler maintains.** A purity check at candidate selection would be a few lines and would convert the first two from silent wrongness into a refused rematerialization.
 
 ## 30.4 In mlfw: a predicate and four segmenters
 

@@ -139,6 +139,34 @@ describe('the use list is maintained by construction', () => {
     expect(func.args[0].useCount).toBe(3);
     expect(func.version).toBeGreaterThan(before);
   });
+
+  it('setAttr and removeAttr bump the function version, so an analysis cache cannot outlive them', () => {
+    const t = f32([4]);
+    const func = buildFunction('attrs', [t, t], [t], (b, args) => {
+      b.returnOp([b.add(args[0], args[1]).getResult(0)]);
+    });
+    const add = func.findOp(o => o.opName === 'add');
+
+    const beforeSet = func.version;
+    add.setAttr('marker', 1);
+    expect(func.version).toBeGreaterThan(beforeSet);
+
+    const beforeRemove = func.version;
+    expect(add.removeAttr('marker')).toBe(true);
+    expect(func.version).toBeGreaterThan(beforeRemove);
+  });
+
+  it('removing an absent attribute is not a mutation and leaves the version alone', () => {
+    const t = f32([4]);
+    const func = buildFunction('attrs', [t, t], [t], (b, args) => {
+      b.returnOp([b.add(args[0], args[1]).getResult(0)]);
+    });
+    const add = func.findOp(o => o.opName === 'add');
+    const before = func.version;
+
+    expect(add.removeAttr('never_set')).toBe(false);
+    expect(func.version).toBe(before);
+  });
 });
 
 describe('structural identity is what CSE compares', () => {

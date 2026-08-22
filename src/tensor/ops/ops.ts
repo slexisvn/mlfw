@@ -73,11 +73,11 @@ export function clamp(self: Tensor, min: TensorInput, max: TensorInput): Tensor 
 export function pad(self: Tensor, low: readonly number[], high: readonly number[], value: TensorInput = 0): Tensor { return _dispatchTensor('pad', self, _asTensor(value, self), low, high); }
 export function one_hot(indices: Tensor, depth: number): Tensor { return _dispatchTensor('one_hot', indices, depth); }
 export function index_select(self: Tensor, dim: number, index: Tensor): Tensor {
-  assertIndicesInRange(index, self.shape[dim < 0 ? self.shape.length + dim : dim], 'index_select');
+  assertIndicesInRange(index, 0, self.shape[dim < 0 ? self.shape.length + dim : dim], 'index_select');
   return _dispatchTensor('index_select', self, index, dim);
 }
 export function gather(self: Tensor, dim: number, index: Tensor): Tensor {
-  assertIndicesInRange(index, self.shape[dim < 0 ? self.shape.length + dim : dim], 'gather');
+  assertIndicesInRange(index, 0, self.shape[dim < 0 ? self.shape.length + dim : dim], 'gather');
   return _dispatchTensor('gather', self, index, dim);
 }
 export function scatter_add(self: Tensor, dim: number, index: Tensor, src: Tensor): Tensor { return _dispatchTensor('scatter_add', self, index, src, dim); }
@@ -141,6 +141,6 @@ export function batch_norm(input: Tensor, weight: Tensor, bias: Tensor, mean: Te
 export function conv2d(input: Tensor, weight: Tensor, strides: readonly number[], padding: PaddingArg, dilation: readonly number[], groups: number): Tensor { return _dispatchTensor('conv2d', input, weight, strides, padding, dilation, groups); }
 export function pool2d(input: Tensor, poolType: string, kernelSize: readonly number[], strides: readonly number[], padding: PaddingArg): Tensor { return _dispatchTensor('pool2d', input, poolType, kernelSize, strides, padding); }
 export function embedding(weight: Tensor, indices: Tensor): Tensor {
-  assertIndicesInRange(indices, weight.shape[0], 'embedding');
+  assertIndicesInRange(indices, 0, weight.shape[0], 'embedding');
   return _dispatchTensor('embedding', weight, indices);
 }

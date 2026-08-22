@@ -141,7 +141,7 @@ describe('CPU kernel quality — elementwise fusion', () => {
       b.returnOp([b.exp(b.tanh(args[0]).getResult(0)).getResult(0)]);
     });
     const s = src(compile(func), 'c_exptanh');
-    expect(s).toMatch(/Math\.exp\(Math\.tanh\(/);
+    expect(s).toMatch(/Math\.exp\(Math\.fround\(Math\.tanh\(/);
   });
 
   it('sqrt(abs(x)): nested math calls', () => {
@@ -266,7 +266,7 @@ describe('CPU kernel quality — matmul structure', () => {
       b.returnOp([b.matmul(args[0], args[1]).getResult(0)]);
     });
     const s = src(compile(func), 'c_mm_fma');
-    expect(s).toMatch(/\+ \(/);
+    expect(s).toMatch(/_acc_0 \+ /);
     expect(s).toMatch(/\*/);
   });
 

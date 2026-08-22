@@ -2,7 +2,18 @@
 
 Chapter 27 established that the gradient is a backward sweep applying one linear map per operation. This chapter is about that map: where it lives, what it is allowed to look at, and what it is obliged to produce.
 
-There are 67 of these rules. Each is fifteen lines or fewer, each is written once by whoever added the operation, and each is a small piece of calculus that has to be right — because nothing downstream will catch it if it is not. A wrong pass produces invalid IR and Chapter 15 names it. A wrong derivative produces valid IR that trains a model slightly worse than it should, and the only thing that catches *that* is a finite-difference test.
+There are 63 of these rules, registered across seven files under [`ad/vjp_rules/`](../../../src/compiler/ad/vjp_rules/) (measured 2026-08-21). Each is written once by whoever added the operation, and each is a small piece of calculus that has to be right — because nothing downstream will catch it if it is not.
+
+**Most of them are short; a handful are not, and the long ones are the interesting ones.** Forty-seven of the sixty-three fit in fifteen lines, which is the impression this chapter's examples will give you. The other sixteen do not, and the distribution has structure worth knowing before you go looking:
+
+| Rule | Lines | Why it is long |
+|---|---:|---|
+| `matmul` | 77 | batch dimensions, broadcasting, and both operands' gradients |
+| `reduce` | 70 | one branch per reduction kind — `sum`, `max`, `min`, `prod` |
+| `layer_norm` | 49 | three gradients through a normalization with two statistics |
+| `dot` | 45 | general contracting- and batch-dimension bookkeeping |
+
+The pattern is that **length tracks the arity of the operation's *attribute* space, not the difficulty of its calculus.** `matmul`'s derivative is two matrix multiplies and a couple of transposes — four lines of mathematics; the other seventy-three lines work out which axes those transposes touch given arbitrary batch and contracting dimensions. That is index bookkeeping, and it is exactly the kind of code Chapter 34's shared skeletons remove from the lowering rules. No equivalent factoring exists on the AD side yet, which is why the long rules are long. A wrong pass produces invalid IR and Chapter 15 names it. A wrong derivative produces valid IR that trains a model slightly worse than it should, and the only thing that catches *that* is a finite-difference test.
 
 ## 28.1 The problem: where does `d/dx` live?
 
@@ -110,7 +121,7 @@ Registration is a map ([`vjp_registry.ts:24`](../../../src/compiler/ad/vjp_regis
 | [`reduction.ts`](../../../src/compiler/ad/vjp_rules/reduction.ts) | 1 | `reduce`, all five reduction kinds |
 | [`control.ts`](../../../src/compiler/ad/vjp_rules/control.ts) | 1 | `stop_gradient`, plus eight barrier declarations (Chapter 31) |
 
-*(67 rules, measured 2026-08-20.)*
+*(63 `registerVJPRule` calls, measured 2026-08-21; the per-file counts above are of rules, and two files register several operation names from a loop.)*
 
 ### The three shapes a rule comes in
 
@@ -201,6 +212,24 @@ Six operations, each differentiated on its own with fusion switched off so the e
 ```
 
 Read `exp` first. The rule asked for `ctx.results[0]` — and the backward function *does not receive it*. Instead the first line of the body is `%3 = exp(%1)`: the value was **recomputed from the saved input** rather than saved. That is the remat policy of Chapter 30 making a decision on the reader's behalf, and it is why `exp` and `log` end up with the same three-argument signature despite reading different things.
+
+> **Which means `ctx` is not a request, and reading it is not what decides the saved set.** The natural reading of the three rule shapes above is that a rule *declares its dependencies* — `add` touches neither list so nothing is saved, `mul` touches `operands` so the operands are saved, `exp` touches `results` so the result is saved. That is a good way to *write* a rule and it is not how the builder works. Every operand and every result is resolved before the rule is called at all ([`backward_builder.ts:73`](../../../src/compiler/ad/backward_builder.ts)):
+>
+> ```ts
+>     const operandValues = new Array<Value>(op.numOperands);
+>     for (let o = 0; o < op.numOperands; o++) operandValues[o] = resolveValue(op.getOperand(o));
+>     const resultValues = new Array<Value>(op.numResults);
+>     for (let r = 0; r < op.numResults; r++) resultValues[r] = resolveValue(op.getResult(r));
+> ```
+>
+> `ctx.operands` and `ctx.results` are fully-populated arrays handed to the rule, not lazy accessors that record which entries were touched. A rule that ignores both, like `add`, still caused every one of its operands and results to be resolved — which for a saved value means it entered the backward function's signature, and for a rematerialized one means its producing subgraph was rebuilt in the backward graph.
+>
+> So the saved set is decided in **two** places, neither of which is the rule:
+>
+> 1. **The resolver's policy**, `_materialize` ([`:248`](../../../src/compiler/ad/backward_builder.ts)), which for each value either returns a saved argument or reconstructs the operation that produced it. Chapter 30 is about that policy.
+> 2. **Dead-code elimination afterwards**, which removes the reconstructed subgraphs nothing consumed. This is why the emitted backward graph looks tidy despite the eager resolution — and why Chapter 31 §31.6 measures the simplification passes deleting a third of what the rules emit.
+>
+> The consequence worth carrying: a rule cannot make a value cheaper by not reading it, and there is no per-rule mechanism for fine-grained saving. If you are chasing training memory, the levers are in Chapter 30, not here. A lazier `ctx` — getters that record access and let the builder resolve only what was touched — is the obvious improvement and is not implemented.
 
 `log`'s body is three operations to `exp`'s four, and the missing one is exactly that recomputation. Two of the three in each are the same: `reshape` and `broadcast_in_dim` turning the scalar loss gradient into something the elementwise rule can multiply — which is the `sum` reduction's own VJP rule, fired one step earlier in the sweep.
 

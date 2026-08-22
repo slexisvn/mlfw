@@ -26,7 +26,11 @@ So the loop cannot be "measure everything". It has to be: draw a population, sco
 
 ## 47.3 Theory
 
-> **Definition 47.1 (Elitist evolutionary search, stated here).** Given a space `P`, a fitness `f : P → ℝ`, a population size `N`, an elite ratio `ρ` and a mutation operator `μ`, the search maintains `P₀ ⊂ P` with `|P₀| = N` and iterates: score `P_g`; let `E_g` be the `⌈ρN⌉` highest-scoring members; set `P_{g+1} = E_g ∪ { μ(crossover(a,b)) : a,b ∈ E_g }` filled to size `N`. It returns `argmax_{p ∈ P_G} f(p)`.
+> **Definition 47.1 (Elitist evolutionary search, stated here).** Given a space `P`, a fitness `f : P → ℝ`, a population size `N`, an elite ratio `ρ` and a mutation operator `μ`, the search maintains a **multiset** `P₀` of `N` elements of `P` and iterates: score `P_g`; let `E_g` be the `⌈ρN⌉` highest-scoring members; set `P_{g+1} = E_g ⊎ { μ(crossover(a,b)) : a,b ∈ E_g }` filled to size `N`. It returns `argmax_{p ∈ P_G} f(p)`.
+
+**A multiset, not a subset — and the difference is the subject of the next two results.** It is natural to write `P₀ ⊂ P` with `|P₀| = N` and it would misdescribe every generation this search produces. Nothing forbids two individuals from being the same parameter vector: mutation may return its argument, crossover of two identical parents is that parent, and elitism copies the keepers forward verbatim. So `N` is a count of *individuals*, and the number of *distinct points* it covers is at most `N` and routinely far less — Corollary 47.4 exhibits an initial population of `N` individuals covering, from the third onward, a single sketch.
+
+This matters in two places downstream. The memoisation in `search.ts` keys on the parameter vector, so duplicates cost nothing to score — which is why Proposition 47.9's `2N` bound is an over-estimate. And the diversity the algorithm relies on to avoid collapsing is a property of the distinct set, not of `N`, so a population that looks healthy by count can be exploring one point.
 
 > **Proposition 47.2 (Elitism makes the best monotone, stated here).** If `f` is a function of the candidate — the same candidate always scores the same — then `max_{p ∈ P_{g+1}} f(p) ≥ max_{p ∈ P_g} f(p)` for every `g`.
 
@@ -60,7 +64,16 @@ Then the measurement, where the theory is classical and slightly discouraging.
 
 *Proof.* `min_i T̂_i ≤ T̂_j` pointwise for every `j`, so `E[min_i T̂_i] ≤ E[T̂_j] = T_j` for every `j`, hence `≤ min_j T_j`. ∎
 
-The tuner's reported best is a minimum over candidates of a median over repeats, so Theorem 47.8 applies at the candidate level, not the sample level: the median is a good estimator of each `T_i`, and it is the `min` *over candidates* that is optimistic. The size of the bias grows with the number of candidates measured and with the residual noise in each median — which is why `maxCv` exists, and why its default of 0 (which disables it) means nothing bounds the residual.
+The tuner's reported best is a minimum over candidates of a median over repeats, so Theorem 47.8 applies at the candidate level, not the sample level: it is the `min` *over candidates* that is optimistic. The size of the bias grows with the number of candidates measured and with the residual noise in each median — which is why `maxCv` exists, and why its default of 0 (which disables it) means nothing bounds the residual.
+
+**Applying the theorem to this estimator needs one step the theorem does not supply, and it is worth not skipping.** Theorem 47.8 assumes `E[T̂_i] = T_i` — that each per-candidate estimate is *unbiased*. The tuner's per-candidate estimate is the upper median of a small sample ([`benchmark.ts:71`](../../../src/compiler/autotune/benchmark.ts)), and **a median is not an unbiased estimator of a mean**. It is unbiased for the *population median*, and the two coincide only for a symmetric distribution. Benchmark timings are not symmetric: they have a hard floor at the true cost and an unbounded right tail of interference, so the median sits below the mean, systematically.
+
+That does not rescue the tuner — it makes the situation slightly worse and slightly different:
+
+- Taking `T_i` to mean *the population median of candidate i's timing*, Theorem 47.8 applies exactly as stated, because the sample median is (asymptotically) unbiased for it. This is the reading the chapter uses, and under it "optimism over candidates" is the whole of the bias.
+- Taking `T_i` to mean *the candidate's true cost*, there is a second, per-candidate downward bias on top of the selection bias, and the two compound.
+
+The right-skew is also the argument for preferring the median here in the first place: it is what makes a single interfering sample unable to move the estimate, which a mean cannot claim. So the estimator is a good choice and the phrase to avoid is "unbiased" — what it is, is *robust*, which is a different property and the one that matters when the tail is interference rather than signal. (Chapter 15 §15.7 works through the same trade in the opposite direction, for a quantity where the minimum is defensible.)
 
 > **Proposition 47.9 (Budget overshoot, stated here).** Let one cost-model evaluation cost at most `e` and one measurement at most `b`. Then `RandomSearch` starts no trial after its deadline has passed and overruns only by the evaluation already in flight; `EvolutionarySearch` performs at most `2N` further evaluations, `N` for the generation it had already entered and `N` for the final scoring pass, which tests no deadline ([`search.ts:157`](../../../src/compiler/autotune/search.ts)); `BlockTuningSession._measureAndLearn` performs at most one further measurement ([`session.ts:203`](../../../src/compiler/autotune/session.ts)); and `TaskScheduler` starts at most one further round ([`task_scheduler.ts:54`](../../../src/compiler/autotune/task_scheduler.ts)). The total overshoot is bounded by `2Ne + kb` where `k = topKForBenchmark`.
 
@@ -126,7 +139,7 @@ Whatever the tuning did or did not produce, `_scheduleResidualBlocks` ([`autotun
 
 Two paths. With a benchmark runner: score the population, measure the top `k`, learn from the timings. Without one: take `candidates[0]` and declare the task finished. The second path is the shipped CPU behaviour, because `enableBenchmark` defaults to `hardwareMeasure || !!measurer` ([`autotuner.ts:127`](../../../src/compiler/autotune/autotuner.ts)) and both are off.
 
-The return value is the round's improvement, and its first value is `Math.max(0, s − (−∞)) = ∞`.
+The return value is the round's improvement, and its first value is `Math.max(0, s − (−∞)) = ∞` — an arithmetic detail with consequences for the budget allocator below, which §47.7 follows up.
 
 ### The candidate filter
 
@@ -143,7 +156,7 @@ The return value is the round's improvement, and its first value is `Math.max(0,
       return { score: this.costModel.score(cloned) };
 ```
 
-This is the one production caller of `ScheduleValidator` in the compiler — Chapter 42's finding 26 seen from the other end. A searched schedule is validated; a rule-produced one is not.
+This is the one production caller of `ScheduleValidator` in the compiler: a searched schedule is validated, a rule-produced one is not. Chapter 42 reaches the same asymmetry from the other end.
 
 The `catch` around it warns once per sketch name ([`session.ts:192`](../../../src/compiler/autotune/session.ts)) and returns `null`, which is how 6,125 `ssrsrs_cpu` refusals become one warning line.
 
@@ -157,7 +170,7 @@ The `catch` around it warns once per sketch name ([`session.ts:192`](../../../sr
     }
 ```
 
-Buffers are cached by shape signature and refilled with fresh uniform random data on every call ([`benchmark.ts:145`](../../../src/compiler/autotune/benchmark.ts)), so no candidate is timed on whatever the previous candidate left in memory — which matters more than it sounds, since a buffer of zeros and a buffer of denormals do not cost the same to multiply. They are `Float32Array` regardless of the buffer's declared dtype ([`benchmark.ts:142`](../../../src/compiler/autotune/benchmark.ts)), which is neutral for the `f32` kernels the tuner meets in practice and not in general: an `f64` buffer is handed half the bytes it declares, and an `i64` one is handed the wrong array class entirely, so the timing would be of a different code path or of nothing at all.
+Buffers are cached by shape signature and refilled with fresh uniform random data on every call ([`benchmark.ts:145`](../../../src/compiler/autotune/benchmark.ts)), so no candidate is timed on whatever the previous candidate left in memory — which matters more than it sounds, since a buffer of zeros and a buffer of denormals do not cost the same to multiply. They are always `Float32Array`, whatever the buffer declares; §47.7 says what that costs.
 
 ```ts
     for (let round = 0; round <= this.maxReMeasures; round++) {
@@ -167,9 +180,7 @@ Buffers are cached by shape signature and refilled with fresh uniform random dat
     }
 ```
 
-The re-measure loop appends to the same `samples` array, so a second round's statistics include the first round's samples rather than replacing them. With `maxCv` at its default of 0 the loop always breaks after one round, so the accumulation never happens in the shipped configuration.
-
-`robustStats` ([`benchmark.ts:71`](../../../src/compiler/autotune/benchmark.ts)) returns the upper median (`sorted[n >> 1]`), the minimum, a 10%-trimmed mean and the coefficient of variation of the trimmed set. The search learns from the median ([`session.ts:206`](../../../src/compiler/autotune/session.ts)). The cv has exactly one reader, the re-measure test three lines above ([`benchmark.ts:187`](../../../src/compiler/autotune/benchmark.ts)), which `maxCv = 0` turns off; the trimmed mean is used to compute the cv and read by nothing else, inside `BenchmarkRunner` or out of it.
+Measure, summarize, and measure again if the samples were too noisy to trust. That is the shape every benchmark harness converges on, and §1.8's reporting rule is why the summary is a median rather than a minimum: `robustStats` ([`benchmark.ts:71`](../../../src/compiler/autotune/benchmark.ts)) returns the upper median, the minimum, a 10%-trimmed mean and a coefficient of variation, and the search learns from the median ([`session.ts:206`](../../../src/compiler/autotune/session.ts)). The loop's default settings turn most of that machinery off, which §47.7 takes up.
 
 ### The task scheduler
 
@@ -383,6 +394,7 @@ So on a CPU compile with `scheduling: { autotune: true }`, none of §47.5's meas
 - **A round in which every measurement fails returns `NaN`**, since `-Infinity − (−Infinity)` is `NaN` and `Math.max(0, NaN)` is `NaN`. `NaN` is neither `<= 0` (so the task is not marked stale) nor `> bestPriority` (so it is never picked again, and its round counter never reaches `maxRoundsPerTask` either). A task in that state starves; if every live task is in it, `pick` returns `null` and the loop exits as though everything had plateaued.
 - **Benchmarking is off by default.** `enableBenchmark` is `hardwareMeasure || !!measurer` ([`autotuner.ts:127`](../../../src/compiler/autotune/autotuner.ts)), and a CPU compile sets neither, so `BenchmarkRunner` — which works perfectly well on a CPU target — is not constructed. The tuner is a cost-model search with no feedback loop unless the caller asks for one.
 - **`maxCv` defaults to 0, which disables the re-measurement it gates.** [`autotuner.ts:130`](../../../src/compiler/autotune/autotuner.ts) and [`benchmark.ts:187`](../../../src/compiler/autotune/benchmark.ts). The cv is computed on every measurement and read only by that test, so with the default it is computed and discarded. And when it *is* enabled, `_collect` appends to the existing sample array rather than replacing it, so round two's statistics are computed over both rounds.
+- **Benchmark buffers are `Float32Array` whatever the buffer declares.** [`benchmark.ts:142`](../../../src/compiler/autotune/benchmark.ts). Neutral for the `f32` kernels the tuner meets in practice, and not in general: an `f64` buffer is handed half the bytes it declares, and an `i64` one the wrong array class entirely, so the timing would be of a different code path or of nothing at all.
 - **The workload key is 32 bits and nothing re-checks a hit.** `computeWorkloadKey` returns `fnv1a(...)` ([`workload_key.ts:152`](../../../src/compiler/autotune/workload_key.ts)); §47.6 exhibits a collision between two descriptions the compiler really builds, for buffers of 10,039 and 11,827 elements. `TuningRecord` stores the key and never the description ([`tuning_db.ts:29`](../../../src/compiler/autotune/tuning_db.ts)), so `lookup` has nothing to compare against and returns whichever workload was tuned first.
 - **The workload key does not include the iteration domain.** Counterexample 47.7. It also identifies a target by `name` and `kind` only, so two `CPUTarget`s differing in `vectorWidth`, `numCores` or `l1CacheBytes` — all of which the cost model or the rule policy reads — share every cache entry.
 - **A database written before `codegenVersion` existed loads unconditionally.** [`tuning_db.ts:129`](../../../src/compiler/autotune/tuning_db.ts). The `!== undefined` guard exempts exactly the files the check exists for.

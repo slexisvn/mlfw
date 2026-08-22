@@ -175,7 +175,17 @@ kernels emitted: 1
 
 The two empty `^bb` blocks are `reduce`'s combiner regions, printed with no body because the reduction is named by its `reduce_type` attribute rather than spelled out — Chapter 13's printer showing you a region that exists and holds nothing.
 
-Six of the seven emitted operations are inside a single `kReduction` fusion region — including the *second* reduction, the sum, which is fused together with the broadcast, the subtract, the exponential and the divide. Only the max reduction stayed outside. One kernel comes out, and it computes a numerically stable softmax.
+Six of the seven emitted operations are inside a single `kReduction` fusion region — including the *second* reduction, the sum, which is fused together with the broadcast, the subtract, the exponential and the divide. Only the max reduction stayed outside.
+
+> **What `kernels emitted: 1` counts, and what it does not.** Chapter 1 §1.8 separates five units that this line could plausibly mean, so be exact about which one the CPU backend is reporting. It is **one generated function** — one top-level function in the emitted JavaScript. On this backend that is *all* it can be, because there is no device queue and therefore no device launch to count; the number is a count of emitted entry points.
+>
+> Three stronger readings do not follow and one of them is false here:
+>
+> - *One loop nest?* No. The max reduction stayed outside the region, so the generated function contains at least two nests — the unfused reduction and the fused remainder.
+> - *No temporary buffers?* No. The max's output is a materialized intermediate that the fused nest then reads.
+> - *One device launch?* Not a question this backend can answer. On CUDA the same graph would be at least two launches, for the same reason there are two nests.
+>
+> What the line does establish is the thing the chapter needs: **decomposition did not cost an entry point.** Ten operations went in, one function came out, and six of the seven survivors share a region — so the intermediates between them are values in a loop body rather than tensors in memory. Read `compiled.source()` and count the `for` statements if you want the loop-nest number; the two are different measurements and only the second one is about fusion quality.
 
 That is the three-step trade completed inside one compile: expand to ten, optimize, re-collapse to one. The user never sees any of it, and the reason the middle step was possible is that the composite was gone.
 

@@ -39,7 +39,7 @@ export function buildGraphPipeline(config: CompilerConfig, target: GraphPipeline
   passes.push(new CallInlinerPass());
   passes.push(new DecompositionPass(target as unknown as null));
   passes.push(new FixedPointGroup('canonicalize', [
-    new CanonicalizePass(),
+    new CanonicalizePass({ fastMath: config.optimization.fastMath }),
     new AlgebraicSimplificationPass({ fastMath: config.optimization.fastMath }),
     new ConstantFoldPass(),
     new CSEPass(),
@@ -64,7 +64,7 @@ export function buildGraphPipeline(config: CompilerConfig, target: GraphPipeline
       }));
     }
     passes.push(quantize);
-    passes.push(new CanonicalizePass());
+    passes.push(new CanonicalizePass({ fastMath: config.optimization.fastMath }));
     passes.push(new DCEPass());
   }
 

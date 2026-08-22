@@ -20,7 +20,15 @@ Take the reshape above and ask three questions about it.
 
 *Do two different iterations ever touch the same element?* You cannot answer that by looking at the syntax. You have to solve `i₁ + 6i₀ = i₁' + 6i₀'` over the loop bounds, and conclude something about the quotient and remainder from the answer.
 
-*Can it be cheaper?* The expression contains a division and a modulo, and integer division is among the slowest instructions on every processor this book targets.
+*Can it be cheaper?* The expression contains a division and a modulo, and integer division by a **runtime-variable** divisor is among the slowest integer instructions on the processors this book targets — typically tens of cycles against one for a multiply, and often not pipelined, so a dependent chain of them serializes.
+
+That claim needs its qualifiers, because the unqualified version ("integer division is the slowest operation on every target") is false in ways that matter to this chapter:
+
+- **A constant divisor is not a division.** Every compiler in the stack below this one — the JavaScript engine, the WebAssembly runtime, `nvcc` — strength-reduces division by a compile-time constant into a multiply-and-shift. That is exactly the case a lowered index expression is usually in, since extents are constants after specialization. So the instruction the chapter is trying to remove is often already gone.
+- **The cost is architecture-specific and moving.** Division latency differs by an order of magnitude across the targets here, and recent CPUs have narrowed the gap substantially.
+- **"Slowest" is the wrong axis anyway.** Chapter 4 established these kernels are memory-bound. An index division inside a loop whose body waits on a cache miss costs nothing observable; the same division in a register-resident inner loop costs everything. Which regime you are in decides whether §35.5's transformation is worth anything.
+
+So the honest motivation for what follows is narrower and still sufficient: **a division whose divisor the compiler cannot see is expensive enough to be worth eliminating when the surrounding loop is not memory-bound**, and §35.6 measures one case where it is worth 1.10× on a pure copy — a workload chosen precisely because nothing else is competing for the time.
 
 A compiler that treats index expressions as opaque trees can answer none of these. One that puts them in a normal form can answer all three with linear algebra — as long as the expressions stay inside the class the normal form covers. Choosing that class is the design decision, and it is the same one every loop compiler makes: **affine**.
 
@@ -283,6 +291,8 @@ Two reshapes of 98,304 elements each. One satisfies Theorem 35.5, one does not.
 ```
 
 Ten per cent, for a kernel that is otherwise a pure memory copy — which is the right order of magnitude, and the right lesson. Index arithmetic is not usually the bottleneck; it becomes one when the loop body is small and the trip count is large, which describes every layout transform, every reshape, and every gather in a model.
+
+> **Provenance, since a bare ratio does not travel.** Node 24.9 on the CPU backend, 2026-08-21, 98,304 `f32` elements, median of 9 rounds of 20 calls. Two things about this number are worth separating. The **arithmetic-per-element table above it is exact and portable** — it is counted from the generated source, not measured, and it will be the same on your machine. The **1.10× is neither**: it depends on how your engine strength-reduces `/ 3` (§35.1), on whether the copy is bandwidth-bound at this size on your cache hierarchy, and on the JIT's mood. What should reproduce is the *sign* — case B is slower than case A — and the order of magnitude. If you measure 1.02× or 1.25×, nothing is wrong; if you measure A slower than B, something is.
 
 The last block of the lab is the honest part:
 

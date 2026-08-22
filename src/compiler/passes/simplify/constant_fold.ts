@@ -3,6 +3,7 @@ import { IRBuilder } from '../../ir/graph/builder.js';
 import { registry } from '../../ir/graph/ops.js';
 import { TraceLevel } from '../../pipeline/trace.js';
 import { isIntType } from '../../ir/graph/types.js';
+import { roundToDtype } from '../../../tensor/utils/half.js';
 import type { AttrValue, ScalarDType, TensorType } from '../../ir/graph/types.js';
 import type { GraphFunction } from '../../ir/graph/function.js';
 import type { Operation } from '../../ir/graph/operation.js';
@@ -18,10 +19,23 @@ function isConstantProducer(opName: string): boolean {
   return !!(def && def.isConstant);
 }
 
-function isFoldResultRepresentable(value: AttrValue, dtype: string): boolean {
-  if (!isIntType(dtype as ScalarDType)) return true;
-  if (typeof value !== 'number') return true;
-  return Number.isInteger(value) && Number.isSafeInteger(value);
+function coerceFoldResult(value: AttrValue | undefined, dtype: string): AttrValue | undefined {
+  if (value === undefined || typeof value !== 'number') return value;
+  if (isIntType(dtype as ScalarDType)) {
+    return Number.isInteger(value) && Number.isSafeInteger(value) ? value : undefined;
+  }
+  return roundToDtype(dtype, value);
+}
+
+function foldOperation(op: Operation, values: readonly AttrValue[], ops: readonly (Operation | null)[]): AttrValue | undefined {
+  const def = registry.get(op.opName);
+  if (!def || !def.fold) return undefined;
+  try {
+    const raw = def.fold(values as AttrValue[], op.attributes, ops as never);
+    return coerceFoldResult(raw, (op.getResult(0).type as TensorType).dtype);
+  } catch (e) {
+    return undefined;
+  }
 }
 
 function resolveConstantValue(value: Value, visited: Set<Operation>, memo: FoldMemo): AttrValue | undefined {
@@ -52,11 +66,7 @@ function computeConstantValue(value: Value, visited: Set<Operation>, memo: FoldM
     childOps[i] = op.getOperand(i).definingOp;
   }
 
-  try {
-    return def.fold(childValues, op.attributes, childOps as never);
-  } catch (e) {
-    return undefined;
-  }
+  return foldOperation(op, childValues, childOps);
 }
 
 export class ConstantFoldPass extends FunctionPass {
@@ -96,9 +106,8 @@ export class ConstantFoldPass extends FunctionPass {
       if (!allResolved) continue;
 
       try {
-        const resultVal = def.fold(constValues, op.attributes, constOps as never);
+        const resultVal = foldOperation(op, constValues, constOps);
         if (resultVal === undefined) continue;
-        if (!isFoldResultRepresentable(resultVal, (op.getResult(0).type as TensorType).dtype)) continue;
 
         builder.block = op.parentBlock as Block;
         builder.setInsertionPoint(op);

@@ -18,7 +18,16 @@ There is a second, sharper version of the problem. A pass throws. What should ha
 
 Replace prints with **events**: objects with a type and fields, handed to a sink the caller supplies. The compiler decides what is worth reporting; the caller decides what to do with it — count it, print it, index it, ignore it.
 
-Attach a **level** to every event and a threshold to the log. An event above the threshold is dropped, and — this is the part that makes it free — a *caller* that is about to construct an expensive event can ask whether the threshold would drop it and skip the construction. The cost of a disabled diagnostic is one integer comparison.
+Attach a **level** to every event and a threshold to the log. An event above the threshold is dropped, and — this is the part that makes it cheap — a *caller* that is about to construct an expensive event can ask whether the threshold would drop it and skip the construction.
+
+Be precise about what "cheap" costs, though, because the mechanism is opt-in per call site. Dropping happens inside `emit`, which means reaching it has already cost a method call and the construction of every argument. The one-integer-comparison price is only paid where the caller *guards itself* with `explainsEnabled` first — and some do:
+
+```ts
+    if (!this.trace || !this.trace.explainsEnabled) return;
+    this.trace.explain('fusion', ops.join('+'), ...);
+```
+
+while others do not ([`fusion_pass.ts:94`](../../../src/compiler/passes/fusion/fusion_pass.ts) calls `explain` straight out, so `ops.join('+')` runs and an object literal is allocated before anything checks the level). So the honest statement is: **a disabled diagnostic costs one integer comparison at a guarded call site, and a string join plus an allocation plus a call at an unguarded one.** Neither is expensive next to a graph traversal, which is why the inconsistency has survived; the reason to know about it is that "tracing is free when off" is the kind of claim that stops being true the moment somebody puts an unguarded `explain` inside a loop over operands.
 
 For failure, the intuition is borrowed from databases: make the compile a **transaction**. Work on a copy. If a pass fails, record the failure as data, restore that function from the original, mark it as failed, and keep going with the rest. The caller gets a result object carrying both what succeeded and a list of what did not — rather than an exception carrying one message and no context.
 
@@ -32,7 +41,9 @@ The ordering must be monotone in a specific sense: raising the threshold may onl
 
 The last clause is what separates an explanation from a log line. "fused add+maximum" is a log line: it tells you what happened, which you could have seen in the IR anyway. "fused add+maximum because it saves 256 bytes of traffic against a 5µs launch cost" is an explanation: it names the quantities the cost model compared, so you can disagree with it. A compiler that logs its decisions tells you what it did; a compiler that explains them tells you what it would take to make it decide otherwise.
 
-> **Definition 18.3 (Transactional compilation, stated here).** A compilation is *transactional* if, when a pass fails on function `f`, the IR the caller handed in is left exactly as it was, and every function other than `f` is compiled as if the failure had not occurred.
+> **Definition 18.3 (Transactional compilation, stated here).** A compilation is *transactional* if, when a pass fails, the IR the caller handed in is left exactly as it was, the working module is left as the failing pass found it, and every function other than the failing one still produces output.
+
+**The middle clause has to be earned per pass rather than per compilation.** A database transaction rolls back the *failed unit of work*; rolling back only at the outermost edge would protect the caller and leave the compiler itself working from a half-edited module. §18.7 has the code and the counterexample it rules out.
 
 Two clauses, and both are needed. The first is about the caller's data: a pass that throws in the middle of a rewrite leaves IR that is not merely unoptimized but *invalid*, and handing that back is worse than handing back nothing. The second is about salvage: in a module of forty functions, one failure should cost you one function.
 
@@ -254,6 +265,46 @@ Strict mode gives you the first exception and nothing else — not the phase, no
 The second error is the interesting one. In strict mode you would never have learned that `cse` was also broken, because the compile stopped at the first failure. Resilient mode kept going and found it — the module pass failure did not poison the function pass that followed, because a `ModulePass` throwing in resilient mode records an error and returns control without marking any function failed ([`pass_manager.ts:123`](../../../src/compiler/passes/pass_manager.ts)). This is what makes resilient mode the right setting for a bisection: one run enumerates every failure instead of the earliest.
 
 `kernels emitted: 0` is the honest limit of this demonstration. Definition 18.3's second clause is about *other functions* surviving, and a traced model is one function, so there is nothing to salvage. The property is real and the test that pins it builds a two-function module where one function fails and the other compiles and runs correctly — [`tests/compiler/pipeline/resilient-transaction.test.js`](../../../tests/compiler/pipeline/resilient-transaction.test.js), which also asserts the first clause directly: a pass that stamps an attribute on an operation and *then* throws leaves no trace of that attribute on the caller's IR.
+
+### What "transactional" does not cover
+
+Read that last assertion carefully — *on the caller's IR*. It holds because of the clone, and the clone is the only rollback there is. Follow what happens to the module the compiler is actually working on ([`pass_manager.ts:120`](../../../src/compiler/passes/pass_manager.ts)):
+
+```ts
+      let result;
+      try {
+        result = pass.run(module, this.analysisManager);
+      } catch (e) {
+        if (!resilient) throw e;
+        this.analysisManager.invalidateAll();
+        results.push(PassResult.FAILED);
+        ctx.errors.push(new CompilationError('graphPasses', module.name || '<module>', (e as Error).message, pass.name));
+        return { changed, fatal: false };
+      }
+```
+
+The handler records the error, drops the analysis cache, and restores the module. That last step is the one worth dwelling on, because without it the phases that follow would carry on from a half-edited module:
+
+> **Counterexample 18.6.** A `ModulePass` that erases three operations and then throws on the fourth leaves the module three operations lighter. In resilient mode the pipeline records one error and continues, so subsequent passes optimize, lower and generate code from IR that no complete pass ever produced. If the partial edit happens to leave the module *valid*, nothing downstream notices and the compile succeeds — emitting kernels for a program that is neither the original nor the transformed one.
+
+The snapshot is taken per module pass, and only when the mode asks for it:
+
+```ts
+      const snapshot = resilient ? cloneGraphModule(module) : null;
+
+      let result;
+      try {
+        result = pass.run(module, this.analysisManager);
+      } catch (e) {
+        if (!resilient) throw e;
+        module.restoreFrom(snapshot as GraphModule);
+```
+
+`restoreFrom` refills the module's function table *in place* rather than swapping the object, because the pipeline and the caller both hold a reference to it — the same reason `Compiler.compile` clones into `ctx.working` instead of reassigning. Strict mode pays nothing: no clone is taken and the exception propagates.
+
+The cost is a module clone per module pass in resilient mode, which is why it is gated on the mode rather than always on. Two things still hold and are worth knowing rather than assuming. Per-pass verification (Chapter 15) runs only on `CHANGED`, and a throwing pass reports `FAILED`, so it does not fire here — the *phase* boundary check is what would catch a structurally invalid module, attributed to the phase rather than the pass. And a `FunctionPass` failure marks its function failed, so that function is dropped rather than compiled from a mangled state.
+
+So Definition 18.3 holds at all three levels: **the caller's IR is safe, the working module is left as the failing pass found it, and other functions still produce output.** [`resilient-transaction.test.js`](../../../tests/compiler/pipeline/resilient-transaction.test.js) pins the middle clause with a module pass that deletes a function and then throws — the deleted function is restored, and its kernel still computes the right numbers.
 
 **Try this.** Sabotage `dce` instead of `cse` and watch the error count. Then sabotage a pass name that does not exist and confirm the compile succeeds — `shouldRun` is called with every pass, so a typo in a disable-set fails silently.
 

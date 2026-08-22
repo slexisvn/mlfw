@@ -182,6 +182,25 @@ Nested regions, multi-result operations, dynamic dimensions, float attributes pr
 
 Definition 13.1 is not a property you get for free. It is a property that holds because someone sorted the attributes, because `-inf` prints as a word, because dense arrays carry their dtype, and because the printer emits result types the parser then reads instead of re-inferring. Each of those is one line, and each of them is a round-trip failure if omitted. In this codebase the printer was made lossless *in order to* make the parser possible; they are one piece of work, not two.
 
+### What "lossless" does not mean
+
+Read Definition 13.1 literally, because it is stated as precisely as it is for a reason. It says `P(Q(P(m))) = P(m)` — *the text is stable*. Three stronger properties do **not** follow, and conflating them with round-tripping is how people get surprised.
+
+**It is not object identity.** `Q(P(m))` is a fresh module. Nothing in it is the same object as anything in `m`, so a `WeakMap` keyed on operations, a cached analysis, or a held reference to a `Value` all point at the old graph after a round trip.
+
+**It is not preservation of everything a module carries.** The printed form covers what the *text format* models: operations, operands, results, types, attributes, regions, signatures. A module in memory carries more, and the extra is silently dropped:
+
+| Field | What it is | Survives a round trip? |
+|---|---|---|
+| `Value.id` | global allocation counter | no — and this is deliberate, §13.3 |
+| `Value.symbolicShape` | the `SymInt` structure behind a `?` | **no** — the type prints as `?`, and the symbol's identity goes with it |
+| `GraphFunction._partitionTarget` | which device a partitioned function is for | no |
+| `_version` | the mutation counter of Chapter 9 | no — the fresh module starts over |
+
+The second row is the one with teeth. Chapter 10 §10.3 made the case that `SymInt` exists precisely so that two dimensions both printed `?` can be *known equal* — that is what lets the compiler fuse them or prove an index in bounds. That knowledge lives in `Value.symbolicShape`, which the grammar has no syntax for. So a module round-tripped through text still round-trips by Definition 13.1, and has forgotten that its two dynamic dimensions were the same `n`. Printing is faithful to the *program*; it is not a serialization format for the compiler's working state, and Chapter 62's dynamic-shape machinery must not be moved across a round trip.
+
+**It is not validity.** §13.6 is about that one.
+
 ## 13.6 Lab 2 — Editing a program in a text editor
 
 The point of a real format is that you can work on the text.
@@ -241,7 +260,7 @@ with the line number of the edit. That is Chapter 12's invariant 1, enforced at 
 ## 13.7 Traps and limits
 
 - **Indentation is significant, and the width is a parameter.** `toLines` divides leading spaces by `indentWidth` ([`parser.ts:474`](../../../src/compiler/ir/graph/parser.ts)). Text indented with tabs, or with three spaces, will not parse as the nesting you see. When hand-writing, copy a printout and edit it rather than typing from scratch.
-- **The parser is more permissive than the verifier.** It enforces the SSA core and the syntax; it does not check arity, unknown operations, or types. §13.6's "Try this" is the demonstration. Anything hand-written should go through the compiler before you trust it.
+- **The parser is more permissive than the verifier, and "it parsed" is not "it is valid".** The parser enforces the SSA core and the syntax: every name resolves, no name is bound twice, no dependency cycle. It does not check arity, unknown operations, types, traits, or **operation ordering**. §13.6's "Try this" is one demonstration; Chapter 8's Lab 2 is the sharper one, because it looks like a success. Reversing a printed function moves `return` to the top, the parser accepts it happily — it builds operations in dependency order rather than reading order, so a terminator appearing first is not a problem *for parsing* — and the resulting module then fails `verifyModule` with `a terminator must be the last operation in its block`. The parser will construct block structures the verifier rejects, which is the right division of labour (the parser's job is to read what the printer wrote) but a trap if you take acceptance as a verdict. Anything hand-written or hand-permuted should go through `verifyModule` before you trust it.
 - **A function may have only one top-level block, and the entry block may not be labelled** ([`parser.ts:523`](../../../src/compiler/ir/graph/parser.ts) and [`parser.ts:526`](../../../src/compiler/ir/graph/parser.ts)). The data structure permits more; the format does not, because nothing generates it.
 - **Round-tripping is a property of what the printer prints, not of the object.** `Q(P(m))` is a *different module* from `m` — new objects, new internal ids, and any field the printer does not emit is gone. Attributes the printer cannot represent fall through `formatAttrValue`'s final `String(val)` and come back as a string. If you attach an exotic attribute to an operation, check that it survives before relying on the text.
 - **`%n` numbering is per function and per print.** Two printouts of the same function agree; a printout of a function and a printout of the module containing it also agree, because `printFunction` resets the counter. But value labels are not stable identifiers across edits — insert one operation near the top and every number below it shifts, which makes textual diffs of IR noisier than they look.

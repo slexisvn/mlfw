@@ -56,38 +56,49 @@ Everything Part I claims about compilation reduces to that difference in scope.
 node docs/part1/ch04-eager-execution/labs/01-anatomy-of-an-op.mjs
 ```
 
-The lab times a single `add` across six sizes:
+The lab times a single `add` across six sizes. Each row is the median of 21 rounds, with the relative half-IQR beside it so you can see which rows are trustworthy (Node 24.9, 2026-08-21):
 
 ```
-one eager add, by size
-      n      elements       us/call      ns/element
-      1             1          2.16         2155.37
-      4            16          2.01          125.92
-     16           256          3.52           13.74
-     64          4096         16.60            4.05
-    256         65536        211.28            3.22
-   1024       1048576       2545.24            2.43
-
-fixed cost per call   alpha = 2.16 us
-marginal cost         beta  = 2.43 ns/element
-break-even size             = 888 elements (a 30x30 tensor)
+one eager add, by size   (median of 21 rounds)
+      n      elements       us/call      ns/element        rel. IQR
+      1             1          1.44         1436.97           5.8%
+      4            16          1.43           89.58           5.3%
+     16           256          2.40            9.36           2.6%
+     64          4096         12.43            3.03          11.8%
+    256         65536        160.39            2.45           9.7%
+   1024       1048576       1648.33            1.57           4.7%
 ```
 
 The middle column rises by a factor of a thousand while the right column falls by a factor of nine hundred. That shape is the signature of a fixed cost being amortized, and it justifies a very simple model.
 
-> **Definition 4.1 (Per-operation cost model; stated here).** The wall-clock cost of one eager operation on `n` elements is
+> **Definition 4.1 (Per-operation cost model).** **(stated here)** The wall-clock cost of one eager operation on `n` elements is
 >
 > **T(n) = α + βn**
 >
 > where **α** is the per-call cost that does not depend on the data — dispatch, shape resolution, allocation, cache lookup — and **β** is the marginal cost per element.
 
-Fitting the two ends of the measured table gives α ≈ 2.16 μs and β ≈ 2.43 ns.
+Now actually fit it, because there is a shortcut here that is easy to take and worth not taking. It is tempting to read α straight off the top row (α = T(1)) and β straight off the bottom (β = T(N)/N) and call that a fit. It is not one: those two numbers pass through those two points by construction, they cannot disagree with the data, and there is no residual to report. Worse, T(N)/N is *systematically* wrong — it equals β + α/N, so it always overstates the marginal cost, by a lot at small N and imperceptibly at large N.
 
-The model has one immediate consequence worth internalizing:
+So the lab solves for both parameters at once, over all six points, by weighted least squares. The weights are 1/T² — that is, the fit minimizes *relative* error. Without them the residual sum is dominated entirely by the 1,048,576-element row, whose absolute time is a thousand times everything else, and the "fit" quietly degenerates back into reading β off the bottom row. It prints both, side by side:
 
-> **Corollary 4.2 (Break-even size).** Below n = α/β elements, an operation spends more time being *arranged* than being *performed*.
+```
+weighted least-squares fit of T(m) = alpha + beta*m over all 6 points
+fixed cost per call   alpha = 1.40 us
+marginal cost         beta  = 1.84 ns/element
+worst relative residual     = 29.1%
+break-even size             = 760 elements (a 28x28 tensor)
 
-Here α/β ≈ 888 elements — a 30 × 30 tensor. Every operation on anything smaller is dominated by framework overhead rather than by your model's arithmetic. If you have ever wondered why a small network on a fast machine feels sluggish, this is usually why: at batch size 1 with modest hidden sizes, a great deal of deep learning happens below the break-even point.
+for comparison, the two-point shortcut alpha=T(1), beta=T(N)/N:
+  alpha = 1.47 us, beta = 1.62 ns/element
+```
+
+**The residual is the interesting output, and it is 29%.** A two-parameter affine model is not a good description of this data across six orders of magnitude, and the fit is honest enough to say so. Look back at the `ns/element` column: it is *still falling* at a million elements — 3.03, 2.45, 1.57 — so there is no flat asymptote for β to be. What is really happening is at least two regimes with a cache transition between them, summarized by one straight line. Both parameters are therefore ballpark figures: α is good to about 10%, β to about 30%, and T(N)/N is an upper bound on the asymptotic marginal cost rather than an estimate of it.
+
+That is enough for what the model is used for. It is a *ranking* device, not a predictor, and §4.7 shows exactly where the difference bites.
+
+> **Corollary 4.2 (Break-even size).** **(stated here)** Below n = α/β elements, an operation spends more time being *arranged* than being *performed*.
+
+Here α/β ≈ 760 elements — a 28 × 28 tensor. Given the 29% residual, read that as "a few hundred elements", not as 760. Every operation on anything much smaller is dominated by framework overhead rather than by your model's arithmetic. If you have ever wondered why a small network on a fast machine feels sluggish, this is usually why: at batch size 1 with modest hidden sizes, a great deal of deep learning happens below the break-even point.
 
 **Try this.** Add rows for `n = 2` and `n = 2048`. They probe opposite ends of the model: at n = 2 the four elements are lost inside α, so `ns/element` climbs to several hundred; at n = 2048 it edges closer to β without ever reaching it, because α is divided by a larger number but never becomes zero.
 
@@ -121,24 +132,29 @@ Two things follow, and both come back later in the book.
 
 ## 4.5 Where does β go? Memory, mostly
 
-β is 2.43 ns per element. On the hardware, a floating-point addition is one instruction and costs a fraction of a nanosecond. So most of β is not the addition.
+β is about 2 ns per element. On the hardware, a floating-point addition is one instruction and costs a fraction of a nanosecond. So most of β is not the addition.
 
-Count the memory instead. An elementwise `add` on n elements reads two arrays and writes one: 12n bytes for `float32`. At 1024 × 1024 the lab reports:
+Count the memory instead. An elementwise `add` on n elements reads two arrays and writes one: **12n bytes** for `float32`. A unary operation such as `tanh` reads one array and writes one: **8n bytes**. Keep those apart — §4.6 needs the difference. At 1024 × 1024 the lab reports:
 
 ```
 at 1024x1024 (4 MB per tensor)
-  add   2.62 ms   -> 4.81 GB/s of traffic
+  add   1.622 ms  (n=21, IQR 1.578-1.692, min 1.402, max 2.039)
+         12 MB moved -> 7.76 GB/s
+  tanh  24.899 ms  (n=21, IQR 23.920-25.511, min 20.394, max 52.015)
+         8 MB moved -> 0.34 GB/s
 ```
 
-12.6 MB moved in 2.62 ms. That is the number to hold on to: the operation is moving data, and the arithmetic is a rounding error on top.
+12.6 MB moved in 1.62 ms. That is the number to hold on to: the `add` is moving data, and the arithmetic is a rounding error on top. The `tanh` is doing something else entirely — it moves *two thirds* as many bytes and takes fifteen times as long, which is §4.6's whole point arriving early.
 
-(The table in §4.3 reported 2.55 ms for the same operation, measured in a different batch a moment earlier. Run-to-run variation of a few percent is normal and worth getting used to — a benchmark that reproduces to three digits is usually measuring the wrong thing.)
+(The table in §4.3 reported 1.65 ms for the same `add`, measured in a different batch a moment earlier. Run-to-run variation of a few percent is normal and worth getting used to — which is why every timing in this book comes with its IQR, and why a benchmark that reproduces to three digits is usually measuring the wrong thing.)
 
 > **Definition 4.3 (Arithmetic intensity; classical).** The arithmetic intensity of a computation is the ratio of arithmetic operations performed to bytes of memory traffic required:
 >
 > **I = FLOP / bytes**
 
-For elementwise `add`: one FLOP per 12 bytes, so I = 0.083. For a matrix multiply of two n × n matrices: 2n³ FLOP against 12n² bytes, so I = n/6 — at n = 1024, about 171.
+For elementwise `add`: one FLOP per 12 bytes, so I = 0.083. For `tanh`, one transcendental evaluation per 8 bytes.
+
+For a matrix multiply of two n × n matrices the count needs a stated assumption, and it is a strong one. The FLOP count is 2n³ and is not negotiable. The byte count is: **12n² bytes is the *minimum* traffic**, achieved only if each of the three matrices crosses the memory boundary exactly once — which requires enough on-chip storage to hold the working set, and a loop order that exploits it. That gives I = n/6, about 171 at n = 1024, and it is a *lower bound on traffic*, hence an *upper bound on intensity*. A naive triple loop that re-reads a row of A and a column of B for every output element moves Θ(n³) bytes and has intensity Θ(1) — memory-bound, not compute-bound, on the same mathematics. The gap between those two numbers is what tiling exists to close, and Part VII is where the compiler goes after it. Whenever this book quotes 12n² it means the ideal, and the phrase to attach is "if the reuse is achieved".
 
 > **Theorem 4.4 (Roofline bound; Williams, Waterman and Patterson, 2009).** A computation with arithmetic intensity I, running on a machine with peak compute rate P (FLOP/s) and peak bandwidth B (bytes/s), cannot exceed
 >
@@ -155,10 +171,14 @@ Elementwise operations, with I ≈ 0.08, are firmly memory-bound. And that is ex
 One more measurement from Lab 1:
 
 ```
-  tanh  26.95 ms   -> 10.3x the cost of add
+  tanh  24.899 ms
+         8 MB moved -> 0.34 GB/s
+  tanh costs 15.4x an add while moving 0.67x the bytes
 ```
 
-Same tensor, same traffic, ten times the time. `tanh` is a *transcendental* function: it is not one instruction but a polynomial approximation, and no amount of memory optimization makes it cheaper.
+Same tensor, **two thirds** the traffic, fifteen times the time. Say that carefully, because the tempting version — "same tensor, same traffic" — is false and would break the argument rather than support it. The binary `add` reads two arrays and writes one; the unary `tanh` reads one and writes one. If traffic were what mattered, `tanh` should be the *cheaper* of the two. It is fifteen times dearer, so whatever is costing the time is not memory, and that is a far stronger conclusion than the equal-traffic version would have licensed.
+
+What is costing it is the arithmetic. `tanh` is a *transcendental* function: it has no single-instruction implementation on mainstream CPUs and is evaluated by an approximation — typically a polynomial or rational one over a reduced range, sometimes with a table. The ECMAScript specification does not say which: it requires only that `Math.tanh` return an implementation-approximated result, explicitly permitting implementations to differ. So the honest claim is architectural rather than specific — many machine-level operations per element instead of one, which no amount of memory optimization makes cheaper — and if you want the actual sequence for your machine you must read your engine's math library, not the standard.
 
 This breaks the tidy story from §4.5. An elementwise chain is memory-bound only if its elements are *cheap*. Put a `tanh` in it and the chain becomes compute-bound, at which point removing memory traffic optimizes something that was not the bottleneck.
 
@@ -180,7 +200,7 @@ twelve elementwise operations on a 1024x1024 tensor (4 MB)
 
 **The same compiler, on the same shape, delivers 1.10× or 4.47× depending on two function calls.** (The 4.47× reproduces within a few percent anywhere; the 1.10× is a coin toss around 1.0 and §4.10 says why.)
 
-Now use the model from §4.3 and §4.6 to predict those eager numbers before looking at them. Measured constants: an `add` at this size costs 2.62 ms, a `tanh` costs 26.95 ms.
+Now use the model from §4.3 and §4.6 to predict those eager numbers before looking at them. The constants have to come from the *same session* as the chain measurements, or the comparison is meaningless: in that session an `add` at this size cost 2.62 ms and a `tanh` cost 26.95 ms. (The re-measured figures quoted in §4.5 — 1.62 ms and 24.90 ms — are from a different, faster machine two weeks later, and are not interchangeable with these. Constants and predictions travel together or not at all.)
 
 - Twelve cheap operations: 12 × 2.62 = **31.4 ms**. Measured: 32.2 ms.
 - Ten cheap operations plus two `tanh`: 10 × 2.62 + 2 × 26.95 = 26.2 + 53.9 = **80.1 ms**. Measured: 80.2 ms.
@@ -193,9 +213,18 @@ Both predictions land within three percent on this run, and the second within 0.
 
 For the compiled numbers, apply Amdahl's law.
 
-> **Theorem 4.5 (Amdahl's law, 1967; in the form we need).** If a fraction *p* of a program's runtime is spent in work that an optimization cannot touch, the speedup from that optimization is at most **1/p**.
+> **Theorem 4.5 (Amdahl's law, 1967; in the form we need).** **(classical)** If a fraction *p* of a program's runtime is spent in work that an optimization cannot touch, the speedup from that optimization is at most **1/p**.
 
-In the `tanh` chain, 53.9 ms of the 80.2 ms is transcendental arithmetic that fusion cannot remove, so p = 0.67 and the ceiling on any traffic-removing optimization is 1/0.67 ≈ 1.49×. Measured: 1.10×. In the cheap chain, essentially all the time is traffic, and fusion collapses twelve passes over memory into one: 4.47×, or the entire chain for the price of 2.7 `add`s.
+Applying it needs a number the measurements above do not contain, and it is worth being explicit about the gap rather than papering over it. The two `tanh` calls account for 53.9 ms of the 80.2 ms — but that 53.9 ms is *the whole eager cost of two `tanh` operations*, and fusion does touch part of it. A fused `tanh` still pays for its dispatch (α), still allocates no intermediate, and reads its input from a register rather than from RAM. What fusion genuinely cannot remove is only the **transcendental arithmetic itself**, and the labs never measured that in isolation; every `tanh` timing here is arithmetic plus 8n bytes of traffic plus α.
+
+So there are two bounds, and only one of them is derived from the data:
+
+- **A lower bound on the ceiling.** Take the *whole* 53.9 ms as untouchable: p = 0.672 and speedup ≤ 1/0.672 ≈ **1.49×**. This is not the true ceiling — it is a ceiling computed by assuming fusion helps the `tanh` operations not at all, so the real ceiling is higher.
+- **The genuine ceiling** would need the transcendental arithmetic timed apart from its memory traffic. Subtracting an `add`-sized traffic cost as a rough proxy for the memory half of each `tanh` moves p to roughly 0.63 and the ceiling to about 1.6×. That number is an estimate built on a proxy, not a measurement, and it is quoted only to show which direction the correction goes.
+
+Measured: 1.10×, comfortably under both. The lesson survives the imprecision intact — when two thirds of the time is arithmetic that fusion cannot touch, no traffic-removing optimization can do much — but "1.49×" is a bound derived under a stated pessimistic assumption, not a prediction, and it should not be quoted as one.
+
+In the cheap chain none of this applies: essentially all the time is traffic, and fusion collapses twelve passes over memory into one for 4.47×, or the entire chain for the price of 2.7 `add`s.
 
 ### A model for the compiled side too
 

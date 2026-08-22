@@ -1,4 +1,5 @@
 import { TensorType } from '../ir/graph/types.js';
+import { isConstantOp } from '../ir/graph/op_traits.js';
 import type { GraphFunction } from '../ir/graph/function.js';
 import type { GraphModule } from '../ir/graph/module.js';
 import type { Operation } from '../ir/graph/operation.js';
@@ -14,14 +15,45 @@ const INDEXED_TABLE_OPS: ReadonlyMap<string, { table: number; indices: number }>
 
 const VALUE_PRESERVING_RESHAPES: ReadonlySet<string> = new Set(['reshape', 'transpose', 'reverse', 'broadcast_in_dim']);
 
-function traceToArg(value: Value, argIndex: ReadonlyMap<Value, number>): number | undefined {
+const OFFSET_OPS: ReadonlySet<string> = new Set(['add', 'sub']);
+
+function scalarIntConstant(value: Value): number | null {
+  const def = value.definingOp;
+  if (!def) return null;
+  if (VALUE_PRESERVING_RESHAPES.has(def.opName)) return scalarIntConstant(def.getOperand(0));
+  const raw = isConstantOp(def.opName) ? def.getAttr('value') : undefined;
+  return typeof raw === 'number' && Number.isInteger(raw) ? raw : null;
+}
+
+type TracedArg = { argIndex: number; offset: number };
+
+function traceToArg(value: Value, argIndex: ReadonlyMap<Value, number>): TracedArg | undefined {
   let v: Value | null = value;
+  let offset = 0;
   while (v) {
     const direct = argIndex.get(v);
-    if (direct !== undefined) return direct;
+    if (direct !== undefined) return { argIndex: direct, offset };
     const def: Operation | null = v.definingOp;
-    if (!def || !VALUE_PRESERVING_RESHAPES.has(def.opName)) return undefined;
-    v = def.getOperand(0);
+    if (!def) return undefined;
+    if (VALUE_PRESERVING_RESHAPES.has(def.opName)) {
+      v = def.getOperand(0);
+      continue;
+    }
+    if (OFFSET_OPS.has(def.opName) && def.numOperands === 2) {
+      const rhs = scalarIntConstant(def.getOperand(1));
+      if (rhs !== null) {
+        offset += def.opName === 'add' ? rhs : -rhs;
+        v = def.getOperand(0);
+        continue;
+      }
+      const lhs = def.opName === 'add' ? scalarIntConstant(def.getOperand(0)) : null;
+      if (lhs !== null) {
+        offset += lhs;
+        v = def.getOperand(1);
+        continue;
+      }
+    }
+    return undefined;
   }
   return undefined;
 }
@@ -49,16 +81,18 @@ export function collectArgIndexBounds(func: GraphFunction): ArgIndexBound[] {
   for (const op of func.ops()) {
     const spec = INDEXED_TABLE_OPS.get(op.opName);
     if (!spec) continue;
-    const idx = traceToArg(op.getOperand(spec.indices), argIndex);
-    if (idx === undefined) continue;
+    const traced = traceToArg(op.getOperand(spec.indices), argIndex);
+    if (traced === undefined) continue;
     const dim = indexedDim(op);
     if (dim === null) continue;
     const limit = tableExtent(op.getOperand(spec.table), dim);
     if (limit <= 0) continue;
-    const key = idx + ':' + limit + ':' + op.opName;
+    const lo = -traced.offset;
+    const hi = limit - traced.offset;
+    const key = traced.argIndex + ':' + lo + ':' + hi + ':' + op.opName;
     if (seen.has(key)) continue;
     seen.add(key);
-    bounds.push({ argIndex: idx, limit, opName: op.opName });
+    bounds.push({ argIndex: traced.argIndex, lo, hi, opName: op.opName });
   }
   return bounds;
 }

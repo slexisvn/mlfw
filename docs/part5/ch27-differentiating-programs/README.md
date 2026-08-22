@@ -38,9 +38,13 @@ J = J₃ · J₂ · J₁
 
 Matrix multiplication is associative, so you may bracket that product however you like, and **the two bracketings are the two modes of automatic differentiation**.
 
-**Bracketed from the input end**, `J₃ · (J₂ · J₁)`, the two factors nearest the input are combined first. Applied to a direction `v` in input space that reads `J₃·(J₂·(J₁·v))`: push `v` through `f₁` to get a direction in `a`-space, push that through `f₂`, and so on. One sweep, one input direction. This is *forward mode*, and it computes a **Jacobian-vector product** — a column of `J`.
+**Bracketed from the input end**, `J₃ · (J₂ · J₁)`, the two factors nearest the input are combined first. Applied to a direction `v` in input space that reads `J₃·(J₂·(J₁·v))`: push `v` through `f₁` to get a direction in `a`-space, push that through `f₂`, and so on. One sweep, one input direction. This is *forward mode*, and it computes a **Jacobian-vector product**, `J·v`.
 
-**Bracketed from the output end**, `(J₃ · J₂) · J₁`, the two factors nearest the output are combined first. Applied to a direction `w` in output space that reads `((wᵀ·J₃)·J₂)·J₁`: pull `w` back through `f₃` to get a direction in `b`-space, pull that back through `f₂`, and so on. One sweep, one output direction. This is *reverse mode*, and it computes a **vector-Jacobian product** — a row of `J`.
+**Bracketed from the output end**, `(J₃ · J₂) · J₁`, the two factors nearest the output are combined first. Applied to a direction `w` in output space that reads `((wᵀ·J₃)·J₂)·J₁`: pull `w` back through `f₃` to get a direction in `b`-space, pull that back through `f₂`, and so on. One sweep, one output direction. This is *reverse mode*, and it computes a **vector-Jacobian product**, `wᵀ·J`.
+
+> **A jvp is a column of `J` only when `v` is a basis vector, and likewise for rows.** The shorthand is convenient and it is worth not internalizing it wrongly, because §27.6 depends on the distinction. `J·v` is a *linear combination of the columns of `J`*, weighted by the entries of `v`; it coincides with the `i`-th column exactly when `v = eᵢ`. Symmetrically `wᵀJ` is a combination of the rows, equal to the `j`-th row exactly when `w = eⱼ`. In general a jvp is a directional derivative along `v`, and it is a full-rank object in its own right — not a piece of a matrix.
+>
+> This is why extracting a Jacobian takes `n` or `m` sweeps rather than one, and it is why the sweep count in Theorem 27.3 is what it is: you recover the matrix by feeding basis vectors one at a time. It also explains what training actually does, which is the case that matters most — a training step pushes back the cotangent `w = 1` on a *scalar* loss, and `1ᵀJ` is the gradient. That is not "a row of the Jacobian of the model"; it is the single row of the `1 × n` Jacobian of the loss, which is why one sweep suffices however many outputs the model has.
 
 Which factor is combined first is the whole distinction, and it is easy to state backwards: the mode that starts at the *input* brackets `J₂·J₁`, the pair furthest from the output.
 
@@ -48,7 +52,9 @@ Now count. A loss has one output and a million inputs. `J` is a `1 × 10⁶` mat
 
 That asymmetry is the whole reason training is possible, and it is not a fact about neural networks. It is a fact about the shape of the function being differentiated.
 
-The bill for it arrives in the next three chapters. Reverse mode needs the derivative of `f₂` *at the point `a` took during the forward pass* — so it cannot start until the forward pass has finished, and the values it needs have to survive until it asks. Forward mode carries its derivative alongside the value and needs no memory at all. The cheap mode is the one that remembers everything.
+The bill for it arrives in the next three chapters. Reverse mode needs the derivative of `f₂` *at the point `a` took during the forward pass* — so it cannot start until the forward pass has finished, and the values it needs have to survive until it asks. Forward mode carries its derivative alongside the value, so it never has to *retain* anything past the operation that produced it. The cheap mode is the one that remembers everything.
+
+Say that carefully, though: "forward mode needs no memory" is false, and the accurate statement is about *retention*, not about consumption. Forward mode carries a tangent alongside every intermediate, so at any instant it holds roughly twice the live data an ordinary forward pass does — and `k` simultaneous directions cost `k` tangents per intermediate, which is how you would batch a Jacobian extraction. What it does not do is keep those tangents alive after the operation consuming them, so its peak is proportional to the *width* of the program rather than to its *length*. Reverse mode's peak is proportional to the length, because everything the backward sweep will need must survive the whole forward pass. That difference — width versus length — is the real distinction, and it is what makes Chapter 30 a chapter about reverse mode.
 
 ## 27.3 Theory
 
@@ -68,6 +74,15 @@ A jvp answers "if the input moves this way, how does the output move?". A vjp an
 
 *Proof sketch.* Each sweep of either mode visits every operation once and, per operation, does work proportional to that operation's own cost — a linear map applied to one vector, never a matrix formed. So one sweep is `Θ(T)`. Forward mode's sweep is parameterized by an input direction, and `n` independent directions are needed to span the domain; reverse mode's sweep is parameterized by an output direction, and `m` span the codomain. ∎
 
+**The hypotheses are doing real work, and the theorem is narrower than the slogan.** "Reverse mode gives you the gradient for the price of a forward pass" is repeated everywhere, this book included, and it holds under conditions worth naming:
+
+- **`T` is a count of primitive operations, not a runtime.** The proof charges each operation its own cost and says nothing about memory traffic — and by Chapter 22 these kernels are bandwidth-bound. §27.5 measures forward-plus-backward at 1.2–4.7× a forward pass where the operation count predicts about 2×, and §27.7 attributes the spread. The `Θ` hides a constant that is not small and is dominated by re-reading saved tensors.
+- **Every primitive's vjp must cost `Θ` of the primitive.** True for the arithmetic and contractions in this registry, and the reason it is true is that each vjp is itself expressible with the same primitives. It is not a law: an operation whose derivative is genuinely harder than the operation breaks the per-operation bound, and the theorem with it.
+- **"The full Jacobian" means forming an `m × n` dense matrix.** Both `Θ(n·T)` and `Θ(m·T)` count sweeps needed to *fill a dense array*, and both are pessimistic when `J` is sparse or structured — a Jacobian with known sparsity can be recovered in far fewer sweeps by colouring its columns, which is a substantial literature this book does not use. Where the book quotes these bounds it means the dense case.
+- **Memory is not in the model at all.** `Θ(T)` is a *time* bound. Reverse mode's memory is `Θ` of the number of retained intermediates, which is why Chapter 30 exists and why the time bound alone is not a reason to prefer reverse mode on a deep model with a tight memory budget.
+
+The `m = 1` corollary survives all four caveats intact, and it is the one training relies on.
+
 The constant hidden in `Θ(T)` matters in practice and is not large: the backward sweep does roughly the same operations as the forward one, sometimes two per forward operation, so two to four forward passes is the usual figure. §27.5 measures it here.
 
 > **Corollary 27.4.** For a scalar loss, reverse mode obtains `∂L/∂θ` for every parameter at once. Finite differences obtain the same thing for `2n` forward passes. The ratio is `Θ(n)`.
@@ -76,7 +91,7 @@ Two consequences of Definition 27.2 are worth pulling out, because Chapters 29 a
 
 > **Definition 27.5 (The linearization point, stated here).** The vjp of an operation is a linear map that depends on the *values* its forward evaluation saw. Reverse mode must therefore have access, at the time it processes an operation, to some sufficient set of that operation's forward operands or results.
 
-That is the sentence that costs memory. Forward mode never needs it, because it processes each operation while those values are in hand.
+That is the sentence that costs memory. Forward mode never needs to *retain* it, because it processes each operation while those values are in hand — the tangent is consumed as soon as it is produced.
 
 > **Corollary 27.6 (Reverse mode is not a rewrite of the forward pass).** The backward program is a *new* program whose inputs include values produced by the forward one. It cannot be obtained by editing the forward graph in place.
 
@@ -154,16 +169,18 @@ Agreement to five or six digits, which is what a central difference in f32 with 
 Then the scaling, which is Corollary 27.4:
 
 ```
-=== how the cost scales with the number of inputs ===
-  inputs   reverse (ms)   differences (ms)   ratio
-       8          0.085              0.298   3.5x
-      32          0.150              2.259   15.0x
-     128          0.446             23.014   51.6x
+=== how the cost scales with the number of inputs (medians of 15 rounds) ===
+  inputs   1 forward   reverse   differences   ratio   rev/fwd
+       8       0.019     0.054         0.277     5.1x      2.9x
+      32       0.020     0.094         0.487     5.2x      4.7x
+     128       0.045     0.053         1.510    28.3x      1.2x
 ```
 
-Read the two columns separately. The differences column grows like `n × T(n)` — quadratically, because both the number of evaluations and the cost of each one grow with the input width. The reverse column grows like `T(n)` — linearly, because there is still exactly one backward pass. Sixteen times more inputs, fifteen times the ratio.
+**Every column here is measured, including `differences`.** The tempting shortcut is to extrapolate that column as `oneForward × 2n` — one forward pass times the number of evaluations a central-difference sweep needs — and on this model it overstates the real cost about sevenfold at `n = 128`, because a sweep calls one already-compiled kernel `2n` times in a tight loop and amortizes almost everything the first call paid for. If you take one methodological lesson from this part, let it be that one: **a cost you multiplied is not a cost you measured.**
 
-Also read the reverse column against a single forward pass: at `n = 128` one forward evaluation is `23.014 / 256 ≈ 0.090 ms`, so forward-plus-backward is about `5×` a forward pass. That is the constant in Theorem 27.3, and five is on the high side of the usual two-to-four because this backward is a separately compiled kernel with its own launch and its own re-read of the saved values (Chapter 29).
+Read the columns separately. The `differences` column grows superlinearly — both the number of evaluations and the cost of each grow with input width. The `reverse` column barely moves, because there is still exactly one backward pass and this model is small enough that the per-call overhead of Chapter 4's `α` dominates its arithmetic at every size shown. The ratio therefore grows, which is Corollary 27.4, and it grows for the reason the corollary gives.
+
+The `rev/fwd` column is the constant in Theorem 27.3, now measured directly rather than derived: forward-plus-backward costs between 1.2× and 4.7× a forward pass across these three sizes. That spread is itself informative and it is not the theorem wobbling — at `n = 128` the reverse column has stopped scaling at all, so the ratio is measuring overhead against overhead. The theorem's `Θ(T)` is an asymptotic statement about a program whose cost is its arithmetic, and none of these three rows is in that regime. A model large enough to be arithmetic-bound is where the usual two-to-four lives.
 
 **Try this.** Push `n` to 512 and predict the ratio before running. Then change the model to have two outputs instead of one and watch what happens to the reverse column.
 
@@ -213,7 +230,7 @@ Three against four is nearly a tie. One against ten million is not, and that is 
 - **Forward mode refuses more than reverse mode does.** `reduce` in forward mode supports only `sum` and `mean` and throws for the rest ([`jvp.ts:167`](../../../src/compiler/ad/jvp.ts)), where the reverse rule handles `max`, `min` and `prod` as well (Chapter 28). Two differentiators for one IR means two coverage surfaces, and they are not the same shape.
 - **Finite differences are the reference and are the less accurate side.** Every gradient test in this repository compares compiled gradients against central differences with `ε = 2×10⁻³` and a tolerance around `10⁻²`. That loose tolerance is not slack in the compiler; it is the noise floor of the reference.
 - **`Θ(T)` is per output, and multi-output models pay per output.** A model with two heads needs two backward passes for the full Jacobian, and `cf.backward` takes one cotangent per forward output ([`tests/e2e/compiled-backward-contract.test.js`](../../../tests/e2e/compiled-backward-contract.test.js) pins the arity check). What training does instead is push a *single* cotangent through — the gradient of the scalar loss — which is one sweep no matter how many heads there are.
-- **The cost model in Theorem 27.3 counts operations, not memory traffic.** By Chapter 22 the runtime of these kernels is bandwidth, and the backward pass re-reads saved tensors the forward pass wrote. The `5×` measured in §27.5 is closer to the truth than the `2×` the operation count suggests, and Chapter 30 is where that gap gets a name.
+- **The cost model in Theorem 27.3 counts operations, not memory traffic.** By Chapter 22 the runtime of these kernels is bandwidth, and the backward pass re-reads saved tensors the forward pass wrote. The `rev/fwd` column in §27.5 reaches 4.7× where the operation count suggests about 2×, and Chapter 30 is where that gap gets a name. The same column also drops to 1.2× on the largest model there, which is overhead rather than efficiency — read the ratio together with the absolute times, never alone.
 
 ## 27.8 Read the tests
 

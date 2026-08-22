@@ -56,7 +56,15 @@ The kinds are the contract, and what Part VII is allowed to do is defined agains
 
 Now the part that is easy to get wrong. The obvious reading of `DataPar` — "distinct values of this axis write distinct locations" — is the one to avoid. It rules out two iterations *writing* the same element and does **not** rule out one iteration reading what another wrote: a block writing `A[i]` and reading `A[i−1]` has distinct writes per iteration and a genuine loop-carried dependence. The tag has to claim something about the whole block, not about its writes.
 
-> **Definition 33.5 (What `DataPar` claims, stated here).** Declaring an axis `DataPar` asserts that any two iterations of the block differing only in that axis are *independent*: neither reads a location the other writes, and they do not write the same location. `CommReduce` asserts the weaker property that they write the same location under an associative and commutative operator and read nothing else that either writes.
+> **Definition 33.5 (What `DataPar` claims, stated here).** Declaring an axis `DataPar` asserts that any two iterations of the block differing only in that axis are *independent*: neither reads a location the other writes, and they do not write the same location. `CommReduce` asserts the weaker property that they write the same location under an operator that is associative and commutative **over the reals**, and read nothing else that either writes.
+
+**"Over the reals" is the qualification the tag cannot make, and it is the one that matters.** `CommReduce` is what licenses a scheduler to reorder a reduction axis, split it across accumulators, or run it in parallel — and every one of those is an N2 transformation under Definition 1.4, because it changes the order in which the partial results are combined. Floating-point addition is commutative but not associative, so the tag on an `f32` sum is asserting something true of the mathematics and false of the arithmetic.
+
+That is not a reason to remove the tag: without it no reduction could ever be parallelised, and every framework in this space makes the same trade. It is a reason to be exact about what the tag *buys*, and the honest statement is:
+
+> `CommReduce` licenses transformations that preserve the **value over the reals** and may change the **floating-point result**. It is a declaration that the program's author accepts N2 equivalence on that axis.
+
+Two consequences follow. A schedule that reorders a `CommReduce` axis is not "semantics-preserving" in the N0 or N1 sense that the rest of the scheduling vocabulary uses, and Chapter 41's `rfactor` is the primitive where that becomes a measurable difference — a serial `3` and a four-way-split `6` on the same eight values. And because the tag is per-axis rather than per-dtype, an integer reduction (where associativity genuinely holds, modulo overflow) and a float one carry the identical declaration; nothing downstream can distinguish the case where reordering is exact from the case where it is not.
 
 That is a claim, not a derivation, and it is the point:
 
@@ -176,7 +184,24 @@ A one-element `local` buffer, allocated inside the spatial loop, holding the run
 | a store's and a load's subscript count equals the buffer's rank | [`verifier.ts:92`](../../../src/compiler/ir/tensor/verifier.ts), [`verifier.ts:116`](../../../src/compiler/ir/tensor/verifier.ts) |
 | every variable used is in scope | [`verifier.ts:142`](../../../src/compiler/ir/tensor/verifier.ts) |
 
-Scoping and rank. That is the TIR analogue of Chapter 12's four invariants, and it is a much shorter list — nothing here checks that a subscript is in range (Chapter 37 explains why that is not decidable in general), that the declared read set matches the body, or that an axis declared `DataPar` really is.
+Scoping and rank. That is the TIR analogue of Chapter 12's four invariants, and it is a much shorter list.
+
+**So sort a block's properties into two piles, because the chapter has been describing them in one voice and they are not the same kind of thing.**
+
+| Property | Status |
+|---|---|
+| subscript count matches buffer rank | **checked** — verifier |
+| every variable is in scope; no variable bound twice | **checked** — verifier |
+| the iteration domain is the image of the loops under the bindings | **derived** — computed from the bindings, not declared |
+| a binding is affine in the enclosing loop variables | **declared** — assumed by every analysis in Chapters 35–37, checked by none |
+| the declared read set covers what the body reads | **declared** — §33.7 exhibits one that does not |
+| the declared write set covers what the body writes | **declared** |
+| an axis declared `DataPar` carries no dependence | **declared** — and Chapter 42's Counterexample 42.9 buys an illegal permutation with a false one |
+| the region touched inside a buffer | **absent** — nothing constructs it (§33.8) |
+
+The middle five rows are the ones to be careful with. They read like facts about the program — "this axis is a reduction axis", "this block reads these buffers" — and they are *assertions made at construction time by whichever lowering rule built the block*. Nothing revisits them. A scheduler consults `DataPar` to decide that a permutation is legal without running dependence analysis, which is the entire performance argument for declaring it (§33.5); the cost is that a wrong declaration is a miscompile with no diagnostic.
+
+This is Chapter 12 §12.6's split showing up one level down, and for the same reason: the verifier can decide **structural** questions by inspecting the node in front of it, and cannot decide **semantic** ones without an analysis it deliberately does not run. Chapter 37 explains why in-range is undecidable in general, and Chapter 42 is where a false `DataPar` produces a wrong answer.
 
 ## 33.5 Lab — the anatomy of a block
 

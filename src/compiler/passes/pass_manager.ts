@@ -4,6 +4,7 @@ import { TraceLevel } from '../pipeline/trace.js';
 import { CompilationError } from '../pipeline/trace.js';
 import { checkIRInvariants } from '../pipeline/invariant_check.js';
 import { IRLevel } from '../ir/verify.js';
+import { cloneGraphModule } from '../ir/graph/module.js';
 import type { GraphModule } from '../ir/graph/module.js';
 import type { GraphFunction } from '../ir/graph/function.js';
 import type { Pass, PassResultValue, PassTarget } from './pass.js';
@@ -117,11 +118,14 @@ export class PassManager {
       const opsBefore = verbose ? countOps(module) : -1;
       const t0 = verbose ? performance.now() : 0;
 
+      const snapshot = resilient ? cloneGraphModule(module) : null;
+
       let result;
       try {
         result = pass.run(module, this.analysisManager);
       } catch (e) {
         if (!resilient) throw e;
+        module.restoreFrom(snapshot as GraphModule);
         this.analysisManager.invalidateAll();
         results.push(PassResult.FAILED);
         ctx.errors.push(new CompilationError('graphPasses', module.name || '<module>', (e as Error).message, pass.name));

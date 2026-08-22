@@ -63,6 +63,10 @@ The proof leans on SSA twice and it is worth naming both places: once for "a val
 
 > **Corollary 29.6.** The two forms compute the same gradients. They differ in what crosses a function boundary — `|S|` tensors in the separate form, none in the joint — and in whether the caller can obtain `y` without supplying `w`.
 
+**"`S` never crosses a function boundary" is not "`S` is not held."** The joint form removes the *interface*: no saved tensor appears in a signature, so nothing is marshalled, and the compiled artifact has fewer arguments. It does not remove the *values*. A joint function replays the forward pass and then the backward one inside a single body, so every forward intermediate the backward half reads is a live value spanning the middle of that body — exactly as long-lived as the saved tensor it replaced, and now a buffer that memory planning has to keep alive rather than a parameter the caller supplies.
+
+What changes is who is responsible and what can be done about it. In the separate form the retention is fixed at the boundary and no downstream pass can touch it. In the joint form it is an ordinary liveness problem in one function, which means fusion, buffer reuse and rematerialization can all attack it — that is the real argument for the joint form, and it is an argument about *opportunity*, not about a saving already banked. Where a joint-compiled model's training memory turns out to be no better than a separately-compiled one's, this is why, and Chapter 30 is the chapter that would fix it.
+
 That last clause is the one with teeth, and §29.6 measures what it costs.
 
 ## 29.4 In mlfw: 523 lines, of which the sweep is thirty
@@ -296,10 +300,36 @@ One kernel run per step instead of two, and joint is now the faster packaging ra
 
 Two things about this are worth keeping. The first is that the worst case is the old behaviour and not worse: a caller that inspects the loss before calling `backward` forces the run with a zero cotangent, and `backward` then runs a second time exactly as before. The second is that `backward` still allocates fresh buffers for the gradient outputs while writing the forward outputs back into the buffers `cf(x)` already handed out — so two `backward` calls on one forward return independent tensors, which is what separate mode does and what the contract test now pins.
 
+### The cost of deferral: when is an input read?
+
+Deferring the kernel bought 15%, and it puts a question that a non-deferred design never has to answer: **when does a compiled call read its arguments?**
+
+Follow the storage. `_executeJointForward` captures its arguments as typed arrays, and `tensorToContiguous` returns the tensor's *live* buffer whenever the tensor is already contiguous and owns its storage ([`jit_dispatch.ts:220`](../../../src/dispatcher/jit_dispatch.ts)):
+
+```ts
+  if (t.isContiguous && srcOff === 0 && srcData.length === n) return t.data || srcData;
+```
+
+No copy — an alias, which is the right decision for a hot path and the wrong one to combine with deferral. The kernel runs later, and `backward` runs it again with the real cotangent, so an aliased buffer is read at least once *after* the call that supplied it.
+
+> **Counterexample 29.7.** Call a joint-compiled `x ↦ x²` on `[1, 2, 3, 4]`, mutate `x`'s storage to all-tens, then read the output and ask for the gradient. With aliased inputs the output settles from the original contents and the gradient is computed from the current ones: `x² = [1, 4, 9, 16]` alongside `2x = [20, 20, 20, 20]`. **One call, two results, and no single `x` produces that pair.**
+
+So the call's *arguments* are snapshotted rather than aliased — `tensorToContiguousCopy`, in both the joint and separate paths. That fixes the semantics at the level the API promises: **arguments are read when the function is called**, and mutating them afterwards is invisible to both the output and the gradient.
+
+**Parameters are deliberately not snapshotted, and the asymmetry is the interesting part.** §5.5's table already established that a lifted parameter tensor is read live — that is what makes training a compiled model work at all, since the optimizer updates the same storage the artifact reads. Copying them per call would break that and cost a copy of the whole weight set per step. So the rule the two halves add up to is:
+
+| What | When it is read |
+|---|---|
+| the arguments you pass to the call | at the call |
+| the model's parameters | at kernel-run time, live |
+
+which is exactly the split a caller would want, and is worth stating because nothing about the API makes it visible.
+
 **Try this.** Read one element of `cf(x)`'s output before calling `backward`, and time the pair again — the 0.044 ms should go back to roughly 0.054. That difference is the deferral, measured.
 
 ## 29.7 Traps and limits
 
+- **A folded scalar is a tensor, not a scalar.** Where the rules need a constant — the `2` in `d(x²)/dx`, the `1` cotangent seeding the sweep, a zero for a non-differentiable branch — the builder materializes it with `builder.broadcast(builder.scalarConstant(...))` ([`backward_builder.ts:77`](../../../src/compiler/ad/backward_builder.ts)), which produces a rank-0 `constant` and a `broadcast_in_dim` to the operand's shape. Two points follow, and they pull in opposite directions. The graph does *not* contain a dense array of the broadcast shape: `broadcast_in_dim` of a scalar is a view, and the artifact carries one number. But Chapter 19's constant folder will happily fold that broadcast into a materialized constant of the full shape when both inputs are constant — §19.6's warning about folding a broadcast on a transformer activation is this same mechanism seen from the other end. So "the constant is dense in the artifact" and "the constant is one number" are both reachable states, decided by whether folding fires, and neither is a property of the AD rules.
 - **The backward function receives saved values it never reads.** In §29.5's first case, `%2: tensor<xf32>` is an argument and appears nowhere in the body. `_identifySavedValues` saves an operation's results whenever they are gradient-reachable and the remat policy says not to recompute them ([`backward_builder.ts:306`](../../../src/compiler/ad/backward_builder.ts)) — it does not ask whether any rule will actually read them. For a `sum` reduction, whose rule needs only the cotangent and a shape, the saved output is dead weight that survives to the compiled signature.
 - **Joint mode's single run is deferred, so *when* it happens depends on what the caller touches.** §29.6. Reading a forward output before calling `backward` forces the kernel early with a zero cotangent and costs the second run back. Nothing reports which of the two paths a given training loop is taking.
 - **The deferral applies only to synchronous runtimes.** A pending fill is resolved from a property getter, which cannot await, so joint mode on an async (GPU) target runs eagerly at `cf(x)` and pays for the forward twice as before ([`compile_backward.ts:393`](../../../src/tracing/compile_backward.ts)).

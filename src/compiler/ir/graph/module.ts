@@ -35,6 +35,15 @@ export class GraphModule {
     return removed;
   }
 
+  restoreFrom(snapshot: GraphModule): void {
+    this._functions.clear();
+    for (const func of snapshot) {
+      this._functions.set(func.name, func);
+      func._module = this;
+    }
+    this._version++;
+  }
+
   get functionCount(): number { return this._functions.size; }
 
   functionNames(): string[] {

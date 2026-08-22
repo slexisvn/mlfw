@@ -37,9 +37,13 @@ The three outcomes correspond to three tests of increasing generality and decrea
 
 Fix a loop nest of depth `d` and two accesses to the same buffer, each a list of subscripts that are affine forms (Definition 35.1) over the loop variables. Write iteration vectors as `I = (i₁,…,i_d)`, ordered lexicographically — dictionary order, outermost component first, which is the order the nest actually runs them in (Definition 32.2). `I ≺ J` therefore means "`I` executes before `J`".
 
-> **Definition 36.1 (Dependence).** Iterations `I ≺ J` are *dependent* through a buffer if they access the same element and at least one access is a write. The dependence is **RAW** (or *flow*) if `I` writes and `J` reads, **WAR** (*anti*) if `I` reads and `J` writes, **WAW** (*output*) if both write.
+> **Definition 36.1 (Dependence).** Let an *access instance* be a pair `(I, s)` of an iteration vector and a statement position within that iteration, ordered lexicographically: `(I, s) ≺ (J, t)` iff `I ≺ J`, or `I = J` and `s` precedes `t` in program order. Two access instances `(I, s) ≺ (J, t)` are *dependent* through a buffer if they access the same element and at least one access is a write. The dependence is **RAW** (or *flow*) if the earlier one writes and the later reads, **WAR** (*anti*) if the earlier reads and the later writes, **WAW** (*output*) if both write.
 
-> **Definition 36.2 (Distance and direction).** For a dependence between `I` and `J`, the *distance vector* is `J − I`. The *direction vector* is its sign, componentwise: `<`, `=` or `>`. A dependence is *carried by level `ℓ`* if its direction is `=` at every level above `ℓ` and `<` at level `ℓ`; it is *loop-independent* if the direction is `=` everywhere.
+**The statement position is not decoration — without it the next definition has no cases left.** A dependence has to relate an *earlier* access to a *later* one, so the ordering must be strict. If strictness were imposed on the iteration vectors alone, `I = J` would be excluded, and Definition 36.2's *loop-independent* dependence — direction `=` at every level — would be the empty relation. But loop-independent dependences are real and common: `A[i] = B[i]; C[i] = A[i]` inside one loop is a RAW within a single iteration, and it is the reason a loop body cannot be reordered freely. Ordering instances by `(iteration, statement)` rather than by iteration alone is what admits them, and it is the convention the classical literature uses.
+
+> **Definition 36.2 (Distance and direction).** For a dependence from `(I, s)` to `(J, t)`, the *distance vector* is `J − I`. The *direction vector* is its sign, componentwise: `<`, `=` or `>`. A dependence is *carried by level `ℓ`* if its direction is `=` at every level above `ℓ` and `<` at level `ℓ`; it is *loop-independent* if the direction is `=` everywhere, in which case the two instances lie in the same iteration and their order is fixed by `s ≺ t` rather than by any loop.
+
+> **Direction vectors are lexicographically positive, by construction.** Because Definition 36.1 orders the two instances, the leftmost non-`=` component of a direction vector is always `<`. A pair whose difference has a leading `>` is not a different dependence; it is *the same* dependence with its endpoints named the wrong way round, and the fix is to swap them and negate every component. This is a normalization step, it is not optional, and §36.7 is where its absence from this implementation becomes a wrong answer.
 
 Definition 36.2 is where the payoff lives:
 
@@ -284,7 +288,46 @@ The hand version is weaker than the real one in exactly one way, and it is the w
 
 **Try this.** The interesting programs for this chapter are the ones a tensor language cannot express, because every tensor operation writes each output element once. Reach for the schedule primitives of Part VII instead: `cache_write` introduces a second buffer with a shifted subscript, and `rfactor` splits a reduction into two, and both are legality questions this machinery answers.
 
-## 36.7 Traps and limits
+## 36.7 Normalising the direction vectors
+
+Definition 36.2 closed with a claim that needs establishing rather than assuming: a direction vector is lexicographically positive, because the two access instances were named in execution order. Nothing in the computation so far guarantees it. Look at how the two ends of a pair are chosen ([`dependence.ts:175`](../../../src/compiler/analysis/dependence.ts)):
+
+```ts
+      const src = write.position <= other.position ? write : other;
+      const dst = write.position <= other.position ? other : write;
+```
+
+`position` is the access's index in the **textual** walk of the body — which statement was written first — not a statement about which *instance* runs first. For a loop-independent dependence the two coincide. For a dependence carried across iterations with a **mixed** direction they do not:
+
+> **Counterexample 36.9.** In the nest
+>
+> ```
+> for i in 0..4:
+>   for j in 0..4:
+>     A[i, j] = A[i+1, j-1]
+> ```
+>
+> iteration `(i, j)` reads the element that iteration `(i+1, j-1)` writes. Since `(i, j) ≺ (i+1, j-1)` lexicographically, the read happens **first**: this is a **WAR** dependence with direction `(<, >)`. Named by textual position, with the write as source, it comes out as RAW with direction `(>, <)` — the wrong kind and the reverse direction.
+
+That matters because `permutationPreservesDependences` is Theorem 36.8's test: *does a permutation reverse a direction vector?* Interchanging `i` and `j` maps the true `(<, >)` to `(>, <)`, which is lexicographically negative and therefore **illegal**. It maps the reversed reading back to `(<, >)`, which looks fine — so the interchange is accepted, and after it iteration `(j, i)` reads an element that has already been overwritten. **That is the failure mode dependence analysis exists to make impossible**: not "I could not tell", but a confident answer wrong in the permissive direction (Chapter 42 §42.4).
+
+So `accessDependence` normalises before returning. A vector is *definitely* lexicographically negative when its leftmost non-`=` level admits only `>`; in that case the ends were named in the wrong order, so they are swapped, every component negated, and the kind recomputed:
+
+```ts
+function isLexNegative(masks: readonly DirectionMask[]): boolean {
+  for (const mask of masks) {
+    if (mask === Direction.EQ) continue;
+    return mask === Direction.GT;
+  }
+  return false;
+}
+```
+
+Two details make this sound rather than merely plausible. It flips **only when the leftmost non-`=` mask is exactly `GT`** — a mask that also admits `<` can already be read as positive, and flipping it would throw that reading away; leaving it costs precision and never soundness. And the *kind* is recomputed rather than carried, because RAW and WAR are defined by which end is earlier, so reversing the pair turns one into the other. The nest above reports `kind=WAR dirs=[<,>]`, and the interchange is refused.
+
+**The test that checks this had to be written carefully, and that is the transferable part.** A brute-force oracle over the iteration space is the obvious way to validate a dependence analyser — enumerate every pair of instances, find the colliding ones, take the difference. But if the oracle pairs them the same way the implementation does, with the write always as source, it computes the same reversed answer and confirms the analyser against itself. §36.9's oracle orders each colliding pair lexicographically *before* taking the difference, so it derives the direction from execution order independently. **An oracle that shares an assumption with the code under test does not test that assumption**, and orientation is exactly the kind of assumption that is invisible until something forces the two apart.
+
+## 36.8 Traps and limits
 
 - **The declaration usually wins before the analysis is consulted.** [`legality.ts:40`](../../../src/compiler/schedule/legality.ts) computes the dependence, finds one, and returns "legal anyway" if the block's iteration-variable kinds permit. On well-formed lowered IR the two always agree; nothing checks that they do, and Chapter 33's Corollary 33.7 is the exposure.
 - **MIV is decided by gcd, and gcd ignores the bounds.** `A[i + 64j]` against `A[i + 64j + 32]` in a nest with `i` of extent 32: gcd is 1, which divides 32, so the test reports a possible dependence. There is none — the two families of offsets are disjoint because `i` cannot reach 32. Banerjee's inequalities or an exact integer-programming test would decide it; neither is implemented.
@@ -294,9 +337,10 @@ The hand version is weaker than the real one in exactly one way, and it is the w
 - **`selfReferential` is likewise informational here.** It marks an access whose own subscript or stored value loads from the same buffer — an indirect access such as `A[B[i]]` where `A` is `B`. The dependence tester does not consult it; the scheduler does, separately ([`schedule.ts:858`](../../../src/compiler/schedule/schedule.ts)).
 - **Direction is computed, distance is discarded.** Theorem 36.5 produces an exact distance and `subscriptDirections` immediately reduces it to a three-valued sign ([`dependence.ts:108`](../../../src/compiler/analysis/dependence.ts)). Distance is what a legality test for *skewing* and for software pipelining needs, and neither exists here, so nothing has yet wanted it. A `Dependence` carries `masks` and no distances.
 - **The pairing is quadratic in accesses per buffer.** `bufferDependences` ([`dependence.ts:175`](../../../src/compiler/analysis/dependence.ts)) is a double loop over the accesses to one buffer. For the nests this compiler produces — a handful of accesses each — that is nothing; for a heavily unrolled nest it is the dominant cost of a legality query, and the caching in `schedule_state` is what keeps it off the critical path.
+- **An oracle can share an assumption with the code it checks.** §36.7 is the worked example: the analyser and its brute-force oracle must derive direction orientation by independent routes, or the test confirms the implementation against itself. When you write an oracle for an analysis, the question to ask is which of the analysis's assumptions the oracle also makes.
 - **Non-affine subscripts are `null`, and `null` means "any".** `subscriptDirections` opens with `if (!srcForm || !dstForm) return ... ANY_DIRECTION`. A gather's data-dependent subscript therefore blocks every reordering of every loop around it — correct, and the reason a gather-heavy kernel schedules badly.
 
-## 36.8 Read the tests
+## 36.9 Read the tests
 
 - [`tests/compiler/analysis/dependence.test.js`](../../../tests/compiler/analysis/dependence.test.js) — the three kinds, the direction vectors, the SIV distance cases including the out-of-range one, the gcd rejection, and the symbolic-extent levels of §36.7 in both directions: still in the direction vector, minus the range refinements.
 - [`tests/compiler/schedule/legality.test.js`](../../../tests/compiler/schedule/legality.test.js) — the same question asked through `parallelize` and `reorder`, which is where a level going missing turns into a race.

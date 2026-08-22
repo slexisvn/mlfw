@@ -227,9 +227,11 @@ So on known dimensions broadcasting is a join — a genuine one, in a lattice wh
 
 Two orders, then, doing different jobs: **specificity** decides whether a type may be used where another was expected, and **broadcast** decides what shape an elementwise operation produces. `1` is special in one and not the other; `?` is special in the other and not the one. Conflating them produces a compiler that thinks `[1, 8]` and `[4, 8]` are interchangeable everywhere, which they are not.
 
-> **Counterexample 10.5.** `broadcastDim(DYNAMIC, 4)` returns `4`, not `DYNAMIC`. Read as a claim, that says: *if this dimension is not 4 at run time, it must be 1.* That is an assumption, not a deduction — the unknown could turn out to be 7, and then the operation is simply invalid. The compiler is choosing the useful answer and delegating the check to the guard that fires before the compiled artifact is reused (Definition 5.5). The alternative, propagating `DYNAMIC`, would be sound and would also make every downstream shape unknown, which is to say useless.
+> **Counterexample 10.5.** `broadcastDim(DYNAMIC, 4)` returns `4`, not `DYNAMIC`. Read as a claim, that says: *if this dimension is not 4 at run time, it must be 1.* That is an assumption, not a deduction — the unknown could turn out to be 7, and then the operation is simply invalid. The alternative, propagating `DYNAMIC`, would be sound and would also make every downstream shape unknown, which is to say useless. So the compiler bets on the useful answer.
 >
-> Two symbols err the opposite way: `broadcastDim(n, m)` returns `DYNAMIC`, which is no more an upper bound under ⊴ than `4` was, but discards both claims rather than betting on one. So on `?` and on symbols the function is not computing a join at all. It picks the shape the program most likely meant, and leaves the check to run time.
+> Two symbols err the opposite way: `broadcastDim(n, m)` returns `DYNAMIC`, which is no more an upper bound under ⊴ than `4` was, but discards both claims rather than betting on one. So on `?` and on symbols the function is not computing a join at all. It picks the shape the program most likely meant.
+
+That bet is not checked anywhere later, which §10.7 traces precisely — it is worth knowing before you rely on a dynamic dimension broadcasting against a known one.
 
 ## 10.6 Lab 2 — Static, dynamic, and what changes
 
@@ -264,6 +266,21 @@ Two smaller observations from the same run.
 **Try this.** Trace with `dynamic_shapes: [true]` on a model that reduces over the dynamic axis — `t.sum(0)` — and look at what the result type becomes. Then ask whether the compiler could have known the answer, and what it would have needed to know it. Chapter 37 is about the machinery for that question.
 
 ## 10.7 Traps and limits
+
+**Nothing checks Counterexample 10.5's bet.** It is tempting to finish that counterexample with "…and the guard catches it at run time", because that is what Definition 5.5 exists for and it would make the design sound. It is not what happens, and the gap is the difference between *deferring* an obligation and *dropping* one.
+
+Here is the entire set of guards this framework ever records. A **static** dimension gets an equality — `produceShapeSpec` ([`shape_env.ts:53`](../../../src/tracing/shape_env.ts)) emits `sym == 4` for each dimension not marked dynamic. A **dynamic** dimension gets exactly one guard, `sym > 0`, added by `createInput` ([`tracer.ts:65`](../../../src/tracing/tracer.ts)). Beyond that, `specialize` pins a symbol to its hint when a later stage demands a concrete value, and `guardDivisible` exists but is called from nowhere outside its own file. That is the list — and **no step of type inference contributes to it.** `broadcastDim` is a pure function over `Dim`s in the IR's type layer; it holds no reference to the `ShapeEnv` and could not add a constraint if it wanted to. So when it decides a `?` is 4, that decision is recorded in the result *type* and nowhere in the *guard set*, which is what `evaluateGuards` consults on every call (§5.6).
+
+The honest statement of what dynamic shapes buy is consequently narrower than "one kernel, many shapes, checked at the boundary":
+
+| Case | Inferred | Guarded | Sound? |
+|---|---|---|---|
+| static dim vs static dim | join under ⊴, or `null` | equality per dim | yes — a mismatch is a compile-time error |
+| `?` vs `1` | `?` | `> 0` | yes — anything broadcasts against 1 |
+| `?` vs known `k` | `k` | `> 0` only | **no** — assumes the unknown is `k` or 1, and never checks |
+| symbol vs symbol | `?` | `> 0` on each | information discarded, not unsound |
+
+Only the third row is a defect, and it is a real one: the type system asserts something about run time that neither the type system nor the runtime verifies. Two designs would close it — have inference emit a `sym ∈ {1, k}` guard when it makes this choice, or propagate `?` and accept the loss of downstream information — and the compiler currently does neither. Until it does, treat "broadcasting a dynamic dimension against a known one" as an assertion *you* are making, and one the framework will not catch you getting wrong.
 
 - **`numel()` returns `-1` for "unknown", not `null`.** [`types.ts:262`](../../../src/compiler/ir/graph/types.ts) uses the same sentinel as `DYNAMIC`, so a caller that forgets to check will allocate a negative number of elements or, worse, silently compute a nonsensical byte count. `symbolicNumel()` is the version that keeps a `SymInt` instead of collapsing to the sentinel.
 - **A negative dimension that is not `-1` prints as itself.** `dimToString` maps `-1` to `?` and anything else through `String`, so a shape that acquires, say, `-3` through a bad inference prints as `tensor<-3xf32>`. That rendering is deliberate — it shows you the corrupt value instead of disguising it as "unknown" — and the verifier is what refuses to let such a shape cross a phase boundary: every result type and every declared input and output is checked for a negative extent other than `DYNAMIC` (Chapter 12). If you see a negative number other than `-1` in a printed type, you have found a shape-inference bug, not an unusual tensor.

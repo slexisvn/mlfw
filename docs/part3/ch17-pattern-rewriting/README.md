@@ -1,8 +1,20 @@
 # Chapter 17 — Pattern rewriting
 
-Four of the five passes in the fixed-point group do the same kind of work: find a shape of IR, replace it with a better one. `x + 0` becomes `x`. `transpose(transpose(x))` becomes `x`. `add(constant, x)` becomes `add(x, constant)`.
+Two of the five passes in the fixed-point group are built the same way: a set of small rules, each of which finds a shape of IR and replaces it with a better one. `x + 0` becomes `x`. `transpose(transpose(x))` becomes `x`. `add(constant, x)` becomes `add(x, constant)`.
 
 There are a few dozen of these rules and there will be more. This chapter is about the machinery that lets them be written one at a time, by different people, without any of them knowing about the others — and about the two properties such a system needs that this one does not prove.
+
+> **Which passes this chapter is about.** It is easy to read "the simplification passes are pattern rewriting" and assume all five of them share one engine. They do not, and knowing which is which saves an hour the first time you go looking for a rule that is not there:
+>
+> | Pass | Driven by |
+> |---|---|
+> | `canonicalize` | `PatternApplicator` over a `PatternSet` ([`canonicalize.ts:49`](../../../src/compiler/passes/canonicalize/canonicalize.ts)) |
+> | `algebraic_simplify` | `PatternApplicator` over a `PatternSet` ([`algebraic.ts:45`](../../../src/compiler/passes/simplify/algebraic.ts)) |
+> | `constant_fold` | its own traversal, calling each op's `fold` ([`constant_fold.ts`](../../../src/compiler/passes/simplify/constant_fold.ts)) |
+> | `cse` | its own hash-and-compare walk over the block |
+> | `dce` | its own reachability walk from the terminator |
+>
+> The bottom three are not pattern sets and adding a `Pattern` will not make them fire. They are *rewrites*, in the loose sense that they change the IR, but each is a single global algorithm rather than a collection of local rules — which is the right shape for them, because "is this operation reachable" is not a question you answer by looking at one operation. The worklist machinery in this chapter drives the top two only.
 
 ## 17.1 The problem: where does a rewrite rule live?
 
@@ -322,11 +334,36 @@ Two, four, six and six operations in; the same two lines out, character for char
 
 This is the property everything downstream leans on. CSE (Chapter 19) merges two operations when they are *structurally* equal, which means a program that computes the same thing twice in two different spellings is only deduplicated if canonicalization has already made the two spellings identical. Fusion compares operation kinds. The tuning database (Chapter 47) keys schedules by a graph signature. Every one of those is a comparison of syntax that is only meaningful because a normalization ran first.
 
-And it is worth being precise about what the lab does and does not show. It shows that these four inputs reach the same normal form. Theorem 17.3 says that *if* the rule set is terminating and locally confluent then all inputs computing this term would — but neither hypothesis is established here, so the lab is evidence, not proof. That gap is real, and it is the difference between a canonicalizer you can test and one you can trust.
+And it is worth being precise about what the lab does and does not show, because "four inputs, one output" is a weaker result than it looks.
+
+**What it shows.** Four textually different modules, each computing the same term, converge to byte-identical printed output. That is genuine evidence of confluence *on this term*, and it is the property a canonicalizer exists to provide.
+
+**What it does not show, in increasing order of importance.**
+
+*It does not check idempotence.* The lab prints the canonical form; it does not feed that form back through `canonicalize` and assert `UNCHANGED`. A rule set can map four inputs to one output and still not be stable there — `A → B → A` maps everything to `A` or `B` and never settles. The check costs one more pass run and Definition 17.2 is the reason to want it: a normal form is defined by *no rule being applicable*, not by two runs agreeing.
+
+*It does not check that no pattern still matches.* Even an idempotent result is not necessarily a normal form. A pattern whose `match` succeeds and whose `rewrite` returns `false` leaves the IR unchanged while remaining applicable, and the applicator would report no change. Distinguishing "nothing matches" from "nothing changed" requires asking the `PatternSet` directly, which the lab does not do.
+
+*It generalizes over one term.* Theorem 17.3 says that *if* the rule set is terminating and locally confluent, then all inputs computing any term converge — but neither hypothesis is established anywhere in this codebase, and §17.7 lists the reasons both are hard. Four inputs computing one term is one data point about a system with a few dozen interacting rules.
+
+That gap is real, and it is the difference between a canonicalizer you can test and one you can trust. **Try this.** Add the idempotence check: re-run `canonicalize` on the parsed canonical form and print the verdict. It should report `UNCHANGED`, and if it ever does not, you have found either a non-terminating rule or a confluence failure — both worth knowing about, and neither visible in the table above.
 
 **Try this.** Add a fifth spelling — `a.mul(a).add(0).mul(1)` — and check it lands in the same place. Then try one that should *not*: `a.mul(a.add(1))`.
 
 ## 17.7 Traps and limits
+
+- **A trait-derived pattern inherits the trait's mistakes.** §17.4's `traitPatternsFor` builds patterns from declarations: any commutative operation gets `CommutativeConstantRight`, and any commutative *and associative* one that can fold gets `AssociativeConstantReassoc` ([`canonicalize.ts:19`](../../../src/compiler/passes/canonicalize/canonicalize.ts)). That is the design working — no operation names anywhere. It is also the design's exposure: a generated pattern is exactly as sound as the trait behind it, and Chapter 11 §11.3 shows `ASSOCIATIVE` is declared unconditionally on `add` and `mul`, including on floats where it is false.
+
+  A hand-written pattern can compensate by testing the dtype at match time, as `AddZero` does ([`patterns.ts:171`](../../../src/compiler/ir/graph/patterns.ts)). A pattern *generated from a trait* has only the trait to consult, so the generator has to hand it the missing context:
+
+  ```ts
+    if (def.isCommutative) {
+      patterns.push(new CommutativeConstantRight(def.name));
+      if (def.isAssociative && def.fold) patterns.push(new AssociativeConstantReassoc(def.name, fastMath));
+    }
+  ```
+
+  That is why `CanonicalizePass` takes a fast-math option and caches one pattern set per setting, the same shape `AlgebraicSimplificationPass` has. The general point: deriving patterns from declarations is the right architecture, and the price is that **a declaration's accuracy becomes load-bearing in a way a `switch` statement never made it** — and that a generated pattern needs a route by which context can reach it.
 
 - **Neither termination nor confluence is checked.** Both are bounded or assumed. A pattern whose rewrite re-creates its own match will burn the safety budget on every compile — with one `INFO`-level line to say so — and a pair of patterns that disagree will produce whichever form the benefit ordering favours, silently. When you add a pattern, the question to ask is not "does it fire" but "can it fire on its own output".
 - **Benefit ties are broken by insertion order.** `_ensureSorted` uses `Array.prototype.sort` on `b.benefit - a.benefit` ([`pattern.ts:47`](../../../src/compiler/ir/rewrite/pattern.ts)). The sort is stable in modern JavaScript engines, so equal-benefit patterns fire in registration order — which for canonicalize means op-registry iteration order. Deterministic, and not a designed guarantee.

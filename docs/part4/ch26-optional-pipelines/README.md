@@ -20,7 +20,16 @@ Chapter 49 defines live intervals properly; here it is enough that a value is *l
 
 > **Theorem 26.2 (√n checkpointing).** *(Chen et al., 2016.)* For a chain of `n` layers, storing every `√n`-th activation and recomputing the rest gives `O(√n)` memory at the cost of one extra forward pass.
 
-That is the result the technique is famous for, and it applies to a chain. The general graph case has no such clean bound, and the implementation here does not attempt one: it is a greedy loop that repeatedly rematerializes the highest-scoring candidate until the peak fits the budget or it runs out of candidates.
+That is the result the technique is famous for, and it is worth being precise about how little of it transfers to the pass below, because the two share a name and almost nothing else.
+
+| | Theorem 26.2 | this implementation |
+|---|---|---|
+| structure | a chain of `n` layers | an arbitrary DAG |
+| what is recomputed | activations between checkpoints, in order | any pure multi-use value, chosen greedily |
+| objective | minimize memory subject to one extra forward pass | reach a byte budget, at whatever recompute cost |
+| guarantee | `O(√n)` memory, `O(n)` time | none |
+
+The chain structure is what makes the `√n` argument work: checkpoints partition the chain into segments, a segment is recomputed from its left checkpoint, and the segment length is the free parameter to optimize. A general graph has no segments, a value may feed many consumers at different depths, and recomputing one value may require recomputing several others — so there is no quantity playing the role of `√n`. **Theorem 26.2 is stated here as background for the idea, not as a bound on what §26.3 does.** The implementation makes no such claim: it is a greedy loop that repeatedly rematerializes the highest-scoring candidate until the peak fits the budget or it runs out of candidates, and §26.3 shows it terminating in the second way.
 
 The score is a ratio ([`rematerialization.ts:104`](../../../src/compiler/passes/memory/rematerialization.ts)):
 
@@ -101,9 +110,35 @@ The cost is precision. Mapping a range of floats onto 256 integer levels loses i
 
 ### The theory
 
-> **Definition 26.3 (Affine quantization).** A quantization of a float range onto `b` bits is a pair `(s, z)` — scale and zero-point — with `q = round(x/s) + z` and `x̂ = s(q − z)`. It is *symmetric* if `z = 0`.
+> **Definition 26.3 (Affine quantization).** A quantization of a float range onto `b` bits is a pair `(s, z)` — scale and zero-point — with
+>
+> `q = clamp(round(x/s) + z, q_min, q_max)` and `x̂ = s(q − z)`,
+>
+> where `[q_min, q_max]` is the representable range of the target integer type: `[−128, 127]` for `i8`, `[0, 255]` for `ui8`. It is *symmetric* if `z = 0`.
+
+**The clamp is not a detail, and dropping it changes what the definition describes.** Without it, `q` is an unbounded integer and quantization is a lossless-in-range affine map that happens to round — error is at most `s/2`, uniformly, for every input. With it, quantization has *two* error regimes: inputs inside the calibrated range pick up rounding error bounded by `s/2`, and inputs outside it are **saturated** to the endpoint, with an error that grows without bound as the input moves further out. Every claim in §26.4 about accuracy depends on which regime the data is in, and the failure mode the lab exhibits is the second one.
+
+The implementation clamps ([`quant_math.ts:22`](../../../src/compiler/passes/lowering/quant_math.ts)):
+
+```ts
+  const rounded = new CallExternNode('round', [shifted], 'f32');
+  const clamped = new CallExternNode('min', [
+    new CallExternNode('max', [rounded, new FloatImmNode(cMin)], 'f32'),
+    new FloatImmNode(cMax),
+  ], 'f32');
+```
+
+and it must: an `i8` buffer cannot hold `round(x/s) + z` when that exceeds 127, so omitting the clamp would not produce a larger number, it would produce whatever the cast does with an out-of-range value. Saturation is the correct behaviour and it is also the behaviour that makes an under-calibrated range destructive rather than merely imprecise.
 
 > **Definition 26.4 (Calibration).** *Calibration* is the process of choosing `s` per tensor by observing the values that tensor actually takes on representative inputs.
+
+> **And the default, stated as a contract.** **(invariant.)** When no calibration data is available for a value, `_getQuantParams` falls back to the range `[-6, 6]` — a constant chosen because it covers the output of a ReLU6 and most normalized activations, and for no reason that is specific to your model. Be explicit about what that default does and does not promise:
+>
+> - It is **not** a bound on error. A tensor whose values live in `[-0.5, 0.5]` is represented on about 20 of 255 levels (§26.4 measures exactly this), and one whose values exceed ±6 is *saturated* by Definition 26.3's clamp, with unbounded error.
+> - It is **not** detected. Nothing compares the default against the values the graph actually produces, and no warning is emitted when the two disagree. The 18% end-to-end error in §26.4 is reported by the lab, not by the compiler.
+> - What it **is** is a value that lets quantization run without calibration data, so that the pipeline is testable and the mechanism is demonstrable.
+>
+> So the public expectation is: **quantizing without calibration produces a numerically different model, by an amount nobody has bounded, and the compiler will not tell you.** Treat `[-6, 6]` as a placeholder that makes the pass runnable, not as a default that makes it usable. §26.4's third switch is the supported path.
 
 Calibration is the whole game. Weights can be inspected statically — they are constants. *Activations* cannot: their range depends on the input distribution, and a compiler that guesses gets the accuracy shown below.
 
@@ -117,9 +152,9 @@ That ordering is the interesting part. The quantization rewrite is written as if
 
 Calibration is a *pass*, and where it sits in the list is the whole of its correctness. [`CalibrationPass`](../../../src/compiler/passes/quantization/calibration_pass.ts) compiles an instrumented copy of the graph that returns the operands of every quantizable operation as extra outputs, runs it on user-supplied batches, and writes the observed ranges into the quantization config. It observes *values* — `CalibrationResult` is a map keyed on `Value` identity ([`calibration.ts:232`](../../../src/compiler/analysis/calibration.ts)) — so anything that replaces a value between the observation and the lookup throws the observation away silently, and `_getQuantParams` falls back to `[-6, 6]`.
 
-The fix for that is not a mechanism, it is an ordering: `buildGraphPipeline` emits the calibration pass immediately before the quantization pass that consumes it ([`graph_pipeline.ts:58`](../../../src/compiler/pipeline/graph_pipeline.ts)), with nothing in between. Calibration used to be a compile *phase* running ahead of every graph pass, which meant it observed a graph the quantizer never saw: for the traced `Sequential` below, the traced form is `transpose(%1) → dot(%0, transposed)`, canonicalization folds the transpose into the `dot`'s contracting-dimension attributes, and the right operand the quantizer then asks about is `%1` — never observed. Supplying `calibrationData` bought 18.26% to 17.46%. Run adjacent to its consumer, the same data buys 18.26% to 0.60%.
+What protects that is not a mechanism, it is an ordering: `buildGraphPipeline` emits the calibration pass immediately before the quantization pass that consumes it ([`graph_pipeline.ts:58`](../../../src/compiler/pipeline/graph_pipeline.ts)), with nothing in between. The distance matters more than it sounds. Run any earlier and calibration observes a graph the quantizer never sees — for the traced `Sequential` below, canonicalization folds a `transpose` into the `dot`'s contracting-dimension attributes, and the operand the quantizer then asks about was never observed. Adjacency is worth 17.46% error against 0.60% on the same model with the same data, which §26.5 returns to.
 
-The instrumented graph is run with the batch as its **complete** argument list ([`calibrate_exec.ts:107`](../../../src/compiler/analysis/calibrate_exec.ts)), which is fine for a hand-built `GraphFunction` whose only argument is the input, and wrong for a traced model, whose graph also takes every captured parameter as an argument. Supplying `calibrationData` through `compile()` therefore used to misalign the arguments and fail with `Cannot set properties of undefined (setting '0')` — the output buffers landed past the end of the list. Calibration was reachable only through the lower-level `Compiler` API, which is how the tests reach it. The `compile()` wrapper now assembles the graph-level argument list the same way it assembles one for an ordinary call — user inputs, then captured parameters ([`compile.ts:311`](../../../src/tracing/compile.ts)) — and converts tensors in a batch to contiguous arrays, so a batch of the same tensors you would pass to the compiled function is now what the pass wants.
+The instrumented graph is run with the batch as its **complete** argument list ([`calibrate_exec.ts:107`](../../../src/compiler/analysis/calibrate_exec.ts)) — user inputs, then captured parameters, assembled the same way `compile()` assembles one for an ordinary call ([`compile.ts:311`](../../../src/tracing/compile.ts)). A traced model's graph takes every captured parameter as an argument, so a batch that is only the inputs would leave the output buffers past the end of the list.
 
 ### Lab
 

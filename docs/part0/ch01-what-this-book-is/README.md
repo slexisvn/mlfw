@@ -74,7 +74,7 @@ You should be comfortable programming, and you should know roughly what a neural
 
 You are **not** expected to know anything about compilers. Not parsing, not intermediate representations, not SSA, not dataflow analysis, not loop transformations, not code generation. Every one of those terms is built from scratch, motivated by a problem you can see, before it is used.
 
-You are also not expected to know the LLVM, MLIR, TVM or XLA codebases. Where this book's design follows theirs — and it often does, because those designs are correct — the connection is pointed out so you can move between this book and their documentation. But nothing is assumed.
+You are also not expected to know the LLVM, MLIR, TVM or XLA codebases. Where this book's design follows theirs — and it often does, because they met these problems first and their answers have survived a scale of use this compiler has not — the connection is pointed out so you can move between this book and their documentation. But nothing is assumed.
 
 The code in this book is TypeScript. If your background is Python, the syntax will still read easily: the excerpts are ordinary classes, functions and loops. Where a TypeScript-specific construct carries meaning — a type parameter that constrains what a pass may do, a `readonly` that encodes an invariant — it is explained at the point of use, because in this codebase the types are part of the specification.
 
@@ -84,7 +84,7 @@ Concretely, when you finish this book you should be able to:
 
 - Read a machine learning compiler's intermediate representation and say what the program computes.
 - Explain why fusing two operations is legal in one case and produces wrong results in another, and prove it.
-- Add a new operation to a compiler: define it, verify it, differentiate it, lower it to loops, and generate code for it. The chapters teach these pieces separately; Appendix F assembles them into one continuous walkthrough.
+- Add a new operation to a compiler: define it, verify it, differentiate it, lower it to loops, and generate code for it. The chapters teach these pieces separately; the planned Appendix F assembles them into one continuous walkthrough.
 - Look at a slow kernel and reason about which transformation would help — tiling, vectorization, changing the loop order, changing the memory layout — and why.
 - Decide whether a transformation you are considering is *legal*, using dependence analysis rather than intuition.
 - Debug a compiler that produces a wrong answer, systematically rather than by guessing.
@@ -101,7 +101,7 @@ That combination — small enough to read in full, complete enough to be real �
 
 ## 1.5 The shape of every chapter
 
-From Part I onward, every chapter that teaches a mechanism is built the same way. (Part 0 is one exception: these three chapters orient you rather than teach a mechanism. The vocabulary chapters — 7, and the glossary in Appendix C — are the other: a list of definitions has no problem to motivate and no lab to run.) The structure is a promise: you will never meet a term before you have seen the problem it solves.
+From Part I onward, every chapter that teaches a mechanism is built the same way. (Part 0 is one exception: these three chapters orient you rather than teach a mechanism. The vocabulary chapters — 7, and the glossary planned as Appendix C — are the other: a list of definitions has no problem to motivate and no lab to run.) The structure is a promise: you will never meet a term before you have seen the problem it solves.
 
 1. **Problem.** A concrete situation, usually measurable. "Five elementwise operations means five passes over memory."
 2. **Intuition.** A picture or an analogy. No formalism.
@@ -118,19 +118,38 @@ This book states definitions precisely and proves the important claims. Formal m
 
 > **Definition 1.1 (Legal transformation).** A program transformation is *legal* if the transformed program produces the same result as the original for every input on which the original is defined.
 
-> **Theorem 1.2.** Reordering two side-effect-free operations that access no common memory location is legal.
+> **Theorem 1.2.** Let two operations have no effect on the world beyond reading and writing memory — no I/O, no hidden state, no trap that depends on when it fires. If neither operation accesses any location the other writes, reordering them is legal.
 
-> *Proof sketch.* If the two operations share no location, neither reads what the other writes, and neither writes what the other writes. The value read by every load is therefore unchanged by the swap, so every store writes the same value. ∎
+> *Proof sketch.* The hypothesis rules out all three ways that order can matter: neither reads what the other writes, neither writes what the other reads, and neither writes where the other writes. Every load therefore returns the same value in either order, so every store writes the same value, and the two orders leave memory in the same state. ∎
 
-> **Counterexample 1.3.** If both write to the same location, order determines which write survives. Reordering is then illegal — this is the case dependence analysis exists to detect.
+> **Counterexample 1.3.** Drop the disjointness and the theorem fails at once: if both operations write to the same location, order decides which write survives. Notice what the hypothesis had to say, and what it deliberately did not. An operation that writes memory is *not* side-effect-free in the ordinary sense of that phrase, so this is not the theorem "reordering side-effect-free operations is legal" — that version would exclude the very operations a tensor compiler spends its time reordering. It is a statement about **disjoint** memory effects, and deciding whether two accesses are disjoint is exactly the job of dependence analysis (Chapter 36).
 
-Definition 1.1 already hides a subtlety, and it is worth flagging now because it recurs everywhere. Under floating-point arithmetic, "the same result" cannot mean bit-identical — almost no useful transformation would survive that test, including the fusion you will watch happen in Chapter 2. But it also cannot mean "close enough", or the definition stops being checkable at all. Chapter 20 resolves this properly, by separating identities that hold over the real numbers from those that hold over floats.
+Definition 1.1 already hides a subtlety, and it is worth settling now because it recurs in every part of the book. Under floating-point arithmetic, "the same result" cannot mean bit-identical — almost no useful transformation would survive that test, including the fusion you will watch happen in Chapter 2. But it also cannot mean "close enough", or the definition stops being checkable at all. So the book does not use one notion of "same result". It uses four, it names them, and **every legality claim in this book says which one it means**.
 
-**Where a result comes from is marked.** Some of what this book states formally is classical and can be looked up: the roofline bound, Amdahl's law, the GCD test for dependence, the √n checkpointing result. Those carry an attribution in parentheses after the name, like *(Williams et al., 2009)*, and you should treat the book's phrasing as one presentation among many.
+> **Definition 1.4 (Numerical equivalence, four levels).** **(stated here)** For programs *P* and *P'* over floating-point inputs:
+>
+> - **N0 — bit-identical.** For every input, *P'* produces exactly the same bit pattern as *P*, NaN payloads aside. This is the only level that composes with no side conditions, and the only level a differential test can check without a tolerance.
+> - **N1 — same operations, same order.** *P'* performs the same arithmetic operations on the same values in the same order, but may execute them in a different place: a different loop nest, a different buffer, a different device. N1 implies N0 whenever every operation involved is correctly rounded and the target honours IEEE 754. Fusion, tiling and buffer reuse are meant to live here.
+> - **N2 — reassociated.** *P'* computes the same mathematical expression but may re-bracket or re-order an associative-over-the-reals operator: a sum split across four accumulators, a reduction tree instead of a serial loop. N2 does **not** imply N0. The error is bounded — a reduction of *n* terms has relative error at most about *n·ε* serially and *log₂n·ε* as a tree — but it is not zero, and for adversarial inputs the difference is unbounded in relative terms (Chapter 20 exhibits one where a serial `3` becomes a reassociated `6`).
+> - **N3 — algebraically rewritten.** *P'* uses an identity that holds over the reals but not over floats at all: `x - x → 0`, `x/x → 1`, `exp(log x) → x`, `(x·a)·b → x·(a·b)`. These change results on inputs involving infinities, NaNs, zeros of either sign, or overflow, and they change them by arbitrary amounts. This is what "fast math" means.
+>
+> A transformation is *sound at level N* if it moves any program to one that is N-equivalent to it. The levels are ordered: N0 ⊂ N1 ⊂ N2 ⊂ N3.
 
-Others are not classical. They are properties of how tracing compilers behave that practitioners know and rely on, but that are usually stated in prose in a framework's documentation rather than as theorems. Where this book pins one down as a theorem it says so, with the marker **(stated here)** after the name. Theorem 5.3 is the main example: the claim itself is uncontroversial and every tracing framework depends on it, but the formulation is this book's, and you will not find it under that name elsewhere. The same marker appears on definitions that are sharper than common usage — Definition 6.1 defines lowering as necessarily irreversible, which is a useful stipulation for this book rather than a universal fact about compilers.
+Two rules follow, and the book holds itself to both. **First, a transformation must not silently promote a program up the ladder.** A compiler configured for N1 may not perform an N2 rewrite, and one configured for N2 may not perform an N3 rewrite; the point of the level is that the user chose it. **Second, reduction order is part of the contract, not an implementation detail.** Any transformation that changes how many partial accumulators a reduction uses — `rfactor`, a parallel reduction, a tree instead of a loop — is an N2 transformation and must be labelled one, even though nothing about the source code changed.
 
-The distinction matters because the two kinds of result fail differently. A classical result is wrong only if you have misapplied it. A stated-here result may be wrong because the formulation missed a case.
+Where this book states that the shipped compiler obeys the ladder, it does so as an **(invariant)**, with the enforcement mechanism named. One primitive stands outside it by construction: Chapter 41's `rfactor` re-brackets a reduction, which is an N2 transformation whatever the implementation, and the autotuner offers it at N1 without asking. It is documented with an executed counterexample where it arises, and listed in §1.11.
+
+**Where a result comes from is marked, and there are four kinds.** A labelled block in this book can be making four quite different sorts of claim, and they fail in four different ways. Confusing them is the single easiest way to misread the book, so every labelled block carries a marker saying which kind it is.
+
+**(classical)** — a mathematical result that can be looked up: the roofline bound, Amdahl's law, the GCD test for dependence, the √n checkpointing result. These carry an attribution in parentheses after the name, like *(Williams et al., 2009)*. The book's phrasing is one presentation among many. A classical result is wrong only if you have misapplied it — check the hypotheses, not the theorem.
+
+**(stated here)** — a property practitioners rely on but usually state in prose rather than as a theorem, which this book pins down. Theorem 5.3 is the main example: the claim is uncontroversial and every tracing framework depends on it, but the formulation is this book's and you will not find it under that name elsewhere. The same marker appears on definitions sharper than common usage — Definition 6.1 defines lowering as necessarily irreversible, a useful stipulation for this book rather than a universal fact about compilers. A stated-here result can be wrong because the *formulation* missed a case; the underlying idea survives, the wording does not.
+
+**(invariant)** — a property this codebase intends to maintain, together with the mechanism that is supposed to maintain it. "Every operation has exactly one defining operation." "A pass that reports `CHANGED` is re-verified." These are not theorems about compilers in general and they are not theorems about mathematics; they are contracts, and a contract can be *violated by a bug*. Where an invariant is enforced by a checker that actually runs, the block says which checker. Where it is enforced only by convention — by every author remembering to do the right thing — the block says that too, because that is precisely where the next bug will be. Chapter 12 is about the difference.
+
+**(measured)** — an observation about one machine, at one moment, on one revision of the source. Every such block carries the date and the shape of the workload. A measured claim does not generalize to your machine, and the book never uses one as a premise in a proof. It is evidence about this implementation, not a fact about compilation.
+
+The distinction that matters most is between the first two and the last two. **(classical)** and **(stated here)** are claims about the world: if the reasoning is sound they stay true no matter what happens to this repository. **(invariant)** and **(measured)** are claims about *this codebase on the date given* — they are exactly as true as the code is, and when the code changes they must be re-checked. Wherever the book states an invariant that the implementation does not currently uphold, it says so in the same breath and names the counterexample. There are several such places, and they are collected in §1.11.
 
 Three notes on reading these.
 
@@ -162,36 +181,71 @@ It gets promoted when it has to. Chapters on tiling and autotuning need a matmul
 
 **Terminology stays in English.** Terms are used in their standard form — *fusion*, *pass*, *schedule*, *liveness*, *lowering* — so that what you learn here connects directly to the TVM, MLIR and XLA literature.
 
-**Measurements are honest.** Where the book reports a benchmark, it reports what the machine actually printed, including the cases where the compiler *loses*. Chapter 2 contains one of those. A book that only shows wins teaches you to trust the wrong things.
+**Five units of execution, never used interchangeably.** It is tempting to say "four ops became one kernel", and almost every framework's release notes say exactly that. It is five different claims, only one of which is usually true, so this book keeps them apart:
+
+| Term | What it means here | Where you can count it |
+|---|---|---|
+| **graph op** | one `Operation` node in Graph IR | `printModule` output, Chapter 9 |
+| **loop nest** | one maximal `for` nest in TIR | `printTensorIR` output, Chapter 33 |
+| **generated function** | one emitted top-level function in the backend's source | the generated text, Chapter 21 |
+| **kernel** | one unit of work a device scheduler dispatches — meaningful on CUDA and WebGPU, where it is a `__global__` function or a compute shader | the launch list, Part VII |
+| **device launch** | one submission of a kernel to a device queue | the runtime's launch counter, Part VII |
+
+On CUDA and WebGPU the last three often coincide; on the CPU and WebAssembly backends **there is no device launch at all**, and a single generated function routinely contains several loop nests and several temporary buffers. So "fusion turned four ops into one kernel" is a statement that can only be made — and only be checked — on a device backend. On the CPU the checkable statement is about loop nests and temporaries, and that is what Chapters 21 and 22 measure. Wherever a claim could mean either, the chapter says which, and shows the artefact you would count.
+
+**Measurements are honest, and reported as distributions.** Where the book reports a benchmark, it reports what the machine actually printed, including the cases where the compiler *loses*. Chapter 2 contains one of those. A book that only shows wins teaches you to trust the wrong things.
+
+The reporting rule is: **the headline number is the median of *n* repetitions, and the spread is printed next to it.** The minimum of *n* runs is a tempting summary — it looks clean and it is what a lot of benchmark harnesses print — but it is not a robust statistic. It is an estimate of the machine's best case, it is biased downward, it gets *further* from the truth as you add repetitions, and it hides the variance entirely. It is reported in this book only where the quantity of interest genuinely is the best case, and it is never called "robust" or "stable". Labs use the shared helper [`docs/tools/measure.mjs`](../../tools/measure.mjs), which returns median, min, max and interquartile range together, so a reader can see when a ratio is inside the noise. Every timing table names the machine, the runtime version, and the date.
 
 ## 1.9 How to read this book
 
-The book has thirteen parts — an orientation part and twelve substantive ones — and sixty-seven chapters. There are three sensible ways through it.
+**What exists today.** The book is planned as thirteen parts — an orientation part and twelve substantive ones — and sixty-seven chapters. **Parts 0 through IX, Chapters 1 through 52, are written**; that is what you can read and run right now, and it is what the status table in [`docs/OUTLINE.md`](../../OUTLINE.md) tracks. Parts X through XII and the appendices are outlined there but not yet written. The chapters do refer forward to them — to the CUDA backend in Chapter 56, to the glossary in Appendix C — because the outline is fixed and the forward references are how a chapter says "this thread is picked up later". Treat any reference to a chapter numbered 53 or above, to Parts X–XII, or to an appendix as a pointer into the outline rather than into text you can read today.
+
+**Two readers, two difficulty curves.** From Part III onward this book is doing two jobs at once, and they do not have the same audience.
+
+- The **teaching line** is the one promised in §1.5: problem, intuition, theory, code, lab. It assumes no compiler background and it is complete on its own. If you read only the numbered sections and the labs, you get a full introduction to tensor compilation.
+- The **audit line** is the *Traps and limits* material at the end of each chapter, plus the counterexamples that carry an **(invariant)** marker. This material is written for someone who maintains this compiler or is deciding whether to trust it. It assumes you have the source open, it argues about specific line numbers, and it is where the book states which contracts the implementation currently fails to keep.
+
+The two are deliberately interleaved rather than split into separate volumes, because a limitation is only comprehensible next to the mechanism it limits. But the difficulty does jump when the audit line starts, and that jump is the book's doing, not yours. **On a first pass, read the numbered sections and skip the trap sections.** Come back to them when you have a reason to — when a result looks wrong, or when you are about to rely on a guarantee.
+
+Beyond that, there are three sensible routes through the written material.
 
 **Cover to cover.** Parts build on each other in order. This is the intended path and the one the examples assume.
 
-**The ML engineer's path.** If your goal is to understand why your model is slow and what a compiler can do about it: Part I (why compilers), Part II (representation), Part IV (graph optimization, especially fusion), then Chapter 36 on dependence analysis — the one piece of Part VI that Part VII cannot be read without — followed by Part VII (scheduling) and Part XI (dynamic shapes and the runtime). Skim Parts III and VIII.
+**The ML engineer's path.** If your goal is to understand why your model is slow and what a compiler can do about it: Part I (why compilers), Part II (representation), Part IV (graph optimization, especially fusion), then Chapter 36 on dependence analysis — the one piece of Part VI that Part VII cannot be read without — followed by Part VII (scheduling). The runtime and dynamic-shape material that would complete this path is Part XI, which is outlined but not yet written. Skim Parts III and VIII.
 
-**The compiler builder's path.** If your goal is to write or extend one: Part II and Part III first — object model and pass infrastructure decide everything downstream — then Part VI, VII, X in order. Part V (automatic differentiation) is separable and can be read whenever you need it.
+**The compiler builder's path.** If your goal is to write or extend one: Part II and Part III first — object model and pass infrastructure decide everything downstream — then Part VI and Part VII in order. Part V (automatic differentiation) is separable and can be read whenever you need it. Part X, which would follow, is not yet written.
 
 Two structural dependencies are worth knowing up front. **Part VII (scheduling) depends on Part VI (dependence analysis)**: legality of a schedule is a statement about dependences, and reading VII without VI leaves you memorizing rules instead of understanding them. **Part VIII (autotuning) depends on Part VII**: search is search over schedules.
 
 ## 1.10 What this book is not
 
-- **Not an API reference.** For the exhaustive list of operations and passes, see the generated appendices. The chapters explain mechanisms.
+- **Not an API reference.** The exhaustive lists of operations and passes are planned as generated appendices; until those exist, the registries in [`src/compiler/ir/graph/ops/`](../../../src/compiler/ir/graph/ops/) are the list. The chapters explain mechanisms.
 - **Not a machine learning book.** Backpropagation appears as a program transformation, not as a lesson in why neural networks learn.
-- **Not a GPU programming tutorial.** Chapter 56 explains enough CUDA to read generated kernels; it will not teach you to write them by hand.
+- **Not a GPU programming tutorial.** The planned Chapter 56 explains enough CUDA to read generated kernels; it will not teach you to write them by hand.
 - **Not a survey.** Where several designs are possible, the book explains the one implemented here, names the alternatives, and says what the tradeoff is. It does not attempt to cover them all.
 
 ## 1.11 A note on where this compiler is imperfect
 
-`mlfw`'s compiler is a real system, and real systems have unfinished corners. This book names them where they arise, and Appendix E collects them. One you will meet early:
+`mlfw`'s compiler is a real system, and real systems have unfinished corners. This book names them where they arise; the planned Appendix E will collect them. There are two kinds, and the difference matters.
+
+**Conservatism.** The compiler refuses a transformation it cannot prove safe. This is the correct behaviour and it costs only performance:
 
 - Analyses over loop indices use interval arithmetic, which is sound but weak: the analyzer often answers "unknown" where a stronger technique would answer "provably safe". Chapter 37 shows the consequence.
 
-These are not embarrassments to be hidden. Knowing *where* a compiler gives up conservative answers is a large part of knowing how compilers work.
+**Contracts the implementation does not fully keep.** These cost correctness, and §1.6 promised you a list of them. Each is stated where it arises, with a counterexample that has been executed:
 
-Appendix E's closed list is longer than its open one, which is worth mentioning because of *how* those entries were found. Integer division and modulo had three different definitions — one in the symbolic layer, one in constant folding, one per backend — so the same TIR could compute different results on the CPU and on CUDA whenever an operand went negative. No test caught it, because every index the compiler generates happens to be non-negative. It surfaced only when someone tried to write down what `//` means, discovered there was no single answer, and went looking. The fix was to define the operation once (`src/util/divmod.ts`) and make all four backends agree. Most of the rest of the closed list was found the same way, while writing Parts IV and V: a chapter states what a pass is supposed to do, a lab runs it, and the two do not match.
+| Where | The contract | What actually happens |
+|---|---|---|
+| Ch. 9, 16 | every edit bumps the version, so the analysis cache cannot serve a stale result | every edit *through a method* does; `op.attributes` and `op.operands` are public containers, and an edit made around the API moves nothing |
+| Ch. 11, 12 | a declared trait is true of the operation declaring it | structural traits are verified; the algebraic ones — `ASSOCIATIVE` above all — are quantified over all inputs and no verifier can decide them |
+| Ch. 30 | rematerialization recomputes the same value, so it costs only time | it does when the recomputed operations are pure and deterministic, which nothing checks; a `dropout` on the recomputed path would draw a fresh mask |
+| Ch. 37 | an out-of-range index throws rather than reading rubbish | an index the compiler can relate to an argument is guarded; a genuinely data-dependent one has nothing on the host to check against |
+| Ch. 41 | every scheduling primitive preserves semantics | `rfactor` re-brackets a reduction, which is its purpose; on floats that is an N2 transformation and the search offers it without asking |
+
+These are not embarrassments to be hidden, and they are not rhetorical. Every row is reproducible from a lab in the chapter named. Knowing *where* a compiler gives up conservative answers is a large part of knowing how compilers work; knowing where it fails to be conservative at all is the rest of it.
+
+A list of defects already closed sits alongside that one, and it is worth mentioning because of *how* those entries were found. Integer division and modulo had three different definitions — one in the symbolic layer, one in constant folding, one per backend — so the same TIR could compute different results on the CPU and on CUDA whenever an operand went negative. No test caught it, because every index the compiler generates happens to be non-negative. It surfaced only when someone tried to write down what `//` means, discovered there was no single answer, and went looking. The fix was to define the operation once (`src/util/divmod.ts`) and make all four backends agree. Most of the rest of the closed list was found the same way, while writing Parts IV and V: a chapter states what a pass is supposed to do, a lab runs it, and the two do not match.
 
 That is a fair description of what documenting a system does to it. If the book seems unusually interested in stating precisely what each construct means, this is why.
 

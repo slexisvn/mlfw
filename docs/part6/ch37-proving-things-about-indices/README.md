@@ -306,6 +306,52 @@ One host-side check per call, derived at compile time by the graph walk of §37.
 
 **Try this.** Feed the embedding a negative index. The same check catches it, because `assertIndicesInRange` bounds on both sides — and note that the kernel would not have: a negative index in JavaScript reads `undefined` and produces `NaN`, silently.
 
+### The guard covers arguments, not indices
+
+That last parenthesis is the whole of §37.6's exposure, so it is worth following. The guard is not derived from the *access*; it is derived from an **argument**. `collectArgIndexBounds` walks the graph for indexed-table operations and then does this ([`index_bounds.ts:52`](../../../src/compiler/analysis/index_bounds.ts)):
+
+```ts
+    const idx = traceToArg(op.getOperand(spec.indices), argIndex);
+    if (idx === undefined) continue;
+```
+
+`traceToArg` follows the index operand backwards, looking for a function argument. If it finds one, a bound is recorded against that argument's index and checked on every call. **If it finds anything else, the operation is skipped and no bound is recorded at all.**
+
+"Anything else" decides the coverage, so it is worth seeing what falls outside it:
+
+> **Counterexample 37.7.** Two models, same table of five rows, same input `[0, 2, 4]`:
+>
+> ```js
+> class Direct   extends Module { forward(idx, t) { return ops.embedding(t, idx); } }
+> class Computed extends Module { forward(idx, t) { return ops.embedding(t, idx.add(1)); } }
+> ```
+>
+> If `traceToArg` gives up at the `add`, the computed model reads row 5 of a five-row table and nothing throws: the kernel indexes past the end of the typed array, JavaScript returns `undefined`, and the arithmetic turns it into `NaN`. On a backend without JavaScript's bounds-checked arrays it is an out-of-bounds read.
+
+### Carrying the offset back to the argument
+
+The answer follows the shape of the problem. An index of the form `arg + c` is still a statement *about `arg`*: the access is in range exactly when `0 ≤ arg + c < limit`, which is `−c ≤ arg < limit − c`. So `traceToArg` walks through `add` and `sub` with a scalar constant operand, accumulating the offset, and the recorded bound becomes a **range on the argument** rather than a table extent:
+
+```ts
+    const lo = -traced.offset;
+    const hi = limit - traced.offset;
+```
+
+`assertIndicesInRange` takes `lo` and `hi` instead of a single `limit`, which also lets the error name the interval the caller must satisfy. The check runs on the host, once per call, over an argument — nothing is added to the kernel.
+
+Both directions matter, and the second shows the bound is a real range rather than a stricter limit: a model indexing `idx.sub(1)` *accepts* `idx = limit`, which a bare table-extent check would reject.
+
+So the contract is:
+
+| Index expression | Compile-time proof | Runtime guard |
+|---|---|---|
+| affine in loop variables | yes — the analyser bounds it | not needed |
+| a function argument, possibly reshaped | no | **yes** — `assertIndicesInRange` |
+| an argument plus or minus a constant | no | **yes** — the range is shifted to compensate |
+| genuinely data-dependent (a lookup, an `argmax`, an index scaled by a runtime value) | no | **no** |
+
+The last row is what remains, and it is the irreducible part: when the index is a value the compiler cannot relate to any argument, there is nothing on the host to check, and the only general answer is to emit the comparison in the kernel — a branch per access, and what Chapter 43's GPU backends would need anyway. **Treat a data-dependent index into a table as unchecked**, and clamp it yourself if it can go out of range.
+
 ## 37.7 Traps and limits
 
 - **The domain is non-relational, and that is the ceiling.** Definition 37.5. Two loop variables of extent 8 give `i − j ∈ [−7,7]`, so nothing that depends on `i ≤ j` is provable: no triangular iteration space, no "the tail of this tile is shorter than the head". The compiler never builds such nests today, which is why the ceiling has not been hit — and it is exactly what a relational domain would be for.
@@ -327,7 +373,11 @@ One host-side check per call, derived at compile time by the graph walk of §37.
 
 ---
 
-**Part VI ends here.** A graph of whole-tensor operations went in; a `PrimFunc` of loops, buffers and scalar stores came out, with every access carrying the region it covers, every pair of accesses answerable for dependence, and every expression answerable for range. Where a subscript is affine — which is most of them — those answers are exact. Where it is not, because a `reshape` left a `//` and a `%` behind or a `gather` reads its index out of a buffer, `toLinearForm` returns `null` and every question above it is answered `unknown`, in the conservative direction. The machinery is an affine analysis with a refusal, not a proof that every subscript is affine.
+**Part VI ends here.** A graph of whole-tensor operations went in; a `PrimFunc` of loops, buffers and scalar stores came out, with every access carrying the region it covers, every pair of accesses answerable for dependence, and every expression answerable for range.
+
+Be careful with the word *exact*, because this part has used it about two different things and only one of them earns it. **Affine analysis is exact for a single-index-variable subscript with equal coefficients** — Theorem 36.5's strong SIV test computes a distance, not an over-approximation, and that case covers most subscripts a lowering rule emits. It is **not** exact in general. The moment a subscript involves two or more loop variables, Chapter 36 falls back to the GCD test, which decides only divisibility and reports a possible dependence whenever the gcd divides the offset — §36.8's `A[i + 64j]` example is a false positive that no bound-aware refinement in this implementation removes. Interval analysis is likewise one-sided by design (Theorem 37.4): it may answer "unknown" where a stronger domain would answer "safe", and §37.7 lists three routine cases where it does.
+
+So the machinery is: **exact on the single-variable affine case, sound-but-imprecise on the multi-variable one, and a refusal outside affine forms entirely.** Where a `reshape` left a `//` and a `%` behind or a `gather` reads its index out of a buffer, `toLinearForm` returns `null` and every question above it is answered `unknown`, in the conservative direction. That last clause is the load-bearing one, and Chapter 36 §36.7 is where it turns out to have an exception.
 
 What has not happened is any decision about *how* to run those loops. Every nest in this part is serial, in the order the rule wrote it, at the size the tensor happened to be.
 

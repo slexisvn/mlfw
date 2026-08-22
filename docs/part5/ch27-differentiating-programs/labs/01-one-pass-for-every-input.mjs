@@ -1,6 +1,7 @@
 import {
   tensor, Linear, ReLU, Sequential, compileWithBackward, compile, CPUTarget, ones, manual_seed,
 } from '../../../../dist/index.node.js';
+import { summarize } from '../../../tools/measure.mjs';
 
 // A scalar-valued function of n inputs. Reverse mode gets every partial
 // derivative from one backward pass; finite differences need one forward
@@ -44,14 +45,14 @@ async function finiteDifferences(m, x, eps) {
   return { grad, evaluations: 2 * n };
 }
 
-async function best(fn, reps) {
+async function sample(fn, reps) {
   const times = [];
   for (let i = 0; i < reps; i++) {
     const t0 = performance.now();
     await fn();
     times.push(performance.now() - t0);
   }
-  return Math.min(...times);
+  return summarize(times);
 }
 
 const m = model();
@@ -75,8 +76,9 @@ console.log('\n=== what each one cost ===');
 console.log(`  reverse mode:         1 forward + 1 backward`);
 console.log(`  central differences:  ${fd.evaluations} forward evaluations`);
 
-console.log('\n=== how the cost scales with the number of inputs ===');
-console.log('  inputs   reverse (ms)   differences (ms)   ratio');
+console.log('');
+console.log('=== how the cost scales with the number of inputs (medians of 15 rounds) ===');
+console.log('  inputs   1 forward   reverse   differences   ratio   rev/fwd');
 for (const n of [8, 32, 128]) {
   manual_seed(0);
   const mn = new Sequential(new Linear(n, 16), new ReLU(), new Linear(16, 1));
@@ -84,15 +86,32 @@ for (const n of [8, 32, 128]) {
 
   const r = await reverseMode(mn, xn);
   await r.run();
-  const tRev = await best(r.run, 10);
+  const sRev = await sample(r.run, 15);
 
   const fwd = compile({ forward: loss(mn) }, [xn], { target: CPUTarget() });
   await fwd._ready;
   await settle(fwd(xn));
-  const oneForward = await best(async () => { await settle(fwd(xn)); }, 10);
-  const tFd = oneForward * 2 * n;
+  const sFwd = await sample(async () => { await settle(fwd(xn)); }, 15);
+
+  // Measure the finite-difference sweep itself rather than extrapolating from a
+  // single forward pass: 2n perturbed evaluations, exactly as a user would run it.
+  const base = xn.toArray()[0];
+  const eps = 1e-3;
+  const runFd = async () => {
+    for (let k = 0; k < n; k++) {
+      for (const sign of [1, -1]) {
+        const shifted = base.slice();
+        shifted[k] += sign * eps;
+        await settle(fwd(tensor([shifted])));
+      }
+    }
+  };
+  await runFd();
+  const sFd = await sample(runFd, 5);
 
   console.log(
-    `  ${String(n).padStart(6)}   ${tRev.toFixed(3).padStart(12)}   ${tFd.toFixed(3).padStart(16)}   ${(tFd / tRev).toFixed(1)}x`
+    `  ${String(n).padStart(6)}   ${sFwd.median.toFixed(3).padStart(9)}   ${sRev.median.toFixed(3).padStart(7)}   ` +
+    `${sFd.median.toFixed(3).padStart(11)}   ${(sFd.median / sRev.median).toFixed(1).padStart(5)}x   ` +
+    `${(sRev.median / sFwd.median).toFixed(1).padStart(6)}x`
   );
 }

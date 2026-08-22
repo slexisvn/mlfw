@@ -50,9 +50,13 @@ Fix a perfectly nested chain of loops `L₁,…,L_k` with iteration points order
 
 The compiler's dependence test is not exact and does not claim to be.
 
-> **Proposition 42.6 (Conservative masks, stated here).** `accessDependence` returns either "independent" or a direction mask that contains the true direction. It never returns a mask excluding a direction that actually occurs.
+> **Proposition 42.6 (Conservative masks, stated here).** Assume the two ends of every dependence are named in execution order, so that direction vectors are lexicographically positive. Then `accessDependence` returns either "independent" or a direction mask that contains the true direction. It never returns a mask excluding a direction that actually occurs.
 
 *Proof sketch.* Three tests of decreasing precision (Chapter 36). One subscript involving one loop level with equal coefficients yields an exact distance; a GCD test rules out whole subscripts; anything else defaults to `ANY_DIRECTION`. A `null` form — a non-affine subscript — also yields `ANY_DIRECTION` ([`dependence.ts:80`](../../../src/compiler/analysis/dependence.ts)). Every fallback widens the mask, and a wider mask forbids more. ∎
+
+> **The hypothesis is not free.** The two ends of a pair are chosen by *textual* position ([`dependence.ts:181`](../../../src/compiler/analysis/dependence.ts)), which coincides with execution order for a loop-independent dependence and not for a mixed one, so `accessDependence` normalises before returning (Chapter 36 §36.7). Without that step the analyser can report the *reverse* of a true direction — a mask excluding what occurs and including what does not — which turns the failure mode from "refuses a legal transformation" into "permits an illegal one".
+>
+> Keep the two failure modes apart, because only one of them is designed. **Proposition 42.8's is designed**: a false declaration deliberately overrules a correct analysis, and Counterexample 42.9 is its demonstration — a trade the compiler makes on purpose and prices. An unnormalised direction vector is the other kind: wrong before any declaration is consulted, so Counterexample 42.9's nest would be accepted *even with the axes untyped*. A conservative-by-design analysis and a conservative-in-fact one are different claims, and only the second protects you.
 
 And now the shortcut, which is where soundness stops being derived:
 

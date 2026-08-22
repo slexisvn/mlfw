@@ -26,7 +26,7 @@ Keep the results in a cache, and attach to each entry the *state of the world wh
 - **Ask the IR.** Give every function a counter that increments on every structural edit. An entry computed at counter 22 is servable only while the counter reads 22. Nobody has to declare anything; the mechanism is driven by the mutation itself.
 - **Ask the pass.** Let a pass declare "I did not disturb the liveness information", and keep that entry across it. This is faster — no recomputation at all across a pass that changed the graph — and it is a *claim*, which means it can be false.
 
-The first is sound by construction. The second is a promise. The rest of this chapter is about what the promise buys, and what happens when it is broken.
+The first is sound by construction — nobody can lie to a counter. The second is a promise, and a promise can be false. The rest of this chapter is about what the promise buys, what happens when it is broken, and — §16.7 — exactly which edits "by construction" covers.
 
 ## 16.3 Theory
 
@@ -34,7 +34,11 @@ The first is sound by construction. The second is a promise. The rest of this ch
 
 Purity matters: an analysis may not edit the IR, and its result must be a function of the IR alone. If it were not, caching it would be meaningless, because "the world has not moved" would not imply "the answer has not changed".
 
-> **Definition 16.2 (Preserved analysis).** A pass `P` *preserves* analysis `A` if `A(P(m)) = A(m)` for every IR `m` on which `P` is defined.
+> **Definition 16.2 (Preserved analysis).** **(stated here)** A pass `P` *preserves* analysis `A` if, for every IR `m` on which `P` is defined, the cached `A(m)` remains a correct answer to every query that can be made after `P` runs. Formally: for every query `q` that is well-formed against `P(m)`, `A(m).answer(q) = A(P(m)).answer(q)`.
+
+**The observational form is the one that is usable, and the equality form is not.** It is tempting to write the condition as `A(P(m)) = A(m)` — the results are equal — and that version is both stronger than necessary and wrong about what the implementation does. Take the case argued in §16.4: DCE preserves the memory-effect analysis, whose result is a `Map` keyed by `Operation`. DCE erases operations. The cached map therefore still holds entries for operations that no longer exist, so it is *not equal* to the map a fresh run would produce — the fresh one has fewer keys. Under the equality reading, DCE does not preserve it, and the declaration in the source is a bug.
+
+Under the observational reading the declaration is correct, and for the reason §16.4 gives: nothing can *ask* about an erased operation, because asking requires holding a reference to it, and it is gone from the function. The stale entries are unreachable, and an unreachable wrong answer is not a wrong answer. That is the property the compiler actually relies on, so it is the property the definition should state.
 
 This is a genuine property of a pass, not a label. DCE preserving the memory-effect analysis is a theorem about DCE, argued in §16.4. A pass declaring preservation it does not have is not caught by anything — the declaration is trusted.
 
@@ -48,7 +52,7 @@ The theorem is worth reading as an argument about *what a declaration can expres
 
 > **Definition 16.4 (Mutation version, stated here).** Each function carries a monotone counter, incremented by every structural edit to its body. A cache entry records the counter's value at computation time. An entry is *fresh* if the recorded value equals the current one.
 
-Definition 16.4 is a mechanism, not a policy, and it is the sound half of the pair. It needs no declarations and cannot be lied to — provided every edit path bumps it, which is a property of the IR data structure rather than of any pass.
+Definition 16.4 is a mechanism, not a policy, and it is the sound half of the pair. It needs no declarations and cannot be lied to — **provided every edit path bumps it**. That proviso is doing all the work, it is a property of the IR data structure rather than of any pass, and §16.7 is where its scope is pinned down.
 
 The two mechanisms interact in one specific way that is the trap of this chapter: **a preservation declaration overrides the version check.** Preserving an analysis does not merely skip its deletion; it re-stamps the cached entry with the *current* version, so that later freshness tests succeed. Preservation is therefore not a hint. It is an assertion that switches off the automatic mechanism for that entry.
 
@@ -276,6 +280,12 @@ Row three is the useful contrast. Preserving only the root saves the root's reco
 The practical rule, which is worth memorising before writing a `preservedAnalyses` set: **preserve from the bottom up, or do not bother.** An analysis is worth naming only if everything it depends on is named too.
 
 ## 16.7 Traps and limits
+
+Everything in this chapter rests on Definition 16.4's proviso — *every edit path bumps the counter* — which §16.2 sold as the mechanism nobody can lie to. The claim is only as wide as the set of edits the counter intercepts, and the rule to carry is that **a mechanism is "sound by construction" only over the operations it intercepts**.
+
+> **Counterexample 16.5.** Let `A` be an analysis whose result depends on an attribute — a FLOP estimate reading `getFlops`, a layout analysis reading `layoutSensitivity`, a fusion cost model reading a reduction's axes. Compute `A`, then rewrite an attribute *without going through `setAttr`*: `op.attributes.set('direction', 'gt')` is one line and `op.attributes` is a public `Map`. The version does not move, the freshness test passes, and the manager serves a result that disagrees with what recomputing `A` would produce.
+
+Chapter 9 §9.4 covers the API side: every mutating method, attributes included, notifies. §9.8 covers the rest — the containers hanging off an `Operation` are public, so the counter is sound for edits made *through* the object and blind to edits made *to its fields*. Two things keep the exposure small: most cached analyses are *structural* — liveness, use-def, dominance, the cycle check and the op-count analyses read which operations exist and how they are wired, and every edit to that shape goes through a method — and no analysis this compiler caches today reads an attribute at all. The gap is real, narrow, and entirely in front of whoever caches the first attribute-dependent analysis.
 
 - **A false preservation is undetectable.** §16.5 is the demonstration. There is no verification of Definition 16.2, no "recompute and compare" debug mode, and no assertion. The infrastructure trusts the declaration completely. If you add a preservation, the argument for it belongs in a comment or a test, because nothing else will carry it.
 - **Analyses are keyed by function, and module passes invalidate by iterating.** `invalidateFunctions` ([`analysis_manager.ts:92`](../../../src/compiler/analysis/analysis_manager.ts)) loops over the module applying the per-function rule. There is no module-level analysis cache at all; a whole-module fact — a call graph, say — has nowhere to live.

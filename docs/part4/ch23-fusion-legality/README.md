@@ -1,6 +1,6 @@
 # Chapter 23 — Fusion II: legality
 
-Chapter 22 argued that fusing a producer into its consumer removes a full tensor round trip, and measured 2.55×. So the question is why a compiler would ever decline.
+Chapter 22 argued that fusing a producer into its consumer removes a full tensor round trip, and measured about 1.9×. So the question is why a compiler would ever decline.
 
 There is a profitability answer — the fused kernel might need too many registers, or duplicate too much work — and Chapter 24 is about that. This chapter is about the other answer, the one that is not a judgement call: some merges produce a program that **cannot be scheduled at all**, and no cost model can rescue them.
 
@@ -44,9 +44,15 @@ Now the algorithmic question. A fusion engine considers thousands of candidate m
 
 > **Definition 23.3 (Incremental topological order).** Maintain a bijection `rank : V → {0..n−1}` such that `u → v` implies `rank(u) < rank(v)`. An operation that would violate it repairs the order by reordering only the vertices whose ranks lie between the two endpoints.
 
-> **Theorem 23.4 (Pearce–Kelly).** *(Pearce and Kelly, 2006.)* Maintaining a topological order under edge insertion by reordering only the *affected region* — the vertices reachable from the lower endpoint with rank below the upper endpoint, and vice versa — costs `O(m^{3/2})` over `m` insertions in the worst case, against `O(m·n)` for recomputing.
+> **Theorem 23.4 (Affected-region repair).** *(Pearce and Kelly, 2006.)* A topological order can be maintained under edge insertion by reordering only the *affected region* — the vertices reachable forward from the lower endpoint with rank below the upper endpoint, together with those reachable backward from the upper endpoint with rank above the lower one. Repair touches only that set, never the whole graph.
 
-The insight the bound rests on is that if `rank(u) < rank(v)` already, the edge `u → v` needs no repair at all; and if not, everything that must move lies strictly between the two ranks. The search never leaves that window, which is why the cost is proportional to how *wrong* the order was rather than to how big the graph is.
+The insight the theorem rests on is that if `rank(u) < rank(v)` already, the edge `u → v` needs no repair at all; and if not, everything that must move lies strictly between the two ranks. The search never leaves that window, which is why the cost is proportional to how *wrong* the order was rather than to how big the graph is.
+
+> **What this book does not claim.** Pearce and Kelly's paper is a comparison of several dynamic-topological-order algorithms with different bounds, and the `O(m^{3/2})` figure that circulates alongside their name belongs to a specific algorithm and analysis — not to "the affected-region idea" in general, and not to any implementation that merely restricts its work to a rank window. Attaching it to whatever code stays inside a window is the kind of citation that looks rigorous and is not, so this chapter states the *structural* result above, which is what the implementation actually borrows, and reports measured scaling for the implementation itself in §23.6.
+
+**And be precise about what §23.4's code does, because it is a simplification of the paper rather than the paper.** Pearce–Kelly discovers the affected set with two searches — forward from the lower endpoint, backward from the upper — and permutes only the vertices those searches reach, which can be far fewer than the vertices in the rank window. This implementation instead takes the whole window: `_reorder(loRank, hiRank)` ([`graph_cycles.ts:137`](../../../src/compiler/passes/fusion/graph_cycles.ts)) collects every live node whose rank lies in `[loRank, hiRank]`, builds in-degrees over the edges among them, and runs an ordinary **Kahn topological sort** on that sub-DAG, writing the result back into the same slots.
+
+That is simpler, it is obviously correct, and it does strictly more work: the cost of one repair is linear in the window and the edges inside it, `O(W + E_W)`, where the affected set may be a small fraction of `W`. There is one saving grace, and it is the `_reachesWithinWindow` guard immediately above the call — a repair is attempted only when some predecessor of the higher endpoint actually falls inside the window, so the common case of a contraction that does not disturb the order costs one scan of an adjacency set and no sort at all. The right description of the implementation is therefore **"window-scoped Kahn sort, guarded by a cheap emptiness test"**, and the reason it performs acceptably is measured rather than proved.
 
 > **Corollary 23.5 (Cycle detection, stated here).** With a maintained rank, adding `u → v` creates a cycle if and only if there is a path from the lower-ranked endpoint to the higher-ranked one that passes through a vertex strictly inside the window. The check is a bounded search, not a global one.
 

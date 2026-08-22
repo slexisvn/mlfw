@@ -52,6 +52,13 @@ export function coerceForStorage(dtype: string, v: number | bigint): number | bi
   return v;
 }
 
+export function roundToDtype(dtype: string, v: number): number {
+  if (dtype === 'f32') return Math.fround(v);
+  if (dtype === 'f16') return f16ToF32(f32ToF16(v));
+  if (dtype === 'bf16') return bf16ToF32(f32ToBf16(v));
+  return v;
+}
+
 export function readFromStorage(dtype: string, raw: number | bigint): number | bigint {
   if (dtype === 'f16') return f16ToF32(Number(raw));
   if (dtype === 'bf16') return bf16ToF32(Number(raw));

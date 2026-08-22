@@ -101,8 +101,8 @@ describe('CPUCodegen._exprToJS', () => {
   });
 
   it('keeps x + 0 and 0 + x on floats, where the identity fails at -0', () => {
-    expect(exprToJS(new MathOpNode('+', new VariableNode('x', 'f32'), new IntImmNode(0)))).toBe('(x + 0)');
-    expect(exprToJS(new MathOpNode('+', new IntImmNode(0), new VariableNode('x', 'f32')))).toBe('(0 + x)');
+    expect(exprToJS(new MathOpNode('+', new VariableNode('x', 'f32'), new IntImmNode(0)))).toBe('Math.fround(x + 0)');
+    expect(exprToJS(new MathOpNode('+', new IntImmNode(0), new VariableNode('x', 'f32')))).toBe('Math.fround(0 + x)');
   });
 
   it('simplifies x - 0 → x', () => {
@@ -123,8 +123,8 @@ describe('CPUCodegen._exprToJS', () => {
   });
 
   it('keeps x * 0 and 0 * x on floats, where the identity fails at NaN and infinity', () => {
-    expect(exprToJS(new MathOpNode('*', new VariableNode('x', 'f32'), new IntImmNode(0)))).toBe('(x * 0)');
-    expect(exprToJS(new MathOpNode('*', new IntImmNode(0), new VariableNode('x', 'f32')))).toBe('(0 * x)');
+    expect(exprToJS(new MathOpNode('*', new VariableNode('x', 'f32'), new IntImmNode(0)))).toBe('Math.fround(x * 0)');
+    expect(exprToJS(new MathOpNode('*', new IntImmNode(0), new VariableNode('x', 'f32')))).toBe('Math.fround(0 * x)');
   });
 
   it('simplifies x * 1 → x', () => {
@@ -176,7 +176,7 @@ describe('CPUCodegen._exprToJS', () => {
 
   it('renders CallExternNode for Math functions', () => {
     const node = new CallExternNode('exp', [new VariableNode('x', 'f32')], 'f32');
-    expect(exprToJS(node)).toBe('Math.exp(x)');
+    expect(exprToJS(node)).toBe('Math.fround(Math.exp(x))');
   });
 
   it('renders CallExternNode for sqrt', () => {
@@ -186,7 +186,7 @@ describe('CPUCodegen._exprToJS', () => {
 
   it('renders CallExternNode for rsqrt', () => {
     const node = new CallExternNode('rsqrt', [new VariableNode('x', 'f32')], 'f32');
-    expect(exprToJS(node)).toBe('(1.0 / Math.sqrt(x))');
+    expect(exprToJS(node)).toBe('Math.fround(1.0 / Math.sqrt(x))');
   });
 
   it('renders CallExternNode with multiple args', () => {

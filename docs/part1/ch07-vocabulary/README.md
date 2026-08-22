@@ -1,6 +1,13 @@
 # Chapter 7 — Vocabulary
 
-Every term this book uses, defined once, with the place in the code where it lives. Read it now to have the words; come back to it whenever a later chapter uses one you have half-forgotten.
+Every term this book uses, defined once, with the place in the code where it lives.
+
+**This is a reference chapter, and it is the one chapter you should not read straight through.** Every other chapter earns its terms: it shows you a problem, then names the thing that solves it, so the word arrives attached to something you have already seen. A glossary inverts that. Reading sixty definitions before meeting any of the problems means memorizing sixty labels with nothing underneath them, which is both unpleasant and ineffective — and it is exactly the failure mode the six-beat structure in §1.5 exists to prevent.
+
+So use it the way you would use a dictionary:
+
+- **Now:** skim the section headings and the bolded terms, for five minutes, to know what is in here. Do not try to retain the definitions.
+- **Later:** come back whenever a chapter uses a word you have half-forgotten. Each entry names the chapter that develops the idea properly, and that chapter is the real explanation; the entry is a pointer.
 
 Terms are grouped by what they describe: data, programs, transformations, execution, and performance.
 
@@ -70,7 +77,13 @@ Terms are grouped by what they describe: data, programs, transformations, execut
 
 **Schedule.** A description of *how* a computation is to be executed — loop order, tiling, vectorization, thread binding — as distinct from *what* it computes. Chapters 38–43.
 
-**Schedule primitive.** One editing operation on a schedule: `split`, `reorder`, `fuse`, `tile`, `vectorize`, `bind`, `cache_read`, `rfactor`. 22 of them here.
+**Schedule primitive.** One editing operation on a schedule. There are 22, and since the number is quoted throughout Parts VII and VIII, here is the list it refers to — the mutating methods of [`Schedule`](../../../src/compiler/schedule/schedule.ts), in the spelling the code uses:
+
+> `split`, `fuseLoops`, `reorder`, `tile`, `unroll`, `vectorize`, `parallelize`, `bindThread`, `annotate`, `blockize`, `tensorize`, `cacheRead`, `cacheWrite`, `setScope`, `storageAlign`, `computeAt`, `reverseComputeAt`, `computeInline`, `computeInlineBlock`, `fuseConsumer`, `decomposeReduction`, `rfactor`
+
+The class has more public methods than that — `getLoops`, `getBlock`, `getTrace`, `verify` and friends — but those *query* a schedule rather than edit one, and they are not counted. Chapters 40 and 41 work through the list; Chapter 38 is where the count matters, because a claim about all 22 is only as strong as the weakest one.
+
+Beware of the snake_case names used in the TVM literature (`cache_read`, `compute_at`, `storage_align`). They denote the same primitives, and this book uses them when discussing the idea in general, but the identifiers in this codebase are camelCase.
 
 **Legality.** Whether a transformation preserves the program's meaning. Not the same as *profitable*: a legal transformation may make the program slower, and an illegal one may make it faster and wrong. Chapter 42.
 

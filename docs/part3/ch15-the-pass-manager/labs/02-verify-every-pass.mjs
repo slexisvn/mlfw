@@ -1,6 +1,7 @@
 import {
   tensor, Linear, ReLU, Sequential, compile, CPUTarget, TraceLevel, manual_seed,
 } from '../../../../dist/index.node.js';
+import { summarize, ratio } from '../../../tools/measure.mjs';
 
 const x = tensor([[0.5, -1.5], [1.0, 2.0]]);
 const LEVELS = ['off', 'boundaries', 'each-pass'];
@@ -69,9 +70,23 @@ for (let round = 0; round < 40; round++) {
   for (const level of LEVELS) samples[level].push(await once(model, level));
 }
 
-console.log('=== compile time by verification level (49 graph ops, best of 40 interleaved rounds) ===');
-const baseline = Math.min(...samples.off);
+console.log('=== compile time by verification level (49 graph ops, 40 interleaved rounds) ===');
+console.log('  level        median     ratio    IQR                min      max');
+const stats = Object.fromEntries(LEVELS.map(l => [l, summarize(samples[l])]));
+const baseline = stats.off;
 for (const level of LEVELS) {
-  const ms = Math.min(...samples[level]);
-  console.log(`  ${level.padEnd(11)} ${ms.toFixed(2)} ms   ${(ms / baseline).toFixed(2)}x`);
+  const s = stats[level];
+  const r = ratio(baseline, s);
+  console.log(
+    `  ${level.padEnd(11)} ${s.median.toFixed(2).padStart(6)} ms` +
+    `  ${(s.median / baseline.median).toFixed(2)}x` +
+    `   ${s.q1.toFixed(2)}-${s.q3.toFixed(2)}` +
+    `   ${s.min.toFixed(2).padStart(7)}  ${s.max.toFixed(2).padStart(7)}` +
+    (level !== 'off' && r.overlapping ? '   [inside the noise]' : '')
+  );
+}
+console.log('');
+console.log('for comparison, minimum of 40 rounds (the best case, not a central estimate):');
+for (const level of LEVELS) {
+  console.log(`  ${level.padEnd(11)} ${stats[level].min.toFixed(2).padStart(6)} ms   ${(stats[level].min / baseline.min).toFixed(2)}x`);
 }

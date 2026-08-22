@@ -55,7 +55,17 @@ Note what this definition deliberately does not say. It does not quantify over i
 
 Proposition 38.4 is trivial and it is the reason the design works: it makes "is this schedule correct?" — a question about an unbounded search space, which Part VIII will explore by machine — into "is this primitive sound?", twenty-two questions asked once. A search that only ever composes sound primitives cannot produce a wrong program, however badly it searches.
 
-The whole force of that sentence is in its hypothesis, and one primitive in this compiler does not satisfy it. Reassociating `+` changes the bits and Definition 38.2 says *identical*, so `rfactor` on a float reduction is not sound in the sense of Definition 38.3 — Chapter 41 measures a case where it turns 3 into 6. Part VIII's sketch generator offers it anyway, and nothing asks the user first. So the guarantee is conditional, and worth stating in the conditional form: a search is safe up to the semantics its primitives assume, and one of them assumes an arithmetic that IEEE-754 does not provide.
+The whole force of that sentence is in its hypothesis, and the hypothesis is a per-primitive obligation rather than a given. Twenty-one of the twenty-two discharge it. One does not, and cannot:
+
+**`rfactor` on a float reduction reassociates the accumulation**, which is an N2 transformation. Reassociating `+` changes the bits and Definition 38.2 says *identical*, so it is not sound in the sense of Definition 38.3 — and a version of `rfactor` that did not reassociate would not be `rfactor`. The primitive is sound at N2 and not at N1; the honest answer is to make the *level* explicit and let the caller choose, not to change the transform. Chapter 41 measures a case where it turns 3 into 6, and Part VIII's sketch generator offers it without asking.
+
+The other twenty-one are worth a sentence each in Chapters 40 and 41, because their obligations are easy to state and easy to miss: `split` has to carry a loop's lower bound and refuse a thread-bound loop; `rfactor` has to derive its identity from the operator *and* the dtype and validate that the store really is an accumulation; `reorder` inherits whatever the dependence analysis gives it, which is why Chapter 36 §36.7 spends a section on normalising direction vectors.
+
+So state the guarantee in the conditional form it actually has:
+
+> **Proposition 38.4 buys "a search cannot produce a wrong program" only for the primitives that are sound.** It is a theorem about composition, and composition of a false premise proves nothing. A search that reaches `rfactor` on a float reduction can change a result at N1 without reporting anything. Part VIII §44 onward assumes this proposition throughout, and inherits that one exception.
+
+The design is what makes that statement possible at all. Reducing "is this schedule correct?" to twenty-two questions asked once is what makes the exceptions *enumerable* — one of them, named, with a measured counterexample — which is not something a compiler without this structure could say about itself.
 
 There is a third question hiding behind the second, and it is the one this chapter's second lab is about.
 

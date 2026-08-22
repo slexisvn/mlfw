@@ -61,7 +61,7 @@ Two special cases carry almost all the intuition, and it is worth naming them be
 - **An internalized value** — produced in `G`, read once in `G`, used nowhere else — contributes `1 + 1 − 0 = 2`: the write and the read that fusion deletes. This is the round trip everyone means when they say fusion removes an intermediate.
 - **A repeated external input** — read by `k` operations in `G`, produced outside — contributes `0 + k − 1 = k − 1`: the fused kernel loads it once where `k` loops each loaded it separately.
 
-The second case is the one that gets dropped, and dropping it understates the saving badly on exactly the graphs fusion is for. §22.5's chain reads `x` in three of its four operations and `y` in two, so three of the nine tensor round trips it removes — a third of the total — are of the second kind. The theorem also credits a value read *twice* inside the group with `1 + 2 = 3` transfers saved, which is right for traffic and is precisely where the implementation disagrees: it charges that value as shared-memory pressure instead and may refuse the fusion outright. That is the distinction Chapter 24 will pay 2.4× for.
+The second case is the one that gets dropped, and dropping it understates the saving badly on exactly the graphs fusion is for. §22.5's chain reads `x` in three of its four operations and `y` in two, so three of the nine tensor round trips it removes — a third of the total — are of the second kind. The theorem also credits a value read *twice* inside the group with `1 + 2 = 3` transfers saved, which is right for traffic and is precisely where the implementation disagrees: it charges that value as shared-memory pressure instead and may refuse the fusion outright. That is the distinction Chapter 24 will pay a factor of two for.
 
 > **Corollary 22.4 (Chains are the ideal case).** For a chain of `k` elementwise binary operations over `n`-element tensors of `b` bytes each, where every intermediate is used once, unfused traffic is `3knb` — two reads and one write per operation. Fused traffic is `(i + 1)nb`, where `i` is the number of *distinct* external inputs, so the ratio is `3k / (i + 1)`. In the case §22.5 measures, where the whole chain is written over the same two tensors, `i = 2` and the ratio is exactly `k`.
 
@@ -74,7 +74,13 @@ The cost model in the compiler computes Theorem 22.3's difference exactly, becau
       launchSaved: (group.size - 1) * this.launchOverheadUs,
 ```
 
-`totalBytes` is the sum over the group's operations of their own operand and result bytes; `fusedBytes` is Definition 22.2's inputs plus outputs. The second line is the `α` from Chapter 4: fusing `k` operations into one removes `k − 1` kernel launches.
+`totalBytes` is the sum over the group's operations of their own operand and result bytes; `fusedBytes` is Definition 22.2's inputs plus outputs. The second line is meant to be the `α` from Chapter 4: fusing `k` operations into one removes `k − 1` kernel launches.
+
+> **The launch term is a constant, and on two of the four backends it is charging for something that does not exist.** `launchOverheadUs` defaults to `DEFAULT_LAUNCH_OVERHEAD_US = 5` ([`graph_pipeline.ts:29`](../../../src/compiler/pipeline/graph_pipeline.ts)) and the target is not consulted — the value is the same 5 µs whether the pipeline is building for CUDA, WebGPU, WebAssembly or the CPU. On the two device backends that is a plausible order of magnitude for a launch. On the CPU and WebAssembly backends **there is no device launch at all**: a fused group and an unfused one are both straight-line code inside one generated function, and merging two nests saves a loop header and a temporary buffer, not a 5 µs submission.
+>
+> The consequence is not that fusion is wrong on the CPU — the memory term still carries the real argument, and §22.5 measures the real benefit. It is that `launchSaved` is a *fixed positive bias toward fusing* on backends where the quantity it names is zero, and it is the term that decides in exactly the case where the memory term is uninformative: a fully dynamic graph, where `estimateBytes` returns zero for every symbolic tensor. There, on the CPU, every group of two or more is fused on the strength of savings that cannot be realized. Chapter 4 §4.5 is the relevant calibration: `α` on the eager CPU path is about 1.3 µs and is dominated by dispatch and allocation — costs that a *compiled* program has already removed — so even as a CPU proxy the constant is measuring the wrong thing.
+>
+> What a target-aware version would look like is straightforward: read the launch cost from the target description, as `maxFusionSize` and `sharedMemoryBytes` already are, and set it to zero for backends with no queue. Chapter 24 §24.5 is the story of a different constant reaching a backend it did not belong to, and it is the same shape of bug.
 
 ## 22.4 In mlfw: what the cost model actually counts
 
@@ -139,29 +145,42 @@ module @Chain {
 
 Two operands in, one result out, four operations inside, three intermediates that never leave the region. Definition 22.2, in IR.
 
+> **Say "one region", not "four ops to one kernel".** The shorthand is everywhere in this field and it is wrong on the backend this lab runs on. There is no device launch on the CPU backend, so "kernel" cannot mean what it means on CUDA, and the compiled artifact is **one generated function in both configurations**. What actually differs is inside it:
+>
+> | | fusion off | fusion on |
+> |---|---|---|
+> | generated functions | 1 | 1 |
+> | loop nests in that function | 4 | 1 |
+> | temporary buffers | 3 | 0 |
+> | device launches | 0 | 0 |
+>
+> The rows that move are the ones the argument needs — three fewer buffers written and read is exactly the traffic Theorem 22.3 counts — and they are the rows you can check by reading `compiled.source()`. The row that does not move is the one the slogan names. On CUDA the launch row would move too, and there the slogan is fair; the habit worth forming is to name the unit you are counting, because "kernel" silently changes meaning between backends. Chapter 1 §1.8 has the five-way table.
+
 Counting by hand: twelve round trips become three, so the model predicts nine tensors of traffic removed per call, independent of size. Theorem 22.3 gets there in two kinds of term — six transfers from the three internalized intermediates, three more from the repeated reads of `x` and `y` — and the `traffic saved` column below is the compiler's own arithmetic agreeing to the byte. Count only the intermediates and you would predict six, which is what makes the second kind worth stating.
 
 Now the measurement, sweeping the tensor from 4 KiB to 16 MiB:
 
 ```
-elements   tensor    unfused   fused    speedup   traffic saved
-    1024       4 KiB    0.013    0.007     1.78x       0.04 MiB
-   16384      64 KiB    0.125    0.051     2.45x       0.56 MiB
-   65536     256 KiB    0.434    0.171     2.54x       2.25 MiB
-  262144    1024 KiB    1.348    0.529     2.55x       9.00 MiB
- 1048576    4096 KiB    5.315    2.080     2.56x      36.00 MiB
- 4194304   16384 KiB   21.079    8.385     2.51x     144.00 MiB
+elements   tensor    unfused   fused    speedup   traffic saved   IQR overlap
+    1024       4 KiB    0.020    0.034     0.59x       0.04 MiB   YES - noise
+   16384      64 KiB    0.188    0.077     2.43x       0.56 MiB            no
+   65536     256 KiB    0.653    0.300     2.17x       2.25 MiB            no
+  262144    1024 KiB    1.751    1.156     1.52x       9.00 MiB            no
+ 1048576    4096 KiB    7.109    4.069     1.75x      36.00 MiB            no
+ 4194304   16384 KiB   28.423   14.826     1.92x     144.00 MiB            no
 ```
+
+Each timing is the median of 25 rounds (Node 24.9, 2026-08-21), and the last column reports whether the two interquartile ranges overlap. The 4 KiB row says `YES`, and it is right to: both tensors fit in L1, both versions take tens of microseconds, and the `0.59x` there is noise rather than a slowdown. Every other row is outside the noise, which is what licenses reading its ratio at all.
 
 Three things to take from this table, and the third is the most important.
 
 **The speedup is real and large.** Two and a half times, for a transformation that changed no arithmetic whatsoever. Nothing else in Part IV comes close: Chapter 19's three passes removed operations that were doing nothing, and this one removed nothing at all — it only changed where the numbers live between operations.
 
-**The speedup is flat once the tensors leave cache.** From 64 KiB to 16 MiB — a 256-fold span — the ratio sits between 2.45 and 2.56 on the machine that produced this table, and stays in a similarly narrow band on others. That flatness is the model being right: traffic saved scales linearly with `n`, traffic total scales linearly with `n`, so the ratio is a constant. A speedup that climbed or fell steadily with size would mean the model had missed the dominant term.
+**The speedup is flat once the tensors leave cache.** From 64 KiB to 16 MiB — a 256-fold span — the ratio stays in a band roughly 1.5 to 2.4 on the machine that produced this table, with no trend across the span, and stays in a similarly narrow band on others. That flatness is the model being right: traffic saved scales linearly with `n`, traffic total scales linearly with `n`, so the ratio is a constant. A speedup that climbed or fell *steadily* with size would mean the model had missed the dominant term; a couple of tenths of drift between adjacent rows is cache behaviour, and the reason to trust that reading rather than inventing a story for it is the IQR column.
 
-**And it is 2.55, not the 4.0 the traffic ratio predicts.** The model says twelve transfers become three. The clock says 2.55. The gap is the model's assumption: `T ∝ bytes` holds for a kernel that is purely memory-bound, and these kernels also execute four arithmetic operations and a loop per element, which the fused version still does. Traffic went down 4×; the part of the runtime that was traffic went down 4×; the rest did not. Chapter 4's roofline says the same thing in one sentence: you can only remove the memory-bound part of a memory-bound kernel.
+**And it is about 1.9, not the 4.0 the traffic ratio predicts.** The model says twelve transfers become three. The clock says roughly 1.9. The gap is the model's assumption: `T ∝ bytes` holds for a kernel that is purely memory-bound, and these kernels also execute four arithmetic operations and a loop per element, which the fused version still does. Traffic went down 4×; the part of the runtime that was traffic went down 4×; the rest did not. Chapter 4's roofline says the same thing in one sentence: you can only remove the memory-bound part of a memory-bound kernel.
 
-The small end is the other boundary. At 4 KiB the two tensors fit in L1, so the "unfused" version is not really doing twelve trips to memory — it is doing twelve trips to cache — and the remaining 1.78× is mostly the four kernel launches becoming one, which is Chapter 4's `α`. The model's assumption fails exactly where you would expect it to, and the failure is in the direction of over-predicting the benefit.
+The small end is the other boundary. At 4 KiB the two tensors fit in L1, so the "unfused" version is not really doing twelve trips to memory — it is doing twelve trips to cache — and what remains is mostly four loop nests and three temporary buffers becoming one nest and none, which is Chapter 4's `α` in its CPU form. Note that it is *not* four launches becoming one: this backend issues none. The model's assumption fails exactly where you would expect it to.
 
 **Try this.** Change the chain to `x.add(y).exp().log().add(x)` — same length, two transcendental operations. Predict what happens to the speedup before running, using Chapter 4's Theorem 4.4.
 
@@ -171,7 +190,7 @@ Three consequences worth carrying forward.
 
 **Decomposition becomes free.** Chapter 21 turned one `softmax` into nine operations and the pipeline turned it back into one kernel. The reason that is not a disaster is this chapter: the nine operations were elementwise and reduction operations over the same shape, so their intermediates were internalizable, so fusing them cost nothing that the original `softmax` kernel would not also have paid.
 
-**The graph's operation count stops being a proxy for cost.** After fusion, a graph of six operations may be one kernel or six; the number that matters is the number of *regions* and what is inside them. Every measurement from here on counts kernels, not operations.
+**The graph's operation count stops being a proxy for cost.** After fusion, a graph of six operations may be one region or six; the number that matters is the number of *regions* and what is inside them. Every measurement from here on counts regions and loop nests, not operations — and on a device backend, launches.
 
 **And the cost model becomes load-bearing.** Everything above assumed the compiler fuses when fusing helps. It fuses when its cost model says fusing helps, and Chapters 23 and 24 are about the two ways that goes wrong: a merge that is illegal, and a merge the model declines for a reason that does not apply to your target.
 

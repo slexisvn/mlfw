@@ -19,6 +19,10 @@ Any engineer would rank these instantly: the second has 64 independent chunks of
 
 The shipped model has neither. Its parallelism term is `numParallelLoops / numLoops` ([`cost_model.ts:113`](../../../src/compiler/autotune/cost_model.ts)) — a ratio of counts. Both schedules have one parallel loop out of nine. They score identically, and so does every other point of the space.
 
+> **One caveat about this example before it does its work.** The claim above is that a *good* model would prefer 64 parallel chunks to 1, and on a machine that executes them in parallel it plainly would. The CPU backend this chapter's numbers come from does not: `parallelize` is an advisory annotation there, and the generated JavaScript runs a serial loop whatever the tag says (Chapter 38 §38.4). So on *this* target the two schedules genuinely do run at similar speeds, and a model scoring them equally is not obviously wrong.
+>
+> That does not weaken the point, it sharpens it. The model's parallelism term is a ratio of *counts* on every target — it would score the two schedules identically on WebAssembly, where the worker pool does execute the annotation, and on CUDA, where the extent decides the launch geometry. A term that cannot distinguish an extent-1 parallel loop from an extent-64 one is wrong wherever parallelism is real, and happens to be harmless on the one backend that ignores it. Read the example as "the feature is blind", not as "this schedule is faster and the model missed it" — the second claim would need a backend that runs it.
+
 That is not a bug in a single line; it is what happens when a feature vector is designed before the space it has to discriminate. The chapter's job is to make the failure mode legible: which features exist, which of them vary over a sketch's space, and what the score is therefore a function of.
 
 ## 46.2 Intuition: two ways to be wrong
@@ -51,7 +55,22 @@ The shift has to be chosen against the residuals rather than fixed in advance, a
 
 > **Counterexample 46.5 (Lower error, higher regret).** *(Stated in predicted cost rather than score: Definition 46.2's convention is higher-is-better, and a model fitted to time predicts its negation, so here the selection is an arg-min.)* Three candidates with true costs `(1, 2, 100)` ms. Model B predicts `(2, 1, 100)`: mean squared error `2/3`, and it selects candidate 1, whose regret is 1 ms. Model C predicts `(50, 51, 60)`: mean squared error `2134`, and it selects candidate 0, whose regret is 0. C's error is 3,201 times B's and its regret is smaller. §46.6 runs the arithmetic.
 
-Corollary 46.4 says a regression metric cannot *prove* anything about search quality; Counterexample 46.5 says it cannot even be relied on as a heuristic in the small. What survives is the practical claim, which §46.6 also measures: on real data a model that fits better usually ranks better, and fitting is worth doing — just not worth *reporting* as if it were the objective.
+Corollary 46.4 says a regression metric cannot *prove* anything about search quality; Counterexample 46.5 says it cannot even be relied on as a heuristic in the small.
+
+**The converse is not true either, and it is worth stating because the chapter's rhetoric could carry a reader past it.** "Error and ranking are unrelated" is too strong in the other direction: *small enough* error does constrain ranking, and the bound is elementary.
+
+> **Proposition 46.6a (Small error does bound regret, stated here).** Let the true costs be `y₁,…,yₙ` with optimum `y*` and let `δ = min{ y_i − y* : y_i > y* }` be the margin between the best candidate and the next distinct one. If every residual satisfies `|ĉ(x_i) − y_i| < δ/2`, the model selects an optimal candidate and its regret is zero.
+>
+> *Proof.* For an optimal `p*` and any `p` with `y_p ≥ y* + δ`, we have `ĉ(p*) < y* + δ/2 ≤ y_p − δ/2 < ĉ(p)`. So no suboptimal candidate is ranked above an optimal one. ∎
+
+Since `MSE < ε²/n` implies every residual is below `ε`, a sufficiently small mean squared error *does* guarantee zero regret — and exact zero error trivially fixes the ranking outright. Corollary 46.4 does not contradict this: its `g(x) = x + c` shift raises the error while preserving order, which shows **large error is compatible with perfect ranking**, not that small error is compatible with bad ranking.
+
+So the accurate pair of statements is:
+
+- **Large error tells you nothing.** A model may be badly calibrated and rank perfectly (Corollary 46.4), or fit tolerably and rank badly (Counterexample 46.5). This is the direction that matters in practice, because measured errors on real cost models are nowhere near `δ/2`.
+- **Small error tells you something, and the threshold is set by the *space*, not the model.** Proposition 46.6a's `δ` is a property of how separated the candidates are. §44.6's eight matmul points span 1.08×, so `δ` there is a few percent of the runtime and the accuracy needed to rank them is far beyond any analytic model in this compiler. A space whose candidates differ by 10× is easy to rank badly and hard to rank wrongly.
+
+What survives is the practical claim, which §46.6 also measures: on real data a model that fits better usually ranks better, and fitting is worth doing — just not worth *reporting* as if it were the objective.
 
 Now the chapter's sharpest statement, which is about this compiler rather than about cost models in general.
 
@@ -322,7 +341,17 @@ The label is not given the same treatment. `_measure` benchmarks the *whole* sch
     return { result, features: FeatureExtractor.extractStatements(miniScheduled) };
 ```
 
-In a program with `k` blocks, every sample for every block carries the time of all `k`. The differences between candidates for one block survive — the other blocks contribute the same constant to each — so the *ranking within a block* is unaffected, which is what Theorem 46.3 says is all that matters within a round. What is affected is the model itself, since samples from different blocks share one `LearnedCostModel` ([`autotuner.ts:158`](../../../src/compiler/autotune/autotuner.ts)) and are fitted against labels that all include one another's time.
+In a program with `k` blocks, every sample for every block carries the time of all `k`. The differences between candidates for one block survive **if** the other blocks contribute the same constant to each — in which case the *ranking within a block* is unaffected, which is what Theorem 46.3 says is all that matters within a round.
+
+That "if" is an assumption of **additive separability**, and it is worth naming because nothing enforces it and three ordinary effects break it:
+
+- **Cache.** Scheduling block `A` to hold a large tile evicts what block `B` was about to reuse. `B`'s time then depends on `A`'s schedule, and the "constant" moves with the candidate under test.
+- **JIT and code size.** The blocks are emitted into one generated function. A candidate that unrolls heavily changes the size of that function, and the host engine's decisions about it — inlining, tiering, register allocation — apply to the whole thing.
+- **Parallel resources.** Where two blocks contend for the same worker pool, their times are not independent by construction.
+
+None of these makes the pairing useless — it is the pragmatic choice, and measuring one block in isolation would require compiling it in isolation, which changes what is being measured in a different way. What it means is that the labels carry a *candidate-dependent* offset rather than a constant one, so the residuals the model is fitted against contain structure that has nothing to do with the features it sees. Corollary 46.4 already said error does not constrain ranking; this is the mechanism by which the error is not even i.i.d. noise.
+
+What is affected beyond one round is the model itself, since samples from different blocks share one `LearnedCostModel` ([`autotuner.ts:158`](../../../src/compiler/autotune/autotuner.ts)) and are fitted against labels that all include one another's time. What is affected is the model itself, since samples from different blocks share one `LearnedCostModel` ([`autotuner.ts:158`](../../../src/compiler/autotune/autotuner.ts)) and are fitted against labels that all include one another's time.
 
 Last, the handover:
 

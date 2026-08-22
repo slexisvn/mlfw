@@ -58,7 +58,7 @@ The important word is *assertion*. The compiler does not verify finiteness — i
 
 Two things that are **not** licensed by any flag in this compiler, and are worth naming so they are not assumed:
 
-- **Reassociation.** `(a + b) + c ≢ a + (b + c)` even over finite floats, because rounding happens at each step. Chapter 11's `ASSOCIATIVE` trait exists and no pass uses it to reassociate float arithmetic.
+- **Reassociation.** `(a + b) + c ≢ a + (b + c)` even over finite floats, because rounding happens at each step. Chapter 11's `ASSOCIATIVE` trait exists and is declared unconditionally on `add` and `mul`, so the trait alone cannot be trusted here; §20.8 is where the rewrite that consumes it gets its dtype test.
 - **Distribution.** `a×b + a×c ≢ a×(b + c)`, same reason.
 
 ## 20.4 In mlfw: the gate is a constructor argument
@@ -230,7 +230,13 @@ The rule that falls out: **an algebraic rewrite belongs at the highest level tha
 - **`fastMath` is one global flag.** There is no per-operation, per-function or per-region control, so a model with one numerically delicate layer either gives up fast-math everywhere or accepts it everywhere. This is the same limitation C compilers have, and the same workaround applies: compile the delicate part separately.
 - **The licence is asserted and never checked.** Nothing verifies finiteness, and nothing warns when a fast-math rewrite fires on a graph whose inputs the compiler has actually seen. The optimization gate (Chapter 61) *does* verify candidate optimizations numerically before keeping them — that machinery exists, and fast-math does not use it.
 - **Integer division is not simplified at all.** `DivSelf` is fast-math-only, so `x / x` for integers is left alone even though the only exception is `x = 0`, which is a trap on most hardware rather than a wrong value. Conservative, and inconsistent with `SubSelf`'s treatment of integers.
-- **Reassociation is absent, and that is deliberate.** `ASSOCIATIVE` is declared on `add` and `mul` (Chapter 11), and the only pattern that uses it, `AssociativeConstantReassoc`, reassociates *constants* — it requires both reassociated operands to be constant operations and folds them ([`patterns.ts:491`](../../../src/compiler/ir/graph/patterns.ts)). No pass reassociates a float sum of runtime values, under any flag.
+- **Reassociation is gated in the pattern, not in the trait.** `ASSOCIATIVE` is declared unconditionally on `add` and `mul` (Chapter 11 §11.3), and canonicalization registers a reassociation pattern for every operation that is commutative, associative and foldable ([`canonicalize.ts:19`](../../../src/compiler/passes/canonicalize/canonicalize.ts)). `AssociativeConstantReassoc` ([`patterns.ts:493`](../../../src/compiler/ir/graph/patterns.ts)) rewrites `(x ⊕ c₁) ⊕ c₂` into `x ⊕ (c₁ ⊕ c₂)`. Both *constants* are constant, which is the sense in which the pattern is "about constants" — but `x` is a runtime value, and re-bracketing a three-term float expression around it is a reassociation whatever the operands are called.
+
+  So the pattern applies the same test `AddZero` does: integers unconditionally, floats only under a licence. Without it the rewrite fires at N1 and changes results:
+
+  > **Counterexample 20.4.** With `fastMath: false`, eager execution of `(1 + 10¹⁶) + (−10¹⁶)` yields `0`, because `1` is lost to rounding when added to `10¹⁶`. Reassociated, the compiler folds `10¹⁶ + (−10¹⁶)` to `0` first and the answer is `1`. Note that the reassociated program is *more* accurate here, which is exactly why this class of rewrite survives review — but "differs from eager execution, in a direction we did not choose, on an input we did not anticipate" is the problem, and Definition 1.4's point is that the level is the user's to pick.
+
+  The gate has one structural consequence worth knowing: `CanonicalizePass` has to be fast-math aware, so it caches one pattern set per setting rather than one globally. [`traits.test.js`](../../../tests/compiler/passes/canonicalize/traits.test.js) pins all three cases — fires on `i32`, refused on `f32`, fires again on `f32` under fast-math. The alternative, dropping `ASSOCIATIVE` from float-capable arithmetic, was rejected because the trait is *true* for the integer instantiations of those same operations.
 
 ## 20.9 Read the tests
 

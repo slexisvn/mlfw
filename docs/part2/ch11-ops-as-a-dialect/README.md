@@ -119,6 +119,23 @@ export function register(registry: OpRegistry) {
 
 That is the entire definition of `add`. Nine lines, four of which are shared helpers used by every binary arithmetic operation. Compare `sub` immediately below it in the same file: same arity, same type inference, same verification, with three fields differing — its own fold, its own canonicalization patterns, and `traits: binaryArithTraits` where `add` has `commBinaryArithTraits`. That last one is a single word, and it is the whole of what makes the two operations behave differently in CSE.
 
+> **Now unfold that single word, because it contains a claim that is false for most of the dtypes it covers.** [`ops/helpers.ts:69`](../../../src/compiler/ir/graph/ops/helpers.ts):
+>
+> ```ts
+> export const commBinaryArithTraits: readonly OpTraitValue[] =
+>   [...binaryArithTraits, OpTrait.COMMUTATIVE, OpTrait.ASSOCIATIVE];
+> ```
+>
+> `add` and `mul` therefore declare **`ASSOCIATIVE` unconditionally** — for every dtype the operation accepts, including `f32` and `f64`. Floating-point addition is not associative: `(2⁵³ + 1) + (−2⁵³)` is `0` in `f64` while `2⁵³ + (1 + (−2⁵³))` is `1`. The declaration is simply untrue for the dtypes these operations spend almost all their time carrying.
+>
+> The trait is *declared per operation*, and an operation is not per-dtype — there is one `add` in the registry, serving `i32` (where the claim holds) and `f32` (where it does not), so the data model as it stands has nowhere to put a dtype-conditional trait.
+>
+> That would be a wording problem if nothing read it. Something does: canonicalization registers a reassociation pattern for any operation that is commutative, associative and foldable ([`canonicalize.ts:19`](../../../src/compiler/passes/canonicalize/canonicalize.ts)), which is exactly `add` and `mul`. Chapter 20 §20.8 is what that pattern has to do about the false half of the declaration.
+
+So the accurate reading of the trait list is: **a trait is a claim about the operation, asserted for every dtype it accepts.** Where a property is dtype-dependent — and associativity is the important case — a trait cannot express it, and **the check has to move into the pattern that consumes the trait**. That is where it lives: `AddZero` and `AssociativeConstantReassoc` both ask for the operand's dtype at match time and decline on floats without a fast-math licence. The trait over-claims; every consumer of it re-checks.
+
+Whenever you see a trait consulted without a dtype test nearby, that is the question to ask — and Chapter 17 §17.7 is why a *generated* pattern makes the question harder to spot than a hand-written one does.
+
 Operations are grouped into fourteen dialect files under [`ops/`](../../../src/compiler/ir/graph/ops/) by family, alongside a `helpers.ts` of shared inference and verification functions — arithmetic, unary, comparison, shape, reduction, linalg, data, control flow, layout, quantization, composite, transfer, pooling, resize — and assembled once ([`ops.ts:19`](../../../src/compiler/ir/graph/ops.ts)):
 
 ```ts
@@ -328,9 +345,9 @@ That is worth noticing for what it says about where the boundary is. The tracer 
 ## 11.8 Traps and limits
 
 - **The registry is process-global.** [`ops.ts:32`](../../../src/compiler/ir/graph/ops.ts) constructs one `registry` at module load and everything imports it. `register` throws on a duplicate name, so two dialects cannot both define `add` — deliberate, but it means there is no namespacing and no way to have two dialects coexist with overlapping names. MLIR's `dialect.op` prefixes exist for exactly this and are not reproduced here.
-- **A trait with no verifier is a promise nobody checks.** Fifteen traits are declared; eight have verifiers (Chapter 12). `ASSOCIATIVE`, `INJECTIVE`, `REDUCTION`, `BROADCAST`, `OPAQUE`, `OUT_EWISE_FUSABLE` and `RECURSIVE_MEMORY_EFFECTS` are consumed by passes but not validated, so declaring one wrongly produces a miscompile rather than an error. When you add an operation, the traits are the part to get right first.
+- **A trait with no verifier is a promise nobody checks — and there is no verifier that could check the algebraic ones.** Fifteen traits are declared; eight have verifiers (Chapter 12). `ASSOCIATIVE`, `INJECTIVE`, `REDUCTION`, `BROADCAST`, `OPAQUE`, `OUT_EWISE_FUSABLE` and `RECURSIVE_MEMORY_EFFECTS` are consumed by passes but not validated, so declaring one wrongly produces a miscompile rather than an error. Be clear about *why* the split falls where it does: the eight that are verified are **structural** claims — "same operand and result type", "terminator is last" — which the verifier decides by inspecting the operation in front of it. The seven that are not are **semantic** claims, quantified over all inputs. Verifying `ASSOCIATIVE` would mean establishing `f(f(a,b),c) = f(a,f(b,c))` for every triple of tensors the operation accepts, which no verifier is going to do by inspection, and which is *false* for the operations that declare it. So this is not a gap somebody forgot to fill; it is a limit on what a declaration-plus-verifier design can enforce. The vocabulary lets an operation assert a law, and the compiler's only defence against a wrong assertion is review. When you add an operation, the traits are the part to get right first.
 - **`structuralEquals` refuses operations with regions.** [`operation.ts:204`](../../../src/compiler/ir/graph/operation.ts) returns `false` if either side has a region, so CSE never merges two identical `fusion`s or two identical `scan`s. That is conservative and safe — comparing two region bodies for equality is a graph isomorphism problem — but it does mean a program with genuinely duplicated loops keeps both.
-- **Commutativity is declared over the operation, not the dtype.** `add` on floats is commutative; `add` on floats is *not* associative, which is why `ASSOCIATIVE` is a separate trait and why Chapter 20 has to be careful. Do not read `COMMUTATIVE` as licence to reassociate.
+- **Commutativity is declared over the operation, not the dtype — and so is associativity.** `add` on floats is genuinely commutative: IEEE 754 addition returns the same result for `a + b` and `b + a`, NaN payloads aside, so `COMMUTATIVE` is a true claim. `ASSOCIATIVE` on the same operation is a false one, for the reason §11.3 spells out, and the two travel together inside `commBinaryArithTraits`. Do not read either as licence to reassociate: the first does not imply it, and the second asserts it wrongly — which is why every consumer of `ASSOCIATIVE` has to re-check the dtype itself.
 - **`fold` operates on scalars.** The `FoldFn` signature takes `AttrValue`s, and the arithmetic folds are written as scalar functions. Folding a whole constant tensor elementwise is not what this hook does; that is the constant-folding pass's job, using the hook per element where it applies.
 
 ## 11.9 Read the tests

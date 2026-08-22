@@ -24,7 +24,7 @@ The picture worth holding is a rectangle of lattice points. `split` draws horizo
 
 ## 40.3 Theory
 
-Fix a loop `for i in [0, n)` with body `B(i)`, and let `c > 0`.
+Fix a loop `for i in [0, n)` with body `B(i)`, and let `c > 0`. **The lower bound being zero is a hypothesis, not a convenience.** A `ForNode` carries a `min` as well as an `extent` ([`nodes.ts:106`](../../../src/compiler/ir/tensor/nodes.ts)), so a loop over `[m, m + n)` is representable and `split` has to carry the offset through; §40.7 is where that hypothesis is discharged.
 
 > **Definition 40.1 (Split).** `split(i, c)` replaces the loop by
 > `for i_o in [0, ⌈n/c⌉) { for i_i in [0, c) { if (i_o·c + i_i < n) B(i_o·c + i_i) } }`,
@@ -96,7 +96,19 @@ Then the outer loop is built and the substitution runs:
 
 Two preconditions, both checked before anything is built: a non-constant extent is refused outright, and so is a factor that is not a positive integer. The first is why `SchedulePolicy.applyToBlock` refuses to schedule *any* block with a dynamic extent on a GPU ([`rules.ts:560`](../../../src/compiler/schedule/rules.ts)) — with no constant extent there is no `⌈n/c⌉` and hence no grid.
 
-`split` preserves `loop.kind` and `loop.threadTag` on **both** halves. Splitting a `@vectorized` loop gives two vectorised loops, which is very likely not what the caller meant; no rule does it, and nothing prevents it.
+`split` preserves `loop.kind` on **both** halves, and refuses outright to split a thread-bound loop.
+
+The `kind` case is a wart: splitting a `@vectorized` loop gives two vectorised loops, which is very likely not what the caller meant. No rule does it, and nothing prevents it.
+
+The thread tag is a sharper problem and gets a sharper answer. A binding is a statement about *how many* parallel instances there are and which index each gets, so copying `threadIdx.x` onto both halves of a split would claim that the outer and inner loops are each the full thread axis — and the launch geometry Chapter 43 derives from those tags would see one axis bound twice, at two different extents, describing neither the original contract nor a coherent new one. Moving the tag to the inner loop, or to the outer, are both defensible readings of what the caller might have meant, which is precisely the reason not to guess:
+
+```ts
+    if (loop.threadTag) {
+      throw new Error(`Cannot split loop '${loop.loopVar.name}': it is bound to '${loop.threadTag}', ...`);
+    }
+```
+
+The refusal costs nothing, because every binding site in this compiler splits *first* and binds afterwards — `sketch_generators.ts` and the GPU rules in `rules.ts` all follow `split(...)` with `bindThread` on the halves. Splitting a bound loop is a sequence nobody writes, and Definition 38.1's "each primitive refuses rather than repairs" is exactly the licence to leave it that way.
 
 ### `fuseLoops`
 
@@ -275,9 +287,13 @@ __global__ void Object(float* buf_1, float* buf_3) {
 }
 ```
 
-`(f / 5) * 5 + f % 5`, emitted twice per element, in shipping output, having passed through `SimplifyPass` and every TIR and LIR pass after it. The analyzer did its half of the job — the operators are C's `/` and `%`, the truncating pair, which the simplifier substitutes only where it has proved the dividend non-negative (Theorem 37.6). It holds the proof that the subscript is `f` and emits four operations anyway, which is Chapter 35's finding 8 verbatim, now reachable from the scheduler as well as from `reshape`.
+`(f / 5) * 5 + f % 5`, emitted twice per element, in shipping output, having passed through `SimplifyPass` and every TIR and LIR pass after it. The analyzer did its half of the job — the operators are C's `/` and `%`, the truncating pair, which the simplifier substitutes only where it has proved the dividend non-negative (Theorem 37.6). It holds the proof that the subscript is `f` and emits four operations anyway, which is exactly the identity Chapter 35 watched the simplifier decline to fold, now reachable from the scheduler as well as from `reshape`.
 
 ## 40.7 Traps and limits
+
+> **Counterexample 40.7 (The other hypothesis).** A loop over `[m, m + n)` is representable, and a `split` that ignores `m` is wrong on it: computing the extent, building two loops both starting at `0`, and substituting `i ↦ i_o·c + i_i` is the mapping for `m = 0`, so `for i in [2, 6)` split by 2 runs the body at `i ∈ {0, 1, 2, 3}` where it should run at `{2, 3, 4, 5}` — every access off by `m`. The substitution therefore carries the offset, `i ↦ m + (i_o·c + i_i)`, while the guard stays `i_o·c + i_i < n` because it is a test in the *shifted* space. The offset is emitted only when `min` is not the constant zero, so the ordinary nest is unchanged and no simplifier has to clean up a `+ 0`.
+
+**Note how little of the compiler would notice if that were wrong.** Every loop the lowering rules in Chapter 34 emit has `min = 0`, so no compilation reaches the offset path — and the TIR printer does not render `min` at all, so a discrepancy would not appear in the one tool you would use to look for it. Neither is a reason to skip it: `split` is documented as a primitive over `ForNode`, and `ForNode` has a `min`. **A primitive's contract is its signature, not the subset of inputs the rest of the compiler happens to produce.**
 
 - **`split` propagates the loop kind to both halves.** Splitting a `@parallel` loop produces two `@parallel` loops, which `ScheduleValidator._checkNoNestedParallel` ([`validator.ts:167`](../../../src/compiler/schedule/validator.ts)) would report as nested parallelism — on the paths that run the validator. No rule does this, because every rule splits before it annotates.
 - **The guard's index expression is built twice.** §40.4. The predicate and the body each hold their own `i_o·c + i_i`, structurally equal and not shared. Nothing at the TIR level commons them; the CPU backend's expression peephole and the LIR CSE do.

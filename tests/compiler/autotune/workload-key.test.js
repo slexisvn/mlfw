@@ -63,3 +63,21 @@ describe('TuningDatabase.computeWorkloadKey delegates to workload_key', () => {
     expect(dbKey).toBe(directKey);
   });
 });
+
+describe('the numerical mode is part of the workload key', () => {
+  it('separates records tuned under fast-math from records tuned without it', () => {
+    const func = makePrimFunc(makeBlock('blk', 'a'));
+    const target = CPUTarget();
+
+    expect(computeWorkloadKey(func, 'blk', target, null, 'n1'))
+      .not.toBe(computeWorkloadKey(func, 'blk', target, null, 'n3'));
+  });
+
+  it('is stable for the same mode', () => {
+    const func = makePrimFunc(makeBlock('blk', 'a'));
+    const target = CPUTarget();
+
+    expect(computeWorkloadKey(func, 'blk', target, null, 'n1'))
+      .toBe(computeWorkloadKey(func, 'blk', target, null, 'n1'));
+  });
+});

@@ -43,6 +43,8 @@ function _gammaExpr(arg: string): string {
   return `((x_g => { const lg = ${_LGAMMA_CORE}; return x_g < 0.5 ? Math.PI / (Math.sin(Math.PI * x_g) * Math.exp(lg(1 - x_g))) : Math.exp(lg(x_g)); })(${arg}))`;
 }
 
+const EXACT_EXTERNS: ReadonlySet<string> = new Set(['max', 'min', 'abs', 'floor', 'ceil', 'round', 'sign', 'sqrt', 'fmod']);
+
 export class CPUCodegen {
   target: TargetFeatures;
   _indent: number;
@@ -177,6 +179,24 @@ export class CPUCodegen {
     return dtype === 'i64' ? '0n' : '0';
   }
 
+  _roundToDtype(dtype: string, expr: string): string {
+    return dtype === 'f32' ? `Math.fround(${expr})` : `(${expr})`;
+  }
+
+  _stripOuterRound(dtype: string, expr: string): string {
+    const prefix = 'Math.fround(';
+    if (dtype !== 'f32' || !expr.startsWith(prefix) || !expr.endsWith(')')) return expr;
+    let depth = 0;
+    for (let i = prefix.length - 1; i < expr.length; i++) {
+      const c = expr[i];
+      if (c === '(') depth++;
+      else if (c === ')' && --depth === 0) {
+        return i === expr.length - 1 ? expr.slice(prefix.length, -1) : expr;
+      }
+    }
+    return expr;
+  }
+
   _visitNode(startNode: IRStmtNode): void {
     let node: IRStmtNode = startNode;
     while (node) {
@@ -282,7 +302,8 @@ export class CPUCodegen {
       this._emit(this._accVar + ' = ' + this._exprToJS(node.value) + ';');
       return;
     }
-    this._emit(node.buffer.name + '[' + this._exprToJS(node.offsetExpr) + '] = ' + this._wrapStoreVal(node.dtype || node.buffer.dtype, this._exprToJS(node.value)) + ';');
+    const storeDtype = node.dtype || node.buffer.dtype;
+    this._emit(node.buffer.name + '[' + this._exprToJS(node.offsetExpr) + '] = ' + this._wrapStoreVal(storeDtype, this._stripOuterRound(storeDtype, this._exprToJS(node.value))) + ';');
   }
 
   _visitLIRBindings(node: LIRBindingsNode): void {
@@ -479,7 +500,7 @@ export class CPUCodegen {
               else if (node.op === '//') vals.push(`Math.floor(${a} / ${b})`);
               else if (node.op === 'tmod') vals.push(`(${a} % ${b})`);
               else if (node.op === 'tdiv') vals.push(`((${a} / ${b}) | 0)`);
-              else vals.push(`(${a} ${node.op} ${b})`);
+              else vals.push(this._roundToDtype(dtype, `${a} ${node.op} ${b}`));
             }
           }
           continue;
@@ -515,15 +536,17 @@ export class CPUCodegen {
             const args: string[] = [];
             for (let i = 0; i < node.args.length; i++) args.unshift(vals.pop() as string);
             const joined = args.join(', ');
-            if (isJSMathFunc(node.externName)) vals.push(`Math.${node.externName}(${joined})`);
-            else if (node.externName === 'rsqrt') vals.push(`(1.0 / Math.sqrt(${joined}))`);
+            const externDtype = EXACT_EXTERNS.has(node.externName) ? '' : inferDtype(node);
+            const round = (e: string) => this._roundToDtype(externDtype, e);
+            if (isJSMathFunc(node.externName)) vals.push(EXACT_EXTERNS.has(node.externName) ? `Math.${node.externName}(${joined})` : round(`Math.${node.externName}(${joined})`));
+            else if (node.externName === 'rsqrt') vals.push(round(`1.0 / Math.sqrt(${joined})`));
             else if (node.externName === 'fmod') vals.push(`((${args[0]} % ${args[1]} + ${args[1]}) % ${args[1]})`);
-            else if (node.externName === 'exp2') vals.push(`Math.pow(2, ${joined})`);
-            else if (node.externName === 'erf') vals.push(_erfExpr(joined));
-            else if (node.externName === 'erfc') vals.push(`(1.0 - ${_erfExpr(joined)})`);
-            else if (node.externName === 'lgamma') vals.push(_lgammaExpr(joined));
-            else if (node.externName === 'gamma') vals.push(_gammaExpr(joined));
-            else if (node.externName === 'log10') vals.push(`(Math.log(${joined}) * ${1 / Math.LN10})`);
+            else if (node.externName === 'exp2') vals.push(round(`Math.pow(2, ${joined})`));
+            else if (node.externName === 'erf') vals.push(round(_erfExpr(joined)));
+            else if (node.externName === 'erfc') vals.push(round(`1.0 - ${_erfExpr(joined)}`));
+            else if (node.externName === 'lgamma') vals.push(round(_lgammaExpr(joined)));
+            else if (node.externName === 'gamma') vals.push(round(_gammaExpr(joined)));
+            else if (node.externName === 'log10') vals.push(round(`Math.log(${joined}) * ${1 / Math.LN10}`));
             else throw new Error(`CPU codegen: unsupported extern function "${node.externName}"`);
           }
           continue;

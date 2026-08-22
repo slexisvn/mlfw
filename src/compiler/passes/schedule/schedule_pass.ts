@@ -26,7 +26,7 @@ export class SchedulePass extends PrimFuncPass {
   override begin(ctx: TirPassCtx): void {
     const sCfg = this.config.scheduling as Record<string, boolean>;
     if (sCfg.autotune) {
-      this._autotuner = new Autotuner(this.target, sCfg, ctx.trace);
+      this._autotuner = new Autotuner(this.target, { ...sCfg, fastMath: !!(this.config.optimization as { fastMath?: boolean } | undefined)?.fastMath }, ctx.trace);
     } else if (sCfg.enabled) {
       this._policy = new SchedulePolicy(this.target, null, ctx.trace);
     }

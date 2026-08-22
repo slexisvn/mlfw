@@ -25,7 +25,7 @@ import type { DType, NumericTypedArray } from '../tensor/types/dtype.js';
 import type { TensorType } from '../compiler/ir/graph/types.js';
 import type { ShapeEnv } from './shape_env.js';
 import type { SymbolicTensor } from './symbolic_tensor.js';
-import type { CompilableModel, CompiledEntry, CompiledForward, CompiledResult, CompileOptions, DynamicShapes, GraphModuleLike, MaybePromise, RuntimeArg, RuntimeTensorLike, SymbolicShape, TensorOutput, TracedCore } from './types.js';
+import type { CompilableModel, CompiledEntry, InputSignature, CompiledForward, CompiledResult, CompileOptions, DynamicShapes, GraphModuleLike, MaybePromise, RuntimeArg, RuntimeTensorLike, SymbolicShape, TensorOutput, TracedCore } from './types.js';
 import type { GraphModule } from '../compiler/ir/graph/module.js';
 
 let _tracingRegistered = false;
@@ -273,6 +273,18 @@ function _timeEntry(entry: CompiledEntry, inputs: readonly Tensor[]): { ms: numb
   return { ms: samples[Math.floor(samples.length / 2)], values: _flatOf(last) };
 }
 
+export function inputSignatureOf(inputs: readonly Tensor[]): InputSignature {
+  return inputs.map(t => ({ dtype: String(t.dtype), device: String(t.device ?? 'cpu') }));
+}
+
+export function signatureMatches(a: InputSignature, b: InputSignature): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].dtype !== b[i].dtype || a[i].device !== b[i].device) return false;
+  }
+  return true;
+}
+
 export function compile(model: CompilableModel, exampleInputs?: Tensor[], opts: CompileOptions = {}): unknown {
   if (opts?.backward) {
     return compileWithBackward(model, exampleInputs, opts);
@@ -324,7 +336,7 @@ export function compile(model: CompilableModel, exampleInputs?: Tensor[], opts: 
   const linksConstants = quantizing || !!(target as { supportsConstBuffers?: boolean })?.supportsConstBuffers;
   const foldPredicate = weightPredicate(linksConstants ? Infinity : MAX_FOLDABLE_ELEMENTS);
 
-  function _entryFor(prepared: TracedCore, indexBounds: readonly ArgIndexBound[], overrides: Readonly<Record<string, unknown>> | null): CompiledEntry {
+  function _entryFor(prepared: TracedCore, indexBounds: readonly ArgIndexBound[], overrides: Readonly<Record<string, unknown>> | null, inputSignature: InputSignature): CompiledEntry {
     const opts = overrides
       ? {
         ...compilerOpts as Record<string, unknown>,
@@ -338,6 +350,7 @@ export function compile(model: CompilableModel, exampleInputs?: Tensor[], opts: 
     const result = new Compiler(_bindCalibrationParams(opts, prepared.capturedParams) as never).compile(module) as unknown as CompiledResult;
     return {
       result,
+      inputSignature,
       graph: module as unknown as GraphModuleLike,
       capturedParams: prepared.capturedParams,
       numUserInputs: prepared.numUserInputs,
@@ -348,13 +361,13 @@ export function compile(model: CompilableModel, exampleInputs?: Tensor[], opts: 
     };
   }
 
-  function _finalize(traced: TracedCore): CompiledEntry {
+  function _finalize(traced: TracedCore, inputs: readonly Tensor[]): CompiledEntry {
     const prepared = foldWeights ? foldWeightParams(traced, tensorToContiguous, foldPredicate) : traced;
     const indexBounds = userArgIndexBounds(prepared.graph as unknown as GraphModule, prepared.numUserInputs);
-    const tuned = tuneOptimizations
-      ? runOptimizationGate(prepared, indexBounds, _entryFor)
-      : null;
-    return tuned ?? _entryFor(prepared, indexBounds, null);
+    const signature = inputSignatureOf(inputs);
+    const build = (p: TracedCore, b: readonly ArgIndexBound[], o: Readonly<Record<string, unknown>> | null) => _entryFor(p, b, o, signature);
+    const tuned = tuneOptimizations ? runOptimizationGate(prepared, indexBounds, build) : null;
+    return tuned ?? build(prepared, indexBounds, null);
   }
 
   function runOptimizationGate(
@@ -423,9 +436,9 @@ export function compile(model: CompilableModel, exampleInputs?: Tensor[], opts: 
         { name: model.constructor.name || 'compiled', dynamicShapes: dynShapes }
       );
       if (_isThenable(traced)) {
-        return traced.then(_finalize, (e: unknown) => { throw _attachRepro(e, inputs, 'compile'); });
+        return traced.then((t: TracedCore) => _finalize(t, inputs), (e: unknown) => { throw _attachRepro(e, inputs, 'compile'); });
       }
-      return _finalize(traced);
+      return _finalize(traced, inputs);
     } catch (e) {
       throw _attachRepro(e, inputs, 'compile');
     }
@@ -440,8 +453,10 @@ export function compile(model: CompilableModel, exampleInputs?: Tensor[], opts: 
   }
 
   function _findCachedEntry(inputs: readonly Tensor[]): CompiledEntry | null {
+    const signature = inputSignatureOf(inputs);
     for (let i = 0; i < _cacheEntries.length; i++) {
       const entry = _cacheEntries[i];
+      if (!signatureMatches(entry.inputSignature, signature)) continue;
       entry.shapeEnv.bindInputShapes(inputs);
       const { passed } = entry.shapeEnv.evaluateGuards();
       if (passed) return entry;

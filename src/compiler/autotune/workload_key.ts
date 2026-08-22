@@ -21,7 +21,7 @@ export function buildBlockMap(root: TirNode | null | undefined): BlockMap {
   return map;
 }
 
-export function computeWorkloadKey(primFunc: PrimFunc, blockName: string, target: ScheduleTarget, blockMap: BlockMap | null = null): string {
+export function computeWorkloadKey(primFunc: PrimFunc, blockName: string, target: ScheduleTarget, blockMap: BlockMap | null = null, numericMode = 'n1'): string {
   const map = blockMap || buildBlockMap(primFunc.body);
   const block = map.get(blockName) || null;
   const parts: string[] = [];
@@ -56,6 +56,7 @@ export function computeWorkloadKey(primFunc: PrimFunc, blockName: string, target
 
   parts.push(target.name);
   parts.push(target.kind as string);
+  parts.push(numericMode);
 
   return fnv1a(parts.join('|'));
 }

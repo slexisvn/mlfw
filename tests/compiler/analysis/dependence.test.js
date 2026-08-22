@@ -43,6 +43,13 @@ function bruteForceMasks(extents, shape, writeOffsets, readOffsets) {
   };
   walkPoints([]);
 
+  const lexCompare = (a, b) => {
+    for (let d = 0; d < a.length; d++) {
+      if (a[d] !== b[d]) return a[d] < b[d] ? -1 : 1;
+    }
+    return 0;
+  };
+
   for (const I of points) {
     const w = writeOffsets.map(([lv, k]) => I[lv] + k);
     if (!inRange(w)) continue;
@@ -52,8 +59,11 @@ function bruteForceMasks(extents, shape, writeOffsets, readOffsets) {
       let same = true;
       for (let d = 0; d < rank; d++) if (w[d] !== r[d]) { same = false; break; }
       if (!same) continue;
+      const writeFirst = lexCompare(I, J) <= 0;
+      const earlier = writeFirst ? I : J;
+      const later = writeFirst ? J : I;
       for (let d = 0; d < n; d++) {
-        const delta = J[d] - I[d];
+        const delta = later[d] - earlier[d];
         masks[d] |= delta > 0 ? Direction.LT : (delta === 0 ? Direction.EQ : Direction.GT);
       }
     }
@@ -170,7 +180,7 @@ describe('a loop extent that is not an integer literal', () => {
     const symbolicPair = writeReadPair(symbolic);
 
     expect(accessDependence(pair.write, pair.read)).toBeNull();
-    expect(accessDependence(symbolicPair.write, symbolicPair.read).masks).toEqual([Direction.GT]);
+    expect(accessDependence(symbolicPair.write, symbolicPair.read).masks).toEqual([Direction.LT]);
   });
 
   it('refuses an interchange whose legality rests on the unknown extent', () => {

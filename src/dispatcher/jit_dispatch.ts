@@ -213,6 +213,16 @@ function _inferOutputShape(opName: string, tensorArgs: readonly Tensor[], scalar
   return bcast || [...tensorArgs[0].shape];
 }
 
+export function tensorToContiguousCopy(t: Tensor): NumericTypedArray {
+  const srcData = t._impl.storage.data!;
+  const srcOff = t._impl.storageOffset;
+  const n = t.numel;
+  if (t.isContiguous && srcOff === 0 && srcData.length === n) {
+    return (t.data || srcData).slice() as NumericTypedArray;
+  }
+  return tensorToContiguous(t);
+}
+
 export function tensorToContiguous(t: Tensor): NumericTypedArray {
   const srcData = t._impl.storage.data!;
   const srcOff = t._impl.storageOffset;

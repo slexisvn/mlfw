@@ -23,11 +23,9 @@ function analyzeKernel(src) {
   const lines = src.split('\n').length;
   const hasNegNoise = /\(0\s*-\s*\w/.test(src);
   const hasMulOne = /\*\s*1\b(?!\.)/.test(src);
-  const hasAddZero = /\+\s*0(?!\.\d*[1-9])\b/.test(src);
   const issues = [];
   if (hasNegNoise) issues.push('NEG_NOISE');
   if (hasMulOne) issues.push('MUL_ONE');
-  if (hasAddZero) issues.push('ADD_ZERO');
   return { loops, temps, lines, issues };
 }
 

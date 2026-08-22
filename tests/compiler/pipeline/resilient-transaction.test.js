@@ -5,7 +5,7 @@ import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js'
 import { Compiler } from '../../../src/compiler/pipeline/compiler.js';
 import { CPUTarget } from '../../../src/backend/target.js';
 import { registerGraphPass, clearGraphPasses } from '../../../src/compiler/pipeline/graph_pass_registry.js';
-import { FunctionPass, PassResult } from '../../../src/compiler/passes/pass.js';
+import { FunctionPass, ModulePass, PassResult } from '../../../src/compiler/passes/pass.js';
 import { verifyFunction } from '../../../src/compiler/ir/graph/verifier.js';
 
 const EVIL_ATTR = '__evil_partial_mutation__';
@@ -17,6 +17,19 @@ class EvilPass extends FunctionPass {
     const op = func.opsArray().find((o) => o.opName !== 'return');
     if (op) op.setAttr(EVIL_ATTR, true);
     throw new Error('boom mid-rewrite');
+  }
+}
+
+class EvilModulePass extends ModulePass {
+  constructor() { super('EvilModulePass'); }
+  run(module) {
+    module.removeFunction('good');
+    const evil = module.getFunction('evil');
+    if (evil) {
+      const op = evil.opsArray().find((o) => o.opName !== 'return');
+      if (op) op.setAttr(EVIL_ATTR, true);
+    }
+    throw new Error('boom mid-module-rewrite');
   }
 }
 
@@ -56,6 +69,22 @@ describe('resilient mode is transactional', () => {
 
     expect(result.errors.some((e) => e.funcName === 'evil')).toBe(true);
     expect(result.errors.some((e) => e.funcName === 'good')).toBe(false);
+
+    const out = new Float32Array(4);
+    result.run('good', new Float32Array([1, 2, 3, 4]), new Float32Array([2, 2, 2, 2]), out);
+    expect([...out]).toEqual([2, 4, 6, 8]);
+  });
+
+  it('rolls the working module back when a module pass mutates and then throws', () => {
+    registerGraphPass(() => new EvilModulePass(), { phase: 'pre' });
+    const { mod, evil, good } = makeModule();
+
+    const compiler = new Compiler({ target: CPUTarget(), errorMode: 'resilient' });
+    const result = compiler.compile(mod);
+
+    expect(hasEvilAttr(evil)).toBe(false);
+    expect(mod.hasFunction('good')).toBe(true);
+    expect(result.errors.length).toBeGreaterThan(0);
 
     const out = new Float32Array(4);
     result.run('good', new Float32Array([1, 2, 3, 4]), new Float32Array([2, 2, 2, 2]), out);

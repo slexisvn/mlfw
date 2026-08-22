@@ -54,7 +54,15 @@ Two properties of `L` decide how the rest of the book is organised.
 
 *Proof.* By exhibition. `add(x, y)` where `x` has shape `[4,3]` and `y` has shape `[1,3]` broadcasts implicitly: the elementwise rule reads the size-1 axis with a literal `0`. `add(x, broadcast_in_dim(y, [4,3], [0,1]))` is a two-operation graph, and its broadcast is folded into the same index expression by the alias path of §32.4. The two `PrimFunc`s are character-identical, which §32.7 checks. ∎
 
-> **Corollary 32.5 (Lowering is irreversible).** No inverse `L⁻¹` exists, so no analysis after lowering can recover a fact about the graph that lowering did not preserve.
+> **Corollary 32.5 (Lowering is irreversible).** No inverse `L⁻¹` exists. In particular, given only `L(F)`, no procedure can determine which of the graph functions in `L⁻¹(L(F))` produced it.
+
+**Read the corollary as the precise statement it is, not as the stronger one it invites.** "The information is gone forever" is the natural gloss and it is too strong in two directions worth separating.
+
+*What genuinely cannot be done.* Recover the graph *uniquely* from the TIR alone. Theorem 32.4 exhibits two graphs with character-identical output, so no procedure taking only that output can tell you which it was. That is a proof, and everything the pipeline order in the next paragraph rests on follows from it.
+
+*What is not ruled out.* First, **inference is not determination**: a heuristic that guesses "this nest was probably a broadcast add" can be right nearly always, and pattern-matching a loop nest back to a high-level operation is exactly what a library-offload pass does — Chapter 58's external codegen recovers `dot` from its shape and index structure for precisely this reason. Such a pass is unsound in the sense of Theorem 32.4 and useful anyway, because being wrong costs a missed optimization rather than a wrong answer. Second, **extra metadata changes the problem entirely**: nothing stops a lowering rule from *recording* what it came from, and this compiler already does this in places — block names carry the originating operation, and `FuncAttr` entries carry facts the IR cannot express. A fact that was deliberately preserved is not a fact recovered from the mapping; it is a fact carried alongside it.
+
+So the useful form of the corollary is: **the mapping preserves what the rules chose to preserve, and nothing downstream can appeal to the mapping for anything else.** If a later pass needs a graph-level fact, the answer is to carry it, not to reconstruct it — and the reason to know Theorem 32.4 is to recognize when you are about to try the second.
 
 This is Definition 6.1 arriving where it bites. It is also why the pipeline order is what it is: differentiation (Part V) before lowering because the chain rule needs dataflow; fusion (Part IV) before lowering because a fusion decision is a claim about which values are internal; layout (Chapter 25) before lowering because a layout choice becomes a stride, and a stride is not a choice any more.
 

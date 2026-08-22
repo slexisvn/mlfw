@@ -219,3 +219,41 @@ describe('sum reduction keeps gradient shapes aligned with inputs', () => {
     });
   }
 });
+
+describe('a call reads its arguments when it is called', () => {
+  for (const mode of MODES) {
+    it(`${mode}: mutating an input after the call changes neither the output nor the gradient`, async () => {
+      const x = tensor([1, 2, 3, 4]);
+      const cf = compileWithBackward({ forward: (t) => t.mul(t) }, [x], { target: CPUTarget(), backward: { mode } });
+      if (cf._ready) await cf._ready;
+
+      let out = cf(x); if (out && out.then) out = await out;
+
+      const storage = x._impl.storage.data;
+      for (let i = 0; i < storage.length; i++) storage[i] = 10;
+
+      expect(flat(out)).toEqual([1, 4, 9, 16]);
+
+      let grads = cf.backward(ones([4]));
+      if (grads && grads.then) grads = await grads;
+      expect(flat(grads[0])).toEqual([2, 4, 6, 8]);
+    });
+
+    it(`${mode}: the output and the gradient agree about what the input was`, async () => {
+      const x = tensor([2, 4]);
+      const cf = compileWithBackward({ forward: (t) => t.mul(t) }, [x], { target: CPUTarget(), backward: { mode } });
+      if (cf._ready) await cf._ready;
+
+      let out = cf(x); if (out && out.then) out = await out;
+      const storage = x._impl.storage.data;
+      for (let i = 0; i < storage.length; i++) storage[i] = 99;
+
+      let grads = cf.backward(ones([2]));
+      if (grads && grads.then) grads = await grads;
+
+      const impliedFromOutput = flat(out).map(Math.sqrt);
+      const impliedFromGrad = flat(grads[0]).map((g) => g / 2);
+      expect(impliedFromGrad).toEqual(impliedFromOutput);
+    });
+  }
+});

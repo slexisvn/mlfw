@@ -230,3 +230,149 @@ describe('Schedule.reorder decides on dependence, not on nest shape', () => {
     expect(nestOrder(sch.func)).toEqual([io.loopVar.name, 'j', ii.loopVar.name]);
   });
 });
+
+describe('split preserves a loop lower bound', () => {
+  beforeEach(() => resetVarCounter());
+
+  function shiftedNest(min, extent) {
+    const A = new Buffer('A', [16], 'f32', 'global');
+    const i = iv('i');
+    const store = new BufferStoreNode(A, [i], new BufferLoadNode(A, [i]));
+    const block = new BlockNode('b', [], [{ buffer: A }], [{ buffer: A }], store);
+    const nest = new ForNode(i, new IntImmNode(min), new IntImmNode(extent), ForKind.SERIAL, block);
+    return new PrimFunc('f', [], nest, new Map([['A', A]]));
+  }
+
+  function storedIndex(sch) {
+    let found = null;
+    const walk = (n) => {
+      if (!n) return;
+      if (n.type === 'BufferStoreNode') { found = n; return; }
+      if (n.body) walk(n.body);
+      if (n.stmts) n.stmts.forEach(walk);
+    };
+    walk(sch.func.body);
+    return found;
+  }
+
+  it('offsets the split index by the loop min so the body visits the original range', () => {
+    const func = shiftedNest(2, 4);
+    const sch = new Schedule(func);
+
+    sch.split(sch.getLoops('b')[0], 2);
+
+    const store = storedIndex(sch);
+    expect(store).not.toBeNull();
+    const idx = store.indices[0];
+    expect(idx.type).toBe('MathOpNode');
+    expect(idx.op).toBe('+');
+    expect(idx.a.type).toBe('IntImmNode');
+    expect(idx.a.value).toBe(2);
+  });
+
+  it('emits no offset for the ordinary zero-based loop', () => {
+    const func = shiftedNest(0, 4);
+    const sch = new Schedule(func);
+
+    sch.split(sch.getLoops('b')[0], 2);
+
+    const idx = storedIndex(sch).indices[0];
+    expect(idx.op).toBe('+');
+    expect(idx.a.type).toBe('MathOpNode');
+  });
+
+  it('refuses to split a thread-bound loop, whose split has no single thread-axis meaning', () => {
+    const func = shiftedNest(0, 8);
+    const sch = new Schedule(func);
+    const loop = sch.getLoops('b')[0];
+    sch.bindThread(loop, 'threadIdx.x');
+
+    expect(() => sch.split(sch.getLoops('b')[0], 2)).toThrow(/bound to/);
+  });
+});
+
+describe('rfactor uses the reduction operator identity', () => {
+  beforeEach(() => resetVarCounter());
+
+  function reductionFunc(op) {
+    const A = new Buffer('A', [4], 'f32', 'global');
+    const C = new Buffer('C', [1], 'f32', 'global');
+    const k = iv('k');
+    const store = new BufferStoreNode(C, [new IntImmNode(0)],
+      new MathOpNode(op, new BufferLoadNode(C, [new IntImmNode(0)]), new BufferLoadNode(A, [k])));
+    const block = new BlockNode('r', [], [{ buffer: A }], [{ buffer: C }], store);
+    const nest = new ForNode(k, new IntImmNode(0), new IntImmNode(4), ForKind.SERIAL, block);
+    return new PrimFunc('f', [], nest, new Map([['A', A], ['C', C]]));
+  }
+
+  function partialInits(sch) {
+    const inits = [];
+    const walk = (n) => {
+      if (!n) return;
+      if (n.type === 'BlockNode') {
+        if (n.initBody && n.initBody.type === 'BufferStoreNode' && n.initBody.buffer.name.endsWith('_rf')) {
+          inits.push(n.initBody.value);
+        }
+        walk(n.body);
+        return;
+      }
+      if (n.body) walk(n.body);
+      if (n.stmts) n.stmts.forEach(walk);
+    };
+    walk(sch.func.body);
+    return inits;
+  }
+
+  it('initializes the partial buffer of a product reduction to 1, not 0', () => {
+    const sch = new Schedule(reductionFunc('*'));
+
+    sch.rfactor('r', 'k', 2);
+
+    const inits = partialInits(sch);
+    expect(inits.length).toBe(1);
+    expect(inits[0].value).toBe(1);
+  });
+
+  it('initializes the partial buffer of a sum reduction to 0', () => {
+    const sch = new Schedule(reductionFunc('+'));
+
+    sch.rfactor('r', 'k', 2);
+
+    expect(partialInits(sch)[0].value).toBe(0);
+  });
+
+  it('initializes a max reduction to negative infinity on a float accumulator', () => {
+    const sch = new Schedule(reductionFunc('max'));
+
+    sch.rfactor('r', 'k', 2);
+
+    expect(partialInits(sch)[0].value).toBe(-Infinity);
+  });
+
+  it('refuses a store whose accumulator load is at a different subscript', () => {
+    const A = new Buffer('A', [4], 'f32', 'global');
+    const C = new Buffer('C', [2], 'f32', 'global');
+    const k = iv('k');
+    const store = new BufferStoreNode(C, [new IntImmNode(0)],
+      new MathOpNode('+', new BufferLoadNode(C, [new IntImmNode(1)]), new BufferLoadNode(A, [k])));
+    const block = new BlockNode('r', [], [{ buffer: A }], [{ buffer: C }], store);
+    const nest = new ForNode(k, new IntImmNode(0), new IntImmNode(4), ForKind.SERIAL, block);
+    const sch = new Schedule(new PrimFunc('f', [], nest, new Map([['A', A], ['C', C]])));
+
+    expect(() => sch.rfactor('r', 'k', 2)).toThrow(/accumulation/);
+  });
+
+  it('refuses an update expression that itself reads the accumulator', () => {
+    const A = new Buffer('A', [4], 'f32', 'global');
+    const C = new Buffer('C', [1], 'f32', 'global');
+    const k = iv('k');
+    const zero = [new IntImmNode(0)];
+    const update = new MathOpNode('*', new BufferLoadNode(A, [k]), new BufferLoadNode(C, zero));
+    const store = new BufferStoreNode(C, zero, new MathOpNode('+', new BufferLoadNode(C, zero), update));
+    const block = new BlockNode('r', [], [{ buffer: A }], [{ buffer: C }], store);
+    const nest = new ForNode(k, new IntImmNode(0), new IntImmNode(4), ForKind.SERIAL, block);
+    const sch = new Schedule(new PrimFunc('f', [], nest, new Map([['A', A], ['C', C]])));
+
+    expect(() => sch.rfactor('r', 'k', 2)).toThrow(/reads accumulator/);
+  });
+});

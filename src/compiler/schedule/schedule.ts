@@ -1,6 +1,6 @@
 import {
   ForNode, BlockNode, SeqNode, BufferStoreNode, BufferLoadNode, BlockRealizeNode,
-  VariableNode, IntImmNode, MathOpNode, ForKind, IterVarKind, IfThenElseNode, AllocateNode, LetStmtNode
+  VariableNode, IntImmNode, FloatImmNode, MathOpNode, ForKind, IterVarKind, IfThenElseNode, AllocateNode, LetStmtNode
 } from '../ir/tensor/nodes.js';
 import { Buffer } from '../ir/tensor/buffer.js';
 import type { BufferRegionLike } from '../ir/tensor/buffer.js';
@@ -12,8 +12,9 @@ import { loopCarriedDependence, reorderLegality, collectVarsUsed, IterVarPolicy 
 import { cloneIRShared } from '../ir/clone_ir.js';
 import { transform as irTransform, walk as irWalk } from '../ir/ir_visitor.js';
 import { FuncAttr } from '../ir/func_attrs.js';
+import { isDtypeInt, reduceInitValue } from '../../util/dtype_map.js';
 import { AccessKind, loadedBuffers, isStaticLevel } from '../analysis/buffer_access.js';
-import { LinearForm, mixedRadixDecomposition, linearFormToNode } from '../analysis/iter_map.js';
+import { LinearForm, mixedRadixDecomposition, linearFormToNode, toLinearForm } from '../analysis/iter_map.js';
 import type { IRNode } from '../ir/ir_visitor.js';
 import type { TirNode, PrimFunc } from '../ir/tensor/nodes.js';
 import type { RadixDecomposition, RadixFactor, VarRange } from '../analysis/iter_map.js';
@@ -42,7 +43,33 @@ export type InlinePlan = {
 export type IterBindingInfo = { name: string; form: LinearForm | null; kind: string | undefined };
 export type BlockBindingInfo = { bindings: readonly IterBindingInfo[] };
 
-const RFACTOR_ASSOCIATIVE_OPS = new Set(['+', '*', 'min', 'max']);
+const RFACTOR_REDUCE_TYPE: Record<string, string> = { '+': 'sum', '*': 'prod', 'min': 'min', 'max': 'max' };
+
+function rfactorIdentity(op: string, dtype: string): TirNode {
+  const value = reduceInitValue(RFACTOR_REDUCE_TYPE[op], dtype);
+  return isDtypeInt(dtype) ? new IntImmNode(value) : new FloatImmNode(value);
+}
+
+function sameIndices(a: readonly TirNode[], b: readonly TirNode[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const fa = toLinearForm(a[i]);
+    const fb = toLinearForm(b[i]);
+    if (!fa || !fb || fa.offset !== fb.offset || fa.terms.size !== fb.terms.size) return false;
+    for (const [name, coeff] of fa.terms) {
+      if (fb.terms.get(name) !== coeff) return false;
+    }
+  }
+  return true;
+}
+
+function readsBuffer(node: TirNode | null | undefined, buffer: Buffer): boolean {
+  let found = false;
+  irWalk(node as IRNode, (n: IRNode) => {
+    if ((n as TirNode).type === 'BufferLoadNode' && (n as unknown as BufferLoadNode).buffer === buffer) found = true;
+  });
+  return found;
+}
 
 function substituteVar(node: TirNode, oldName: string, exprFactory: () => TirNode): TirNode {
   return irTransform(node, (n: IRNode) => {
@@ -263,8 +290,14 @@ export class Schedule {
     if (factor <= 0 || !Number.isInteger(factor)) {
       throw new Error(`Split factor must be a positive integer, got ${factor}`);
     }
+    if (loop.threadTag) {
+      throw new Error(`Cannot split loop '${loop.loopVar.name}': it is bound to '${loop.threadTag}', and a split has no single thread-axis meaning; split before binding`);
+    }
 
     const outerExtent = Math.ceil(extent / factor);
+    const minValue = getConstExtent(loop.min);
+    const shift = (node: TirNode): TirNode =>
+      minValue === 0 ? node : new MathOpNode('+', cloneExprTree(loop.min), node);
     const outerVar = freshVar(`${loop.loopVar.name}_o`);
     const innerVar = freshVar(`${loop.loopVar.name}_i`);
     const oldVarName = loop.loopVar.name;
@@ -276,7 +309,7 @@ export class Schedule {
       new IntImmNode(factor),
       loop.kind,
       clonedBody,
-      loop.threadTag
+      null
     );
 
     const needsGuard = extent % factor !== 0;
@@ -297,14 +330,14 @@ export class Schedule {
       new IntImmNode(outerExtent),
       loop.kind,
       innerLoop,
-      loop.threadTag
+      null
     );
 
     substituteVar(innerLoop.body, oldVarName, () =>
-      new MathOpNode('+',
+      shift(new MathOpNode('+',
         new MathOpNode('*', outerVar, new IntImmNode(factor)),
         innerVar
-      )
+      ))
     );
 
     this.mutator.replaceNode(loop, outerLoop);
@@ -645,16 +678,22 @@ export class Schedule {
     const spatialIdx = store.indices;
     const storeMath = store.value as MathOpNode;
     const op = storeMath.op;
-    const isAccLoad = (node: TirNode | null | undefined): boolean => !!node && node.type === 'BufferLoadNode' && (node as BufferLoadNode).buffer === acc;
+    const isAccLoad = (node: TirNode | null | undefined): boolean =>
+      !!node && node.type === 'BufferLoadNode'
+      && (node as BufferLoadNode).buffer === acc
+      && sameIndices((node as BufferLoadNode).indices, spatialIdx);
     let update: TirNode | undefined;
     if (isAccLoad(storeMath.a)) update = storeMath.b as TirNode;
     else if (isAccLoad(storeMath.b)) update = storeMath.a;
-    else throw new Error(`rfactor: accumulator load not found in block '${blockName}' body`);
-    if (!RFACTOR_ASSOCIATIVE_OPS.has(op)) {
+    else throw new Error(`rfactor: block '${blockName}' body is not an accumulation into '${acc.name}' at the stored subscript`);
+    if (readsBuffer(update, acc)) {
+      throw new Error(`rfactor: update expression in block '${blockName}' reads accumulator '${acc.name}'; cannot factor reduction`);
+    }
+    if (!RFACTOR_REDUCE_TYPE[op]) {
       throw new Error(`rfactor: op '${op}' is not associative+commutative; cannot factor reduction`);
     }
     const initVal = (block.initBody && block.initBody.type === 'BufferStoreNode' && block.initBody.value)
-      ? block.initBody.value : new IntImmNode(0);
+      ? block.initBody.value : rfactorIdentity(op, acc.dtype);
 
     const spatialLoops = loops.filter(l => l.loopVar.name !== reductionVarName);
     const spatialLoopVars = new Set(spatialLoops.map(l => l.loopVar.name));

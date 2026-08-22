@@ -72,6 +72,8 @@ The graph knows there is a `dot`. It does not know, and cannot say, in what orde
 
 The lab prints a third version, the generated JavaScript you already met in Chapter 2, and it continues the same slide. There, `buf_13[vls0_17, vrs0_18]` has become `buf_13[(ls0_14 * 8) + rs0_15]`: the two-dimensional index is gone, replaced by arithmetic on a flat array. TIR knew the buffer had a shape; the emitted code knows only offsets.
 
+> **What the lab does not show, and why.** The three artefacts printed above are Graph IR, TIR and **generated source** — not Graph IR, TIR and LIR. LIR is the level that performs the flattening you just watched, and it has no snapshot of its own: `IRSnapshotFlags` ([`trace.ts:5`](../../../src/compiler/pipeline/trace.ts)) offers exactly three points, `afterGraphPasses`, `afterLowering` and `afterScheduling`, and all three are above LIR. So in this chapter LIR is visible only through its output. Chapter 53 prints it directly; until then, read the flat index expressions in the generated code as LIR's handwriting.
+
 That trade — gaining detail by losing meaning, at every step — is what a level of a compiler is.
 
 > **Definition 6.1 (Lowering; stated here).** *Lowering* is a translation from a representation to a more detailed one that (i) preserves the program's semantics and (ii) is not invertible: information present in the source representation is not recoverable from the result.
@@ -116,9 +118,15 @@ That is the small version of a general problem.
 
 > **Definition 6.2 (Phase-ordering problem; classical).** Given a set of program transformations, the *phase-ordering problem* is to choose a sequence of applications that yields the best final program. Transformations are not commutative: applying A then B may enable, disable, or undo the effect of applying B then A.
 
-> **Theorem 6.3 (folklore).** No fixed order of transformations is optimal for all programs.
+> **Theorem 6.3 (folklore).** Fix a set of transformations *T* and a schedule length *k*. If a compiler must commit to one sequence of *k* applications drawn from *T*, no such sequence is optimal for all programs.
 >
-> *Proof sketch.* It suffices to exhibit two programs whose optimal orders differ. Take A = constant folding, B = loop unrolling. For a loop whose trip count becomes constant only after folding, A-then-B unrolls and B-then-A does not. For a loop whose body contains a constant expression exposed only by unrolling, B-then-A folds it and A-then-B does not. No single order handles both. ∎
+> *Proof sketch.* It suffices to exhibit, for each candidate sequence, a program it handles suboptimally. Take A = constant folding, B = loop unrolling. Program *P₁* has a loop whose trip count becomes constant only after folding; program *P₂* has a loop body containing a constant expression exposed only by unrolling. A sequence handles *P₁* only if some A precedes some B, and handles *P₂* only if some B precedes some A. A sequence of length k = 1 does neither. A sequence of length k = 2 contains one A and one B in some order, so it fails one of the two. ∎
+
+**Read the hypotheses, because the theorem is weaker than it first looks.** The proof above compares `A → B` against `B → A`, and a reader is entitled to ask about `A → B → A`, which handles *both* programs and is only three passes long. It does — and that is not a hole in the theorem, it is the reason the theorem is stated with *k* fixed.
+
+The honest position is this. For any *particular* finite pair of programs you can usually find a longer sequence that handles both; repeating passes is exactly how real compilers buy their way out of the two-program version of the problem. What no fixed sequence escapes is the general case: for any sequence of length *k*, one can construct a program requiring *k+1* alternations — chain the construction, so that each unrolling exposes a constant whose folding exposes another loop bound — and that program is handled suboptimally. So the theorem's real content is that **the required schedule length is unbounded in the program**, not that any two passes are irreconcilable.
+
+Two consequences follow, and the compiler uses both. If the required length is unbounded but usually small, *iterate to a fixed point* and let the program decide how many rounds it needs. If iteration is too expensive or does not converge, *measure*. Those are the next two responses.
 
 Compilers respond in one of three ways, and this one uses all three.
 
@@ -136,7 +144,16 @@ Compilers respond in one of three ways, and this one uses all three.
   ], config.optimization.maxSimplifyIterations));
 ```
 
-This dissolves ordering *within* the group: any enabling relationship among those five is eventually exploited, whatever order it needs. The three passes from the example above are all members of this group, which is precisely why their relative order is not something anyone has to get right — run `dce` too early and the next iteration cleans up anyway. What the group does not dissolve is ordering *between* groups, and it is bounded by an iteration cap, because a fixed point is not guaranteed to be reached quickly — Chapter 15 proves what can be guaranteed.
+This dissolves ordering *within* the group: any enabling relationship among those five is eventually exploited, whatever order it needs. The three passes from the example above are all members of this group, which is precisely why their relative order is not something anyone has to get right — run `dce` too early and the next iteration cleans up anyway. What the group does not dissolve is ordering *between* groups.
+
+**"Until nothing changes" is doing more work in that sentence than it looks, and the assumptions deserve naming.** A loop that runs passes until none reports a change terminates at a fixed point only if all of the following hold:
+
+- **Determinism.** Each pass is a function of the IR alone. A pass that consults a random seed, a wall clock, or an iteration counter can report a change on the second visit to a state it already declared stable.
+- **Truthful change reporting.** A pass that reports `UNCHANGED` after editing the IR stops the loop early, at a state that is not a fixed point; a pass that reports `CHANGED` after doing nothing prevents the loop from stopping at all. This is Chapter 3 §3.6's point arriving with consequences, and Chapter 14 makes it a contract.
+- **No hidden state.** If a pass carries state across invocations — a cache, a "already tried this" set — the composite is not a function of the IR, and the argument for termination goes with it.
+- **Monotone progress, or none at all.** Nothing here forbids two passes from undoing each other. Canonicalization moving a constant right and an algebraic rule moving it left would oscillate forever, each honestly reporting `CHANGED`.
+
+The implementation guarantees none of these; it *assumes* the first three and defends against the fourth with a cap, `maxSimplifyIterations` (default 8). That is the pragmatic answer, and it is worth being clear about what it does and does not buy. It does buy termination, unconditionally — the loop is bounded, so no combination of passes can hang the compiler. It does *not* buy convergence, and the two are not the same claim: a program that would have kept improving simply stops improving when the budget runs out. To the compiler's credit the cap is not silent — the pass manager emits a `<group>:max-iter` event when a group exits without a quiet round, so "we gave up" is visible in the trace rather than indistinguishable from "we finished". What it cannot tell you is *why*: a pair of passes oscillating forever and a long chain of genuine improvements both exhaust the budget and look identical in that one event. Chapter 15 §15.3 develops this properly.
 
 **Measure instead of guessing.** For a few expensive, program-dependent choices, the compiler compiles more than one version and times them ([`src/compiler/pipeline/opt_gate.ts`](../../../src/compiler/pipeline/opt_gate.ts)). This is the honest response to Theorem 6.3: when analysis cannot tell you which order wins, run both and look. Part VIII scales this idea into full autotuning.
 

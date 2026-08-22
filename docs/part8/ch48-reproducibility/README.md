@@ -49,13 +49,32 @@ For the converse: `split` records `[loop.loopVar.name, factor]` ([`schedule.ts:3
 
 Condition (ii) is the one that has no representation anywhere. There is exactly one way to set the counter — `resetVarCounter()` ([`schedule.ts:198`](../../../src/compiler/schedule/schedule.ts)) — and `TuningRecord` ([`tuning_db.ts:29`](../../../src/compiler/autotune/tuning_db.ts)) stores a workload key, a sketch name, parameters, a score, a trace, a version and two timings. It does not store the counter, and could not usefully: what would have to be recorded is not a value but the guarantee that the process reaches the same value, which is a property of everything the process did beforehand.
 
-> **Proposition 48.4 (Faithful replay requires complete recording, stated here).** If a primitive changes the `PrimFunc` and does not append a step, then for any schedule using it, the recorded trace — *if it replays at all* — is not faithful.
+> **Proposition 48.4 (Faithful replay requires complete recording, stated here).** Let a primitive change the `PrimFunc` and append no step, and let that change **persist** — that is, no later recorded step overwrites or removes the part of the function it touched. Then for any schedule using it, the recorded trace — *if it replays at all* — is not faithful.
 
-*Proof.* Replay applies the recorded steps and nothing else, so the unrecorded change is absent from the result. The qualification is necessary in both directions: the omission itself raises no error, but a later step may still throw, and may throw *because* the omitted change is missing. What cannot happen is a faithful result. ∎
+*Proof.* Replay applies the recorded steps and nothing else, so the unrecorded change is absent from the result. Persistence is what makes that absence observable: the recorded steps produce the same function as the original run everywhere except in the part the unrecorded change touched, and by hypothesis nothing later rewrote it. The qualification about replaying at all is necessary in both directions: the omission itself raises no error, but a later step may still throw, and may throw *because* the omitted change is missing. What cannot happen is a faithful result. ∎
+
+**The persistence hypothesis is not a technicality; without it the proposition is false.** An unrecorded mutation that a later recorded step *destroys* leaves no trace in the final function, and replay produces exactly the right answer despite the gap. Two shapes of this are ordinary: an unrecorded annotation on a loop that a later `split` replaces with two fresh loops, and an unrecorded field set on a subtree that a later `rfactor` swaps out wholesale. Chapter 39 §39.2 makes this likely rather than exotic — *every* primitive replaces a subtree, so an unrecorded edit inside one is discarded the moment anything above it is rewritten.
+
+The practical reading is therefore uncomfortable rather than reassuring: **an incomplete trace is not reliably broken.** It may replay faithfully on the schedules you tested and unfaithfully on a schedule that happens to order its primitives differently — which is precisely the situation a search creates, since it explores orderings nobody wrote by hand. A test that replays one recorded schedule and finds it faithful has not established that the recording is complete.
 
 > **Counterexample 48.5.** `tensorize` ([`schedule.ts:1093`](../../../src/compiler/schedule/schedule.ts)) sets `FuncAttr.TENSOR_INTRIN` on the function and records nothing. A schedule that splits and then tensorises records one step; replaying it reproduces the split and drops the intrinsic, and the CUDA backend reads that attribute, so the two programs compile to different kernels. `createMatmulRegisterBlockGPUSketch` is the extreme case: it assigns `schedule.func.body` directly ([`gpu_matmul_sketch.ts:393`](../../../src/compiler/autotune/gpu_matmul_sketch.ts)) and its recorded trace is empty, so replay produces the *unscheduled* function.
 
 > **Corollary 48.6 (A trace is a recipe, not a certificate, stated here).** `ScheduleTrace.replay` performs exactly one check — that the named primitive exists ([`trace.ts:51`](../../../src/compiler/schedule/trace.ts)) — and applies the steps in order with no transaction. A step that throws leaves every earlier step applied. Nothing validates the result: `ScheduleValidator` is run by the tuning session ([`session.ts:186`](../../../src/compiler/autotune/session.ts)) and never by `replay`.
+
+**And "the named primitive exists" is a weaker check than it reads as, because of how the lookup is done:**
+
+```ts
+      const method = schedule[step.primitive] as ((...args: unknown[]) => unknown) | undefined;
+      if (typeof method !== 'function') {
+        throw new Error(`Unknown schedule primitive: ${step.primitive}`);
+      }
+```
+
+That is an ordinary property access, so it walks the prototype chain — through `Schedule.prototype` and on to `Object.prototype`. **The names a trace can invoke are therefore not the 22 primitives, nor even the ~28 public members of `Schedule`, but every callable property reachable from a `Schedule` instance**, which includes `toString`, `valueOf`, `hasOwnProperty`, `isPrototypeOf`, `propertyIsEnumerable` and `constructor`, plus every private `_`-prefixed method the class defines. A step naming one of those passes the check and is called.
+
+Nothing in this compiler *writes* such a step — traces are produced by the primitives recording themselves — so this is a property of the surface rather than an observed failure. It matters because a trace is a **serialized, persisted, externally-editable artifact**: `TuningRecord.traceData` is written to a database file, and Definition 48.7 exists precisely so that data can come back from disk. Treating a deserialized trace as a list of primitive invocations, when the mechanism will dispatch any inherited method name, is the same category of assumption as trusting a file's contents because your own program wrote it.
+
+The fix is one line — look the name up in an explicit allow-list of the 22 primitives rather than on the object — and it would also make Corollary 48.6's check mean what the chapter says it means.
 
 Finally, the alternative the compiler actually uses.
 
@@ -169,7 +188,32 @@ Three fields out of nine. `_buildTunedSchedule` then re-derives the sketches for
           }
 ```
 
-This is Definition 48.7's parameter-based path, and it is the whole of the cache. `traceData` is never consulted. The assumptions it makes instead — that `getSketchesForBlock` still returns a sketch of that name for this block, and that the sketch still accepts those parameters — are checked by the `find` returning `undefined` and by the surrounding `try`, so a stale record degrades to "no tuning applied" rather than to a wrong kernel.
+This is Definition 48.7's parameter-based path, and it is the whole of the cache. `traceData` is never consulted. The assumptions it makes instead — that `getSketchesForBlock` still returns a sketch of that name for this block, and that the sketch still accepts those parameters — are checked by the `find` returning `undefined` and by the surrounding `try`.
+
+> **"A stale record degrades to no tuning, not to a wrong kernel" needs those two checks to be doing more than they look.** They establish that a sketch of that *name* exists and that it *accepts* those parameters. Neither establishes that the sketch still **means** what it meant when the record was written, and those are different properties:
+>
+> | What the pair verifies | What it does not |
+> |---|---|
+> | a sketch named `mlt_cpu` is derived for this block | that it is the *same* `mlt_cpu` — same skeleton, same primitive sequence |
+> | it accepts the recorded parameter vector | that the parameters mean the same thing — same order, same semantics per position |
+>
+> A sketch whose parameter list is reordered, whose skeleton gains a `reorder`, or whose `rfactor` moves to a different axis still parses an old record, still accepts the old parameters, and applies a *different transformation*. The record is a `(name, params)` pair, and the name is a string.
+
+### Two version guards and a key
+
+The database therefore carries two version stamps, and rejects wholesale on either mismatch. `CODEGEN_VERSION` covers the emitted-code format; `SCHEDULE_SEMANTICS_VERSION` covers what the primitives *mean*, and is bumped by hand whenever one of them changes — the `split` lower-bound and `rfactor` identity rules of Chapters 40 and 41 are exactly the kind of change that has to bump it. A database written before the stamp existed is rejected too, since its absence is indistinguishable from an older semantics.
+
+Wholesale rejection is coarse, and it is the right shape for a *format or meaning* change: every record in the file was written under the old meaning, so none of them is salvageable.
+
+The **numerical mode** is different, because records from the two modes are simultaneously valid — they just answer different questions. A schedule tuned with fast-math off must not be served to a fast-math compile, and vice versa, since the set of legal schedules differs. So the mode goes into the *workload key* rather than into a version stamp, and the two sets of records coexist in one database.
+
+That leaves what Proposition 47.6 already told you the key does not contain, and it is worth reading as a list of things a cache hit does not promise:
+
+- **the primitive implementations.** Covered by the semantics version, and only because somebody remembers to bump it.
+- **the target's behaviour beyond `name` and `kind`.** Two CPU targets with different cache sizes or vector widths share a key — which is the point on one machine and wrong across two.
+- **the enclosing loops.** A block's key describes the block, not its context.
+
+So the accurate statement of the cache contract is: **a hit means a block that looks like this was tuned once, against a target with this name, in this numerical mode, under this schedule semantics, and the parameters still fit.** A `(sketchName, params)` pair is robust in that it survives irrelevant changes; the cost of that robustness is that it survives some relevant ones too, and the version stamps are what keep that set small.
 
 ## 48.5 Lab — record and replay
 
@@ -201,6 +245,8 @@ Replayed into a fresh copy of the same program:
 
 Theorem 48.3's sufficient direction, and the `_replaying` flag doing its job. Condition (ii) holds here because `lowerToTir` — a lab helper, not compiler code — calls `resetVarCounter` before lowering, so both programs are built from the same counter value. The compiler never resets it (§48.4), so condition (ii) is not something the compiler arranges; it is something nothing in the compiler needs, because nothing in the compiler replays a trace.
 
+> **What this lab is evidence for, stated narrowly.** One schedule, four primitives — `split`, `parallelize`, `vectorize`, `reorder` — on one 8×8 matmul, replayed once, compared by printed IR. That is a real check and it is worth running. It is **not** evidence that record/replay is faithful in general, and three of the chapter's own results say why: Counterexample 48.5 names two constructs (`tensorize`, and the register-block GPU sketch) whose traces are incomplete and which this schedule does not use; Proposition 48.4 shows an incomplete trace can replay *correctly* when a later step happens to overwrite the gap, so a passing replay does not certify completeness; and Corollary 48.6 shows nothing validates a replayed result at all. A one-case demonstration cannot distinguish "the mechanism is faithful" from "this schedule avoids the constructs where it is not". The mechanism is faithful *for traces made only of primitives that record themselves completely*, and the set of primitives that do is smaller than the set that exist.
+
 Now break condition (ii) by allocating two variables elsewhere first:
 
 ```
@@ -216,7 +262,7 @@ Now break condition (ii) by allocating two variables elsewhere first:
 
 The names a `split` introduces are a function of how much scheduling has happened *in the process*, not of the program being scheduled. Step one still succeeds — `ls0_6` is a name the lowering rule chose, so it is stable — and produces `ls0_6_o_2`. Step two asks for `ls0_6_o_0`, `_resolveLoop` does not find it, returns the string, and `reorder` reports a type error.
 
-Two things about that error are worth saying. It is Chapter 40's finding 34 arriving where it does the most damage: the message names a type rather than the missing name, so the failure mode of a replayed trace is maximally uninformative. And it is a *loud* failure, which is the good case. A trace whose last step is a `parallelize` on a stale name would fail the same way; a trace consisting only of steps that name original loops would replay silently and correctly. Whether a given trace is fragile depends on whether any step names something an earlier step created — which for every tiling sketch is all of them.
+Two things about that error are worth saying. It is Chapter 40's unresolved loop name arriving where it does the most damage: the message names a type rather than the missing name, so the failure mode of a replayed trace is maximally uninformative. And it is a *loud* failure, which is the good case. A trace whose last step is a `parallelize` on a stale name would fail the same way; a trace consisting only of steps that name original loops would replay silently and correctly. Whether a given trace is fragile depends on whether any step names something an earlier step created — which for every tiling sketch is all of them.
 
 Last, what replay checks:
 
@@ -338,4 +384,4 @@ The trace transfers to a different problem size, which is not obvious and is a d
 
 ---
 
-Part VIII ends here. [Part IX](../../OUTLINE.md) leaves the search behind and returns to a question with a single right answer: given the loop nests this part has been permuting, when may two buffers share the same bytes, and what is the smallest arena that holds a program?
+Part VIII ends here. [Part IX](../../part9/README.md) leaves the search behind and returns to a question with a single right answer: given the loop nests this part has been permuting, when may two buffers share the same bytes, and what is the smallest arena that holds a program?

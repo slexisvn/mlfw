@@ -92,8 +92,11 @@ export type CompiledResult = {
   getSource(name: string): string | null;
 };
 
+export type InputSignature = readonly { dtype: string; device: string }[];
+
 export type CompiledEntry = {
   result: CompiledResult;
+  inputSignature: InputSignature;
   graph: GraphModuleLike;
   capturedParams: TensorInput[];
   numUserInputs: number;

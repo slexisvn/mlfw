@@ -40,13 +40,15 @@ First-match, not best-match: the rules are a decision list, so their order is pa
 
 *Proof.* The rule registered at priority 30 has `matches: () => true` ([`derivation.ts:69`](../../../src/compiler/autotune/derivation.ts)) and its `derive` returns a one-element list, so the scan in `deriveSketches` always terminates on a rule that produces a sketch. The two exceptions are the two early returns above the scan. ∎
 
-The exceptions are not idle. `WasmTarget` is neither `TargetKind.CPU` nor `isGPU()`, so **on WASM the autotuner derives no sketches at all** and every block falls through to the `empty` task kind — a fact §45.7 returns to.
+The exceptions are not idle: on WASM the autotuner derives no sketches at all, and §45.7 says what that costs.
 
 The core of any tiling sketch is the claim that a factorisation can be realised by repeated splitting without arithmetic loss.
 
 > **Definition 45.4 (Tile structure, stated here).** A *tile structure* is an ordered list of `(kind, level)` pairs with `kind ∈ {S, R}`, together with a partial map from `kind·level` to a role in `{parallelize, vectorize, unroll, blockIdx, threadIdx}`. Its *level counts* `L_S`, `L_R` are one more than the largest level of each kind.
 
-> **Proposition 45.5 (A multi-level split realises a factorisation exactly, stated here).** Let a loop have constant extent `n` and let `(f₀,…,f_{L−1})` satisfy `∏ f_i = n`. Then `multiLevelSplit` produces `L` nested loops whose extents are exactly `f₀,…,f_{L−1}`, and no guard predicate is introduced.
+> **Proposition 45.5 (A multi-level split realises a factorisation exactly, stated here).** Let a loop have constant extent `n`, **lower bound `0`**, and let `(f₀,…,f_{L−1})` satisfy `∏ f_i = n`. Then `multiLevelSplit` produces `L` nested loops whose extents are exactly `f₀,…,f_{L−1}`, and no guard predicate is introduced.
+>
+> The lower-bound hypothesis is discharged by `split` itself, which carries a non-zero `min` through the substitution (Chapter 40, Counterexample 40.7) — not by the accident that every loop a tiling sketch is offered comes from a lowering rule emitting `min = 0`.
 
 *Proof.* By induction on `i`. Before step `i` the loop being split has extent `∏_{j≥i} f_j`; the code splits by `inner = ∏_{j>i} f_j` ([`tiling.ts:23`](../../../src/compiler/autotune/tiling.ts)), which divides that extent exactly with quotient `f_i`. Chapter 40's `split` therefore computes `outerExtent = ⌈(∏_{j≥i} f_j)/inner⌉ = f_i` and, since `extent % factor === 0`, takes the branch that emits no `IfThenElseNode` ([`schedule.ts:282`](../../../src/compiler/schedule/schedule.ts)). The remaining loop has extent `∏_{j>i} f_j`, which is the induction hypothesis at `i+1`. After `L−1` steps the innermost extent is `f_{L−1}`. ∎
 
@@ -58,7 +60,9 @@ Soundness of the whole space then follows from Part VII, with two named exceptio
 
 > **Theorem 45.7 (A sketch space is sound if its primitives are, stated here).** Let `apply` call only primitives that are sound in the sense of Definition 38.3. Then for every parameter point on which `apply` does not throw, the resulting `PrimFunc` is semantically equivalent to the input. Consequently no point of the space is a wrong program, and a search over it needs no correctness oracle.
 
-*Proof.* Proposition 38.4: a composition of sound partial functions is sound. A point on which `apply` throws contributes no program at all, because `BlockTuningSession` clones the function before every attempt ([`session.ts:183`](../../../src/compiler/autotune/session.ts)) and discards the clone — which is what the search needs, since `tile` is known to leave the IR modified after failing (Chapter 40, finding 33). ∎
+This is the load-bearing correctness argument for the whole of Part VIII: it is what lets a search try thousands of programs without checking any of them for correctness. Everything therefore rests on the hypothesis, so it is worth knowing where the hypothesis fails — which is Counterexample 45.8, and which is why every later claim of the form "a search cannot produce a wrong program" carries an exception.
+
+*Proof.* Proposition 38.4: a composition of sound partial functions is sound. A point on which `apply` throws contributes no program at all, because `BlockTuningSession` clones the function before every attempt ([`session.ts:183`](../../../src/compiler/autotune/session.ts)) and discards the clone — which is what the search needs, since `tile` is known to leave the IR modified after failing (Chapter 40). ∎
 
 > **Counterexample 45.8 (Two ways the hypothesis fails).** `createRfactorSketch` calls `rfactor`, which is sound only under a relaxed floating-point semantics (Theorem 41.2 and Counterexample 41.3), so the `rfactor` sketch's space contains points that change the answer. And `createMatmulRegisterBlockGPUSketch` calls no primitive at all: it assigns `schedule.func.body` a nest built from scratch ([`gpu_matmul_sketch.ts:393`](../../../src/compiler/autotune/gpu_matmul_sketch.ts)), so Theorem 45.7 says nothing whatever about it. Its correctness rests on `buildRegisterBlockedMatmul` being right, which is a 115-line hand-written kernel generator and a different kind of obligation.
 
@@ -341,6 +345,16 @@ A sketch's advertised size is `∏|C_i|`. That is an upper bound on the number o
 
 `mlt_cpu` is injective on its whole space, which Proposition 45.5 predicts: distinct factor tuples give distinct extent sequences. Not one of its 1,225 points is refused and not one fails `ScheduleValidator` — a strong statement about the skeleton, since it means every parameter the search can draw yields a program the session will accept.
 
+> **Three different things could be meant by "this candidate is valid", and only the strongest is being claimed here.** They are worth keeping apart, because a sketch that clears the first two and not the third is the shape of every finding in this chapter.
+>
+> | Claim | What establishes it | What it rules out |
+> |---|---|---|
+> | the sketch *derived* | `deriveSketches` returned it for this block | nothing about the schedule — §45.6's `ssrsrs_cpu` derives 6,125 points and every one is refused |
+> | `apply` *did not throw* | every primitive accepted its arguments | malformed calls; **not** semantic legality, since a primitive checks its own preconditions and not the whole nest |
+> | `ScheduleValidator` *passed* | the seven structural checks of Chapter 42 §42.4 | the nest is well-formed and schedulable |
+>
+> The 1,225 figure above is the third, which is why it is worth reporting. But note what even that does not cover: the validator checks *structure*, not numerics. A point that reassociates a float reduction passes all three and still computes a different number, which is Counterexample 45.8, and no column of this table would catch it.
+
 `elementwise_cpu` is injective on a 16-wide innermost loop and loses two points on a 4-wide one, where widths 8 and 16 both fail `extent >= vector_width` ([`sketch_generators.ts:71`](../../../src/compiler/autotune/sketch_generators.ts)) and produce the same bare `parallelize`.
 
 On GPU the collapse is larger and structural:
@@ -355,7 +369,7 @@ On GPU the collapse is larger and structural:
     target.maxThreadsPerBlock = 256, and gpuThreadCap clamps to min(that, 256)
 ```
 
-`gpuThreadCap` ([`sketch_generators.ts:10`](../../../src/compiler/autotune/sketch_generators.ts)) is `Math.min((target && target.maxThreadsPerBlock) || 256, 256)` — the same hard 256 ceiling Chapter 43's finding 31 found in `bindFusedSpatialGPU`, arriving in the sketch generator. Three of the six advertised thread-block sizes are the same kernel, and on a device advertising 1024 threads per block the two largest are unreachable.
+`gpuThreadCap` ([`sketch_generators.ts:10`](../../../src/compiler/autotune/sketch_generators.ts)) is `Math.min((target && target.maxThreadsPerBlock) || 256, 256)` — the same hard 256 ceiling Chapter 43 found in `bindFusedSpatialGPU`, arriving in the sketch generator. Three of the six advertised thread-block sizes are the same kernel, and on a device advertising 1024 threads per block the two largest are unreachable.
 
 And a case where every point collapses:
 
@@ -370,10 +384,10 @@ The init block of a 16×16 matmul has 256 elements, and the function it belongs 
 ## 45.7 Traps and limits
 
 - **`rfactor` does not check that the axis it is factoring is a reduction axis.** [`schedule.ts:633`](../../../src/compiler/schedule/schedule.ts) onwards tests the loop, the extent, the factor and the body's operator, and never the axis's `IterVarKind`, so `rfactor('matmul_1', 'ls0_6', 2)` is accepted and produces a nest whose combine loop references two out-of-scope variables. Definition 41.1's requirement that the accumulator subscript not involve the factored axis is the missing hypothesis. Two things keep it latent: `createRfactorSketch` only ever names an axis from `blockInfo.reductionLoopVars` ([`sketch_generators.ts:34`](../../../src/compiler/autotune/sketch_generators.ts)), and `ScheduleValidator` rejects the result on the searched path ([`session.ts:186`](../../../src/compiler/autotune/session.ts)) — which is the validator earning its place, since a rule-produced schedule would not be checked.
-- **`ssrsrs_cpu` is derived, counted, sampled and always refused.** [`tiling.ts:131`](../../../src/compiler/autotune/tiling.ts) calls `decomposeReduction`, which needs an `initBody` no lowering rule sets (Chapter 33, finding 12). It advertises 6,125 of a matmul block's 7,354 points on a 16×16×16 problem — 83% of the block's space is unreachable, and the reachable part contains no schedule that tiles the reduction axis.
+- **`ssrsrs_cpu` is derived, counted, sampled and always refused.** [`tiling.ts:131`](../../../src/compiler/autotune/tiling.ts) calls `decomposeReduction`, which needs an `initBody` no lowering rule sets (Chapter 33). It advertises 6,125 of a matmul block's 7,354 points on a 16×16×16 problem — 83% of the block's space is unreachable, and the reachable part contains no schedule that tiles the reduction axis.
 - **The `fused` sketch is never derived.** `findFusibleConsumer` compares store-subscript variable names against enclosing loop variable names ([`block_dag.ts:119`](../../../src/compiler/autotune/block_dag.ts), and again at `:124` and `:130` for the consumer). Those namespaces are disjoint for every block a lowering rule emits, so the comparison always fails, `createFusedTilingSketch` has no reachable caller, and `BlockTuningSession`'s `needsWholeFunc` branch ([`session.ts:96`](../../../src/compiler/autotune/session.ts)) — which exists to give the fused sketch a whole-function evaluation context — is dead with it.
 - **The autotuner derives nothing for a WASM target.** `deriveSketches` returns `[]` unless the target is `TargetKind.CPU` or `isGPU()` ([`derivation.ts:78`](../../../src/compiler/autotune/derivation.ts)), and `WasmTarget` is neither. Every block becomes an `empty` task, `tune` returns no results, and `tuneAndApply` falls back to the rule policy — which is the correct output, silently obtained without tuning. WASM is the one shipped backend that acts on both `@parallel` and `@vectorized`, so it is also the target where a schedule search would have most to gain.
-- **`gpuThreadCap` caps the menu at 256.** [`sketch_generators.ts:10`](../../../src/compiler/autotune/sketch_generators.ts). Two of the six `BLOCK_SIZE_CANDIDATES` are unreachable on every device and three are aliases on a 256-thread device. Same constant, same consequence as Chapter 43's finding 31, in a different file.
+- **`gpuThreadCap` caps the menu at 256.** [`sketch_generators.ts:10`](../../../src/compiler/autotune/sketch_generators.ts). Two of the six `BLOCK_SIZE_CANDIDATES` are unreachable on every device and three are aliases on a 256-thread device. Same constant, same consequence as the ceiling in Chapter 43, in a different file.
 - **A degenerate factorisation is a first-class point.** `[1,1,1,n]` parallelises a one-iteration loop and leaves the nest as it was. The sketch cannot avoid offering degenerate tuples: for a prime extent *every* tuple is one, since `F(p, 4) = 4` is exactly the four placements of `p` among four slots with 1s elsewhere. Nothing down-weights them, so a search that samples uniformly spends a constant fraction of its budget on schedules that do nothing.
 - **`applyRoles` picks the axis by position, not by extent.** `parallelize` always goes to `axes[0]` and `vectorize` always to `axes[axes.length − 1]` ([`tiling.ts:39`](../../../src/compiler/autotune/tiling.ts), [`tiling.ts:43`](../../../src/compiler/autotune/tiling.ts)). For a nest whose first spatial axis is short and second is long, the parallel loop is the short one and the search has no parameter that can swap them.
 - **A sketch is a closure, so nothing can inspect it.** `ScheduleSketch` holds `_apply` as a function ([`sketch.ts:27`](../../../src/compiler/autotune/sketch.ts)); there is no declarative form. The only way to learn what a point does is to run it, which is why `ssrsrs_cpu` can be counted into the space by code that has no way to discover that it throws.

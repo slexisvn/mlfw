@@ -77,7 +77,35 @@ function isFoldResultRepresentable(value: AttrValue, dtype: string): boolean {
 }
 ```
 
-Folding happens in JavaScript, whose only number type is a double. For an integer operation whose true result exceeds 2⁵³, the double has already lost the answer, and writing that answer into the graph would be a miscompile that no later stage could detect. So the fold is discarded and the operation survives to run at the target's real precision. This is the general shape of a folding hazard: **the compiler's arithmetic and the target's arithmetic are not the same arithmetic**, and Chapter 20 is entirely about the floating-point version of that sentence.
+Folding happens in JavaScript, whose only number type is a double. For an integer operation whose true result exceeds 2⁵³, the double has already lost the answer, and writing that answer into the graph would be a miscompile that no later stage could detect. So the fold is discarded and the operation survives to run at the target's real precision. This is the general shape of a folding hazard: **the compiler's arithmetic and the target's arithmetic are not the same arithmetic**.
+
+Read the guard's first line again, though, because it says exactly which half of that problem is solved:
+
+```ts
+  if (!isIntType(dtype as ScalarDType)) return true;
+```
+
+**Every float dtype is waved through.** The check exists to stop an `i64` fold from silently losing precision to a double, and it does. It does nothing at all for `f32`, and the same hazard is present there for the same reason, only earlier: an `f32` has 24 bits of significand against a double's 53, so a fold that a double computes exactly can be a value the target rounds away.
+
+> **Counterexample 19.6.** `16777216f + 1f` is `16777217` in a double and `16777216` in `f32`, since `2²⁴ + 1` is not representable at single precision. Folding the pair without rounding puts a constant in the graph that the machine could not have produced, and nothing downstream re-rounds a constant.
+
+So both hazards — the integer one and the float one — are resolved in one place, and a fold cannot escape either:
+
+```ts
+function coerceFoldResult(value: AttrValue | undefined, dtype: string): AttrValue | undefined {
+  if (value === undefined || typeof value !== 'number') return value;
+  if (isIntType(dtype as ScalarDType)) {
+    return Number.isInteger(value) && Number.isSafeInteger(value) ? value : undefined;
+  }
+  return roundToDtype(dtype, value);
+}
+```
+
+`roundToDtype` ([`half.ts`](../../../src/tensor/utils/half.ts)) is `Math.fround` for `f32`, a round-trip through the half encoders for `f16` and `bf16`, and the identity for `f64` — the same single source the backends use for storage coercion. Note the asymmetry between the two branches, which is not arbitrary: the integer path **refuses** the fold, because no rounding makes an out-of-range integer right; the float path **rounds**, because rounding is exactly what the target would have done.
+
+One detail matters more than it looks. The pass folds in two places — the main loop, and the recursive resolver that collapses a chain of foldable operations in one visit — and rounding only the first would let a multi-step chain accumulate `f64` precision internally before rounding once at the end. Both go through one `foldOperation` helper, so every intermediate in a folded chain rounds exactly where execution would round it.
+
+**And be careful about what does *not* demonstrate this.** The obvious repro is a chain like `t.add(16777216).add(1).add(-16777216)`, which does disagree with eager execution — but it never reaches the folder at all, because `t` is a runtime argument and nothing in it is all-constant. What it exercises is fusion carrying intermediates at a wider precision, which is §19.8's separate entry. Demonstrating a folder defect needs a fold: two constants, no runtime operand.
 
 ### Elimination
 
@@ -296,10 +324,28 @@ Being conservative here is the *safe* direction — Theorem 19.4's asymmetry —
 ## 19.8 Traps and limits
 
 - **CSE never merges two operations with regions.** [`cse.ts:47`](../../../src/compiler/passes/simplify/cse.ts) refuses them outright. Two identical `fusion` bodies, two identical `scan` loops, two identical `if`s all survive in duplicate. Comparing region bodies is graph isomorphism, so this is the right call, and it means CSE must run *before* fusion to be useful — which is exactly where the pipeline puts it.
-- **Constant folding is scalar-shaped.** `FoldFn` takes and returns `AttrValue`s (Chapter 11), so what gets folded is an operation whose *whole result* is one attribute value — a scalar, or a constant tensor produced by broadcasting one. There is no elementwise folding of two large constant tensors; a graph containing one will keep it and compute it at run time.
+- **A fused float chain rounds its intermediates, and that costs something.** This is not a folding matter and is easy to confuse with one. Once fusion merges a chain of elementwise operations into a single expression (Chapter 22), the generated CPU kernel is one line of JavaScript, and every intermediate in it is a JavaScript number — a `double`. Eager execution materializes each operation into a `Float32Array` and therefore rounds at every step. Left alone, the two disagree: `t.add(16777216).add(1).add(-16777216)` gives `0` eagerly and `1` compiled, and the CPU backend would disagree with WebAssembly, whose `f32` operations round natively.
+
+  So the CPU backend rounds each `f32` intermediate as it is produced. Two refinements keep the cost off the common path. A store into a `Float32Array` already rounds, so the outermost round of a stored expression is stripped — which means a single-operation kernel, the shape the eager JIT compiles, is byte-for-byte what it was before. And operations that return one of their operands or an exact result — `min`, `max`, `abs`, `floor`, `ceil`, `round`, `sqrt` — are not rounded at all.
+
+  What remains is a real cost on genuinely fused arithmetic, and §22.5 is where it shows up: fusing a four-operation chain is worth about 1.9× with the intermediates rounded, against roughly 2.7× without. **About a third of the apparent fusion win is fusion computing in a wider precision than the program asked for.** That is worth knowing when reading any framework's fusion benchmark, including this one's.
+
+- **Constant folding is scalar-shaped.**- **Constant folding is scalar-shaped.** `FoldFn` takes and returns `AttrValue`s (Chapter 11), so what gets folded is an operation whose *whole result* is one attribute value — a scalar, or a constant tensor produced by broadcasting one. There is no elementwise folding of two large constant tensors; a graph containing one will keep it and compute it at run time.
 - **`fold` runs inside a `try` and failures are silent at `INFO`.** [`constant_fold.ts:110`](../../../src/compiler/passes/simplify/constant_fold.ts) catches, emits a `pass_detail` at `DEBUG`, and moves on. A fold rule that throws on every call costs you nothing visible and buys you nothing at all.
 - **The effect mask has four bits and the analysis uses two.** `ALLOCATE` and `CONTROL` are defined, `CONTROL` is declared by `call`, and every consumer in the compiler asks only `hasSideEffect(op)` — *is the mask non-zero*. Nothing distinguishes a read from a write when deciding what may be deleted or reordered. That is sufficient for DCE and insufficient for anything that wants to move two effectful operations past each other, which is why Chapter 36's dependence analysis works on buffers rather than on this.
 - **Fixed-point cost.** All three passes are in the same group (Chapter 15), so each of them runs once more than it needs to, and on a large graph "once more" is a full traversal each. The group's convergence round is cheap only because these three passes are cheap.
+
+- **All three passes are exactly as correct as the registry's metadata, and none of them can check it.** This is worth stating as the chapter's closing thought, because it is the same sentence three times. Definition 19.1 folds an operation if its `fold` callback is present and the operation is *pure*; Definition 19.2 merges two operations if they are *pure* and their opcodes, attributes and operands match, modulo order when the operation is declared *commutative*; Definition 19.3 deletes an operation with no users if it has *no side effect*. Every italicised word is a lookup in the `OpDef`, and Chapter 12 §12.6 established that a declaration is checked only when a verifier exists for it — which, for the algebraic traits, none does and none could.
+
+  So the failure modes are declaration bugs rather than pass bugs, and they present as miscompiles rather than as errors:
+
+  | Wrong declaration | What the pass does | Symptom |
+  |---|---|---|
+  | `COMMUTATIVE` on an operation that is not | CSE merges `f(a,b)` with `f(b,a)` | one of the two computations silently becomes the other |
+  | side-effect mask left empty on an effectful op | DCE deletes it when its result is unused | the effect never happens |
+  | `fold` that disagrees with the backend's arithmetic | constant folding writes the wrong constant | Counterexample 19.6 |
+
+  Theorem 19.4 is honest about this in its own terms — its proof leans entirely on Definition 19.3's third clause, and that clause is a declaration. The theorem is true; the hypothesis is unverified. When a CSE or DCE bug is reported, the first place to look is not the pass.
 
 ## 19.9 Read the tests
 

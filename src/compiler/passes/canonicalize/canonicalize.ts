@@ -10,47 +10,52 @@ import type { GraphFunction } from '../../ir/graph/function.js';
 import type { AnalysisManager } from '../../analysis/analysis_manager.js';
 import type { PassResultValue, PassTarget } from '../pass.js';
 
-let _cachedPatterns: PatternSet | null = null;
+const _cachedPatterns = new Map<boolean, PatternSet>();
 
-function traitPatternsFor(def: OpDef): Pattern[] {
+function traitPatternsFor(def: OpDef, fastMath: boolean): Pattern[] {
   const patterns: Pattern[] = [];
   if (def.isCommutative) {
     patterns.push(new CommutativeConstantRight(def.name));
-    if (def.isAssociative && def.fold) patterns.push(new AssociativeConstantReassoc(def.name));
+    if (def.isAssociative && def.fold) patterns.push(new AssociativeConstantReassoc(def.name, fastMath));
   }
   if (def.hasTrait(OpTrait.IDEMPOTENT)) patterns.push(new IdempotentSelf(def.name));
   return patterns;
 }
 
-function getCanonicalizationPatterns(): PatternSet {
-  if (_cachedPatterns) return _cachedPatterns;
-  _cachedPatterns = new PatternSet();
+function getCanonicalizationPatterns(fastMath: boolean): PatternSet {
+  const cached = _cachedPatterns.get(fastMath);
+  if (cached) return cached;
+  const set = new PatternSet();
   for (const def of registry.allOps()) {
-    for (const p of traitPatternsFor(def)) _cachedPatterns.add(p);
+    for (const p of traitPatternsFor(def, fastMath)) set.add(p);
     if (def.getCanonicalizationPatterns) {
       const opPatterns = def.getCanonicalizationPatterns();
       if (opPatterns) {
         for (const p of opPatterns) {
-          _cachedPatterns.add(p);
+          set.add(p);
         }
       }
     }
   }
-  return _cachedPatterns;
+  _cachedPatterns.set(fastMath, set);
+  return set;
 }
 
 export class CanonicalizePass extends FunctionPass {
-  constructor() {
+  fastMath: boolean;
+
+  constructor(opts: Readonly<{ fastMath?: boolean }> = {}) {
     super('canonicalize');
+    this.fastMath = !!opts.fastMath;
   }
 
   override run(func: PassTarget, analysisManager?: AnalysisManager): PassResultValue {
-    const patterns = getCanonicalizationPatterns();
+    const patterns = getCanonicalizationPatterns(this.fastMath);
     const applicator = new PatternApplicator(patterns);
     return applicator.applyPatterns(func as GraphFunction, 10, this.trace) as PassResultValue;
   }
 }
 
 export function resetCanonicalizationCache(): void {
-  _cachedPatterns = null;
+  _cachedPatterns.clear();
 }

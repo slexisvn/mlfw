@@ -13,7 +13,8 @@ Status: overview plan. Chapter-level detail (section headings, figures, lab scri
 | [Part VI — Lowering to loops: TIR](part6/README.md) | **written** — 6 chapters, 12 runnable labs |
 | [Part VII — Scheduling](part7/README.md) | **written** — 6 chapters, 12 runnable labs |
 | [Part VIII — Autotuning](part8/README.md) | **written** — 5 chapters, 10 runnable labs |
-| Parts IX–XII | outlined below, not yet written |
+| [Part IX — Memory](part9/README.md) | **written** — 4 chapters, 4 runnable labs |
+| Parts X–XII | outlined below, not yet written |
 
 ## Locked decisions
 
@@ -46,7 +47,16 @@ Formal material is set in labelled boxes so a reader can either absorb or skip i
 
 The named results the book will actually state and argue are listed per Part below. This is the material that separates the book from a code walkthrough: a reader should finish able to reason about *any* tensor compiler, not just this one.
 
-**Provenance is marked on every formal statement.** Classical results carry an attribution — *(Williams et al., 2009)* for the roofline bound, *(Amdahl, 1967)*, *(classical)* for terms like arithmetic intensity and the phase-ordering problem. Statements the book formulates itself, because the property is one practitioners rely on but usually state only in prose, carry **(stated here)**. Theorem 5.3 (trace validity) and Definition 6.1 (lowering as irreversible) are the current examples. The distinction is explained to the reader in §1.6, and it matters: a classical result fails only if misapplied, a stated-here result can fail because the formulation missed a case.
+**Provenance is marked on every formal statement, and there are four kinds.** The distinction is explained to the reader in §1.6, and it matters because the four fail in four different ways.
+
+- **(classical)** — a mathematical result that can be looked up, carrying an attribution: *(Williams et al., 2009)* for the roofline bound, *(Amdahl, 1967)*, *(classical)* for terms like arithmetic intensity and the phase-ordering problem. Fails only if misapplied.
+- **(stated here)** — a property practitioners rely on but usually state only in prose, which the book formulates. Theorem 5.3 (trace validity) and Definition 6.1 (lowering as irreversible) are the canonical examples. Can fail because the formulation missed a case.
+- **(invariant)** — a contract this codebase intends to maintain, stated together with the mechanism that enforces it, and with a note where nothing enforces it but convention. Can be violated by a bug; §1.11 lists the contracts currently broken.
+- **(measured)** — an observation on one machine, one date, one revision, reported as a median with its spread. Never used as a premise in a proof.
+
+A labelled block that makes a claim about *this implementation* is **(invariant)** or **(measured)**, never **(stated here)**. Getting that boundary wrong is how a book ends up asserting that a compiler is sound because its documentation says so.
+
+**The numerical-equivalence ladder is book-wide.** Definition 1.4 fixes four levels — N0 bit-identical, N1 same operations in the same order, N2 reassociated, N3 algebraically rewritten — and every legality claim in every Part names the level it means. Reduction order is part of the contract: any transformation that changes the number of partial accumulators is N2 and must be labelled one.
 
 ### Running example
 
@@ -62,7 +72,7 @@ Parts VII and VIII promote the example to a large matmul plus softmax when tilin
 
 ### Repo baseline (2026-08-19; AD and lowering figures re-measured 2026-08-20)
 
-36,166 LOC in `src/compiler`; 96 graph ops; 31 concrete pass classes (21 graph, 9 TIR, 1 LIR); 67 VJP rules (including `stop_gradient`) plus 8 further declared gradient barriers, and 43 JVP rules; **66 of the 96 ops have a lowering rule**, the other 30 being 21 removed by decomposition and 9 handled structurally; 21 TIR node kinds; **22 schedule primitives** (28 public members of `Schedule` less six queries; the earlier count of 23 was made by hand); 5,131 tests passing across 302 files; `tsc --noEmit` clean under `strict`.
+36,166 LOC in `src/compiler`; 96 graph ops; 31 concrete pass classes (21 graph, 9 TIR, 1 LIR); 63 VJP rules (including `stop_gradient`) plus 8 further declared gradient barriers, and 43 JVP rules; **68 of the 96 ops have a lowering rule**, the other 28 being 21 removed by decomposition and 7 handled structurally (Definition 34.6); 21 TIR node kinds; **22 schedule primitives** (28 public members of `Schedule` less six queries; the earlier count of 23 was made by hand); 5,131 tests passing across 302 files; `tsc --noEmit` clean under `strict`.
 
 The lowering figure was "32" in earlier drafts. That number counted literal `registerLoweringRule('name', …)` sites and missed the 33 elementwise rules registered in a loop, `argmax`/`argmin` registered by a helper, and the one target-specific rule — the same failure mode that once made this outline claim 64 ops. It is now measured from the strategy registry, as Appendix A will be.
 
@@ -120,12 +130,12 @@ The lowering figure was "32" in earlier drafts. That number counted literal `reg
     *Formal:* Theorem 20.1 (identities valid over floats), Theorem 20.2 (identities not valid, with the NaN, ±∞ and signed-zero counterexamples), Definition 20.3 (fast-math licence, stated here). Measured: two rewrites that fire with the licence withheld, one in a graph pattern and one in a backend's string peephole.
 21. [**Decomposition**](part4/ch21-decomposition/README.md) — big ops into primitives, and when that loses information a library call would have kept.
     *Formal:* Definition 21.1 (decomposition rule), Definition 21.2 (primitive set, stated here), Definition 21.3 (lossy vs neutral decomposition, stated here); the numerical-form note, since `softmax`'s rule is where max-subtraction is decided for every backend.
-22. [**Fusion I: why it is the single most valuable optimization**](part4/ch22-fusion-why/README.md) — arithmetic intensity, the roofline argument, measured 2.55× flat across four orders of magnitude.
+22. [**Fusion I: why it is the single most valuable optimization**](part4/ch22-fusion-why/README.md) — arithmetic intensity, the roofline argument, measured 1.5–2.4×, flat across four orders of magnitude, with the interquartile ranges reported so the flatness is checkable.
     *Formal:* Definition 22.1 (memory traffic), Definition 22.2 (fusion of a group), Theorem 22.3 (one round trip removed per internalized value, stated here), Corollary 22.4 (a chain of k gains a factor k).
 23. [**Fusion II: legality**](part4/ch23-fusion-legality/README.md) — the cycle problem and incremental topological ordering, [graph_cycles.ts](../src/compiler/passes/fusion/graph_cycles.ts).
     *Formal:* Definition 23.1 (contraction), Theorem 23.2 (legal iff the contraction is acyclic), Definition 23.3 (incremental topological order), Theorem 23.4 (Pearce–Kelly, *(Pearce and Kelly, 2006)*), Corollary 23.5 (windowed cycle detection, stated here). Measured exponent 1.59 — and the finding that the cost is candidate re-evaluation, not the cycle check.
 24. [**Fusion III: the three strategies in mlfw**](part4/ch24-fusion-strategies/README.md) — dominator, priority, multi-output and epilogue fusion, plus the cost model that picks, [passes/fusion/](../src/compiler/passes/fusion/).
-    *Formal:* Definition 24.1 (fusion partition), Theorem 24.2 (NP-hard, classical), Definition 24.3 (monotone candidate set, stated here), Counterexample 24.4 (legality is not monotone), Definition 24.5 (stale candidate, stated here). Measured: 2.4× between the default strategy and the same strategy with one cost-model constant corrected.
+    *Formal:* Definition 24.1 (fusion partition), Theorem 24.2 (NP-hard, classical), Definition 24.3 (monotone candidate set, stated here), Counterexample 24.4 (legality is not monotone), Definition 24.5 (stale candidate, stated here). Measured 2026-08-21: 2.3× between the default strategy and the same strategy with one cost-model constant corrected; the ratio reproduces, the absolute times do not.
 25. [**Layout**](part4/ch25-layout/README.md) — NCHW vs NHWC vs blocked, propagation and insertion of transforms, [passes/layout/](../src/compiler/passes/layout/); off by default, inert when enabled, and slower when properly enabled.
     *Formal:* Definition 25.1 (layout as a permutation), Definition 25.2 (layout assignment problem, stated here), Theorem 25.3 (NP-hard as multiway cut, classical), Definition 25.4 (greedy propagation with local accept, stated here).
 26. [**Three optional pipelines in outline**](part4/ch26-optional-pipelines/README.md) — rematerialization, quantization, partitioning and BYOC. One chapter of overview; each gets a deep appendix.
@@ -147,8 +157,8 @@ The lowering figure was "32" in earlier drafts. That number counted literal `reg
     *Formal:* Definition 32.1 (iteration domain), Definition 32.2 (loop nest), Definition 32.3 (lowering), Theorem 32.4 (lowering is not injective, stated here) with a character-identical counterexample, Corollary 32.5 (irreversibility — Definition 6.1 where it bites), Definition 32.6 (lowering rule, and what it may not see). Measured: 6 graph ops become 16 loops.
 33. [**Buffers, blocks, iteration variables**](part6/ch33-buffers-blocks-itervars/README.md) — the loops are the plan and the block is the computation; spatial vs reduction axes, `local` scratch, and the declaration the scheduler trusts, [ir/tensor/nodes.ts](../src/compiler/ir/tensor/nodes.ts).
     *Formal:* Definition 33.1 (buffer, and layout as strides), Definition 33.2 (block), Definition 33.3 (iteration variable kind), Definition 33.4 (block abstraction, stated here), Definition 33.5 (what `DataPar` claims, stated here), Proposition 33.6 (kind-based legality, stated here), Corollary 33.7 (the declaration is load-bearing — and is checked by nothing).
-34. [**Lowering rules**](part6/ch34-lowering-rules/README.md) — 66 rules, a two-level priority scheme, two override points, and five shared skeletons, [lowering/rules/](../src/compiler/passes/lowering/rules/).
-    *Formal:* Definition 34.1 (op strategy), Definition 34.2 (implementation selection — by priority alone, never by shape), Definition 34.3 (coverage), Proposition 34.4 (coverage is a joint property of registry and pipeline, stated here), Definition 34.5 (rule skeleton, stated here). Measured: 66 + 21 decomposed + 9 structural = 96, with nothing left over.
+34. [**Lowering rules**](part6/ch34-lowering-rules/README.md) — 68 rules, a two-level priority scheme, two override points, and five shared skeletons, [lowering/rules/](../src/compiler/passes/lowering/rules/).
+    *Formal:* Definition 34.1 (op strategy), Definition 34.2 (implementation selection — by priority alone, never by shape), Definition 34.3 (coverage), Proposition 34.4 (coverage is a joint property of registry and pipeline, stated here), Definition 34.5 (rule skeleton, stated here). Measured 2026-08-21: 68 ruled + 21 decomposed + 7 structural = 96, with nothing left over; Definition 34.6 fixes the three classes so the counts stay comparable across Parts.
 35. [**Index arithmetic**](part6/ch35-index-arithmetic/README.md) — linear forms, iteration maps, mixed-radix splitting, [analysis/iter_map.ts](../src/compiler/analysis/iter_map.ts).
     *Formal:* Definition 35.1 (affine form, and why `split` stays inside it while a loop fuse does not), Definition 35.2 and Theorem 35.3 (row-major flattening is a bijection; the inverse is exactly the div/mod recurrence), Definition 35.4 and Theorem 35.5 (exact divisor split, stated here), Corollary 35.6, Definition 35.7 and Theorem 35.8 (mixed-radix forms are exact covers, stated here). Measured: 1.10× between two reshapes of the same 98,304 elements, one of which satisfies Theorem 35.5.
 36. [**Dependence analysis**](part6/ch36-dependence-analysis/README.md) — the theoretical heart of the book, [dependence.ts](../src/compiler/analysis/dependence.ts).
@@ -162,7 +172,7 @@ The lowering figure was "32" in earlier drafts. That number counted literal `reg
     *Formal:* Definition 38.1 (schedule as a sequence of partial functions), Definition 38.2 (semantic equivalence for a `PrimFunc`, stated here), Definition 38.3 (sound primitive), Proposition 38.4 (soundness composes — why a search cannot produce a wrong program, and the one primitive whose unsoundness it therefore does not cover), Definition 38.5 (advisory annotation, stated here).
 39. [**The sref tree and block scopes**](part7/ch39-sref-tree-and-block-scopes/README.md) — how a schedule edits IR without destroying structure, [schedule/sref.ts](../src/compiler/schedule/sref.ts), [block_scope.ts](../src/compiler/schedule/block_scope.ts).
     *Formal:* Definition 39.1 (sref tree), Definition 39.2 (block scope), Definition 39.3 (scope dependence), Lemma 39.4 (scope edges over-approximate, stated here), Proposition 39.5 (relocation legality, stated here).
-40. [**Loop primitives**](part7/ch40-loop-primitives/README.md) — split, fuse, reorder, tile, and the predicate that appears when the extent does not divide, [schedule.ts:257](../src/compiler/schedule/schedule.ts).
+40. [**Loop primitives**](part7/ch40-loop-primitives/README.md) — split, fuse, reorder, tile, and the predicate that appears when the extent does not divide, [schedule.ts](../src/compiler/schedule/schedule.ts).
     *Formal:* Definition 40.1 (split), Theorem 40.2 (split with a guard preserves semantics for any extent), Counterexample 40.3 (the same split without the guard, executed), Proposition 40.4 (fuse needs no guard), Corollary 40.5 (fuse does not undo split, stated here), Definition 40.6 (reorder).
 41. [**Memory and reduction primitives**](part7/ch41-memory-and-reduction-primitives/README.md) — cache_read/cache_write, rfactor, decompose_reduction, storage_align, compute_inline, compute_at.
     *Formal:* Definition 41.1 (reduction block), Theorem 41.2 (rfactor is sound iff the operator is associative and commutative), Counterexample 41.3 (f32 addition is not — measured: serial 3, rfactor(4) 6, on the same eight values), Proposition 41.4 (interposing a buffer, stated here), Definition 41.5 (inlinable producer, stated here), Proposition 41.6 (inlining is sound for one).
@@ -184,13 +194,16 @@ The lowering figure was "32" in earlier drafts. That number counted literal `reg
 48. [**Reproducibility**](part8/ch48-reproducibility/README.md) — schedule traces as serialisable, replayable objects, [schedule/trace.ts](../src/compiler/schedule/trace.ts), [autotune/tune_ir.ts](../src/compiler/autotune/tune_ir.ts); and the difference between replaying a derivation and re-deriving from parameters.
     *Formal:* Definition 48.1 (schedule trace, stated here), Definition 48.2 (replayable versus faithful, stated here), Theorem 48.3 (conditions for faithful replay, stated here — the fresh-variable counter is condition (ii)), Proposition 48.4 (faithful replay requires complete recording, stated here), Counterexample 48.5 (`tensorize` and the register-block sketch record nothing), Corollary 48.6 (a trace is a recipe, not a certificate, stated here), Definition 48.7 (provenance of a tuning result, stated here). Measured: 22 primitives, 18 recording a step of their own; every stored trace replaced with garbage leaves a cached compilation's output unchanged; three of six `annotate` values survive a JSON round trip.
 
-## Part IX — Memory (4 chapters)
+## Part IX — Memory (4 chapters) — **written**, see [part9/](part9/README.md)
 
-49. **Buffer lifetimes** — live intervals over a linearized program, [buffer_liveness.ts](../src/compiler/passes/memory/buffer_liveness.ts).
-50. **Arena allocation** — best-fit and first-fit packing, alignment, [buffer_assignment.ts](../src/compiler/passes/memory/buffer_assignment.ts).
-    *Formal:* the problem as 2D strip packing; NP-hardness in general and what greedy-by-size buys in practice.
-51. **In-place reuse and donation** — when overwriting an input is provably safe, [inplace_analysis.ts](../src/compiler/passes/memory/inplace_analysis.ts).
-52. **Scheduling to lower peak memory** — reordering independent work to shrink the high-water mark, [memory_scheduler.ts](../src/compiler/passes/memory/memory_scheduler.ts).
+49. [**Buffer lifetimes**](part9/ch49-buffer-lifetimes/README.md) — live intervals over a linearized program, [buffer_liveness.ts](../src/compiler/passes/memory/buffer_liveness.ts).
+    *Formal:* Definition 49.1 (live interval), Definition 49.2 (interference), Theorem 49.3 (disjoint intervals may share storage), Lemma 49.4 (region extension — why a loop widens an interval), Definition 49.5 (peak).
+50. [**Arena allocation**](part9/ch50-arena-allocation/README.md) — best-fit and first-fit packing, alignment, [buffer_assignment.ts](../src/compiler/passes/memory/buffer_assignment.ts).
+    *Formal:* Definitions 50.1–50.2 (assignment, validity), Theorem 50.3 (width is a lower bound), Theorem 50.4 (dynamic storage allocation is NP-complete, *(Garey and Johnson, 1979)*), Proposition 50.5 (greedy placement is valid), Definition 50.6 (first-fit and best-fit).
+51. [**In-place reuse and donation**](part9/ch51-inplace-and-donation/README.md) — when overwriting an input is provably safe, [inplace_analysis.ts](../src/compiler/passes/memory/inplace_analysis.ts).
+    *Formal:* Definitions 51.1–51.2 (candidate, aliasing), Theorem 51.3 (index equality suffices), Counterexample 51.4 (`D[i] = S[i] * S[0]`). **And the finding that the shipped default plans a 1.9x lower peak while allocating 2.5x more, because in-place candidates are recorded but never materialized and are excluded from the aliasing that would have been.**
+52. [**Scheduling to lower peak memory**](part9/ch52-scheduling-for-peak/README.md) — reordering independent work to shrink the high-water mark, [memory_scheduler.ts](../src/compiler/passes/memory/memory_scheduler.ts).
+    *Formal:* Definitions 52.1–52.2 (schedule, peak of a schedule), Theorem 52.3 (register sufficiency is NP-complete, *(Sethi, 1975)*), Definitions 52.4–52.5 (list scheduling, depth-first by subgraph weight), Proposition 52.6 (best-of-k is never worse). Measured 2.99x.
 
 ## Part X — Code generation (6 chapters)
 

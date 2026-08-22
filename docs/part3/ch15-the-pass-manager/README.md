@@ -18,7 +18,7 @@ Suppose you have your 21 graph passes as objects, and you write down an order. T
 
 The answers are, in order: **a group that repeats until nothing happens**, **a pipeline that is built rather than written down**, and **a check between every pair of passes**.
 
-The third is worth stating as a slogan, because it is the difference between a debuggable compiler and an undebuggable one: *if you verify only at the ends, you learn that something is broken; if you verify after every pass, you learn who broke it.* The cost is a full IR traversal per pass, which is the kind of price you should expect to pay for that information — and §15.7 measures it.
+The third is worth stating as a slogan, because it is the difference between a debuggable compiler and an undebuggable one: *if you verify only at the ends, you learn that something is broken; if you verify after each pass that changed anything, you learn who broke it.* Note the qualification — it is not decoration, and §15.6 is where it earns its keep. The cost is a full IR traversal per such pass, which is the kind of price you should expect to pay for that information — and §15.7 measures it.
 
 ## 15.3 Theory
 
@@ -44,7 +44,18 @@ That proof is deliberately anticlimactic, because the honest statement is that *
 
 > **Counterexample.** `canonicalize: CHANGED 10 -> 10`. Operation count is not decreased by a CHANGED report, so operation count is not the measure. Neither is any obvious refinement: canonicalization rewrote an attribute, fusion *adds* an operation (the `fusion` wrapper) while removing others, and rematerialization deliberately increases the operation count to lower peak memory.
 
-So the cap is not a safety net around a proof. It is the proof. Two consequences follow, and both are visible in §15.5: a group can stop before it has converged, silently leaving a program that a further round would have improved; and a pass that reports CHANGED when nothing changed costs `maxIterations` rounds of everything else in its group.
+So the cap is not a safety net around a proof. It is the proof — and it proves *termination*, which is a strictly weaker claim than *convergence*. Keep the two apart:
+
+| Claim | Status |
+|---|---|
+| the group stops | proved, by the bound |
+| the group stops **at a fixed point** | not proved, and not true in general |
+| the group tells you which of the two happened | yes — §15.4's `<group>:max-iter` event |
+| the group tells you **why** it hit the cap | no |
+
+The last two rows are the practically useful ones. Falling out of the loop without a quiet round emits a synthetic trace event, so exhausting the budget is visible rather than silent; that is the one line of logging §15.4 points at. But the event carries no diagnosis, and there are two very different situations behind it. A group may be making genuine progress that simply needs more than eight rounds — raise the cap and it converges. Or two passes may be *oscillating*, each honestly reporting CHANGED as it undoes the other, in which case no cap is large enough and raising it only makes compilation slower. Nothing distinguishes them automatically; the way to tell is to re-run with a larger cap and see whether the event goes away.
+
+Two further consequences follow, and both are visible in §15.5: a group can stop before it has converged, leaving a program that a further round would have improved; and a pass that reports CHANGED when nothing changed costs `maxIterations` rounds of everything else in its group.
 
 Chapter 6 established the other half of the picture — Theorem 6.3, that no fixed pass order is optimal for all programs. The fixed-point group is one of the three standard answers to it: if you cannot pick the right order, run the cheap passes repeatedly until order stops mattering.
 
@@ -249,9 +260,21 @@ export const VerifyLevel = Object.freeze({
 });
 ```
 
-**The default is `EACH_PASS`** ([`invariant_check.ts:16`](../../../src/compiler/pipeline/invariant_check.ts): `value ?? VerifyLevel.EACH_PASS`). That is an unusual choice and a deliberate one — most compilers make per-pass verification a debug build or a flag. Enabling it by default means every user's compile is a test of every pass, and it means the first report of a miscompile arrives with a pass name attached. The price is measured next.
+**The default is `EACH_PASS`** ([`invariant_check.ts:16`](../../../src/compiler/pipeline/invariant_check.ts): `value ?? VerifyLevel.EACH_PASS`). That is an unusual choice and a deliberate one — most compilers make per-pass verification a debug build or a flag. Enabling it by default means the first report of a miscompile arrives with a pass name attached. The price is measured next.
 
-Note also the guard on the call site: `_verifyAfter` runs only after a pass that reported CHANGED. A pass that reports UNCHANGED is taken at its word, which is Chapter 14's contract being spent rather than merely declared.
+> **Read the name as `EACH_CHANGING_PASS`.** **(invariant — narrower than it sounds.)** The setting does not verify after every pass, and the guard is not in `_verifyAfter` at all — it is at the call site ([`pass_manager.ts:134`](../../../src/compiler/passes/pass_manager.ts)):
+>
+> ```ts
+>   if (result === PassResult.CHANGED) {
+>     changed = true;
+>     ctx.anyChanged = true;
+>     this.analysisManager.invalidateFunctions(module, pass.preservedAnalyses);
+>     const verr = this._verifyAfter(pass, module, true);
+> ```
+>
+> `_verifyAfter` is reached only from inside that branch. A pass reporting UNCHANGED is taken at its word and skipped entirely; look back at Chapter 14's ledger and count how many of the fifteen runs that is — eleven.
+
+This is Chapter 14's contract being *spent* rather than merely declared, and it is the right optimization as long as the contract holds: verifying a module no pass touched is pure cost. But it means the two mechanisms that would catch a broken pass — verification and analysis invalidation — are keyed off the same self-report, and both fail together in exactly one case: **a pass that mutates the IR and reports UNCHANGED is never verified, so the corruption it introduced is first noticed after some later pass, and attributed to that one.** Chapter 14 §14.2 traces the sequence. If you are hunting a miscompile and `each-pass` blames a pass whose code cannot possibly have done it, the question to ask is which pass ran before it and what it reported.
 
 ## 15.7 Lab 2 — What each verification level buys
 
@@ -284,18 +307,34 @@ The middle row is the one to sit with. "Invalid after graph passes" is a true st
 
 Two details in the output are worth naming. The error surfaces twice at `each-pass` — once attributed to `cse` through the trace stream, once as the thrown exception from the boundary check — because in strict mode the pass manager records the error and stops running passes, and then the pipeline's own boundary check finds the same corruption still there. And the two levels report different operation ids for the same defect (`id=2` against `id=23`), because ids come from a process-global counter and the two compiles are consecutive; an id identifies an operation within one run, not across runs.
 
-Then the price. The second half of the lab times a 49-operation graph (a 25-layer MLP) at each level, interleaving the three so drift cannot favour one, and reporting the *best* of forty rounds:
+Then the price. The second half of the lab times a 49-operation graph (a 25-layer MLP) at each level, interleaving the three so drift cannot favour one, over forty rounds (Node 24.9, 2026-08-21):
 
 ```
-=== compile time by verification level (49 graph ops, best of 40 interleaved rounds) ===
-  off         5.10 ms   1.00x
-  boundaries  5.32 ms   1.04x
-  each-pass   6.03 ms   1.18x
+=== compile time by verification level (49 graph ops, 40 interleaved rounds) ===
+  level        median     ratio    IQR                min      max
+  off           5.35 ms  1.00x   5.13-5.88      5.01     8.06
+  boundaries    5.88 ms  1.10x   5.66-6.13      5.38     6.68   [inside the noise]
+  each-pass     6.81 ms  1.27x   6.26-7.07      6.10     8.46
 ```
 
-Per-pass verification costs 15–30% depending on the run, and that part reproduces. The boundary row does not reliably: it is three module traversals for the whole compile against fifteen for `each-pass`, and on this workload it is close enough to noise that a run will sometimes show no difference at all.
+Per-pass verification costs 20–30% depending on the run, and that part reproduces. The boundary row does not, and **the table says so rather than leaving you to find out**: its interquartile range, 5.59–6.26 ms, overlaps `off`'s 5.29–5.84 ms, so the 1.10× is not distinguishable from noise on this workload. That is unsurprising once you count the work — three module traversals for the whole compile against fifteen for `each-pass` — but a bare ratio would have presented 1.10× and 1.27× as two facts of the same kind, and only one of them is.
 
-The choice of statistic matters here and is worth copying. An earlier version of this lab took the median of fifteen rounds and produced orderings that reversed between runs — `boundaries` measuring *faster* than `off`, which is impossible. The minimum is the robust statistic for "how long does this work take": every sample is the true cost plus some non-negative interference, so the smallest sample is the one with the least of it. A median over a noisy distribution is a measurement of the noise.
+### On choosing a statistic
+
+The lab prints the minimum too, immediately below, and the two disagree in an instructive way:
+
+```
+for comparison, minimum of 40 rounds (the best case, not a central estimate):
+  off           5.01 ms   1.00x
+  boundaries    5.38 ms   1.07x
+  each-pass     6.10 ms   1.22x
+```
+
+There is a real argument for the minimum here, and it is worth stating properly before setting it aside. Compile time is a *non-negative-interference* measurement: every sample is the true cost plus some amount of scheduler noise, cache disturbance and GC, and none of that can make the work go faster. Under that model the smallest sample is the one with the least contamination, and it is the best estimator of the underlying cost. An earlier version of this lab took the median of only fifteen rounds and produced orderings that reversed between runs — `boundaries` measuring *faster* than `off`, which is impossible — which is exactly the failure mode the minimum avoids.
+
+What the minimum is not is a **robust** statistic, and this book does not call it one. Robustness is resistance to a few bad values, measured by breakdown point; the minimum has the worst breakdown point of any order statistic, because a *single* anomalously low sample — a mis-timed clock, a round that skipped work, a JIT that specialized one iteration — replaces the estimate entirely, with no other sample able to outvote it. It is also biased downward by construction, and the bias grows with the number of rounds: take more samples and the minimum drifts further from the typical cost, not closer. And it reports nothing at all about spread, which is the information that would have told you the `boundaries` row is noise.
+
+So the rule this book follows, stated in Chapter 1 §1.8: **report the median with its spread as the headline, and the minimum only as a labelled best case.** The earlier version's problem was not that it used the median, it was that fifteen rounds were too few to have one; forty rounds and a printed IQR fix the reversal and keep the dispersion. Where the quantity you actually care about is the machine's best case, say so and quote the minimum — just do not call it robust, and never quote it alone.
 
 ## 15.8 Above the pass manager: phases
 

@@ -24,15 +24,13 @@ function analyzeKernel(src) {
   const lines = src.split('\n').length;
   const hasNegNoise = /\(0\s*-\s*\w/.test(src);
   const hasMulOne = /\*\s*1\b(?!\.)/.test(src);
-  const hasAddZero = /\+\s*0(?!\.\d*[1-9])\b/.test(src);
-  return { loops, temps, mathCalls, lines, hasNegNoise, hasMulOne, hasAddZero };
+  return { loops, temps, mathCalls, lines, hasNegNoise, hasMulOne };
 }
 
 function report(name, opCount, compileMs, kernelStats) {
   const quality = [];
   if (kernelStats.hasNegNoise) quality.push('NEG_NOISE');
   if (kernelStats.hasMulOne) quality.push('MUL_ONE');
-  if (kernelStats.hasAddZero) quality.push('ADD_ZERO');
   const qStr = quality.length === 0 ? 'CLEAN' : quality.join(', ');
   console.log(
     `  [${name}] ops=${opCount} compile=${compileMs.toFixed(0)}ms ` +

@@ -36,7 +36,9 @@ This is *static single assignment* form, and it is the single most consequential
 
 > **Definition 8.1 (SSA form; classical, after Cytron et al., 1991).** A program is in *static single assignment* form when every value is defined by exactly one instruction, and every use of a value refers unambiguously to that definition.
 
-> **Definition 8.2 (Use-def and def-use graphs).** The *use-def graph* of a program in SSA form is the directed graph whose nodes are operations and whose edges run from each operation to the operations producing its operands. The *def-use graph* is its reverse: an edge from each operation to the operations consuming its results. The two carry the same information and are read in opposite directions, so which one a compiler stores is an engineering choice — and this one stores the second, since a `Value` holds a list of its users.
+> **Definition 8.2 (Use-def and def-use graphs).** The *use-def graph* of a program in SSA form is the directed graph whose nodes are operations and whose edges run **from each operation to the operations producing its operands** — that is, consumer → producer, pointing backwards against the flow of data. The *def-use graph* is its reverse: an edge from each operation to the operations consuming its results, producer → consumer, pointing along the flow of data. The two carry the same information and are read in opposite directions, so which one a compiler stores is an engineering choice — and this one stores the second, since a `Value` holds a list of its users.
+
+Keep the arrows straight, because the direction decides which topological order you mean. A topological order of the **def-use** graph lists producers before consumers: that is a valid *execution* order. A topological order of the **use-def** graph lists consumers before producers, which is the reverse of an execution order — useful when propagating information backwards, as reverse-mode differentiation does in Part V, and wrong if you were trying to schedule. Whenever this book says "topological order" without qualification it means the executable one, over the def-use graph.
 
 ## 8.3 In mlfw: a value is a node with a list of users
 
@@ -171,11 +173,17 @@ Nine of fifteen values cannot affect the output. That reachability walk is the w
 
 Here is a claim that sounds wrong the first time you read it.
 
-> **Theorem 8.4 (Textual order carries no semantics; stated here).** Let *B* be a block of side-effect-free operations in SSA form whose use-def graph is acyclic. Then any permutation of the operations in *B* that is consistent with the use-def graph denotes the same computation, and the graph admits at least one such permutation.
+> **Theorem 8.4 (Textual order carries no semantics).** **(stated here)** Let *B* be a block of side-effect-free operations in SSA form whose use-def graph is acyclic, and let *t* be its terminator. Then any permutation of *B* that (a) is a topological order of the def-use graph — every producer before its consumers — and (b) leaves *t* last, denotes the same computation, and at least one such permutation exists.
 >
-> *Proof sketch.* Each operation's result is a function of its operands alone; no operation reads or writes state that another can observe. So the value of every result is determined by the use-def graph, not by position. Existence of a consistent permutation is the standard fact that a finite DAG has a topological order. ∎
+> *Proof sketch.* Each operation's result is a function of its operands alone; no operation reads or writes state that another can observe. So the value of every result is determined by the def-use graph, not by position, and (a) guarantees each operand is defined before it is read. Existence is the standard fact that a finite DAG has a topological order, together with the observation that the terminator has no results and therefore no consumers, so it is free to be placed last in any such order. ∎
 
-Two conditions are doing real work there, and both were established in Part 0 without being named. *Side-effect-free* is why the operations cannot communicate except through values — Chapter 19 returns to the operations for which this fails. *Acyclic* is what makes a topological order exist at all, and it is checked: [`verifier.ts:136`](../../../src/compiler/ir/graph/verifier.ts) contains a `detectCycles` pass over every block, reporting `participates in a value dependency cycle`.
+Three conditions are doing real work there, and it is worth being clear about what each one costs.
+
+*Side-effect-free* is why the operations cannot communicate except through values — Chapter 19 returns to the operations for which this fails.
+
+*Acyclic* is what makes a topological order exist at all, and it is checked: [`verifier.ts:136`](../../../src/compiler/ir/graph/verifier.ts) contains a `detectCycles` pass over every block, reporting `participates in a value dependency cycle`.
+
+*Terminator last* is the condition that is easy to forget, and the reason it is stated explicitly is that the very next lab appears to violate it. A block's terminator is not just conventionally final: it is required to be, by a trait the verifier enforces. A permutation that satisfies (a) but not (b) — dataflow-consistent, terminator moved — is a structure the parser will happily build and the verifier will reject. §8.6 runs exactly that case.
 
 The theorem is not a curiosity. It is the licence for everything later in the book. When Chapter 24's fusion engine reorders operations to bring a producer next to its consumer, when Chapter 52's memory scheduler moves independent work to shrink peak memory, when the lowering pass walks the graph in an order the user never wrote — none of them needs to prove that reordering is safe, because in this representation the order was never carrying information in the first place.
 
@@ -210,6 +218,15 @@ the parser accepted it.
 ```
 
 Every single line now uses values that are defined *below* it. `return(%13)` comes first. Read as a sequence of instructions this is nonsense. Read as a set of edges it is the same graph, and the parser has no difficulty with it, because it builds operations in dependency order rather than in reading order — [`parser.ts:403`](../../../src/compiler/ir/graph/parser.ts), which Chapter 13 walks through.
+
+> **This module is not valid IR, and that is Theorem 8.4's condition (b) showing its teeth.** Reversing the block moved the terminator to the top, and a terminator is required to be last. Run the result through the verifier and it says so:
+>
+> ```
+> trait 'terminator': a terminator must be the last operation in its block
+> Missing return op
+> ```
+>
+> The same module before reversing verifies clean. So the lab demonstrates precisely as much as the theorem claims and no more: **the dataflow is order-independent, the block structure is not.** Parsing successfully is not the same as being valid — the parser enforces the SSA core and the syntax, the verifier enforces the rest, and Chapter 12 is about the gap between them. If you want a permutation that is both dataflow-consistent and *legal*, shuffle the non-terminator operations and leave the terminator where it is.
 
 The lab then proves the two graphs are the same by traversing each from its return value:
 

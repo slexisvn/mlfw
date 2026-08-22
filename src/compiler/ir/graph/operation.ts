@@ -81,8 +81,16 @@ export class Operation {
 
   getAttr<T extends AttrValue = AttrValue>(name: string): T | undefined { return this.attributes.get(name) as T | undefined; }
   hasAttr(name: string): boolean { return this.attributes.has(name); }
-  setAttr(name: string, value: AttrValue): void { this.attributes.set(name, value); }
-  removeAttr(name: string): boolean { return this.attributes.delete(name); }
+  setAttr(name: string, value: AttrValue): void {
+    this.attributes.set(name, value);
+    if (this.parentBlock) this.parentBlock._notifyMutation();
+  }
+
+  removeAttr(name: string): boolean {
+    const removed = this.attributes.delete(name);
+    if (removed && this.parentBlock) this.parentBlock._notifyMutation();
+    return removed;
+  }
 
   replaceOperand(index: number, newValue: Value): void {
     if (index < 0 || index >= this.operands.length) {

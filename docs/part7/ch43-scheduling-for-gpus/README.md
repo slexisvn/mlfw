@@ -48,7 +48,18 @@ Both hypotheses are load-bearing, and neither is decidable in general — which 
 
 *Proof sketch.* Within a block, `__syncthreads()` orders every access before it against every access after it, and shared memory is visible to all threads of the block. ∎
 
+**Four hypotheses are hiding in "inserting a barrier after each write", and the proof sketch above uses all of them.** They are worth writing down because a repair that satisfies three of them is not a repair:
+
+- **Convergent participation.** `__syncthreads()` is only defined when *every* thread of the block reaches it. A barrier placed inside a guarded region — the predicate `split` emits when the tile does not divide the extent (Chapter 40), or a bounds check — is reached by some threads and not others, and the behaviour is undefined rather than merely unsynchronised. Any barrier this repair inserts must sit outside every conditional.
+- **Unique writers.** The proposition orders writes before reads; it says nothing about two threads writing the *same* element. A WAW race is not repaired by a barrier — both writes are still unordered relative to each other — and the result is whichever landed last. The analysis in §43.4 detects "written under one signature, read under another" and does not distinguish this case.
+- **Phase separation.** One barrier per write is sufficient only if the accesses fall into alternating write-phases and read-phases. A loop that writes, reads, and writes again needs a barrier on *both* sides of the read — the second write must not overtake another thread's read. "After each write" is the right rule for a single producer-consumer step and not for a loop.
+- **Capacity.** The promotion moves the buffer to shared memory, which is finite (48 KiB on the targets here). A buffer that does not fit cannot be promoted, so the repair is unavailable rather than merely expensive.
+
+The implementation's response to all four is the same one: it does not attempt the general case. It promotes only *kernel-local* buffers whose accesses it can see, and where it cannot establish what it needs it falls back to serialisation — which is Theorem 43.4's response applied to a case Proposition 43.5 might have covered. That is the right engineering choice, and it means Proposition 43.5 describes *what a correct repair would require*, not a procedure the compiler carries out in full.
+
 Theorem 43.4 and Proposition 43.5 are why the CUDA backend has two responses to a detected race, and §43.7 shows both.
+
+> **And neither is a proof that the emitted kernel is race-free.** The analysis in §43.4 is a *detector*, and a conservative one: it reports doubt when a buffer's accesses carry differing binding signatures, which is neither necessary nor sufficient for a genuine race. Not sufficient, because two differing signatures may still touch disjoint elements — §43.4 says so, and the cost is unnecessary serialisation. Not necessary in the strong sense either: it examines buffer accesses under thread bindings, so races arising through any other channel — an atomic used incorrectly, a device-scope buffer aliased by the runtime, or a barrier the *backend* omits when emitting a construct the analysis never saw — are outside what it inspects. What the compiler establishes is: **of the races this analysis models, none survives into the emitted kernel.** That is a useful property and it is not "the generated GPU program is race-free"; no analysis in this compiler proves the latter, and Chapter 65's differential testing against the CPU backend is what actually catches the rest.
 
 The third piece of theory is the one the compiler does *not* use:
 
@@ -127,7 +138,11 @@ Fuse the spatial loops into one, split by 256, bind the inner half to threads an
     }
 ```
 
-[`rules.ts:560`](../../../src/compiler/schedule/rules.ts). A launch geometry is a triple of numbers computed at compile time (Definition 43.2), so a loop whose extent is a symbolic dimension cannot be bound. Chapter 62's dynamic shapes therefore cost all GPU parallelism, and the trace says so.
+[`rules.ts:560`](../../../src/compiler/schedule/rules.ts). A loop whose extent is a symbolic dimension is not bound, so Chapter 62's dynamic shapes cost all GPU parallelism on this compiler, and the trace says so.
+
+**That is a limitation of this implementation, not of the hardware, and the distinction is worth insisting on** because the sentence "a GPU needs its grid at compile time" is false and gets repeated. CUDA's launch geometry is an argument to `cuLaunchKernel`, computed by the *host* immediately before the launch; a kernel written with the standard `idx = blockIdx.x * blockDim.x + threadIdx.x; if (idx < n) ...` guard runs correctly for any `n` the host supplies, and that is how essentially every hand-written CUDA kernel handles a runtime size. WebGPU's `dispatchWorkgroups` is the same shape.
+
+What is compile-time here is Definition 43.2's *geometry*, because this compiler computes the triple during scheduling from constant loop extents and stores it on the function. Supporting a dynamic grid would mean deferring that computation to the runtime — emitting the bound-and-guard form, and having the launcher divide the symbolic extent by the block size at call time. Nothing about the hardware prevents it; the geometry is simply not currently a runtime expression. So read this gate as **"the compiler declines to bind what it cannot count"**, and note that it is one of the larger open items on the dynamic-shape side.
 
 ### Race detection
 
@@ -262,7 +277,7 @@ The second is a 128×128 matmul:
 
 This is the fast kernel: 2×2 blocks of 16×16 threads, each thread holding a 4×4 register tile, two shared-memory staging buffers double-buffered across the k-tile loop, barriers on both sides of the inner product. It is also the one nest in the compiler that no primitive touched. `applyDeterministicGpuMatmul` matched the shape and assigned `schedule.func.body = buildRegisterBlockedMatmul(dims, cfg, plan.epilogue)`.
 
-The `[UnknownNode: SyncThreadsNode]` lines are Chapter 32's finding 13 showing through, and they are also a diagnostic: `SyncThreadsNode` has no printer visitor because no lowering rule and no primitive ever emits one. Seeing it in a printout tells you the nest came from somewhere else.
+The `[UnknownNode: SyncThreadsNode]` lines are the printer gap Chapter 32 noted showing through, and they are also a diagnostic: `SyncThreadsNode` has no printer visitor because no lowering rule and no primitive ever emits one. Seeing it in a printout tells you the nest came from somewhere else.
 
 The third compilation is the interesting race:
 

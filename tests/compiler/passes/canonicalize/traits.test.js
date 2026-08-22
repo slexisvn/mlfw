@@ -6,8 +6,8 @@ import { registry } from '../../../../src/compiler/ir/graph/ops.js';
 import { OpTrait } from '../../../../src/compiler/ir/graph/op_registry.js';
 import { PassResult } from '../../../../src/compiler/passes/pass.js';
 
-function run(func) {
-  return new CanonicalizePass().run(func);
+function run(func, opts = {}) {
+  return new CanonicalizePass(opts).run(func);
 }
 
 function retVal(func) {
@@ -16,6 +16,10 @@ function retVal(func) {
 
 function f32(shape) {
   return new TensorType(shape, ScalarType.F32);
+}
+
+function i32(shape) {
+  return new TensorType(shape, ScalarType.I32);
 }
 
 describe('IDEMPOTENT drives f(x, x) -> x', () => {
@@ -96,14 +100,18 @@ describe('COMMUTATIVE drives constant-to-the-right without per-op wiring', () =>
   });
 });
 
+function chain(opName, dtype, scalarType, c1, c2) {
+  const t = dtype([4]);
+  return buildFunction('f', [t], [t], (b, args) => {
+    const inner = b[opName](args[0], b.scalarConstant(c1, scalarType).getResult(0));
+    const outer = b[opName](inner.getResult(0), b.scalarConstant(c2, scalarType).getResult(0));
+    b.returnOp([outer.getResult(0)]);
+  });
+}
+
 describe('ASSOCIATIVE drives constant reassociation', () => {
-  it('(x + c1) + c2 folds the constants into a single add', () => {
-    const t = f32([4]);
-    const func = buildFunction('f', [t], [t], (b, args) => {
-      const inner = b.add(args[0], b.scalarConstant(2, ScalarType.F32).getResult(0));
-      const outer = b.add(inner.getResult(0), b.scalarConstant(5, ScalarType.F32).getResult(0));
-      b.returnOp([outer.getResult(0)]);
-    });
+  it('(x + c1) + c2 folds the constants into a single add on integers', () => {
+    const func = chain('add', i32, ScalarType.I32, 2, 5);
 
     expect(run(func)).toBe(PassResult.CHANGED);
 
@@ -113,19 +121,40 @@ describe('ASSOCIATIVE drives constant reassociation', () => {
     expect(adds[0].getOperand(1).definingOp.getAttr('value')).toBe(7);
   });
 
-  it('(x * c1) * c2 folds through the same trait-derived pattern', () => {
-    const t = f32([4]);
-    const func = buildFunction('f', [t], [t], (b, args) => {
-      const inner = b.mul(args[0], b.scalarConstant(3, ScalarType.F32).getResult(0));
-      const outer = b.mul(inner.getResult(0), b.scalarConstant(4, ScalarType.F32).getResult(0));
-      b.returnOp([outer.getResult(0)]);
-    });
+  it('(x * c1) * c2 folds through the same trait-derived pattern on integers', () => {
+    const func = chain('mul', i32, ScalarType.I32, 3, 4);
 
     run(func);
 
     const muls = func.findOps(op => op.opName === 'mul');
     expect(muls.length).toBe(1);
     expect(muls[0].getOperand(1).definingOp.getAttr('value')).toBe(12);
+  });
+
+  it('refuses to reassociate a float chain without a fast-math licence', () => {
+    const func = chain('add', f32, ScalarType.F32, 2, 5);
+
+    run(func);
+
+    expect(func.findOps(op => op.opName === 'add').length).toBe(2);
+  });
+
+  it('refuses to reassociate a float product without a fast-math licence', () => {
+    const func = chain('mul', f32, ScalarType.F32, 3, 4);
+
+    run(func);
+
+    expect(func.findOps(op => op.opName === 'mul').length).toBe(2);
+  });
+
+  it('reassociates the same float chain under fast-math', () => {
+    const func = chain('add', f32, ScalarType.F32, 2, 5);
+
+    expect(run(func, { fastMath: true })).toBe(PassResult.CHANGED);
+
+    const adds = func.findOps(op => op.opName === 'add');
+    expect(adds.length).toBe(1);
+    expect(adds[0].getOperand(1).definingOp.getAttr('value')).toBe(7);
   });
 
   it('does not reassociate when the intermediate is used elsewhere', () => {

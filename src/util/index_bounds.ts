@@ -7,7 +7,7 @@ export type IndexedTensor = {
   } | null;
 };
 
-export type ArgIndexBound = { argIndex: number; limit: number; opName: string };
+export type ArgIndexBound = { argIndex: number; lo: number; hi: number; opName: string };
 
 function storageOf(t: IndexedTensor): ArrayLike<number | bigint> | null {
   const storage = t && t._impl ? t._impl.storage : null;
@@ -22,15 +22,15 @@ function numelOf(shape: readonly number[]): number {
   return n;
 }
 
-function reportOutOfRange(value: number, position: number, limit: number, label: string): never {
+function reportOutOfRange(value: number, position: number, lo: number, hi: number, label: string): never {
   throw new RangeError(
-    `${label}: index ${value} at position ${position} is out of range for a table of ${limit} row(s); valid indices are 0..${limit - 1}`
+    `${label}: index ${value} at position ${position} is out of range for a table of ${hi - lo} row(s); valid indices are ${lo}..${hi - 1}`
   );
 }
 
-export function assertIndicesInRange(indices: IndexedTensor, limit: number, label: string): void {
+export function assertIndicesInRange(indices: IndexedTensor, lo: number, hi: number, label: string): void {
   const data = storageOf(indices);
-  if (data === null || !Number.isFinite(limit) || limit <= 0) return;
+  if (data === null || !Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) return;
 
   const shape = indices.shape;
   const n = numelOf(shape);
@@ -43,7 +43,7 @@ export function assertIndicesInRange(indices: IndexedTensor, limit: number, labe
     const end = Math.min(data.length, offset + n);
     for (let i = offset; i < end; i++) {
       const v = Number(data[i]);
-      if (v < 0 || v >= limit) reportOutOfRange(v, i - offset, limit, label);
+      if (v < lo || v >= hi) reportOutOfRange(v, i - offset, lo, hi, label);
     }
     return;
   }
@@ -54,7 +54,7 @@ export function assertIndicesInRange(indices: IndexedTensor, limit: number, labe
   for (let pos = 0; pos < n; pos++) {
     if (flat >= 0 && flat < data.length) {
       const v = Number(data[flat]);
-      if (v < 0 || v >= limit) reportOutOfRange(v, pos, limit, label);
+      if (v < lo || v >= hi) reportOutOfRange(v, pos, lo, hi, label);
     }
     for (let d = rank - 1; d >= 0; d--) {
       counter[d]++;
@@ -69,6 +69,6 @@ export function assertIndicesInRange(indices: IndexedTensor, limit: number, labe
 export function assertArgIndexBounds(bounds: readonly ArgIndexBound[], inputs: readonly IndexedTensor[]): void {
   for (const b of bounds) {
     const t = inputs[b.argIndex];
-    if (t) assertIndicesInRange(t, b.limit, `${b.opName}: compiled input ${b.argIndex}`);
+    if (t) assertIndicesInRange(t, b.lo, b.hi, `${b.opName}: compiled input ${b.argIndex}`);
   }
 }

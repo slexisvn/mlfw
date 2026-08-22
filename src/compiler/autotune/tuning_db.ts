@@ -16,7 +16,7 @@ export type SerializedRecord = {
   minMs: number | null;
 };
 
-export type SerializedDatabase = { version: number; codegenVersion?: string; entries: SerializedRecord[] };
+export type SerializedDatabase = { version: number; codegenVersion?: string; scheduleSemanticsVersion?: string; entries: SerializedRecord[] };
 
 export type FsLike = {
   writeFile(path: string, data: string): void;
@@ -25,6 +25,7 @@ export type FsLike = {
 };
 
 export const CODEGEN_VERSION = 'mlfw-codegen-1';
+export const SCHEDULE_SEMANTICS_VERSION = 'mlfw-schedule-2';
 
 export class TuningRecord {
   workloadKey: string;
@@ -121,12 +122,15 @@ export class TuningDatabase {
         });
       }
     }
-    return { version: this.version, codegenVersion: CODEGEN_VERSION, entries };
+    return { version: this.version, codegenVersion: CODEGEN_VERSION, scheduleSemanticsVersion: SCHEDULE_SEMANTICS_VERSION, entries };
   }
 
   static deserialize(data: SerializedDatabase): TuningDatabase {
     const db = new TuningDatabase(data.version);
     if (data.codegenVersion !== undefined && data.codegenVersion !== CODEGEN_VERSION) {
+      return db;
+    }
+    if (data.scheduleSemanticsVersion !== SCHEDULE_SEMANTICS_VERSION) {
       return db;
     }
     for (const entry of data.entries) {

@@ -1,6 +1,7 @@
 import {
   tensor, Module, compile, CPUTarget, TraceLevel, manual_seed,
 } from '../../../../dist/index.node.js';
+import { summarize, ratio } from '../../../tools/measure.mjs';
 
 manual_seed(0);
 
@@ -34,14 +35,14 @@ async function build(args, fusionEnabled) {
   return { compiled, explains, ir };
 }
 
-async function best(fn, reps) {
+async function sample(fn, reps) {
   const times = [];
   for (let i = 0; i < reps; i++) {
     const t0 = performance.now();
     await fn();
     times.push(performance.now() - t0);
   }
-  return Math.min(...times);
+  return summarize(times);
 }
 
 const big = inputs(1 << 20);
@@ -52,22 +53,24 @@ console.log('the cost model: ' + on.explains.map(e => `${e.subject} -> ${e.decis
 
 console.log('\n=== traffic per call, counted from the graph ===');
 console.log('  unfused: 4 kernels x (2 reads + 1 write) = 12 tensor round-trips');
-console.log('  fused:   1 kernel  x (2 reads + 1 write) =  3 tensor round-trips');
+console.log('  fused:   1 loop nest x (2 reads + 1 write) =  3 tensor round-trips');
 console.log('  the model removes 9 round-trips, independent of tensor size\n');
 
-console.log('elements   tensor    unfused   fused    speedup   traffic saved');
+console.log('elements   tensor    unfused   fused    speedup   traffic saved   IQR overlap');
 for (const shift of [10, 14, 16, 18, 20, 22]) {
   const n = 1 << shift;
   const args = inputs(n);
   const off = await build(args, false);
   const fused = await build(args, true);
   await off.compiled(...args); await fused.compiled(...args);
-  const tOff = await best(() => off.compiled(...args), 20);
-  const tOn = await best(() => fused.compiled(...args), 20);
+  const sOff = await sample(() => off.compiled(...args), 25);
+  const sOn = await sample(() => fused.compiled(...args), 25);
   const savedMiB = (9 * n * 4) / 1024 / 1024;
+  const r = ratio(sOff, sOn);
   console.log(
     `${String(n).padStart(8)}  ${(n * 4 / 1024).toFixed(0).padStart(6)} KiB  ` +
-    `${tOff.toFixed(3).padStart(7)}  ${tOn.toFixed(3).padStart(7)}  ` +
-    `${(tOff / tOn).toFixed(2).padStart(7)}x  ${savedMiB.toFixed(2).padStart(9)} MiB`
+    `${sOff.median.toFixed(3).padStart(7)}  ${sOn.median.toFixed(3).padStart(7)}  ` +
+    `${r.value.toFixed(2).padStart(7)}x  ${savedMiB.toFixed(2).padStart(9)} MiB  ` +
+    `${(r.overlapping ? 'YES - noise' : 'no').padStart(12)}`
   );
 }

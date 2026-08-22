@@ -67,6 +67,7 @@ export type AutotuneConfigOpts = Readonly<{
   benchmarkRepeat?: number;
   benchmarkMaxCv?: number;
   topKForBenchmark?: number;
+  fastMath?: boolean;
   maxRoundsPerTask?: number;
   plateauPatience?: number;
   schedulerPolicy?: SchedulerPolicy | null;
@@ -102,6 +103,7 @@ class AutotuneConfig {
   benchmarkRepeat: number;
   benchmarkMaxCv: number;
   topKForBenchmark: number;
+  numericMode: string;
   maxRoundsPerTask: number;
   plateauPatience: number;
   schedulerPolicy: SchedulerPolicy | null;
@@ -129,6 +131,7 @@ class AutotuneConfig {
     this.benchmarkRepeat = opts.benchmarkRepeat ?? 10;
     this.benchmarkMaxCv = opts.benchmarkMaxCv ?? 0;
     this.topKForBenchmark = opts.topKForBenchmark ?? 5;
+    this.numericMode = opts.fastMath ? 'n3' : 'n1';
     this.maxRoundsPerTask = opts.maxRoundsPerTask ?? 8;
     this.plateauPatience = opts.plateauPatience ?? 2;
     this.schedulerPolicy = opts.schedulerPolicy || null;
@@ -194,7 +197,7 @@ export class Autotuner {
     const keyByBlock = new Map<string, string>();
 
     for (const name of blockNames) {
-      const key = computeWorkloadKey(primFunc, name, this.target, blockMap);
+      const key = computeWorkloadKey(primFunc, name, this.target, blockMap, this.config.numericMode);
       keyByBlock.set(name, key);
       const existing = tasksByKey.get(key);
       if (existing) { existing.weight++; continue; }

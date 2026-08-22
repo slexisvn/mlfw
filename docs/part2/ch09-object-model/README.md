@@ -83,7 +83,7 @@ A region is thin — it exists to be the thing an operation owns. `parentOp` is 
 
 Any node, at any nesting depth, can find the function it belongs to. That matters for a reason that is not obvious: **mutation tracking**.
 
-### Every edit bumps a version number
+### Every edit through the API bumps a version number
 
 [`block.ts:41`](../../../src/compiler/ir/graph/block.ts):
 
@@ -94,9 +94,28 @@ Any node, at any nesting depth, can find the function it belongs to. That matter
   }
 ```
 
-`pushOp`, `insertBefore`, `insertAfter`, `removeOp`, `addArgument`, `removeArguments` and `replaceOperand` all call it. So does `replaceAllUsesWith`. The result is that a function carries a counter that changes whenever anything inside it changes, at any depth.
+`pushOp`, `insertBefore`, `insertAfter`, `removeOp`, `addArgument`, `removeArguments` and `replaceOperand` all call it. So does `replaceAllUsesWith`. The result is that a function carries a counter that changes whenever the *structure* inside it changes, at any depth — which operations exist, and which values they consume.
 
-That counter is the foundation of Chapter 16's analysis caching: an analysis result computed at version 7 is known to be stale at version 8, without comparing anything. It is a small mechanism with a large consequence, and the reason it works is that *there is exactly one path by which the IR can be edited*. If a pass could reach in and splice a linked list directly, the version would not move and a stale analysis would be used as if fresh.
+That counter is the foundation of Chapter 16's analysis caching: an analysis result computed at version 7 is known to be stale at version 8, without comparing anything.
+
+**Attributes count as edits.** An attribute is not decoration: a `dot`'s `lhs_contracting` decides which axes are summed, and a comparison's `direction` decides whether the test is `<` or `>`. Changing one changes what the program computes, and passes do change them in place — [`patterns.ts:162`](../../../src/compiler/ir/graph/patterns.ts) inverts a comparison's `direction` during canonicalization, [`partition_pass.ts:59`](../../../src/compiler/passes/partition/partition_pass.ts) stamps `partition_id` onto existing operations. So the attribute mutators notify too ([`operation.ts:84`](../../../src/compiler/ir/graph/operation.ts)):
+
+```ts
+  setAttr(name: string, value: AttrValue): void {
+    this.attributes.set(name, value);
+    if (this.parentBlock) this.parentBlock._notifyMutation();
+  }
+
+  removeAttr(name: string): boolean {
+    const removed = this.attributes.delete(name);
+    if (removed && this.parentBlock) this.parentBlock._notifyMutation();
+    return removed;
+  }
+```
+
+Two details are worth copying. The notification is conditional on `parentBlock`, because an operation under construction is not yet in a function and has no version to bump. And `removeAttr` notifies only when it removed something — deleting an absent key is not a mutation, and reporting it as one would invalidate the cache on every miss.
+
+The mechanism is therefore what §9.4's heading claims: every edit that goes through the API bumps the version. What it cannot see is an edit made *around* the API, which is §9.8's subject.
 
 ### Function — a signature and one region
 
@@ -289,7 +308,7 @@ Then look at the two loops. Operations are **cloned** in `topoSortByOperands` or
 - **`ops()` versus `opsRecursive()` is a real bug source.** They differ by everything inside every region. When you read a pass in Part IV, check which one it uses; when you write one, decide deliberately.
 - **Region isolation is a contract, not a checked invariant.** The verifier in Chapter 12 checks that operands are defined *somewhere in the function's scope set*, which is deliberately permissive: it does not reject a region operation whose body reads an enclosing value. Isolation is upheld by the passes that build regions and is pinned by [`tests/compiler/ir/graph/region-scope-contract.test.js`](../../../tests/compiler/ir/graph/region-scope-contract.test.js) rather than by the verifier. Chapter 12 returns to why that boundary was drawn there.
 - **A region here almost always has exactly one block.** The structure permits several, and `Region.blocks` is an array. But with no branch operation there is nothing to make a second block reachable, so multi-block regions are unused. The parser refuses more than one top-level block in a function outright ([`parser.ts:523`](../../../src/compiler/ir/graph/parser.ts)).
-- **The version counter only moves for edits that go through the API.** Every mutating method calls `_notifyMutation`. Reaching into `block._head` directly does not, and Chapter 16's analysis cache will then hand you a stale result. This is the practical reason the fields are named with a leading underscore even though TypeScript would let you touch them.
+- **Encapsulation is a naming convention, and it does not cover the containers.** Every mutating *method* notifies (§9.4), but the underscore convention is the whole of the enforcement, and `Operation.attributes`, `.operands`, `.results` and `.regions` are all public, mutable and reachable. `op.attributes.set('direction', 'gt')` compiles, runs, changes what the program computes, and leaves the version untouched — by a route that is not even nominally private. Only `Block`'s intrusive list is underscore-protected. So "there is exactly one path by which the IR can be edited" describes an intention rather than a property of the code: the version counter is sound for every edit made through the API and cannot see one made around it. Freezing the containers, or hiding them behind accessors, is what would close the remaining gap.
 - **`Object.freeze` on the signature is shallow.** `inputTypes` cannot be reassigned or resized; the `TensorType` objects inside it are immutable by their own construction rather than by the freeze. Chapter 10 makes that immutability explicit.
 
 ## 9.9 Read the tests

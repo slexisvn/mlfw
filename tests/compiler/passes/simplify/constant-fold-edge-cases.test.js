@@ -151,6 +151,49 @@ describe('visited set prevents re-traversal', () => {
   });
 });
 
+describe('float folds are rounded to the result dtype', () => {
+  it('folds 16777216f + 1f to 16777216, the f32 result, not the f64 one', () => {
+    const t = new TensorType([], ScalarType.F32);
+    const func = buildFunction('f', [], [t], (b) => {
+      const a = b.scalarConstant(16777216, ScalarType.F32);
+      const c = b.scalarConstant(1, ScalarType.F32);
+      b.returnOp([b.add(a.getResult(0), c.getResult(0)).getResult(0)]);
+    });
+
+    run(func);
+
+    expect(retVal(func).definingOp.getAttr('value')).toBe(16777216);
+  });
+
+  it('rounds a chained f32 fold at every step, matching stepwise execution', () => {
+    const t = new TensorType([], ScalarType.F32);
+    const func = buildFunction('f', [], [t], (b) => {
+      const a = b.scalarConstant(16777216, ScalarType.F32);
+      const one = b.scalarConstant(1, ScalarType.F32);
+      const back = b.scalarConstant(-16777216, ScalarType.F32);
+      const inner = b.add(a.getResult(0), one.getResult(0));
+      b.returnOp([b.add(inner.getResult(0), back.getResult(0)).getResult(0)]);
+    });
+
+    run(func);
+
+    expect(retVal(func).definingOp.getAttr('value')).toBe(0);
+  });
+
+  it('leaves an f64 fold at full double precision', () => {
+    const t = new TensorType([], ScalarType.F64);
+    const func = buildFunction('f', [], [t], (b) => {
+      const a = b.scalarConstant(16777216, ScalarType.F64);
+      const c = b.scalarConstant(1, ScalarType.F64);
+      b.returnOp([b.add(a.getResult(0), c.getResult(0)).getResult(0)]);
+    });
+
+    run(func);
+
+    expect(retVal(func).definingOp.getAttr('value')).toBe(16777217);
+  });
+});
+
 describe('integer dtype fold representability guard', () => {
   it('aborts fold when integer result exceeds safe integer range', () => {
     const t = new TensorType([], ScalarType.I64);

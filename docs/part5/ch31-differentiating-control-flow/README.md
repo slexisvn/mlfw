@@ -164,7 +164,17 @@ for (const op of ['compare', 'logical_not', 'logical_and', 'logical_or', 'argmax
 }
 ```
 
-Every one of them produces a boolean or an integer. That is the criterion, and it is a good one: the barrier set is exactly the operations whose *output type* is not differentiable, which is checkable rather than a matter of taste. `stop_gradient` is the exception and appears twice — a barrier *and* a rule returning `[null]` — because it is the one operation whose whole purpose is to be a barrier the user asked for.
+It is tempting to summarize that list as "every one of them produces a boolean or an integer", and seven of the nine do. **`one_hot` does not**: its result dtype defaults to `f32` ([`ops/data.ts:97`](../../../src/compiler/ir/graph/ops/data.ts): `|| ScalarType.F32`), and a one-hot encoding is an ordinary float tensor that flows into ordinary float arithmetic. So the output-type criterion is not the one this set actually satisfies, and stating it that way would leave you unable to explain why `one_hot` belongs.
+
+The criterion that does hold is about the *other* end:
+
+> **A barrier is an operation across which no cotangent can meaningfully flow** — either because its result is not a float, so nothing downstream can hand it one, or because its differentiable-looking result depends only on operands that are *indices*, for which a derivative is undefined.
+
+`compare`, `logical_*`, `argmax` and `argmin` are the first kind. `one_hot` and `iota` are the second: `one_hot`'s single operand is an integer index tensor, `iota`'s output depends on no operand at all. In both cases the gradient with respect to the operand does not exist — not "is zero" — and stopping is the right answer, but the reason is the operand, not the result.
+
+That distinction has a practical consequence. An operation whose *output* is a float is one a downstream rule will happily send a cotangent to, so a barrier of the second kind is invisible until the sweep reaches it. If you add an operation with float output and index inputs and forget to declare it, the failure is Corollary 31.4's third outcome — an error naming the operation — which is the good case, and the reason §31.4's registry throws rather than defaulting.
+
+`stop_gradient` is the exception to both kinds and appears twice — a barrier *and* a rule returning `[null]` — because it is the one operation whose whole purpose is to be a barrier the user asked for.
 
 The first outcome, the numeric zero, is four operations ([`vjp_rules/unary.ts:199`](../../../src/compiler/ad/vjp_rules/unary.ts)):
 
@@ -270,7 +280,20 @@ The third outcome does not appear in the table because no traced user program ca
 - **`if` costs both branches in the backward pass.** §31.4. The forward `if` executes one branch; its backward executes both and selects. For branches of very different cost that is a real asymmetry between the forward and backward passes.
 - **Inside a region body, everything is treated as needing gradient.** `ALWAYS_NEEDS_GRAD` ([`scan_backward.ts:31`](../../../src/compiler/ad/scan_backward.ts)) is a set whose `has` returns `true` unconditionally, and it is what a nested region's backward is given. So Definition 29.1's pruning does not apply inside a loop body: every operation in the body is differentiated, whether or not its result reaches anything. On an unrolled `T`-step scan that overhead is multiplied by `T`.
 - **`findUnsupportedGradOps` has no callers.** [`vjp_registry.ts:39`](../../../src/compiler/ad/vjp_registry.ts) exists to answer "which operations in this graph would fail to differentiate" *before* the sweep starts, which is exactly the diagnostic a user wants. Nothing in `src/` or `tests/` calls it, so the failure arrives from the middle of the sweep instead of up front. It also checks only the rule and barrier maps, so it would report `scan` and `if` as unsupported.
-- **The barrier list is a list, not a property.** All nine barriers produce booleans or integers, which is a rule the type system could enforce — an operation whose result dtype is not a float needs no gradient. It is instead nine names in one file, so a new integer-valued operation is a missing declaration rather than an automatic barrier, and the failure mode is the throw rather than the right answer.
+- **The barrier list is a list, not a property — and it could not be one property.** §31.4 works through this: seven of the nine barriers produce booleans or integers, and *that* part a type check could enforce automatically. The other two, `one_hot` and `iota`, produce `f32` and are barriers because of their operands rather than their results, so no single dtype rule covers the set. What that means practically is that adding an integer-valued operation without declaring it is a missing declaration rather than an automatic barrier, and adding a float-valued index consumer without declaring it is the same. Both fail as the throw rather than the right answer.
+
+- **The sweep never revisits the operations it emits, which is why the backward graph may contain a `compare` that was never a barrier question.** The reverse walk runs over the *forward* function's operations in reverse topological order, and the graph it builds is output, not input. So when an `if` rule emits a `select` guarded by the original condition, or a `max` rule emits a `compare` to route the cotangent, those newly created comparison and control operations are simply appended — they are never handed to `requireVJPRuleOrBarrier`, never checked for a rule, and never reached by `computeGradReachability`. That is correct: they are part of the derivative, not part of the function being differentiated, and differentiating them again would be meaningless. But it is an asymmetry worth naming, because it means "every `compare` in the program is a declared barrier" is true of the forward graph and not of the compiled artifact. If you are reading a backward graph and find a `compare` in it, do not go looking for its barrier declaration.
+- **There is no stated contract for mutating an input between `cf(x)` and `cf.backward(w)`.** **(invariant — undefined.)** Chapter 29 §29.6 exhibits the joint mode's version of this: input buffers are aliased rather than copied, the joint kernel is deferred, and `backward` re-runs it — so one call can return a forward output computed from the call-time input and a gradient computed from a later one. The wider point belongs here, because it applies to both modes and to the whole two-call API:
+
+  | Question | Answer today |
+  |---|---|
+  | May I mutate an input after `cf(x)` returns? | unspecified |
+  | May I mutate a *parameter* between forward and backward? | unspecified; the aliasing in §29.6 says the gradient sees the new value |
+  | Are the forward output and the gradient guaranteed to come from the same input state? | **no** — §29.6 has the counterexample |
+  | Does reading the forward output change what `backward` computes? | in joint mode, yes: it settles the kernel early |
+
+  Every row of that table should have a documented answer and none does. This is not an exotic scenario for a training loop: an optimizer that updates parameters in place, a data loader reusing one staging buffer, or a gradient-accumulation loop that overwrites its inputs will all reach it. Until the contract is written, the safe discipline is: **do not mutate anything the compiled function was handed until you have both the outputs and the gradients you intend to use.** The framework will not warn you, and the failure is a silently wrong gradient rather than an error.
+
 - **A numeric zero keeps its operand on the gradient path.** `computeGradReachability` tests for the *presence* of a rule, not for what the rule returns (Chapter 29), so `floor` pulls its operand into the reachable set and the zeros are emitted. Part IV removes them only where the zero is the whole contribution; where it is added to a real one, the `constant` and the `add` survive to the backend, because `x + 0` is unsound on floats.
 
 ## 31.8 Read the tests

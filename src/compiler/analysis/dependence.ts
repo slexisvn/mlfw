@@ -146,6 +146,21 @@ function dependenceKind(src: BufferAccess, dst: BufferAccess): DepKindValue {
   return DepKind.WAR;
 }
 
+function negateMask(mask: DirectionMask): DirectionMask {
+  let out = mask & Direction.EQ;
+  if (mask & Direction.LT) out |= Direction.GT;
+  if (mask & Direction.GT) out |= Direction.LT;
+  return out;
+}
+
+function isLexNegative(masks: readonly DirectionMask[]): boolean {
+  for (const mask of masks) {
+    if (mask === Direction.EQ) continue;
+    return mask === Direction.GT;
+  }
+  return false;
+}
+
 export function accessDependence(src: BufferAccess, dst: BufferAccess): Dependence | null {
   const loops = commonNest(src.iterSpace, dst.iterSpace);
   const levelIndex = new Map<string, number>();
@@ -167,6 +182,10 @@ export function accessDependence(src: BufferAccess, dst: BufferAccess): Dependen
       masks[k] &= dims[k];
       if (masks[k] === 0) return null;
     }
+  }
+
+  if (isLexNegative(masks)) {
+    return new Dependence(src.buffer, dst, src, dependenceKind(dst, src), loops, masks.map(negateMask));
   }
 
   return new Dependence(src.buffer, src, dst, dependenceKind(src, dst), loops, masks);

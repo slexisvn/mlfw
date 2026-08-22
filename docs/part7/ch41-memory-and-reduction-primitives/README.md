@@ -40,9 +40,11 @@ Meanwhile the other three primitives answer a plainer question. Chapter 4 measur
 
 The pattern-match in Definition 41.1 is doing real work: it names the accumulator (the buffer that appears on both sides at the same subscript), the operator, and the update expression. `rfactor` is exactly this decomposition, and everything it builds is assembled from those three parts.
 
-> **Theorem 41.2 (rfactor is sound iff `⊕` is associative and commutative).** Let `B` be a reduction over `⊕` with axis `k ∈ [0, K)` and initial value `e₀`, and let `f ∣ K`. The rfactored program — `P[i] = e₀ ⊕ ⨁_{j<K/f} x_{j·f+i}` for each `i < f`, then `A[s] = e₀ ⊕ ⨁_{i<f} P[i]` — computes the same value as `B` for all inputs if `⊕` is associative and commutative with identity `e₀`. If `⊕` is not associative, there are inputs for which it does not.
+> **Theorem 41.2 (rfactor is sound when `⊕` is associative and commutative with identity `e₀`, and unsound for some input when it is not associative).** Let `B` be a reduction over `⊕` with axis `k ∈ [0, K)` and initial value `e₀`, and let `f ∣ K`. The rfactored program — `P[i] = e₀ ⊕ ⨁_{j<K/f} x_{j·f+i}` for each `i < f`, then `A[s] = e₀ ⊕ ⨁_{i<f} P[i]` — computes the same value as `B` for all inputs if `⊕` is associative and commutative with identity `e₀`. If `⊕` is not associative, there are inputs for which it does not.
 
 *Proof.* The original computes `e₀ ⊕ x₀ ⊕ ⋯ ⊕ x_{K−1}` left to right. The rfactored form computes the same `K` terms grouped by residue mod `f`, with `e₀` inserted once per group and once at the combine. Associativity lets the parentheses be moved, commutativity lets the terms be permuted from index order into residue order, and identity lets the `f` extra copies of `e₀` be discarded. Conversely, if `⊕` is non-associative, pick `a, b, c` with `(a⊕b)⊕c ≠ a⊕(b⊕c)`; with `K = 4`, `f = 2` the two forms bracket differently and differ. ∎
+
+**Note that the theorem is not an "iff", and calling it one would claim more than the proof gives.** The forward direction is a genuine sufficiency result: associativity, commutativity and an identity are enough. The converse only says that a *non-associative* operator fails on *some* input — which leaves out two cases the phrase "iff" would wrongly settle. An operator that is associative but not commutative is still fine for this particular transform *if* the partition preserves index order, which the strided partition below does not; and a non-associative operator is perfectly correct on every input that does not exercise the difference, which is why float rfactor passes almost every test anyone writes. Soundness in the sense of Definition 38.3 is a claim about all inputs, so the second case is still a failure — but "unsound" and "always wrong" are not the same statement, and §41.5's counterexample had to be constructed rather than found.
 
 The gap between Theorem 41.2 and the code is the whole of §41.5:
 
@@ -83,23 +85,26 @@ Every clause of Definition 41.5 is a `throw` in `_inlinePlan`, and §41.6 lists 
     const spatialIdx = store.indices;
     const storeMath = store.value as MathOpNode;
     const op = storeMath.op;
-    const isAccLoad = (node: TirNode | null | undefined): boolean => !!node && node.type === 'BufferLoadNode' && (node as BufferLoadNode).buffer === acc;
+    const isAccLoad = (node: TirNode | null | undefined): boolean =>
+      !!node && node.type === 'BufferLoadNode'
+      && (node as BufferLoadNode).buffer === acc
+      && sameIndices((node as BufferLoadNode).indices, spatialIdx);
     let update: TirNode | undefined;
     if (isAccLoad(storeMath.a)) update = storeMath.b as TirNode;
     else if (isAccLoad(storeMath.b)) update = storeMath.a;
-    else throw new Error(`rfactor: accumulator load not found in block '${blockName}' body`);
-    if (!RFACTOR_ASSOCIATIVE_OPS.has(op)) {
-      throw new Error(`rfactor: op '${op}' is not associative+commutative; cannot factor reduction`);
+    else throw new Error(`rfactor: block '${blockName}' body is not an accumulation into '${acc.name}' at the stored subscript`);
+    if (readsBuffer(update, acc)) {
+      throw new Error(`rfactor: update expression in block '${blockName}' reads accumulator '${acc.name}'; cannot factor reduction`);
     }
 ```
 
-Theorem 41.2's hypothesis is a four-element set ([`schedule.ts:45`](../../../src/compiler/schedule/schedule.ts)):
+Theorem 41.2's hypothesis is a four-element table ([`schedule.ts:45`](../../../src/compiler/schedule/schedule.ts)):
 
 ```ts
-const RFACTOR_ASSOCIATIVE_OPS = new Set(['+', '*', 'min', 'max']);
+const RFACTOR_REDUCE_TYPE: Record<string, string> = { '+': 'sum', '*': 'prod', 'min': 'min', 'max': 'max' };
 ```
 
-`min` and `max` select an operand rather than computing a new value, so no rounding happens and they are associative and commutative exactly; `+` and `*` are the approximate cases of Counterexample 41.3. The set does not distinguish the two situations, and there is no dtype test — an integer sum, which is exact, and a float sum, which is not, take the same path.
+which doubles as the operator test and as the route to each operator's identity (§41.6). `min` and `max` select an operand rather than computing a new value, so no rounding happens and they are associative and commutative exactly; `+` and `*` are the approximate cases of Counterexample 41.3. The table does not distinguish the two situations, and there is no dtype test — an integer sum, which is exact, and a float sum, which is not, take the same path.
 
 The rest builds two nests. The partial one carries the split of the reduction axis, the new `[factor, ...acc.shape]` buffer, and — this is the only place in the compiler that does it — an `initBody`:
 
@@ -111,9 +116,28 @@ The rest builds two nests. The partial one carries the split of the reduction ax
       block.reads.map(r => ({ buffer: r.buffer })), [{ buffer: partialBuf }], partialStore, partialInit);
 ```
 
-and the initial value it uses is `block.initBody`'s value if there is one and `IntImmNode(0)` otherwise ([`schedule.ts:656`](../../../src/compiler/schedule/schedule.ts)). Since no lowering rule sets `initBody` (Chapter 33, finding 12), **every rfactor in this compiler defaults its identity element to integer zero** — correct for `+`, wrong for `*` (identity 1), `min` (identity `+∞`) and `max` (identity `−∞`).
+and the initial value it uses is `block.initBody`'s value if there is one and `IntImmNode(0)` otherwise ([`schedule.ts:656`](../../../src/compiler/schedule/schedule.ts)). Since no lowering rule sets `initBody` (Chapter 33), **every rfactor in this compiler defaults its identity element to integer zero** — correct for `+`, wrong for `*` (identity 1), `min` (identity `+∞`) and `max` (identity `−∞`).
 
-That is less bad than it looks, and worth being precise about. The default only reaches the emitted code through the `init` contract, and the init contract is what the backend uses to zero the accumulator at the innermost reduction loop. For `*`, `min` and `max` the compiler never gets there, because the reduce lowering rule emits its identity into a *separate* init block rather than into `initBody` — so the block `rfactor` matches is always a `+` accumulation in practice. It is a latent defect guarded by the shape of the input rather than by a check.
+**And the identity is where a plausible-sounding argument goes wrong.** It is tempting to reason: the reduce lowering rule emits its identity into a *separate* init block rather than into `initBody`, so `rfactor` only ever meets `+` accumulations in practice. Read it again — a separate init block is exactly what leaves `block.initBody` null, which is exactly what makes the fallback fire. The arrangement that was supposed to make a wrong default unreachable is the arrangement that reaches it.
+
+> **Counterexample 41.7 (rfactor on a product).** A block computing `C = ∏ A[k]` over `k ∈ [0, 4)` with no `initBody` is accepted — `*` is associative and commutative. Initialise its partial buffer to `0` and every partial product is `0 × something = 0`, and the combine multiplies zeros: the product of `[2, 3, 4, 5]` becomes `0` instead of `120`. Not a rounding difference; every product in the program becoming zero.
+
+So the identity comes from the operator and the accumulator's dtype, through the same `reduceInitValue` the lowering rules use — a reduction initialised by `rfactor` and one initialised by `lowerReduce` cannot disagree:
+
+```ts
+const RFACTOR_REDUCE_TYPE: Record<string, string> = { '+': 'sum', '*': 'prod', 'min': 'min', 'max': 'max' };
+
+function rfactorIdentity(op: string, dtype: string): TirNode {
+  const value = reduceInitValue(RFACTOR_REDUCE_TYPE[op], dtype);
+  return isDtypeInt(dtype) ? new IntImmNode(value) : new FloatImmNode(value);
+}
+```
+
+The dtype matters as much as the operator: `max` on a float accumulator initialises to `−∞` and on an integer one to that type's minimum. An explicit `initBody` still wins, because a reduction with a non-identity initial value is a legitimate program and rfactoring it must preserve that value.
+
+**The accumulator pattern needs checking too, and Definition 41.1 says what to check.** Comparing buffers alone is not enough: `C[i] = C[j] ⊕ x` with `i ≠ j` would pass, and so would a store whose "update" half also reads `acc` — in which case the partial and combine nests both read a buffer they are concurrently rewriting. So the load's subscript must match the store's, compared as affine forms via `toLinearForm` rather than by node identity so that `C[0]` and `C[0+0]` are the same place, and the update expression must not read `acc` at all. Both refuse with a message naming the accumulator.
+
+**What none of this touches is Counterexample 41.3**, and nothing can: reassociating a float sum is what `rfactor` is *for*. It remains an N2 transformation offered without asking, and §41.5 measures serial `3` against rfactored `6`.
 
 Two derived facts about the emitted nests:
 
@@ -128,7 +152,7 @@ Two derived facts about the emitted nests:
     if (!block.initBody) throw new Error(`decomposeReduction: block '${blockName}' has no initBody`);
 ```
 
-which, given Chapter 33's finding 12, means it throws on every block the lowering rules produce. It is the inverse of the form those rules already emit. §41.6 follows the consequence into Part VIII.
+which, since no lowering rule sets `initBody` (Chapter 33), means it throws on every block the lowering rules produce. It is the inverse of the form those rules already emit. §41.6 follows the consequence into Part VIII.
 
 ### `cacheRead` and `cacheWrite`
 
@@ -299,7 +323,7 @@ It cannot fire on a block the lowering rules produced, and it can on a block `rf
 
 ## 41.7 Traps and limits
 
-- **`rfactor`'s identity element defaults to integer `0`.** [`schedule.ts:656`](../../../src/compiler/schedule/schedule.ts) reads `block.initBody`, which no lowering rule sets, and falls back to `IntImmNode(0)` — the identity of `+` and of nothing else in `RFACTOR_ASSOCIATIVE_OPS`. A `*`, `min` or `max` reduction that did reach `rfactor` would be silently wrong. None does, because the reduce rule emits its identity as a separate init block, so the only blocks matching Definition 41.1 are `+` accumulations.
+- **`rfactor`'s identity element comes from the operator and the dtype, not from the block.** [`schedule.ts:656`](../../../src/compiler/schedule/schedule.ts) reads `block.initBody` when there is one and otherwise derives the identity from `reduceInitValue` (§41.6). No lowering rule sets `initBody`, so the derived path is the one every rfactor in a real compilation takes — and since those are all `+` accumulations, a wrong default there would be invisible until someone called `rfactor` on a product by hand. `rfactor` is public, so that is not a defence.
 - **`rfactor` reassociates without a licence.** There is no `fastMath` argument and no dtype check, unlike Chapter 20's algebraic patterns, which take both. Part VIII's `createRfactorSketch` will offer it for any single-axis reduction with a divisor.
 - **`decomposeReduction` cannot be applied to lowered TIR.** §41.6, and it takes the SSRSRS tiling sketch with it.
 - **`cacheWrite` leaves the cache uninitialised when the accumulator's init is in a sibling block.** §41.6. Correct on CPU by accident, wrong on CUDA.

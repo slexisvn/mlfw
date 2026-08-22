@@ -78,6 +78,26 @@ describe('embedding rejects out-of-range indices instead of producing NaN', () =
     expect(() => emb.forward(bad)).toThrow(/index 99/);
   });
 
+  it('a computed index is guarded on the argument it was derived from', async () => {
+    const emb = new nn.Embedding(V, D);
+    const compiled = compile({ forward: (x) => emb.forward(T.add(x, 1)) }, [tensor([0, 1, 2], { dtype: 'i32' })], { target: CPUTarget() });
+
+    const good = await compiled(tensor([0, 1, 2], { dtype: 'i32' }));
+    expect(flat(good).every(Number.isFinite)).toBe(true);
+
+    await expect(async () => await compiled(tensor([0, 1, V - 1], { dtype: 'i32' }))).rejects.toThrow(/out of range/);
+  });
+
+  it('a computed index shifted the other way admits the value the shift makes valid', async () => {
+    const emb = new nn.Embedding(V, D);
+    const compiled = compile({ forward: (x) => emb.forward(T.sub(x, 1)) }, [tensor([1, 2, 3], { dtype: 'i32' })], { target: CPUTarget() });
+
+    const good = await compiled(tensor([1, 2, V], { dtype: 'i32' }));
+    expect(flat(good).every(Number.isFinite)).toBe(true);
+
+    await expect(async () => await compiled(tensor([0, 2, 3], { dtype: 'i32' }))).rejects.toThrow(/out of range/);
+  });
+
   it('an index tensor that is only reachable through a captured weight is not falsely rejected', () => {
     const emb = new nn.Embedding(V, D);
     const fixed = tensor([1, 2], { dtype: 'i32' });

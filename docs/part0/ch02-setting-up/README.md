@@ -1,8 +1,8 @@
 # Chapter 2 — Setting up
 
-By the end of this chapter you will have run three programs. The first prints a compiler's intermediate representation. The second measures what compilation buys — including a case where it buys almost nothing. The third prints the machine code, or rather the JavaScript, that the compiler wrote.
+By the end of this chapter you will have run three programs. The first prints a compiler's intermediate representation. The second measures what compilation buys — including a case where it buys almost nothing. The third prints the *generated source* the compiler wrote — JavaScript, in this backend's case. It is worth being exact about that from the start: this compiler's CPU backend emits JavaScript text and hands it to the host engine, which is what actually compiles it to machine code. Nothing in this book emits machine code directly. What the backends emit is source for another compiler — JavaScript here, a WebAssembly module in Chapter 55, CUDA C in Chapter 56 — and "the code the compiler wrote" always means that source.
 
-Everything here takes about ten minutes.
+Budget about forty-five minutes: the install and build take a few minutes of waiting, the test suite about a minute, and the three labs are quick to run but repay being read. If you are new to compilers, the walkthroughs in §2.4 and §2.6 are the part that takes the time.
 
 ## 2.1 What you need
 
@@ -77,7 +77,7 @@ The remaining projects are hardware-gated:
 | `npm run test:stress` | Time and memory | Slow; not part of the default check |
 | `npm run test:perf` | Time | Asserts the *shape* of scaling, not absolute timings; Chapter 4 points you at it |
 
-Prefer `npm run test:unit` and `npm run test:e2e` as your everyday check. Plain `npm test` also includes the WebGPU project, which will report failures on a machine with no browser available — a fact about your machine, not about the code.
+Prefer `npm run test:unit` and `npm run test:e2e` as your everyday check. Plain `npm test` also includes the WebGPU project. That project gates itself on finding a Chrome or Chromium binary — [`chrome.webgpu.test.js:233`](../../../tests/e2e/webgpu/chrome.webgpu.test.js) wraps its suite in `describe.skipIf(!deps)` — so on a machine without one the WebGPU tests report as **skipped**, not failed, and `npm test` still exits green. That is the same behaviour promised in §2.1, and it is deliberate: a missing browser is a fact about your machine, and a test suite that failed over it would be reporting the wrong thing.
 
 *All test counts measured 2026-08-19.*
 
@@ -288,7 +288,8 @@ Count the memory traffic. The fused version reads `buf_13`, reads the bias, writ
 |---|---|---|
 | `Cannot find module '../../../../dist/index.node.js'` | Bundle not built | `npm run build` |
 | A lab prints stale behaviour after you edited `src/` | `dist/` is a snapshot | `npm run build` again |
-| `npm test` reports WebGPU failures | No Chrome available | Use `npm run test:unit` and `npm run test:e2e` |
+| `npm test` reports WebGPU tests as skipped | No Chrome available | Expected; set `CHROME_PATH` if you have a browser elsewhere |
+| `npm test` reports WebGPU *failures* | Chrome was found but could not start, or has no WebGPU adapter | Check `CHROME_PATH`; otherwise use `npm run test:unit` and `npm run test:e2e` |
 | CUDA tests all skip | No GPU or CUDA runtime | Expected; nothing before Chapter 56 needs them |
 | `ERR_UNSUPPORTED_ESM_URL_SCHEME` on Windows | Absolute path in an `import` | Use a relative path, as the labs do |
 
@@ -306,9 +307,9 @@ While reading, keep three things within reach:
 
 - **`printModule`** — for any model, at any point, print the graph and look at it.
 - **`compiled.source()`** — for any compiled model, read the generated code.
-- **The test suite** — when the book says the compiler behaves a certain way, `tests/` contains the executable proof.
+- **The test suite** — when the book says the compiler behaves a certain way, `tests/` usually contains a check you can run.
 
-Between them, nothing in this book has to be taken on faith.
+Between them, very little in this book has to be taken on faith. But be precise about what a passing test buys you. A test demonstrates that the behaviour holds *on the inputs it tries*; a proof shows it holds on all of them. The two are not the same currency, and this book does not spend one as if it were the other. The claims marked **(classical)** and **(stated here)** in §1.6 are argued; the claims marked **(invariant)** are backed by a checker or by tests, and §1.11 lists the ones where that backing turned out to be thinner than the claim. Where a test is the only evidence, the chapter says "the tests check" rather than "it is proved" — and when you are deciding whether to rely on something, that distinction is the one worth reading for.
 
 ---
 

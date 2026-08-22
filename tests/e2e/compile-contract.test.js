@@ -190,6 +190,44 @@ for (const target of TARGETS) {
       });
     });
 
+    describe('dtype is part of the guard, not only shape', () => {
+      class Half {
+        forward(t) { return t.div(2); }
+      }
+
+      it('recompiles for a new dtype instead of reusing the f32 artifact', async () => {
+        const model = new Half();
+        const compiled = compileFor(model, [tensor([1, 3, 5, 7], { dtype: 'f32' })], target);
+
+        const asF32 = await compiled(tensor([1, 3, 5, 7], { dtype: 'f32' }));
+        expect(asF32.dtype).toBe('f32');
+        expect([...asF32.toArray()]).toEqual([0.5, 1.5, 2.5, 3.5]);
+
+        const asI32 = await compiled(tensor([1, 3, 5, 7], { dtype: 'i32' }));
+        expect(asI32.dtype).toBe('i32');
+        expect([...asI32.toArray()]).toEqual([0, 1, 2, 3]);
+      });
+
+      it('agrees with eager execution on the dtype it recompiled for', async () => {
+        const model = new Half();
+        const compiled = compileFor(model, [tensor([1, 3, 5, 7], { dtype: 'f32' })], target);
+        const idx = tensor([1, 3, 5, 7], { dtype: 'i32' });
+
+        expect([...(await compiled(idx)).toArray()]).toEqual([...(await model.forward(idx)).toArray()]);
+      });
+
+      it('still serves the original dtype from cache afterwards', async () => {
+        const model = new Half();
+        const compiled = compileFor(model, [tensor([1, 3, 5, 7], { dtype: 'f32' })], target);
+
+        await compiled(tensor([1, 3, 5, 7], { dtype: 'i32' }));
+        const back = await compiled(tensor([1, 3, 5, 7], { dtype: 'f32' }));
+
+        expect(back.dtype).toBe('f32');
+        expect([...back.toArray()]).toEqual([0.5, 1.5, 2.5, 3.5]);
+      });
+    });
+
     describe('numerical stability', () => {
       it('zero input', async () => {
         const model = new Sequential(new Linear(4, 2));

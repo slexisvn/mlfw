@@ -1,8 +1,8 @@
 # Chapter 24 — Fusion III: the three strategies
 
-Chapter 22 said fusion is worth 2.55×. Chapter 23 said a merge is legal exactly when contracting it leaves a DAG. Neither says *which* legal, profitable merges to make, in what order, and that turns out to be the question with the largest spread between good and bad answers.
+Chapter 22 said fusion is worth roughly 1.9×. Chapter 23 said a merge is legal exactly when contracting it leaves a DAG. Neither says *which* legal, profitable merges to make, in what order, and that turns out to be the question with the largest spread between good and bad answers.
 
-There are three fusion engines in this compiler and two auxiliary passes. They see the same graph, use the same legality checks and the same cost model, and on a three-operation program they used to produce three different answers, the best of which ran 2.4× faster than the default. They now produce the same answer. What separated them was not the strategies at all — it was a single `||` in the cost model, and §24.5 is the chase.
+There are three fusion engines in this compiler and two auxiliary passes. They see the same graph, use the same legality checks and the same cost model, and on a three-operation program they used to produce three different answers, the best of which ran about 2.3× faster than the default. They now produce the same answer. What separated them was not the strategies at all — it was a single `||` in the cost model, and §24.5 is the chase.
 
 ## 24.1 The problem: fusion decisions are not independent
 
@@ -30,7 +30,13 @@ The difference between them is not a matter of taste. A region-at-a-time engine 
 
 > **Definition 24.1 (Fusion partition).** A *fusion partition* of a DAG `G` is a partition of its vertices into groups such that contracting every group simultaneously leaves a DAG. Its *benefit* is the sum over groups of `memorySaved + launchSaved` from Chapter 22.
 
-> **Theorem 24.2 (Hardness).** *(Classical.)* Maximizing the benefit of a fusion partition is NP-hard in general — it contains graph partitioning with arbitrary vertex weights as a special case.
+> **Theorem 24.2 (Hardness).** *(Classical.)* Fix a DAG `G` with rational edge benefits and a bound `B`. Deciding whether `G` admits a fusion partition (Definition 24.1) of total benefit at least `B` is NP-complete.
+>
+> *Proof sketch.* Membership is clear: a partition is a polynomial-size certificate, and both its acyclicity after contraction and its benefit are checkable in polynomial time. For hardness, note that the acyclicity constraint is vacuous on a DAG with no edges between the vertices being grouped, so the problem restricted to such instances is exactly **maximum-benefit graph partitioning** with arbitrary weights, which is NP-hard by reduction from `MAX-CUT`. ∎
+
+**State the problem before quoting the hardness, because "fusion is NP-hard" on its own means very little.** Several distinct problems live under that phrase and they have different answers. Deciding whether *one* merge is legal is polynomial — Chapter 23's cycle check. Finding *any* maximal legal partition is polynomial and is what a greedy engine does. Finding the partition of *maximum benefit* under a fixed additive cost function is the one Theorem 24.2 is about, and it is the one no engine here attempts. And "the partition that actually runs fastest" is not in NP at all under any obvious encoding, because the objective is a wall-clock time nobody can evaluate without running the program — which is precisely why Part VIII stops predicting and starts measuring.
+
+So the load-bearing claim for this chapter is the third one, and its practical content is modest: **there is no reason to expect a greedy engine to be optimal, so the differences between the three engines below are expected rather than surprising.** The hardness does not tell you how far from optimal any of them is, and §24.5's finding is a reminder that in practice the gap between engines was not a search-quality gap at all.
 
 Hence heuristics, and hence the practical question is not "which is optimal" but "which fails less badly, and how would you know". Two properties distinguish greedy schemes here:
 
@@ -100,7 +106,13 @@ The benefit function is one line ([`fusion_cost.ts:70`](../../../src/compiler/pa
   }
 ```
 
-with weights `{ memory: 1, launch: 1000 }` ([`fusion_cost.ts:38`](../../../src/compiler/passes/fusion/fusion_cost.ts)), so a saved launch is worth `1000 × 5 = 5000` "bytes". That is a unit-free trade-off between two incomparable quantities, and the number encodes an assumption about how expensive a launch is relative to a byte of bandwidth. On a CPU, where a "launch" is a function call, it is very likely too high.
+with weights `{ memory: 1, launch: 1000 }` ([`fusion_cost.ts:38`](../../../src/compiler/passes/fusion/fusion_cost.ts)).
+
+**Check the dimensions, because they do not check out.** `launchOverheadUs` is a time, in microseconds. `bytes` is a count of bytes. The expression adds `1000 × 5 µs` to `1 × bytes` and returns a `number` — so the quantity being maximized has no unit at all, and the "1000" is not a conversion factor between microseconds and bytes but an unexplained scalar that happens to make a saved launch outrank about 5000 bytes of traffic. Nothing in the code names that exchange rate or says where it came from, and TypeScript is content because both sides are `number`.
+
+A dimensionally sound version is not hard to write and is worth knowing as the target: pick one unit — time — and convert. Traffic becomes `bytes / bandwidth`, launches stay in microseconds, the sum is in microseconds, and the "weight" disappears entirely because the machine supplies the exchange rate. Chapter 4's roofline gives exactly the number needed: at the ~7.7 GB/s this eager CPU path achieves, 5000 bytes is about 0.65 µs, so the current weights value a launch at roughly eight times a 5000-byte transfer rather than exactly equal to it. Whether that is right is now a *question you can ask*, which is the whole benefit of carrying units.
+
+Two consequences follow from the unit-free form. The weights cannot be transferred between machines, because a ratio between a time and a byte count is a property of a machine's bandwidth and launch latency, and nothing records which machine these were tuned on. And they cannot be transferred between backends: §22.4 showed `launchOverheadUs` is a target-independent constant, so on the CPU the first term contributes a large fixed bonus for a saving that is not there. Chapter 46 rebuilds this idea properly, with a model whose output is a predicted *time* and which is graded against measured times.
 
 The main loop is Definition 24.5 in practice ([`priority_fusion.ts:189`](../../../src/compiler/passes/fusion/priority_fusion.ts)):
 
@@ -148,80 +160,61 @@ class Diamond extends Module {
 }
 ```
 
-Three operations, all elementwise, all the same shape, on 256K-element tensors. Every pair is legal by Chapter 23. And this is what the lab printed before the fix described below:
+Three operations, all elementwise, all the same shape, on 256K-element tensors. Every pair is legal by Chapter 23. And this is what the lab printed before the fix described below (Node 24.9, 2026-08-21):
 
 ```
 === strategy 'priority' (the default) ===
   cost model: add+mul -> fused
   1 fusion region(s) holding: add, mul
-  1.473 ms
+  1.014 ms
 
 === strategy 'dominator' ===
   cost model: mul+add+add -> not-fused: shared memory 1048576 exceeds limit 49152
   0 fusion region(s) holding: (nothing)
-  1.598 ms
+  1.083 ms
 
 === strategy 'greedy' (the original FusionPass) ===
   cost model: add+mul+add -> not-fused: shared memory 1048576 exceeds limit 49152
   0 fusion region(s) holding: (nothing)
-  1.565 ms
+  1.109 ms
 
 === strategy 'dominator', shared-memory budget raised to 16 MiB ===
   cost model: mul+add+add -> fused: saves 6291456 bytes, 10us launch
   1 fusion region(s) holding: add, mul, add
-  0.606 ms
+  0.438 ms
 ```
 
 Two of the three engines fused **nothing**. The reason is in the explanation: `s` is used twice inside the candidate group, so the cost model charges it as shared memory ([`fusion_cost.ts:203`](../../../src/compiler/passes/fusion/fusion_cost.ts)) at its full tensor size — one megabyte — against a limit of 48 KiB.
 
 The priority engine reached a different answer for a structural reason. It merges *edges*, so it first forms `{add, mul}` — at which point `s` has one internal user and one external one, no shared-memory charge, and the merge passes. Then it tries to add the final `add`, which would make `s` internally reused, and *that* merge is refused. It stopped one step short of the group the other two engines evaluated as a whole, producing a two-output region: the kernel yields both `s` and `s*x`, and the final add reads them back.
 
-The fourth run is the control. Same engine, same graph, one number changed — and all three operations fuse into one kernel, **2.4× faster than the default configuration**. So the 48 KiB limit cost this program 2.4×, and it is worth asking where the number came from. 48 KiB is a GPU shared-memory budget. This compilation targets a CPU, which has no shared memory at all. The plumbing explains it ([`priority_fusion.ts:60`](../../../src/compiler/passes/fusion/priority_fusion.ts)):
-
-```ts
-      maxSharedMemory: target.sharedMemoryBytes,
-```
-
-`CPUTarget` does not mention `sharedMemoryBytes` at all, and the base constructor turns that silence into a number — `config.sharedMemoryBytes || 0` ([`target.ts:114`](../../../src/backend/target.ts)). The cost model then read that number as `config.maxSharedMemory || 49152` ([`fusion_cost.ts:62`](../../../src/compiler/passes/fusion/fusion_cost.ts)). **Zero is falsy.** So "I have no shared memory" and "I did not say" collapsed to the same value twice over, and the second `||` read that value as the former having never been stated — falling back to the GPU default. `CUDATarget` sets `48 * 1024` explicitly and was unaffected; CPU and WASM, which say nothing, inherited a budget for a resource they do not have.
-
-The obvious repair is `??` instead of `||`, and it is not enough: `??` faithfully propagates the CPU's zero, and a *limit* of zero refuses the fusion even harder — `shared memory 1048576 exceeds limit 0`. The `||` was hiding a second question the code never asked, which is what a device reporting no scratchpad *means*. It does not mean a budget of zero bytes; it means the budget does not apply, because a fused intermediate on a CPU lives in ordinary memory and nothing on-chip bounds it. So the resolution has three cases, not two ([`fusion_cost.ts:43`](../../../src/compiler/passes/fusion/fusion_cost.ts)):
-
-```ts
-function deviceLimit(stated: number | undefined, whenUnspecified: number): number {
-  if (stated === undefined) return whenUnspecified;
-  return stated === 0 ? Infinity : stated;
-}
-```
-
-`maxRegistersPerThread` gets the same treatment, and for the same reason: `target.registersPerThread` is also `0` on CPU and WASM, and `|| 255` was handing them a GPU register file too. With both budgets resolved that way the lab reads:
+The fourth run is the control. Same engine, same graph, one number changed — and all three operations fuse into one kernel, **about 2.3× faster than the default configuration**. So the 48 KiB limit cost this program roughly 2.3×, and it is worth asking where the number came from. 48 KiB is a GPU shared-memory budget, and this compilation targets a CPU, which has no shared memory at all. A CPU target says nothing about the quantity, and the chain of defaults underneath read that silence as the GPU number rather than as "not applicable" — a distinction the type `number` cannot express, and one §24.7 takes up. Resolving silence and zero separately, for the shared-memory budget and the per-thread register budget alike, the lab reads:
 
 ```
 === strategy 'priority' (the default) ===
   cost model: add+mul+add -> fused
   1 fusion region(s) holding: add, mul, add
-  0.621 ms
+  0.450 ms
 
 === strategy 'dominator' ===
   cost model: mul+add+add -> fused: saves 6291456 bytes, 10us launch
   1 fusion region(s) holding: add, mul, add
-  0.621 ms
+  0.434 ms
 
 === strategy 'greedy' (the original FusionPass) ===
   cost model: add+mul+add -> fused: saves 6291456 bytes, 10us launch
   1 fusion region(s) holding: add, mul, add
-  0.615 ms
+  0.441 ms
 
 === strategy 'dominator', shared-memory budget raised to 16 MiB ===
   cost model: mul+add+add -> fused: saves 6291456 bytes, 10us launch
   1 fusion region(s) holding: add, mul, add
-  0.622 ms
+  0.429 ms
 ```
 
-All four runs now agree, and the control run — the one that had to raise the limit by hand — is no longer distinguishable from the default. The default strategy went from 1.473 ms to 0.621 ms, so the finding was worth **2.4× on the path everyone actually takes**, not only on the two strategies nobody selects.
+All four runs now agree, and the control run — the one that had to raise the limit by hand — is no longer distinguishable from the default. The default strategy went from 1.014 ms to 0.450 ms, so the budget was worth **2.3× on the path everyone actually takes**, not only on the two strategies nobody selects.
 
-This is a one-character class of bug — `||` where `??` was meant — and it is worth dwelling on because of where it landed. It did not produce a wrong answer, it did not fail a test, and it did not appear in any trace unless you were running the non-default strategy that explains its refusals. It cost 2.4× and reported nothing. It is also worth noticing that the one-character fix alone would have made things worse, and that the difference between "no shared memory" and "48 KiB of shared memory" is a difference the *type* `number` cannot express.
-
-**Try this.** Set `sharedMemoryBytes` on the target to `1` instead of leaving it at zero, and confirm the fusion is refused for a limit of 1 — which is the evidence that a stated budget is still honoured, and that only silence is now read as silence.
+Both columns come from `docs/part4/ch24-fusion-strategies/labs/01-three-strategies.mjs`, Node 24.9, 2026-08-21, on a `1<<18`-element chain. The same pair measured on another machine came out 1.473 ms → 0.621 ms, a ratio four percent away, which is about as much precision as this measurement deserves. What should reproduce is not the exact pair but the shape: the four rows agree with one another, and the misconfigured default is roughly twice the corrected one.
 
 ## 24.6 Lab 2 — Epilogue fusion
 
@@ -271,11 +264,24 @@ This is the clearest example in Part IV of an optimization whose value is entire
 
 ## 24.7 Traps and limits
 
-- **A per-thread resource budget of `0` now means "no such budget", which is a convention and not a type.** §24.5 is the fix; the residual trap is that a real device with genuinely zero usable shared memory cannot be expressed, because `0` is spoken for. No target in the tree is in that position, and the alternative — an explicit `null` for "not applicable" — would have to be threaded through `TargetFeatures`, three fusion passes and the cost model to be worth anything.
+**Where §24.5's 2.3× came from.** `CPUTarget` does not mention `sharedMemoryBytes`, and the base constructor turns that silence into a number — `config.sharedMemoryBytes || 0` ([`target.ts:114`](../../../src/backend/target.ts)). The cost model then read that number as `config.maxSharedMemory || 49152` ([`fusion_cost.ts:62`](../../../src/compiler/passes/fusion/fusion_cost.ts)). **Zero is falsy**, so "I have no shared memory" and "I did not say" collapsed to the same value twice over, and the second `||` read it as the latter — falling back to the GPU default. `CUDATarget` sets `48 * 1024` explicitly and was unaffected; CPU and WASM, which say nothing, inherited a budget for a resource they do not have. `maxRegistersPerThread` had the same shape, `|| 255` handing them a GPU register file too.
+
+Writing `??` for `||` is not enough on its own: `??` faithfully propagates the CPU's zero, and a *limit* of zero refuses the fusion even harder. A device reporting no scratchpad does not mean a budget of zero bytes; it means the budget does not apply, because a fused intermediate on a CPU lives in ordinary memory and nothing on-chip bounds it. So the resolution has three cases, not two ([`fusion_cost.ts:43`](../../../src/compiler/passes/fusion/fusion_cost.ts)):
+
+```ts
+function deviceLimit(stated: number | undefined, whenUnspecified: number): number {
+  if (stated === undefined) return whenUnspecified;
+  return stated === 0 ? Infinity : stated;
+}
+```
+
+That class of defect is worth dwelling on because of where it landed: it produced no wrong answer, failed no test, and appeared in no trace unless you were running the non-default strategy that explains its refusals. It cost more than a factor of two and reported nothing. To confirm that a stated budget is still honoured, set `sharedMemoryBytes` to `1` and watch the fusion refused for a limit of 1 — only silence is now read as silence.
+
+- **A per-thread resource budget of `0` means "no such budget", which is a convention and not a type.** The residual trap is that a real device with genuinely zero usable shared memory cannot be expressed, because `0` is spoken for. No target in the tree is in that position, and the alternative — an explicit `null` for "not applicable" — would have to be threaded through `TargetFeatures`, three fusion passes and the cost model to be worth anything.
 - **The launch weight is 1000 and is not target-derived.** [`fusion_cost.ts:38`](../../../src/compiler/passes/fusion/fusion_cost.ts) fixes `{ memory: 1, launch: 1000 }` for every target, so a saved launch is worth 5,000 bytes of traffic everywhere. A target may override it through the `fusionBenefitWeights` attribute ([`priority_fusion.ts:55`](../../../src/compiler/passes/fusion/priority_fusion.ts)); none does.
 - **The strategy string has no validation.** Anything that is not `'dominator'` or `'priority'` silently selects `FusionPass` ([`graph_pipeline.ts:88`](../../../src/compiler/pipeline/graph_pipeline.ts)). A typo in a config becomes a different fusion engine rather than an error.
 - **`edgeBenefit` scores the edge, not the merge.** The heap is ordered by the bytes on one dataflow edge plus a launch constant, while the accept/reject decision uses the full group cost. So the *ordering* and the *decision* use different models, and a candidate can be at the top of the heap and then rejected — which is fine, and means the heap ordering is a heuristic on a heuristic.
-- **Priority fusion explains only its successes.** Chapter 18's finding, and §24.5 is why it matters: while the budget was wrong, the default strategy's refused merge produced no event at all, and the refusal was visible only by switching to a strategy you were not going to use. The finding cost 2.4× and the mechanism that should have reported it stayed silent, which is a stronger argument for explaining refusals than any of Chapter 18's.
+- **Priority fusion explains only its successes.** Chapter 18's finding, and §24.5 is why it matters: while the budget was wrong, the default strategy's refused merge produced no event at all, and the refusal was visible only by switching to a strategy you were not going to use. The finding cost more than a factor of two and the mechanism that should have reported it stayed silent, which is a stronger argument for explaining refusals than any of Chapter 18's.
 - **`FusionMergerPass` runs only with the `greedy` strategy.** It exists to merge two already-formed groups, which is the step the priority engine performs inline. Under `dominator` neither pass runs, so a dominator-based compilation has no mechanism at all for combining two regions after the fact.
 
 ## 24.8 Read the tests
