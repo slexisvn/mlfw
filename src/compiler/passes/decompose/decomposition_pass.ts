@@ -124,8 +124,8 @@ registerDecomposition('all_gather', (op, b) => {
 registerDecomposition('softmax', (op, b) => {
   const input = op.getOperand(0);
   const axis = op.getAttr<number>('axis') as number;
-  const rank = (input.type as TensorType).rank;
   const dtype = (input.type as TensorType).dtype;
+  const rank = (input.type as TensorType).rank;
   const shape = (input.type as TensorType).shape;
   const bcastDims = broadcastDimsExcluding(rank, axis);
 
@@ -235,7 +235,6 @@ registerDecomposition('batch_norm', (op, b) => {
   const variance = op.getOperand(4);
   const axis = op.getAttr<number>('axis') as number;
   const eps = op.getAttr<number>('epsilon') as number;
-  const rank = (input.type as TensorType).rank;
   const dtype = (input.type as TensorType).dtype;
   const shape = (input.type as TensorType).shape;
 
@@ -285,7 +284,6 @@ registerDecomposition('split', (op, b) => {
 
 registerDecomposition('one_hot', (op, b) => {
   const indices = op.getOperand(0);
-  const depth = op.getAttr<number>('depth') as number;
   const axis = op.getAttr<number>('axis') ?? -1;
   const onVal = op.getAttr<number>('on_value') ?? 1;
   const offVal = op.getAttr<number>('off_value') ?? 0;

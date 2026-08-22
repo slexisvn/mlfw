@@ -31,7 +31,7 @@ Dominance is a statement about *paths through a control-flow graph*. It exists b
 
 In a structure with no branching, every path from entry to a use is the same path, and "definition dominates use" collapses into "definition is in scope and the graph is acyclic" — which is invariants 1 and 2.
 
-> **Theorem 12.1 (Scope plus acyclicity suffices; stated here).** In a dataflow IR whose functions have a single block and whose control flow is expressed as operations carrying regions, a use-def graph in which every operand is defined within the enclosing scope and no dependency cycle exists admits an execution order in which every definition precedes every use. No dominance relation need be computed.
+> **Theorem 12.1 (Scope plus acyclicity suffices).** **(stated here)** In a dataflow IR whose functions have a single block and whose control flow is expressed as operations carrying regions, a use-def graph in which every operand is defined within the enclosing scope and no dependency cycle exists admits an execution order in which every definition precedes every use. No dominance relation need be computed.
 >
 > *Proof sketch.* Acyclicity gives a topological order of the operations under the def-use edges (Theorem 8.4) — producers first, which is the executable direction. In that order every operand's producer precedes its consumer. Because a function body has one block and a region's block is entered unconditionally when its parent operation executes, there is no alternative path along which a definition could be skipped. So the topological order is a valid execution order. ∎
 
@@ -258,20 +258,21 @@ Note `id=${this.op.id}` — the global operation counter from Chapter 8. This is
 - **Verification is per-level, and the levels do not check each other.** `verify:post` proves the graph is well-formed and `verify:tensor` proves the TIR is; neither proves the TIR *computes the same thing* as the graph. Chapter 6 §6.6's integer-division story is what that gap looks like when it bites. Differential testing (Chapter 65) is the only thing that closes it.
 - **Nothing verifies the absence of a cycle across a region boundary.** `detectCycles` runs per block, over operations in that block. A cycle threading out of a region and back in is not something the builders can produce, but it is not something the verifier would catch either.
 - **`verify()` and `verifyModule` sharing a name-root is a trap.** They are unrelated functions with a fifteen-fold difference in coverage. When a bug report says "it verified fine", find out which one was called.
+- **A module can be invalid between two verifications, and nothing notices.** Verification is a *phase boundary* activity, not an invariant maintained continuously. Every public mutation — `pushOp`, `replaceOperand`, `setAttr`, or reaching into `op.operands` directly (Chapter 9 §9.9) — can leave the module in a state that `verifyModule` would reject, and it stays that way until a verification path happens to run. Three consequences follow. Inside a pass, transient invalidity is *expected* and is the reason §12.1 argues against checking too much. Between passes, invalidity is caught only if the pass manager runs the verifier there — and Chapter 15 §15.4 shows it runs only when a pass reports `CHANGED`, so a pass that mutates and reports `UNCHANGED` is not checked at all. And outside the pipeline entirely — a script that builds IR by hand, a test that patches a module — nothing runs unless you call it. If you have mutated a module and want to know whether it is still valid, the answer is always to call `verifyModule` yourself.
 
-- **"Valid" means *structurally well-formed*, and the word will mislead you if you let it.** This is worth restating at the end because the chapter's own vocabulary invites the slide. The four invariants of §12.1 are all statements about the data structure: something is defined, something is acyclic, arities agree, types agree. None of them is a statement about what the program *computes*. Concretely, `verifyModule` returning `[]` does not establish any of the following, and each has bitten somewhere in this book:
->
-> | Not established by validity | Where it matters |
-> |---|---|
-> | that a declared trait is true of the operation | §12.6 above; Chapter 11 §11.8 — seven traits have no verifier, and `ASSOCIATIVE` is *false* on the operations declaring it |
-> | that this level computes what the level above computed | §12.6; only differential testing closes it |
-> | that a numeric result equals the eager one, or is within any tolerance | Chapter 19's `f32` folding, Chapter 20's reassociation |
-> | that the version counter reflects the edits made | Chapter 9 §9.4; `setAttr` mutates without notifying |
-> | that a region reads nothing from outside itself | §12.6 above |
->
-> So a valid module can be a wrong program, and this compiler contains valid modules that are wrong programs. Validity is the property that lets the *rest of the compiler run without tripping over its own data structures* — which is exactly what §12.1 set out to define, and exactly why it is worth checking four times per compilation. Read "invalid IR" as "a pass broke the machine", never as "a pass broke the mathematics".
+### "Valid" means *structurally well-formed*, and the word will mislead you if you let it
 
-- **A module can be invalid between two verifications, and nothing notices.** Verification is a *phase boundary* activity, not an invariant maintained continuously. Every public mutation — `pushOp`, `replaceOperand`, `setAttr`, or reaching into `op.operands` directly (Chapter 9 §9.8) — can leave the module in a state that `verifyModule` would reject, and it stays that way until a verification path happens to run. Three consequences follow. Inside a pass, transient invalidity is *expected* and is the reason §12.1 argues against checking too much. Between passes, invalidity is caught only if the pass manager runs the verifier there — and Chapter 15 §15.4 shows it runs only when a pass reports `CHANGED`, so a pass that mutates and reports `UNCHANGED` is not checked at all. And outside the pipeline entirely — a script that builds IR by hand, a test that patches a module — nothing runs unless you call it. If you have mutated a module and want to know whether it is still valid, the answer is always to call `verifyModule` yourself.
+This is worth restating at the end because the chapter's own vocabulary invites the slide. The four invariants of §12.1 are all statements about the data structure: something is defined, something is acyclic, arities agree, types agree. None of them is a statement about what the program *computes*. Concretely, `verifyModule` returning `[]` does not establish any of the following, and each has bitten somewhere in this book:
+
+| Not established by validity | Where it matters |
+|---|---|
+| that a declared trait is true of the operation | the traps above; Chapter 11 §11.8 — seven traits have no verifier, and `ASSOCIATIVE` is *false* on the operations declaring it |
+| that this level computes what the level above computed | the traps above; only differential testing closes it |
+| that a numeric result equals the eager one, or is within any tolerance | Chapter 19's `f32` folding, Chapter 20's reassociation |
+| that the version counter reflects the edits made | Chapter 9 §9.9 — every mutating *method* notifies, but `op.attributes` and `op.operands` are public, so an edit made around the API is invisible to the counter |
+| that a region reads nothing from outside itself | the first trap above |
+
+So a valid module can be a wrong program, and this compiler contains valid modules that are wrong programs. Validity is the property that lets the *rest of the compiler run without tripping over its own data structures* — which is exactly what §12.1 set out to define, and exactly why it is worth checking four times per compilation. Read "invalid IR" as "a pass broke the machine", never as "a pass broke the mathematics".
 
 ## 12.7 Read the tests
 

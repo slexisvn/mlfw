@@ -9,7 +9,6 @@ import { symIntToNode } from '../../ir/tensor/sym_lower.js';
 import { isConstantOp } from '../../ir/graph/op_traits.js';
 import { registerOpStrategy, getOpStrategy, selectImplementation } from './op_strategy.js';
 import type { Dim, IRType, Shape, SymIntValue, TensorType } from '../../ir/graph/types.js';
-import type { Value } from '../../ir/graph/value.js';
 import type { Operation } from '../../ir/graph/operation.js';
 import type { TirNode } from '../../ir/tensor/nodes.js';
 import type { BufferRegionLike } from '../../ir/tensor/buffer.js';

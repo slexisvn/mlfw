@@ -1,6 +1,6 @@
+import { Estimator } from './estimator.js';
 import { _dispatch } from '../tensor/ops/ops.js';
 import { tensor } from '../tensor/factory/from_ops.js';
-import { r2_score, accuracy_score } from './metrics.js';
 import { vectorOf, encodeLabels, takeRows } from './_util.js';
 import { makeRng } from './_random.js';
 import type { MLTensor } from './types.js';
@@ -27,7 +27,7 @@ function treePredict(X: MLTensor, nodes: TreeNodes): MLTensor {
   return _dispatch('decision_tree_predict', X, nodes[0], nodes[1], nodes[2], nodes[3], nodes[4]) as MLTensor;
 }
 
-class BaseTree {
+class BaseTree extends Estimator {
   maxDepth: number;
   minSamplesSplit: number;
   minSamplesLeaf: number;
@@ -37,6 +37,7 @@ class BaseTree {
   protected _nodes: TreeNodes | null;
 
   constructor(params: TreeParams, classify: boolean) {
+    super();
     this.maxDepth = params.maxDepth ?? NO_LIMIT;
     this.minSamplesSplit = params.minSamplesSplit ?? 2;
     this.minSamplesLeaf = params.minSamplesLeaf ?? 1;
@@ -58,12 +59,10 @@ class BaseTree {
 
 export class DecisionTreeRegressor extends BaseTree {
   constructor(params: TreeParams = {}) { super(params, false); }
-  score(X: MLTensor, y: MLTensor): number { return r2_score(y, this.predict(X)); }
 }
 
 export class DecisionTreeClassifier extends BaseTree {
   constructor(params: TreeParams = {}) { super(params, true); }
-  score(X: MLTensor, y: MLTensor): number { return accuracy_score(y, this.predict(X)); }
 }
 
 function defaultMaxFeatures(mf: number, d: number, classify: boolean): number {
@@ -71,7 +70,7 @@ function defaultMaxFeatures(mf: number, d: number, classify: boolean): number {
   return classify ? Math.max(1, Math.floor(Math.sqrt(d))) : Math.max(1, Math.floor(d / 3));
 }
 
-class BaseForest {
+class BaseForest extends Estimator {
   nEstimators: number;
   maxDepth: number;
   minSamplesSplit: number;
@@ -82,6 +81,7 @@ class BaseForest {
   protected _trees: TreeNodes[];
 
   constructor(params: TreeParams & { nEstimators?: number }, classify: boolean) {
+    super();
     this.nEstimators = params.nEstimators ?? 100;
     this.maxDepth = params.maxDepth ?? NO_LIMIT;
     this.minSamplesSplit = params.minSamplesSplit ?? 2;
@@ -139,15 +139,14 @@ class BaseForest {
 
 export class RandomForestRegressor extends BaseForest {
   constructor(params: TreeParams & { nEstimators?: number } = {}) { super(params, false); }
-  score(X: MLTensor, y: MLTensor): number { return r2_score(y, this.predict(X)); }
 }
 
 export class RandomForestClassifier extends BaseForest {
   constructor(params: TreeParams & { nEstimators?: number } = {}) { super(params, true); }
-  score(X: MLTensor, y: MLTensor): number { return accuracy_score(y, this.predict(X)); }
 }
 
-export class GradientBoostingRegressor {
+export class GradientBoostingRegressor extends Estimator {
+  protected readonly _classify = false;
   nEstimators: number;
   learningRate: number;
   params: ResolvedTreeParams;
@@ -156,6 +155,7 @@ export class GradientBoostingRegressor {
   private _trees: TreeNodes[];
 
   constructor({ nEstimators = 100, learningRate = 0.1, maxDepth = 3, minSamplesSplit = 2, minSamplesLeaf = 1, randomState = 0 }: TreeParams & { nEstimators?: number; learningRate?: number } = {}) {
+    super();
     this.nEstimators = nEstimators;
     this.learningRate = learningRate;
     this.params = { maxDepth, minSamplesSplit, minSamplesLeaf, maxFeatures: 0 };
@@ -195,12 +195,10 @@ export class GradientBoostingRegressor {
     return tensor(F, { shape: [n], dtype: X.dtype, device: X.device }) as MLTensor;
   }
 
-  score(X: MLTensor, y: MLTensor): number {
-    return r2_score(y, this.predict(X));
-  }
 }
 
-export class GradientBoostingClassifier {
+export class GradientBoostingClassifier extends Estimator {
+  protected readonly _classify = true;
   nEstimators: number;
   learningRate: number;
   params: ResolvedTreeParams;
@@ -209,6 +207,7 @@ export class GradientBoostingClassifier {
   private _stages: Stage[];
 
   constructor({ nEstimators = 100, learningRate = 0.1, maxDepth = 3, minSamplesSplit = 2, minSamplesLeaf = 1, randomState = 0 }: TreeParams & { nEstimators?: number; learningRate?: number } = {}) {
+    super();
     this.nEstimators = nEstimators;
     this.learningRate = learningRate;
     this.params = { maxDepth, minSamplesSplit, minSamplesLeaf, maxFeatures: 0 };
@@ -262,9 +261,6 @@ export class GradientBoostingClassifier {
     return tensor(out, { shape: [n], dtype: X.dtype, device: X.device }) as MLTensor;
   }
 
-  score(X: MLTensor, y: MLTensor): number {
-    return accuracy_score(y, this.predict(X));
-  }
 }
 
 function softmaxRows(F: Float64Array, n: number, K: number): Float64Array {

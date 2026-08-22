@@ -1,3 +1,4 @@
+import { COMPARE_DIRECTIONS } from '../../../../util/dtype_map.js';
 import { OpAttrKey, OpDef, OpTrait } from '../op_registry.js';
 import type { OpRegistry } from '../op_registry.js';
 import { TensorType, ScalarType } from '../types.js';
@@ -21,8 +22,6 @@ function inferBinaryBool(operandTypes: readonly IRType[]): IRType[] | null {
   return [new TensorType(shape, ScalarType.BOOL)];
 }
 
-const VALID_DIRECTIONS = new Set(['eq', 'ne', 'lt', 'le', 'gt', 'ge']);
-
 export function register(registry: OpRegistry) {
   registry.register(new OpDef({
     name: 'compare',
@@ -38,7 +37,7 @@ export function register(registry: OpRegistry) {
       if (!op.hasAttr('direction')) errs.push('compare missing direction attr');
       else {
         const d = op.getAttr<string>('direction')!;
-        if (!VALID_DIRECTIONS.has(d)) errs.push(`compare invalid direction: ${d}`);
+        if (!COMPARE_DIRECTIONS.has(d)) errs.push(`compare invalid direction: ${d}`);
       }
       return errs;
     }

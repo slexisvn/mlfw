@@ -1,5 +1,5 @@
 import { TensorType, typeToString } from './types.js';
-import { jsTypedArray } from '../../../util/dtype_map.js';
+import { dtypeKeys, jsTypedArray } from '../../../util/dtype_map.js';
 import type { Block as BlockType } from './block.js';
 import type { AttrValue } from './types.js';
 import type { Value } from './value.js';
@@ -182,9 +182,8 @@ function sortedEntries(map: ReadonlyMap<string, AttrValue>): [string, AttrValue]
   return entries;
 }
 
-const DENSE_DTYPES = ['f16', 'bf16', 'f32', 'f64', 'i8', 'i16', 'i32', 'i64', 'ui8', 'bool', 'index'];
 const DENSE_DTYPE_BY_ARRAY: Record<string, string> = {};
-for (const dtype of DENSE_DTYPES) {
+for (const dtype of dtypeKeys()) {
   const name = jsTypedArray(dtype);
   if (!(name in DENSE_DTYPE_BY_ARRAY)) DENSE_DTYPE_BY_ARRAY[name] = dtype;
 }

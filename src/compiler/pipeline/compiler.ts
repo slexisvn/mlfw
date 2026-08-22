@@ -41,10 +41,9 @@ export { VerifyLevel } from './invariant_check.js';
 import type { GraphFunction } from '../ir/graph/function.js';
 import type { PrimFunc } from '../ir/tensor/nodes.js';
 import type { LIRFunc } from '../ir/lir/nodes.js';
-import type { CompileTarget, FusionConfig, MemoryConfig, OptimizationConfig, QuantizationConfig, GraphPass, TirPass } from './pipeline_types.js';
+import type { CompileTarget, FusionConfig, MemoryConfig, OptimizationConfig, QuantizationConfig } from './pipeline_types.js';
 import type { VerifyLevelValue } from './invariant_check.js';
 import type { TraceLogConfig, TraceSink, IRSnapshotFlags } from './trace.js';
-import type { PartitionerOpts } from '../analysis/partitioner.js';
 import type { GpuLaunchDiagnosis } from '../analysis/gpu_race.js';
 import type { IRLevelValue } from '../ir/verify.js';
 

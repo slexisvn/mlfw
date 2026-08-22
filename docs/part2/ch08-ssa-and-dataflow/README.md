@@ -34,9 +34,9 @@ Nothing about the computation changed. But the question "what is `x` here?" no l
 
 This is *static single assignment* form, and it is the single most consequential representational decision in modern compilers. In a tensor IR it is not even a transformation you apply: it is how the IR is built in the first place. When you write `a.add(b)` under a tracer, the result is a fresh value that never existed before and will never be assigned again.
 
-> **Definition 8.1 (SSA form; classical, after Cytron et al., 1991).** A program is in *static single assignment* form when every value is defined by exactly one instruction, and every use of a value refers unambiguously to that definition.
+> **Definition 8.1 (SSA form; after Cytron et al., 1991).** **(classical)** A program is in *static single assignment* form when every value is defined by exactly one instruction, and every use of a value refers unambiguously to that definition.
 
-> **Definition 8.2 (Use-def and def-use graphs).** The *use-def graph* of a program in SSA form is the directed graph whose nodes are operations and whose edges run **from each operation to the operations producing its operands** — that is, consumer → producer, pointing backwards against the flow of data. The *def-use graph* is its reverse: an edge from each operation to the operations consuming its results, producer → consumer, pointing along the flow of data. The two carry the same information and are read in opposite directions, so which one a compiler stores is an engineering choice — and this one stores the second, since a `Value` holds a list of its users.
+> **Definition 8.2 (Use-def and def-use graphs).** **(classical)** The *use-def graph* of a program in SSA form is the directed graph whose nodes are operations and whose edges run **from each operation to the operations producing its operands** — that is, consumer → producer, pointing backwards against the flow of data. The *def-use graph* is its reverse: an edge from each operation to the operations consuming its results, producer → consumer, pointing along the flow of data. The two carry the same information and are read in opposite directions, so which one a compiler stores is an engineering choice — and this one stores the second, since a `Value` holds a list of its users.
 
 Keep the arrows straight, because the direction decides which topological order you mean. A topological order of the **def-use** graph lists producers before consumers: that is a valid *execution* order. A topological order of the **use-def** graph lists consumers before producers, which is the reverse of an execution order — useful when propagating information backwards, as reverse-mode differentiation does in Part V, and wrong if you were trying to schedule. Whenever this book says "topological order" without qualification it means the executable one, over the def-use graph.
 
@@ -88,9 +88,34 @@ The list is kept current by the operation constructor, which is where an edge in
 
 Constructing an operation registers it as a user of each of its operands. From that moment, `value.getUsers()` is a list traversal, not a graph search.
 
+Both directions, for the single value `%6 = dot(%0, %5)` that `add` then consumes:
+
+```
+                      the "single assignment": one field, one answer
+                      ..............................................
+                      :                                            :
+   Operation 'dot'    :                                            v
+   +---------------+  :                                   +--------------------+
+   | operands[0] --+--+---> %0                            |     Value  %6      |
+   | operands[1] --+----> %5                              |--------------------|
+   | results[0] ---+------------------------------------->| definingOp  -> dot |
+   +---------------+                                      | resultIndex = 0    |
+                                                          | _useHead ------+   |
+                                                          | _useCount = 1  |   |
+   Operation 'add'                                        +----------------|---+
+   +---------------+                                                       |
+   | operands[0] --+----> %6                                               v
+   | operands[1] --+----> %2                            UseLink { user: add, operandIndex: 0 }
+   | _operandLinks +--------------------------------------> ^     prev: null, next: null
+   +---------------+       the same object, reachable       |
+                           from both ends                   +-- the list `_useHead` walks
+```
+
+`definingOp` is one pointer, so "what produces `%6`?" is a field read. `_useHead` is a list exactly as long as the number of consumers, so "who consumes `%6`?" costs one walk of that list. Neither question touches the enclosing block, which is the content of the next lemma.
+
 This is what SSA buys, stated as a cost:
 
-> **Lemma 8.3.** In this representation, "what produces this value?" is O(1), and "who consumes this value?" is O(k) in the number of consumers — neither depends on the size of the function.
+> **Lemma 8.3 (Cost of the two questions).** **(invariant)** In this representation, "what produces this value?" is O(1), and "who consumes this value?" is O(k) in the number of consumers — neither depends on the size of the function.
 >
 > *Proof sketch.* The first is a field read. The second walks a list whose length is exactly the number of uses, maintained by `addUse` and `removeUse` at O(1) each. Neither traverses the enclosing block. ∎
 

@@ -1,5 +1,5 @@
 import type { Buffer } from '../../ir/tensor/buffer.js';
-import type { AllocateNode, BlockNode, BufferStoreNode, EvaluateNode, ForNode, IfThenElseNode, LetStmtNode, PrimFunc, SeqNode, TirNode, WhileNode } from '../../ir/tensor/nodes.js';
+import type { AllocateNode, BlockNode, EvaluateNode, ForNode, IfThenElseNode, LetStmtNode, PrimFunc, SeqNode, TirNode, WhileNode } from '../../ir/tensor/nodes.js';
 
 export type StmtOrderEntry = { idx: number; node: BlockNode };
 

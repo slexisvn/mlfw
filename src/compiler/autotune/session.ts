@@ -5,12 +5,12 @@ import { clonePrimFunc, extractBlockMini } from './tune_ir.js';
 import { createSearchStrategy } from './search.js';
 import { LearnedCostModel, GuidedCostModel } from './cost_model.js';
 import type { AnalyticalCostModel } from './cost_model.js';
-import type { PrimFunc, BlockNode, TirNode, ForNode, IntImmNode } from '../ir/tensor/nodes.js';
+import type { PrimFunc, BlockNode, ForNode, IntImmNode } from '../ir/tensor/nodes.js';
 import type { ScheduleTarget } from '../schedule/gpu_matmul_schedule.js';
 import type { ScheduleSketch, SketchParams } from './sketch.js';
 import type { Deadline } from './budget.js';
 import type { SerializedStep } from '../schedule/trace.js';
-import type { PopulationMember, SearchCandidate } from './search.js';
+import type { PopulationMember } from './search.js';
 
 export type ScoredCandidate = { sketchName: string; params: SketchParams; score: number };
 export type TuningRecordDraft = ScoredCandidate & { measuredScore: number; medianMs?: number; minMs?: number };

@@ -15,7 +15,7 @@ import { ForKind } from '../ir/tensor/nodes.js';
 import { TaskScheduler } from './task_scheduler.js';
 import { getMeasurer } from '../../runtime/measurer_registry.js';
 import { FuncAttr } from '../ir/func_attrs.js';
-import type { PrimFunc, TirNode } from '../ir/tensor/nodes.js';
+import type { PrimFunc } from '../ir/tensor/nodes.js';
 import type { ScheduleTarget } from '../schedule/gpu_matmul_schedule.js';
 import type { CostModelTarget } from './cost_model.js';
 import type { MeasurerLike } from './benchmark.js';

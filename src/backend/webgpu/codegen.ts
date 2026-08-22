@@ -1,11 +1,14 @@
+import { GpuCodegenBase } from '../codegen_base.js';
+import { ACCESS_NODE_TYPES, LOOP_NODE_TYPES } from '../../compiler/ir/node_kinds.js';
+import { COMPARE_MATH_OPS } from '../../util/dtype_map.js';
 import { ForKind } from '../../compiler/ir/tensor/nodes.js';
 import { wgslType, wgslBytes, wgslMathFunc, hasWgslMathFunc, cCompareOp } from '../../util/dtype_map.js';
 import { flattenRowMajorIndex } from '../index_emit.js';
 import { MinHeap } from '../../util/min_heap.js';
 import { walk } from '../../compiler/ir/ir_visitor.js';
-import { visitStatements, estimateBufferSize, dynamicDimProduct, resolveShapeParam } from '../codegen_utils.js';
-import { parseThreadAxis, maxBindingExtent } from '../../compiler/analysis/thread_binding.js';
-import { allocatedBufferNames, referencedBuffers, storedBufferNames } from '../../compiler/analysis/tir_queries.js';
+import { resolveShapeParam } from '../codegen_utils.js';
+import { parseThreadAxis } from '../../compiler/analysis/thread_binding.js';
+import { allocatedBufferNames, referencedBuffers } from '../../compiler/analysis/tir_queries.js';
 import { profileGpuAccesses, loopCarriedIntermediates, extentMismatchBuffers, GpuRaceReason } from '../../compiler/analysis/gpu_race.js';
 import type { GpuLaunchDiagnosis } from '../../compiler/analysis/gpu_race.js';
 
@@ -13,15 +16,12 @@ import type { GpuLaunchDiagnosis } from '../../compiler/analysis/gpu_race.js';
 import { LANCZOS_G, LANCZOS_COEFFS, ERF_A, ERF_P } from '../../util/special_math.js';
 
 import { Buffer } from '../../compiler/ir/tensor/buffer.js';
-import type { AllocateNode, BlockNode, BufferStoreNode, CallExternNode, ForNode, IfThenElseNode, LetStmtNode, TirNode, VecCopyNode, WhileNode } from '../../compiler/ir/tensor/nodes.js';
-import type { IRStmtNode, LIRAccumulatorNode, LIRBindingsNode, LIRFlatStoreNode, LIRThreadBinding } from '../../compiler/ir/lir/nodes.js';
+import type { AllocateNode, BlockNode, BufferStoreNode, CallExternNode, ForNode, IfThenElseNode, LetStmtNode, VecCopyNode, WhileNode } from '../../compiler/ir/tensor/nodes.js';
+import type { IRStmtNode, LIRAccumulatorNode, LIRBindingsNode, LIRFlatStoreNode } from '../../compiler/ir/lir/nodes.js';
 import type { BufferDecl, CodegenFunc } from '../codegen_utils.js';
 import type { TargetFeatures } from '../target.js';
 
-const ACCESS_NODE_TYPES = new Set(['BufferLoadNode', 'BufferStoreNode', 'LIRFlatLoadNode', 'LIRFlatStoreNode']);
-const LOOP_NODE_TYPES = new Set(['ForNode', 'WhileNode', 'LIRAccumulatorNode']);
 const BOOL_OPS = new Set(['!', '&&', '||']);
-const CMP_OPS = new Set(['<', '>', '<=', '>=', '==', '!=']);
 
 type WgslNameTable = Readonly<Record<string, string | undefined>>;
 type PackedBufEntry = { name: string; offset: number; size: number; dtype: string; argIndex?: number };
@@ -121,17 +121,10 @@ export class WebGPUKernel {
   }
 }
 
-export class WebGPUCodegen {
-  target: TargetFeatures;
-  _indent: number;
-  _lines: string[];
-  _threadBindings: Map<string, LIRThreadBinding[]>;
-  _sharedBuffers: Buffer[];
+export class WebGPUCodegen extends GpuCodegenBase {
   _workgroupSize: number[];
   _dispatchSize: number[];
   _defaultDtype: string;
-  _storeBuffers: Set<string>;
-  declare _primFunc: CodegenFunc;
   declare _promotedBuffers: Set<string>;
   declare _promotedBufferDecls: BufferDecl[];
   declare _wgPoolOffsets: Map<string, PoolRef> | null;
@@ -148,11 +141,7 @@ export class WebGPUCodegen {
   declare _packedOffsets: Map<string, PackedRef> | null;
 
   constructor(target: TargetFeatures) {
-    this.target = target;
-    this._indent = 0;
-    this._lines = [];
-    this._threadBindings = new Map();
-    this._sharedBuffers = [];
+    super(target);
     this._workgroupSize = [1, 1, 1];
     this._dispatchSize = [1, 1, 1];
     this._defaultDtype = 'f32';
@@ -378,10 +367,6 @@ export class WebGPUCodegen {
     return `_gid.${axis}`;
   }
 
-  _scanStoreTargets(root: IRStmtNode): void {
-    this._storeBuffers = storedBufferNames(root);
-  }
-
   _scanBindings(root: IRStmtNode): void {
     walk(root, (node) => {
       if (node.type === 'ForNode' && node.kind === ForKind.THREAD_BINDING && node.threadTag) {
@@ -406,10 +391,6 @@ export class WebGPUCodegen {
     if (!p) return;
     if (p.space === 'thread') this._workgroupSize[p.axis] = Math.max(this._workgroupSize[p.axis], extent);
     else this._dispatchSize[p.axis] = Math.max(this._dispatchSize[p.axis], extent);
-  }
-
-  _getMaxBindingExtent(tag: string | null): number {
-    return maxBindingExtent(this._threadBindings, tag);
   }
 
   _serialize(reason: string, buffers: ReadonlySet<string>): void {
@@ -570,14 +551,6 @@ export class WebGPUCodegen {
       bytes += peak * (wgslBytes(dtype) || 4);
     }
     return { offsets, decls, bytes };
-  }
-
-  _emit(line: string): void {
-    this._lines.push('  '.repeat(this._indent) + line);
-  }
-
-  _visitNode(node: IRStmtNode): void {
-    visitStatements(this, node);
   }
 
   _emitSync(): void {
@@ -774,10 +747,6 @@ export class WebGPUCodegen {
     return { minPos, maxPos };
   }
 
-  _estimateBufferSize(buffer: Buffer): number {
-    return estimateBufferSize(buffer);
-  }
-
   _visitAllocateNode(node: AllocateNode): void {
     if (node.scope !== 'shared') {
       if (this._promotedBuffers.has(node.buffer.name)) return;
@@ -880,7 +849,7 @@ export class WebGPUCodegen {
   _isBoolExpr(node: IRStmtNode | null): boolean {
     if (!node) return false;
     if (node.type === 'CompareNode') return true;
-    if (node.type === 'MathOpNode' && (BOOL_OPS.has(node.op) || CMP_OPS.has(node.op))) return true;
+    if (node.type === 'MathOpNode' && (BOOL_OPS.has(node.op) || COMPARE_MATH_OPS.has(node.op))) return true;
     return false;
   }
 
@@ -996,10 +965,6 @@ export class WebGPUCodegen {
 
   _flatIndex(buffer: Buffer, indices: readonly IRStmtNode[]): string {
     return flattenRowMajorIndex(buffer, indices, (e) => this._exprToWGSL(e), (b, i) => this._computeDynamicStride(b, i), false);
-  }
-
-  _computeDynamicStride(buffer: Buffer, dimIdx: number): string {
-    return dynamicDimProduct(buffer, dimIdx + 1, (b, j) => this._resolveShapeParam(b, j));
   }
 
   _resolveShapeParam(buffer: Buffer, dimIdx: number): string {

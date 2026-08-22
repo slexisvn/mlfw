@@ -436,7 +436,7 @@ export class ElementwiseWasmRule extends ScheduleRule {
     const extent = innermost.extent;
 
     if (extent.type === 'IntImmNode' && extent.value >= vectorWidth * 2) {
-      const [outer, inner] = schedule.split(innermost, vectorWidth);
+      const [, inner] = schedule.split(innermost, vectorWidth);
       schedule.vectorize(inner);
       return;
     }

@@ -1,9 +1,9 @@
+import { Estimator } from './estimator.js';
 import { solve, lstsq } from '../tensor/ops/linalg.js';
 import { matmul, add, sub, mul, div, exp, sum, mean, max, argmax, cat, _dispatch } from '../tensor/ops/ops.js';
 import { ones, eye, zeros } from '../tensor/factory/creation_ops.js';
 import { tensor } from '../tensor/factory/from_ops.js';
 import { vectorOf, encodeLabels } from './_util.js';
-import { r2_score, accuracy_score } from './metrics.js';
 import type { MLTensor } from './types.js';
 
 function addBias(X: MLTensor, fitIntercept: boolean): MLTensor {
@@ -15,11 +15,13 @@ function asColumn(y: MLTensor): MLTensor {
   return y.ndim === 1 ? y.reshape([y.shape[0], 1]) : y;
 }
 
-export class LinearRegression {
+export class LinearRegression extends Estimator {
+  protected readonly _classify = false;
   fitIntercept: boolean;
   weight_: MLTensor | null;
 
   constructor({ fitIntercept = true }: { fitIntercept?: boolean } = {}) {
+    super();
     this.fitIntercept = fitIntercept;
     this.weight_ = null;
   }
@@ -35,18 +37,17 @@ export class LinearRegression {
     return (matmul(D, this.weight_!) as MLTensor).reshape([X.shape[0]]);
   }
 
-  score(X: MLTensor, y: MLTensor): number {
-    return r2_score(y, this.predict(X));
-  }
 }
 
-export class Ridge {
+export class Ridge extends Estimator {
+  protected readonly _classify = false;
   alpha: number;
   fitIntercept: boolean;
   coef_: MLTensor | null;
   intercept_: MLTensor | null;
 
   constructor({ alpha = 1, fitIntercept = true }: { alpha?: number; fitIntercept?: boolean } = {}) {
+    super();
     this.alpha = alpha;
     this.fitIntercept = fitIntercept;
     this.coef_ = null;
@@ -79,12 +80,10 @@ export class Ridge {
     return (add(matmul(X, this.coef_!), this.intercept_!) as MLTensor).reshape([X.shape[0]]);
   }
 
-  score(X: MLTensor, y: MLTensor): number {
-    return r2_score(y, this.predict(X));
-  }
 }
 
-export class ElasticNet {
+export class ElasticNet extends Estimator {
+  protected readonly _classify = false;
   alpha: number;
   l1Ratio: number;
   fitIntercept: boolean;
@@ -94,6 +93,7 @@ export class ElasticNet {
   intercept_: MLTensor | null;
 
   constructor({ alpha = 1, l1Ratio = 0.5, fitIntercept = true, maxIter = 1000, tol = 1e-6 }: { alpha?: number; l1Ratio?: number; fitIntercept?: boolean; maxIter?: number; tol?: number } = {}) {
+    super();
     this.alpha = alpha;
     this.l1Ratio = l1Ratio;
     this.fitIntercept = fitIntercept;
@@ -118,9 +118,6 @@ export class ElasticNet {
     return add((matmul(X, w) as MLTensor).reshape([X.shape[0]]), this.intercept_!) as MLTensor;
   }
 
-  score(X: MLTensor, y: MLTensor): number {
-    return r2_score(y, this.predict(X));
-  }
 }
 
 export class Lasso extends ElasticNet {
@@ -129,7 +126,8 @@ export class Lasso extends ElasticNet {
   }
 }
 
-export class LogisticRegression {
+export class LogisticRegression extends Estimator {
+  protected readonly _classify = true;
   C: number;
   lr: number;
   maxIter: number;
@@ -138,6 +136,7 @@ export class LogisticRegression {
   classes_: number[] | null;
 
   constructor({ C = 1, lr = 0.5, maxIter = 1000 }: { C?: number; lr?: number; maxIter?: number } = {}) {
+    super();
     this.C = C;
     this.lr = lr;
     this.maxIter = maxIter;
@@ -191,7 +190,4 @@ export class LogisticRegression {
     return tensor(out, { shape: [idx.length], dtype: X.dtype, device: X.device }) as MLTensor;
   }
 
-  score(X: MLTensor, y: MLTensor): number {
-    return accuracy_score(y, this.predict(X));
-  }
 }

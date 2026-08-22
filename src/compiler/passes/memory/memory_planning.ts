@@ -34,12 +34,22 @@ export class MemoryPlan {
   liveness: BufferLivenessResult;
   inplaceCandidates: readonly InplaceCandidate[];
   aliasMap: Map<Buffer, Buffer>;
+  shareable: ReadonlySet<Buffer>;
+  preAllocated: ReadonlySet<string>;
 
-  constructor(assignment: BufferAssignment, livenessResult: BufferLivenessResult, inplaceCandidates: readonly InplaceCandidate[]) {
+  constructor(
+    assignment: BufferAssignment,
+    livenessResult: BufferLivenessResult,
+    inplaceCandidates: readonly InplaceCandidate[],
+    shareable: ReadonlySet<Buffer>,
+    preAllocated: ReadonlySet<string>
+  ) {
     this.assignment = assignment;
     this.liveness = livenessResult;
     this.inplaceCandidates = inplaceCandidates;
     this.aliasMap = new Map();
+    this.shareable = shareable;
+    this.preAllocated = preAllocated;
   }
 
   peakMemory(scope: string | null = null): number {
@@ -56,7 +66,7 @@ export class MemoryPlan {
       });
     }
 
-    for (const [buf, entry] of this.assignment.assignments) {
+    for (const entry of this.assignment.assignments.values()) {
       const info = scopeBreakdown.get(entry.scope);
       if (info) {
         info.numBuffers++;
@@ -94,16 +104,19 @@ export class MemoryPlanner {
   plan(primFunc: PrimFunc): MemoryPlan {
     const livenessResult = BufferLiveness.analyze(primFunc);
     const temporaries = livenessResult.getTemporaries();
+    const preAllocated = collectPreAllocated(primFunc);
+    const { shareable, donatable } = storageRoles(primFunc, temporaries, preAllocated);
 
     let inplaceCandidates: InplaceCandidate[] = [];
     if (this.enableInplace) {
-      inplaceCandidates = InplaceAnalysis.analyze(primFunc, livenessResult);
+      inplaceCandidates = InplaceAnalysis.analyze(primFunc, livenessResult)
+        .filter((c) => donatable.has(c.srcBuffer) && shareable.has(c.dstBuffer));
     }
 
     const assignment = new BufferAssignment();
     assignment.assign(temporaries, inplaceCandidates, this.alignment, this.allocStrategy);
 
-    return new MemoryPlan(assignment, livenessResult, inplaceCandidates);
+    return new MemoryPlan(assignment, livenessResult, inplaceCandidates, shareable, preAllocated);
   }
 
   planAndRewrite(primFunc: PrimFunc): { func: PrimFunc; plan: MemoryPlan } {
@@ -118,9 +131,9 @@ export class MemoryPlanner {
 
     let aliasMap = new Map<Buffer, Buffer>();
     if (this.poolAllocation) {
-      this._assignPoolOffsets(primFunc, plan, temporaries);
+      this._assignPoolOffsets(plan, temporaries);
     } else {
-      aliasMap = this._buildReuseAliases(temporaries, plan, primFunc);
+      aliasMap = this._buildReuseAliases(plan, temporaries);
       if (aliasMap.size > 0) {
         rewriteBufferAliases(primFunc.body, aliasMap);
       }
@@ -131,17 +144,12 @@ export class MemoryPlanner {
 
     let body: TirNode = primFunc.body;
     const allocated = new Set<Buffer>();
-    const preAllocated = new Set<string>();
-    walk(primFunc.body as unknown as IRNode, (node) => {
-      if ((node as { type: string }).type === 'AllocateNode') preAllocated.add((node as unknown as AllocateNode).buffer.name);
-    });
     for (const interval of sorted) {
       const buf = interval.buffer;
-      if (preAllocated.has(buf.name)) continue;
+      if (plan.preAllocated.has(buf.name)) continue;
       if (aliasMap.has(buf)) continue;
       const assignment = plan.assignment.getAssignment(buf);
       if (!assignment) continue;
-      if (assignment.inplaceOf) continue;
       if (allocated.has(buf)) continue;
       allocated.add(buf);
       body = new AllocateNode(buf, assignment.isDynamic ? 'dynamic' : assignment.scope, body);
@@ -152,40 +160,39 @@ export class MemoryPlanner {
     return primFunc;
   }
 
-  _assignPoolOffsets(primFunc: PrimFunc, plan: MemoryPlan, temporaries: readonly BufferInterval[]): void {
-    const needsDefinedStorage = buffersRequiringDefinedStorage(primFunc);
+  _assignPoolOffsets(plan: MemoryPlan, temporaries: readonly BufferInterval[]): void {
     for (const interval of temporaries) {
       const buf = interval.buffer;
-      if (needsDefinedStorage.has(buf)) continue;
+      if (!plan.shareable.has(buf)) continue;
       if (buf.scope !== 'global') continue;
       const assignment = plan.assignment.getAssignment(buf);
-      if (!assignment || assignment.inplaceOf || assignment.isDynamic) continue;
+      if (!assignment || assignment.isDynamic) continue;
       if (!(assignment.size > 0)) continue;
       buf.poolByteOffset = assignment.offset;
     }
   }
 
-  _buildReuseAliases(temporaries: readonly BufferInterval[], plan: MemoryPlan, primFunc: PrimFunc): Map<Buffer, Buffer> {
-    const needsDefinedStorage = buffersRequiringDefinedStorage(primFunc);
-    const inplaceSources = new Set(plan.assignment.inplaceMap.values());
+  _buildReuseAliases(plan: MemoryPlan, temporaries: readonly BufferInterval[]): Map<Buffer, Buffer> {
     const effLastUse = plan.assignment.effLastUse;
     const lastUseOf = (interval: BufferInterval): number => effLastUse.get(interval.buffer) ?? interval.lastUse;
+
+    const aliasMap = new Map<Buffer, Buffer>();
+    for (const [buf, assignment] of plan.assignment.assignments) {
+      if (assignment.inplaceOf) aliasMap.set(buf, assignment.inplaceOf);
+    }
 
     const groups = new Map<string, BufferInterval[]>();
     for (const interval of temporaries) {
       const buf = interval.buffer;
+      if (!plan.shareable.has(buf)) continue;
       const assignment = plan.assignment.getAssignment(buf);
       if (!assignment || assignment.inplaceOf || assignment.isDynamic) continue;
-      if (inplaceSources.has(buf)) continue;
-      if (buf.numel() <= 0) continue;
-      if (needsDefinedStorage.has(buf)) continue;
       const key = `${buf.scope}|${buf.dtype}|${buf.shape.join(',')}|${buf.strides.join(',')}`;
       let bucket = groups.get(key);
       if (!bucket) { bucket = []; groups.set(key, bucket); }
       bucket.push(interval);
     }
 
-    const aliasMap = new Map<Buffer, Buffer>();
     for (const bucket of groups.values()) {
       if (bucket.length < 2) continue;
       bucket.sort((a, b) => a.firstUse - b.firstUse || lastUseOf(a) - lastUseOf(b));
@@ -202,8 +209,44 @@ export class MemoryPlanner {
         }
       }
     }
-    return aliasMap;
+    return resolveAliasChains(aliasMap);
   }
+}
+
+function collectPreAllocated(primFunc: PrimFunc): Set<string> {
+  const preAllocated = new Set<string>();
+  walk(primFunc.body as unknown as IRNode, (node) => {
+    if ((node as { type: string }).type === 'AllocateNode') preAllocated.add((node as unknown as AllocateNode).buffer.name);
+  });
+  return preAllocated;
+}
+
+function storageRoles(primFunc: PrimFunc, temporaries: readonly BufferInterval[], preAllocated: ReadonlySet<string>): { shareable: Set<Buffer>; donatable: Set<Buffer> } {
+  const needsDefinedStorage = buffersRequiringDefinedStorage(primFunc);
+  const shareable = new Set<Buffer>();
+  const donatable = new Set<Buffer>();
+  for (const interval of temporaries) {
+    const buf = interval.buffer;
+    if (buf.numel() <= 0) continue;
+    if (preAllocated.has(buf.name)) continue;
+    donatable.add(buf);
+    if (!needsDefinedStorage.has(buf)) shareable.add(buf);
+  }
+  return { shareable, donatable };
+}
+
+function resolveAliasChains(aliasMap: ReadonlyMap<Buffer, Buffer>): Map<Buffer, Buffer> {
+  const resolved = new Map<Buffer, Buffer>();
+  for (const [from, target] of aliasMap) {
+    let to = target;
+    const seen = new Set<Buffer>([from, to]);
+    for (let next = aliasMap.get(to); next && !seen.has(next); next = aliasMap.get(to)) {
+      to = next;
+      seen.add(to);
+    }
+    resolved.set(from, to);
+  }
+  return resolved;
 }
 
 function rewriteBufferAliases(root: TirNode, aliasMap: ReadonlyMap<Buffer, Buffer>): void {

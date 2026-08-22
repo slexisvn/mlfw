@@ -1,9 +1,11 @@
 import { ForKind } from '../ir/tensor/nodes.js';
 import { walk, walkScoped } from '../ir/ir_visitor.js';
 import { parseThreadAxis, maxBindingExtent } from './thread_binding.js';
+import { usesAnyVar, staticExtentOf } from './tir_queries.js';
+import { LOAD_NODE_TYPES, SEQ_LOOP_NODE_TYPES, STORE_NODE_TYPES } from '../ir/node_kinds.js';
 import type { Buffer } from '../ir/tensor/buffer.js';
 import type { IRNode } from '../ir/ir_visitor.js';
-import type { PrimFunc } from '../ir/tensor/nodes.js';
+import type { PrimFunc, TirNode } from '../ir/tensor/nodes.js';
 import type { LIRFunc, LIRThreadBinding } from '../ir/lir/nodes.js';
 
 export type GpuAccessKind = 'store' | 'load';
@@ -52,7 +54,7 @@ type RaceScope = Readonly<{
   underThread: boolean;
   underBlock: boolean;
   multiplicity: number;
-  seqVars: readonly string[];
+  seqVars: ReadonlySet<string>;
 }>;
 
 type IndexedNode = { buffer?: Buffer; indices?: readonly IRNode[]; offsetExpr?: IRNode | null; value?: IRNode | null };
@@ -63,29 +65,13 @@ const ROOT_SCOPE: RaceScope = {
   underThread: false,
   underBlock: false,
   multiplicity: 1,
-  seqVars: [],
+  seqVars: new Set(),
 };
 
-const STORE_TYPES = new Set(['BufferStoreNode', 'LIRFlatStoreNode']);
-const LOAD_TYPES = new Set(['BufferLoadNode', 'LIRFlatLoadNode']);
-const SEQ_LOOP_TYPES = new Set(['WhileNode', 'LIRAccumulatorNode']);
-
-function collectVarNames(node: IRNode | null | undefined, out: Set<string>): void {
-  if (!node) return;
-  walk(node, (n) => { if (n.type === 'VariableNode') out.add((n as { name: string }).name); });
-}
-
-function dependsOn(expr: IRNode | null | undefined, vars: readonly string[]): boolean {
-  if (!expr || vars.length === 0) return false;
-  const names = new Set<string>();
-  collectVarNames(expr, names);
-  for (const v of vars) if (names.has(v)) return true;
-  return false;
-}
-
-function staticExtent(node: { extent?: IRNode | null }): number {
-  const e = node.extent as { type?: string; value?: number } | null | undefined;
-  return e && e.type === 'IntImmNode' ? (e.value as number) : 0;
+function withVar(vars: ReadonlySet<string>, name: string): ReadonlySet<string> {
+  const next = new Set(vars);
+  next.add(name);
+  return next;
 }
 
 function isLiteral(node: IRNode | null | undefined): boolean {
@@ -138,7 +124,7 @@ export function profileGpuAccesses(func: PrimFunc | LIRFunc, opts: GpuProfileOpt
       narrow: scope.narrow,
       underBlockBinding: scope.underBlock,
       multiplicity: scope.multiplicity,
-      seqLoopIndexed: accessIndices(node).some((idx) => dependsOn(idx, scope.seqVars)),
+      seqLoopIndexed: accessIndices(node).some((idx) => usesAnyVar(idx, scope.seqVars)),
       literalValue: kind === 'store' && isLiteral(node.value),
     };
     const entry = entryFor(buffer);
@@ -153,7 +139,7 @@ export function profileGpuAccesses(func: PrimFunc | LIRFunc, opts: GpuProfileOpt
       const forNode = node as unknown as { kind: string; threadTag: string | null; loopVar?: { name: string } };
       if (forNode.kind === ForKind.THREAD_BINDING && forNode.threadTag) {
         const tag = forNode.threadTag;
-        const extent = staticExtent(node as unknown as { extent?: IRNode | null });
+        const extent = staticExtentOf(node as unknown as { extent?: TirNode | null });
         const maxExtent = maxBindingExtent(threadBindings, tag);
         const axis = parseThreadAxis(tag);
         next = {
@@ -165,33 +151,33 @@ export function profileGpuAccesses(func: PrimFunc | LIRFunc, opts: GpuProfileOpt
           seqVars: next.seqVars,
         };
       } else if (forNode.loopVar) {
-        next = { ...next, seqVars: [...next.seqVars, forNode.loopVar.name] };
+        next = { ...next, seqVars: withVar(next.seqVars, forNode.loopVar.name) };
       }
-    } else if (SEQ_LOOP_TYPES.has(node.type)) {
+    } else if (SEQ_LOOP_NODE_TYPES.has(node.type)) {
       const loopVar = (node as unknown as { loopVar?: { name: string } }).loopVar;
-      if (loopVar) next = { ...next, seqVars: [...next.seqVars, loopVar.name] };
+      if (loopVar) next = { ...next, seqVars: withVar(next.seqVars, loopVar.name) };
     }
 
     if (node.type === 'LIRBindingsNode') {
       const bindings = (node as unknown as { bindings?: readonly { name: string; expr: IRNode }[] }).bindings || [];
       let seqVars = next.seqVars;
       for (const b of bindings) {
-        if (!seqVars.includes(b.name) && dependsOn(b.expr, seqVars)) seqVars = [...seqVars, b.name];
+        if (!seqVars.has(b.name) && usesAnyVar(b.expr, seqVars)) seqVars = withVar(seqVars, b.name);
       }
       if (seqVars !== next.seqVars) next = { ...next, seqVars };
     } else if (node.type === 'BlockNode') {
       const iterVars = (node as unknown as { iterVars?: readonly { iterVar?: { name: string }; binding?: IRNode }[] }).iterVars || [];
       let seqVars = next.seqVars;
       for (const iv of iterVars) {
-        if (iv.iterVar && iv.binding && !seqVars.includes(iv.iterVar.name) && dependsOn(iv.binding, seqVars)) {
-          seqVars = [...seqVars, iv.iterVar.name];
+        if (iv.iterVar && iv.binding && !seqVars.has(iv.iterVar.name) && usesAnyVar(iv.binding, seqVars)) {
+          seqVars = withVar(seqVars, iv.iterVar.name);
         }
       }
       if (seqVars !== next.seqVars) next = { ...next, seqVars };
     } else if (node.type === 'LetStmtNode') {
       const let_ = node as unknown as { variable?: { name: string }; value?: IRNode };
-      if (let_.variable && !next.seqVars.includes(let_.variable.name) && dependsOn(let_.value, next.seqVars)) {
-        next = { ...next, seqVars: [...next.seqVars, let_.variable.name] };
+      if (let_.variable && !next.seqVars.has(let_.variable.name) && usesAnyVar(let_.value, next.seqVars)) {
+        next = { ...next, seqVars: withVar(next.seqVars, let_.variable.name) };
       }
     } else if (node.type === 'AllocateNode') {
       const buffer = (node as unknown as { buffer?: Buffer }).buffer;
@@ -201,8 +187,8 @@ export function profileGpuAccesses(func: PrimFunc | LIRFunc, opts: GpuProfileOpt
       }
     }
 
-    if (STORE_TYPES.has(node.type)) record('store', node as unknown as IndexedNode, next);
-    else if (LOAD_TYPES.has(node.type)) record('load', node as unknown as IndexedNode, next);
+    if (STORE_NODE_TYPES.has(node.type)) record('store', node as unknown as IndexedNode, next);
+    else if (LOAD_NODE_TYPES.has(node.type)) record('load', node as unknown as IndexedNode, next);
 
     return next;
   });
@@ -225,7 +211,7 @@ export function launchGeometry(func: PrimFunc | LIRFunc): LaunchGeometry {
     if (forNode.kind !== ForKind.THREAD_BINDING || !forNode.threadTag) return;
     const axis = parseThreadAxis(forNode.threadTag);
     if (!axis) return;
-    const extent = staticExtent(node as unknown as { extent?: IRNode | null });
+    const extent = staticExtentOf(node as unknown as { extent?: TirNode | null });
     if (extent <= 0) return;
     const dims = axis.space === 'thread' ? blockDim : gridDim;
     dims[axis.axis] = Math.max(dims[axis.axis], extent);

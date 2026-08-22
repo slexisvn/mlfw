@@ -1,4 +1,5 @@
 import { getBackend } from './backend_registry.js';
+import { typedArrayCtor as dtypeTypedArrayCtor } from '../util/dtype_map.js';
 import { CompiledKernel } from '../backend/pipeline.js';
 import type { TargetFeatures } from '../backend/target.js';
 import type { NumericTypedArray } from '../tensor/types/dtype.js';
@@ -57,22 +58,8 @@ type SerializedRuntimeModule = {
   kernels: Array<{ name: string; source: string; target: string; metadata: RuntimeKernel['metadata'] }>;
 };
 
-const TYPED_ARRAY_CTORS = {
-  'f16':  Uint16Array,
-  'bf16': Uint16Array,
-  'f32':  Float32Array,
-  'f64':  Float64Array,
-  'i8':   Int8Array,
-  'i16':  Int16Array,
-  'i32':  Int32Array,
-  'i64':  BigInt64Array,
-  'ui8':  Uint8Array,
-  'bool': Uint8Array,
-  'index': Int32Array,
-};
-
 function typedArrayCtor(dtype: RuntimeDType): RuntimeArrayConstructor {
-  return (TYPED_ARRAY_CTORS[dtype as keyof typeof TYPED_ARRAY_CTORS] || Float32Array) as RuntimeArrayConstructor;
+  return dtypeTypedArrayCtor(dtype) as RuntimeArrayConstructor;
 }
 
 function dtypeOfTypedArray(a: RuntimeData): RuntimeDType {

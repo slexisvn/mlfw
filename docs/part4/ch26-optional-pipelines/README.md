@@ -14,11 +14,11 @@ When that exceeds the device, you have three options: shrink the batch, shrink t
 
 ### The theory
 
-> **Definition 26.1 (Rematerialization).** Let `v` be a value with more than one use, produced by a pure operation `f`. *Rematerializing* `v` at a use `u` means inserting a fresh evaluation of `f` immediately before `u` and rewiring `u` to the fresh result, shortening `v`'s live interval.
+> **Definition 26.1 (Rematerialization).** **(classical)** Let `v` be a value with more than one use, produced by a pure operation `f`. *Rematerializing* `v` at a use `u` means inserting a fresh evaluation of `f` immediately before `u` and rewiring `u` to the fresh result, shortening `v`'s live interval.
 
 Chapter 49 defines live intervals properly; here it is enough that a value is *live* from its definition to its last use, and that peak memory is the maximum over program points of the total bytes live there.
 
-> **Theorem 26.2 (√n checkpointing).** *(Chen et al., 2016.)* For a chain of `n` layers, storing every `√n`-th activation and recomputing the rest gives `O(√n)` memory at the cost of one extra forward pass.
+> **Theorem 26.2 (√n checkpointing; Chen et al., 2016).** **(classical)** For a chain of `n` layers, storing every `√n`-th activation and recomputing the rest gives `O(√n)` memory at the cost of one extra forward pass.
 
 That is the result the technique is famous for, and it is worth being precise about how little of it transfers to the pass below, because the two share a name and almost nothing else.
 
@@ -29,7 +29,7 @@ That is the result the technique is famous for, and it is worth being precise ab
 | objective | minimize memory subject to one extra forward pass | reach a byte budget, at whatever recompute cost |
 | guarantee | `O(√n)` memory, `O(n)` time | none |
 
-The chain structure is what makes the `√n` argument work: checkpoints partition the chain into segments, a segment is recomputed from its left checkpoint, and the segment length is the free parameter to optimize. A general graph has no segments, a value may feed many consumers at different depths, and recomputing one value may require recomputing several others — so there is no quantity playing the role of `√n`. **Theorem 26.2 is stated here as background for the idea, not as a bound on what §26.3 does.** The implementation makes no such claim: it is a greedy loop that repeatedly rematerializes the highest-scoring candidate until the peak fits the budget or it runs out of candidates, and §26.3 shows it terminating in the second way.
+The chain structure is what makes the `√n` argument work: checkpoints partition the chain into segments, a segment is recomputed from its left checkpoint, and the segment length is the free parameter to optimize. A general graph has no segments, a value may feed many consumers at different depths, and recomputing one value may require recomputing several others — so there is no quantity playing the role of `√n`. **Theorem 26.2 is stated here as background for the idea, not as a bound on what §26.3 does.** The implementation makes no such claim: it is a greedy loop that repeatedly rematerializes the highest-scoring candidate until the peak fits the budget or it runs out of candidates, and §26.1's lab below shows it terminating in the second way.
 
 The score is a ratio ([`rematerialization.ts:104`](../../../src/compiler/passes/memory/rematerialization.ts)):
 
@@ -47,7 +47,7 @@ Bytes freed per unit of work added — the natural greedy criterion for a knapsa
 
 ### In mlfw
 
-[`passes/memory/rematerialization.ts`](../../../src/compiler/passes/memory/rematerialization.ts), 228 lines, a `FunctionPass` requiring `LivenessAnalysis`. The entry condition is the budget ([`rematerialization.ts:60`](../../../src/compiler/passes/memory/rematerialization.ts)):
+[`passes/memory/rematerialization.ts`](../../../src/compiler/passes/memory/rematerialization.ts), 234 lines, a `FunctionPass` requiring `LivenessAnalysis`. The entry condition is the budget ([`rematerialization.ts:60`](../../../src/compiler/passes/memory/rematerialization.ts)):
 
 ```ts
     if (this.config.memoryBudget === Infinity) return PassResult.UNCHANGED;
@@ -110,13 +110,13 @@ The cost is precision. Mapping a range of floats onto 256 integer levels loses i
 
 ### The theory
 
-> **Definition 26.3 (Affine quantization).** A quantization of a float range onto `b` bits is a pair `(s, z)` — scale and zero-point — with
+> **Definition 26.3 (Affine quantization).** **(classical)** A quantization of a float range onto `b` bits is a pair `(s, z)` — scale and zero-point — with
 >
 > `q = clamp(round(x/s) + z, q_min, q_max)` and `x̂ = s(q − z)`,
 >
 > where `[q_min, q_max]` is the representable range of the target integer type: `[−128, 127]` for `i8`, `[0, 255]` for `ui8`. It is *symmetric* if `z = 0`.
 
-**The clamp is not a detail, and dropping it changes what the definition describes.** Without it, `q` is an unbounded integer and quantization is a lossless-in-range affine map that happens to round — error is at most `s/2`, uniformly, for every input. With it, quantization has *two* error regimes: inputs inside the calibrated range pick up rounding error bounded by `s/2`, and inputs outside it are **saturated** to the endpoint, with an error that grows without bound as the input moves further out. Every claim in §26.4 about accuracy depends on which regime the data is in, and the failure mode the lab exhibits is the second one.
+**The clamp is not a detail, and dropping it changes what the definition describes.** Without it, `q` is an unbounded integer and quantization is a lossless-in-range affine map that happens to round — error is at most `s/2`, uniformly, for every input. With it, quantization has *two* error regimes: inputs inside the calibrated range pick up rounding error bounded by `s/2`, and inputs outside it are **saturated** to the endpoint, with an error that grows without bound as the input moves further out. Every claim in this section about accuracy depends on which regime the data is in, and the failure mode the lab exhibits is the second one.
 
 The implementation clamps ([`quant_math.ts:22`](../../../src/compiler/passes/lowering/quant_math.ts)):
 
@@ -130,15 +130,15 @@ The implementation clamps ([`quant_math.ts:22`](../../../src/compiler/passes/low
 
 and it must: an `i8` buffer cannot hold `round(x/s) + z` when that exceeds 127, so omitting the clamp would not produce a larger number, it would produce whatever the cast does with an out-of-range value. Saturation is the correct behaviour and it is also the behaviour that makes an under-calibrated range destructive rather than merely imprecise.
 
-> **Definition 26.4 (Calibration).** *Calibration* is the process of choosing `s` per tensor by observing the values that tensor actually takes on representative inputs.
+> **Definition 26.4 (Calibration).** **(classical)** *Calibration* is the process of choosing `s` per tensor by observing the values that tensor actually takes on representative inputs.
 
-> **And the default, stated as a contract.** **(invariant.)** When no calibration data is available for a value, `_getQuantParams` falls back to the range `[-6, 6]` — a constant chosen because it covers the output of a ReLU6 and most normalized activations, and for no reason that is specific to your model. Be explicit about what that default does and does not promise:
+> **And the default, stated as a contract.** **(invariant)** When no calibration data is available for a value, `_getQuantParams` falls back to the range `[-6, 6]` — a constant chosen because it covers the output of a ReLU6 and most normalized activations, and for no reason that is specific to your model. Be explicit about what that default does and does not promise:
 >
-> - It is **not** a bound on error. A tensor whose values live in `[-0.5, 0.5]` is represented on about 20 of 255 levels (§26.4 measures exactly this), and one whose values exceed ±6 is *saturated* by Definition 26.3's clamp, with unbounded error.
+> - It is **not** a bound on error. A tensor whose values live in `[-0.5, 0.5]` is represented on about 20 of 255 levels (the lab below measures exactly this), and one whose values exceed ±6 is *saturated* by Definition 26.3's clamp, with unbounded error.
 > - It is **not** detected. Nothing compares the default against the values the graph actually produces, and no warning is emitted when the two disagree. The 18% end-to-end error in §26.4 is reported by the lab, not by the compiler.
 > - What it **is** is a value that lets quantization run without calibration data, so that the pipeline is testable and the mechanism is demonstrable.
 >
-> So the public expectation is: **quantizing without calibration produces a numerically different model, by an amount nobody has bounded, and the compiler will not tell you.** Treat `[-6, 6]` as a placeholder that makes the pass runnable, not as a default that makes it usable. §26.4's third switch is the supported path.
+> So the public expectation is: **quantizing without calibration produces a numerically different model, by an amount nobody has bounded, and the compiler will not tell you.** Treat `[-6, 6]` as a placeholder that makes the pass runnable, not as a default that makes it usable. The lab's calibrated run is the supported path.
 
 Calibration is the whole game. Weights can be inspected statically — they are constants. *Activations* cannot: their range depends on the input distribution, and a compiler that guesses gets the accuracy shown below.
 
@@ -209,7 +209,7 @@ Both are the same graph problem: choose a set of subgraphs, assign each to an ex
 
 ### The theory
 
-> **Definition 26.5 (Partition).** A *partition* assigns every operation to an executor. Its cost is the sum of per-operation costs on the assigned executor plus a transfer cost for every value crossing a boundary.
+> **Definition 26.5 (Partition).** **(stated here)** A *partition* assigns every operation to an executor. Its cost is the sum of per-operation costs on the assigned executor plus a transfer cost for every value crossing a boundary.
 
 > **Note.** The subgraph handed to an executor must be *convex*: if `a` and `c` are in it and `b` lies on a path from `a` to `c`, then `b` must be in it too. Otherwise the subgraph cannot be executed as one unit — the same acyclicity requirement as Theorem 23.2, in a different costume.
 

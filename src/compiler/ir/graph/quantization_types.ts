@@ -32,6 +32,9 @@ export type SerializedQuantizationParams = {
   numBits: number;
 };
 
+export const DEFAULT_QUANTIZABLE_OPS: ReadonlySet<string> = new Set(['dot', 'conv', 'add', 'mul', 'sub']);
+export const DEFAULT_EXCLUDE_OPS: ReadonlySet<string> = new Set(['softmax', 'sqrt', 'div', 'rsqrt', 'log', 'exp', 'tanh']);
+
 const SCHEME_SET = new Set<string>(Object.values(QuantizationScheme));
 const QUANTIZABLE_DTYPES = new Set<ScalarDType>([ScalarType.I8, ScalarType.UI8]);
 

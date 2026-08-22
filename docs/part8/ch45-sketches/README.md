@@ -28,15 +28,15 @@ Three things follow from that picture, and all three matter.
 
 ## 45.3 Theory
 
-> **Definition 45.1 (Sketch, stated here).** A *sketch* is a triple `(name, V, apply)` where `V = (V₁,…,V_k)` is a finite list of search variables with finite candidate sets, and `apply : Schedule × BlockName × Target × Params → unit` is a partial function defined by a sequence of schedule-primitive calls. `apply` is *total on the space* if it does not throw for any `p ∈ C₁ × ⋯ × C_k`.
+> **Definition 45.1 (Sketch).** **(stated here)** A *sketch* is a triple `(name, V, apply)` where `V = (V₁,…,V_k)` is a finite list of search variables with finite candidate sets, and `apply : Schedule × BlockName × Target × Params → unit` is a partial function defined by a sequence of schedule-primitive calls. `apply` is *total on the space* if it does not throw for any `p ∈ C₁ × ⋯ × C_k`.
 
 The definition deliberately does not require totality, because one of the sketches this compiler derives for a matmul is defined at no point of its space at all.
 
-> **Definition 45.2 (Derivation, stated here).** A *sketch rule* is a pair `(matches, derive)` with a priority. `derive` maps a block to a list of sketches. The *derivation* of a block is `derive` of the first rule, in priority order, whose `matches` accepts the block's structure.
+> **Definition 45.2 (Derivation).** **(stated here)** A *sketch rule* is a pair `(matches, derive)` with a priority. `derive` maps a block to a list of sketches. The *derivation* of a block is `derive` of the first rule, in priority order, whose `matches` accepts the block's structure.
 
 First-match, not best-match: the rules are a decision list, so their order is part of their meaning and adding a rule at a lower priority number can silently take work away from an existing one.
 
-> **Proposition 45.3 (Derivation is total, given a supported target and `richGpu` off, stated here).** For a CPU or GPU target with `opts.richGpu` unset, `deriveSketches` returns a non-empty list for every block. It returns the empty list for a target that is neither CPU nor GPU ([`derivation.ts:78`](../../../src/compiler/autotune/derivation.ts)), and for a GPU target with `richGpu` set it returns the empty list for every block of a recognised pure matmul except the reduction block ([`gpu_matmul_sketch.ts:539`](../../../src/compiler/autotune/gpu_matmul_sketch.ts)).
+> **Proposition 45.3 (Derivation is total, given a supported target and `richGpu` off).** **(invariant)** For a CPU or GPU target with `opts.richGpu` unset, `deriveSketches` returns a non-empty list for every block. It returns the empty list for a target that is neither CPU nor GPU ([`derivation.ts:78`](../../../src/compiler/autotune/derivation.ts)), and for a GPU target with `richGpu` set it returns the empty list for every block of a recognised pure matmul except the reduction block ([`gpu_matmul_sketch.ts:539`](../../../src/compiler/autotune/gpu_matmul_sketch.ts)).
 
 *Proof.* The rule registered at priority 30 has `matches: () => true` ([`derivation.ts:69`](../../../src/compiler/autotune/derivation.ts)) and its `derive` returns a one-element list, so the scan in `deriveSketches` always terminates on a rule that produces a sketch. The two exceptions are the two early returns above the scan. ∎
 
@@ -44,21 +44,21 @@ The exceptions are not idle: on WASM the autotuner derives no sketches at all, a
 
 The core of any tiling sketch is the claim that a factorisation can be realised by repeated splitting without arithmetic loss.
 
-> **Definition 45.4 (Tile structure, stated here).** A *tile structure* is an ordered list of `(kind, level)` pairs with `kind ∈ {S, R}`, together with a partial map from `kind·level` to a role in `{parallelize, vectorize, unroll, blockIdx, threadIdx}`. Its *level counts* `L_S`, `L_R` are one more than the largest level of each kind.
+> **Definition 45.4 (Tile structure).** **(stated here)** A *tile structure* is an ordered list of `(kind, level)` pairs with `kind ∈ {S, R}`, together with a partial map from `kind·level` to a role in `{parallelize, vectorize, unroll, blockIdx, threadIdx}`. Its *level counts* `L_S`, `L_R` are one more than the largest level of each kind.
 
-> **Proposition 45.5 (A multi-level split realises a factorisation exactly, stated here).** Let a loop have constant extent `n`, **lower bound `0`**, and let `(f₀,…,f_{L−1})` satisfy `∏ f_i = n`. Then `multiLevelSplit` produces `L` nested loops whose extents are exactly `f₀,…,f_{L−1}`, and no guard predicate is introduced.
+> **Proposition 45.5 (A multi-level split realises a factorisation exactly).** **(stated here)** Let a loop have constant extent `n`, **lower bound `0`**, and let `(f₀,…,f_{L−1})` satisfy `∏ f_i = n`. Then `multiLevelSplit` produces `L` nested loops whose extents are exactly `f₀,…,f_{L−1}`, and no guard predicate is introduced.
 >
 > The lower-bound hypothesis is discharged by `split` itself, which carries a non-zero `min` through the substitution (Chapter 40, Counterexample 40.7) — not by the accident that every loop a tiling sketch is offered comes from a lowering rule emitting `min = 0`.
 
 *Proof.* By induction on `i`. Before step `i` the loop being split has extent `∏_{j≥i} f_j`; the code splits by `inner = ∏_{j>i} f_j` ([`tiling.ts:23`](../../../src/compiler/autotune/tiling.ts)), which divides that extent exactly with quotient `f_i`. Chapter 40's `split` therefore computes `outerExtent = ⌈(∏_{j≥i} f_j)/inner⌉ = f_i` and, since `extent % factor === 0`, takes the branch that emits no `IfThenElseNode` ([`schedule.ts:282`](../../../src/compiler/schedule/schedule.ts)). The remaining loop has extent `∏_{j>i} f_j`, which is the induction hypothesis at `i+1`. After `L−1` steps the innermost extent is `f_{L−1}`. ∎
 
-> **Corollary 45.6 (The bindings are a mixed-radix reconstruction, stated here).** After a multi-level split of an axis into `(f₀,…,f_{L−1})`, the block's binding for that axis is `Σ_i v_i · ∏_{j>i} f_j`, which by Theorem 35.3 is a bijection from `∏ [0, f_i)` onto `[0, n)`. The iteration space is therefore preserved exactly — the same points, renamed.
+> **Corollary 45.6 (The bindings are a mixed-radix reconstruction).** **(stated here)** After a multi-level split of an axis into `(f₀,…,f_{L−1})`, the block's binding for that axis is `Σ_i v_i · ∏_{j>i} f_j`, which by Theorem 35.3 is a bijection from `∏ [0, f_i)` onto `[0, n)`. The iteration space is therefore preserved exactly — the same points, renamed.
 
 Proposition 45.5 is why Chapter 40's guard, which exists for the general case, never appears in a tiling sketch: the search only ever offers factor tuples that multiply back to the extent. It also explains why a factor of `1` is harmless — it produces a loop of extent 1 and a multiplier that repeats, which the simplifier folds — and why the sketch has to keep those degenerate tuples: without `[1,1,1,n]` a prime extent would have no tiling at all.
 
 Soundness of the whole space then follows from Part VII, with two named exceptions.
 
-> **Theorem 45.7 (A sketch space is sound if its primitives are, stated here).** Let `apply` call only primitives that are sound in the sense of Definition 38.3. Then for every parameter point on which `apply` does not throw, the resulting `PrimFunc` is semantically equivalent to the input. Consequently no point of the space is a wrong program, and a search over it needs no correctness oracle.
+> **Theorem 45.7 (A sketch space is sound if its primitives are).** **(stated here)** Let `apply` call only primitives that are sound in the sense of Definition 38.3. Then for every parameter point on which `apply` does not throw, the resulting `PrimFunc` is semantically equivalent to the input. Consequently no point of the space is a wrong program, and a search over it needs no correctness oracle.
 
 This is the load-bearing correctness argument for the whole of Part VIII: it is what lets a search try thousands of programs without checking any of them for correctness. Everything therefore rests on the hypothesis, so it is worth knowing where the hypothesis fails — which is Counterexample 45.8, and which is why every later claim of the form "a search cannot produce a wrong program" carries an exception.
 

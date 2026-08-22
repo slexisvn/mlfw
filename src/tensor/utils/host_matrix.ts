@@ -1,4 +1,5 @@
 import { tensor } from '../factory/from_ops.js';
+import { float64From } from '../../util/numeric_array.js';
 import { tensorToContiguous } from '../../dispatcher/jit_dispatch.js';
 import { DeviceType, CPU_DEVICE } from '../types/device.js';
 import type { Device } from '../types/device.js';
@@ -6,12 +7,6 @@ import type { DType, NumericTypedArray } from '../types/dtype.js';
 import type { Tensor } from '../core/tensor.js';
 
 const HOST_DEVICES = new Set<string>([DeviceType.CPU, DeviceType.WASM]);
-
-function float64From(data: ArrayLike<number | bigint>): Float64Array {
-  const out = new Float64Array(data.length);
-  for (let i = 0; i < data.length; i++) out[i] = Number(data[i]);
-  return out;
-}
 
 export function deviceKey(t: Tensor): string {
   return t.device.type;

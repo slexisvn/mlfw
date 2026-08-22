@@ -19,7 +19,6 @@ import type {
   OptimizerLike,
   TrainerOptions,
 } from '../types.js';
-import type { SchedulerConfig } from './module.js';
 
 export class Trainer {
   private _state: TrainerState;

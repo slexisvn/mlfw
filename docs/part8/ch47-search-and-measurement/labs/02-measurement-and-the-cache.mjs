@@ -119,18 +119,26 @@ console.log('  ascending time; unmeasured ones by descending score. Two scales, 
 console.log('  compared, because the measured/unmeasured split is tested first.');
 
 const blob = db.serialize();
-const { codegenVersion, ...noVersion } = blob;
-console.log(`\n  codegenVersion written:       ${blob.codegenVersion}`);
-console.log(`  reload with the same version: ${TuningDatabase.deserialize(blob).size} records`);
-console.log(`  reload with a different one:  ${TuningDatabase.deserialize({ ...blob, codegenVersion: 'mlfw-codegen-2' }).size} records`);
-console.log(`  reload with the field absent: ${TuningDatabase.deserialize(noVersion).size} records`);
+const { codegenVersion, ...noCodegen } = blob;
+const { scheduleSemanticsVersion, ...noSemantics } = blob;
+const { codegenVersion: _c, scheduleSemanticsVersion: _s, ...preVersioning } = blob;
+console.log(`\n  stamps written:                     ${blob.codegenVersion} / ${blob.scheduleSemanticsVersion}`);
+console.log(`  reload with both unchanged:         ${TuningDatabase.deserialize(blob).size} records`);
+console.log(`  reload with a foreign codegen:      ${TuningDatabase.deserialize({ ...blob, codegenVersion: 'mlfw-codegen-2' }).size} records`);
+console.log(`  reload with a foreign semantics:    ${TuningDatabase.deserialize({ ...blob, scheduleSemanticsVersion: 'mlfw-schedule-1' }).size} records`);
+console.log(`  reload with codegen absent:         ${TuningDatabase.deserialize(noCodegen).size} records`);
+console.log(`  reload with semantics absent:       ${TuningDatabase.deserialize(noSemantics).size} records`);
+console.log(`  reload of a genuine pre-versioning file (neither field): ${TuningDatabase.deserialize(preVersioning).size} records`);
 const odd = new TuningDatabase(1);
 odd.store('z', new TuningRecord('z', 's', {}, 1, null, 9));
 console.log(`  a record claiming version 9, stored into a version-1 database: kept, version ${odd.lookup('z').version}`);
-console.log('\n  The guard is `data.codegenVersion !== undefined && ... !== CODEGEN_VERSION`');
-console.log('  (tuning_db.ts:129). A file written before the field existed has no');
-console.log(`  field, so it loads unconditionally — which is the one file "${CODEGEN_VERSION}"`);
-console.log('  exists to reject. The per-record `version` is stored and never compared.');
+console.log('\n  Two guards, and only one of them has an `!== undefined` escape.');
+console.log('  `codegenVersion` is exempt when absent (tuning_db.ts:130), which on its');
+console.log('  own would have let a pre-versioning file through. `scheduleSemanticsVersion`');
+console.log('  has no such exemption (tuning_db.ts:133), so a file missing it is rejected —');
+console.log('  and a genuine pre-versioning file is missing both. The hole in the first');
+console.log('  guard is real and is covered by the second.');
+console.log('  The per-record `version` is still stored and never compared.');
 
 // -------------------------------------------------- 4. what a cache hit reproduces
 

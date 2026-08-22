@@ -1,4 +1,4 @@
-import { _traceCore, resolveDynamicShapes, inputSignatureOf, signatureMatches } from './compile.js';
+import { _traceCore, resolveDynamicShapes, inputSignatureOf, signatureMatches, isThenable } from './compile.js';
 import { Compiler } from '../compiler/pipeline/compiler.js';
 import { CPUTarget } from '../backend/target.js';
 import { GraphModule } from '../compiler/ir/graph/module.js';
@@ -19,7 +19,7 @@ import type { Device } from '../tensor/types/device.js';
 import type { DType, NumericTypedArray } from '../tensor/types/dtype.js';
 import type { TensorType } from '../compiler/ir/graph/types.js';
 import type { GraphFunction } from '../compiler/ir/graph/function.js';
-import type { CompilableModel, CompiledResult, CompileOptions, GraphFunctionLike, GraphModuleLike, IRBuilderLike, IROperationLike, IRValueLike, MaybePromise, RuntimeArg, SymbolicShape, TensorOutput, TracedCore } from './types.js';
+import type { CompilableModel, CompiledResult, CompileOptions, GraphFunctionLike, GraphModuleLike, IRBuilderLike, IRValueLike, MaybePromise, RuntimeArg, SymbolicShape, TensorOutput, TracedCore } from './types.js';
 
 type SavedSource = { kind: 'arg' | 'output'; index: number };
 type BackwardPolicy = unknown;
@@ -90,10 +90,6 @@ type JointBuilderResult = {
 };
 type AsyncKernelResult = Promise<unknown> | null;
 
-function _isThenable<T>(value: MaybePromise<T>): value is Promise<T> {
-  return typeof (value as { then?: unknown }).then === 'function';
-}
-
 export function compileWithBackward(model: CompilableModel, exampleInputs?: Tensor[], opts: CompileOptions = {}): unknown {
   const target = opts.target ?? CPUTarget();
   const mode = opts.mode || 'separate';
@@ -126,7 +122,7 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
       return compiled;
     };
 
-    return _isThenable(traced) ? traced.then(finish) : finish(traced);
+    return isThenable(traced) ? traced.then(finish) : finish(traced);
   }
 
   function _compileSeparate(forwardFunc: GraphFunctionLike, traced: TracedCore, policy: BackwardPolicy): SeparateMeta {
@@ -352,7 +348,7 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
       return _executeJointForward(meta, inputs);
     }
     const ctx = _executeSeparateForward(meta, inputs);
-    if (_isThenable(ctx)) return ctx.then((c: SeparateForwardContext) => { _savedValues = c; return c.results; });
+    if (isThenable(ctx)) return ctx.then((c: SeparateForwardContext) => { _savedValues = c; return c.results; });
     _savedValues = ctx;
     return ctx.results;
   }
@@ -362,7 +358,7 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
     if (cached) return _forwardWith(cached, inputs);
 
     const compiledOrPromise = _compile(inputs);
-    if (_isThenable(compiledOrPromise)) {
+    if (isThenable(compiledOrPromise)) {
       return compiledOrPromise.then((meta) => {
         _cacheEntries.push(meta);
         meta.shapeEnv.bindInputShapes(inputs);
@@ -496,7 +492,7 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
 
   if (exampleInputs) {
     const compiled = _compile(exampleInputs);
-    if (_isThenable(compiled)) {
+    if (isThenable(compiled)) {
       _pendingCompile = compiled.then((meta) => { _cacheEntries.push(meta); _pendingCompile = null; return meta; });
     } else {
       _cacheEntries.push(compiled);

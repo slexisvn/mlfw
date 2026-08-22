@@ -1,8 +1,4 @@
 import type { TargetFeatures } from '../../backend/target.js';
-import type { GraphModule } from '../ir/graph/module.js';
-import type { GraphFunction } from '../ir/graph/function.js';
-import type { PrimFunc } from '../ir/tensor/nodes.js';
-import type { TirModule } from '../ir/tensor/module.js';
 
 export type PassPhase = 'pre' | 'post';
 

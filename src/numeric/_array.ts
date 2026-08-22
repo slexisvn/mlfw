@@ -1,13 +1,8 @@
 import { Tensor } from '../tensor/core/tensor.js';
+import { float64From } from '../util/numeric_array.js';
 import { tensorToContiguous } from '../dispatcher/jit_dispatch.js';
 import { CPU_DEVICE } from '../tensor/types/device.js';
 import type { HostGrid, HostVector, NumericMatrixInput, NumericVectorInput } from './types.js';
-
-function float64From(data: ArrayLike<number | bigint>): Float64Array {
-  const out = new Float64Array(data.length);
-  for (let i = 0; i < data.length; i++) out[i] = Number(data[i]);
-  return out;
-}
 
 export function hostVector(x: NumericVectorInput): HostVector {
   if (x instanceof Tensor) {
@@ -32,10 +27,4 @@ export function hostGrid(x: NumericMatrixInput): HostGrid {
     for (let j = 0; j < cols; j++) data[i * cols + j] = x[i][j];
   }
   return { data, rows, cols, dtype: 'f64', device: CPU_DEVICE };
-}
-
-export function nextPow2(n: number): number {
-  let p = 1;
-  while (p < n) p <<= 1;
-  return p;
 }

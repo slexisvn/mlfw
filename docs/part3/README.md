@@ -12,9 +12,49 @@ It is also the part that decides whether the compiler is debuggable. A wrong num
 | [17](ch17-pattern-rewriting/README.md) | Pattern rewriting | What is a rewrite rule when it is an object rather than a branch in a `switch`, and what makes a set of them converge? |
 | [18](ch18-watching-the-compiler/README.md) | Watching the compiler work | How do you see inside a compile without editing the compiler — and what does a compiler owe you when it fails? |
 
+## The five objects, and who holds whom
+
+Every chapter of this part is one box in this picture. It is worth having in front of you, because the chapters are written as if you already know where the thing being described sits.
+
+```
+   Compiler.compile                       drives a list of 14 named PHASES
+        |                                 (ch15 15.8) -- graphPasses is one of them
+        |  ctx.working : GraphModule      resilient mode works on a clone (ch18)
+        v
+   PassManager                            one entry at a time, in order
+        |    +-----------------------------------------------------+
+        |    |  entry = a Pass, or a FixedPointGroup of Passes      |  ch15
+        |    +-----------------------------------------------------+
+        |
+        |  for each entry:
+        |     shouldRun(pass)? ................ PassContext          ch14
+        |     fetch pass.requiredAnalyses ..... AnalysisManager      ch16
+        |     verdict = pass.run(target) ...... Pass                 ch14
+        |     if CHANGED:  bumpVersion
+        |                  invalidate(preservedAnalyses) .. ch16
+        |                  verify -> names the pass ........ ch15
+        |     emit a `pass` event ............. TraceLog            ch18
+        v
+   the same GraphModule, edited in place
+
+   Two passes are not one transformation but a driver over many small rules:
+        CanonicalizePass, AlgebraicSimplificationPass
+             -> PatternApplicator over a PatternSet, worklist-driven   ch17
+```
+
+Read the middle block downward and you have the whole of Chapter 15: everything after the verdict is *keyed off* the verdict, which is why Chapter 14 spends its length on a three-valued return.
+
 ## The argument in one paragraph
 
-A transformation is an object with a name, a target, and a three-valued verdict, and the verdict is what everything else is keyed off: whether to iterate, whether to re-verify, whether to keep what you know (Chapter 14). A driver runs a sequence of them, rebuilding that sequence per compile from the config and the target, iterating the cheap ones as a group until a whole round reports no change — which costs exactly one extra round to establish, and which terminates only because it is capped, not because anything decreases — and verifying the IR after every pass that claims to have changed it, so that an invalid graph arrives with the name of the pass that produced it (Chapter 15). Passes want derived facts, so those are cached against a counter the IR increments on every structural edit — a mechanism meant to be sound without anybody declaring anything, and which currently is not, because attribute edits do not move the counter; a pass may additionally *declare* that it preserved a fact, which is faster, is trusted, is unchecked, and must be applied transitively over the dependency graph or it buys nothing (Chapter 16). Two of the five simplification passes are collections of independent rewrite rules driven by a worklist that re-queues whatever a rewrite disturbed, so rules cascade without knowing about each other, converging to a normal form that is bounded rather than proved — and one of those rules is generated from a trait that is false on floats (Chapter 17). And all of it emits a filtered stream of structured events — phases, verdicts, rewrite counts, IR snapshots, and the reasons behind individual decisions — while a resilient mode turns a thrown exception into a recorded error and leaves the *caller's* IR untouched, without rolling back the module it is working on (Chapter 18).
+A transformation is an object with a name, a target, and a three-valued verdict. The verdict is what everything else is keyed off — whether to iterate, whether to re-verify, whether to keep what you already know — which is why a pass that reports it wrongly gets a *later* pass blamed for the damage (Chapter 14).
+
+A driver runs a sequence of those objects, rebuilding the sequence per compile from the config and the target. It iterates the cheap ones as a group until a whole round reports no change, which costs exactly one extra round to establish and terminates only because it is capped, not because anything decreases. And it verifies the IR after every pass that claims to have changed it, so an invalid graph arrives with the name of the pass that produced it (Chapter 15).
+
+Passes want derived facts, so those are cached against a counter the IR increments on every structural edit — sound without anybody declaring anything, over exactly the edits it intercepts. A pass may additionally *declare* that it preserved a fact. That is faster, it is trusted, it is unchecked, and it must be applied transitively over the dependency graph or it buys nothing at all (Chapter 16).
+
+Two of the five simplification passes are not single algorithms but collections of independent rewrite rules, driven by a worklist that re-queues whatever a rewrite disturbed. Rules cascade without knowing about each other, converging to a normal form that is bounded rather than proved — and one of those rules is generated from a trait that is false on floats (Chapter 17).
+
+All of it emits a filtered stream of structured events: phases, verdicts, rewrite counts, IR snapshots, and the reasons behind individual decisions. A resilient mode turns a thrown exception into a recorded error, restores the module the failing pass abandoned, and leaves the caller's IR untouched (Chapter 18).
 
 ## What Part III establishes for later parts
 

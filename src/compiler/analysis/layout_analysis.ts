@@ -161,7 +161,7 @@ function resolveFromInputs(op: Operation, assignments: ReadonlyMap<Value, Layout
   return Layout.rowMajor(1);
 }
 
-function layoutEquals(a: LayoutLike | null | undefined, b: LayoutLike | null | undefined): boolean {
+export function layoutEquals(a: LayoutLike | null | undefined, b: LayoutLike | null | undefined): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
   if (typeof a.equals === 'function') return a.equals(b);

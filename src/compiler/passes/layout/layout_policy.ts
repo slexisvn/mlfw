@@ -1,4 +1,5 @@
 import { TensorType } from '../../ir/graph/types.js';
+import { layoutEquals } from '../../analysis/layout_analysis.js';
 import { registry } from '../../ir/graph/ops.js';
 import { OpAttrKey } from '../../ir/graph/op_traits.js';
 import { LayoutPreference } from '../../ir/graph/layout_pref.js';
@@ -57,9 +58,3 @@ export class LayoutPolicy {
   }
 }
 
-function layoutEquals(a: Layout | null, b: Layout | null): boolean {
-  if (a === b) return true;
-  if (!a || !b) return false;
-  if (typeof a.equals === 'function') return a.equals(b);
-  return false;
-}

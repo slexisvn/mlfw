@@ -4,7 +4,6 @@ import { compileGraph } from '../compiler/pipeline/compiler.js';
 import { CPUTarget } from '../backend/target.js';
 import { Optimizer } from './optimizer.js';
 import type { NumberTypedArray, NumberTypedArrayConstructor, OptimizerParams } from './types.js';
-import type { GraphModule } from '../compiler/ir/graph/module.js';
 
 const F = ScalarType.F32;
 const VEC = (n: number): TensorType => new TensorType([n], F);

@@ -34,21 +34,21 @@ The trade is asymmetric on purpose: the analysis is allowed to be imprecise and 
 
 ## 37.3 Theory
 
-> **Definition 37.1 (Interval abstraction).** An *abstract value* is a pair `[lo, hi]` with `lo ∈ ℤ ∪ {−∞}` and `hi ∈ ℤ ∪ {+∞}`. Its *concretisation* `γ([lo,hi])` is `{n ∈ ℤ : lo ≤ n ≤ hi}`.
+> **Definition 37.1 (Interval abstraction).** **(classical)** An *abstract value* is a pair `[lo, hi]` with `lo ∈ ℤ ∪ {−∞}` and `hi ∈ ℤ ∪ {+∞}`. Its *concretisation* `γ([lo,hi])` is `{n ∈ ℤ : lo ≤ n ≤ hi}`.
 
-> **Definition 37.2 (Sound abstraction).** An abstract operation `f#` is *sound* for a concrete operation `f` if for all abstract values `A, B`, `{f(a,b) : a ∈ γ(A), b ∈ γ(B)} ⊆ γ(f#(A,B))`.
+> **Definition 37.2 (Sound abstraction).** **(classical)** An abstract operation `f#` is *sound* for a concrete operation `f` if for all abstract values `A, B`, `{f(a,b) : a ∈ γ(A), b ∈ γ(B)} ⊆ γ(f#(A,B))`.
 
-> **Theorem 37.3 (Soundness of interval arithmetic).** *(Interval arithmetic is classical — (Moore, 1966); the soundness criterion of Definition 37.2 is abstract interpretation — (Cousot and Cousot, 1977).)* With `[a₁,a₂] + [b₁,b₂] = [a₁+b₁, a₂+b₂]`, `−[a₁,a₂] = [−a₂,−a₁]`, `[a₁,a₂]·[b₁,b₂] = [min P, max P]` for `P` the four endpoint products, and division by a positive constant `c` given by `[⌊a₁/c⌋, ⌊a₂/c⌋]`, every operation is sound.
+> **Theorem 37.3 (Soundness of interval arithmetic; Moore, 1966, with the soundness criterion of Cousot and Cousot, 1977).** **(classical)** With `[a₁,a₂] + [b₁,b₂] = [a₁+b₁, a₂+b₂]`, `−[a₁,a₂] = [−a₂,−a₁]`, `[a₁,a₂]·[b₁,b₂] = [min P, max P]` for `P` the four endpoint products, and division by a positive constant `c` given by `[⌊a₁/c⌋, ⌊a₂/c⌋]`, every operation is sound.
 
 *Proof sketch.* Addition and negation are monotone in each argument, so the extremes of the result are attained at the extremes of the arguments. Multiplication is monotone in each argument for a fixed sign of the other, so the extremes are attained at some pair of endpoints, and taking the min and max over all four covers every sign case. Floor division by a positive constant is monotone. ∎
 
-> **Theorem 37.4 (One-sided decidability).** Let `E` be an expression and `B` its computed interval. If `B ⊆ [0, ∞)` then `E ≥ 0` on every concrete state. The converse fails: `E ≥ 0` everywhere does not imply `B ⊆ [0,∞)`.
+> **Theorem 37.4 (One-sided decidability).** **(classical)** Let `E` be an expression and `B` its computed interval. If `B ⊆ [0, ∞)` then `E ≥ 0` on every concrete state. The converse fails: `E ≥ 0` everywhere does not imply `B ⊆ [0,∞)`.
 
 *Proof.* The forward direction is Definition 37.2 applied inductively over the expression. For the converse, take `E = i − j` where `i` and `j` are two names for values that happen always to be equal: `B = [−e, e]`, and `E` is identically zero. ∎
 
 The converse's counterexample names the essential limitation:
 
-> **Definition 37.5 (Non-relational domain).** An abstract domain is *non-relational* if it assigns each variable an abstract value independently. Such a domain cannot express any relationship between variables — `i ≤ j`, `i + j = n`, `i ≡ 0 mod 4` — and therefore loses precision at every point where two occurrences of related quantities meet.
+> **Definition 37.5 (Non-relational domain).** **(classical)** An abstract domain is *non-relational* if it assigns each variable an abstract value independently. Such a domain cannot express any relationship between variables — `i ≤ j`, `i + j = n`, `i ≡ 0 mod 4` — and therefore loses precision at every point where two occurrences of related quantities meet.
 
 Intervals are non-relational. Relational domains exist (octagons, convex polyhedra) and cost more; this compiler uses none of them, and §37.7 lists what that costs.
 
@@ -56,7 +56,7 @@ Intervals are non-relational. Relational domains exist (octagons, convex polyhed
 
 The interval analysis has a second customer, and it is the one that settled a question spanning the whole book.
 
-> **Theorem 37.6 (Floor and truncation agree on non-negative dividends).** For integers `a ≥ 0` and `c > 0`, `⌊a/c⌋ = trunc(a/c)` and `a − c⌊a/c⌋ = a mod c` under either convention.
+> **Theorem 37.6 (Floor and truncation agree on non-negative dividends).** **(classical)** For integers `a ≥ 0` and `c > 0`, `⌊a/c⌋ = trunc(a/c)` and `a − c⌊a/c⌋ = a mod c` under either convention.
 
 *Proof.* For `a ≥ 0` the real quotient `a/c` is non-negative, and for a non-negative real, floor and truncation are the same function. The remainders then agree because both are `a − c·q` for the same `q`. ∎
 

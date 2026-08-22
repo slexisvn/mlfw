@@ -7,9 +7,9 @@ This chapter is about the two indexes that reduce that cost, and about how much 
 **One correction to make before the chapter makes the claim, because the tempting figure is `O(k·depth)` and it is not what this implementation achieves.** Two costs sit on top of the tree lookup, and both are proportional to the work a primitive does rather than to the depth at which it does it:
 
 - **`replaceNode` walks the replacement subtree.** Patching the shadow tree unregisters the srefs under the old node and *walks the new node* to build fresh ones (§39.4). That is `O(size of the replaced subtree)`, not `O(depth)`. For `split` the subtree is two loops and a body; for `rfactor` it is two complete nests. And when the old node is not found the fallback is `rebuildFrom`, which is `O(n)`.
-- **Every primitive clears every memo.** `ScheduleState.invalidate` drops six cached analyses wholesale (§39.5), so the next legality query recomputes buffer accesses and dependences from scratch over the nest it asks about.
+- **Every primitive clears every memo.** `ScheduleState.invalidate` drops six cached analyses wholesale (§39.4), so the next legality query recomputes buffer accesses and dependences from scratch over the nest it asks about.
 
-So the honest bound is: **the tree gives `O(depth)` *lookup*, and the rest of a primitive's cost is proportional to the subtree it rewrites plus whatever analysis the next query has to redo.** That is still a large improvement on re-walking the whole function for every query — which is the point of the chapter — and it is not a per-primitive constant. §39.5 is where the memo behaviour is measured and §39.7 is honest about what "incremental" covers.
+So the honest bound is: **the tree gives `O(depth)` *lookup*, and the rest of a primitive's cost is proportional to the subtree it rewrites plus whatever analysis the next query has to redo.** That is still a large improvement on re-walking the whole function for every query — which is the point of the chapter — and it is not a per-primitive constant. §39.4 is where the memo behaviour is set out and §39.7 is honest about what "incremental" covers.
 
 ## 39.1 The problem: a tree that is edited from the middle
 
@@ -31,15 +31,15 @@ The second index answers a different question. Given the *siblings* inside one s
 
 ## 39.3 Theory
 
-> **Definition 39.1 (sref tree).** For a `PrimFunc` `P`, the *sref tree* has one node per `ForNode` and per `BlockNode` in `P`'s body. The parent of an sref is the nearest enclosing loop or block; nodes of any other kind are transparent. An sref stores its IR node, its parent, and its ordered children.
+> **Definition 39.1 (sref tree).** **(stated here)** For a `PrimFunc` `P`, the *sref tree* has one node per `ForNode` and per `BlockNode` in `P`'s body. The parent of an sref is the nearest enclosing loop or block; nodes of any other kind are transparent. An sref stores its IR node, its parent, and its ordered children.
 
-> **Definition 39.2 (Block scope).** The *scope root* of a block `B` is the nearest enclosing block, or `⊥` if there is none. The *block scope* of a root `R` is the set of blocks whose scope root is `R`, together with a *position* for each (its first access in program order) and a dependence graph over them.
+> **Definition 39.2 (Block scope).** **(stated here)** The *scope root* of a block `B` is the nearest enclosing block, or `⊥` if there is none. The *block scope* of a root `R` is the set of blocks whose scope root is `R`, together with a *position* for each (its first access in program order) and a dependence graph over them.
 
-> **Definition 39.3 (Scope dependence).** For blocks `X`, `Y` in one scope with `pos(X) ≤ pos(Y)`, and a buffer `b` both touch, there is an edge `X → Y` labelled RAW if `X` writes a region of `b` overlapping one `Y` reads, WAW if both write overlapping regions, and WAR if `X` reads a region `Y` writes.
+> **Definition 39.3 (Scope dependence).** **(classical)** For blocks `X`, `Y` in one scope with `pos(X) ≤ pos(Y)`, and a buffer `b` both touch, there is an edge `X → Y` labelled RAW if `X` writes a region of `b` overlapping one `Y` reads, WAW if both write overlapping regions, and WAR if `X` reads a region `Y` writes.
 
 The regions in Definition 39.3 are *hulls*, not exact sets, which makes the edge set conservative in the right direction:
 
-> **Lemma 39.4 (Scope edges over-approximate, stated here).** If two blocks in a scope access overlapping locations of a buffer, the scope contains an edge between them of the corresponding kind. The converse fails: an edge may exist between blocks that never touch the same location.
+> **Lemma 39.4 (Scope edges over-approximate).** **(invariant)** If two blocks in a scope access overlapping locations of a buffer, the scope contains an edge between them of the corresponding kind. The converse fails: an edge may exist between blocks that never touch the same location.
 
 *Proof sketch.* `ScopeMember.hull` takes the bounding box of every access region a block makes to a buffer ([`block_scope.ts:67`](../../../src/compiler/schedule/block_scope.ts)), and `rangesOverlap` returns `true` whenever the boxes intersect and whenever either is unknown ([`dep_analysis.ts:5`](../../../src/compiler/schedule/dep_analysis.ts)). A real overlap implies overlapping hulls, so no edge is missed. Two blocks touching disjoint checkerboards of the same buffer have identical hulls and get an edge, so edges can be spurious. ∎
 
@@ -47,7 +47,7 @@ That is the correct direction for a legality check: an over-approximated depende
 
 The move a scope makes possible is stated once here and used by Chapter 41:
 
-> **Proposition 39.5 (Relocation legality, stated here).** Moving a block `X` from its position to a position `d` within the same scope preserves semantics if no block `Z` with `pos(Z)` strictly between `pos(X)` and `d` has an edge to or from `X`.
+> **Proposition 39.5 (Relocation legality).** **(stated here)** Moving a block `X` from its position to a position `d` within the same scope preserves semantics if no block `Z` with `pos(Z)` strictly between `pos(X)` and `d` has an edge to or from `X`.
 
 *Proof sketch.* Program order within a scope is a total order, and the scope's edges are exactly the pairs whose relative order is constrained (Lemma 39.4, in the safe direction). Moving `X` past only unconstrained blocks changes the order of no constrained pair, and the sequential composition of two commuting statements is order-independent. ∎
 
@@ -132,7 +132,7 @@ A `@recurrence` loop — the sequential time axis a `scan` lowers to (Chapter 34
 
 ### `ScheduleState`
 
-[`schedule/schedule_state.ts`](../../../src/compiler/schedule/schedule_state.ts), 268 lines, is the sref tree plus six memoised analyses, all cleared by one method ([`schedule_state.ts:76`](../../../src/compiler/schedule/schedule_state.ts)):
+[`schedule/schedule_state.ts`](../../../src/compiler/schedule/schedule_state.ts), 274 lines, is the sref tree plus six memoised analyses, all cleared by one method ([`schedule_state.ts:76`](../../../src/compiler/schedule/schedule_state.ts)):
 
 ```ts
   invalidate(): void {

@@ -24,7 +24,7 @@ And it has to have an answer for the case where the honest answer is "not yet" �
 export type IRType = TensorType | TupleType | TokenType | FunctionType;
 ```
 
-`TupleType` groups results (`split` produces one); `TokenType` orders side effects without carrying data; `FunctionType` types a callee. Ninety-nine values in a hundred are the fourth, `TensorType` ([`types.ts:244`](../../../src/compiler/ir/graph/types.ts)):
+Three of those four are rare. `TupleType` groups results (`split` produces one); `TokenType` orders side effects without carrying data; `FunctionType` types a callee. Ninety-nine values in a hundred carry the remaining one, `TensorType` ([`types.ts:244`](../../../src/compiler/ir/graph/types.ts)):
 
 ```ts
 export class TensorType {
@@ -174,17 +174,17 @@ Rank must match. Then a dimension pair passes if either side is unknown, or if t
 
 To say what that relation is, order dimensions by how much they claim:
 
-> **Definition 10.1 (Specificity order).** Write `d ⊑ e` when `d` is `?` or `d = e`. This is a partial order on dimensions: reflexive, antisymmetric, transitive, with `?` as least element. Extend it componentwise to shapes of equal rank. A symbolic dimension sits with `?` rather than with the numbers: two symbols are related only when they are structurally equal, and a symbol is never provably different from anything.
+> **Definition 10.1 (Specificity order).** **(stated here)** Write `d ⊑ e` when `d` is `?` or `d = e`. This is a partial order on dimensions: reflexive, antisymmetric, transitive, with `?` as least element. Extend it componentwise to shapes of equal rank. A symbolic dimension sits with `?` rather than with the numbers: two symbols are related only when they are structurally equal, and a symbol is never provably different from anything.
 
-> **Definition 10.2 (Compatibility).** Two shapes of equal rank are *compatible* when they have a common upper bound under ⊑ — that is, when there is a shape at least as specific as both. Equivalently, and this is the reading the code implements: when no dimension pair can be *proved* different.
+> **Definition 10.2 (Compatibility).** **(stated here)** Two shapes of equal rank are *compatible* when they have a common upper bound under ⊑ — that is, when there is a shape at least as specific as both. Equivalently, and this is the reading the code implements: when no dimension pair can be *proved* different.
 
-`shapeCompatible` decides exactly Definition 10.2, and the least such upper bound is what type inference propagates: `[?, 3]` and `[4, ?]` meet at `[4, 3]`, and every unknown that a caller resolves makes the whole function more specific.
+`shapeCompatible` decides exactly Definition 10.2, and the least such upper bound — the **join** under ⊑, since the order runs from unknown up towards specific — is what type inference propagates: `[?, 3]` joined with `[4, ?]` is `[4, 3]`, and every unknown that a caller resolves makes the whole function more specific. (Keep *join* and *meet* apart here. Both orders in this chapter are used for their joins; a meet, the greatest lower bound, would go the other way and is never what inference wants — the greatest lower bound of `[4, 3]` and `[9, 3]` is `[?, 3]`, which throws away everything the caller told you.)
 
 It is worth naming what this is *not*, because the obvious guess is wrong. Compatibility is not unification. Definition 10.1 puts a symbolic dimension next to `?`, and it does so at each occurrence independently — nothing records that the two `n`s in `[n, n]` are the same `n`. So `[n, n]` is compatible with `[4, 5]`: neither pair is two known numbers, so neither is rejected, even though no value of `n` could satisfy both. A unifier would answer no here; `shapeCompatible` answers "I cannot prove otherwise", and those are different claims. Deciding the first would need a solver over the symbolic layer of Chapter 37, and nothing in the type system reaches for one.
 
 Now the trap.
 
-> **Theorem 10.3 (Compatibility is not transitive; stated here).** `shapeCompatible` is reflexive and symmetric but not transitive, hence not an equivalence relation and not a partial order.
+> **Theorem 10.3 (Compatibility is not transitive).** **(stated here)** `shapeCompatible` is reflexive and symmetric but not transitive, hence not an equivalence relation and not a partial order.
 >
 > *Proof.* `[4, 3]` is compatible with `[?, 3]` because the first dimension of the second side is unknown. `[?, 3]` is compatible with `[9, 3]` for the same reason. But `[4, 3]` and `[9, 3]` are two known, different sizes, so they are incompatible. ∎
 
@@ -221,7 +221,7 @@ export function broadcastDim(a: Dim, b: Dim): Dim | null {
 }
 ```
 
-> **Definition 10.4 (Broadcast order).** Write `d ⊴ e` when `d = 1` or `d = e`. **On known dimensions**, `broadcastDim` computes the least upper bound of `d` and `e` under ⊴ when one exists, and returns `null` when it does not. Its last three lines leave that order rather than extending it, and Counterexample 10.5 is what they do instead.
+> **Definition 10.4 (Broadcast order).** **(stated here)** Write `d ⊴ e` when `d = 1` or `d = e`. **On known dimensions**, `broadcastDim` computes the least upper bound of `d` and `e` under ⊴ when one exists, and returns `null` when it does not. Its last three lines leave that order rather than extending it, and Counterexample 10.5 is what they do instead.
 
 So on known dimensions broadcasting is a join — a genuine one, in a lattice whose bottom is `1` rather than `?`. `TensorType.broadcastShape` ([`types.ts:328`](../../../src/compiler/ir/graph/types.ts)) lifts it to whole shapes, right-aligning ranks so that a `[8]` bias joins a `[2, 8]` activation. That is precisely what happened at `%7` in Lab 1: `add([2,8], [8]) : [2,8]`.
 

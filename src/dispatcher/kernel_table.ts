@@ -1,8 +1,8 @@
 import { DispatchKey } from './dispatch_key.js';
-import type { DispatchKeyValue } from './dispatch_key.js';
+import type { DispatchKeySet, DispatchKeyValue } from './dispatch_key.js';
 import type { KernelFunction } from './boxing.js';
 
-export class FallbackTable {
+export class KernelTable {
   private readonly _kernels: Array<KernelFunction | null>;
 
   constructor() {
@@ -31,5 +31,13 @@ export class FallbackTable {
       if (this._kernels[i]) keys.push(i as DispatchKeyValue);
     }
     return keys;
+  }
+
+  firstOf(keySet: DispatchKeySet): { key: DispatchKeyValue; kernel: KernelFunction } | null {
+    for (const key of keySet) {
+      const kernel = this._kernels[key];
+      if (kernel) return { key, kernel };
+    }
+    return null;
   }
 }

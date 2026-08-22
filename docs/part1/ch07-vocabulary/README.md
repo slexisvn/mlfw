@@ -51,15 +51,23 @@ Terms are grouped by what they describe: data, programs, transformations, execut
 
 **Region.** A block nested inside an operation, making that operation contain a program. Regions are how `fusion`, `scan`, `if` and `while` are represented without unrolling or flattening. Chapter 9.
 
+**Region-carrying operation.** An operation that owns one or more regions — `fusion`, `scan`, `if`, `while`. Two things follow and both catch people: a traversal that uses `ops()` rather than `opsRecursive()` never sees inside one, and its side effects are whatever its contents' are, which is what the `RECURSIVE_MEMORY_EFFECTS` trait declares. Chapters 9 and 11.
+
+**Lifted parameter.** A tensor that `forward` read from the model rather than receiving as an argument — `this.fc.weight` — and that tracing turned into a parameter of the traced function. Lifting is why a compiled model can still be trained: the artifact holds a live reference to the tensor's storage and sees an in-place update. A host *scalar* read the same way is not lifted; it is frozen into the graph as a constant. Chapter 5 §5.5.
+
+**Graph break.** In a bytecode-capture system such as TorchDynamo, the seam where capture stops because the interpreter reached something it cannot compile, emits the graph so far, lets the host run the offending code, and starts a new graph after it. The program still runs; no optimization crosses the seam. This framework traces instead, so the same situation raises an error rather than producing a seam. Chapter 5 §5.2.
+
 **Trait.** A declared property of an operation that passes can query instead of special-casing op names: *commutative*, *elementwise*, *terminator*, *reduction*. This is how a fusion pass can reason about operations it has never heard of. [`op_registry.ts`](../../../src/compiler/ir/graph/op_registry.ts), Chapter 11.
 
 **Verifier.** A function that checks an IR's invariants and reports every violation. Not an optimization — a guard rail. Chapter 12.
 
 ## 7.3 Transformations
 
-**Pass.** A transformation from an IR to an IR, reporting whether it changed anything. The unit of composition in a compiler. [`src/compiler/passes/`](../../../src/compiler/passes/); 33 pass classes as of 2026-08-19. Chapter 14.
+**Pass.** A transformation from an IR to an IR, reporting whether it changed anything. The unit of composition in a compiler. [`src/compiler/passes/`](../../../src/compiler/passes/); 31 concrete pass classes as of 2026-08-19 — 21 over the graph, 9 over TIR, 1 over LIR — plus the abstract bases they extend, which are not passes. Chapter 14.
 
 **Analysis.** A computation over an IR that produces *facts* without changing it: which values are used where, which loops carry dependences, which buffers are live at which point. Analyses are cached and invalidated when passes modify the IR. Chapter 16.
+
+**Fixed-point group.** A set of passes run repeatedly as a unit until none of them reports a change, or until an iteration cap is reached. It dissolves ordering *within* the group — any enabling relationship among its members is eventually exploited — and dissolves nothing between groups. The cap, not a monotone measure, is what guarantees termination. Chapters 6 §6.4 and 15.
 
 **Pipeline.** The ordered list of passes for one level. [`graph_pipeline.ts`](../../../src/compiler/pipeline/graph_pipeline.ts), [`tir_pipeline.ts`](../../../src/compiler/pipeline/tir_pipeline.ts), [`lir_pipeline.ts`](../../../src/compiler/pipeline/lir_pipeline.ts).
 
@@ -106,6 +114,8 @@ Beware of the snake_case names used in the TVM literature (`cache_read`, `comput
 **Runtime.** What holds compiled kernels and executes them: argument marshalling, device memory, asynchrony. [`src/runtime/runtime.ts`](../../../src/runtime/runtime.ts), Chapter 59.
 
 **Dispatch.** Choosing which implementation of an operation to run, based on device, dtype, and whether tracing is active. [`src/dispatcher/`](../../../src/dispatcher/), Chapter 60.
+
+**Dispatch key.** One bit of the set every tensor carries that decides which implementation an operation resolves to — `CPU`, the autograd keys, `TRACING`. The highest key present wins, which is the entire mechanism by which a symbolic tensor diverts `add` away from the CPU kernel and into the tracer without the model's code knowing (Chapter 5 §5.3). Chapter 60.
 
 **Guard.** A predicate checked before a compiled artifact is reused, ensuring the conditions it was compiled under still hold (Definition 5.5). Shapes are the most common guard.
 

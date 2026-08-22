@@ -34,23 +34,23 @@ That is the classical statement. What this compiler adds is a shortcut around it
 
 Fix a perfectly nested chain of loops `L₁,…,L_k` with iteration points ordered lexicographically.
 
-> **Definition 42.1 (Dependence).** Iterations `p` and `q` with `p <_lex q` are *dependent* on buffer `b` if they access a common element of `b` and at least one access is a write. The dependence is RAW, WAR or WAW according to which of the two writes.
+> **Definition 42.1 (Dependence).** **(classical)** Iterations `p` and `q` with `p <_lex q` are *dependent* on buffer `b` if they access a common element of `b` and at least one access is a write. The dependence is RAW, WAR or WAW according to which of the two writes.
 
-> **Definition 42.2 (Direction vector).** For a dependence between `p` and `q`, the direction vector `d ∈ {<, =, >}^k` has `d_i = sign(q_i − p_i)`. A *direction mask* is a subset of `{<, =, >}` at each level, representing every direction the analysis could not rule out.
+> **Definition 42.2 (Direction vector).** **(classical)** For a dependence between `p` and `q`, the direction vector `d ∈ {<, =, >}^k` has `d_i = sign(q_i − p_i)`. A *direction mask* is a subset of `{<, =, >}` at each level, representing every direction the analysis could not rule out.
 
-> **Definition 42.3 (Carried at level `ℓ`).** A dependence is *carried by* loop `L_ℓ` if `d_i = ` `=` for all `i < ℓ` and `d_ℓ ≠ ` `=`. Iterations differing only in levels `≥ ℓ` are then ordered by `L_ℓ`.
+> **Definition 42.3 (Carried at level `ℓ`).** **(classical)** A dependence is *carried by* loop `L_ℓ` if `d_i = ` `=` for all `i < ℓ` and `d_ℓ ≠ ` `=`. Iterations differing only in levels `≥ ℓ` are then ordered by `L_ℓ`.
 
-> **Theorem 42.4 (Permutation legality — classical).** A permutation `π` of `L₁,…,L_k` preserves semantics iff, for every dependence with direction vector `d`, the permuted vector `π(d)` is lexicographically positive.
+> **Theorem 42.4 (Permutation legality).** **(classical)** A permutation `π` of `L₁,…,L_k` preserves semantics iff, for every dependence with direction vector `d`, the permuted vector `π(d)` is lexicographically positive.
 
 *Proof sketch.* The permuted program visits the same iteration points; only the order changes. Two iterations `p <_lex q` in the original are executed in the opposite order in the permuted program exactly when `π(q) <_lex π(p)`, i.e. when `π(d)` is lexicographically negative. Reversing the order of a dependent pair changes which value a read observes or which write survives, so it changes the result; leaving every dependent pair in order leaves every read observing the same write. ∎
 
-> **Corollary 42.5 (Parallelisation).** Loop `L_ℓ` may run its iterations in any order, including concurrently, iff no dependence is carried at level `ℓ`.
+> **Corollary 42.5 (Parallelisation).** **(classical)** Loop `L_ℓ` may run its iterations in any order, including concurrently, iff no dependence is carried at level `ℓ`.
 
 *Proof.* Running `L_ℓ` out of order permutes the relative order of iterations that differ at level `ℓ` and agree above it — exactly the pairs Definition 42.3 calls carried. ∎
 
 The compiler's dependence test is not exact and does not claim to be.
 
-> **Proposition 42.6 (Conservative masks, stated here).** Assume the two ends of every dependence are named in execution order, so that direction vectors are lexicographically positive. Then `accessDependence` returns either "independent" or a direction mask that contains the true direction. It never returns a mask excluding a direction that actually occurs.
+> **Proposition 42.6 (Conservative masks).** **(invariant)** Assume the two ends of every dependence are named in execution order, so that direction vectors are lexicographically positive. Then `accessDependence` returns either "independent" or a direction mask that contains the true direction. It never returns a mask excluding a direction that actually occurs.
 
 *Proof sketch.* Three tests of decreasing precision (Chapter 36). One subscript involving one loop level with equal coefficients yields an exact distance; a GCD test rules out whole subscripts; anything else defaults to `ANY_DIRECTION`. A `null` form — a non-affine subscript — also yields `ANY_DIRECTION` ([`dependence.ts:80`](../../../src/compiler/analysis/dependence.ts)). Every fallback widens the mask, and a wider mask forbids more. ∎
 
@@ -60,9 +60,9 @@ The compiler's dependence test is not exact and does not claim to be.
 
 And now the shortcut, which is where soundness stops being derived:
 
-> **Definition 42.7 (Kind policy).** A *policy* is a set of iteration-variable kinds. Loop `L` *satisfies* policy `P` if every block under `L` has affine bindings, typed iteration variables, no direct use of `L`'s variable in the body, and every axis `L` feeds carries a kind in `P`.
+> **Definition 42.7 (Kind policy).** **(stated here)** A *policy* is a set of iteration-variable kinds. Loop `L` *satisfies* policy `P` if every block under `L` has affine bindings, typed iteration variables, no direct use of `L`'s variable in the body, and every axis `L` feeds carries a kind in `P`.
 
-> **Proposition 42.8 (The declaration overrules the analysis, stated here).** If `L` satisfies the policy, `loopCarriedDependence` and `reorderLegality` return "legal" *without regard to the dependences they have already computed*. The result is sound if and only if every declaration involved is true, in the sense of Definition 33.5.
+> **Proposition 42.8 (The declaration overrules the analysis).** **(invariant)** If `L` satisfies the policy, `loopCarriedDependence` and `reorderLegality` return "legal" *without regard to the dependences they have already computed*. The result is sound if and only if every declaration involved is true, in the sense of Definition 33.5.
 
 *Proof.* By inspection of [`legality.ts:40`](../../../src/compiler/schedule/legality.ts) and [`legality.ts:48`](../../../src/compiler/schedule/legality.ts): a dependence is found, then `blockAbstractionPermits` is consulted, and a `true` from it returns `null` — legal. Soundness is then exactly Proposition 33.6's hypothesis. ∎
 

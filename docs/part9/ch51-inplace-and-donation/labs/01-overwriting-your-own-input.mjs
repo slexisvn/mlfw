@@ -66,5 +66,5 @@ const off = rows.find((r) => r.config.startsWith('poolAllocation=false') && r.co
 console.log('\n=== reading the two columns against each other ===\n');
 console.log(`  the shipped default plans for ${shipped.planned} bytes and allocates ${shipped.allocated}`);
 console.log(`  turning the feature off plans for ${off.planned} bytes and allocates ${off.allocated}`);
-console.log(`  so the reported peak falls by ${(off.planned / shipped.planned).toFixed(2)}x while the real allocation rises by ${(shipped.allocated / off.allocated).toFixed(2)}x`);
+console.log(`  so the reported peak falls by ${(off.planned / shipped.planned).toFixed(2)}x and the bytes the program allocates by ${(off.allocated / shipped.allocated).toFixed(2)}x`);
 console.log(`  every configuration computes the same numbers: max error ${Math.max(...rows.map((r) => r.maxErr))}`);

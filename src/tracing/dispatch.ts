@@ -4,6 +4,7 @@ import { dispatcher } from '../dispatcher/dispatcher.js';
 import { getActiveTracer } from './tracer.js';
 import { SymbolicTensor } from './symbolic_tensor.js';
 import { scalarArgNames } from '../tensor/ops/metadata.js';
+import { isTensor as isTensorValue } from '../tensor/core/is_tensor.js';
 import type { Tensor } from '../tensor/core/tensor.js';
 import type { AttrMap, TensorOutput } from './types.js';
 import type { DispatchKeySet as DispatchKeySetType } from '../dispatcher/dispatch_key.js';
@@ -14,14 +15,6 @@ const _TRACE_BY_DECOMPOSITION = new Set([
 ]);
 
 type TensorCandidate = Tensor & { isSymbolic?: boolean };
-
-function _isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-function _hasImpl(value: unknown): value is TensorCandidate {
-  return _isObject(value) && '_impl' in value;
-}
 
 function _tracingKernel(opName: string): (keySet: unknown, ...args: unknown[]) => TensorOutput | TensorOutput[] {
   return (keySet: unknown, ...args: unknown[]) => {
@@ -40,7 +33,7 @@ function _tracingKernel(opName: string): (keySet: unknown, ...args: unknown[]) =
     const spec = scalarArgNames(opName);
     let scalarIdx = 0;
 
-    const isTensor = (a: unknown): a is TensorCandidate | SymbolicTensor => (a instanceof SymbolicTensor) || _hasImpl(a);
+    const isTensorArg = (a: unknown): a is TensorCandidate | SymbolicTensor => (a instanceof SymbolicTensor) || isTensorValue(a);
     const pushTensor = (arg: TensorCandidate | SymbolicTensor): void => {
       if (arg instanceof SymbolicTensor) {
         tensorArgs.push(arg);
@@ -52,9 +45,9 @@ function _tracingKernel(opName: string): (keySet: unknown, ...args: unknown[]) =
     };
 
     for (const arg of args) {
-      if (Array.isArray(arg) && arg.length > 0 && isTensor(arg[0])) {
+      if (Array.isArray(arg) && arg.length > 0 && isTensorArg(arg[0])) {
         for (const el of arg) pushTensor(el);
-      } else if (isTensor(arg)) {
+      } else if (isTensorArg(arg)) {
         pushTensor(arg);
       } else if (spec) {
         if (arg !== undefined && arg !== null && scalarIdx < spec.length) {

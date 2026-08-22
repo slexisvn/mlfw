@@ -21,11 +21,11 @@ import type { ArgIndexBound } from '../util/index_bounds.js';
 import type { CandidateMeasurement, GateDecision, GateTarget } from '../compiler/pipeline/opt_gate.js';
 import type { Tensor } from '../tensor/core/tensor.js';
 import type { Device } from '../tensor/types/device.js';
-import type { DType, NumericTypedArray } from '../tensor/types/dtype.js';
+import type { NumericTypedArray } from '../tensor/types/dtype.js';
 import type { TensorType } from '../compiler/ir/graph/types.js';
 import type { ShapeEnv } from './shape_env.js';
 import type { SymbolicTensor } from './symbolic_tensor.js';
-import type { CompilableModel, CompiledEntry, InputSignature, CompiledForward, CompiledResult, CompileOptions, DynamicShapes, GraphModuleLike, MaybePromise, RuntimeArg, RuntimeTensorLike, SymbolicShape, TensorOutput, TracedCore } from './types.js';
+import type { CompilableModel, CompiledEntry, InputSignature, CompiledForward, CompiledResult, CompileOptions, DynamicShapes, GraphModuleLike, MaybePromise, RuntimeArg, RuntimeTensorLike, TensorOutput, TracedCore } from './types.js';
 import type { GraphModule } from '../compiler/ir/graph/module.js';
 
 let _tracingRegistered = false;
@@ -41,7 +41,7 @@ type ExecutionPrepared = {
 };
 type ReproError = Error & { repro?: unknown };
 
-function _isThenable<T>(value: MaybePromise<T>): value is Promise<T> {
+export function isThenable<T>(value: MaybePromise<T>): value is Promise<T> {
   return typeof (value as { then?: unknown }).then === 'function';
 }
 
@@ -114,7 +114,7 @@ export function _traceCore(fn: TraceFunction, exampleInputs: readonly Tensor[], 
   const TRACING_KEYS = DispatchKeySet.fromKey(DispatchKey.TRACING);
   const result = withIncludedKeys(TRACING_KEYS, () => fn(...symbolicInputs)) as MaybePromise<TensorOutput | TensorOutput[]>;
 
-  if (_isThenable(result)) {
+  if (isThenable(result)) {
     return result.then(
       (resolved: TensorOutput | TensorOutput[]) => _finalize(resolved),
       (error: unknown) => { tracer.deactivate(); throw error; },
@@ -131,7 +131,7 @@ export function _traceCore(fn: TraceFunction, exampleInputs: readonly Tensor[], 
 
 export function trace(fn: TraceFunction, exampleInputs: readonly Tensor[], opts?: CompileOptions): MaybePromise<GraphModuleLike> {
   const result = _traceCore(fn, exampleInputs, opts);
-  if (_isThenable(result)) {
+  if (isThenable(result)) {
     return result.then((r: TracedCore) => r.graph);
   }
   return result.graph;
@@ -261,7 +261,7 @@ function _timeEntry(entry: CompiledEntry, inputs: readonly Tensor[]): { ms: numb
   let last: unknown;
   for (let i = 0; i < GATE_WARMUP; i++) {
     last = executeCompiled(entry, inputs, entry.shapeEnv);
-    if (_isThenable(last)) return null;
+    if (isThenable(last)) return null;
   }
   const samples: number[] = [];
   for (let i = 0; i < GATE_REPEAT; i++) {
@@ -435,7 +435,7 @@ export function compile(model: CompilableModel, exampleInputs?: Tensor[], opts: 
         inputs,
         { name: model.constructor.name || 'compiled', dynamicShapes: dynShapes }
       );
-      if (_isThenable(traced)) {
+      if (isThenable(traced)) {
         return traced.then((t: TracedCore) => _finalize(t, inputs), (e: unknown) => { throw _attachRepro(e, inputs, 'compile'); });
       }
       return _finalize(traced, inputs);
@@ -468,7 +468,7 @@ export function compile(model: CompilableModel, exampleInputs?: Tensor[], opts: 
     assertArgIndexBounds(entry.indexBounds, inputs);
     try {
       const out = executeCompiled(entry, inputs, entry.shapeEnv);
-      if (_isThenable(out)) {
+      if (isThenable(out)) {
         return out.then(undefined, (e: unknown) => { throw _attachRepro(e, inputs, 'run'); });
       }
       return out;
@@ -489,7 +489,7 @@ export function compile(model: CompilableModel, exampleInputs?: Tensor[], opts: 
     let entry = _findCachedEntry(inputs);
     if (!entry) {
       const result = _compile(inputs);
-      if (_isThenable(result)) {
+      if (isThenable(result)) {
         return result.then((c: CompiledEntry) => {
           _cacheEntries.push(c);
           c.shapeEnv.bindInputShapes(inputs);
@@ -513,11 +513,11 @@ export function compile(model: CompilableModel, exampleInputs?: Tensor[], opts: 
     }
     pending.push(_compile(exampleInputs));
 
-    if (pending.some(r => _isThenable(r))) {
+    if (pending.some(r => isThenable(r))) {
       _ready = Promise.all(pending).then(entries => { for (const c of entries) _cacheEntries.push(c); });
     } else {
       for (const c of pending) {
-        if (!_isThenable(c)) _cacheEntries.push(c);
+        if (!isThenable(c)) _cacheEntries.push(c);
       }
     }
   }

@@ -28,13 +28,33 @@ Fusing a set of operations means treating them as **one node**. In graph terms t
 
 Contraction can create a cycle. In the example: contract `{add, mul}` into a node `F`. `F → matmul` survives (the matmul reads `add`'s result), and `matmul → F` survives (the `mul` reads the matmul's result). Two nodes, two edges, opposite directions — a cycle in a graph that had none.
 
+Drawn, with the group in braces:
+
+```
+   before contraction (a DAG)              after contracting {add, mul}
+
+        add                                        +-----------+
+         | \                                       |  F        |
+         |  \                                      | add, mul  |
+         v   \                                     +-----------+
+      matmul  |                                      ^       |
+         |    |                                      |       |    F needs matmul's result,
+         v    v                                   matmul <---+    matmul needs F's result
+        mul <-+                                      ^
+                                                     +--------  a cycle in a graph
+   one path add -> matmul -> mul                                that had none
+   plus the direct edge add -> mul
+```
+
+The left graph is acyclic and every kernel in it can be scheduled. The right one has two nodes and two edges pointing opposite ways, and no order exists. Nothing about the `add`-to-`mul` edge changed — what changed is that the path *through* the matmul now runs between two halves of the same kernel.
+
 That is the whole legality question, and it has a pleasing property: it does not depend on what the operations *do*. Contraction is legal exactly when it leaves a DAG, and everything else the fusion engine checks — shapes, patterns, region nesting — is either a lowering restriction or a cost heuristic wearing legality's clothes.
 
 ## 23.3 Theory
 
-> **Definition 23.1 (Contraction).** Let `G = (V, E)` be a DAG and `S ⊆ V`. The *contraction* `G/S` has vertex set `(V \ S) ∪ {s}` and an edge `u → s` for every `u → v ∈ E` with `u ∉ S, v ∈ S`, and `s → w` for every `v → w ∈ E` with `v ∈ S, w ∉ S`.
+> **Definition 23.1 (Contraction).** **(classical)** Let `G = (V, E)` be a DAG and `S ⊆ V`. The *contraction* `G/S` has vertex set `(V \ S) ∪ {s}` and an edge `u → s` for every `u → v ∈ E` with `u ∉ S, v ∈ S`, and `s → w` for every `v → w ∈ E` with `v ∈ S, w ∉ S`.
 
-> **Theorem 23.2 (Legality of fusion).** Fusing `S` into one kernel admits a valid execution order if and only if `G/S` is acyclic.
+> **Theorem 23.2 (Legality of fusion).** **(stated here)** Fusing `S` into one kernel admits a valid execution order if and only if `G/S` is acyclic.
 
 *Proof sketch.* (⇐) If `G/S` is acyclic it has a topological order; running the kernels in that order satisfies every dependency, because every dependency of the fused kernel is an in-edge of `s` and every dependent is an out-edge. (⇒) A cycle in `G/S` through `s` means there is a path `s → w → … → u → s`: some kernel `w` needs a value the fused kernel produces, and the fused kernel needs a value `u` produces downstream of `w`. Since the fused kernel is atomic — it is one kernel launch — neither can be scheduled first. ∎
 
@@ -42,9 +62,9 @@ Theorem 23.2 also explains why this problem does not exist before fusion: contra
 
 Now the algorithmic question. A fusion engine considers thousands of candidate merges and performs hundreds. Recomputing acyclicity from scratch is a full traversal per candidate — `O(V + E)` each, `O(V·E)` overall. The standard fix is to maintain a topological ordering *incrementally*.
 
-> **Definition 23.3 (Incremental topological order).** Maintain a bijection `rank : V → {0..n−1}` such that `u → v` implies `rank(u) < rank(v)`. An operation that would violate it repairs the order by reordering only the vertices whose ranks lie between the two endpoints.
+> **Definition 23.3 (Incremental topological order).** **(classical)** Maintain a bijection `rank : V → {0..n−1}` such that `u → v` implies `rank(u) < rank(v)`. An operation that would violate it repairs the order by reordering only the vertices whose ranks lie between the two endpoints.
 
-> **Theorem 23.4 (Affected-region repair).** *(Pearce and Kelly, 2006.)* A topological order can be maintained under edge insertion by reordering only the *affected region* — the vertices reachable forward from the lower endpoint with rank below the upper endpoint, together with those reachable backward from the upper endpoint with rank above the lower one. Repair touches only that set, never the whole graph.
+> **Theorem 23.4 (Affected-region repair; Pearce and Kelly, 2006).** **(classical)** A topological order can be maintained under edge insertion by reordering only the *affected region* — the vertices reachable forward from the lower endpoint with rank below the upper endpoint, together with those reachable backward from the upper endpoint with rank above the lower one. Repair touches only that set, never the whole graph.
 
 The insight the theorem rests on is that if `rank(u) < rank(v)` already, the edge `u → v` needs no repair at all; and if not, everything that must move lies strictly between the two ranks. The search never leaves that window, which is why the cost is proportional to how *wrong* the order was rather than to how big the graph is.
 
@@ -54,7 +74,7 @@ The insight the theorem rests on is that if `rank(u) < rank(v)` already, the edg
 
 That is simpler, it is obviously correct, and it does strictly more work: the cost of one repair is linear in the window and the edges inside it, `O(W + E_W)`, where the affected set may be a small fraction of `W`. There is one saving grace, and it is the `_reachesWithinWindow` guard immediately above the call — a repair is attempted only when some predecessor of the higher endpoint actually falls inside the window, so the common case of a contraction that does not disturb the order costs one scan of an adjacency set and no sort at all. The right description of the implementation is therefore **"window-scoped Kahn sort, guarded by a cheap emptiness test"**, and the reason it performs acceptably is measured rather than proved.
 
-> **Corollary 23.5 (Cycle detection, stated here).** With a maintained rank, adding `u → v` creates a cycle if and only if there is a path from the lower-ranked endpoint to the higher-ranked one that passes through a vertex strictly inside the window. The check is a bounded search, not a global one.
+> **Corollary 23.5 (Cycle detection).** **(stated here)** With a maintained rank, adding `u → v` creates a cycle if and only if there is a path from the lower-ranked endpoint to the higher-ranked one that passes through a vertex strictly inside the window. The check is a bounded search, not a global one.
 
 ## 23.4 In mlfw: 194 lines of union-find and ranks
 

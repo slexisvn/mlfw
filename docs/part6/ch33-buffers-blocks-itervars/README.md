@@ -42,21 +42,21 @@ This is TVM's TensorIR design, and the reason to name the lineage is that the pa
 
 ## 33.3 Theory
 
-> **Definition 33.1 (Buffer).** A *buffer* is a name, a shape `(n₁,…,n_r)`, an element type, a memory scope, and a stride vector `(s₁,…,s_r)`. The element at logical index `(i₁,…,i_r)` lives at flat offset `Σ i_k s_k` from the buffer's base.
+> **Definition 33.1 (Buffer).** **(stated here)** A *buffer* is a name, a shape `(n₁,…,n_r)`, an element type, a memory scope, and a stride vector `(s₁,…,s_r)`. The element at logical index `(i₁,…,i_r)` lives at flat offset `Σ i_k s_k` from the buffer's base.
 
 Strides are the whole of layout at this level. Chapter 25's NCHW-versus-NHWC choice arrives here as a permutation of `s`, and nothing downstream knows it was ever a choice.
 
-> **Definition 33.2 (Block).** A *block* is a name, a list of iteration variables `v₁,…,v_d` each with a *binding* — an expression over the enclosing loop variables — and a *kind*, together with a body and declared read and write sets. The block's iteration domain is the image of the enclosing loops' domain under the bindings.
+> **Definition 33.2 (Block).** **(stated here)** A *block* is a name, a list of iteration variables `v₁,…,v_d` each with a *binding* — an expression over the enclosing loop variables — and a *kind*, together with a body and declared read and write sets. The block's iteration domain is the image of the enclosing loops' domain under the bindings.
 
-> **Definition 33.3 (Iteration variable kind).** Every axis of a block carries one of two tags: `DataPar`, the *spatial* axes, and `CommReduce`, the *reducing* ones. The tag is data on the node; §33.4 shows where it is set and Definition 33.5 says what setting it asserts.
+> **Definition 33.3 (Iteration variable kind).** **(invariant)** Every axis of a block carries one of two tags: `DataPar`, the *spatial* axes, and `CommReduce`, the *reducing* ones. The tag is data on the node; §33.4 shows where it is set and Definition 33.5 says what setting it asserts.
 
 The kinds are the contract, and what Part VII is allowed to do is defined against them:
 
-> **Definition 33.4 (Block abstraction, stated here).** A transformation *respects the block abstraction* if it preserves each block's body and read/write sets, changes only the bindings, and moves a loop variable only across axes whose kinds permit that movement.
+> **Definition 33.4 (Block abstraction).** **(stated here)** A transformation *respects the block abstraction* if it preserves each block's body and read/write sets, changes only the bindings, and moves a loop variable only across axes whose kinds permit that movement.
 
 Now the part that is easy to get wrong. The obvious reading of `DataPar` — "distinct values of this axis write distinct locations" — is the one to avoid. It rules out two iterations *writing* the same element and does **not** rule out one iteration reading what another wrote: a block writing `A[i]` and reading `A[i−1]` has distinct writes per iteration and a genuine loop-carried dependence. The tag has to claim something about the whole block, not about its writes.
 
-> **Definition 33.5 (What `DataPar` claims, stated here).** Declaring an axis `DataPar` asserts that any two iterations of the block differing only in that axis are *independent*: neither reads a location the other writes, and they do not write the same location. `CommReduce` asserts the weaker property that they write the same location under an operator that is associative and commutative **over the reals**, and read nothing else that either writes.
+> **Definition 33.5 (What `DataPar` claims).** **(stated here)** Declaring an axis `DataPar` asserts that any two iterations of the block differing only in that axis are *independent*: neither reads a location the other writes, and they do not write the same location. `CommReduce` asserts the weaker property that they write the same location under an operator that is associative and commutative **over the reals**, and read nothing else that either writes.
 
 **"Over the reals" is the qualification the tag cannot make, and it is the one that matters.** `CommReduce` is what licenses a scheduler to reorder a reduction axis, split it across accumulators, or run it in parallel — and every one of those is an N2 transformation under Definition 1.4, because it changes the order in which the partial results are combined. Floating-point addition is commutative but not associative, so the tag on an `f32` sum is asserting something true of the mathematics and false of the arithmetic.
 
@@ -68,7 +68,7 @@ Two consequences follow. A schedule that reorders a `CommReduce` axis is not "se
 
 That is a claim, not a derivation, and it is the point:
 
-> **Proposition 33.6 (Kind-based legality, stated here).** If a loop variable feeds only `DataPar` axes of every block beneath it, and every such declaration is true, then running its iterations in any order — including concurrently — computes the same result.
+> **Proposition 33.6 (Kind-based legality).** **(stated here)** If a loop variable feeds only `DataPar` axes of every block beneath it, and every such declaration is true, then running its iterations in any order — including concurrently — computes the same result.
 
 *Proof.* Immediate from Definition 33.5: two iterations of the loop differ only in axes it feeds, all of which are `DataPar`, so by the claim they are independent, and independent computations commute. ∎
 
@@ -88,7 +88,7 @@ export function loopCarriedDependence(state: ScheduleState, loop: ForNode, allow
 
 Read line 4 and line 5 together. A dependence was **found**, and the declaration **overrules it**. That is not a bug; it is what a contract is for — the analysis is conservative and a true declaration is exact. But it does mean the kinds are trusted, and §33.7 is about what checks them.
 
-> **Corollary 33.7 (The declaration is load-bearing, stated here).** A block whose axis kinds are wrong can be transformed into a program that computes something else, without any pass reporting an error, because the analysis that would have caught it is skipped precisely when the declaration is present.
+> **Corollary 33.7 (The declaration is load-bearing).** **(invariant)** A block whose axis kinds are wrong can be transformed into a program that computes something else, without any pass reporting an error, because the analysis that would have caught it is skipped precisely when the declaration is present.
 
 ## 33.4 In mlfw
 
@@ -194,12 +194,12 @@ Scoping and rank. That is the TIR analogue of Chapter 12's four invariants, and 
 | every variable is in scope; no variable bound twice | **checked** — verifier |
 | the iteration domain is the image of the loops under the bindings | **derived** — computed from the bindings, not declared |
 | a binding is affine in the enclosing loop variables | **declared** — assumed by every analysis in Chapters 35–37, checked by none |
-| the declared read set covers what the body reads | **declared** — §33.7 exhibits one that does not |
+| the declared read set covers what the body reads | **declared** — §33.6 exhibits one that does not |
 | the declared write set covers what the body writes | **declared** |
 | an axis declared `DataPar` carries no dependence | **declared** — and Chapter 42's Counterexample 42.9 buys an illegal permutation with a false one |
-| the region touched inside a buffer | **absent** — nothing constructs it (§33.8) |
+| the region touched inside a buffer | **absent** — nothing constructs it (§33.7) |
 
-The middle five rows are the ones to be careful with. They read like facts about the program — "this axis is a reduction axis", "this block reads these buffers" — and they are *assertions made at construction time by whichever lowering rule built the block*. Nothing revisits them. A scheduler consults `DataPar` to decide that a permutation is legal without running dependence analysis, which is the entire performance argument for declaring it (§33.5); the cost is that a wrong declaration is a miscompile with no diagnostic.
+The middle five rows are the ones to be careful with. They read like facts about the program — "this axis is a reduction axis", "this block reads these buffers" — and they are *assertions made at construction time by whichever lowering rule built the block*. Nothing revisits them. A scheduler consults `DataPar` to decide that a permutation is legal without running dependence analysis, which is the entire performance argument for declaring it (§33.3); the cost is that a wrong declaration is a miscompile with no diagnostic.
 
 This is Chapter 12 §12.6's split showing up one level down, and for the same reason: the verifier can decide **structural** questions by inspecting the node in front of it, and cannot decide **semantic** ones without an analysis it deliberately does not run. Chapter 37 explains why in-range is undecidable in general, and Chapter 42 is where a false `DataPar` produces a wrong answer.
 
@@ -348,4 +348,4 @@ Every accumulation block in this compiler reads its own output and does not decl
 
 ---
 
-**Next:** [Chapter 34 — Lowering rules](../ch34-lowering-rules/README.md), which is the other half of Chapter 32's driver: the 66 registered rules, how one of them is selected, and what happens to the 30 operations that have none.
+**Next:** [Chapter 34 — Lowering rules](../ch34-lowering-rules/README.md), which is the other half of Chapter 32's driver: the 68 operations lowering can handle, how a rule is selected, and what happens to the 28 that have none.

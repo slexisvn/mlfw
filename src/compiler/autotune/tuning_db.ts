@@ -107,7 +107,7 @@ export class TuningDatabase {
 
   serialize(): SerializedDatabase {
     const entries: SerializedRecord[] = [];
-    for (const [key, records] of this._records) {
+    for (const records of this._records.values()) {
       for (const r of records) {
         entries.push({
           workloadKey: r.workloadKey,

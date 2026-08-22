@@ -1,12 +1,5 @@
-import {
-  IntImmNode, FloatImmNode, MathOpNode, CompareNode,
-  ForNode, ForKind, BufferStoreNode, BufferLoadNode,
-  BlockNode, SeqNode, IfThenElseNode, CastNode, CallExternNode, mathOp
-} from '../../../ir/tensor/nodes.js';
-import {
-  registerLoweringRule, lowerPointwise, buildSpatialNest,
-  buildDotGeometry, parseLayout, buildConvNest, emitMatmulInitAcc
-} from '../lowering_registry.js';
+import { IntImmNode, MathOpNode, BufferLoadNode, SeqNode, CastNode } from '../../../ir/tensor/nodes.js';
+import { registerLoweringRule, lowerPointwise, buildConvNest, emitMatmulInitAcc } from '../lowering_registry.js';
 import { buildQuantizeExpr, buildDequantizeExpr } from '../quant_math.js';
 
 export function register(): void {

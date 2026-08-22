@@ -3,17 +3,14 @@ import { getHandle } from './registry.js';
 import { scalar } from '../factory/from_ops.js';
 import { getGpuMatmul } from '../../dispatcher/jit_dispatch.js';
 import { assertIndicesInRange } from '../../util/index_bounds.js';
+import { isTensor } from '../core/is_tensor.js';
 import type { Tensor } from '../core/tensor.js';
 
 type TensorInput = Tensor | number;
 type PaddingArg = readonly number[] | readonly (readonly number[])[];
 
-function hasTensorImpl(value: unknown): value is Tensor {
-  return typeof value === 'object' && value !== null && '_impl' in value;
-}
-
 function _asTensor(value: TensorInput, ref: Tensor): Tensor {
-  if (hasTensorImpl(value)) return value;
+  if (isTensor(value)) return value;
   return scalar(value, { dtype: ref.dtype, device: ref.device });
 }
 

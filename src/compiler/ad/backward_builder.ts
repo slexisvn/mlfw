@@ -5,7 +5,7 @@ import { UseDefAnalysis } from '../analysis/use_def.js';
 import { readValues } from '../ir/graph/graph_algorithms.js';
 import { GradAccumulator, gradOrZero } from './grad_accumulator.js';
 import { getVJPRule, isGradientBarrier, requireVJPRuleOrBarrier, getRegionVJP } from './vjp_registry.js';
-import { buildScanBackward, buildCondBackward, regionFreeVars } from './scan_backward.js';
+import { regionFreeVars } from './scan_backward.js';
 import { REGION_CONTROL_FLOW } from './control_flow_ops.js';
 
 import { TensorType } from '../ir/graph/types.js';

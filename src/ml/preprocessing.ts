@@ -1,14 +1,15 @@
+import { TransformerMixin } from './estimator.js';
 import { matrixOf, matrix, vectorOf, vector, encodeLabels } from './_util.js';
 import type { MLTensor } from './types.js';
 
-export class StandardScaler {
+export class StandardScaler extends TransformerMixin {
   withMean: boolean;
   withStd: boolean;
   mean_: Float64Array | null;
   scale_: Float64Array | null;
-  private _cols?: number;
 
   constructor({ withMean = true, withStd = true }: { withMean?: boolean; withStd?: boolean } = {}) {
+    super();
     this.withMean = withMean;
     this.withStd = withStd;
     this.mean_ = null;
@@ -33,7 +34,6 @@ export class StandardScaler {
       this.mean_[j] = this.withMean ? mean : 0;
       this.scale_[j] = this.withStd && std > 0 ? std : 1;
     }
-    this._cols = m.cols;
     return this;
   }
 
@@ -48,10 +48,6 @@ export class StandardScaler {
       }
     }
     return matrix(out, m.rows, m.cols, X.dtype);
-  }
-
-  fit_transform(X: MLTensor): MLTensor {
-    return this.fit(X).transform(X);
   }
 
   inverse_transform(X: MLTensor): MLTensor {
@@ -114,10 +110,11 @@ export class LabelEncoder {
   }
 }
 
-export class OneHotEncoder {
+export class OneHotEncoder extends TransformerMixin {
   classes_: number[] | null;
 
   constructor() {
+    super();
     this.classes_ = null;
   }
 
@@ -141,18 +138,16 @@ export class OneHotEncoder {
     return matrix(out, yv.n, K, y.dtype);
   }
 
-  fit_transform(y: MLTensor): MLTensor {
-    return this.fit(y).transform(y);
-  }
 }
 
-export class MinMaxScaler {
+export class MinMaxScaler extends TransformerMixin {
   featureRange: readonly [number, number];
   min_: null;
   dataMin_: Float64Array | null;
   dataRange_: Float64Array | null;
 
   constructor({ featureRange = [0, 1] }: { featureRange?: readonly [number, number] } = {}) {
+    super();
     this.featureRange = featureRange;
     this.min_ = null;
     this.dataMin_ = null;
@@ -193,7 +188,4 @@ export class MinMaxScaler {
     return matrix(out, m.rows, m.cols, X.dtype);
   }
 
-  fit_transform(X: MLTensor): MLTensor {
-    return this.fit(X).transform(X);
-  }
 }

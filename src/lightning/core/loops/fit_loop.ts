@@ -1,6 +1,6 @@
 import { TrainingLoop } from './training_loop.js';
 import { ValidationLoop } from './validation_loop.js';
-import type { DataLoaderLike, LightningModuleLike, NumericMetricRecord, OptimizerLike, TrainerCoreLike } from '../../types.js';
+import type { DataLoaderLike, LightningModuleLike, OptimizerLike, TrainerCoreLike } from '../../types.js';
 import type { SchedulerConfig } from '../module.js';
 
 export class FitLoop {

@@ -30,7 +30,7 @@ The first is sound by construction — nobody can lie to a counter. The second i
 
 ## 16.3 Theory
 
-> **Definition 16.1 (Analysis).** An *analysis* `A` is a pure function from IR to a result, together with a finite list of analyses it depends on. `A`'s result is computed from the IR and from its dependencies' results.
+> **Definition 16.1 (Analysis).** **(stated here)** An *analysis* `A` is a pure function from IR to a result, together with a finite list of analyses it depends on. `A`'s result is computed from the IR and from its dependencies' results.
 
 Purity matters: an analysis may not edit the IR, and its result must be a function of the IR alone. If it were not, caching it would be meaningless, because "the world has not moved" would not imply "the answer has not changed".
 
@@ -44,13 +44,13 @@ This is a genuine property of a pass, not a label. DCE preserving the memory-eff
 
 Now the result that shapes the implementation.
 
-> **Theorem 16.3 (Transitive invalidation is required, stated here).** Let `A` depend on `B`, and let pass `P` not preserve `B`. Then retaining a cached `A` across `P` while discarding `B` is unsound.
+> **Theorem 16.3 (Transitive invalidation is required).** **(stated here)** Let `A` depend on `B`, and let pass `P` not preserve `B`. Then retaining a cached `A` across `P` while discarding `B` is unsound.
 
 *Proof sketch.* `A`'s cached result was computed from `B`'s result at some earlier IR state. `P` not preserving `B` means `B`'s result may differ after `P`. Since `A` is a function of `B`'s result, `A`'s result may differ too. The manager has no way to tell whether this particular `A` reads the part of `B` that moved — the dependency is declared as a whole, not per field — so the only sound rule is to treat "a dependency was invalidated" as "the dependent is invalidated". Dependency is transitive, so the rule must be applied over the transitive closure of the dependency relation. ∎
 
 The theorem is worth reading as an argument about *what a declaration can express*. A pass declares a set of preserved analyses. That set is a promise about the analyses named in it and says nothing about their dependencies. So a pass that preserves `liveness` but not `use_def` has, in effect, preserved nothing — and §16.6 measures exactly that, on the real pipeline.
 
-> **Definition 16.4 (Mutation version, stated here).** Each function carries a monotone counter, incremented by every structural edit to its body. A cache entry records the counter's value at computation time. An entry is *fresh* if the recorded value equals the current one.
+> **Definition 16.4 (Mutation version).** **(invariant)** Each function carries a monotone counter, incremented by every structural edit to its body. A cache entry records the counter's value at computation time. An entry is *fresh* if the recorded value equals the current one.
 
 Definition 16.4 is a mechanism, not a policy, and it is the sound half of the pair. It needs no declarations and cannot be lied to — **provided every edit path bumps it**. That proviso is doing all the work, it is a property of the IR data structure rather than of any pass, and §16.7 is where its scope is pinned down.
 
@@ -285,7 +285,7 @@ Everything in this chapter rests on Definition 16.4's proviso — *every edit pa
 
 > **Counterexample 16.5.** Let `A` be an analysis whose result depends on an attribute — a FLOP estimate reading `getFlops`, a layout analysis reading `layoutSensitivity`, a fusion cost model reading a reduction's axes. Compute `A`, then rewrite an attribute *without going through `setAttr`*: `op.attributes.set('direction', 'gt')` is one line and `op.attributes` is a public `Map`. The version does not move, the freshness test passes, and the manager serves a result that disagrees with what recomputing `A` would produce.
 
-Chapter 9 §9.4 covers the API side: every mutating method, attributes included, notifies. §9.8 covers the rest — the containers hanging off an `Operation` are public, so the counter is sound for edits made *through* the object and blind to edits made *to its fields*. Two things keep the exposure small: most cached analyses are *structural* — liveness, use-def, dominance, the cycle check and the op-count analyses read which operations exist and how they are wired, and every edit to that shape goes through a method — and no analysis this compiler caches today reads an attribute at all. The gap is real, narrow, and entirely in front of whoever caches the first attribute-dependent analysis.
+Chapter 9 §9.4 covers the API side: every mutating method, attributes included, notifies. §9.9 covers the rest — the containers hanging off an `Operation` are public, so the counter is sound for edits made *through* the object and blind to edits made *to its fields*. Two things keep the exposure small: most cached analyses are *structural* — liveness, use-def, dominance, the cycle check and the op-count analyses read which operations exist and how they are wired, and every edit to that shape goes through a method — and no analysis this compiler caches today reads an attribute at all. The gap is real, narrow, and entirely in front of whoever caches the first attribute-dependent analysis.
 
 - **A false preservation is undetectable.** §16.5 is the demonstration. There is no verification of Definition 16.2, no "recompute and compare" debug mode, and no assertion. The infrastructure trusts the declaration completely. If you add a preservation, the argument for it belongs in a comment or a test, because nothing else will carry it.
 - **Analyses are keyed by function, and module passes invalidate by iterating.** `invalidateFunctions` ([`analysis_manager.ts:92`](../../../src/compiler/analysis/analysis_manager.ts)) loops over the module applying the per-function rule. There is no module-level analysis cache at all; a whole-module fact — a call graph, say — has nowhere to live.

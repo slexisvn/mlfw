@@ -28,11 +28,13 @@ The second is *checkpointing*, and it is the one with the famous result: cutting
 
 Let `F` be a forward function with operations `o₁…o_n` in topological order.
 
-> **Definition 30.1 (Rematerialization).** A backward construction *rematerializes* a forward value `v` if, instead of receiving `v` as an argument, it emits a copy of the operations producing `v` and evaluates them from values it does have.
+> **Definition 30.1 (Rematerialization).** **(classical)** A backward construction *rematerializes* a forward value `v` if, instead of receiving `v` as an argument, it emits a copy of the operations producing `v` and evaluates them from values it does have.
 
-> **Definition 30.2 (Segmentation).** A *segmentation* of `F` is a partition of `o₁…o_n` into consecutive segments `S₁…S_k`. Its *boundary set* is the set of values produced in one segment and read in another, plus the function's inputs and outputs.
+> **Definition 30.2 (Segmentation).** **(classical)** A *segmentation* of `F` is a partition of `o₁…o_n` into consecutive segments `S₁…S_k`. Its *boundary set* is the set of values produced in one segment and read in another, plus the function's inputs and outputs.
 
-> **Theorem 30.3 (√n checkpointing).** *(Chen et al., 2016.)* For a chain of `n` equal-cost layers, storing only the boundary values of `√n` segments of `√n` layers gives peak activation memory `O(√n)` at the cost of one additional forward pass.
+> **Theorem 30.3 (√n checkpointing; Chen et al., 2016).** **(classical)** For a chain of `n` equal-cost layers, storing only the boundary values of `√n` segments of `√n` layers gives peak activation memory `O(√n)` at the cost of one additional forward pass.
+>
+> *This is Theorem 26.2 restated.* Chapter 26 met the result from the buffer level, where a pass tries to reach a byte budget on an already-lowered function; this chapter meets it from the graph level, where a builder decides what to hand across the forward-backward boundary. Same theorem, two customers, and — §30.7 — neither of them implements it.
 
 *Proof sketch.* At any moment the construction holds `k = √n` boundary values plus the intermediates of the single segment currently being replayed, which is at most `√n` — so peak is `O(√n)`. Each segment is replayed exactly once during the backward walk, and the segments partition the program, so the total extra work is one forward pass over the program. ∎
 

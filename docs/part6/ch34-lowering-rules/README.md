@@ -34,17 +34,17 @@ What a rule cannot do is look at the rest of the program (Definition 32.6). It s
 
 ## 34.3 Theory
 
-> **Definition 34.1 (Op strategy).** An *op strategy* for an operation name is a set of *implementations*, each with a name, a compute function, a priority level, and an optional target kind.
+> **Definition 34.1 (Op strategy).** **(stated here)** An *op strategy* for an operation name is a set of *implementations*, each with a name, a compute function, a priority level, and an optional target kind.
 
-> **Definition 34.2 (Implementation selection).** Given a target of kind `k`, the *candidate set* for an operation is the implementations whose target kind is `null` or `k`. The *selected* implementation is a candidate of maximum priority.
+> **Definition 34.2 (Implementation selection).** **(stated here)** Given a target of kind `k`, the *candidate set* for an operation is the implementations whose target kind is `null` or `k`. The *selected* implementation is a candidate of maximum priority.
 
 Two things are worth noticing about Definition 34.2. Selection is by priority alone, so an implementation is chosen without the compiler ever looking at the operation's shapes — a shape-dependent choice has to be made *inside* the rule, which is what the CUDA attention rule does. And ties are broken by registration order, since `best()` keeps the first maximum it sees.
 
-> **Definition 34.3 (Coverage).** A pipeline is *covered* if every operation that can appear in a graph function at the start of the lowering phase has a selected implementation for the target being compiled.
+> **Definition 34.3 (Coverage).** **(stated here)** A pipeline is *covered* if every operation that can appear in a graph function at the start of the lowering phase has a selected implementation for the target being compiled.
 
 Coverage is not "every registered operation has a rule". It is a joint property of the registry and the graph pipeline: an operation with no rule is fine as long as some earlier pass is guaranteed to have removed it.
 
-> **Proposition 34.4 (Coverage is a joint property, stated here).** Let `R` be the set of operations with a selected implementation, and `E` the set of operations that the graph pipeline can leave in a module at the moment lowering begins. Lowering cannot fail for a missing rule if and only if `E ⊆ R`.
+> **Proposition 34.4 (Coverage is a joint property).** **(stated here)** Let `R` be the set of operations with a selected implementation, and `E` the set of operations that the graph pipeline can leave in a module at the moment lowering begins. Lowering cannot fail for a missing rule if and only if `E ⊆ R`.
 
 *Argument.* The driver reaches its rule lookup for exactly the operations in `E`, minus terminators and constants, which it handles itself; it throws exactly when that lookup returns nothing. So a failure is possible precisely when some member of `E` is outside `R`. ∎
 
@@ -52,7 +52,7 @@ The statement is nearly a tautology and is worth writing down anyway, because of
 
 The consequence is the practical one: **turning off a pass can make lowering fail.** Disable decomposition and `softmax` reaches a phase with no rule for it. Nothing in the decomposition pass says "lowering depends on me", and nothing in the lowering registry says "I assume decomposition ran". That coupling is the reason §34.6's table has two halves.
 
-> **Definition 34.5 (Rule skeleton, stated here).** A *skeleton* is a shared constructor that builds the nest, the block and the store for a family of operations, taking a callback for the part that differs. A family with a skeleton has one nest-building implementation and `n` leaf callbacks rather than `n` nest builders.
+> **Definition 34.5 (Rule skeleton).** **(stated here)** A *skeleton* is a shared constructor that builds the nest, the block and the store for a family of operations, taking a callback for the part that differs. A family with a skeleton has one nest-building implementation and `n` leaf callbacks rather than `n` nest builders.
 
 ## 34.4 In mlfw: registration, selection, and two overrides
 
@@ -174,6 +174,8 @@ const ELEMENTWISE_SCALAR_OPS: Record<string, string> = {
 | [`rules/layout.ts`](../../../src/compiler/passes/lowering/rules/layout.ts) | 1 | `layout_transform` |
 | [`rules/attention.ts`](../../../src/compiler/passes/lowering/rules/attention.ts) | 1 + 1 | `scaled_dot_product_attention`, generic and CUDA |
 
+**That table lists 66 operations and the next one says 68, so reconcile them before reading on.** `constant` and `scalar_constant` have no entry in the strategy registry and are nonetheless lowerable: the driver handles them itself, in its third walk over the graph (§32.4), because a constant does not always become a statement. `hasLoweringRule` reports that honestly — it asks the registry *and* falls back to `isConstantOp` ([`lowering_registry.ts:68`](../../../src/compiler/passes/lowering/lowering_registry.ts)) — so the predicate says 68 while the files above hold 66. Both numbers are right about different things, and the one Definition 34.6 partitions on is the predicate.
+
 ### The taxonomy, stated once
 
 Several parts of this book quote counts from this table, and they have drifted against each other in the past, so here is the partition and the predicate that decides each class. Every registered operation falls in exactly one:
@@ -189,13 +191,13 @@ Both predicates are exported, so the partition is checkable rather than asserted
 
 | Class | Count | Members |
 |---|---:|---|
-| **ruled** | 68 | the table above |
+| **ruled** | 68 | the 66 of §34.5, plus `constant` and `scalar_constant` |
 | **decomposed** | 21 | `softmax`, `log_softmax`, `sigmoid`, `silu`, `gelu`, `celu`, `elu`, `selu`, `mish`, `leaky_relu`, `hardsigmoid`, `hardswish`, `layer_norm`, `batch_norm`, `one_hot`, `where`, `split`, `embedding`, `stop_gradient`, `all_reduce`, `all_gather` |
 | **structural** | 7 | `return`, `yield`, `tuple`, `get_tuple_element`, `call`, `fusion`, `custom_call` |
 
 **68 + 21 + 7 = 96, with nothing left over.** That is Proposition 34.4 checked by counting rather than by trusting: the set of operations with no rule and no removal path is empty.
 
-> **These numbers move, and the sum does not.** An operation migrating between classes — `constant` and `scalar_constant` gaining lowering rules, say — changes *two* of the three counts in step while the total stays pinned by the registry. That is the useful property of a partition: the arithmetic closing is a permanent check, while any individual class count is a fact about the implementation on a date. Quote a class count with its date, or derive it from the predicates.
+> **These numbers move, and the sum does not.** An operation migrating between classes — a decomposed one gaining a lowering rule, say — changes *two* of the three counts in step while the total stays pinned by the registry. That is the useful property of a partition: the arithmetic closing is a permanent check, while any individual class count is a fact about the implementation on a date. Quote a class count with its date, or derive it from the predicates.
 
 ## 34.6 Lab — the catalogue
 

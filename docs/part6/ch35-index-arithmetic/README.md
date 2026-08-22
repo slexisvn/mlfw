@@ -10,7 +10,7 @@ That is `[4,3] -> [2,6]`, printed by §35.5's lab with the buffers and loop vari
 
 Those expressions are now the program. The data movement is fixed — a copy is a copy — and everything the compiler can still do is arithmetic on coordinates: proving two accesses cannot collide (Chapter 36), proving a guard is unnecessary (Chapter 37), proving a loop can be split (Chapter 40).
 
-All of that rests on one representation and two theorems, and this chapter is those.
+All of that rests on one representation and three theorems — a flattening is a bijection, a division sometimes splits exactly, and a subscript sometimes covers its range exactly once — and this chapter is those.
 
 ## 35.1 The problem: an index expression is a program the compiler has to understand
 
@@ -47,15 +47,15 @@ That last clause is the whole of §35.3's second theorem, and the whole of why s
 
 ## 35.3 Theory
 
-> **Definition 35.1 (Affine form).** An *affine form* over variables `x₁,…,x_n` is an expression `Σ aₖxₖ + b` with all `aₖ` and `b` integers. Affine forms are closed under addition, negation, and multiplication by an integer constant, and under nothing else.
+> **Definition 35.1 (Affine form).** **(classical)** An *affine form* over variables `x₁,…,x_n` is an expression `Σ aₖxₖ + b` with all `aₖ` and `b` integers. Affine forms are closed under addition, negation, and multiplication by an integer constant, and under nothing else.
 
 The class is chosen because it is exactly the class closed under the operations loop transformations perform. Splitting a loop replaces `i` by `8·i_o + i_i`, which is affine in the new variables. Fusing two loops replaces `i, j` by `k // n, k % n`, which is *not* — and that asymmetry is why fusion of loops is the primitive that most often defeats later analysis.
 
 ### Flattening
 
-> **Definition 35.2 (Row-major flattening).** For a shape `(n₁,…,n_r)` with all `nₖ > 0`, define strides `sₖ = ∏_{j>k} n_j` and `φ(i₁,…,i_r) = Σ iₖ sₖ`.
+> **Definition 35.2 (Row-major flattening).** **(classical)** For a shape `(n₁,…,n_r)` with all `nₖ > 0`, define strides `sₖ = ∏_{j>k} n_j` and `φ(i₁,…,i_r) = Σ iₖ sₖ`.
 
-> **Theorem 35.3 (Flattening is a bijection).** `φ` is a bijection from `∏ₖ [0, nₖ)` onto `[0, N)` where `N = ∏ₖ nₖ`, and its inverse is the mixed-radix decomposition
+> **Theorem 35.3 (Flattening is a bijection).** **(classical)** `φ` is a bijection from `∏ₖ [0, nₖ)` onto `[0, N)` where `N = ∏ₖ nₖ`, and its inverse is the mixed-radix decomposition
 
 > ```
 > i_r = f mod n_r,   f₁ = ⌊f / n_r⌋
@@ -68,9 +68,9 @@ Theorem 35.3 is the reason `reshape` has a lowering rule at all. A reshape does 
 
 ### When the division disappears
 
-> **Definition 35.4 (Divisor split).** For an affine form `f = Σ aₖxₖ + b` and an integer `c > 0`, the *divisor split* of `f` by `c` is the pair `(f_D, f_R)` where `f_D` collects the terms whose coefficient is a multiple of `c` and `f_R` collects the rest, together with the offset.
+> **Definition 35.4 (Divisor split).** **(stated here)** For an affine form `f = Σ aₖxₖ + b` and an integer `c > 0`, the *divisor split* of `f` by `c` is the pair `(f_D, f_R)` where `f_D` collects the terms whose coefficient is a multiple of `c` and `f_R` collects the rest, together with the offset.
 
-> **Theorem 35.5 (Exact split, stated here).** Let `(f_D, f_R)` be the divisor split of `f` by `c`, and let `//` and `%` be floor division and floor modulo. If `0 ≤ f_R ≤ c−1` at every point of the iteration domain, then on that domain
+> **Theorem 35.5 (Exact split).** **(stated here)** Let `(f_D, f_R)` be the divisor split of `f` by `c`, and let `//` and `%` be floor division and floor modulo. If `0 ≤ f_R ≤ c−1` at every point of the iteration domain, then on that domain
 > ```
 > f // c = f_D / c        and        f % c = f_R
 > ```
@@ -82,15 +82,15 @@ The hypothesis is one range fact, supplied by the interval analysis of Chapter 3
 
 There is a degenerate case worth naming separately because it fires constantly:
 
-> **Corollary 35.6.** If `0 ≤ f ≤ c−1` on the domain, then `f // c = 0` and `f % c = f`.
+> **Corollary 35.6 (The degenerate split).** **(stated here)** If `0 ≤ f ≤ c−1` on the domain, then `f // c = 0` and `f % c = f`.
 
 That is the split with `f_D` empty, and it is what makes a reshape of a size-1 leading axis compile to a bare copy.
 
 ### Recognising a flattening
 
-> **Definition 35.7 (Mixed-radix form).** An affine form `Σ aₖxₖ + b` over variables with ranges `[mₖ, mₖ + eₖ)` is in *mixed-radix form* if, after sorting the terms by coefficient, `a₍₁₎ = 1` and `a₍ᵢ₊₁₎ = a₍ᵢ₎·e₍ᵢ₎` for every `i`.
+> **Definition 35.7 (Mixed-radix form).** **(stated here)** An affine form `Σ aₖxₖ + b` over variables with ranges `[mₖ, mₖ + eₖ)` is in *mixed-radix form* if, after sorting the terms by coefficient, `a₍₁₎ = 1` and `a₍ᵢ₊₁₎ = a₍ᵢ₎·e₍ᵢ₎` for every `i`.
 
-> **Theorem 35.8 (Mixed-radix forms are exact covers, stated here).** If `f` is in mixed-radix form with total extent `E = ∏ eₖ`, then as the variables range over their domain `f` takes every value in `[b', b' + E)` exactly once, where `b' = b + Σ aₖmₖ`.
+> **Theorem 35.8 (Mixed-radix forms are exact covers).** **(stated here)** If `f` is in mixed-radix form with total extent `E = ∏ eₖ`, then as the variables range over their domain `f` takes every value in `[b', b' + E)` exactly once, where `b' = b + Σ aₖmₖ`.
 
 *Proof.* This is Theorem 35.3 read backwards: the sorted coefficients are exactly the strides of a shape whose dimensions are the extents, so `f` is `φ` for that shape, shifted by `b'`. ∎
 

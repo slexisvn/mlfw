@@ -8,7 +8,6 @@ import { LivenessAnalysis } from '../../analysis/liveness.js';
 import { isConstantOp, isTerminatorOp } from '../../ir/graph/op_traits.js';
 import type { GraphFunction } from '../../ir/graph/function.js';
 import type { Block } from '../../ir/graph/block.js';
-import type { OpDef } from '../../ir/graph/op_registry.js';
 import type { Value } from '../../ir/graph/value.js';
 import type { AttrValue } from '../../ir/graph/types.js';
 import type { AnalysisManager } from '../../analysis/analysis_manager.js';

@@ -29,12 +29,10 @@ export function _setDispatcher(d: DispatcherLike): void {
 
 export class Library {
   private readonly _namespace: string;
-  private readonly _kind: string;
   private readonly _registrations: Registration[];
 
   constructor(namespace: string, kind: string) {
     this._namespace = namespace;
-    this._kind = kind;
     this._registrations = [];
   }
 

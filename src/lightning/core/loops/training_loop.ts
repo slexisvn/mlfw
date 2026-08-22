@@ -8,15 +8,7 @@ import type { Tensor } from '../../../tensor/core/tensor.js';
 import type { NumericTypedArray } from '../../../tensor/types/dtype.js';
 import type { CallbackConnector } from '../hooks.js';
 import type { SchedulerConfig } from '../module.js';
-import type {
-  CompiledTrainStep,
-  DataLoaderLike,
-  EagerGraphRunner,
-  LightningModuleLike,
-  NumericMetricRecord,
-  OptimizerLike,
-  TrainerCoreLike,
-} from '../../types.js';
+import type { CompiledTrainStep, DataLoaderLike, LightningModuleLike, NumericMetricRecord, OptimizerLike, TrainerCoreLike } from '../../types.js';
 import type { SingleDeviceStrategy } from '../state.js';
 
 type LossLike = {

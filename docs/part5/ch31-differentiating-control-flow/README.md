@@ -39,11 +39,11 @@ The first two both produce zero gradients and are not the same. The first is a c
 
 ## 31.3 Theory
 
-> **Definition 31.1 (Region VJP).** A *region VJP* for an operation `f` with regions is a function that, given `f` and the reverse sweep's state, accumulates cotangents into `f`'s operands and into the free variables of `f`'s regions, and returns nothing.
+> **Definition 31.1 (Region VJP).** **(stated here)** A *region VJP* for an operation `f` with regions is a function that, given `f` and the reverse sweep's state, accumulates cotangents into `f`'s operands and into the free variables of `f`'s regions, and returns nothing.
 
 The clause about free variables is the one that is easy to miss. A loop body may read values from the enclosing function — a weight matrix, say — without them being operands of the `scan`. Those are *free variables* of the region, they receive gradient, and nothing in the operation's operand list mentions them.
 
-> **Theorem 31.2 (Reverse of a scan).** Let a scan step be `(c_{t+1}, y_t) = g(x_t, c_t)`, run for `t = 0 … T−1`. Then with `w^c_T` the cotangent of the final carry and `w^y_t` that of the output emitted at step `t`,
+> **Theorem 31.2 (Reverse of a scan).** **(classical)** Let a scan step be `(c_{t+1}, y_t) = g(x_t, c_t)`, run for `t = 0 … T−1`. Then with `w^c_T` the cotangent of the final carry and `w^y_t` that of the output emitted at step `t`,
 >
 > `(w^x_t, w^c_t) = vjp_g(x_t, c_t)·(w^c_{t+1}, w^y_t)`
 >
@@ -55,9 +55,9 @@ The cotangent handed to each step is a *pair*, and it is worth insisting on that
 
 The theorem says what to compute, not how to hold it. It needs `(x_t, c_t)` for every `t` — the linearization points of all `T` steps — and that is Chapter 30's problem in its sharpest form, because `T` can be thousands.
 
-> **Definition 31.3 (Gradient barrier, stated here).** A *gradient barrier* is an operation declared to terminate gradient propagation: the reverse sweep neither requires a rule for it nor propagates cotangents to its operands.
+> **Definition 31.3 (Gradient barrier).** **(stated here)** A *gradient barrier* is an operation declared to terminate gradient propagation: the reverse sweep neither requires a rule for it nor propagates cotangents to its operands.
 
-> **Corollary 31.4 (The three outcomes).** For an operation on the gradient path, an autodiff system may: apply a rule; stop at a declared barrier; or fail. A system with only the first two options cannot distinguish "the derivative is zero" from "nobody has said what the derivative is", and the second is a bug that presents as the first.
+> **Corollary 31.4 (The three outcomes).** **(stated here)** For an operation on the gradient path, an autodiff system may: apply a rule; stop at a declared barrier; or fail. A system with only the first two options cannot distinguish "the derivative is zero" from "nobody has said what the derivative is", and the second is a bug that presents as the first.
 
 That corollary is why the third option earns its keep. A zero gradient is indistinguishable from a correct gradient that happens to be zero, so it is the perfect disguise for a missing rule — the model trains, slightly wrongly, forever.
 
@@ -283,7 +283,7 @@ The third outcome does not appear in the table because no traced user program ca
 - **The barrier list is a list, not a property — and it could not be one property.** §31.4 works through this: seven of the nine barriers produce booleans or integers, and *that* part a type check could enforce automatically. The other two, `one_hot` and `iota`, produce `f32` and are barriers because of their operands rather than their results, so no single dtype rule covers the set. What that means practically is that adding an integer-valued operation without declaring it is a missing declaration rather than an automatic barrier, and adding a float-valued index consumer without declaring it is the same. Both fail as the throw rather than the right answer.
 
 - **The sweep never revisits the operations it emits, which is why the backward graph may contain a `compare` that was never a barrier question.** The reverse walk runs over the *forward* function's operations in reverse topological order, and the graph it builds is output, not input. So when an `if` rule emits a `select` guarded by the original condition, or a `max` rule emits a `compare` to route the cotangent, those newly created comparison and control operations are simply appended — they are never handed to `requireVJPRuleOrBarrier`, never checked for a rule, and never reached by `computeGradReachability`. That is correct: they are part of the derivative, not part of the function being differentiated, and differentiating them again would be meaningless. But it is an asymmetry worth naming, because it means "every `compare` in the program is a declared barrier" is true of the forward graph and not of the compiled artifact. If you are reading a backward graph and find a `compare` in it, do not go looking for its barrier declaration.
-- **There is no stated contract for mutating an input between `cf(x)` and `cf.backward(w)`.** **(invariant — undefined.)** Chapter 29 §29.6 exhibits the joint mode's version of this: input buffers are aliased rather than copied, the joint kernel is deferred, and `backward` re-runs it — so one call can return a forward output computed from the call-time input and a gradient computed from a later one. The wider point belongs here, because it applies to both modes and to the whole two-call API:
+- **There is no stated contract for mutating an input between `cf(x)` and `cf.backward(w)`.** **(invariant)** There is no such contract, which is itself the finding. Chapter 29 §29.6 exhibits the joint mode's version of this: input buffers are aliased rather than copied, the joint kernel is deferred, and `backward` re-runs it — so one call can return a forward output computed from the call-time input and a gradient computed from a later one. The wider point belongs here, because it applies to both modes and to the whole two-call API:
 
   | Question | Answer today |
   |---|---|

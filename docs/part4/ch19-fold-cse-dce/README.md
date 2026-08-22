@@ -30,17 +30,17 @@ Each of the three needs a notion of *sameness* or *observability* that is more s
 
 ## 19.3 Theory
 
-> **Definition 19.1 (Constant-foldable).** An operation is *constant-foldable* if it is pure, has no regions, every operand is a compile-time constant, and its registry entry supplies a `fold` function. Folding replaces the operation with a constant holding `fold`'s result.
+> **Definition 19.1 (Constant-foldable).** **(stated here)** An operation is *constant-foldable* if it is pure, has no regions, every operand is a compile-time constant, and its registry entry supplies a `fold` function. Folding replaces the operation with a constant holding `fold`'s result.
 
-> **Definition 19.2 (Redundant).** Two operations are *redundant* if they have the same opcode, the same attributes, and operands that are pairwise the same SSA values — modulo operand order when the operation is commutative (Chapter 11) — and both are pure.
+> **Definition 19.2 (Redundant).** **(stated here)** Two operations are *redundant* if they have the same opcode, the same attributes, and operands that are pairwise the same SSA values — modulo operand order when the operation is commutative (Chapter 11) — and both are pure.
 
 Redundancy is a syntactic relation, and that is the whole reason canonicalization runs first (Chapter 17): two operations computing the same value in different spellings are not redundant until a normalizer has made their spellings identical.
 
-> **Definition 19.3 (Dead).** An operation is *dead* if it is not a terminator, none of its results has a use, and it has no side effect.
+> **Definition 19.3 (Dead).** **(stated here)** An operation is *dead* if it is not a terminator, none of its results has a use, and it has no side effect.
 
 The three clauses are not symmetric in difficulty. "Not a terminator" is a lookup. "No uses" is `O(1)` on the intrusive use list from Chapter 8. "No side effect" is the hard one, because it is a claim about the world outside the dataflow graph.
 
-> **Theorem 19.4 (Soundness of DCE, stated here).** Deleting a dead operation preserves the meaning of the program, where meaning is the tuple of function results together with every effect on state outside the function.
+> **Theorem 19.4 (Soundness of DCE).** **(stated here)** Deleting a dead operation preserves the meaning of the program, where meaning is the tuple of function results together with every effect on state outside the function.
 
 *Proof sketch.* By SSA (Chapter 8), a value's only route to the outside is through the operations that use it. A result with no uses reaches nothing, so removing its producer cannot change any other value. The second clause of the meaning — effects on external state — is preserved exactly because the third clause of Definition 19.3 excludes operations that have any. ∎
 
@@ -48,13 +48,13 @@ The proof makes the dependency explicit: **DCE is sound only to the extent that 
 
 And one more consequence, which the transitive worklist in §19.4 exists for:
 
-> **Corollary 19.5.** Deleting a dead operation can make its operands' producers dead. Hence DCE is a fixed-point computation, not a single sweep.
+> **Corollary 19.5 (DCE is a fixed point).** **(stated here)** Deleting a dead operation can make its operands' producers dead. Hence DCE is a fixed-point computation, not a single sweep.
 
-## 19.4 In mlfw: three files, 345 lines
+## 19.4 In mlfw: three files, 354 lines
 
 ### Folding
 
-[`simplify/constant_fold.ts`](../../../src/compiler/passes/simplify/constant_fold.ts). The entry condition is Definition 19.1, checked field by field ([`constant_fold.ts:78`](../../../src/compiler/passes/simplify/constant_fold.ts)):
+[`simplify/constant_fold.ts`](../../../src/compiler/passes/simplify/constant_fold.ts). The entry condition is Definition 19.1, checked field by field ([`constant_fold.ts:88`](../../../src/compiler/passes/simplify/constant_fold.ts)):
 
 ```ts
       const def = registry.get(op.opName);
@@ -65,31 +65,9 @@ And one more consequence, which the transitive worklist in §19.4 exists for:
       if (op.numOperands === 0) continue;
 ```
 
-Then each operand is resolved to a constant *recursively* ([`constant_fold.ts:34`](../../../src/compiler/passes/simplify/constant_fold.ts)), so a chain of foldable operations collapses in one visit rather than one per round, with a memo table keyed by value so a shared subexpression is resolved once.
+Then each operand is resolved to a constant *recursively* ([`constant_fold.ts:41`](../../../src/compiler/passes/simplify/constant_fold.ts)), so a chain of foldable operations collapses in one visit rather than one per round, with a memo table keyed by value so a shared subexpression is resolved once.
 
-One check is easy to miss and is the interesting one ([`constant_fold.ts:21`](../../../src/compiler/passes/simplify/constant_fold.ts)):
-
-```ts
-function isFoldResultRepresentable(value: AttrValue, dtype: string): boolean {
-  if (!isIntType(dtype as ScalarDType)) return true;
-  if (typeof value !== 'number') return true;
-  return Number.isInteger(value) && Number.isSafeInteger(value);
-}
-```
-
-Folding happens in JavaScript, whose only number type is a double. For an integer operation whose true result exceeds 2⁵³, the double has already lost the answer, and writing that answer into the graph would be a miscompile that no later stage could detect. So the fold is discarded and the operation survives to run at the target's real precision. This is the general shape of a folding hazard: **the compiler's arithmetic and the target's arithmetic are not the same arithmetic**.
-
-Read the guard's first line again, though, because it says exactly which half of that problem is solved:
-
-```ts
-  if (!isIntType(dtype as ScalarDType)) return true;
-```
-
-**Every float dtype is waved through.** The check exists to stop an `i64` fold from silently losing precision to a double, and it does. It does nothing at all for `f32`, and the same hazard is present there for the same reason, only earlier: an `f32` has 24 bits of significand against a double's 53, so a fold that a double computes exactly can be a value the target rounds away.
-
-> **Counterexample 19.6.** `16777216f + 1f` is `16777217` in a double and `16777216` in `f32`, since `2²⁴ + 1` is not representable at single precision. Folding the pair without rounding puts a constant in the graph that the machine could not have produced, and nothing downstream re-rounds a constant.
-
-So both hazards — the integer one and the float one — are resolved in one place, and a fold cannot escape either:
+One check is easy to miss and is the interesting one — the guard that decides whether a computed answer may be written into the graph at all ([`constant_fold.ts:22`](../../../src/compiler/passes/simplify/constant_fold.ts)):
 
 ```ts
 function coerceFoldResult(value: AttrValue | undefined, dtype: string): AttrValue | undefined {
@@ -101,7 +79,26 @@ function coerceFoldResult(value: AttrValue | undefined, dtype: string): AttrValu
 }
 ```
 
-`roundToDtype` ([`half.ts`](../../../src/tensor/utils/half.ts)) is `Math.fround` for `f32`, a round-trip through the half encoders for `f16` and `bf16`, and the identity for `f64` — the same single source the backends use for storage coercion. Note the asymmetry between the two branches, which is not arbitrary: the integer path **refuses** the fold, because no rounding makes an out-of-range integer right; the float path **rounds**, because rounding is exactly what the target would have done.
+Folding happens in JavaScript, whose only number type is a double. For an integer operation whose true result exceeds 2⁵³, the double has already lost the answer, and writing that answer into the graph would be a miscompile that no later stage could detect. So the fold is discarded and the operation survives to run at the target's real precision. This is the general shape of a folding hazard: **the compiler's arithmetic and the target's arithmetic are not the same arithmetic**.
+
+The float branch is there for the same reason and was added later, which is worth knowing because the earlier version of this guard is the one most compilers ship. It read, in full:
+
+```ts
+// the earlier version — int-only, and no longer what the file contains
+function isFoldResultRepresentable(value: AttrValue, dtype: string): boolean {
+  if (!isIntType(dtype as ScalarDType)) return true;
+  if (typeof value !== 'number') return true;
+  return Number.isInteger(value) && Number.isSafeInteger(value);
+}
+```
+
+**Every float dtype was waved through by that first line.** The check stopped an `i64` fold from silently losing precision to a double, and it did nothing at all for `f32`, where the same hazard is present for the same reason, only earlier: an `f32` has 24 bits of significand against a double's 53, so a fold that a double computes exactly can be a value the target rounds away.
+
+> **Counterexample 19.6.** `16777216f + 1f` is `16777217` in a double and `16777216` in `f32`, since `2²⁴ + 1` is not representable at single precision. Folding the pair without rounding puts a constant in the graph that the machine could not have produced, and nothing downstream re-rounds a constant.
+
+Both hazards — the integer one and the float one — are now resolved in the one function above, and a fold cannot escape either. Note the asymmetry between its two branches, which is not arbitrary: the integer path **refuses** the fold, because no rounding makes an out-of-range integer right; the float path **rounds**, because rounding is exactly what the target would have done.
+
+`roundToDtype` ([`half.ts`](../../../src/tensor/utils/half.ts)) is `Math.fround` for `f32`, a round-trip through the half encoders for `f16` and `bf16`, and the identity for `f64` — the same single source the backends use for storage coercion.
 
 One detail matters more than it looks. The pass folds in two places — the main loop, and the recursive resolver that collapses a chain of foldable operations in one visit — and rounding only the first would let a multi-step chain accumulate `f64` precision internally before rounding once at the end. Both go through one `foldOperation` helper, so every intermediate in a folded chain rounds exactly where execution would round it.
 
@@ -330,7 +327,7 @@ Being conservative here is the *safe* direction — Theorem 19.4's asymmetry —
 
   What remains is a real cost on genuinely fused arithmetic, and §22.5 is where it shows up: fusing a four-operation chain is worth about 1.9× with the intermediates rounded, against roughly 2.7× without. **About a third of the apparent fusion win is fusion computing in a wider precision than the program asked for.** That is worth knowing when reading any framework's fusion benchmark, including this one's.
 
-- **Constant folding is scalar-shaped.**- **Constant folding is scalar-shaped.** `FoldFn` takes and returns `AttrValue`s (Chapter 11), so what gets folded is an operation whose *whole result* is one attribute value — a scalar, or a constant tensor produced by broadcasting one. There is no elementwise folding of two large constant tensors; a graph containing one will keep it and compute it at run time.
+- **Constant folding is scalar-shaped.** `FoldFn` takes and returns `AttrValue`s (Chapter 11), so what gets folded is an operation whose *whole result* is one attribute value — a scalar, or a constant tensor produced by broadcasting one. There is no elementwise folding of two large constant tensors; a graph containing one will keep it and compute it at run time.
 - **`fold` runs inside a `try` and failures are silent at `INFO`.** [`constant_fold.ts:110`](../../../src/compiler/passes/simplify/constant_fold.ts) catches, emits a `pass_detail` at `DEBUG`, and moves on. A fold rule that throws on every call costs you nothing visible and buys you nothing at all.
 - **The effect mask has four bits and the analysis uses two.** `ALLOCATE` and `CONTROL` are defined, `CONTROL` is declared by `call`, and every consumer in the compiler asks only `hasSideEffect(op)` — *is the mask non-zero*. Nothing distinguishes a read from a write when deciding what may be deleted or reordered. That is sufficient for DCE and insufficient for anything that wants to move two effectful operations past each other, which is why Chapter 36's dependence analysis works on buffers rather than on this.
 - **Fixed-point cost.** All three passes are in the same group (Chapter 15), so each of them runs once more than it needs to, and on a large graph "once more" is a full traversal each. The group's convergence round is cheap only because these three passes are cheap.

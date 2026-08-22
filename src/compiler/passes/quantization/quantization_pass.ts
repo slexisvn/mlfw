@@ -3,13 +3,12 @@ import { Operation } from '../../ir/graph/operation.js';
 import { TensorType, ScalarType, isFloatType, scalarBytes } from '../../ir/graph/types.js';
 import { registry } from '../../ir/graph/ops.js';
 import { UseDefAnalysis } from '../../analysis/use_def.js';
-import { QuantizationScheme, QuantizationParams } from '../../ir/graph/quantization_types.js';
+import { QuantizationScheme, QuantizationParams, DEFAULT_EXCLUDE_OPS, DEFAULT_QUANTIZABLE_OPS } from '../../ir/graph/quantization_types.js';
 import type { QuantizationSchemeValue } from '../../ir/graph/quantization_types.js';
 import { TraceLevel } from '../../pipeline/trace.js';
 import { isTerminatorOp } from '../../ir/graph/op_traits.js';
 import type { GraphFunction } from '../../ir/graph/function.js';
 import type { Value } from '../../ir/graph/value.js';
-import type { Block } from '../../ir/graph/block.js';
 import type { AttrValue, ScalarDType, TensorType as TensorTypeT } from '../../ir/graph/types.js';
 import type { AnalysisManager } from '../../analysis/analysis_manager.js';
 import type { PassResultValue, PassTarget } from '../pass.js';
@@ -35,8 +34,6 @@ export type QuantizationConfigOpts = {
   target?: CompileTarget | null;
 };
 
-const DEFAULT_EXCLUDE_OPS = new Set(['softmax', 'sqrt', 'div', 'rsqrt', 'log', 'exp', 'tanh']);
-const DEFAULT_QUANTIZABLE_OPS = new Set(['dot', 'conv', 'add', 'mul', 'sub']);
 
 const NATIVE_QUANTIZED_VARIANTS = new Map([
   ['dot', 'quantized_dot'],

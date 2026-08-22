@@ -24,7 +24,6 @@ registerVJPRule('softmax', (ctx) => {
 registerVJPRule('log_softmax', (ctx) => {
   const grad = ctx.gradOutputs[0]!;
   const result = ctx.results[0];
-  const [input] = ctx.operands;
   const axis = ctx.op.getAttr<number>('axis')!;
   const dtype = result.type.dtype;
   const shape = result.type.shape;

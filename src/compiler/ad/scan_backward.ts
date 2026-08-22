@@ -1,5 +1,5 @@
 import { GradAccumulator } from './grad_accumulator.js';
-import { getVJPRule, requireVJPRuleOrBarrier, registerRegionVJP, getRegionVJP } from './vjp_registry.js';
+import { requireVJPRuleOrBarrier, registerRegionVJP, getRegionVJP } from './vjp_registry.js';
 import { reduceGradToOperandShape } from './backward_builder.js';
 import { REGION_CONTROL_FLOW } from './control_flow_ops.js';
 import { TensorType } from '../ir/graph/types.js';

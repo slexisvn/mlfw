@@ -28,25 +28,25 @@ The rule of thumb — **consume a value as soon as it exists** — is right ofte
 
 ## 52.3 Theory
 
-> **Definition 52.1 (Schedule).** Given statements with a dependence relation, a *schedule* is a topological order of them: every statement appears after all statements it depends on.
+> **Definition 52.1 (Schedule).** **(classical)** Given statements with a dependence relation, a *schedule* is a topological order of them: every statement appears after all statements it depends on.
 
 Any schedule computes the same results — that is what a dependence relation is for, and Chapter 36 is where the relation comes from. What differs is the memory.
 
-> **Definition 52.2 (Peak of a schedule).** Walk a schedule in order, maintaining a live set. A buffer enters the live set at its first use and leaves after its last. The *peak* is the maximum total size of the live set over the walk.
+> **Definition 52.2 (Peak of a schedule).** **(classical)** Walk a schedule in order, maintaining a live set. A buffer enters the live set at its first use and leaves after its last. The *peak* is the maximum total size of the live set over the walk.
 
-> **Theorem 52.3 (Minimizing peak is NP-hard) — (classical)** *(Sethi, 1975)*. Deciding whether a directed acyclic graph of computations admits a schedule whose peak is at most `k` is NP-complete, already for unit-sized values, where it is the *register sufficiency* problem.
+> **Theorem 52.3 (Minimising peak is NP-hard; Sethi, 1975).** **(classical)** Deciding whether a directed acyclic graph of computations admits a schedule whose peak is at most `k` is NP-complete, already for unit-sized values, where it is the *register sufficiency* problem.
 
 So again, heuristics. Two are worth knowing, and this compiler runs both.
 
-> **Definition 52.4 (List scheduling by net release).** Maintain the set of statements whose predecessors have all run. Repeatedly pick the one maximizing `(bytes it frees) − (bytes it newly allocates)`, run it, and update.
+> **Definition 52.4 (List scheduling by net release).** **(classical)** Maintain the set of statements whose predecessors have all run. Repeatedly pick the one maximizing `(bytes it frees) − (bytes it newly allocates)`, run it, and update.
 
-> **Definition 52.5 (Depth-first by subgraph weight).** Give each statement a weight: the total bytes allocated by it and everything reachable from it. Traverse depth-first, visiting the *heaviest* ready statement first among those released, so the expensive subtree is finished while the cheap ones are still unstarted.
+> **Definition 52.5 (Depth-first by subgraph weight).** **(classical)** Give each statement a weight: the total bytes allocated by it and everything reachable from it. Traverse depth-first, visiting the *heaviest* ready statement first among those released, so the expensive subtree is finished while the cheap ones are still unstarted.
 
 Neither dominates. List scheduling is greedy about the next step and can be led into a state where every remaining choice is bad; depth-first commits to a subtree and is blind to a cheap statement elsewhere that would have freed a large buffer. On the shape in §52.1 both find the good order, for different reasons — list scheduling because `ra` frees 32 KiB and allocates 8 bytes, depth-first because `wa`'s subtree is heavy and gets finished first.
 
 The escape from having to choose is to run both:
 
-> **Proposition 52.6 (Best-of-*k* is never worse, stated here).** Let `H₁, …, H_k` be schedule heuristics and let `σ₀` be the program's original order. Simulating each and keeping the argmin of peak yields a schedule whose peak is at most that of `σ₀`.
+> **Proposition 52.6 (Best-of-*k* is never worse).** **(stated here)** Let `H₁, …, H_k` be schedule heuristics and let `σ₀` be the program's original order. Simulating each and keeping the argmin of peak yields a schedule whose peak is at most that of `σ₀`.
 >
 > *Proof.* `σ₀` is in the candidate set, so the minimum over the set is at most its peak. ∎
 

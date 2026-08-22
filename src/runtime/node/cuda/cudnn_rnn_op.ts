@@ -6,7 +6,7 @@ import { wrapResult, gpuContiguousArray } from '../../../dispatcher/jit_dispatch
 import type { NumericTypedArray } from '../../../tensor/types/dtype.js';
 import { deviceBufferForInput, deviceBufferForOutput } from './resident.js';
 import { cudnnRNNForward, cudnnRNNBackward, releaseRNNForward, CELL_LSTM, CELL_GRU } from './cudnn.js';
-import type { RNNForwardCtx, RNNLayerDevs, RNNPlanOpts } from './cudnn.js';
+import type { RNNForwardCtx, RNNPlanOpts } from './cudnn.js';
 import type { Tensor } from '../../../tensor/core/tensor.js';
 import type { DType } from '../../../tensor/types/dtype.js';
 import type { Device } from '../../../tensor/types/device.js';
@@ -116,7 +116,7 @@ function cudnnRNNOp(
   cx: Tensor | null = null,
 ): (Tensor | null)[] {
   const kind = KIND[kindName];
-  const { inputSize, hiddenSize, seqLen, batch } = opts;
+  const { hiddenSize, seqLen, batch } = opts;
   const numLayers = cells.length;
   const planOpts = { ...opts, numLayers, cellMode: kind.cellMode, gates: kind.gates };
 

@@ -28,9 +28,9 @@ The difference between them is not a matter of taste. A region-at-a-time engine 
 
 ## 24.3 Theory
 
-> **Definition 24.1 (Fusion partition).** A *fusion partition* of a DAG `G` is a partition of its vertices into groups such that contracting every group simultaneously leaves a DAG. Its *benefit* is the sum over groups of `memorySaved + launchSaved` from Chapter 22.
+> **Definition 24.1 (Fusion partition).** **(stated here)** A *fusion partition* of a DAG `G` is a partition of its vertices into groups such that contracting every group simultaneously leaves a DAG. Its *benefit* is the sum over groups of `memorySaved + launchSaved` from Chapter 22.
 
-> **Theorem 24.2 (Hardness).** *(Classical.)* Fix a DAG `G` with rational edge benefits and a bound `B`. Deciding whether `G` admits a fusion partition (Definition 24.1) of total benefit at least `B` is NP-complete.
+> **Theorem 24.2 (Hardness).** **(classical)** Fix a DAG `G` with rational edge benefits and a bound `B`. Deciding whether `G` admits a fusion partition (Definition 24.1) of total benefit at least `B` is NP-complete.
 >
 > *Proof sketch.* Membership is clear: a partition is a polynomial-size certificate, and both its acyclicity after contraction and its benefit are checkable in polynomial time. For hardness, note that the acyclicity constraint is vacuous on a DAG with no edges between the vertices being grouped, so the problem restricted to such instances is exactly **maximum-benefit graph partitioning** with arbitrary weights, which is NP-hard by reduction from `MAX-CUT`. ∎
 
@@ -40,7 +40,7 @@ So the load-bearing claim for this chapter is the third one, and its practical c
 
 Hence heuristics, and hence the practical question is not "which is optimal" but "which fails less badly, and how would you know". Two properties distinguish greedy schemes here:
 
-> **Definition 24.3 (Monotone candidate set, stated here).** A greedy scheme has a *monotone* candidate set if merging never makes a previously-illegal merge legal. Under monotonicity, a candidate rejected once may be discarded; without it, rejected candidates must be reconsidered after every merge.
+> **Definition 24.3 (Monotone candidate set).** **(stated here)** A greedy scheme has a *monotone* candidate set if merging never makes a previously-illegal merge legal. Under monotonicity, a candidate rejected once may be discarded; without it, rejected candidates must be reconsidered after every merge.
 
 Fusion is **not** monotone in the cost sense: merging `A` with `B` changes the group's inputs and outputs, so an edge that was unprofitable can become profitable, and vice versa. It is tempting to think it is at least monotone in the cycle sense — that contracting more can only create cycles, never remove them — and that is false in both directions:
 
@@ -48,7 +48,7 @@ Fusion is **not** monotone in the cost sense: merging `A` with `B` changes the g
 
 The consequence is that a rejected candidate may not be discarded. The priority engine keeps a heap it re-pushes into after every merge, and validates popped entries against a version counter rather than trusting them:
 
-> **Definition 24.5 (Stale candidate, stated here).** A heap entry naming two groups is *stale* if either group has been merged since the entry was pushed. A stale entry must be discarded rather than applied, because its recorded benefit was computed for groups that no longer exist.
+> **Definition 24.5 (Stale candidate).** **(stated here)** A heap entry naming two groups is *stale* if either group has been merged since the entry was pushed. A stale entry must be discarded rather than applied, because its recorded benefit was computed for groups that no longer exist.
 
 This is a lazy-deletion priority queue, and it is the standard way to avoid the alternative — finding and removing every affected entry on each merge, which needs an indexed heap.
 
@@ -112,7 +112,7 @@ with weights `{ memory: 1, launch: 1000 }` ([`fusion_cost.ts:38`](../../../src/c
 
 A dimensionally sound version is not hard to write and is worth knowing as the target: pick one unit — time — and convert. Traffic becomes `bytes / bandwidth`, launches stay in microseconds, the sum is in microseconds, and the "weight" disappears entirely because the machine supplies the exchange rate. Chapter 4's roofline gives exactly the number needed: at the ~7.7 GB/s this eager CPU path achieves, 5000 bytes is about 0.65 µs, so the current weights value a launch at roughly eight times a 5000-byte transfer rather than exactly equal to it. Whether that is right is now a *question you can ask*, which is the whole benefit of carrying units.
 
-Two consequences follow from the unit-free form. The weights cannot be transferred between machines, because a ratio between a time and a byte count is a property of a machine's bandwidth and launch latency, and nothing records which machine these were tuned on. And they cannot be transferred between backends: §22.4 showed `launchOverheadUs` is a target-independent constant, so on the CPU the first term contributes a large fixed bonus for a saving that is not there. Chapter 46 rebuilds this idea properly, with a model whose output is a predicted *time* and which is graded against measured times.
+Two consequences follow from the unit-free form. The weights cannot be transferred between machines, because a ratio between a time and a byte count is a property of a machine's bandwidth and launch latency, and nothing records which machine these were tuned on. And they cannot be transferred between backends: §22.3 showed `launchOverheadUs` is a target-independent constant, so on the CPU the first term contributes a large fixed bonus for a saving that is not there. Chapter 46 rebuilds this idea properly, with a model whose output is a predicted *time* and which is graded against measured times.
 
 The main loop is Definition 24.5 in practice ([`priority_fusion.ts:189`](../../../src/compiler/passes/fusion/priority_fusion.ts)):
 
@@ -215,6 +215,25 @@ The fourth run is the control. Same engine, same graph, one number changed — a
 All four runs now agree, and the control run — the one that had to raise the limit by hand — is no longer distinguishable from the default. The default strategy went from 1.014 ms to 0.450 ms, so the budget was worth **2.3× on the path everyone actually takes**, not only on the two strategies nobody selects.
 
 Both columns come from `docs/part4/ch24-fusion-strategies/labs/01-three-strategies.mjs`, Node 24.9, 2026-08-21, on a `1<<18`-element chain. The same pair measured on another machine came out 1.473 ms → 0.621 ms, a ratio four percent away, which is about as much precision as this measurement deserves. What should reproduce is not the exact pair but the shape: the four rows agree with one another, and the misconfigured default is roughly twice the corrected one.
+
+### So what does separate the three engines?
+
+The measurement above answers the chapter's opening question in a way the chapter did not intend: on this program, *nothing* separates them once the cost model is right. That is worth taking seriously rather than filing away, because it is the most common outcome of a strategy comparison — the strategies were never the variable.
+
+But they are not interchangeable, and the differences are structural rather than measurable on three operations. Four of them, in the order you are likely to meet them:
+
+| | priority (default) | dominator | greedy |
+|---|---|---|---|
+| what a veto costs you | the *last* merge only — the group formed so far survives | the **whole region**, since the cost model is evaluated on it as a unit | the rest of the current walk |
+| horizontal fusion | `MultiOutputFusionPass` runs after it | **no auxiliary pass at all** | `MultiOutputFusionPass` runs after it |
+| merging two finished groups | inline, as part of the main loop | not available | `FusionMergerPass` |
+| cost of deciding | a heap plus re-scoring every touched edge after each merge — §23.6's quadratic term | one pass over the post-dominance tree | one walk |
+
+The first row is the one §24.5 accidentally demonstrated. While the shared-memory budget was wrong, priority stopped one operation short and still produced a two-output region; dominator and greedy evaluated the three-operation region as a whole, hit the same veto, and produced nothing. **An edge-at-a-time engine degrades; a region-at-a-time engine falls off a cliff.** That is a real and general property, and it is the argument for the default — not that priority finds better partitions, but that it fails more gracefully when the cost model is wrong, which it periodically will be.
+
+The second and third rows say the opposite thing about `dominator`: it is the only strategy with no way to combine regions after the fact and no horizontal fusion, so a graph whose wins are sibling-shaped gets none of them. And the fourth row is the price of the first: §23.6 measured the re-scoring loop at close to quadratic in the size of the final group, which the other two engines do not pay.
+
+None of that is measured here, and it would need graphs shaped to expose each row rather than one diamond. What §24.5 does establish is narrower and more useful: **before comparing search strategies, check that they are searching under the same constraints.** Three engines disagreeing by a factor of two looked like a search-quality result for as long as nobody read the constraint they shared.
 
 ## 24.6 Lab 2 — Epilogue fusion
 

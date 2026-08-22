@@ -27,6 +27,21 @@ None of these is a calculus question. All three are graph questions, and the ans
 
 Picture the forward graph laid out left to right. The backward graph is a second graph laid out right to left underneath it, one node group per forward operation, built by visiting the forward operations in reverse.
 
+```
+   forward, built left to right, run first
+   x ------> [ mul ] ------> t ------> [ sum ] ------> L
+   |            ^                          |
+   |            |                          | (1) values flow down: a rule needs x
+   |            |                              saved as an argument, or rebuilt
+   |            |                          |
+   |            v                          v
+   w_x <---- [ mul' ] <---- w_t <---- [ sum' ] <---- w_L = 1
+        ^^                                     backward, built right to left
+        ||
+        two contributions arrive at x, because the forward mul read it twice
+        the driver sums them; no rule knows the other one happened
+```
+
 Three things run between the two pictures.
 
 **Cotangents flow right to left.** Each value in the forward graph has a matching cotangent in the backward one, and a rule turns the cotangents of an operation's results into the cotangents of its operands.
@@ -41,27 +56,27 @@ The last decision is how to package it. Two functions, or one function that does
 
 Fix a forward function `F` in SSA form with inputs `x₁…x_n`, a topological order `O` of its operations, and outputs `y₁…y_m`.
 
-> **Definition 29.1 (Gradient reachability).** A value `v` is *gradient-reachable* if `v` is a function output, or `v` is an operand of an operation `f` with a VJP rule such that some result of `f` is gradient-reachable. The reachable set is the least fixed point of that rule.
+> **Definition 29.1 (Gradient reachability).** **(stated here)** A value `v` is *gradient-reachable* if `v` is a function output, or `v` is an operand of an operation `f` with a VJP rule such that some result of `f` is gradient-reachable. The reachable set is the least fixed point of that rule.
 
 Reachability is computed by one backward walk, because an operation's results precede its operands in reverse topological order — so a single reverse pass reaches the fixed point without iterating.
 
-> **Definition 29.2 (Cotangent accumulation).** For a value `v` with consumers `f¹…f^k` in `F`, the cotangent of `v` is
+> **Definition 29.2 (Cotangent accumulation).** **(classical)** For a value `v` with consumers `f¹…f^k` in `F`, the cotangent of `v` is
 >
 > `w_v = Σ_{i=1..k} (rule of f^i applied at the operand position of v)`
 >
 > and is complete only after every consumer of `v` has been processed.
 
-> **Theorem 29.3 (Correctness of the reverse sweep).** Processing the operations of `F` in reverse topological order, applying each operation's rule to the cotangents of its results and accumulating into the cotangents of its operands, yields `w_v = (∂L/∂v)ᵀ` for every gradient-reachable `v`, where `L` is the value seeded at the outputs.
+> **Theorem 29.3 (Correctness of the reverse sweep).** **(classical)** Processing the operations of `F` in reverse topological order, applying each operation's rule to the cotangents of its results and accumulating into the cotangents of its operands, yields `w_v = (∂L/∂v)ᵀ` for every gradient-reachable `v`, where `L` is the value seeded at the outputs.
 
 *Proof sketch.* By induction over reverse topological order. The outputs are seeded by hypothesis. For any other value `v`, every consumer of `v` appears strictly later than `v`'s producer in topological order, hence strictly earlier in the reverse walk — so when the walk reaches `v`'s producer, every consumer has already contributed. The multivariate chain rule states exactly that `∂L/∂v` is the sum over consumers of the local derivative times the consumer's cotangent, which is Definition 29.2. SSA is what makes "every consumer" a finite, statically known set. ∎
 
 The proof leans on SSA twice and it is worth naming both places: once for "a value has one producer", so the walk knows where to deposit `w_v`, and once for "a value's uses are enumerable", so the sum is over a known set. In a language with mutable aliasing neither holds, which is why source-level AD tools for such languages are so much harder than this one.
 
-> **Definition 29.4 (Saved set, stated here).** The *saved set* `S` of a backward construction is the set of forward values passed into the backward function as arguments. A construction is *well-formed* if every forward value a rule reads is either in `S` or recomputable from `S` by operations the construction replays.
+> **Definition 29.4 (Saved set).** **(stated here)** The *saved set* `S` of a backward construction is the set of forward values passed into the backward function as arguments. A construction is *well-formed* if every forward value a rule reads is either in `S` or recomputable from `S` by operations the construction replays.
 
-> **Definition 29.5 (Separate and joint form, stated here).** The *separate* form compiles two functions: `F' : (x) → (y, S)` and `B : (w, S) → (∂L/∂x)`. The *joint* form compiles one: `J : (x, w) → (y, ∂L/∂x)`, with `S` never crossing a function boundary.
+> **Definition 29.5 (Separate and joint form).** **(stated here)** The *separate* form compiles two functions: `F' : (x) → (y, S)` and `B : (w, S) → (∂L/∂x)`. The *joint* form compiles one: `J : (x, w) → (y, ∂L/∂x)`, with `S` never crossing a function boundary.
 
-> **Corollary 29.6.** The two forms compute the same gradients. They differ in what crosses a function boundary — `|S|` tensors in the separate form, none in the joint — and in whether the caller can obtain `y` without supplying `w`.
+> **Corollary 29.6 (Mode is packaging).** **(stated here)** The two forms compute the same gradients. They differ in what crosses a function boundary — `|S|` tensors in the separate form, none in the joint — and in whether the caller can obtain `y` without supplying `w`.
 
 **"`S` never crosses a function boundary" is not "`S` is not held."** The joint form removes the *interface*: no saved tensor appears in a signature, so nothing is marshalled, and the compiled artifact has fewer arguments. It does not remove the *values*. A joint function replays the forward pass and then the backward one inside a single body, so every forward intermediate the backward half reads is a live value spanning the middle of that body — exactly as long-lived as the saved tensor it replaced, and now a buffer that memory planning has to keep alive rather than a parameter the caller supplies.
 
@@ -246,7 +261,18 @@ The running two-layer MLP, compiled both ways.
     @joint     17 ops   @joint_Sequential(%0: tensor<2x2xf32>, %1: tensor<8x2xf32>, %2: tensor<8xf32>, %3: tensor<1x8xf32>, %4: tensor<1xf32>, %5: tensor<2x1xf32>) -> (tensor<2x1xf32>, tensor<2x2xf32>, tensor<8x2xf32>, tensor<8xf32>, tensor<1x8xf32>, tensor<1xf32>)
 ```
 
-Definition 29.5 as two signatures. The separate forward returns **seven** values for a model with one output: the result, plus six saved tensors. The backward takes **thirteen** arguments: one cotangent plus twelve saved. The joint function takes six and returns six, and nothing is saved anywhere because nothing crosses a boundary.
+Definition 29.5 as two signatures. The separate forward returns **seven** values for a model with one output: the result, plus six saved tensors. The backward takes **thirteen** arguments. The joint function takes six and returns six, and nothing is saved anywhere because nothing crosses a boundary.
+
+**Six against twelve does not add up until you count what `S` contains, so count it.** The natural reading of Definition 29.5 is that `F'` returns exactly the set `B` consumes, and the two numbers should therefore match. They do not, because `F'` returns only the part of `S` that the forward pass *computed*. Reading the shapes off the two signatures above:
+
+| The backward's twelve non-cotangent arguments | Count | Where they come from |
+|---|---:|---|
+| `2x2`, `8x2`, `8`, `1x8`, `1` | 5 | the **forward function's own parameters** — the input and the four weights. The caller already holds them, so `F'` has no reason to hand them back |
+| `2x8` ×4, `8x1` | 5 | intermediates `F'` returned |
+| `2x1` | 1 | the sixth returned value, another intermediate |
+| `2x1` | 1 | the forward **output**, which `F'` returns as its first result anyway |
+
+Five plus six plus one is twelve, and `F'`'s seven results are the one output plus the six intermediates. So the precise statement is: **`S` is everything the backward reads that the forward pass had, and `F'` returns only the members of `S` that did not already exist before the call.** The parameters travel by the caller passing them twice; nothing about that is visible in either signature, which is why the two counts look like they disagree.
 
 Both produce the same gradients to the last bit, which is the useful invariant to know: **mode is a packaging choice, not a numerical one**.
 

@@ -20,27 +20,44 @@ Draw the program left to right as time and memory bottom to top. Each buffer is 
 
 A layout is valid when no two rectangles overlap. The arena is as tall as the tallest point of the stack. The job is to slide the rectangles so the whole thing is as short as possible.
 
+```
+  bytes
+    ^
+ 8192|                                     the arena's height
+    -|-----------------------------------  <- max over columns
+ 4096|  +--------+       +----------+
+     |  | buf_4  |       |  buf_13  |      buf_4 and buf_13: disjoint
+     |  +--------+       +----------+      intervals, same offset
+    0|  +----------------+  +----------------+
+     |  |     buf_8      |  |    buf_18      |   likewise, at offset 0
+     |  +----------------+  +----------------+
+     +-----------------------------------------> time (statement index)
+        0        1        2        3
+```
+
+A rectangle's **width is fixed** — it is the live interval, and only Chapter 52 can change it. A rectangle may only slide **up and down**, which is choosing an offset. A layout is valid when no two rectangles overlap, and the arena is as tall as the tallest column.
+
 This is a picture worth holding because it makes both the easy fact and the hard fact obvious. The easy fact: the arena can never be shorter than the tallest *column* — at the widest moment of the program, every live buffer needs its own bytes, and they are stacked. The hard fact: getting down to that height is not always possible, because rectangles that would fill a hole may be the wrong width for it, and choosing well for one buffer forecloses choices for another.
 
 ## 50.3 Theory
 
-> **Definition 50.1 (Assignment).** An *assignment* maps each buffer `b` to an offset `off(b) ≥ 0`, occupying bytes `[off(b), off(b) + size(b))`. Its *height* is `max_b (off(b) + size(b))`.
+> **Definition 50.1 (Assignment).** **(stated here)** An *assignment* maps each buffer `b` to an offset `off(b) ≥ 0`, occupying bytes `[off(b), off(b) + size(b))`. Its *height* is `max_b (off(b) + size(b))`.
 
-> **Definition 50.2 (Valid assignment).** An assignment is *valid* if for every pair of interfering buffers `a` and `b` (Definition 49.2), their byte ranges are disjoint.
+> **Definition 50.2 (Valid assignment).** **(stated here)** An assignment is *valid* if for every pair of interfering buffers `a` and `b` (Definition 49.2), their byte ranges are disjoint.
 
 Validity is exactly the condition Theorem 49.3 needs, read backwards: buffers that do not interfere are *permitted* to overlap in bytes, and buffers that do interfere are *required* not to.
 
-> **Theorem 50.3 (Width is a lower bound).** For any valid assignment, height ≥ `max_i Σ{ size(b) : i ∈ interval(b) }` — the peak of Definition 49.5.
+> **Theorem 50.3 (Peak is a lower bound).** **(stated here)** For any valid assignment, height ≥ `max_i Σ{ size(b) : i ∈ interval(b) }` — the peak of Definition 49.5.
 >
 > *Proof.* Fix an index `i` achieving the maximum, and let `L` be the buffers live at `i`. Any two members of `L` interfere, since both intervals contain `i`, so by Definition 50.2 their byte ranges are pairwise disjoint. A collection of pairwise disjoint intervals of the real line contained in `[0, height)` has total length at most `height`, so `Σ_{b ∈ L} size(b) ≤ height`. ∎
 
 That bound is what the lab measures against. It is not always achievable.
 
-> **Theorem 50.4 (The problem is NP-hard) — (classical)** *(Garey and Johnson, 1979, problem SR2)*. Deciding whether a set of intervals with sizes admits a valid assignment of height at most `k` is NP-complete. It is the **dynamic storage allocation** problem.
+> **Theorem 50.4 (Dynamic storage allocation is NP-hard; Garey and Johnson, 1979, problem SR2).** **(classical)** Deciding whether a set of intervals with sizes admits a valid assignment of height at most `k` is NP-complete. It is the **dynamic storage allocation** problem.
 
 So a compiler does not solve it. It runs a heuristic and accepts a gap, and the interesting question becomes which heuristic and how large a gap. The standard answer, and the one used here, is to place the big rectangles first.
 
-> **Proposition 50.5 (Greedy placement is valid, stated here).** Process buffers in any order. For each, compute the set of byte ranges occupied by already-placed buffers that interfere with it, and choose an aligned offset whose range meets none of them. The result is a valid assignment, and such an offset always exists.
+> **Proposition 50.5 (Greedy placement is valid).** **(stated here)** Process buffers in any order. For each, compute the set of byte ranges occupied by already-placed buffers that interfere with it, and choose an aligned offset whose range meets none of them. The result is a valid assignment, and such an offset always exists.
 >
 > *Proof.* Validity is maintained as an invariant: each buffer is placed disjointly from every interfering buffer already placed, and interference is symmetric, so no later placement can violate an earlier pair. Existence: the occupied ranges are finite in number and bounded above, so the aligned offset at the first multiple of the alignment at or beyond the largest occupied end is always available. ∎
 
@@ -48,7 +65,7 @@ Note what Proposition 50.5 does *not* claim. It says the greedy is correct, not 
 
 There is one more choice once the order is fixed — which hole to use.
 
-> **Definition 50.6 (First-fit and best-fit).** Given the interfering occupied ranges sorted by offset, *first-fit* places the buffer in the lowest gap large enough to hold it; *best-fit* places it in the smallest such gap.
+> **Definition 50.6 (First-fit and best-fit).** **(classical)** Given the interfering occupied ranges sorted by offset, *first-fit* places the buffer in the lowest gap large enough to hold it; *best-fit* places it in the smallest such gap.
 
 Neither dominates the other. First-fit keeps allocations low and dense, which tends to leave one large hole at the top; best-fit preserves large holes for large buffers at the cost of leaving many small unusable ones. Which wins depends on the size distribution, and for the programs this compiler produces the lab finds they usually agree.
 
@@ -192,9 +209,9 @@ Which is the claim Theorem 49.3 and Definition 50.2 exist to support, checked ra
 ## 50.6 Traps and limits
 
 - **A zero-size buffer is skipped entirely and has no assignment.** [`buffer_assignment.ts:185`](../../../src/compiler/passes/memory/buffer_assignment.ts) `continue`s on `size === 0`, so `getOffset` later returns `-1` for it ([`buffer_assignment.ts:244`](../../../src/compiler/passes/memory/buffer_assignment.ts)) — the same sentinel `numel()` uses for "unknown" (Chapter 10 §10.7). A caller that does not distinguish "not placed" from "placed at −1" has two ways to be wrong and no type to stop it.
-- **Every dynamically-sized buffer is assigned offset 0.** [`buffer_assignment.ts:186`](../../../src/compiler/passes/memory/buffer_assignment.ts) handles `size < 0` by recording `{ offset: 0, size: 0, isDynamic: true }` and moving on. Two dynamic buffers therefore carry the same offset with no interference check between them, because the interference sweep is skipped for both. Nothing downstream reads those offsets as addresses today — `_assignPoolOffsets` explicitly excludes `isDynamic` buffers from the pool ([`memory_planning.ts:162`](../../../src/compiler/passes/memory/memory_planning.ts)) — so the value is inert rather than wrong, and it is inert by the grace of one filter in a different file.
+- **Every dynamically-sized buffer is assigned offset 0.** [`buffer_assignment.ts:186`](../../../src/compiler/passes/memory/buffer_assignment.ts) handles `size < 0` by recording `{ offset: 0, size: 0, isDynamic: true }` and moving on. Two dynamic buffers therefore carry the same offset with no interference check between them, because the interference sweep is skipped for both. Nothing downstream reads those offsets as addresses today — `_assignPoolOffsets` explicitly excludes `isDynamic` buffers from the pool ([`memory_planning.ts:169`](../../../src/compiler/passes/memory/memory_planning.ts)) — so the value is inert rather than wrong, and it is inert by the grace of one filter in a different file.
 - **The interference sweep is linear in everything placed, not in what interferes.** [`buffer_assignment.ts:226`](../../../src/compiler/passes/memory/buffer_assignment.ts) walks all of `placed` for the scope and filters, so assigning `n` buffers costs `Θ(n²)` comparisons. For the buffer counts a lowered `PrimFunc` produces — tens, occasionally hundreds — that is nothing, and it is the reason no interval tree is warranted. It is worth knowing before pointing this allocator at a program with a hundred thousand temporaries.
-- **The in-place fast path depends on the sort order and fails silently.** [`buffer_assignment.ts:169`](../../../src/compiler/passes/memory/buffer_assignment.ts) gives an in-place destination its source's offset — but only `if (srcAssignment)`, that is, only if the source has already been placed. The order is size-descending, and an in-place pair has equal sizes by construction (Chapter 51), so the tie-break on `firstUse` decides it, and a source used *later* than its destination is placed later. When that happens the `if` falls through and the destination is allocated its own bytes, with no diagnostic. The in-place is silently downgraded to an ordinary allocation.
+- **The in-place fast path is guarded against an ordering that cannot arise.** [`buffer_assignment.ts:169`](../../../src/compiler/passes/memory/buffer_assignment.ts) gives an in-place destination its source's offset — but only `if (srcAssignment)`, that is, only if the source has already been placed, and if it has not, the destination is silently allocated its own bytes instead. That fallback is unreachable as the passes are wired: a candidate requires `last(S) ≤ first(D)` (Chapter 51), hence `first(S) ≤ first(D)`, and an in-place pair has equal sizes by construction, so the size-descending sort falls through to the `firstUse` tie-break and places the source first — the remaining tie, `first(S) = first(D)`, is decided by the array order, which is first-touch order, and a block's reads are touched before its writes. The `if` is therefore defensive rather than live, and it is worth knowing which: it costs nothing today and would begin to fire silently if either the candidate condition or the sort key changed.
 - **`peakMemory()` sums pools that are never live simultaneously in the same address space.** [`buffer_assignment.ts:253`](../../../src/compiler/passes/memory/buffer_assignment.ts). On a GPU target, adding global, shared and local peaks produces a number that describes no physical resource. Read the per-scope figure instead; the summed one is meaningful only where there is one pool.
 - **Height is minimized, fragmentation is not measured.** The allocator reports the top of the arena and nothing about the holes below it. A layout with 40% of its bytes stranded in unusable gaps and one with none report the same peak if their heights match, and nothing in the trace distinguishes them.
 

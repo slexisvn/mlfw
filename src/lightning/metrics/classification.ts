@@ -1,5 +1,5 @@
 import { Metric } from './metric.js';
-import type { NumericTypedArray } from '../../tensor/types/dtype.js';
+import { argmaxRow } from './row_ops.js';
 import type { AverageMode, ClassificationTask, TensorLike } from '../types.js';
 
 type ClassificationOptions = {
@@ -166,15 +166,6 @@ function updateConfusionCounters(
   }
 }
 
-function argmaxRow(data: NumericTypedArray, row: number, cols: number): number {
-  let best = 0;
-  let bestVal = data[row * cols];
-  for (let j = 1; j < cols; j++) {
-    const v = data[row * cols + j];
-    if (v > bestVal) { bestVal = v; best = j; }
-  }
-  return best;
-}
 
 function computePrecisionPerClass(tp: Int32Array, fp: Int32Array, numClasses: number): Float64Array {
   const result = new Float64Array(numClasses);

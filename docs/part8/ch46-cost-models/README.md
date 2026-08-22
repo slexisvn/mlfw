@@ -39,15 +39,15 @@ The second intuition is about what a feature vector is *for*. A feature is a hyp
 
 ## 46.3 Theory
 
-> **Definition 46.1 (Feature map, stated here).** A *feature map* is a function `φ : PrimFunc → ℝ^d`. It is *discriminating on a space `P`* if `φ` is non-constant on `{ program(p) : p ∈ P }`.
+> **Definition 46.1 (Feature map).** **(stated here)** A *feature map* is a function `φ : PrimFunc → ℝ^d`. It is *discriminating on a space `P`* if `φ` is non-constant on `{ program(p) : p ∈ P }`.
 
-> **Definition 46.2 (Cost model, stated here).** A *cost model* is a function `ĉ : PrimFunc → ℝ`, used by the search only through comparisons: the search computes `argmax`, sorts by `ĉ`, and keeps a running maximum. Higher is better by convention, so a model fitted to measured time predicts its negation.
+> **Definition 46.2 (Cost model).** **(stated here)** A *cost model* is a function `ĉ : PrimFunc → ℝ`, used by the search only through comparisons: the search computes `argmax`, sorts by `ĉ`, and keeps a running maximum. Higher is better by convention, so a model fitted to measured time predicts its negation.
 
-> **Theorem 46.3 (Only the induced order matters, stated here).** Let `g : ℝ → ℝ` be strictly increasing and let `ĉ' = g ∘ ĉ`. Then a search that consumes `ĉ` only through comparisons visits the same candidates, in the same order, and returns the same result under `ĉ'` as under `ĉ`.
+> **Theorem 46.3 (Only the induced order matters).** **(stated here)** Let `g : ℝ → ℝ` be strictly increasing and let `ĉ' = g ∘ ĉ`. Then a search that consumes `ĉ` only through comparisons visits the same candidates, in the same order, and returns the same result under `ĉ'` as under `ĉ`.
 
 *Proof.* By inspection of the three places a score is consumed. `scored.sort((a,b) => b.score − a.score)` ([`search.ts:134`](../../../src/compiler/autotune/search.ts)) and the final sort at [`search.ts:164`](../../../src/compiler/autotune/search.ts) depend only on the sign of a difference, which `g` preserves; `_consider` ([`session.ts:235`](../../../src/compiler/autotune/session.ts)) is `rec.measuredScore > this._best.measuredScore`, likewise. The remaining reads of the score — the memo key ([`search.ts:117`](../../../src/compiler/autotune/search.ts)), the elite count, the mutation draws — do not involve it. The sorts are stable, so ties break identically. ∎
 
-> **Corollary 46.4 (Absolute error is not identifiable from search behaviour, stated here).** For any `ĉ` and any `M > 0` there is a `ĉ'` inducing the same search whose mean squared error exceeds `M`. Hence no statement of the form "the model's error is `E`" constrains what the search will do, and no observation of the search bounds the model's error.
+> **Corollary 46.4 (Absolute error is not identifiable from search behaviour).** **(stated here)** For any `ĉ` and any `M > 0` there is a `ĉ'` inducing the same search whose mean squared error exceeds `M`. Hence no statement of the form "the model's error is `E`" constrains what the search will do, and no observation of the search bounds the model's error.
 
 *Proof.* Let `r_i = ĉ(x_i) − y_i` be the residuals and take `g(x) = x + c`, strictly increasing for every `c`, so Theorem 46.3 applies. Then `MSE(c) = mean((r_i + c)²) = mean(r²) + 2c·mean(r) + c²`, a quadratic in `c` with positive leading coefficient; it tends to infinity with `c`, so some `c` puts it above `M`. ∎
 
@@ -59,7 +59,7 @@ Corollary 46.4 says a regression metric cannot *prove* anything about search qua
 
 **The converse is not true either, and it is worth stating because the chapter's rhetoric could carry a reader past it.** "Error and ranking are unrelated" is too strong in the other direction: *small enough* error does constrain ranking, and the bound is elementary.
 
-> **Proposition 46.6a (Small error does bound regret, stated here).** Let the true costs be `y₁,…,yₙ` with optimum `y*` and let `δ = min{ y_i − y* : y_i > y* }` be the margin between the best candidate and the next distinct one. If every residual satisfies `|ĉ(x_i) − y_i| < δ/2`, the model selects an optimal candidate and its regret is zero.
+> **Proposition 46.6a (Small error does bound regret).** **(classical)** Let the true costs be `y₁,…,yₙ` with optimum `y*` and let `δ = min{ y_i − y* : y_i > y* }` be the margin between the best candidate and the next distinct one. If every residual satisfies `|ĉ(x_i) − y_i| < δ/2`, the model selects an optimal candidate and its regret is zero.
 >
 > *Proof.* For an optimal `p*` and any `p` with `y_p ≥ y* + δ`, we have `ĉ(p*) < y* + δ/2 ≤ y_p − δ/2 < ĉ(p)`. So no suboptimal candidate is ranked above an optimal one. ∎
 
@@ -74,7 +74,7 @@ What survives is the practical claim, which §46.6 also measures: on real data a
 
 Now the chapter's sharpest statement, which is about this compiler rather than about cost models in general.
 
-> **Proposition 46.6 (The analytic model is constant on the multi-level tiling space, stated here).** Let `B` be a block with `s` spatial and `r` reduction axes of constant extent, tiled by `CPU_TILING`, and let `p, q` be any two points of the `mlt_cpu` schedule space. Then `AnalyticalCostModel.score(program(p)) = AnalyticalCostModel.score(program(q))` on a CPU target.
+> **Proposition 46.6 (The analytic model is constant on the multi-level tiling space).** **(invariant)** Let `B` be a block with `s` spatial and `r` reduction axes of constant extent, tiled by `CPU_TILING`, and let `p, q` be any two points of the `mlt_cpu` schedule space. Then `AnalyticalCostModel.score(program(p)) = AnalyticalCostModel.score(program(q))` on a CPU target.
 
 *Proof.* The score is a fixed linear combination of seven terms ([`cost_model.ts:87`](../../../src/compiler/autotune/cost_model.ts)) that on a CPU target read exactly ten features: `numLoops`, `numParallelLoops`, `numVectorizedLoops`, `numSerialLoops`, `innermostExtent`, `strideOneAccesses`, `nonStrideOneAccesses`, `arithmeticIntensity`, `numMathOps`, `numExternCalls`. Take each in turn.
 
@@ -86,7 +86,7 @@ Finally `innermostExtent` is assigned on every `ForNode` visit ([`features.ts:26
 
 Two hypotheses in that proof deserve to be named, because they are what a fix would have to change. The first is `L_R = 1`: with two reduction levels `innermostExtent` would vary. The second is that the walk's last `ForNode` is the innermost one, which is an accident of the traversal rather than a stated intent — the feature is named `innermostExtent` and is used by `_scoreVectorization` as if it were the extent of the *vectorised* loop.
 
-> **Proposition 46.7 (The statement aggregation is max-dominated, stated here).** `aggregateStatements` ([`cost_model.ts:20`](../../../src/compiler/autotune/cost_model.ts)) reduces a function's statement vectors component-wise: by maximum for the seven features in `MAX_FEATURE_NAMES`, by mean for `arithmeticIntensity`, by sum otherwise. Consequently, if a schedule change alters a max-aggregated feature only in a statement that is not the arg-max, the aggregated row is unchanged and the learned model cannot see the change.
+> **Proposition 46.7 (The statement aggregation is max-dominated).** **(invariant)** `aggregateStatements` ([`cost_model.ts:20`](../../../src/compiler/autotune/cost_model.ts)) reduces a function's statement vectors component-wise: by maximum for the seven features in `MAX_FEATURE_NAMES`, by mean for `arithmeticIntensity`, by sum otherwise. Consequently, if a schedule change alters a max-aggregated feature only in a statement that is not the arg-max, the aggregated row is unchanged and the learned model cannot see the change.
 
 *Proof.* Immediate from `max` being insensitive to changes below the maximum. ∎
 
@@ -351,7 +351,7 @@ That "if" is an assumption of **additive separability**, and it is worth naming 
 
 None of these makes the pairing useless — it is the pragmatic choice, and measuring one block in isolation would require compiling it in isolation, which changes what is being measured in a different way. What it means is that the labels carry a *candidate-dependent* offset rather than a constant one, so the residuals the model is fitted against contain structure that has nothing to do with the features it sees. Corollary 46.4 already said error does not constrain ranking; this is the mechanism by which the error is not even i.i.d. noise.
 
-What is affected beyond one round is the model itself, since samples from different blocks share one `LearnedCostModel` ([`autotuner.ts:158`](../../../src/compiler/autotune/autotuner.ts)) and are fitted against labels that all include one another's time. What is affected is the model itself, since samples from different blocks share one `LearnedCostModel` ([`autotuner.ts:158`](../../../src/compiler/autotune/autotuner.ts)) and are fitted against labels that all include one another's time.
+What is affected beyond one round is the model itself, since samples from different blocks share one `LearnedCostModel` ([`autotuner.ts:158`](../../../src/compiler/autotune/autotuner.ts)) and are fitted against labels that all include one another's time.
 
 Last, the handover:
 

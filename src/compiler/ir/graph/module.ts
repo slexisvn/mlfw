@@ -1,40 +1,8 @@
 import { cloneGraphFunction } from './function.js';
+import { IRModule } from '../module_base.js';
 import type { GraphFunction } from './function.js';
 
-export class GraphModule {
-  name: string;
-  private _functions: Map<string, GraphFunction>;
-  _version: number;
-
-  constructor(name = 'module') {
-    this.name = name;
-    this._functions = new Map();
-    this._version = 0;
-  }
-
-  get version(): number { return this._version; }
-
-  addFunction(func: GraphFunction): GraphFunction {
-    this._functions.set(func.name, func);
-    func._module = this;
-    this._version++;
-    return func;
-  }
-
-  getFunction(name: string): GraphFunction | null {
-    return this._functions.get(name) || null;
-  }
-
-  hasFunction(name: string): boolean {
-    return this._functions.has(name);
-  }
-
-  removeFunction(name: string): boolean {
-    const removed = this._functions.delete(name);
-    if (removed) this._version++;
-    return removed;
-  }
-
+export class GraphModule extends IRModule<GraphFunction> {
   restoreFrom(snapshot: GraphModule): void {
     this._functions.clear();
     for (const func of snapshot) {
@@ -42,20 +10,6 @@ export class GraphModule {
       func._module = this;
     }
     this._version++;
-  }
-
-  get functionCount(): number { return this._functions.size; }
-
-  functionNames(): string[] {
-    return [...this._functions.keys()];
-  }
-
-  *functions(): Generator<GraphFunction, void, undefined> {
-    yield* this._functions.values();
-  }
-
-  *[Symbol.iterator](): Generator<GraphFunction, void, undefined> {
-    yield* this._functions.values();
   }
 
   verify(): string[] {

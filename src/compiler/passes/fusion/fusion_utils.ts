@@ -73,8 +73,7 @@ export function materializeFusionGroup(group: FusionGroup, fallbackKind: string)
   const sortedOps = topoSortByOperands(group.ops, (op: Operation) => group.hasOp(op), 'null');
   if (sortedOps === null || sortedOps.length === 0) return null;
 
-  group._inputValues = null;
-  group._outputValues = null;
+  group.invalidateIO();
   const inputValues = group.getInputValues();
   const outputValues = group.getOutputValues();
 

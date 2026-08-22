@@ -2,7 +2,7 @@
 
 A pass is a transformation that reports on itself. A pass manager is the thing that decides which ones run, in what order, how many times, and what happens when one of them is wrong.
 
-It is 256 lines. It is also the single most useful piece of infrastructure in the compiler for the specific job of *finding out why the answer is wrong*, and this chapter is mostly about why.
+It is 260 lines. It is also the single most useful piece of infrastructure in the compiler for the specific job of *finding out why the answer is wrong*, and this chapter is mostly about why.
 
 ## 15.1 The problem: three questions a list cannot answer
 
@@ -22,13 +22,13 @@ The third is worth stating as a slogan, because it is the difference between a d
 
 ## 15.3 Theory
 
-> **Definition 15.1 (Pass pipeline).** A *pipeline* is a finite sequence of entries, where each entry is either a pass or a *fixed-point group*: a finite list of passes together with an iteration bound.
+> **Definition 15.1 (Pass pipeline).** **(stated here)** A *pipeline* is a finite sequence of entries, where each entry is either a pass or a *fixed-point group*: a finite list of passes together with an iteration bound.
 
-> **Definition 15.2 (Fixed-point group).** Running a group `G = (P₁ … Pₙ, k)` on IR `m` means: repeat up to `k` times the sequence `P₁ … Pₙ`, stopping early after any full round in which every `Pᵢ` reported UNCHANGED.
+> **Definition 15.2 (Fixed-point group).** **(stated here)** Running a group `G = (P₁ … Pₙ, k)` on IR `m` means: repeat up to `k` times the sequence `P₁ … Pₙ`, stopping early after any full round in which every `Pᵢ` reported UNCHANGED.
 
 The stopping condition is the interesting half. "Every pass reported UNCHANGED for a whole round" is exactly the statement that the round was a no-op, so running the round again would also be a no-op — a fixed point of the composite transformation `Pₙ ∘ … ∘ P₁`. Hence the name.
 
-> **Lemma 15.3 (The cost of knowing you are done, stated here).** A group whose composite reaches a fixed point after `k` productive rounds performs `k + 1` rounds, provided `k + 1 ≤ maxIterations`.
+> **Lemma 15.3 (The cost of knowing you are done).** **(stated here)** A group whose composite reaches a fixed point after `k` productive rounds performs `k + 1` rounds, provided `k + 1 ≤ maxIterations`.
 
 *Proof.* Rounds 1 through `k` each contain at least one CHANGED report, so none of them triggers the early stop. Round `k + 1` reports UNCHANGED throughout and stops. ∎
 
@@ -36,13 +36,13 @@ That extra round is not waste; it is the evidence. There is no way to know a fix
 
 Now the question the implementation actually has to answer:
 
-> **Theorem 15.4 (Termination).** A fixed-point group terminates after at most `maxIterations` rounds, for every input, unconditionally.
+> **Theorem 15.4 (Termination).** **(invariant)** A fixed-point group terminates after at most `maxIterations` rounds, for every input, unconditionally.
 
 *Proof.* The loop is bounded by a constant. ∎
 
 That proof is deliberately anticlimactic, because the honest statement is that **the bound is the entire termination argument.** The classical alternative is available and is not used here: a rewrite system terminates if there is a well-founded order on terms that every rule strictly decreases *(classical, term rewriting)*. To apply it you would need a measure `μ` on IR such that any pass reporting CHANGED strictly decreases `μ`. No such measure exists in this compiler, and the ledger from Chapter 14 shows why:
 
-> **Counterexample.** `canonicalize: CHANGED 10 -> 10`. Operation count is not decreased by a CHANGED report, so operation count is not the measure. Neither is any obvious refinement: canonicalization rewrote an attribute, fusion *adds* an operation (the `fusion` wrapper) while removing others, and rematerialization deliberately increases the operation count to lower peak memory.
+> **Counterexample 15.5.** `canonicalize: CHANGED 10 -> 10`. Operation count is not decreased by a CHANGED report, so operation count is not the measure. Neither is any obvious refinement: canonicalization rewrote an attribute, fusion *adds* an operation (the `fusion` wrapper) while removing others, and rematerialization deliberately increases the operation count to lower peak memory.
 
 So the cap is not a safety net around a proof. It is the proof — and it proves *termination*, which is a strictly weaker claim than *convergence*. Keep the two apart:
 
@@ -102,7 +102,7 @@ Definition 15.2, line for line. Note the last two lines before the return: falli
   passes.push(new CallInlinerPass());
   passes.push(new DecompositionPass(target as unknown as null));
   passes.push(new FixedPointGroup('canonicalize', [
-    new CanonicalizePass(),
+    new CanonicalizePass({ fastMath: config.optimization.fastMath }),
     new AlgebraicSimplificationPass({ fastMath: config.optimization.fastMath }),
     new ConstantFoldPass(),
     new CSEPass(),
@@ -262,7 +262,7 @@ export const VerifyLevel = Object.freeze({
 
 **The default is `EACH_PASS`** ([`invariant_check.ts:16`](../../../src/compiler/pipeline/invariant_check.ts): `value ?? VerifyLevel.EACH_PASS`). That is an unusual choice and a deliberate one — most compilers make per-pass verification a debug build or a flag. Enabling it by default means the first report of a miscompile arrives with a pass name attached. The price is measured next.
 
-> **Read the name as `EACH_CHANGING_PASS`.** **(invariant — narrower than it sounds.)** The setting does not verify after every pass, and the guard is not in `_verifyAfter` at all — it is at the call site ([`pass_manager.ts:134`](../../../src/compiler/passes/pass_manager.ts)):
+> **Read the name as `EACH_CHANGING_PASS`.** **(invariant)** The setting is narrower than its name. It does not verify after every pass, and the guard is not in `_verifyAfter` at all — it is at the call site ([`pass_manager.ts:134`](../../../src/compiler/passes/pass_manager.ts)):
 >
 > ```ts
 >   if (result === PassResult.CHANGED) {
@@ -274,7 +274,7 @@ export const VerifyLevel = Object.freeze({
 >
 > `_verifyAfter` is reached only from inside that branch. A pass reporting UNCHANGED is taken at its word and skipped entirely; look back at Chapter 14's ledger and count how many of the fifteen runs that is — eleven.
 
-This is Chapter 14's contract being *spent* rather than merely declared, and it is the right optimization as long as the contract holds: verifying a module no pass touched is pure cost. But it means the two mechanisms that would catch a broken pass — verification and analysis invalidation — are keyed off the same self-report, and both fail together in exactly one case: **a pass that mutates the IR and reports UNCHANGED is never verified, so the corruption it introduced is first noticed after some later pass, and attributed to that one.** Chapter 14 §14.2 traces the sequence. If you are hunting a miscompile and `each-pass` blames a pass whose code cannot possibly have done it, the question to ask is which pass ran before it and what it reported.
+This is Chapter 14's contract being *spent* rather than merely declared, and it is the right optimization as long as the contract holds: verifying a module no pass touched is pure cost. But it means the two mechanisms that would catch a broken pass — verification and analysis invalidation — are keyed off the same self-report, and both fail together in exactly one case: **a pass that mutates the IR and reports UNCHANGED is never verified, so the corruption it introduced is first noticed after some later pass, and attributed to that one.** Chapter 14 §14.3 traces the sequence. If you are hunting a miscompile and `each-pass` blames a pass whose code cannot possibly have done it, the question to ask is which pass ran before it and what it reported.
 
 ## 15.7 Lab 2 — What each verification level buys
 
@@ -317,7 +317,7 @@ Then the price. The second half of the lab times a 49-operation graph (a 25-laye
   each-pass     6.81 ms  1.27x   6.26-7.07      6.10     8.46
 ```
 
-Per-pass verification costs 20–30% depending on the run, and that part reproduces. The boundary row does not, and **the table says so rather than leaving you to find out**: its interquartile range, 5.59–6.26 ms, overlaps `off`'s 5.29–5.84 ms, so the 1.10× is not distinguishable from noise on this workload. That is unsurprising once you count the work — three module traversals for the whole compile against fifteen for `each-pass` — but a bare ratio would have presented 1.10× and 1.27× as two facts of the same kind, and only one of them is.
+Per-pass verification costs 20–30% depending on the run, and that part reproduces. The boundary row does not, and **the table says so rather than leaving you to find out**: its interquartile range, 5.66–6.13 ms, overlaps `off`'s 5.13–5.88 ms, so the 1.10× is not distinguishable from noise on this workload. That is unsurprising once you count the work — three module traversals for the whole compile against fifteen for `each-pass` — but a bare ratio would have presented 1.10× and 1.27× as two facts of the same kind, and only one of them is.
 
 ### On choosing a statistic
 

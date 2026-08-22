@@ -39,7 +39,6 @@ export class ModelCheckpoint extends Callback {
   private _dirpath: string;
   private _filename: string;
   private _monitor: string | null;
-  private _mode: CheckpointMode;
   private _saveTopK: number;
   private _saveLast: boolean;
   private _everyNEpochs: number;
@@ -62,7 +61,6 @@ export class ModelCheckpoint extends Callback {
     this._dirpath = dirpath;
     this._filename = filename;
     this._monitor = monitor;
-    this._mode = mode;
     this._saveTopK = saveTopK;
     this._saveLast = saveLast;
     this._everyNEpochs = everyNEpochs;

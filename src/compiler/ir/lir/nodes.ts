@@ -1,3 +1,4 @@
+import { WASM_NATIVE_OPS } from '../../../util/dtype_map.js';
 import { isDtypeFloat } from '../../../util/dtype_map.js';
 import { TensorNode } from '../tensor/nodes.js';
 import { withFuncAttrs } from '../func_attrs.js';
@@ -162,8 +163,6 @@ export class LIRMetadata {
     this.paramBuffers = new Set();
   }
 }
-
-const WASM_NATIVE_OPS = new Set(['sqrt', 'abs', 'ceil', 'floor', 'min', 'max']);
 
 const DTYPE_NORMALIZE: Readonly<Record<string, string>> = {
   'int32': 'i32', 'index': 'i32', 'i32': 'i32',

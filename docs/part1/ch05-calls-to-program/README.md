@@ -64,7 +64,7 @@ Every tensor carries a set of *dispatch keys* that decide which implementation a
 
 The consequence is that **the model's own code runs unmodified**. Loops loop, methods dispatch, `this.l1` is looked up exactly as always. Nothing knows it is being watched, except the tensors.
 
-> **Definition 5.1 (Trace).** A *trace* of a function *f* at input *x* is the sequence of tensor operations that *f* performs when executed on *x*, recorded as a graph with the data dependencies between them.
+> **Definition 5.1 (Trace).** **(stated here)** A *trace* of a function *f* at input *x* is the sequence of tensor operations that *f* performs when executed on *x*, recorded as a graph with the data dependencies between them.
 
 That definition contains the whole problem, and it is sitting in plain sight: **at input *x***. A trace describes what happened for one input. Whether it describes what would happen for another is the subject of §5.5.
 
@@ -182,11 +182,11 @@ Understand why it fails at all. `t.sum()` returns a symbolic tensor — a claim 
 
 That message is worth dwelling on as a piece of design, because a compiler's diagnostics are part of its user interface and this one does three separate jobs. It names **what** was refused and on which tensor. It gives the **mechanism** rather than the symptom: tracing records instead of computing. And it lists the **remedies** in the order worth trying — express the decision as tensor arithmetic with `where`; move the loop into a region-carrying operation such as `scan` (§5.7); or, if what you wanted was a dimension rather than an element, trace with `dynamic_shapes` so the size stays symbolic (§5.6).
 
-All three remedies are concepts from this chapter. A diagnostic that teaches the model instead of merely reporting a failure is worth what it costs to write: the alternative, and the message this one replaced, is a null-dereference stack trace that names nothing the reader can act on.
+All three remedies are concepts from this chapter. A diagnostic that teaches the model instead of merely reporting a failure is worth what it costs to write. The alternative — what you get when nobody writes one — is a null-dereference stack trace from inside the tracer, naming a field the reader has never heard of and nothing they can act on.
 
 The underlying limitation, however, is not a bug — it is inherent, and every tracing framework has it. Let us state it precisely.
 
-> **Definition 5.2 (Control-flow path).** The *control-flow path* taken by *f* at input *x* is the sequence of host-language branches evaluated during execution of *f(x)*.
+> **Definition 5.2 (Control-flow path).** **(stated here)** The *control-flow path* taken by *f* at input *x* is the sequence of host-language branches evaluated during execution of *f(x)*.
 
 > **Theorem 5.3 (Trace validity).** **(stated here)** Let *G* be a trace of *f* at *x*, taken in host environment *E* — everything *f* reads without receiving it as an argument. Then *G* computes *f(y)* for every input *y* that (i) takes the same control-flow path as *x* and (ii) has the same shapes and dtypes as *x*, provided (iii) *f* is a function of its arguments, of the tensors *G* lifts to parameters, and of *E* alone, and the non-lifted part of *E* is unchanged since the trace.
 >
@@ -269,7 +269,7 @@ Four distinct batch sizes, four compilations, and returning to a shape already s
 
 > **Definition 5.5 (Guard).** **(stated here)** A *guard* is a predicate over the inputs, checked before a compiled artifact is reused, that is sufficient to establish the preconditions under which the artifact was proven correct.
 
-Guards *would* make the specialization sound: if the guard establishes the preconditions, Theorem 5.3 applies and the compiled program is correct; if it fails, the framework compiles a new one rather than returning a wrong answer. Chapter 62 examines what the guard set contains, and what happens when it grows large.
+Read that definition as a conditional, because the conditional is where the whole design either holds or leaks. *If* a guard establishes the preconditions, then Theorem 5.3 applies, the compiled program is correct, and a guard failure costs a recompilation rather than a wrong answer. The guards this framework records establish condition (ii) and nothing else: shapes and dtypes are covered completely, the control-flow path is covered only when the branch happens to read a tensor, and the environment is not covered at all. So the specialization on shapes really is sound; the artifact as a whole is sound only to the extent that you have upheld conditions (i) and (iii) yourself. §5.9 tabulates that split, and Chapter 62 examines what the guard set contains once it grows large.
 
 Dtypes are guarded too, by a second key rather than by the same mechanism. Each cache entry records the dtype and device it was traced from, and a lookup skips any entry whose signature does not match before evaluating a single shape predicate ([`compile.ts:442`](../../../src/tracing/compile.ts)). A miss compiles a new entry rather than returning a wrong answer, so calling the same model on `f32` and then on `i32` produces two artifacts and two correct results.
 
@@ -325,7 +325,9 @@ module @traced {
 }
 ```
 
-Notice what did **not** happen: the loop body was not unrolled four times. There is one `scan` operation carrying a *region* — the indented block — that holds the body once. The block's two arguments are the current element of `xs` and the carry, and you can tell which is which from how they are used: `%5` is multiplied by 0.9, so `%5` is the carry.
+Notice what did **not** happen: the loop body was not unrolled four times. There is one `scan` operation carrying a *region* — the indented block — that holds the body once.
+
+**The block's arguments are (element of `xs`, carry) — the reverse of the JavaScript callback's `(carry, x_t)`, and this trips everyone once.** You can confirm it from the printout without trusting anyone: `%7 = mul(%5, %6)` with `%6 = 0.9`, and the source multiplies the *carry* by 0.9, so `%5` is the carry and `%4` is the element. The order is set by [`builder.ts:471`](../../../src/compiler/ir/graph/builder.ts), which lays the block out as `[...xtTypes, ...carryTypes]` to match the operand list `[...xs, ...initCarry]` position for position — the `scan` operation takes its data inputs first and its loop-carried state second, and the region mirrors the operation, not the user-facing API. The user-facing `scan(fn, initCarry, xs)` puts the carry first because that is how `jax.lax.scan` reads. Two conventions, one adapter between them, and `num_carry` / `num_xs` are the attributes that record where the split falls.
 
 This is worth pausing on, because it is the first real payoff of the IR design. A region lets one operation contain a program. The graph stays small regardless of sequence length; the body can be optimized once; and — the reason this matters most — the body can be *differentiated* once, which is what makes backpropagation through a recurrence tractable (Chapter 31).
 

@@ -60,13 +60,13 @@ Say that carefully, though: "forward mode needs no memory" is false, and the acc
 
 Write `f : ℝⁿ → ℝᵐ` for the function a program computes, and `J(x) ∈ ℝ^{m×n}` for its Jacobian at `x`.
 
-> **Definition 27.1 (Tangent and cotangent maps).** The *jvp* (Jacobian-vector product) of `f` at `x` is the linear map `v ↦ J(x)·v` from ℝⁿ to ℝᵐ. The *vjp* (vector-Jacobian product) is the linear map `w ↦ Jᵀ(x)·w` from ℝᵐ to ℝⁿ, usually written `w ↦ wᵀJ(x)`.
+> **Definition 27.1 (Tangent and cotangent maps).** **(classical)** The *jvp* (Jacobian-vector product) of `f` at `x` is the linear map `v ↦ J(x)·v` from ℝⁿ to ℝᵐ. The *vjp* (vector-Jacobian product) is the linear map `w ↦ Jᵀ(x)·w` from ℝᵐ to ℝⁿ, usually written `w ↦ wᵀJ(x)`.
 
 A jvp answers "if the input moves this way, how does the output move?". A vjp answers "to move the output this way, which input direction is responsible?". Neither ever forms `J`.
 
-> **Definition 27.2 (Forward and reverse mode).** *Forward mode* evaluates `f` and its jvp in one traversal of the program in dataflow order, carrying a tangent alongside every value. *Reverse mode* evaluates `f` in dataflow order, then evaluates its vjp in one traversal in reverse dataflow order, carrying a cotangent alongside every value.
+> **Definition 27.2 (Forward and reverse mode).** **(classical)** *Forward mode* evaluates `f` and its jvp in one traversal of the program in dataflow order, carrying a tangent alongside every value. *Reverse mode* evaluates `f` in dataflow order, then evaluates its vjp in one traversal in reverse dataflow order, carrying a cotangent alongside every value.
 
-> **Theorem 27.3 (Cost of the two modes).** *(Baur and Strassen, 1983; Griewank, 2008.)* Let `T` be the cost of evaluating `f`. Then:
+> **Theorem 27.3 (Cost of the two modes; Baur and Strassen, 1983; Griewank, 2008).** **(classical)** Let `T` be the cost of evaluating `f`. Then:
 > - the full Jacobian by forward mode costs `Θ(n·T)` — one sweep per input;
 > - the full Jacobian by reverse mode costs `Θ(m·T)` — one sweep per output;
 >
@@ -85,15 +85,15 @@ The `m = 1` corollary survives all four caveats intact, and it is the one traini
 
 The constant hidden in `Θ(T)` matters in practice and is not large: the backward sweep does roughly the same operations as the forward one, sometimes two per forward operation, so two to four forward passes is the usual figure. §27.5 measures it here.
 
-> **Corollary 27.4.** For a scalar loss, reverse mode obtains `∂L/∂θ` for every parameter at once. Finite differences obtain the same thing for `2n` forward passes. The ratio is `Θ(n)`.
+> **Corollary 27.4 (Why training is possible).** **(classical)** For a scalar loss, reverse mode obtains `∂L/∂θ` for every parameter at once. Finite differences obtain the same thing for `2n` forward passes. The ratio is `Θ(n)`.
 
 Two consequences of Definition 27.2 are worth pulling out, because Chapters 29 and 30 are about them.
 
-> **Definition 27.5 (The linearization point, stated here).** The vjp of an operation is a linear map that depends on the *values* its forward evaluation saw. Reverse mode must therefore have access, at the time it processes an operation, to some sufficient set of that operation's forward operands or results.
+> **Definition 27.5 (The linearization point).** **(stated here)** The vjp of an operation is a linear map that depends on the *values* its forward evaluation saw. Reverse mode must therefore have access, at the time it processes an operation, to some sufficient set of that operation's forward operands or results.
 
 That is the sentence that costs memory. Forward mode never needs to *retain* it, because it processes each operation while those values are in hand — the tangent is consumed as soon as it is produced.
 
-> **Corollary 27.6 (Reverse mode is not a rewrite of the forward pass).** The backward program is a *new* program whose inputs include values produced by the forward one. It cannot be obtained by editing the forward graph in place.
+> **Corollary 27.6 (Reverse mode is not a rewrite of the forward pass).** **(stated here)** The backward program is a *new* program whose inputs include values produced by the forward one. It cannot be obtained by editing the forward graph in place.
 
 Which is why Chapter 29 builds a second `GraphFunction` rather than a pass.
 

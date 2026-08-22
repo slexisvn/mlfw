@@ -13,7 +13,7 @@ import { FuncAttr } from '../ir/func_attrs.js';
 import type { IRNode } from '../ir/ir_visitor.js';
 import type { SketchParams } from './sketch.js';
 import type { BlockClassification } from '../schedule/rules.js';
-import type { TirNode, PrimFunc, BlockNode } from '../ir/tensor/nodes.js';
+import type { TirNode, PrimFunc } from '../ir/tensor/nodes.js';
 
 type NodeSlots = Record<string, TirNode | TirNode[] | undefined>;
 import type { ScheduleTarget } from '../schedule/gpu_matmul_schedule.js';

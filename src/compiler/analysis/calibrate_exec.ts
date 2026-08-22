@@ -4,6 +4,7 @@ import { Operation } from '../ir/graph/operation.js';
 import { TensorType, isFloatType } from '../ir/graph/types.js';
 import { topoSortByOperands } from '../ir/graph/graph_algorithms.js';
 import { CalibrationCollector } from './calibration.js';
+import { DEFAULT_QUANTIZABLE_OPS } from '../ir/graph/quantization_types.js';
 import type { Value } from '../ir/graph/value.js';
 
 export type CalibrationTarget = { isGPU?: () => boolean };
@@ -15,8 +16,6 @@ export type CalibrationOpts = Readonly<{
   mode?: string;
   compileFn?: CompileFn;
 }>;
-
-const DEFAULT_QUANTIZABLE_OPS = new Set(['dot', 'conv', 'add', 'mul', 'sub']);
 
 function activationTargets(func: GraphFunction, quantizableOps: ReadonlySet<string>): Value[] {
   const entry = func.entryBlock;

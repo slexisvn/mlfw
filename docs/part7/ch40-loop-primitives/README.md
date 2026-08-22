@@ -26,11 +26,11 @@ The picture worth holding is a rectangle of lattice points. `split` draws horizo
 
 Fix a loop `for i in [0, n)` with body `B(i)`, and let `c > 0`. **The lower bound being zero is a hypothesis, not a convenience.** A `ForNode` carries a `min` as well as an `extent` ([`nodes.ts:106`](../../../src/compiler/ir/tensor/nodes.ts)), so a loop over `[m, m + n)` is representable and `split` has to carry the offset through; §40.7 is where that hypothesis is discharged.
 
-> **Definition 40.1 (Split).** `split(i, c)` replaces the loop by
+> **Definition 40.1 (Split).** **(stated here)** `split(i, c)` replaces the loop by
 > `for i_o in [0, ⌈n/c⌉) { for i_i in [0, c) { if (i_o·c + i_i < n) B(i_o·c + i_i) } }`,
 > and omits the predicate when `c ∣ n`.
 
-> **Theorem 40.2 (Split is sound, for every extent).** For every `n ≥ 0` and `c > 0`, the split loop executes `B(v)` exactly once for each `v ∈ [0, n)` and for no other `v`. When `c ∣ n` the predicate is universally true and may be omitted.
+> **Theorem 40.2 (Split is sound, for every extent).** **(stated here)** For every `n ≥ 0` and `c > 0`, the split loop executes `B(v)` exactly once for each `v ∈ [0, n)` and for no other `v`. When `c ∣ n` the predicate is universally true and may be omitted.
 
 *Proof.* The map `(i_o, i_i) ↦ i_o·c + i_i` from `[0, ⌈n/c⌉) × [0, c)` to `[0, ⌈n/c⌉·c)` is a bijection: it is the base-`c` numeral with two digits, so surjective by construction and injective because `i_i < c` makes the low digit unique. Its image is `[0, ⌈n/c⌉·c) ⊇ [0, n)`, and the predicate `i_o·c + i_i < n` selects exactly the preimage of `[0, n)`. Each `v ∈ [0, n)` therefore has exactly one preimage and it passes the predicate; each `v ∈ [n, ⌈n/c⌉·c)` has exactly one preimage and it fails. If `c ∣ n` then `⌈n/c⌉·c = n`, the image is exactly `[0, n)`, and no `(i_o, i_i)` fails the predicate. ∎
 
@@ -38,11 +38,11 @@ Fix a loop `for i in [0, n)` with body `B(i)`, and let `c > 0`. **The lower boun
 
 The other three primitives are the same theorem in different arrangements.
 
-> **Proposition 40.4 (Fuse is sound, and needs no guard).** For adjacent loops `for o in [0, p) { for q in [0, r) { B(o, q) } }`, `fuseLoops` produces `for f in [0, p·r) { B(f div r, f mod r) }`, which executes `B(o, q)` exactly once for each pair.
+> **Proposition 40.4 (Fuse is sound, and needs no guard).** **(stated here)** For adjacent loops `for o in [0, p) { for q in [0, r) { B(o, q) } }`, `fuseLoops` produces `for f in [0, p·r) { B(f div r, f mod r) }`, which executes `B(o, q)` exactly once for each pair.
 
 *Proof.* Division with remainder again, now read as a decoding: `f ↦ (f div r, f mod r)` is the inverse of `(o, q) ↦ o·r + q`, which is a bijection `[0, p) × [0, r) → [0, p·r)` by the argument of Theorem 40.2 with `n = p·r`, where the divisibility case applies. No point of the fused space is outside the product, so no predicate is needed. ∎
 
-> **Corollary 40.5 (Fuse does not undo split, stated here).** If `c ∤ n`, then `fuseLoops(split(i, c))` yields a loop of extent `⌈n/c⌉·c > n` carrying the predicate, with body references of the form `(f div c)·c + (f mod c)`.
+> **Corollary 40.5 (Fuse does not undo split).** **(stated here)** If `c ∤ n`, then `fuseLoops(split(i, c))` yields a loop of extent `⌈n/c⌉·c > n` carrying the predicate, with body references of the form `(f div c)·c + (f mod c)`.
 
 *Proof.* Immediate: `split` produced a `⌈n/c⌉ × c` space and a predicate, and `fuse` is a bijection onto `[0, ⌈n/c⌉·c)` that rewrites `i_o` and `i_i` but deletes nothing. ∎
 
@@ -50,7 +50,7 @@ Corollary 40.5 matters because `(f div c)·c + (f mod c) = f` for every `f ≥ 0
 
 For `reorder` this chapter states only the easy half and defers the rest:
 
-> **Definition 40.6 (Reorder).** Given a chain of perfectly nested loops `L₁,…,L_k` and a permutation `π`, `reorder` produces the chain `L_{π(1)},…,L_{π(k)}` with the same innermost body.
+> **Definition 40.6 (Reorder).** **(stated here)** Given a chain of perfectly nested loops `L₁,…,L_k` and a permutation `π`, `reorder` produces the chain `L_{π(1)},…,L_{π(k)}` with the same innermost body.
 
 Reorder visits exactly the same set of iteration points, in a different order. Whether that is *sound* is Definition 38.2's question and depends on the body: Chapter 42 answers it with direction vectors. Everything up to that point — that the loops must form a chain, that no block may separate them, that a two-way conditional between them is fatal — is structural, and this chapter's `_collectReorderChain` handles it.
 

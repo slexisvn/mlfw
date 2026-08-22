@@ -56,7 +56,7 @@ function ensure(): boolean {
 export function cusolverAvailable(): boolean { return ensure(); }
 
 const JOB_ECON = 'S'.charCodeAt(0);
-const EIG_VECTOR = 1, FILL_LOWER = 0, OP_T = 1;
+const EIG_VECTOR = 1, FILL_LOWER = 0;
 
 let _handle: CudaHandle | null = null;
 function handle(): CudaHandle | null {

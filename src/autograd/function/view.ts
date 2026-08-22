@@ -1,17 +1,9 @@
 import { AutogradNode } from '../node.js';
+import { addAt } from '../../tensor/utils/typed_array.js';
 import * as ops from '../../tensor/ops/ops.js';
 import { zeros } from '../../tensor/factory/creation_ops.js';
 import { reshape, transpose, permute, unsqueeze } from '../../tensor/ops/ops.js';
-import type { NumericTypedArray } from '../../tensor/types/dtype.js';
 import type { GradInputList, GradOutputList } from '../types.js';
-
-function _addAt(data: NumericTypedArray, index: number, value: number | bigint): void {
-  if (typeof value === 'bigint') {
-    (data as BigInt64Array)[index] += value;
-  } else {
-    (data as Exclude<NumericTypedArray, BigInt64Array>)[index] += value;
-  }
-}
 
 export class ReshapeBackward extends AutogradNode {
   constructor() { super(1); }
@@ -87,7 +79,7 @@ export class SliceBackward extends AutogradNode {
         const idx = d === dim ? start + indices[d] * step : indices[d];
         oi += idx * resultStrides[d];
       }
-      _addAt(outData, oi, gData[gi]);
+      addAt(outData, oi, gData[gi]);
 
       for (let d = ndim - 1; d >= 0; d--) {
         indices[d]++;

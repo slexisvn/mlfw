@@ -30,21 +30,21 @@ And it is why the legality question changes shape. "Does this loop carry a depen
 
 ## 43.3 Theory
 
-> **Definition 43.1 (Thread binding).** Binding loop `L` with extent `n` to axis `t` replaces `L` by the assertion that the enclosing kernel is launched with at least `n` points along `t`, and that the body executes once for each, with `L`'s variable equal to the point's coordinate.
+> **Definition 43.1 (Thread binding).** **(stated here)** Binding loop `L` with extent `n` to axis `t` replaces `L` by the assertion that the enclosing kernel is launched with at least `n` points along `t`, and that the body executes once for each, with `L`'s variable equal to the point's coordinate.
 
-> **Definition 43.2 (Launch geometry).** For a `PrimFunc`, `blockDim[a]` is the maximum extent bound to `threadIdx.a` and `gridDim[a]` the maximum bound to `blockIdx.a`, each defaulting to 1.
+> **Definition 43.2 (Launch geometry).** **(stated here)** For a `PrimFunc`, `blockDim[a]` is the maximum extent bound to `threadIdx.a` and `gridDim[a]` the maximum bound to `blockIdx.a`, each defaulting to 1.
 
 Taking the *maximum* is what makes two sibling nests with different extents on the same axis launchable at all, and it is also the first place a schedule can be wrong: the smaller nest then runs on more threads than it was written for.
 
-> **Definition 43.3 (Binding signature).** For an access inside a kernel, its *binding signature* is the set of `tag:extent` pairs of the thread bindings enclosing it.
+> **Definition 43.3 (Binding signature).** **(stated here)** For an access inside a kernel, its *binding signature* is the set of `tag:extent` pairs of the thread bindings enclosing it.
 
-> **Theorem 43.4 (Cross-block RAW is unrepairable, stated here).** Let a global buffer element be written by one thread and read by another, and let those two threads be able to fall in different blocks of a grid with more than one block. Then no insertion of intra-kernel barriers makes the kernel deterministic.
+> **Theorem 43.4 (Cross-block RAW is unrepairable).** **(stated here)** Let a global buffer element be written by one thread and read by another, and let those two threads be able to fall in different blocks of a grid with more than one block. Then no insertion of intra-kernel barriers makes the kernel deterministic.
 
 *Proof sketch.* A barrier synchronises the threads of one block. The two accesses may be executed by threads of different blocks; blocks have no common synchronisation point inside a kernel launch; so the write is not ordered before the read, and both orders are permitted executions of the same program. ∎
 
 Both hypotheses are load-bearing, and neither is decidable in general — which is why the compiler tests for neither. `crossBlockRAWBuffers` ([`gpu_race.ts:239`](../../../src/compiler/analysis/gpu_race.ts)) tests something weaker and sufficient for doubt: a storage buffer with at least one store and one load whose binding signatures are not all identical. Two accesses under different signatures need not touch a common element, and need not land in different blocks — two thread-level signatures can sit inside the same block. So the pass decides "the compiler cannot prove these accesses block-local", and serialising is the conservative response to *that*, not a consequence Theorem 43.4 forces. Only the grid hypothesis is checked at all, and it is checked at the call site rather than in the analysis ([`codegen.ts:605`](../../../src/backend/cuda/codegen.ts)).
 
-> **Proposition 43.5 (Cross-thread sharing is repairable, stated here).** If a *kernel-local* buffer is written under one signature and read under another, and every access is inside one block, then promoting the buffer to shared memory and inserting a barrier after each write makes the kernel deterministic.
+> **Proposition 43.5 (Cross-thread sharing is repairable).** **(stated here)** If a *kernel-local* buffer is written under one signature and read under another, and every access is inside one block, then promoting the buffer to shared memory and inserting a barrier after each write makes the kernel deterministic.
 
 *Proof sketch.* Within a block, `__syncthreads()` orders every access before it against every access after it, and shared memory is visible to all threads of the block. ∎
 
@@ -57,13 +57,13 @@ Both hypotheses are load-bearing, and neither is decidable in general — which 
 
 The implementation's response to all four is the same one: it does not attempt the general case. It promotes only *kernel-local* buffers whose accesses it can see, and where it cannot establish what it needs it falls back to serialisation — which is Theorem 43.4's response applied to a case Proposition 43.5 might have covered. That is the right engineering choice, and it means Proposition 43.5 describes *what a correct repair would require*, not a procedure the compiler carries out in full.
 
-Theorem 43.4 and Proposition 43.5 are why the CUDA backend has two responses to a detected race, and §43.7 shows both.
+Theorem 43.4 and Proposition 43.5 are why the CUDA backend has two responses to a detected race, and §43.6 shows both.
 
 > **And neither is a proof that the emitted kernel is race-free.** The analysis in §43.4 is a *detector*, and a conservative one: it reports doubt when a buffer's accesses carry differing binding signatures, which is neither necessary nor sufficient for a genuine race. Not sufficient, because two differing signatures may still touch disjoint elements — §43.4 says so, and the cost is unnecessary serialisation. Not necessary in the strong sense either: it examines buffer accesses under thread bindings, so races arising through any other channel — an atomic used incorrectly, a device-scope buffer aliased by the runtime, or a barrier the *backend* omits when emitting a construct the analysis never saw — are outside what it inspects. What the compiler establishes is: **of the races this analysis models, none survives into the emitted kernel.** That is a useful property and it is not "the generated GPU program is race-free"; no analysis in this compiler proves the latter, and Chapter 65's differential testing against the CPU backend is what actually catches the rest.
 
 The third piece of theory is the one the compiler does *not* use:
 
-> **Definition 43.6 (Tensorisation).** *Tensorising* a sub-nest replaces it with a call to a hardware intrinsic computing the same thing — for a tensor core, a fixed-shape `M×N×K` matrix multiply-accumulate. It is legal iff the sub-nest computes exactly the intrinsic's function on operands laid out as the intrinsic requires.
+> **Definition 43.6 (Tensorisation).** **(stated here)** *Tensorising* a sub-nest replaces it with a call to a hardware intrinsic computing the same thing — for a tensor core, a fixed-shape `M×N×K` matrix multiply-accumulate. It is legal iff the sub-nest computes exactly the intrinsic's function on operands laid out as the intrinsic requires.
 
 The "laid out as required" clause is what makes tensorisation a *scheduling* problem rather than a peephole: the operands must already be in the right memory at the right stride, which takes a tile, a cache stage and an alignment. In this compiler `tensorize` sets a function attribute and the backend supplies the whole kernel, so the clause is discharged by construction and never checked.
 

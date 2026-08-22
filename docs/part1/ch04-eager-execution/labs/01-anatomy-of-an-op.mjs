@@ -19,7 +19,9 @@ function timeOp(build, n, inner) {
   return sample(run, 21, inner);
 }
 
-// Weighted least squares for T = alpha + beta*m.
+// Weighted least squares for T = alpha + beta*n, with n the ELEMENT count.
+// The tensors are square, so a row labelled side=64 carries n=4096 elements;
+// the fit never sees the side length.
 // Weights are 1/T^2, so the fit minimizes *relative* error: without them the
 // 1048576-element point would be the only one the residual sum can see, and
 // the "fit" would degenerate into reading beta off the largest row.
@@ -41,7 +43,7 @@ const addAt = (n) => { const a = randn([n, n]); const b = randn([n, n]); return 
 const tanhAt = (n) => { const a = randn([n, n]); return () => a.tanh(); };
 
 console.log('one eager add, by size   (median of 21 rounds)');
-console.log('      n      elements       us/call      ns/element        rel. IQR');
+console.log('   side      elements       us/call      ns/element        rel. IQR');
 const points = [];
 for (const [n, inner] of [[1, 3000], [4, 3000], [16, 2000], [64, 1000], [256, 200], [1024, 20]]) {
   const s = timeOp(addAt, n, inner);
@@ -57,7 +59,8 @@ const { alpha, beta, worst } = fitAffine(points);
 const alphaUs = alpha * 1000;
 const betaNs = beta * 1e6;
 const breakEven = alphaUs * 1000 / betaNs;
-console.log(`\nweighted least-squares fit of T(m) = alpha + beta*m over all ${points.length} points`);
+console.log(`\nweighted least-squares fit of T(n) = alpha + beta*n over all ${points.length} points`);
+console.log(`  (n is the element count, not the side length)`);
 console.log(`fixed cost per call   alpha = ${alphaUs.toFixed(2)} us`);
 console.log(`marginal cost         beta  = ${betaNs.toFixed(2)} ns/element`);
 console.log(`worst relative residual     = ${(worst * 100).toFixed(1)}%`);
@@ -72,7 +75,7 @@ const naiveBeta = points[points.length - 1][1] * 1e6 / points[points.length - 1]
 console.log(`\nfor comparison, the two-point shortcut alpha=T(1), beta=T(N)/N:`);
 console.log(`  alpha = ${naiveAlpha.toFixed(2)} us, beta = ${naiveBeta.toFixed(2)} ns/element`);
 console.log(`  it reports no residual because it passes through both points by construction`);
-console.log(`  ns/element is still falling at m=${points[points.length - 1][0]}, so T(N)/N is an`);
+console.log(`  ns/element is still falling at n=${points[points.length - 1][0]}, so T(N)/N is an`);
 console.log(`  upper bound on the asymptotic marginal cost, not an estimate of it`);
 
 const N = 1024;

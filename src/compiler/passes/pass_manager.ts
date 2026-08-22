@@ -1,4 +1,5 @@
 import { AnalysisManager } from '../analysis/analysis_manager.js';
+import { PassManagerBase } from './pass_manager_base.js';
 import { FunctionPass, ModulePass, PassResult, PassContext } from './pass.js';
 import { TraceLevel } from '../pipeline/trace.js';
 import { CompilationError } from '../pipeline/trace.js';
@@ -61,23 +62,14 @@ export class FixedPointGroup {
   }
 }
 
-export class PassManager {
-  passes: PassManagerEntry[];
+export class PassManager extends PassManagerBase<PassManagerEntry> {
   analysisManager: AnalysisManager;
-  trace: TraceLog | null;
-  checkEachPass: boolean;
   instruments: PassInstrument[];
 
   constructor() {
-    this.passes = [];
+    super();
     this.analysisManager = new AnalysisManager();
-    this.trace = null;
-    this.checkEachPass = false;
     this.instruments = [];
-  }
-
-  addPass(pass: PassManagerEntry): void {
-    this.passes.push(pass);
   }
 
   addInstrument(instrument: PassInstrument): void {
@@ -89,14 +81,6 @@ export class PassManager {
       const fn = inst[method];
       if (typeof fn === 'function') (fn as (p: Pass, t: PassTarget, r: PassResultValue | null) => void)(pass, target, result);
     }
-  }
-
-  setTrace(trace: TraceLog | null): void {
-    this.trace = trace;
-  }
-
-  setCheckEachPass(enabled: boolean): void {
-    this.checkEachPass = enabled;
   }
 
   _verifyAfter(pass: Pass, target: PassTarget, isModule: boolean): CompilationError | null {

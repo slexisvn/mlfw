@@ -1,6 +1,7 @@
 import { registry } from '../ir/graph/ops.js';
 import { TensorType } from '../ir/graph/types.js';
-import { buildPartitions, computePartitionIO } from '../passes/partition/partition_core.js';
+import { buildPartitions } from '../passes/partition/partition_core.js';
+import { OpGroup } from '../passes/partition/op_group.js';
 import type { GraphFunction } from '../ir/graph/function.js';
 import type { Operation } from '../ir/graph/operation.js';
 import type { Value } from '../ir/graph/value.js';
@@ -33,64 +34,27 @@ export type TransferEdge = {
   sizeBytes: number;
 };
 
-export class Partition {
-  id: number;
+export class Partition extends OpGroup {
   target: PartitionTarget;
-  ops: Operation[];
-  opSet: Set<Operation>;
   memoryBytes_?: number;
-  private _inputValues: Value[] | null;
-  private _outputValues: Value[] | null;
   private _memoryBytes: number;
 
   constructor(id: number, target: PartitionTarget) {
-    this.id = id;
+    super(id);
     this.target = target;
-    this.ops = [];
-    this.opSet = new Set();
-    this._inputValues = null;
-    this._outputValues = null;
     this._memoryBytes = 0;
   }
 
-  addOp(op: Operation): void {
-    if (this.opSet.has(op)) return;
-    this.ops.push(op);
-    this.opSet.add(op);
-    this._inputValues = null;
-    this._outputValues = null;
+  addOp(op: Operation): boolean {
+    if (!super.addOp(op)) return false;
     this._memoryBytes += estimateOpMemory(op);
-  }
-
-  hasOp(op: Operation): boolean {
-    return this.opSet.has(op);
+    return true;
   }
 
   merge(other: Partition): void {
     for (const op of other.ops) {
       this.addOp(op);
     }
-  }
-
-  computeIO(): void {
-    if (this._inputValues && this._outputValues) return;
-    const { inputs, outputs } = computePartitionIO(this.opSet, this.ops);
-    this._inputValues = inputs;
-    this._outputValues = outputs;
-  }
-
-  getInputValues(): Value[] {
-    this.computeIO();
-    return this._inputValues as Value[];
-  }
-
-  getOutputValues(): Value[] {
-    this.computeIO();
-    return this._outputValues as Value[];
-  }
-
-  get size(): number {
-    return this.ops.length;
   }
 
   get memoryBytes(): number {

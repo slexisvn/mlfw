@@ -1,7 +1,7 @@
 import { AccessKind, isStaticLevel } from './buffer_access.js';
 import { mixedRadixDecomposition } from './iter_map.js';
 import type { LinearForm, VarRange } from './iter_map.js';
-import type { BufferAccess, AccessKindValue, IterLevel } from './buffer_access.js';
+import type { BufferAccess, IterLevel } from './buffer_access.js';
 import type { Buffer } from '../ir/tensor/buffer.js';
 import type { TirNode } from '../ir/tensor/nodes.js';
 

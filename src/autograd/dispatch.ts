@@ -7,6 +7,7 @@ import { GradAccumulator } from './accumulator.js';
 import { AutogradMeta } from '../tensor/core/autograd_meta.js';
 import { TensorImpl } from '../tensor/core/tensor_impl.js';
 import { Tensor } from '../tensor/core/tensor.js';
+import { isTensor } from '../tensor/core/is_tensor.js';
 import { DeviceType } from '../tensor/types/device.js';
 import { isEagerDeferred } from '../dispatcher/eager_mode.js';
 import { setAutogradEngine } from '../tensor/core/tensor.js';
@@ -43,17 +44,13 @@ function _snapshotTensor(t: Tensor): Tensor {
   return new Tensor(newImpl);
 }
 
-function _isTensor(value: unknown): value is Tensor {
-  return typeof value === 'object' && value !== null && '_impl' in value;
-}
-
 function _anyRequiresGrad(args: readonly unknown[]): boolean {
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
-    if (_isTensor(a) && a.requiresGrad) return true;
+    if (isTensor(a) && a.requiresGrad) return true;
     if (Array.isArray(a)) {
       for (let j = 0; j < a.length; j++) {
-        if (_isTensor(a[j]) && a[j].requiresGrad) return true;
+        if (isTensor(a[j]) && a[j].requiresGrad) return true;
       }
     }
   }
@@ -64,11 +61,11 @@ function _extractTensors(args: readonly unknown[]): Tensor[] {
   const tensors: Tensor[] = [];
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
-    if (_isTensor(a)) {
+    if (isTensor(a)) {
       tensors.push(a);
     } else if (Array.isArray(a)) {
       for (let j = 0; j < a.length; j++) {
-        if (_isTensor(a[j])) tensors.push(a[j]);
+        if (isTensor(a[j])) tensors.push(a[j]);
       }
     }
   }
@@ -87,8 +84,6 @@ function _getOrCreateAccumulator(tensor: Tensor): AutogradNode | null {
 }
 
 export function wrapWithAutograd(opName: string, handle: OperatorHandle) {
-  const origDispatch = dispatcher.dispatch.bind(dispatcher);
-
   return (keySet: unknown, ...args: unknown[]) => {
     const ks = keySet as DispatchKeySet;
     if (!GradMode.isEnabled() || !_anyRequiresGrad(args)) {
@@ -127,13 +122,13 @@ export function wrapWithAutograd(opName: string, handle: OperatorHandle) {
     const stripped = ks.subtract(AUTOGRAD_KEY_SET);
     const result = dispatcher.redispatch(handle, stripped, ...args);
 
-    if (_isTensor(result)) {
+    if (isTensor(result)) {
       result._impl.setAutogradMeta(new AutogradMeta());
       const meta = result._impl.autogradMeta;
       meta!.setGradFn(gradFn, 0);
       meta!.requiresGrad = true;
       result._impl._updateKeySet();
-    } else if (Array.isArray(result) && result.some(_isTensor)) {
+    } else if (Array.isArray(result) && result.some(isTensor)) {
       throw new Error(`autograd: op '${opName}' returns multiple tensors, which eager autograd cannot track — the gradient would be silently dropped. Use compileWithBackward, or detach the inputs.`);
     }
 

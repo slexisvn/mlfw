@@ -1,4 +1,4 @@
-import { OpDef, OpTrait } from '../op_registry.js';
+import { OpDef } from '../op_registry.js';
 import type { FoldFn, OpRegistry } from '../op_registry.js';
 import * as pat from '../patterns.js';
 import {

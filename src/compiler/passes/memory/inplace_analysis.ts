@@ -1,6 +1,7 @@
 import { walk as irWalk, collect as irCollect } from '../../ir/ir_visitor.js';
 import { toLinearForm } from '../../analysis/iter_map.js';
 import type { Buffer } from '../../ir/tensor/buffer.js';
+import type { Dim } from '../../ir/graph/types.js';
 import type { BlockNode, BufferLoadNode, BufferStoreNode, CastNode, CompareNode, FloatImmNode, IntImmNode, MathOpNode, PrimFunc, TirNode, VariableNode } from '../../ir/tensor/nodes.js';
 import type { IRNode } from '../../ir/ir_visitor.js';
 import type { BufferLivenessResult } from './buffer_liveness.js';
@@ -55,7 +56,7 @@ export class InplaceAnalysis {
           if (alreadyAliased.has(srcBuf)) continue;
           if (livenessResult.isParam(srcBuf) && !allowedDonationParams.has(srcBuf)) continue;
 
-          if (!shapesMatch(srcBuf, dstBuf)) continue;
+          if (!layoutsMatch(srcBuf, dstBuf)) continue;
           if (srcBuf.dtype !== dstBuf.dtype) continue;
           if (srcBuf.scope !== dstBuf.scope) continue;
 
@@ -83,12 +84,16 @@ export class InplaceAnalysis {
   }
 }
 
-function shapesMatch(a: Buffer, b: Buffer): boolean {
-  if (a.shape.length !== b.shape.length) return false;
-  for (let i = 0; i < a.shape.length; i++) {
-    if (a.shape[i] !== b.shape[i]) return false;
+function dimsMatch(a: readonly Dim[], b: readonly Dim[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
   }
   return true;
+}
+
+function layoutsMatch(a: Buffer, b: Buffer): boolean {
+  return dimsMatch(a.shape, b.shape) && dimsMatch(a.strides, b.strides);
 }
 
 

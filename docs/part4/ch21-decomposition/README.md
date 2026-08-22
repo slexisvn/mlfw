@@ -26,13 +26,13 @@ The information you lose in step 1 is real, though, and it is worth naming preci
 
 ## 21.3 Theory
 
-> **Definition 21.1 (Decomposition rule).** A *decomposition rule* for operation `f` is a function that, given an instance of `f`, emits a subgraph of other operations computing the same result, and replaces all uses of `f`'s results with the subgraph's outputs.
+> **Definition 21.1 (Decomposition rule).** **(stated here)** A *decomposition rule* for operation `f` is a function that, given an instance of `f`, emits a subgraph of other operations computing the same result, and replaces all uses of `f`'s results with the subgraph's outputs.
 
-> **Definition 21.2 (Primitive set, stated here).** Given a set of decomposition rules `R`, the *primitive set* is the set of operations with no rule in `R`. Decomposition to fixed point rewrites any graph into one containing only primitives.
+> **Definition 21.2 (Primitive set).** **(stated here)** Given a set of decomposition rules `R`, the *primitive set* is the set of operations with no rule in `R`. Decomposition to fixed point rewrites any graph into one containing only primitives.
 
 Termination is not automatic — a rule that emits the operation it decomposes, directly or through a cycle, does not terminate. Here it is obtained structurally rather than by a bound: rules are collected into a worklist *before* any of them runs ([`decomposition_pass.ts:43`](../../../src/compiler/passes/decompose/decomposition_pass.ts)), so a single pass expands each original composite exactly once and never revisits what a rule produced. A rule emitting a composite therefore leaves it in place, which is a silent under-decomposition rather than a hang. Chapter 15's fixed-point group does not contain this pass, so nothing re-runs it.
 
-> **Definition 21.3 (Decomposition is not free, stated here).** A decomposition is *neutral* if the compiler can recover, from the emitted subgraph, every decision it could have made from the original operation. It is *lossy* otherwise.
+> **Definition 21.3 (Decomposition is not free).** **(stated here)** A decomposition is *neutral* if the compiler can recover, from the emitted subgraph, every decision it could have made from the original operation. It is *lossy* otherwise.
 
 Every decomposition in this compiler is lossy in one specific way: it destroys the name. Whether that matters depends entirely on whether anything downstream wanted the name — a backend with a library kernel, a quantization pass with a per-operation policy, an autotuner with a workload key. §21.7 makes the loss concrete by asking the compiler to keep an operation whole.
 

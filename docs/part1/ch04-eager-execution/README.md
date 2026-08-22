@@ -56,11 +56,15 @@ Everything Part I claims about compilation reduces to that difference in scope.
 node docs/part1/ch04-eager-execution/labs/01-anatomy-of-an-op.mjs
 ```
 
-The lab times a single `add` across six sizes. Each row is the median of 21 rounds, with the relative half-IQR beside it so you can see which rows are trustworthy (Node 24.9, 2026-08-21):
+The lab times a single `add` across six sizes. Each row is the median of 21 rounds, with the relative half-IQR beside it so you can see which rows are trustworthy.
+
+> **Two machines appear in this chapter, and every block says which.** **Machine A** is where §4.7's twelve-operation chains were timed. **Machine B** is a faster laptop, re-measured on 2026-08-21 under Node 24.9, and is where §4.3, §4.5 and §4.7's reproduction box come from. Constants measured on one machine never predict timings on the other; §4.7 is partly a demonstration of what happens if you forget that. Read the label before comparing any two numbers in this chapter.
+>
+> The left-hand column below is the *side* of a square tensor. The model's **n is the element count** — the second column — so the row labelled 64 is n = 4096.
 
 ```
-one eager add, by size   (median of 21 rounds)
-      n      elements       us/call      ns/element        rel. IQR
+one eager add, by size   (median of 21 rounds)          [machine B]
+   side      elements       us/call      ns/element        rel. IQR
       1             1          1.44         1436.97           5.8%
       4            16          1.43           89.58           5.3%
      16           256          2.40            9.36           2.6%
@@ -82,7 +86,8 @@ Now actually fit it, because there is a shortcut here that is easy to take and w
 So the lab solves for both parameters at once, over all six points, by weighted least squares. The weights are 1/T² — that is, the fit minimizes *relative* error. Without them the residual sum is dominated entirely by the 1,048,576-element row, whose absolute time is a thousand times everything else, and the "fit" quietly degenerates back into reading β off the bottom row. It prints both, side by side:
 
 ```
-weighted least-squares fit of T(m) = alpha + beta*m over all 6 points
+weighted least-squares fit of T(n) = alpha + beta*n over all 6 points
+  (n is the element count, not the side length)
 fixed cost per call   alpha = 1.40 us
 marginal cost         beta  = 1.84 ns/element
 worst relative residual     = 29.1%
@@ -92,15 +97,17 @@ for comparison, the two-point shortcut alpha=T(1), beta=T(N)/N:
   alpha = 1.47 us, beta = 1.62 ns/element
 ```
 
+**Carry this away before the caveats: α and β are a ranking device, not a predictor.** They tell you which of two programs is dominated by fixed cost and which by traffic. They do not tell you how long either will take. The next two paragraphs are the evidence for that sentence.
+
 **The residual is the interesting output, and it is 29%.** A two-parameter affine model is not a good description of this data across six orders of magnitude, and the fit is honest enough to say so. Look back at the `ns/element` column: it is *still falling* at a million elements — 3.03, 2.45, 1.57 — so there is no flat asymptote for β to be. What is really happening is at least two regimes with a cache transition between them, summarized by one straight line. Both parameters are therefore ballpark figures: α is good to about 10%, β to about 30%, and T(N)/N is an upper bound on the asymptotic marginal cost rather than an estimate of it.
 
-That is enough for what the model is used for. It is a *ranking* device, not a predictor, and §4.7 shows exactly where the difference bites.
+§4.7 shows exactly where the difference between ranking and predicting bites.
 
 > **Corollary 4.2 (Break-even size).** **(stated here)** Below n = α/β elements, an operation spends more time being *arranged* than being *performed*.
 
 Here α/β ≈ 760 elements — a 28 × 28 tensor. Given the 29% residual, read that as "a few hundred elements", not as 760. Every operation on anything much smaller is dominated by framework overhead rather than by your model's arithmetic. If you have ever wondered why a small network on a fast machine feels sluggish, this is usually why: at batch size 1 with modest hidden sizes, a great deal of deep learning happens below the break-even point.
 
-**Try this.** Add rows for `n = 2` and `n = 2048`. They probe opposite ends of the model: at n = 2 the four elements are lost inside α, so `ns/element` climbs to several hundred; at n = 2048 it edges closer to β without ever reaching it, because α is divided by a larger number but never becomes zero.
+**Try this.** Add rows for side 2 and side 2048. They probe opposite ends of the model: at side 2 the four elements are lost inside α, so `ns/element` climbs to several hundred; at side 2048 — four million elements — it edges closer to β without ever reaching it, because α is divided by a larger number but never becomes zero.
 
 ## 4.4 Lab 3 — The first call is not like the others
 
@@ -137,7 +144,7 @@ Two things follow, and both come back later in the book.
 Count the memory instead. An elementwise `add` on n elements reads two arrays and writes one: **12n bytes** for `float32`. A unary operation such as `tanh` reads one array and writes one: **8n bytes**. Keep those apart — §4.6 needs the difference. At 1024 × 1024 the lab reports:
 
 ```
-at 1024x1024 (4 MB per tensor)
+at 1024x1024 (4 MB per tensor)                          [machine B]
   add   1.622 ms  (n=21, IQR 1.578-1.692, min 1.402, max 2.039)
          12 MB moved -> 7.76 GB/s
   tanh  24.899 ms  (n=21, IQR 23.920-25.511, min 20.394, max 52.015)
@@ -148,7 +155,7 @@ at 1024x1024 (4 MB per tensor)
 
 (The table in §4.3 reported 1.65 ms for the same `add`, measured in a different batch a moment earlier. Run-to-run variation of a few percent is normal and worth getting used to — which is why every timing in this book comes with its IQR, and why a benchmark that reproduces to three digits is usually measuring the wrong thing.)
 
-> **Definition 4.3 (Arithmetic intensity; classical).** The arithmetic intensity of a computation is the ratio of arithmetic operations performed to bytes of memory traffic required:
+> **Definition 4.3 (Arithmetic intensity).** **(classical)** The arithmetic intensity of a computation is the ratio of arithmetic operations performed to bytes of memory traffic required:
 >
 > **I = FLOP / bytes**
 
@@ -156,7 +163,7 @@ For elementwise `add`: one FLOP per 12 bytes, so I = 0.083. For `tanh`, one tran
 
 For a matrix multiply of two n × n matrices the count needs a stated assumption, and it is a strong one. The FLOP count is 2n³ and is not negotiable. The byte count is: **12n² bytes is the *minimum* traffic**, achieved only if each of the three matrices crosses the memory boundary exactly once — which requires enough on-chip storage to hold the working set, and a loop order that exploits it. That gives I = n/6, about 171 at n = 1024, and it is a *lower bound on traffic*, hence an *upper bound on intensity*. A naive triple loop that re-reads a row of A and a column of B for every output element moves Θ(n³) bytes and has intensity Θ(1) — memory-bound, not compute-bound, on the same mathematics. The gap between those two numbers is what tiling exists to close, and Part VII is where the compiler goes after it. Whenever this book quotes 12n² it means the ideal, and the phrase to attach is "if the reuse is achieved".
 
-> **Theorem 4.4 (Roofline bound; Williams, Waterman and Patterson, 2009).** A computation with arithmetic intensity I, running on a machine with peak compute rate P (FLOP/s) and peak bandwidth B (bytes/s), cannot exceed
+> **Theorem 4.4 (Roofline bound; Williams, Waterman and Patterson, 2009).** **(classical)** A computation with arithmetic intensity I, running on a machine with peak compute rate P (FLOP/s) and peak bandwidth B (bytes/s), cannot exceed
 >
 > **min(P, I · B)** FLOP/s.
 >
@@ -190,8 +197,10 @@ node docs/part1/ch04-eager-execution/labs/02-where-fusion-wins.mjs
 
 Two chains, twelve operations each, same tensor, same compiler. The only difference: one chain contains two `tanh` calls, the other replaces them with two multiplications.
 
+**What this section establishes, in one line:** fusion's payoff is set by how much of the runtime is memory traffic, and two `tanh` calls are enough to move a chain from "fusion wins big" to "fusion wins nothing". The arithmetic that gets you there is worth following, but that sentence is the result.
+
 ```
-twelve elementwise operations on a 1024x1024 tensor (4 MB)
+twelve elementwise operations on a 1024x1024 tensor (4 MB)   [machine A]
 
   chain              eager ms   compiled ms     speedup
   10 cheap + 2 tanh       80.2          73.1        1.10x
@@ -200,14 +209,14 @@ twelve elementwise operations on a 1024x1024 tensor (4 MB)
 
 **The same compiler, on the same shape, delivers 1.10× or 4.47× depending on two function calls.** (The 4.47× reproduces within a few percent anywhere; the 1.10× is a coin toss around 1.0 and §4.10 says why.)
 
-Now use the model from §4.3 and §4.6 to predict those eager numbers before looking at them. The constants have to come from the *same session* as the chain measurements, or the comparison is meaningless: in that session an `add` at this size cost 2.62 ms and a `tanh` cost 26.95 ms. (The re-measured figures quoted in §4.5 — 1.62 ms and 24.90 ms — are from a different, faster machine two weeks later, and are not interchangeable with these. Constants and predictions travel together or not at all.)
+Now use the model from §4.3 and §4.6 to predict those eager numbers before looking at them. The constants have to come from the *same machine* as the chain measurements, or the comparison is meaningless: on machine A an `add` at this size cost 2.62 ms and a `tanh` cost 26.95 ms. (Machine B's figures from §4.5 — 1.62 ms and 24.90 ms — are not interchangeable with these. Constants and predictions travel together or not at all.)
 
 - Twelve cheap operations: 12 × 2.62 = **31.4 ms**. Measured: 32.2 ms.
 - Ten cheap operations plus two `tanh`: 10 × 2.62 + 2 × 26.95 = 26.2 + 53.9 = **80.1 ms**. Measured: 80.2 ms.
 
 Both predictions land within three percent on this run, and the second within 0.2%. Do not read too much into that third digit — the next box shows it does not survive re-measurement — but do read the shape of it. A model that says nothing except *add up the operations* gets the total roughly right, and the reason tells you something real about eager execution: **there is very little else going on.** Eager execution is close to the sum of its operations, because each one runs to completion in isolation before the next begins. No overlap, no reuse, almost no interaction. That is the property compilation removes.
 
-> **Does this reproduce? Partly, and the part that fails is instructive.** The tables above come from one session. Re-running both labs on a different machine — Node 24.9, three paired runs of Lab 1 and Lab 2 — reproduced every structural claim and none of the precision. The constants drifted as expected (α = 1.34 μs, β = 1.62 ns, `add` 1.65–1.99 ms, `tanh` 11–15× `add`). But the predictions came out 10% to 60% away from measurement, in both directions: 12 × 1.99 = 23.9 ms predicted against 21.8 measured, and 10 × 1.99 + 2 × 24.38 = 68.7 ms predicted against 42.9 measured.
+> **Does this reproduce? Partly, and the part that fails is instructive.** The tables above are machine A. Re-running both labs on machine B — three paired runs of Lab 1 and Lab 2 — reproduced every structural claim and none of the precision. The constants drifted as expected (α = 1.34 μs, β = 1.62 ns, `add` 1.65–1.99 ms, `tanh` 11–15× `add`). But the predictions came out 10% to 60% away from measurement, in both directions: 12 × 1.99 = 23.9 ms predicted against 21.8 measured, and 10 × 1.99 + 2 × 24.38 = 68.7 ms predicted against 42.9 measured.
 >
 > So the sum-of-operations model is not the 0.2%-accurate instrument the first run makes it look like. What it reliably gets right is the ordering and the rough magnitude: the `tanh` chain always costs about twice the cheap chain, `tanh` always dominates the total when it is present, and the cheap chain always fuses several times better than the `tanh` chain. What it gets wrong is any specific total, by up to a factor of 1.6 — because §4.10's caveat is real and load-bearing: `add` and `tanh` were timed *alone*, and an operation inside a twelve-deep chain competes for cache with eleven others. The individual numbers in this chapter are disposable. The model is worth carrying for what it ranks, not for what it predicts, and §4.10 returns to why that distinction is the whole subject of Part VIII.
 
@@ -228,10 +237,10 @@ In the cheap chain none of this applies: essentially all the time is traffic, an
 
 ### A model for the compiled side too
 
-The fused kernel has its own two-term structure: one pass over memory, plus the arithmetic, which grows with the number of operations. Halving the chain to six cheap operations and measuring both versions gives (a separate run, hence 32.8 ms where Lab 2 reported 32.2 ms):
+The fused kernel has its own two-term structure: one pass over memory, plus the arithmetic, which grows with the number of operations. Halving the chain to six cheap operations and measuring both versions gives (machine A again, but a separate run, hence 32.8 ms where Lab 2 reported 32.2 ms):
 
 ```
-  ops    eager ms   compiled ms   speedup
+  ops    eager ms   compiled ms   speedup            [machine A]
     6       16.0           6.1      2.62x
    12       32.8           7.3      4.50x
 ```
@@ -276,11 +285,11 @@ That precondition is not free either. Getting it costs you dynamism, and the bil
 
 ## 4.10 Traps and limits
 
-- **These constants are this machine's, and so is the sign of the `tanh` result.** α, β and the cost of `tanh` will differ on your hardware and your Node version. The *structure* — a fixed cost, a marginal cost, a break-even point, expensive transcendentals — is what transfers. The 1.10× in §4.7 does not: on a second machine the same lab reported 0.95×, 0.99× and 1.07× across three runs, meaning fusion sometimes made the `tanh` chain *slower*. That is not a contradiction of the argument, it is the argument's conclusion taken one step further — when almost all the time is in work an optimization cannot touch, the optimization's own overhead is free to dominate what little is left.
+- **These constants are one machine's, and so is the sign of the `tanh` result.** α, β and the cost of `tanh` will differ on your hardware and your Node version. The *structure* — a fixed cost, a marginal cost, a break-even point, expensive transcendentals — is what transfers. The 1.10× in §4.7 does not: on machine B the same lab reported 0.95×, 0.99× and 1.07× across three runs, meaning fusion sometimes made the `tanh` chain *slower*. That is not a contradiction of the argument, it is the argument's conclusion taken one step further — when almost all the time is in work an optimization cannot touch, the optimization's own overhead is free to dominate what little is left.
 - **`add` and `tanh` were measured in isolation.** In a real model, operations compete for cache with everything around them, and measurements taken alone can flatter or slander an operation. Chapter 46 returns to this when it builds a cost model the autotuner has to trust.
 - **The fused model was fitted on cheap operations, and does not extrapolate.** Applying `T_fused = M + k·c` to the `tanh` chain — substituting the measured cost of a `tanh` for `c` on two of the twelve terms — predicts about 55 ms against a measured 73 ms. Something the model does not represent is costing 18 ms. Candidate explanations: the generated code calls `Math.tanh` in a context the engine optimizes less well than the one-operation kernel does, or the long fused expression puts pressure on registers. The honest position is that we do not know which, and that a cost model is a hypothesis you keep testing, not a fact you have established. Part VIII is about compilers that face this problem at scale, and their answer is to stop predicting and start measuring.
 - **The roofline model ignores latency.** It assumes you can saturate either compute or bandwidth. A dependent chain of scalar operations saturates neither, and no roofline predicts it.
-- **JavaScript is not the peak.** 4.81 GB/s is what this eager path achieves, not what the machine can do. Chapter 55 gets closer with WebAssembly SIMD; Chapter 56 changes the machine entirely.
+- **JavaScript is not the peak.** The 7.76 GB/s of §4.5 is what this eager path achieves on machine B, not what the machine can do. Chapter 55 gets closer with WebAssembly SIMD; Chapter 56 changes the machine entirely.
 
 ## 4.11 Read the tests
 

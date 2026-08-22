@@ -12,7 +12,6 @@ registerVJPRule('dot', (ctx) => {
 
   const lhsRank = lhs.type.rank;
   const rhsRank = rhs.type.rank;
-  const gradRank = grad.type.rank;
 
   const lhsFree = [];
   for (let i = 0; i < lhsRank; i++) {

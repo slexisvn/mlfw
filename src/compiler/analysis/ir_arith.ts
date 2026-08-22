@@ -1,3 +1,5 @@
+import { COMPARE_MATH_OPS, compareDirectionOf } from '../../util/dtype_map.js';
+import { DIVMOD_MATH_OPS } from '../../util/divmod.js';
 import { Analyzer } from './analyzer.js';
 import { SymInt } from './sym_int.js';
 import { IntImmNode, MathOpNode, CompareNode, VariableNode, mathOp } from '../ir/tensor/nodes.js';
@@ -15,9 +17,6 @@ type ComparePredicates = Readonly<Record<string, BoundPredicate | undefined>>;
 export type DivModSplit = { quotient: TirNode; remainder: TirNode };
 
 const MATHOP_TO_SYM: Readonly<Record<string, SymBinaryName | undefined>> = { '+': 'add', '-': 'sub', '*': 'mul', '//': 'div', '%': 'mod', 'tdiv': 'div', 'tmod': 'mod' };
-const DIVMOD_MATHOPS = new Set(['//', '%', 'tdiv', 'tmod']);
-const COMPARE_MATHOPS = new Set(['<', '<=', '>', '>=', '==', '!=']);
-const MATHOP_TO_DIRECTION: Readonly<Record<string, string>> = { '<': 'lt', '<=': 'le', '>': 'gt', '>=': 'ge', '==': 'eq', '!=': 'ne' };
 
 export function irToSymInt(node: TirNode | number | null | undefined): SymExpr | null {
   if (node === null || node === undefined) return null;
@@ -42,7 +41,7 @@ export function irToSymInt(node: TirNode | number | null | undefined): SymExpr |
       if (a === null) return null;
       const b = irToSymInt(math.b);
       if (b === null) return null;
-      if (DIVMOD_MATHOPS.has(math.op)) {
+      if (DIVMOD_MATH_OPS.has(math.op)) {
         if (typeof b !== 'number' || b <= 0) return null;
       }
       return SymInt[sym](a, b);
@@ -109,7 +108,7 @@ export function proveTrue(analyzer: Analyzer, node: TirNode | null | undefined):
   if (node.type === 'MathOpNode') {
     const math = node as MathOpNode;
     if (math.op === '*' && math.b) return proveTrue(analyzer, math.a) && proveTrue(analyzer, math.b);
-    if (COMPARE_MATHOPS.has(math.op)) return proveCompare(analyzer, MATHOP_TO_DIRECTION[math.op], math.a, math.b as TirNode, CMP_TRUE);
+    if (COMPARE_MATH_OPS.has(math.op)) return proveCompare(analyzer, compareDirectionOf(math.op), math.a, math.b as TirNode, CMP_TRUE);
   }
   return false;
 }
@@ -121,7 +120,7 @@ export function proveFalse(analyzer: Analyzer, node: TirNode | null | undefined)
   if (node.type === 'MathOpNode') {
     const math = node as MathOpNode;
     if (math.op === '*' && math.b) return proveFalse(analyzer, math.a) || proveFalse(analyzer, math.b);
-    if (COMPARE_MATHOPS.has(math.op)) return proveCompare(analyzer, MATHOP_TO_DIRECTION[math.op], math.a, math.b as TirNode, CMP_FALSE);
+    if (COMPARE_MATH_OPS.has(math.op)) return proveCompare(analyzer, compareDirectionOf(math.op), math.a, math.b as TirNode, CMP_FALSE);
   }
   return false;
 }
@@ -228,7 +227,7 @@ export class RewriteSimplify {
       const truncated = nonNegativeDivMod(this.analyzer, folded);
       if (truncated) return truncated;
     }
-    if (COMPARE_MATHOPS.has(folded.op)) {
+    if (COMPARE_MATH_OPS.has(folded.op)) {
       if (proveTrue(this.analyzer, folded)) return new IntImmNode(1);
       if (proveFalse(this.analyzer, folded)) return new IntImmNode(0);
     }

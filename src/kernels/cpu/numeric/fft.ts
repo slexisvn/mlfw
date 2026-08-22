@@ -1,3 +1,5 @@
+import { nextPow2 } from '../../../util/numeric_array.js';
+
 function bitReversePermute(re: Float64Array, im: Float64Array): void {
   const n = re.length;
   for (let i = 1, j = 0; i < n; i++) {
@@ -43,12 +45,6 @@ function fftRadix2(re: Float64Array, im: Float64Array, invert: boolean): void {
       im[i] /= n;
     }
   }
-}
-
-function nextPow2(n: number): number {
-  let p = 1;
-  while (p < n) p <<= 1;
-  return p;
 }
 
 function bluestein(re: Float64Array, im: Float64Array, invert: boolean): void {

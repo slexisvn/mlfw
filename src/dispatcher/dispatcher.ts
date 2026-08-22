@@ -2,7 +2,7 @@ import { EMPTY_KEY_SET } from './dispatch_key.js';
 import type { DispatchKeySet, DispatchKeyValue } from './dispatch_key.js';
 import { OperatorEntry } from './operator_entry.js';
 import { OperatorHandle } from './operator_handle.js';
-import { FallbackTable } from './fallback.js';
+import { KernelTable } from './kernel_table.js';
 import { guardStack } from './guard.js';
 import { _setDispatcher } from './library.js';
 import { parseSchema } from './operator_schema.js';
@@ -22,12 +22,12 @@ function hasDispatchKeySet(value: unknown): value is Dispatchable {
 class Dispatcher {
   private readonly _entries: Map<string, OperatorEntry>;
   private readonly _handles: Map<string, OperatorHandle>;
-  private readonly _fallbacks: FallbackTable;
+  private readonly _fallbacks: KernelTable;
 
   constructor() {
     this._entries = new Map();
     this._handles = new Map();
-    this._fallbacks = new FallbackTable();
+    this._fallbacks = new KernelTable();
   }
 
   registerOp(schema: OperatorSchema): OperatorHandle {
@@ -117,7 +117,7 @@ class Dispatcher {
     return this._handles.has(fullName);
   }
 
-  get fallbacks(): FallbackTable {
+  get fallbacks(): KernelTable {
     return this._fallbacks;
   }
 }

@@ -1,4 +1,4 @@
-import { DispatchKey } from './dispatch_key.js';
+import { KernelTable } from './kernel_table.js';
 import type { DispatchKeySet, DispatchKeyValue } from './dispatch_key.js';
 import type { KernelFunction } from './boxing.js';
 import type { OperatorSchema } from './operator_schema.js';
@@ -10,12 +10,12 @@ export type KernelLookup = Readonly<{
 
 export class OperatorEntry {
   private readonly _schema: OperatorSchema;
-  private readonly _kernels: Array<KernelFunction | null>;
+  private readonly _kernels: KernelTable;
   private _catchAll: KernelFunction | null;
 
   constructor(schema: OperatorSchema) {
     this._schema = schema;
-    this._kernels = new Array(DispatchKey.NUM_KEYS).fill(null);
+    this._kernels = new KernelTable();
     this._catchAll = null;
   }
 
@@ -24,19 +24,23 @@ export class OperatorEntry {
   }
 
   registerKernel(key: DispatchKeyValue, kernelFn: KernelFunction): void {
-    this._kernels[key] = kernelFn;
+    this._kernels.register(key, kernelFn);
   }
 
   removeKernel(key: DispatchKeyValue): void {
-    this._kernels[key] = null;
+    this._kernels.remove(key);
   }
 
   lookupKernel(key: DispatchKeyValue): KernelFunction | null {
-    return this._kernels[key];
+    return this._kernels.lookup(key);
   }
 
   hasKernel(key: DispatchKeyValue): boolean {
-    return this._kernels[key] !== null;
+    return this._kernels.has(key);
+  }
+
+  registeredKeys(): DispatchKeyValue[] {
+    return this._kernels.registeredKeys();
   }
 
   get catchAll(): KernelFunction | null {
@@ -48,19 +52,9 @@ export class OperatorEntry {
   }
 
   bestKernel(keySet: DispatchKeySet): KernelLookup | null {
-    for (const key of keySet) {
-      const k = this._kernels[key];
-      if (k) return { key, kernel: k };
-    }
+    const found = this._kernels.firstOf(keySet);
+    if (found) return found;
     if (this._catchAll) return { key: -1, kernel: this._catchAll };
     return null;
-  }
-
-  registeredKeys(): DispatchKeyValue[] {
-    const keys: DispatchKeyValue[] = [];
-    for (let i = 0; i < this._kernels.length; i++) {
-      if (this._kernels[i]) keys.push(i as DispatchKeyValue);
-    }
-    return keys;
   }
 }

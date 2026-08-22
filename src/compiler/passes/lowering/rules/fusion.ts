@@ -1,4 +1,4 @@
-import { FloatImmNode, IntImmNode, MathOpNode, CompareNode, BufferStoreNode, BufferLoadNode, BlockNode, SeqNode, IfThenElseNode, CallExternNode, CastNode, LetStmtNode } from '../../../ir/tensor/nodes.js';
+import { FloatImmNode, IntImmNode, CompareNode, BufferStoreNode, BufferLoadNode, BlockNode, SeqNode, IfThenElseNode, CallExternNode, CastNode, LetStmtNode } from '../../../ir/tensor/nodes.js';
 
 import { getLoweringRule, makeLoopNest, wrapInLoops, computeBroadcastIndices, bufRefs, lowerConstant, isConstantOp } from '../lowering_registry.js';
 import { buildElementwiseExpr, elementwiseOpNames } from './elementwise.js';

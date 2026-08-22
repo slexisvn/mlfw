@@ -18,6 +18,20 @@ A hotel with one room per guest needs as many rooms as it has ever had guests. A
 
 The register is the useful object, and it holds one fact per guest: a check-in and a check-out. Two guests can share a room exactly when their stays do not overlap, and the number of rooms the hotel actually needs is the largest number of stays that cover any single night.
 
+```
+                  stmt 0    stmt 1    stmt 2    stmt 3
+   input           #####
+   t1              #############
+   t2                        #############
+   t3                                  #############
+   const c1                  #####
+   const c2                            #####
+                     |         |         |         |
+   guests staying:   2         3         3         1   <- the width
+```
+
+Each bar is one guest's stay: checked in at the statement that first touches the buffer, checked out at the statement that last does. Two stays that never share a column can share a room — `t1` and `t3` never do, so those two can be one room. The busiest column is the number of rooms the hotel has to have, and it is 3 here even though six guests pass through.
+
 That is the whole of this chapter, with one substitution: guests are buffers, nights are statements, and the busiest night is peak memory. The two chapters after this one are about handing out the rooms (Chapter 50) and about moving the guests' dates around so the busiest night is less busy (Chapter 52).
 
 The analogy has one seam, and it is worth naming now because it is where the real subtlety lives. A hotel guest's stay is an interval because time is a line. A program's statements are a line only if you *choose* a line — and a loop is not a line. Everything difficult in §49.3 comes from that.
@@ -26,15 +40,15 @@ The analogy has one seam, and it is worth naming now because it is where the rea
 
 Fix a program and a total order on its statements. Nothing yet says the order is the execution order; §49.4 says which order this compiler picks.
 
-> **Definition 49.1 (Live interval).** Let statements be indexed `0, 1, …, n−1`. The *live interval* of a buffer `b` is `[first(b), last(b)]`, where `first(b)` is the least index of a statement that reads or writes `b` and `last(b)` is the greatest.
+> **Definition 49.1 (Live interval).** **(classical)** Let statements be indexed `0, 1, …, n−1`. The *live interval* of a buffer `b` is `[first(b), last(b)]`, where `first(b)` is the least index of a statement that reads or writes `b` and `last(b)` is the greatest.
 
-Note what the definition does **not** say: it does not say `b` is live at every index in between. A buffer written at 0, untouched at 1 through 8, and read at 9 has interval `[0, 9]` and is genuinely dead for eight of those ten statements. The interval is an over-approximation — a single range rather than a set of ranges — and the reason to accept it is in Theorem 49.4.
+Note what the definition does **not** say: it does not say `b` is live at every index in between. A buffer written at 0, untouched at 1 through 8, and read at 9 has interval `[0, 9]` and is genuinely dead for eight of those ten statements. The interval is an over-approximation — a single range rather than a set of ranges — and the reason to accept it is in Lemma 49.4.
 
-> **Definition 49.2 (Interference).** Buffers `a` and `b` *interfere* if their intervals overlap: `first(a) ≤ last(b)` and `first(b) ≤ last(a)`.
+> **Definition 49.2 (Interference).** **(classical)** Buffers `a` and `b` *interfere* if their intervals overlap: `first(a) ≤ last(b)` and `first(b) ≤ last(a)`.
 
 The overlap test is inclusive at both ends, so two buffers that share a single endpoint interfere. That is deliberate and it is not a rounding error: at the statement where one is last read and the other first written, both contents matter, because within a statement nothing orders the read against the write.
 
-> **Theorem 49.3 (Disjoint intervals may share storage).** Let `a` and `b` be buffers that do not interfere, with `last(a) < first(b)`. If the total order on statements is a linearization of the execution order — every statement executes after all statements with smaller indices and before all statements with greater — then a program in which `a` and `b` name the same bytes computes the same results as one in which they do not.
+> **Theorem 49.3 (Disjoint intervals may share storage).** **(stated here)** Let `a` and `b` be buffers that do not interfere, with `last(a) < first(b)`. If the total order on statements is a linearization of the execution order — every statement executes after all statements with smaller indices and before all statements with greater — then a program in which `a` and `b` name the same bytes computes the same results as one in which they do not.
 >
 > *Proof.* Every access to `a` occurs at a statement with index at most `last(a)`, and every access to `b` at a statement with index at least `first(b) > last(a)`. Under the hypothesis these sets of statements are executed in that order with none interleaved, so every read of `a` is executed before every write of `b`. A read of `a` therefore returns what the last write to `a` stored, whether or not `b` later overwrites those bytes; and a read of `b` returns what the last write to `b` stored, since no access to `a` follows it. Every load in the shared program returns the value it returned in the unshared one, so every store writes the same value. ∎
 
@@ -44,13 +58,13 @@ Two things about that proof are worth pausing on, because the rest of Part IX is
 
 The repair is not to abandon the linearization but to widen the intervals until the theorem's hypothesis holds again:
 
-> **Lemma 49.4 (Region extension).** Let `R` be a set of statements with indices `[s, e]` that may execute more than once, or in an order other than index order. Extend the interval of every buffer touched inside `R` so that it covers `[s, e]`. Then any two non-interfering buffers satisfy Theorem 49.3's hypothesis.
+> **Lemma 49.4 (Region extension).** **(stated here)** Let `R` be a set of statements with indices `[s, e]` that may execute more than once, or in an order other than index order. Extend the interval of every buffer touched inside `R` so that it covers `[s, e]`. Then any two non-interfering buffers satisfy Theorem 49.3's hypothesis.
 >
 > *Proof.* After extension, two buffers both touched inside `R` have overlapping intervals — both contain `[s, e]` — so they interfere and the theorem is not applied to them. If only one of the pair is touched inside `R`, the other is touched only outside it, and outside `R` the index order is the execution order by construction. ∎
 
 This is why an over-approximating single interval is the right shape after all. The analysis is not trying to describe liveness exactly; it is trying to describe a *conservative* liveness under which interval disjointness is a sound sharing test. Widening is always allowed; narrowing is what would be unsound.
 
-> **Definition 49.5 (Peak, and the width of a program).** The *width* at index `i` is the number of buffers whose intervals contain `i`. The *peak* is the maximum over `i` of the total size of those buffers.
+> **Definition 49.5 (Peak, and the width of a program).** **(classical)** The *width* at index `i` is the number of buffers whose intervals contain `i`. The *peak* is the maximum over `i` of the total size of those buffers.
 
 Peak is a lower bound on how many bytes any assignment needs, and Chapter 50 is about how close a real allocator gets to it.
 
@@ -141,7 +155,7 @@ Three node types call it — `ForNode` ([`:128`](../../../src/compiler/passes/me
 node docs/part9/ch49-buffer-lifetimes/labs/01-when-is-a-buffer-live.mjs
 ```
 
-The lab compiles `t.mul(2).add(1).relu().mul(3)` on a 64 × 64 input with fusion switched off — fusion would delete the very intermediates this chapter is about, which is §49.5's last observation — and rebuilds the analysis from the printed IR: the blocks in order, then the interval of every buffer they touch.
+The lab compiles `t.mul(2).add(1).relu().mul(3)` on a 64 × 64 input with two switches off, and rebuilds the analysis from the printed IR: the blocks in order, then the interval of every buffer they touch. Fusion is off because it would delete the very intermediates this chapter is about — which is this section's last observation, and worth arriving at rather than assuming. In-place reuse is off because Chapter 51's mechanism collapses the staircase before the packer ever sees it, and leaving it on would credit this chapter's analysis with a saving the next chapter makes. What is left is the number this chapter is responsible for.
 
 ```
 === the linearized program: one index per block ===
@@ -175,10 +189,13 @@ That staircase is the shape of every elementwise chain, and it is why deep model
 === which pairs may share storage (disjoint intervals) ===
   24 disjoint pair(s), 12 interfering pair(s)
   widest point of the program: 3 buffers live at once, out of 9 total
-  the planner reported peak: 16640 bytes over 7 temporaries
+  the planner reported peak: 32960 bytes over 7 temporaries
+  the emitted program allocates: 32768 bytes
 ```
 
-Nine buffers, but never more than three alive together. The planner's reported peak is 16,640 bytes — one full-size intermediate at 16,384 plus 256 bytes of constants — against 49,152 bytes for three unshared intermediates. The staircase was worth 3×, and it cost one traversal to find.
+Nine buffers, but never more than three alive together. The planner's reported peak is 32,960 bytes: the three 16,384-byte intermediates packed into two slots, one of which also hosts a constant, plus a 64-byte slot for each of the other three constants. Against 49,408 bytes for the same buffers unshared, the staircase was worth 1.5×, and it cost one traversal to find.
+
+Both numbers are printed because Part IX's preface promised each chapter would say which it measured. Here they agree: the plan says 32,960 and the emitted program allocates 32,768 for its two full-size slots, the difference being the constants the backend folds into expressions rather than allocating. Turn the pinned switch back on and Chapter 51 takes both numbers to one slot.
 
 The last block of output is the one to think about longest:
 
@@ -188,9 +205,9 @@ The last block of output is the one to think about longest:
   the planner reported peak: 256 bytes over 4 temporaries
 ```
 
-**Fusion is the better memory optimization, and it is not in this part.** Four blocks became one, the three 16,384-byte intermediates became values inside a loop body, and the peak fell from 16,640 bytes to 256. Everything Part IX does is applied to what fusion leaves behind. Chapter 22 sold fusion on memory *traffic*; this is the same mechanism collecting a second dividend in memory *footprint*, and neither chapter's argument needs the other.
+**Fusion is the better memory optimization, and it is not in this part.** Four blocks became one, the three 16,384-byte intermediates became values inside a loop body, and the peak fell from 32,960 bytes to 256. Everything Part IX does is applied to what fusion leaves behind. Chapter 22 sold fusion on memory *traffic*; this is the same mechanism collecting a second dividend in memory *footprint*, and neither chapter's argument needs the other.
 
-**Try this.** Lengthen the chain and watch the two numbers separate: the buffer count grows with the chain, the width does not. Then set the input to `[512, 512]` and compare the reported peak against `n × 16,384` for the `n` intermediates you counted.
+**Try this.** Lengthen the chain and watch the two numbers separate: the buffer count grows with the chain, the width does not. Then set the input to `[512, 512]` and compare the reported peak against `n × 1,048,576` for the `n` intermediates you counted.
 
 ## 49.6 Traps and limits
 

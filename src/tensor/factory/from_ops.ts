@@ -1,3 +1,4 @@
+import { isDtypeWideStorage } from '../../util/dtype_map.js';
 import { Tensor } from '../core/tensor.js';
 import { TensorImpl } from '../core/tensor_impl.js';
 import { Storage } from '../core/storage.js';
@@ -55,13 +56,12 @@ export function scalar(value: number, opts?: TensorOptions): Tensor {
   return _fromScalar(value, dtype, device, opts?.requiresGrad ?? false);
 }
 
-const _NEEDS_COERCE = new Set(['f16', 'bf16', 'i64']);
 
 function _fromScalar(value: number, dtype: DType, device: Device, requiresGrad: boolean): Tensor {
   const Ctor = typedArrayCtor(dtype);
   const data = new Ctor(1);
   const writable = data as MutableNumericArray;
-  writable[0] = _NEEDS_COERCE.has(dtype) ? coerceForStorage(dtype, value) : value;
+  writable[0] = isDtypeWideStorage(dtype) ? coerceForStorage(dtype, value) : value;
   const storage = Storage.fromData(data, device);
   const impl = new TensorImpl(storage, 0, [], [], dtype, device);
   const t = new Tensor(impl);
@@ -73,7 +73,7 @@ function _fromTypedArray(data: ArrayLike<number>, shape: readonly number[] | und
   const Ctor = typedArrayCtor(dtype);
   const copied = new Ctor(data.length);
   const writable = copied as MutableNumericArray;
-  if (_NEEDS_COERCE.has(dtype)) {
+  if (isDtypeWideStorage(dtype)) {
     for (let i = 0; i < data.length; i++) writable[i] = coerceForStorage(dtype, data[i]!);
   } else {
     for (let i = 0; i < data.length; i++) writable[i] = data[i]!;
@@ -92,7 +92,7 @@ function _fromFlatArray(flat: readonly number[], shape: readonly number[], dtype
   const Ctor = typedArrayCtor(dtype);
   const data = new Ctor(flat.length);
   const writable = data as MutableNumericArray;
-  if (_NEEDS_COERCE.has(dtype)) {
+  if (isDtypeWideStorage(dtype)) {
     for (let i = 0; i < flat.length; i++) writable[i] = coerceForStorage(dtype, flat[i]!);
   } else {
     for (let i = 0; i < flat.length; i++) writable[i] = flat[i]!;

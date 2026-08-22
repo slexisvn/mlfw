@@ -1,6 +1,7 @@
 import { fft, ifft } from './transforms.js';
 import { lstsq } from '../tensor/ops/linalg.js';
-import { hostVector, nextPow2 } from './_array.js';
+import { hostVector } from './_array.js';
+import { f64, float64From, nextPow2 } from '../util/numeric_array.js';
 import { toHostTensor } from '../tensor/utils/host_matrix.js';
 import { tensorToContiguous } from '../dispatcher/jit_dispatch.js';
 import type { Tensor } from '../tensor/core/tensor.js';
@@ -16,16 +17,6 @@ const DK_SEED_IM = 0.9;
 type ConvMode = 'full' | 'same' | 'valid';
 type ModeOptions = { mode?: ConvMode };
 type RollingOptions = { ddof?: number };
-
-function f64(data: ArrayLike<number | bigint>, index: number): number {
-  return Number(data[index]);
-}
-
-function float64From(data: ArrayLike<number | bigint>): Float64Array {
-  const out = new Float64Array(data.length);
-  for (let i = 0; i < data.length; i++) out[i] = Number(data[i]);
-  return out;
-}
 
 function fftInterleaved(data: Float64Array, m: number, device: Device) {
   const padded = new Float64Array(m);

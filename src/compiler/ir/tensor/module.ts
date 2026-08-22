@@ -1,34 +1,8 @@
 import { verifyIR, IRLevel } from '../verify.js';
+import { IRModule } from '../module_base.js';
 import type { PrimFunc } from './nodes.js';
 
-export class TirModule {
-  name: string;
-  private _functions: Map<string, PrimFunc>;
-  _version: number;
-
-  constructor(name = 'module') {
-    this.name = name;
-    this._functions = new Map();
-    this._version = 0;
-  }
-
-  get version(): number { return this._version; }
-
-  addFunction(primFunc: PrimFunc): PrimFunc {
-    this._functions.set(primFunc.name, primFunc);
-    primFunc._module = this;
-    this._version++;
-    return primFunc;
-  }
-
-  getFunction(name: string): PrimFunc | null {
-    return this._functions.get(name) || null;
-  }
-
-  hasFunction(name: string): boolean {
-    return this._functions.has(name);
-  }
-
+export class TirModule extends IRModule<PrimFunc> {
   replaceFunction(name: string, primFunc: PrimFunc): PrimFunc {
     if (!this._functions.has(name)) {
       throw new Error(`TirModule '${this.name}' has no function '${name}' to replace`);
@@ -38,26 +12,6 @@ export class TirModule {
     primFunc._module = this;
     this._version++;
     return primFunc;
-  }
-
-  removeFunction(name: string): boolean {
-    const removed = this._functions.delete(name);
-    if (removed) this._version++;
-    return removed;
-  }
-
-  get functionCount(): number { return this._functions.size; }
-
-  functionNames(): string[] {
-    return [...this._functions.keys()];
-  }
-
-  *functions(): Generator<PrimFunc, void, undefined> {
-    yield* this._functions.values();
-  }
-
-  *[Symbol.iterator](): Generator<PrimFunc, void, undefined> {
-    yield* this._functions.values();
   }
 
   verify(): string[] {

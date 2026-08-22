@@ -36,11 +36,11 @@ Meanwhile the other three primitives answer a plainer question. Chapter 4 measur
 
 ## 41.3 Theory
 
-> **Definition 41.1 (Reduction block).** A block is a *reduction over `⊕`* if its body is a single store `A[s] = A[s] ⊕ e`, where `s` does not involve the reduction axes and `e` does not read `A`.
+> **Definition 41.1 (Reduction block).** **(stated here)** A block is a *reduction over `⊕`* if its body is a single store `A[s] = A[s] ⊕ e`, where `s` does not involve the reduction axes and `e` does not read `A`.
 
 The pattern-match in Definition 41.1 is doing real work: it names the accumulator (the buffer that appears on both sides at the same subscript), the operator, and the update expression. `rfactor` is exactly this decomposition, and everything it builds is assembled from those three parts.
 
-> **Theorem 41.2 (rfactor is sound when `⊕` is associative and commutative with identity `e₀`, and unsound for some input when it is not associative).** Let `B` be a reduction over `⊕` with axis `k ∈ [0, K)` and initial value `e₀`, and let `f ∣ K`. The rfactored program — `P[i] = e₀ ⊕ ⨁_{j<K/f} x_{j·f+i}` for each `i < f`, then `A[s] = e₀ ⊕ ⨁_{i<f} P[i]` — computes the same value as `B` for all inputs if `⊕` is associative and commutative with identity `e₀`. If `⊕` is not associative, there are inputs for which it does not.
+> **Theorem 41.2 (rfactor is sound when `⊕` is associative and commutative with identity `e₀`, and unsound for some input when it is not associative).** **(stated here)** Let `B` be a reduction over `⊕` with axis `k ∈ [0, K)` and initial value `e₀`, and let `f ∣ K`. The rfactored program — `P[i] = e₀ ⊕ ⨁_{j<K/f} x_{j·f+i}` for each `i < f`, then `A[s] = e₀ ⊕ ⨁_{i<f} P[i]` — computes the same value as `B` for all inputs if `⊕` is associative and commutative with identity `e₀`. If `⊕` is not associative, there are inputs for which it does not.
 
 *Proof.* The original computes `e₀ ⊕ x₀ ⊕ ⋯ ⊕ x_{K−1}` left to right. The rfactored form computes the same `K` terms grouped by residue mod `f`, with `e₀` inserted once per group and once at the combine. Associativity lets the parentheses be moved, commutativity lets the terms be permuted from index order into residue order, and identity lets the `f` extra copies of `e₀` be discarded. Conversely, if `⊕` is non-associative, pick `a, b, c` with `(a⊕b)⊕c ≠ a⊕(b⊕c)`; with `K = 4`, `f = 2` the two forms bracket differently and differ. ∎
 
@@ -54,7 +54,7 @@ This is Chapter 20's fast-math question again, and the compiler answers it the s
 
 The memory primitives need a weaker and purely structural condition.
 
-> **Proposition 41.4 (Interposing a buffer is sound, stated here).** Let `B` read buffer `b`, let `C` be a fresh buffer of the same shape and type, and let the program be transformed by (i) inserting a copy `C[x] = b[x]` over the whole shape immediately before `B`'s nest, and (ii) redirecting `B`'s reads of `b` to `C`. The result is equivalent, provided nothing between the copy and `B` writes `b`, and nothing writes `C`.
+> **Proposition 41.4 (Interposing a buffer is sound).** **(stated here)** Let `B` read buffer `b`, let `C` be a fresh buffer of the same shape and type, and let the program be transformed by (i) inserting a copy `C[x] = b[x]` over the whole shape immediately before `B`'s nest, and (ii) redirecting `B`'s reads of `b` to `C`. The result is equivalent, provided nothing between the copy and `B` writes `b`, and nothing writes `C`.
 
 *Proof sketch.* After the copy, `C` and `b` agree everywhere; no intervening write makes them disagree; so every load `B` performs returns what it would have returned. `C` is fresh, so no other statement is affected. ∎
 
@@ -62,9 +62,9 @@ Both provisos are discharged in this compiler by *construction* rather than by a
 
 `computeInline` is where the analysis is real:
 
-> **Definition 41.5 (Inlinable producer, stated here).** A block `P` writing `A[φ(v₁,…,v_d)]` is *inlinable* if `φ` is an invertible affine map of `P`'s own iteration variables, `P` has no `initBody`, its store value reads no buffer `P` itself writes, `A` is not used inside any index expression anywhere, and every variable the store value reads is an iteration variable of `P`.
+> **Definition 41.5 (Inlinable producer).** **(stated here)** A block `P` writing `A[φ(v₁,…,v_d)]` is *inlinable* if `φ` is an invertible affine map of `P`'s own iteration variables, `P` has no `initBody`, its store value reads no buffer `P` itself writes, `A` is not used inside any index expression anywhere, and every variable the store value reads is an iteration variable of `P`.
 
-> **Proposition 41.6 (Inlining is sound for an inlinable producer, stated here).** Replacing every load `A[ψ]` in the program by `P`'s store value with `v_i := φ⁻¹(ψ)_i`, and deleting `P`, preserves semantics.
+> **Proposition 41.6 (Inlining is sound for an inlinable producer).** **(stated here)** Replacing every load `A[ψ]` in the program by `P`'s store value with `v_i := φ⁻¹(ψ)_i`, and deleting `P`, preserves semantics.
 
 *Proof sketch.* Invertibility of `φ` is what makes `φ⁻¹(ψ)` well defined, so each load can be rewritten to the expression that produced that element. "No `initBody`" excludes reductions, whose element is produced by a loop rather than an expression. "Reads no co-produced buffer" and "every free variable is an iteration variable" ensure the substituted expression means the same thing at the consumer's site as it did at the producer's. `A` not appearing in an index expression rules out indirect access, where the set of elements read is not statically known. ∎
 
@@ -104,7 +104,7 @@ Theorem 41.2's hypothesis is a four-element table ([`schedule.ts:45`](../../../s
 const RFACTOR_REDUCE_TYPE: Record<string, string> = { '+': 'sum', '*': 'prod', 'min': 'min', 'max': 'max' };
 ```
 
-which doubles as the operator test and as the route to each operator's identity (§41.6). `min` and `max` select an operand rather than computing a new value, so no rounding happens and they are associative and commutative exactly; `+` and `*` are the approximate cases of Counterexample 41.3. The table does not distinguish the two situations, and there is no dtype test — an integer sum, which is exact, and a float sum, which is not, take the same path.
+which doubles as the operator test and as the route to each operator's identity, two paragraphs below. `min` and `max` select an operand rather than computing a new value, so no rounding happens and they are associative and commutative exactly; `+` and `*` are the approximate cases of Counterexample 41.3. The table does not distinguish the two situations, and there is no dtype test — an integer sum, which is exact, and a float sum, which is not, take the same path.
 
 The rest builds two nests. The partial one carries the split of the reduction axis, the new `[factor, ...acc.shape]` buffer, and — this is the only place in the compiler that does it — an `initBody`:
 

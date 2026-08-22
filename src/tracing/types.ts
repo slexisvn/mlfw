@@ -1,6 +1,5 @@
 import type { Tensor } from '../tensor/core/tensor.js';
 import type { DType, NumericTypedArray } from '../tensor/types/dtype.js';
-import type { Device } from '../tensor/types/device.js';
 import type { Dim, TensorType } from '../compiler/ir/graph/types.js';
 import type { ShapeEnv } from './shape_env.js';
 import type { SymbolicTensor } from './symbolic_tensor.js';

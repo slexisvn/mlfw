@@ -81,41 +81,7 @@ A region is thin — it exists to be the thing an operation owns. `parentOp` is 
   }
 ```
 
-Any node, at any nesting depth, can find the function it belongs to. That matters for a reason that is not obvious: **mutation tracking**.
-
-### Every edit through the API bumps a version number
-
-[`block.ts:41`](../../../src/compiler/ir/graph/block.ts):
-
-```ts
-  _notifyMutation(): void {
-    const fn = this._owningFunction();
-    if (fn) fn.bumpVersion();
-  }
-```
-
-`pushOp`, `insertBefore`, `insertAfter`, `removeOp`, `addArgument`, `removeArguments` and `replaceOperand` all call it. So does `replaceAllUsesWith`. The result is that a function carries a counter that changes whenever the *structure* inside it changes, at any depth — which operations exist, and which values they consume.
-
-That counter is the foundation of Chapter 16's analysis caching: an analysis result computed at version 7 is known to be stale at version 8, without comparing anything.
-
-**Attributes count as edits.** An attribute is not decoration: a `dot`'s `lhs_contracting` decides which axes are summed, and a comparison's `direction` decides whether the test is `<` or `>`. Changing one changes what the program computes, and passes do change them in place — [`patterns.ts:162`](../../../src/compiler/ir/graph/patterns.ts) inverts a comparison's `direction` during canonicalization, [`partition_pass.ts:59`](../../../src/compiler/passes/partition/partition_pass.ts) stamps `partition_id` onto existing operations. So the attribute mutators notify too ([`operation.ts:84`](../../../src/compiler/ir/graph/operation.ts)):
-
-```ts
-  setAttr(name: string, value: AttrValue): void {
-    this.attributes.set(name, value);
-    if (this.parentBlock) this.parentBlock._notifyMutation();
-  }
-
-  removeAttr(name: string): boolean {
-    const removed = this.attributes.delete(name);
-    if (removed && this.parentBlock) this.parentBlock._notifyMutation();
-    return removed;
-  }
-```
-
-Two details are worth copying. The notification is conditional on `parentBlock`, because an operation under construction is not yet in a function and has no version to bump. And `removeAttr` notifies only when it removed something — deleting an absent key is not a mutation, and reporting it as one would invalidate the cache on every miss.
-
-The mechanism is therefore what §9.4's heading claims: every edit that goes through the API bumps the version. What it cannot see is an edit made *around* the API, which is §9.8's subject.
+Any node, at any nesting depth, can find the function it belongs to. That matters for a reason that is not obvious, and §9.4 is about it: **mutation tracking**.
 
 ### Function — a signature and one region
 
@@ -157,7 +123,41 @@ export class GraphModule {
 
 The module is the least interesting container and the shortest file, which is as it should be. Functions are keyed by name, which is what makes a `call` operation resolvable and what lets Chapter 26's partitioner split one function into several and keep them together.
 
-## 9.4 Lab 1 — The six nouns, printed
+## 9.4 Every edit through the API bumps a version number
+
+[`block.ts:41`](../../../src/compiler/ir/graph/block.ts):
+
+```ts
+  _notifyMutation(): void {
+    const fn = this._owningFunction();
+    if (fn) fn.bumpVersion();
+  }
+```
+
+`pushOp`, `insertBefore`, `insertAfter`, `removeOp`, `addArgument`, `removeArguments` and `replaceOperand` all call it. So does `replaceAllUsesWith`. The result is that a function carries a counter that changes whenever the *structure* inside it changes, at any depth — which operations exist, and which values they consume.
+
+That counter is the foundation of Chapter 16's analysis caching: an analysis result computed at version 7 is known to be stale at version 8, without comparing anything.
+
+**Attributes count as edits.** An attribute is not decoration: a `dot`'s `lhs_contracting` decides which axes are summed, and a comparison's `direction` decides whether the test is `<` or `>`. Changing one changes what the program computes, and passes do change them in place — [`patterns.ts:162`](../../../src/compiler/ir/graph/patterns.ts) inverts a comparison's `direction` during canonicalization, [`partition_pass.ts:59`](../../../src/compiler/passes/partition/partition_pass.ts) stamps `partition_id` onto existing operations. So the attribute mutators notify too ([`operation.ts:84`](../../../src/compiler/ir/graph/operation.ts)):
+
+```ts
+  setAttr(name: string, value: AttrValue): void {
+    this.attributes.set(name, value);
+    if (this.parentBlock) this.parentBlock._notifyMutation();
+  }
+
+  removeAttr(name: string): boolean {
+    const removed = this.attributes.delete(name);
+    if (removed && this.parentBlock) this.parentBlock._notifyMutation();
+    return removed;
+  }
+```
+
+Two details are worth copying. The notification is conditional on `parentBlock`, because an operation under construction is not yet in a function and has no version to bump. And `removeAttr` notifies only when it removed something — deleting an absent key is not a mutation, and reporting it as one would invalidate the cache on every miss.
+
+So the mechanism is what this section's heading claims, with one word doing the work: every edit that goes *through the API* bumps the version. What it cannot see is an edit made *around* the API, which is §9.9's subject.
+
+## 9.5 Lab 1 — The six nouns, printed
 
 ```bash
 node docs/part2/ch09-object-model/labs/01-the-six-nouns.mjs
@@ -215,7 +215,7 @@ Finally, the lab walks *upward* from an operation buried inside the loop body:
 
 Every node knows its container, all the way to the top. That is `parentBlock` and `parentRegion.parentOp`, the same chain `_owningFunction` follows.
 
-## 9.5 What a region is for
+## 9.6 What a region is for
 
 Regions do three jobs in this compiler, and it is worth naming them separately because they look unrelated until you see the mechanism is the same.
 
@@ -227,7 +227,7 @@ Regions do three jobs in this compiler, and it is worth naming them separately b
 
 The price is stated in the op registry. Region-carrying operations declare `RECURSIVE_MEMORY_EFFECTS` ([`op_registry.ts:39`](../../../src/compiler/ir/graph/op_registry.ts)), meaning "my effects are whatever my contents' effects are" — a pass that ignores this and treats a region-carrying operation as pure will delete a loop that writes to memory. That was a real bug in this codebase, and it is why the trait exists.
 
-## 9.6 Lab 2 — What a region can see
+## 9.7 Lab 2 — What a region can see
 
 A region contains a program. Which values from *outside* can that program refer to?
 
@@ -266,15 +266,15 @@ Three operands go in, three block arguments come out, positionally matched and i
 
 That is the **region scope contract**, and it is the design decision this chapter is really about:
 
-> **Definition 9.1 (Region scope isolation; stated here).** A region is *isolated* when every value used inside it is either a block argument of one of its blocks or defined by an operation within it — so that the only values crossing the boundary do so through the operation's explicit operands and results.
+> **Definition 9.1 (Region scope isolation).** **(stated here)** A region is *isolated* when every value used inside it is either a block argument of one of its blocks or defined by an operation within it — so that the only values crossing the boundary do so through the operation's explicit operands and results.
 
 Isolation is a choice, not a necessity. MLIR supports both isolated and non-isolated regions, and a non-isolated region — one that can close over enclosing values — is more convenient to build. What isolation buys is that **the boundary is complete**: to know what a `fusion` reads you read its operand list, and to know what it produces you read its result list. No pass has to search inside it to discover a hidden dependency. Every fusion legality check in Part IV, every liveness computation in Part IX, and the buffer plumbing in every backend depend on that being true.
 
-The lab computes the capture set the hard way — every value used inside, minus everything defined inside — and gets zero. The compiler has a function for this, `capturedValues` at [`graph_algorithms.ts:22`](../../../src/compiler/ir/graph/graph_algorithms.ts), used by the topological sort so that an operation with a region is ordered after everything its *contents* read. It exists precisely because isolation is enforced by convention and construction rather than by the verifier, which is the honest version of this story — see §9.8.
+The lab computes the capture set the hard way — every value used inside, minus everything defined inside — and gets zero. The compiler has a function for this, `capturedValues` at [`graph_algorithms.ts:22`](../../../src/compiler/ir/graph/graph_algorithms.ts), used by the topological sort so that an operation with a region is ordered after everything its *contents* read. It exists precisely because isolation is enforced by convention and construction rather than by the verifier, which is the honest version of this story — see §9.9.
 
-**Try this.** Run the lab against the `scan` model from Lab 1 instead. `scan` takes 2 operands and its block takes 2 arguments, but they do not correspond positionally in the same way: the block arguments are (element of `xs`, carry) while the operands are (`xs`, `h0`). Region operations get to define their own calling convention, and `num_carry` / `num_xs` are the attributes that record it.
+**Try this.** Run the lab against the `scan` model from Lab 1 instead. `scan` also takes 2 operands and its block also takes 2 arguments, and they still correspond position for position — operands are `(xs, h0)`, block arguments are `(element of xs, carry)`. What changes is that the correspondence is no longer type-preserving: operand 0 is the whole `tensor<4x3xf32>` stack while block argument 0 is one `tensor<3xf32>` slice of it, because the loop hands the body one timestep at a time. Only the carry passes through unchanged. Region operations get to define their own calling convention this way, and `num_carry` / `num_xs` are the attributes that record where the split falls; Chapter 5 §5.7 works through how to read it off a printout.
 
-## 9.7 Cloning, and why it is harder than it looks
+## 9.8 Cloning, and why it is harder than it looks
 
 One operation on this structure is worth reading in full, because it is where all six nouns interact: cloning a region ([`operation.ts:283`](../../../src/compiler/ir/graph/operation.ts)):
 
@@ -303,7 +303,7 @@ The `valueMap` threads through everything: it maps old values to new ones so tha
 
 Then look at the two loops. Operations are **cloned** in `topoSortByOperands` order — an operation cannot be cloned before its operands' clones exist — but **pushed** in the original array order. Cloning order is a dataflow constraint; insertion order is cosmetic. That is Theorem 8.4 showing up as three lines of code, and Chapter 13 will show the parser making exactly the same split for exactly the same reason.
 
-## 9.8 Traps and limits
+## 9.9 Traps and limits
 
 - **`ops()` versus `opsRecursive()` is a real bug source.** They differ by everything inside every region. When you read a pass in Part IV, check which one it uses; when you write one, decide deliberately.
 - **Region isolation is a contract, not a checked invariant.** The verifier in Chapter 12 checks that operands are defined *somewhere in the function's scope set*, which is deliberately permissive: it does not reject a region operation whose body reads an enclosing value. Isolation is upheld by the passes that build regions and is pinned by [`tests/compiler/ir/graph/region-scope-contract.test.js`](../../../tests/compiler/ir/graph/region-scope-contract.test.js) rather than by the verifier. Chapter 12 returns to why that boundary was drawn there.
@@ -311,10 +311,10 @@ Then look at the two loops. Operations are **cloned** in `topoSortByOperands` or
 - **Encapsulation is a naming convention, and it does not cover the containers.** Every mutating *method* notifies (§9.4), but the underscore convention is the whole of the enforcement, and `Operation.attributes`, `.operands`, `.results` and `.regions` are all public, mutable and reachable. `op.attributes.set('direction', 'gt')` compiles, runs, changes what the program computes, and leaves the version untouched — by a route that is not even nominally private. Only `Block`'s intrusive list is underscore-protected. So "there is exactly one path by which the IR can be edited" describes an intention rather than a property of the code: the version counter is sound for every edit made through the API and cannot see one made around it. Freezing the containers, or hiding them behind accessors, is what would close the remaining gap.
 - **`Object.freeze` on the signature is shallow.** `inputTypes` cannot be reassigned or resized; the `TensorType` objects inside it are immutable by their own construction rather than by the freeze. Chapter 10 makes that immutability explicit.
 
-## 9.9 Read the tests
+## 9.10 Read the tests
 
 - [`tests/compiler/ir/graph/block-invariants.test.js`](../../../tests/compiler/ir/graph/block-invariants.test.js) — what the operation list guarantees under insertion, removal, and erasure during iteration.
-- [`tests/compiler/ir/graph/region-scope-contract.test.js`](../../../tests/compiler/ir/graph/region-scope-contract.test.js) — the isolation property of §9.6, stated as a test because it is not stated as a verifier rule.
+- [`tests/compiler/ir/graph/region-scope-contract.test.js`](../../../tests/compiler/ir/graph/region-scope-contract.test.js) — the isolation property of §9.7, stated as a test because it is not stated as a verifier rule.
 - [`tests/compiler/ir/deep-nesting.test.js`](../../../tests/compiler/ir/deep-nesting.test.js) — regions inside regions inside regions, and the traversals that must not blow the stack on them.
 
 ---

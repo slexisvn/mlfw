@@ -1,11 +1,13 @@
+import { CodegenBase } from '../codegen_base.js';
 import { ForKind } from '../../compiler/ir/tensor/nodes.js';
-import { wasmType, wasmLoad, wasmStore, wasmBytes, isDtypeFloat, wasmSimdEntry, wasmVecOp } from '../../util/dtype_map.js';
+import { wasmType, wasmLoad, wasmStore, wasmBytes, isDtypeFloat, isDtypeHalf, wasmSimdEntry, wasmVecOp, WASM_FLOAT_PREFIX_OPS } from '../../util/dtype_map.js';
+import { DIVISION_MATH_OPS } from '../../util/divmod.js';
 import type { SimdInfo } from '../../util/dtype_map.js';
 import { inferDtype } from '../../compiler/ir/lir/nodes.js';
 import { HALF_WASM_CONSTANTS } from '../../tensor/utils/half.js';
 import { walk, some, collect, walkScoped } from '../../compiler/ir/ir_visitor.js';
 import { usesAnyVar, usesAnyVarIn, bufferAccessCount, vectorValueDtype, loopCarriedDependenceIn, indicesAreLaneAffine, guardedLoadsAreInRange, storedBufferNames, collectScopeBindings, findLoopOfKind, staticExtentOf, hasBufferAccessMatching, loadsAreUnitStrideIn } from '../../compiler/analysis/tir_queries.js';
-import { resolveShapeParam, isZeroFillBody } from '../codegen_utils.js';
+import { resolveShapeParam } from '../codegen_utils.js';
 
 import type { Buffer } from '../../compiler/ir/tensor/buffer.js';
 import type { BlockNode, BufferLoadNode, BufferStoreNode, CallExternNode, CastNode, CompareNode, ForNode, IfThenElseNode, MathOpNode, SeqNode, TirNode, WhileNode } from '../../compiler/ir/tensor/nodes.js';
@@ -13,8 +15,6 @@ import type { IRStmtNode, LIRAccumulatorNode, LIRBindingsNode, LIRFlatStoreNode,
 import type { CodegenFunc } from '../codegen_utils.js';
 import type { TargetFeatures } from '../target.js';
 
-const _HALF_DTYPES = new Set(['f16', 'bf16']);
-const INT_DIV_OPS = new Set(['/', '//', '%', 'tdiv', 'tmod']);
 
 type SimdOpKey = keyof SimdInfo;
 type InstrTable = Readonly<Record<string, string | undefined>>;
@@ -31,7 +31,6 @@ type VectorMode = {
 };
 type WasmAcc = { local: string; bufName: string; indices?: TirNode[] };
 type WasmAccPattern = { buf: Buffer; indices: TirNode[]; outerIndices: TirNode[] };
-type BindingRef = { name: string; expr: IRStmtNode };
 
 export type WasmParallelInfo = { extent: number; outputIndices: number[]; poolSafe: boolean };
 export type WasmCodegenResult = {
@@ -44,10 +43,7 @@ export type WasmCodegenResult = {
   parallel: WasmParallelInfo | null;
 };
 
-export class WasmCodegen {
-  target: TargetFeatures;
-  _lines: string[];
-  _indent: number;
+export class WasmCodegen extends CodegenBase {
   _locals: Map<string, string>;
   _imports: Map<string, string>;
   _bufferOffsets: Map<string, number>;
@@ -65,9 +61,7 @@ export class WasmCodegen {
   declare _intDivEmitDepth: number;
 
   constructor(target: TargetFeatures) {
-    this.target = target;
-    this._lines = [];
-    this._indent = 0;
+    super(target);
     this._locals = new Map();
     this._imports = new Map();
     this._bufferOffsets = new Map();
@@ -133,10 +127,7 @@ export class WasmCodegen {
       this._emit(`(import "math" "${name}" (func $math_${name} ${sig}))`);
     }
 
-    const paramDecls: string[] = [];
-    for (const [, buf] of func.bufferMap) {
-      paramDecls.push('(param i32)');
-    }
+    const paramDecls: string[] = Array.from(func.bufferMap, () => '(param i32)');
     const shapeParamEntries: string[] = [];
     for (const sp of func.shapeParams) {
       paramDecls.push('(param i32)');
@@ -240,17 +231,13 @@ export class WasmCodegen {
     }
   }
 
-  _emit(line: string): void {
-    this._lines.push('  '.repeat(this._indent) + line);
-  }
-
   _emitLoadOp(dtype: string): void {
-    if (_HALF_DTYPES.has(dtype)) { this._emitHalfDecode(dtype); return; }
+    if (isDtypeHalf(dtype)) { this._emitHalfDecode(dtype); return; }
     this._emit(wasmLoad(dtype));
   }
 
   _emitStoreOp(dtype: string): void {
-    if (_HALF_DTYPES.has(dtype)) { this._emitHalfEncode(dtype); return; }
+    if (isDtypeHalf(dtype)) { this._emitHalfEncode(dtype); return; }
     this._emit(wasmStore(dtype));
   }
 
@@ -361,11 +348,11 @@ export class WasmCodegen {
   _ensureHalfScratch(func: CodegenFunc): void {
     let needs = false;
     for (const [, buf] of func.bufferMap) {
-      if (_HALF_DTYPES.has(buf.dtype)) { needs = true; break; }
+      if (isDtypeHalf(buf.dtype)) { needs = true; break; }
     }
     if (!needs && (func as LIRFunc).metadata && (func as LIRFunc).metadata.locals) {
       for (const [, dtype] of (func as LIRFunc).metadata.locals) {
-        if (_HALF_DTYPES.has(dtype)) { needs = true; break; }
+        if (isDtypeHalf(dtype)) { needs = true; break; }
       }
     }
     if (!needs) needs = this._treeHasHalf(func.body);
@@ -377,7 +364,7 @@ export class WasmCodegen {
   }
 
   _treeHasHalf(root: IRStmtNode): boolean {
-    return hasBufferAccessMatching(root, (dtype) => _HALF_DTYPES.has(dtype));
+    return hasBufferAccessMatching(root, (dtype) => isDtypeHalf(dtype));
   }
 
   _visitNode(startNode: IRStmtNode): void {
@@ -1145,8 +1132,7 @@ export class WasmCodegen {
       return;
     }
 
-    const NATIVE = new Set(['sqrt', 'abs', 'ceil', 'floor', 'min', 'max', 'rsqrt']);
-    const prefix = node.externName === 'abs' || NATIVE.has(node.externName)
+    const prefix = node.externName === 'abs' || WASM_FLOAT_PREFIX_OPS.has(node.externName)
       ? (this._numPrefix(node.dtype) === 'i32' ? 'f32' : this._numPrefix(node.dtype))
       : 'f32';
 
@@ -1213,7 +1199,7 @@ export class WasmCodegen {
 
   _isIntDivNode(n: IRStmtNode): boolean {
     if (n.type !== 'MathOpNode' || !n.b) return false;
-    if (!INT_DIV_OPS.has(n.op)) return false;
+    if (!DIVISION_MATH_OPS.has(n.op)) return false;
     const prefix = this._joinPrefix(this._exprPrefix(n.a), this._exprPrefix(n.b));
     return prefix === 'i32' || prefix === 'i64';
   }
@@ -1345,10 +1331,6 @@ export class WasmCodegen {
     return node.type === 'IntImmNode' ? node.value : null;
   }
 
-  _isZeroFillBody(body: IRStmtNode): boolean {
-    return isZeroFillBody(body);
-  }
-
   _computeLaneVars(node: ForNode | LIRAccumulatorNode): Set<string> {
     const laneVars = new Set([node.loopVar.name]);
     const bindings = collectScopeBindings(node.body);
@@ -1399,7 +1381,6 @@ export class WasmCodegen {
 
     const mainExtent = Math.floor(extent / lanes) * lanes;
     const tailExtent = extent - mainExtent;
-    const bytes = wasmBytes(dtype);
     const bufAccessCount = this._countBufAccesses(node.body);
     const useAddrCSE = bufAccessCount >= 2;
     const addrLocal = useAddrCSE ? '_vaddr_' + varName : null;

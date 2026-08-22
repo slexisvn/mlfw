@@ -40,21 +40,21 @@ Neither vocabulary can express the other. A graph has no loops to tile. A loop n
 
 Fix a program as a finite set of statements, each writing one scalar.
 
-> **Definition 32.1 (Iteration domain).** The *iteration domain* of a statement `S` is the set of integer vectors `(i₁,…,i_d)` for which `S` executes, one component per enclosing loop. In this compiler every domain is a rectangle: `0 ≤ i_k < e_k` for extents `e_k` that are integer literals or symbolic expressions in the function's shape parameters.
+> **Definition 32.1 (Iteration domain).** **(classical)** The *iteration domain* of a statement `S` is the set of integer vectors `(i₁,…,i_d)` for which `S` executes, one component per enclosing loop. In this compiler every domain is a rectangle: `0 ≤ i_k < e_k` for extents `e_k` that are integer literals or symbolic expressions in the function's shape parameters.
 
-> **Definition 32.2 (Loop nest).** A *loop nest* for `S` is an ordered list of `d` loops whose bodies contain `S`, together with an assignment of each loop variable to a component of the iteration domain. The nest fixes the execution order: *lexicographic* in `(i₁,…,i_d)` — the order a dictionary sorts words in, so the outermost loop varies slowest and the innermost fastest, exactly as nested `for` loops run.
+> **Definition 32.2 (Loop nest).** **(classical)** A *loop nest* for `S` is an ordered list of `d` loops whose bodies contain `S`, together with an assignment of each loop variable to a component of the iteration domain. The nest fixes the execution order: *lexicographic* in `(i₁,…,i_d)` — the order a dictionary sorts words in, so the outermost loop varies slowest and the innermost fastest, exactly as nested `for` loops run.
 
 The graph fixes neither of these. Lowering picks both.
 
-> **Definition 32.3 (Lowering).** *Lowering* is a map `L` from a graph function to a `PrimFunc`: it assigns a buffer to every value, and replaces every operation with statements over those buffers wrapped in a loop nest.
+> **Definition 32.3 (Lowering).** **(stated here)** *Lowering* is a map `L` from a graph function to a `PrimFunc`: it assigns a buffer to every value, and replaces every operation with statements over those buffers wrapped in a loop nest.
 
 Two properties of `L` decide how the rest of the book is organised.
 
-> **Theorem 32.4 (Lowering is not injective, stated here).** There exist distinct graph functions `F ≠ G` with `L(F) = L(G)`.
+> **Theorem 32.4 (Lowering is not injective).** **(stated here)** There exist distinct graph functions `F ≠ G` with `L(F) = L(G)`.
 
 *Proof.* By exhibition. `add(x, y)` where `x` has shape `[4,3]` and `y` has shape `[1,3]` broadcasts implicitly: the elementwise rule reads the size-1 axis with a literal `0`. `add(x, broadcast_in_dim(y, [4,3], [0,1]))` is a two-operation graph, and its broadcast is folded into the same index expression by the alias path of §32.4. The two `PrimFunc`s are character-identical, which §32.7 checks. ∎
 
-> **Corollary 32.5 (Lowering is irreversible).** No inverse `L⁻¹` exists. In particular, given only `L(F)`, no procedure can determine which of the graph functions in `L⁻¹(L(F))` produced it.
+> **Corollary 32.5 (Lowering is irreversible).** **(stated here)** No inverse `L⁻¹` exists. In particular, given only `L(F)`, no procedure can determine which of the graph functions in `L⁻¹(L(F))` produced it.
 
 **Read the corollary as the precise statement it is, not as the stronger one it invites.** "The information is gone forever" is the natural gloss and it is too strong in two directions worth separating.
 
@@ -66,7 +66,7 @@ So the useful form of the corollary is: **the mapping preserves what the rules c
 
 This is Definition 6.1 arriving where it bites. It is also why the pipeline order is what it is: differentiation (Part V) before lowering because the chain rule needs dataflow; fusion (Part IV) before lowering because a fusion decision is a claim about which values are internal; layout (Chapter 25) before lowering because a layout choice becomes a stride, and a stride is not a choice any more.
 
-> **Definition 32.6 (Lowering rule).** A *lowering rule* for an operation `o` is a function taking `o`, the buffers assigned to its operands, and the buffers assigned to its results, and returning a statement.
+> **Definition 32.6 (Lowering rule).** **(stated here)** A *lowering rule* for an operation `o` is a function taking `o`, the buffers assigned to its operands, and the buffers assigned to its results, and returning a statement.
 
 Note what Definition 32.6 does **not** take: the rest of the program. A rule sees one operation. The driver is what sees the function, and §32.4 shows the two decisions it makes that no rule could.
 

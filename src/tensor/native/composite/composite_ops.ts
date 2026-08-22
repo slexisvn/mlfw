@@ -1,3 +1,4 @@
+import { nextPow2 } from '../../../util/numeric_array.js';
 import * as ops from '../../ops/ops.js';
 import { zeros, ones } from '../../factory/creation_ops.js';
 import { tensor } from '../../factory/from_ops.js';
@@ -100,12 +101,6 @@ export function cumsumKernel(self: Tensor, dim = 0): Tensor {
     out = asTensor(ops.add(out, shifted));
   }
   return out;
-}
-
-function nextPow2(n: number): number {
-  let p = 1;
-  while (p < n) p <<= 1;
-  return p;
 }
 
 function bitonicLastDim(self: Tensor, descending: boolean, withIdx: false): Tensor;

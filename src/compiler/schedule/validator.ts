@@ -3,7 +3,6 @@ import { reductionLoopVars, classifyBufferIndex } from './legality.js';
 import { Analyzer } from '../analysis/analyzer.js';
 import { irBound } from '../analysis/ir_arith.js';
 import type { TirNode, PrimFunc, ForNode, BlockNode, SeqNode, IfThenElseNode, LetStmtNode, AllocateNode, BufferLoadNode, BufferStoreNode, MathOpNode, CompareNode, CastNode, CallExternNode, IntImmNode, ForKindValue } from '../ir/tensor/nodes.js';
-import type { Dim } from '../ir/graph/types.js';
 
 type ParLoop = { varName: string; kind: ForKindValue };
 type BufferAccessNode = BufferLoadNode | BufferStoreNode;

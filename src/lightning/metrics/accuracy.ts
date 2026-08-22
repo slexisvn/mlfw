@@ -11,7 +11,6 @@ type AccuracyOptions = {
 
 export class Accuracy extends Metric {
   private _task: AccuracyTask;
-  private _numClasses: number | null;
   private _topK: number;
   private _threshold: number;
   private _correct: number;
@@ -20,7 +19,6 @@ export class Accuracy extends Metric {
   constructor({ task = 'multiclass', numClasses = null, topK = 1, threshold = 0.5 }: AccuracyOptions = {}) {
     super();
     this._task = task;
-    this._numClasses = numClasses;
     this._topK = topK;
     this._threshold = threshold;
     this._correct = 0;

@@ -2,48 +2,32 @@ import { TensorType } from '../../ir/graph/types.js';
 import { registry } from '../../ir/graph/ops.js';
 import { classifyFusionKind, FusionKind } from './fusion_analysis.js';
 import { canInlineFuse } from '../lowering/graph_to_tensor.js';
-import { computePartitionIO } from '../partition/partition_core.js';
+import { OpGroup } from '../partition/op_group.js';
 import type { Operation } from '../../ir/graph/operation.js';
 import type { Value } from '../../ir/graph/value.js';
 import type { GraphFunction } from '../../ir/graph/function.js';
 import type { OpDef } from '../../ir/graph/op_registry.js';
 import type { FusionLegality, FusionLegalityResult } from './fusion_analysis.js';
 
-export class FusionGroup {
-  id: number;
-  ops: Operation[];
-  opSet: Set<Operation>;
+export class FusionGroup extends OpGroup {
   kind: string | null;
-  _inputValues: Value[] | null;
-  _outputValues: Value[] | null;
   minTopoPos: number;
   maxTopoPos: number;
 
   constructor(id: number) {
-    this.id = id;
-    this.ops = [];
-    this.opSet = new Set();
+    super(id);
     this.kind = null;
-    this._inputValues = null;
-    this._outputValues = null;
     this.minTopoPos = Infinity;
     this.maxTopoPos = -Infinity;
   }
 
-  addOp(op: Operation, topoPos?: number): void {
-    if (this.opSet.has(op)) return;
-    this.ops.push(op);
-    this.opSet.add(op);
-    this._inputValues = null;
-    this._outputValues = null;
+  addOp(op: Operation, topoPos?: number): boolean {
+    if (!super.addOp(op)) return false;
     if (topoPos !== undefined) {
       if (topoPos < this.minTopoPos) this.minTopoPos = topoPos;
       if (topoPos > this.maxTopoPos) this.maxTopoPos = topoPos;
     }
-  }
-
-  hasOp(op: Operation): boolean {
-    return this.opSet.has(op);
+    return true;
   }
 
   merge(other: FusionGroup): void {
@@ -53,25 +37,6 @@ export class FusionGroup {
     if (other.minTopoPos < this.minTopoPos) this.minTopoPos = other.minTopoPos;
     if (other.maxTopoPos > this.maxTopoPos) this.maxTopoPos = other.maxTopoPos;
   }
-
-  computeIO(): void {
-    if (this._inputValues && this._outputValues) return;
-    const { inputs, outputs } = computePartitionIO(this.opSet, this.ops);
-    this._inputValues = inputs;
-    this._outputValues = outputs;
-  }
-
-  getInputValues(): Value[] {
-    this.computeIO();
-    return this._inputValues as Value[];
-  }
-
-  getOutputValues(): Value[] {
-    this.computeIO();
-    return this._outputValues as Value[];
-  }
-
-  get size(): number { return this.ops.length; }
 
   classifyKind(): string | null {
     this.kind = classifyFusionKind(this.ops);

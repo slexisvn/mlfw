@@ -1,5 +1,5 @@
 import { CompilationError } from '../pipeline/trace.js';
-import { checkIRInvariants } from '../pipeline/invariant_check.js';
+import { PassManagerBase } from './pass_manager_base.js';
 import { IRLevel } from '../ir/verify.js';
 import type { LIRFunc } from '../ir/lir/nodes.js';
 import type { LirFuncPass, LirPassCtx } from './lir_pass.js';
@@ -12,29 +12,7 @@ export type LirRunCtx = LirPassCtx & {
   resilient: boolean;
 };
 
-export class LirPassManager {
-  passes: LirFuncPass[];
-  trace: TraceLog | null;
-  checkEachPass: boolean;
-
-  constructor() {
-    this.passes = [];
-    this.trace = null;
-    this.checkEachPass = false;
-  }
-
-  addPass(pass: LirFuncPass): void {
-    this.passes.push(pass);
-  }
-
-  setTrace(trace: TraceLog | null): void {
-    this.trace = trace;
-  }
-
-  setCheckEachPass(enabled: boolean): void {
-    this.checkEachPass = enabled;
-  }
-
+export class LirPassManager extends PassManagerBase<LirFuncPass> {
   run(funcs: LIRFunc[], ctx: LirRunCtx): LIRFunc[] {
     for (const pass of this.passes) {
       this._runPass(pass, funcs, ctx);
@@ -66,19 +44,8 @@ export class LirPassManager {
     pass.end(ctx);
 
     trace.phaseEnd(pass.phase, performance.now() - t0);
-    if (this.checkEachPass) this._verifyFuncs(funcs, ctx, pass.name);
+    if (this.checkEachPass) this._verifyFuncs(IRLevel.LIR, funcs, ctx, pass.name);
     pass.trace = null;
   }
 
-  _verifyFuncs(funcs: readonly LIRFunc[], ctx: LirRunCtx, passName: string): void {
-    for (const func of funcs) {
-      if (ctx.failed.has(func.name)) continue;
-      const err = checkIRInvariants(IRLevel.LIR, func, func.name, passName);
-      if (!err) continue;
-      ctx.errors.push(err);
-      ctx.failed.add(func.name);
-      ctx.trace.errorEvent('verification', func.name, err.message);
-      if (!ctx.resilient) throw new Error(err.toString());
-    }
-  }
 }

@@ -14,8 +14,6 @@ type EarlyStoppingOptions = {
 export class EarlyStopping extends Callback {
   private _monitor: string;
   private _patience: number;
-  private _mode: EarlyStoppingMode;
-  private _minDelta: number;
   private _checkOnTrainEpochEnd: boolean;
   private _waitCount: number;
   private _bestScore: number | null;
@@ -31,8 +29,6 @@ export class EarlyStopping extends Callback {
     super();
     this._monitor = monitor;
     this._patience = patience;
-    this._mode = mode;
-    this._minDelta = minDelta;
     this._checkOnTrainEpochEnd = checkOnTrainEpochEnd;
     this._waitCount = 0;
     this._bestScore = null;

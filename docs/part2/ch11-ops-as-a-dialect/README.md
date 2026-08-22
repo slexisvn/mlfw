@@ -28,7 +28,7 @@ That inverts the dependency. A pass now depends on a *vocabulary of properties* 
 
 This is what MLIR calls a *dialect*: a set of operations, each with declared traits, verification, type inference and folding behaviour, registered into a table that passes query. The vocabulary is the interface; the operation list is data.
 
-> **Definition 11.1 (Op registry).** An *op registry* is a mapping from operation name to a description carrying: arity, attribute schema, declared traits, side-effect kind, a type inference rule, a verification rule, a folding rule, and a set of canonicalization patterns.
+> **Definition 11.1 (Op registry).** **(stated here)** An *op registry* is a mapping from operation name to a description carrying: arity, attribute schema, declared traits, side-effect kind, a type inference rule, a verification rule, a folding rule, and a set of canonicalization patterns.
 
 ## 11.3 In mlfw: what an operation definition holds
 

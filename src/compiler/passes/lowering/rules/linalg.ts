@@ -1,14 +1,7 @@
-import {
-  IntImmNode, FloatImmNode, MathOpNode, CompareNode,
-  ForNode, ForKind, BufferStoreNode, BufferLoadNode,
-  BlockNode, SeqNode, IfThenElseNode, CallExternNode, CastNode, mathOp
-} from '../../../ir/tensor/nodes.js';
+import { IntImmNode, FloatImmNode, MathOpNode, BufferStoreNode, BufferLoadNode, BlockNode, SeqNode, CallExternNode, CastNode } from '../../../ir/tensor/nodes.js';
 import { ScalarType, isFloatType } from '../../../ir/graph/types.js';
 import type { ScalarDType } from '../../../ir/graph/types.js';
-import {
-  registerLoweringRule, getLoweringRule, buildSpatialNest, buildDotGeometry,
-  parseLayout, bufRefs, computeBroadcastIndices, makeLoopNest, wrapInLoops, buildConvNest, emitMatmulInitAcc
-} from '../lowering_registry.js';
+import { registerLoweringRule, getLoweringRule, buildSpatialNest, bufRefs, computeBroadcastIndices, makeLoopNest, wrapInLoops, buildConvNest, emitMatmulInitAcc } from '../lowering_registry.js';
 import type { LoweringRuleFn } from '../lowering_registry.js';
 import type { TirNode } from '../../../ir/tensor/nodes.js';
 import type { Buffer } from '../../../ir/tensor/buffer.js';

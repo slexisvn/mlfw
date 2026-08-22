@@ -26,13 +26,13 @@ So the loop cannot be "measure everything". It has to be: draw a population, sco
 
 ## 47.3 Theory
 
-> **Definition 47.1 (Elitist evolutionary search, stated here).** Given a space `P`, a fitness `f : P → ℝ`, a population size `N`, an elite ratio `ρ` and a mutation operator `μ`, the search maintains a **multiset** `P₀` of `N` elements of `P` and iterates: score `P_g`; let `E_g` be the `⌈ρN⌉` highest-scoring members; set `P_{g+1} = E_g ⊎ { μ(crossover(a,b)) : a,b ∈ E_g }` filled to size `N`. It returns `argmax_{p ∈ P_G} f(p)`.
+> **Definition 47.1 (Elitist evolutionary search).** **(classical)** Given a space `P`, a fitness `f : P → ℝ`, a population size `N`, an elite ratio `ρ` and a mutation operator `μ`, the search maintains a **multiset** `P₀` of `N` elements of `P` and iterates: score `P_g`; let `E_g` be the `⌈ρN⌉` highest-scoring members; set `P_{g+1} = E_g ⊎ { μ(crossover(a,b)) : a,b ∈ E_g }` filled to size `N`. It returns `argmax_{p ∈ P_G} f(p)`.
 
 **A multiset, not a subset — and the difference is the subject of the next two results.** It is natural to write `P₀ ⊂ P` with `|P₀| = N` and it would misdescribe every generation this search produces. Nothing forbids two individuals from being the same parameter vector: mutation may return its argument, crossover of two identical parents is that parent, and elitism copies the keepers forward verbatim. So `N` is a count of *individuals*, and the number of *distinct points* it covers is at most `N` and routinely far less — Corollary 47.4 exhibits an initial population of `N` individuals covering, from the third onward, a single sketch.
 
 This matters in two places downstream. The memoisation in `search.ts` keys on the parameter vector, so duplicates cost nothing to score — which is why Proposition 47.9's `2N` bound is an over-estimate. And the diversity the algorithm relies on to avoid collapsing is a property of the distinct set, not of `N`, so a population that looks healthy by count can be exploring one point.
 
-> **Proposition 47.2 (Elitism makes the best monotone, stated here).** If `f` is a function of the candidate — the same candidate always scores the same — then `max_{p ∈ P_{g+1}} f(p) ≥ max_{p ∈ P_g} f(p)` for every `g`.
+> **Proposition 47.2 (Elitism makes the best monotone).** **(classical)** If `f` is a function of the candidate — the same candidate always scores the same — then `max_{p ∈ P_{g+1}} f(p) ≥ max_{p ∈ P_g} f(p)` for every `g`.
 
 *Proof.* `E_g` contains an arg-max of `P_g` and `E_g ⊆ P_{g+1}` by construction ([`search.ts:140`](../../../src/compiler/autotune/search.ts)). ∎
 
@@ -40,19 +40,19 @@ The hypothesis is not free. `f` here is `evaluator`, which clones the function, 
 
 Now the generator. `_rng(max)` is `state % max` over an LCG with a power-of-two modulus, and that combination has a classical failure mode.
 
-> **Proposition 47.3 (The initial population's sketch index reaches a fixed point, stated here).** Let `x_{n+1} = (a·x_n + c) mod 2^31` with `a = 1664525`, `c = 1013904223`, and let `_rng(m) = x mod m`. Since `a ≡ 1 (mod 4)` and `c ≡ 3 (mod 4)`, we have `x_{n+1} ≡ x_n + 3 (mod 4)`. Suppose the sketch list has length 4 and `_initPopulation` draws one variate for the index and one per search variable of the sketch it drew. Then the index of individual `i+1` is `idx_i + 3·(1 + |V_{idx_i}|) (mod 4)`. An index whose sketch has three search variables is a fixed point; from an index whose sketch has one, the next index is `idx + 2`; from one whose sketch has none, `idx + 3`.
+> **Proposition 47.3 (The initial population's sketch index reaches a fixed point).** **(invariant)** Let `x_{n+1} = (a·x_n + c) mod 2^31` with `a = 1664525`, `c = 1013904223`, and let `_rng(m) = x mod m`. Since `a ≡ 1 (mod 4)` and `c ≡ 3 (mod 4)`, we have `x_{n+1} ≡ x_n + 3 (mod 4)`. Suppose the sketch list has length 4 and `_initPopulation` draws one variate for the index and one per search variable of the sketch it drew. Then the index of individual `i+1` is `idx_i + 3·(1 + |V_{idx_i}|) (mod 4)`. An index whose sketch has three search variables is a fixed point; from an index whose sketch has one, the next index is `idx + 2`; from one whose sketch has none, `idx + 3`.
 
 *Proof.* `1664525 = 4·416131 + 1` and `1013904223 = 4·253476055 + 3`, so reducing the recurrence mod 4 gives `x ↦ x + 3`. Advancing `k` draws advances the residue by `3k ≡ −k (mod 4)`. With `k = 1 + |V|`: `|V| = 3` gives `k = 4` and no advance; `|V| = 1` gives `k = 2` and an advance of `−2 ≡ 2`; `|V| = 0` gives `k = 1` and an advance of `3`. ∎
 
-> **Corollary 47.4 (stated here).** On a CPU target the four derived sketches for a contraction block have `3, 3, 1, 0` search variables at indices `0, 1, 2, 3`. The index map is therefore `0 ↦ 0`, `1 ↦ 1`, `2 ↦ 0`, `3 ↦ 2`; every orbit reaches `0` or `1` in at most two steps and stays. The initial population contains at most two distinct sketches and, from the third individual on, exactly one — which one being decided entirely by the seed.
+> **Corollary 47.4 (The initial population is one sketch).** **(invariant)** On a CPU target the four derived sketches for a contraction block have `3, 3, 1, 0` search variables at indices `0, 1, 2, 3`. The index map is therefore `0 ↦ 0`, `1 ↦ 1`, `2 ↦ 0`, `3 ↦ 2`; every orbit reaches `0` or `1` in at most two steps and stays. The initial population contains at most two distinct sketches and, from the third individual on, exactly one — which one being decided entirely by the seed.
 
 `RandomSearch` is immune, because it iterates over the sketch list rather than sampling it ([`search.ts:62`](../../../src/compiler/autotune/search.ts)).
 
 Next, the cache key.
 
-> **Definition 47.5 (Workload key, stated here).** The *workload key* of a block is the FNV-1a hash of: the shapes and dtypes of its declared read and write buffers; a pre-order serialisation of its body's expression tree in which every load carries its buffer's shape and dtype; the sorted serialisations of the bodies of every other block that declares a read of its output buffer; and the target's `name` and `kind`.
+> **Definition 47.5 (Workload key).** **(stated here)** The *workload key* of a block is the FNV-1a hash of: the shapes and dtypes of its declared read and write buffers; a pre-order serialisation of its body's expression tree in which every load carries its buffer's shape and dtype; the sorted serialisations of the bodies of every other block that declares a read of its output buffer; the target's `name` and `kind`; and the *numerical mode* the compilation is running under ([`workload_key.ts:24`](../../../src/compiler/autotune/workload_key.ts): `numericMode = 'n1'`). The mode is there because a schedule tuned with fast-math off must not be served to a fast-math compile — the set of legal schedules differs — and unlike a version stamp the two sets of records are simultaneously valid, so they coexist in one database under different keys.
 
-> **Proposition 47.6 (What the key does and does not determine, stated here).** Two blocks with equal *descriptions* have equal declared buffer shapes and dtypes, equal expression trees up to buffer naming, and equal target name and kind. They need not have equal iteration domains, equal loop counts, or equal target attributes other than name and kind. The key is the 32-bit FNV-1a hash of the description, so equal *keys* imply equal descriptions only under a no-collision assumption, which nothing checks.
+> **Proposition 47.6 (What the key does and does not determine).** **(invariant)** Two blocks with equal *descriptions* have equal declared buffer shapes and dtypes, equal expression trees up to buffer naming, and equal target name and kind. They need not have equal iteration domains, equal loop counts, or equal target attributes other than name and kind. The key is the 32-bit FNV-1a hash of the description, so equal *keys* imply equal descriptions only under a no-collision assumption, which nothing checks.
 
 *Proof.* The first three follow from the construction, since the description is the concatenation of exactly those parts ([`workload_key.ts:30`](../../../src/compiler/autotune/workload_key.ts) to [`workload_key.ts:58`](../../../src/compiler/autotune/workload_key.ts)). The negative half follows from the same construction: `collectBlockOps` descends into a `ForNode` by recursing on its body ([`workload_key.ts:133`](../../../src/compiler/autotune/workload_key.ts)) without emitting anything for the loop itself, and the enclosing loops are outside the block. `target` contributes only `name` and `kind`. The last sentence is `fnv1a` ([`workload_key.ts:152`](../../../src/compiler/autotune/workload_key.ts)) mapping into a 32-bit space; §47.6 exhibits two descriptions that collide. ∎
 
@@ -60,7 +60,7 @@ Next, the cache key.
 
 Then the measurement, where the theory is classical and slightly discouraging.
 
-> **Theorem 47.8 (Selection bias in a noisy minimum).** *(Classical.)* Let `T̂₁,…,T̂_n` be measurements with `E[T̂_i] = T_i`. Then `E[min_i T̂_i] ≤ min_i T_i`, with equality only if the minimising index is almost surely the one with the smallest mean.
+> **Theorem 47.8 (Selection bias in a noisy minimum).** **(classical)** Let `T̂₁,…,T̂_n` be measurements with `E[T̂_i] = T_i`. Then `E[min_i T̂_i] ≤ min_i T_i`, with equality only if the minimising index is almost surely the one with the smallest mean.
 
 *Proof.* `min_i T̂_i ≤ T̂_j` pointwise for every `j`, so `E[min_i T̂_i] ≤ E[T̂_j] = T_j` for every `j`, hence `≤ min_j T_j`. ∎
 
@@ -75,7 +75,7 @@ That does not rescue the tuner — it makes the situation slightly worse and sli
 
 The right-skew is also the argument for preferring the median here in the first place: it is what makes a single interfering sample unable to move the estimate, which a mean cannot claim. So the estimator is a good choice and the phrase to avoid is "unbiased" — what it is, is *robust*, which is a different property and the one that matters when the tail is interference rather than signal. (Chapter 15 §15.7 works through the same trade in the opposite direction, for a quantity where the minimum is defensible.)
 
-> **Proposition 47.9 (Budget overshoot, stated here).** Let one cost-model evaluation cost at most `e` and one measurement at most `b`. Then `RandomSearch` starts no trial after its deadline has passed and overruns only by the evaluation already in flight; `EvolutionarySearch` performs at most `2N` further evaluations, `N` for the generation it had already entered and `N` for the final scoring pass, which tests no deadline ([`search.ts:157`](../../../src/compiler/autotune/search.ts)); `BlockTuningSession._measureAndLearn` performs at most one further measurement ([`session.ts:203`](../../../src/compiler/autotune/session.ts)); and `TaskScheduler` starts at most one further round ([`task_scheduler.ts:54`](../../../src/compiler/autotune/task_scheduler.ts)). The total overshoot is bounded by `2Ne + kb` where `k = topKForBenchmark`.
+> **Proposition 47.9 (Budget overshoot).** **(invariant)** Let one cost-model evaluation cost at most `e` and one measurement at most `b`. Then `RandomSearch` starts no trial after its deadline has passed and overruns only by the evaluation already in flight; `EvolutionarySearch` performs at most `2N` further evaluations, `N` for the generation it had already entered and `N` for the final scoring pass, which tests no deadline ([`search.ts:157`](../../../src/compiler/autotune/search.ts)); `BlockTuningSession._measureAndLearn` performs at most one further measurement ([`session.ts:203`](../../../src/compiler/autotune/session.ts)); and `TaskScheduler` starts at most one further round ([`task_scheduler.ts:54`](../../../src/compiler/autotune/task_scheduler.ts)). The total overshoot is bounded by `2Ne + kb` where `k = topKForBenchmark`.
 
 *Proof.* By inspection of the four loops and the position of their deadline tests. The memoisation makes `2N` an over-estimate whenever the population contains duplicates. ∎
 
@@ -207,13 +207,20 @@ The arithmetic of that averaging is where §47.5 finds something.
 
 ### The database
 
-[`tuning_db.ts`](../../../src/compiler/autotune/tuning_db.ts), 158 lines: `store` appends, re-sorts by `rankRecords` ([`tuning_db.ts:53`](../../../src/compiler/autotune/tuning_db.ts)) and truncates to ten records per key, and invalidation is the single line
+[`tuning_db.ts`](../../../src/compiler/autotune/tuning_db.ts), 162 lines: `store` appends, re-sorts by `rankRecords` ([`tuning_db.ts:53`](../../../src/compiler/autotune/tuning_db.ts)) and truncates to ten records per key, and invalidation is two lines against two stamps ([`tuning_db.ts:130`](../../../src/compiler/autotune/tuning_db.ts)):
 
 ```ts
     if (data.codegenVersion !== undefined && data.codegenVersion !== CODEGEN_VERSION) {
+      return db;
+    }
+    if (data.scheduleSemanticsVersion !== SCHEDULE_SEMANTICS_VERSION) {
+      return db;
+    }
 ```
 
-against `CODEGEN_VERSION = 'mlfw-codegen-1'` ([`tuning_db.ts:27`](../../../src/compiler/autotune/tuning_db.ts)). Bumping that string discards every stored record, which is the right lever: a change to a lowering rule or a backend can make yesterday's winner today's loser. §47.6 runs both the ranking and the guard.
+`CODEGEN_VERSION = 'mlfw-codegen-1'` covers the emitted-code format and `SCHEDULE_SEMANTICS_VERSION = 'mlfw-schedule-2'` covers what the primitives *mean* ([`tuning_db.ts:27`](../../../src/compiler/autotune/tuning_db.ts)); bumping either discards every stored record, which is the right lever, because every record in the file was written under the old meaning and none is salvageable.
+
+**The two guards are not written the same way, and the asymmetry is deliberate.** The first exempts an absent field and the second does not. On its own the first would let through exactly the file it exists to reject — one written before the stamp existed, which has no field to disagree. The second guard closes that: a pre-versioning file is missing *both* stamps, and a missing `scheduleSemanticsVersion` is rejected unconditionally. §47.6 runs all six cases, including the one that distinguishes the two guards.
 
 ## 47.5 Lab — the search loop
 
@@ -357,14 +364,19 @@ The database:
     {"vector_width":8}     score     5   medianMs null
     {"vector_width":2}     score   3.9   medianMs null
 
-  codegenVersion written:       mlfw-codegen-1
-  reload with the same version: 3 records
-  reload with a different one:  0 records
-  reload with the field absent: 3 records
+  stamps written:                     mlfw-codegen-1 / mlfw-schedule-2
+  reload with both unchanged:         3 records
+  reload with a foreign codegen:      0 records
+  reload with a foreign semantics:    0 records
+  reload with codegen absent:         3 records
+  reload with semantics absent:       0 records
+  reload of a genuine pre-versioning file (neither field): 0 records
   a record claiming version 9, stored into a version-1 database: kept, version 9
 ```
 
-The ranking is right and the invalidation has a hole in it. `data.codegenVersion !== undefined && …` means a serialised database with no `codegenVersion` field loads unconditionally — and a file with no `codegenVersion` field is precisely a file written before the field existed, which is the one file the mechanism is there to reject. The per-record `version`, which `TuningRecord` stores and `Autotuner` fills from `this.db.version`, is written, serialised, restored, and compared to nothing.
+The ranking is right, and the six reload rows are the two guards seen one at a time. Rows two and three are each stamp doing its job. Row four is the hole in the first guard: `data.codegenVersion !== undefined && …` exempts an absent field, and a file with no `codegenVersion` is precisely a file written before that field existed. Row five is the second guard, written without the exemption. Row six is why that matters and is the row worth remembering: **a genuine pre-versioning file is missing both stamps, so the second guard rejects it and the hole in the first is never reachable from a real file.**
+
+That is worth stating as a design observation rather than as a finding. Two guards were written at different times, one defensively and one not, and the strict one covers the lenient one's gap — but only by accident of which field was added second. If `scheduleSemanticsVersion` ever acquires the same `!== undefined` treatment, for the same plausible-sounding reason, the gap reopens with nothing left to cover it. The per-record `version`, which `TuningRecord` stores and `Autotuner` fills from `this.db.version`, is a separate matter: it is written, serialised, restored, and compared to nothing.
 
 Finally the whole loop, through the public compiler:
 
@@ -396,8 +408,8 @@ So on a CPU compile with `scheduling: { autotune: true }`, none of §47.5's meas
 - **`maxCv` defaults to 0, which disables the re-measurement it gates.** [`autotuner.ts:130`](../../../src/compiler/autotune/autotuner.ts) and [`benchmark.ts:187`](../../../src/compiler/autotune/benchmark.ts). The cv is computed on every measurement and read only by that test, so with the default it is computed and discarded. And when it *is* enabled, `_collect` appends to the existing sample array rather than replacing it, so round two's statistics are computed over both rounds.
 - **Benchmark buffers are `Float32Array` whatever the buffer declares.** [`benchmark.ts:142`](../../../src/compiler/autotune/benchmark.ts). Neutral for the `f32` kernels the tuner meets in practice, and not in general: an `f64` buffer is handed half the bytes it declares, and an `i64` one the wrong array class entirely, so the timing would be of a different code path or of nothing at all.
 - **The workload key is 32 bits and nothing re-checks a hit.** `computeWorkloadKey` returns `fnv1a(...)` ([`workload_key.ts:152`](../../../src/compiler/autotune/workload_key.ts)); §47.6 exhibits a collision between two descriptions the compiler really builds, for buffers of 10,039 and 11,827 elements. `TuningRecord` stores the key and never the description ([`tuning_db.ts:29`](../../../src/compiler/autotune/tuning_db.ts)), so `lookup` has nothing to compare against and returns whichever workload was tuned first.
-- **The workload key does not include the iteration domain.** Counterexample 47.7. It also identifies a target by `name` and `kind` only, so two `CPUTarget`s differing in `vectorWidth`, `numCores` or `l1CacheBytes` — all of which the cost model or the rule policy reads — share every cache entry.
-- **A database written before `codegenVersion` existed loads unconditionally.** [`tuning_db.ts:129`](../../../src/compiler/autotune/tuning_db.ts). The `!== undefined` guard exempts exactly the files the check exists for.
+- **The workload key does not include the iteration domain.** Counterexample 47.7. It also identifies a target by `name` and `kind` only, so two `CPUTarget`s differing in `vectorWidth`, `numCores` or `l1CacheBytes` — all of which the cost model or the rule policy reads — share every cache entry. What it *does* include beyond the block and the target is the numerical mode (Definition 47.5), which is the one axis along which two simultaneously-valid record sets have to be kept apart rather than invalidated.
+- **The `codegenVersion` guard exempts an absent field, and only the second stamp saves it.** [`tuning_db.ts:130`](../../../src/compiler/autotune/tuning_db.ts) is `data.codegenVersion !== undefined && …`, so on its own it would let through exactly the file it exists to reject. [`tuning_db.ts:133`](../../../src/compiler/autotune/tuning_db.ts) tests `scheduleSemanticsVersion` without the exemption, and a pre-versioning file is missing both — so the hole is unreachable today and would reopen if the second guard were ever written like the first.
 - **`TuningRecord.version` is stored and never compared.** `TuningDatabase.deserialize` reads it into the reconstructed record ([`tuning_db.ts:133`](../../../src/compiler/autotune/tuning_db.ts)) and no code path tests it against `db.version`.
 - **`EvolutionarySearch` overshoots its deadline by up to two populations.** Proposition 47.9; the final scoring pass at [`search.ts:157`](../../../src/compiler/autotune/search.ts) has no deadline test. With the default `populationSize: 32` that is up to 64 evaluations past the stated budget.
 - **`_crossover` has a branch its caller cannot reach.** [`search.ts:179`](../../../src/compiler/autotune/search.ts) returns `{...a.params}` when the two parents have different sketches, but the only call site is the `else` of `if (parentA.sketch !== parentB.sketch)` ([`search.ts:149`](../../../src/compiler/autotune/search.ts)), so the parents always match. Harmless, and a hint that the two-sketch case was once handled differently.

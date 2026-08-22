@@ -33,19 +33,19 @@ For failure, the intuition is borrowed from databases: make the compile a **tran
 
 ## 18.3 Theory
 
-> **Definition 18.1 (Trace level).** A *trace level* is a totally ordered severity attached to each event and a threshold on the log, such that an event is delivered exactly when `event.level ≤ log.level`.
+> **Definition 18.1 (Trace level).** **(stated here)** A *trace level* is a totally ordered severity attached to each event and a threshold on the log, such that an event is delivered exactly when `event.level ≤ log.level`.
 
 The ordering must be monotone in a specific sense: raising the threshold may only *add* events, never change or remove ones already delivered. That sounds obvious and it is a real constraint on where you attach levels. Put a level on a *class* of information rather than on an individual message, and never make a low-level event summarize what a high-level event would have said in detail — otherwise turning up the verbosity silently rewrites history, and two runs at two levels can no longer be compared.
 
-> **Definition 18.2 (Explanation, stated here).** An *explanation* is an event carrying four fields: the *category* of decision, the *subject* it was made about, the *decision* taken, and the *reason* — where the reason is expressed in the terms the decision procedure actually used.
+> **Definition 18.2 (Explanation).** **(stated here)** An *explanation* is an event carrying four fields: the *category* of decision, the *subject* it was made about, the *decision* taken, and the *reason* — where the reason is expressed in the terms the decision procedure actually used.
 
 The last clause is what separates an explanation from a log line. "fused add+maximum" is a log line: it tells you what happened, which you could have seen in the IR anyway. "fused add+maximum because it saves 256 bytes of traffic against a 5µs launch cost" is an explanation: it names the quantities the cost model compared, so you can disagree with it. A compiler that logs its decisions tells you what it did; a compiler that explains them tells you what it would take to make it decide otherwise.
 
-> **Definition 18.3 (Transactional compilation, stated here).** A compilation is *transactional* if, when a pass fails, the IR the caller handed in is left exactly as it was, the working module is left as the failing pass found it, and every function other than the failing one still produces output.
+> **Definition 18.3 (Transactional compilation).** **(stated here)** A compilation is *transactional* if, when a pass fails, the IR the caller handed in is left exactly as it was, the working module is left as the failing pass found it, and every function other than the failing one still produces output.
 
 **The middle clause has to be earned per pass rather than per compilation.** A database transaction rolls back the *failed unit of work*; rolling back only at the outermost edge would protect the caller and leave the compiler itself working from a half-edited module. §18.7 has the code and the counterexample it rules out.
 
-Two clauses, and both are needed. The first is about the caller's data: a pass that throws in the middle of a rewrite leaves IR that is not merely unoptimized but *invalid*, and handing that back is worse than handing back nothing. The second is about salvage: in a module of forty functions, one failure should cost you one function.
+Three clauses, and each buys something different. The first is about the caller's data: a pass that throws in the middle of a rewrite leaves IR that is not merely unoptimized but *invalid*, and handing that back is worse than handing back nothing. The second is about the compiler's own working copy, and is the one §18.7's counterexample is for: a module the pipeline goes on optimizing after a pass abandoned it half-edited is a program nobody wrote. The third is about salvage: in a module of forty functions, one failure should cost you one function.
 
 The cost of the first clause is a copy of the module before any pass runs, and it is paid only in resilient mode.
 
@@ -268,26 +268,7 @@ The second error is the interesting one. In strict mode you would never have lea
 
 ### What "transactional" does not cover
 
-Read that last assertion carefully — *on the caller's IR*. It holds because of the clone, and the clone is the only rollback there is. Follow what happens to the module the compiler is actually working on ([`pass_manager.ts:120`](../../../src/compiler/passes/pass_manager.ts)):
-
-```ts
-      let result;
-      try {
-        result = pass.run(module, this.analysisManager);
-      } catch (e) {
-        if (!resilient) throw e;
-        this.analysisManager.invalidateAll();
-        results.push(PassResult.FAILED);
-        ctx.errors.push(new CompilationError('graphPasses', module.name || '<module>', (e as Error).message, pass.name));
-        return { changed, fatal: false };
-      }
-```
-
-The handler records the error, drops the analysis cache, and restores the module. That last step is the one worth dwelling on, because without it the phases that follow would carry on from a half-edited module:
-
-> **Counterexample 18.6.** A `ModulePass` that erases three operations and then throws on the fourth leaves the module three operations lighter. In resilient mode the pipeline records one error and continues, so subsequent passes optimize, lower and generate code from IR that no complete pass ever produced. If the partial edit happens to leave the module *valid*, nothing downstream notices and the compile succeeds — emitting kernels for a program that is neither the original nor the transformed one.
-
-The snapshot is taken per module pass, and only when the mode asks for it:
+Read that last assertion carefully — *on the caller's IR*. It holds because of the clone, and the clone is the only rollback there is. Follow what happens to the module the compiler is actually working on ([`pass_manager.ts:118`](../../../src/compiler/passes/pass_manager.ts)):
 
 ```ts
       const snapshot = resilient ? cloneGraphModule(module) : null;
@@ -298,9 +279,20 @@ The snapshot is taken per module pass, and only when the mode asks for it:
       } catch (e) {
         if (!resilient) throw e;
         module.restoreFrom(snapshot as GraphModule);
+        this.analysisManager.invalidateAll();
+        results.push(PassResult.FAILED);
+        ctx.errors.push(new CompilationError('graphPasses', module.name || '<module>', (e as Error).message, pass.name));
+        return { changed, fatal: false };
+      }
 ```
 
-`restoreFrom` refills the module's function table *in place* rather than swapping the object, because the pipeline and the caller both hold a reference to it — the same reason `Compiler.compile` clones into `ctx.working` instead of reassigning. Strict mode pays nothing: no clone is taken and the exception propagates.
+The handler restores the module, drops the analysis cache, records the error, and returns a non-fatal verdict so the pipeline continues. The restore is the line worth dwelling on, because without it the phases that follow would carry on from a half-edited module:
+
+> **Counterexample 18.4.** A `ModulePass` that erases three operations and then throws on the fourth leaves the module three operations lighter. In resilient mode the pipeline records one error and continues, so subsequent passes optimize, lower and generate code from IR that no complete pass ever produced. If the partial edit happens to leave the module *valid*, nothing downstream notices and the compile succeeds — emitting kernels for a program that is neither the original nor the transformed one.
+
+Note where the snapshot is taken: immediately before the call, per module pass, and only when the mode asks for it. Strict mode allocates nothing and lets the exception propagate.
+
+`restoreFrom` refills the module's function table *in place* rather than swapping the object, because the pipeline and the caller both hold a reference to it — the same reason `Compiler.compile` clones into `ctx.working` instead of reassigning.
 
 The cost is a module clone per module pass in resilient mode, which is why it is gated on the mode rather than always on. Two things still hold and are worth knowing rather than assuming. Per-pass verification (Chapter 15) runs only on `CHANGED`, and a throwing pass reports `FAILED`, so it does not fire here — the *phase* boundary check is what would catch a structurally invalid module, attributed to the phase rather than the pass. And a `FunctionPass` failure marks its function failed, so that function is dropped rather than compiled from a mangled state.
 

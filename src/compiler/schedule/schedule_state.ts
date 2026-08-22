@@ -6,7 +6,6 @@ import { buildBlockScopes, scopeRootSRef } from './block_scope.js';
 import { LinearForm, toLinearForm, composeForm, coverRangeOfForm } from '../analysis/iter_map.js';
 import type { VarRange } from '../analysis/iter_map.js';
 import type { TirNode, PrimFunc, ForNode, BlockNode, IntImmNode, ForKindValue } from '../ir/tensor/nodes.js';
-import type { Buffer } from '../ir/tensor/buffer.js';
 import { opaqueLevel } from '../analysis/buffer_access.js';
 import type { BufferAccessResult, BufferAccessEnv, IterLevel, BlockAccessInfo } from '../analysis/buffer_access.js';
 import type { Dependence } from '../analysis/dependence.js';

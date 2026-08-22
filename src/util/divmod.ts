@@ -1,3 +1,6 @@
+export const DIVMOD_MATH_OPS: ReadonlySet<string> = new Set(['//', '%', 'tdiv', 'tmod']);
+export const DIVISION_MATH_OPS: ReadonlySet<string> = new Set(['/', ...DIVMOD_MATH_OPS]);
+
 function asInteger(value: number): number {
   return value === 0 ? 0 : value;
 }

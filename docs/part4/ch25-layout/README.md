@@ -35,19 +35,19 @@ That last step is why layout is a *cost* problem and not a constraint problem. E
 
 ## 25.3 Theory
 
-> **Definition 25.1 (Layout).** A *layout* for a rank-`r` tensor is a permutation `σ` of `{0..r−1}` giving the order in which dimensions are laid out from slowest- to fastest-varying. The linear address of index `(i₀..i_{r−1})` is the row-major flattening of the permuted index vector.
+> **Definition 25.1 (Layout).** **(stated here)** A *layout* for a rank-`r` tensor is a permutation `σ` of `{0..r−1}` giving the order in which dimensions are laid out from slowest- to fastest-varying. The linear address of index `(i₀..i_{r−1})` is the row-major flattening of the permuted index vector.
 
 Chapter 35 proves the flattening is a bijection; here the only consequence needed is that two layouts of the same tensor hold the same values and a *permutation of the data* converts one to the other.
 
-> **Definition 25.2 (Layout assignment problem, stated here).** Given a DAG whose operations have layout preferences and conversion costs, assign a layout to every value minimizing the sum of conversion costs plus per-operation costs, where an operation's cost depends on whether its operands are in its preferred layout.
+> **Definition 25.2 (Layout assignment problem).** **(stated here)** Given a DAG whose operations have layout preferences and conversion costs, assign a layout to every value minimizing the sum of conversion costs plus per-operation costs, where an operation's cost depends on whether its operands are in its preferred layout.
 
-> **Theorem 25.3.** *(Classical.)* Layout assignment is an instance of the *multiway cut* problem and is NP-hard for three or more distinct layouts.
+> **Theorem 25.3 (Layout assignment is NP-hard).** **(classical)** Layout assignment is an instance of the *multiway cut* problem and is NP-hard for three or more distinct layouts.
 
 The reduction is the natural one: each layout is a terminal, each value is a vertex, and a conversion cost is an edge weight to be cut. With two layouts it is min-cut and polynomial; with three — NCHW, NHWC, blocked — it is not.
 
 So, again, a heuristic. The standard one, and the one used here, is:
 
-> **Definition 25.4 (Greedy propagation with local accept, stated here).** Propagate preferences forward, collect the required conversions, group them by (value, from, to), and accept a group only when its estimated benefit exceeds its estimated cost. Reject everything else and leave those consumers with the layout they were given.
+> **Definition 25.4 (Greedy propagation with local accept).** **(stated here)** Propagate preferences forward, collect the required conversions, group them by (value, from, to), and accept a group only when its estimated benefit exceeds its estimated cost. Reject everything else and leave those consumers with the layout they were given.
 
 The weakness of Definition 25.4 is that it is local: it decides each conversion against its own consumers, with no view of whether accepting two nearby conversions would have let a third become free. The strength is that it never makes the program worse *by its own model* — and §25.5 is about what happens when the model is wrong.
 

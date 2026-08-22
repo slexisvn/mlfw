@@ -37,39 +37,39 @@ The three outcomes correspond to three tests of increasing generality and decrea
 
 Fix a loop nest of depth `d` and two accesses to the same buffer, each a list of subscripts that are affine forms (Definition 35.1) over the loop variables. Write iteration vectors as `I = (i₁,…,i_d)`, ordered lexicographically — dictionary order, outermost component first, which is the order the nest actually runs them in (Definition 32.2). `I ≺ J` therefore means "`I` executes before `J`".
 
-> **Definition 36.1 (Dependence).** Let an *access instance* be a pair `(I, s)` of an iteration vector and a statement position within that iteration, ordered lexicographically: `(I, s) ≺ (J, t)` iff `I ≺ J`, or `I = J` and `s` precedes `t` in program order. Two access instances `(I, s) ≺ (J, t)` are *dependent* through a buffer if they access the same element and at least one access is a write. The dependence is **RAW** (or *flow*) if the earlier one writes and the later reads, **WAR** (*anti*) if the earlier reads and the later writes, **WAW** (*output*) if both write.
+> **Definition 36.1 (Dependence).** **(classical)** Let an *access instance* be a pair `(I, s)` of an iteration vector and a statement position within that iteration, ordered lexicographically: `(I, s) ≺ (J, t)` iff `I ≺ J`, or `I = J` and `s` precedes `t` in program order. Two access instances `(I, s) ≺ (J, t)` are *dependent* through a buffer if they access the same element and at least one access is a write. The dependence is **RAW** (or *flow*) if the earlier one writes and the later reads, **WAR** (*anti*) if the earlier reads and the later writes, **WAW** (*output*) if both write.
 
 **The statement position is not decoration — without it the next definition has no cases left.** A dependence has to relate an *earlier* access to a *later* one, so the ordering must be strict. If strictness were imposed on the iteration vectors alone, `I = J` would be excluded, and Definition 36.2's *loop-independent* dependence — direction `=` at every level — would be the empty relation. But loop-independent dependences are real and common: `A[i] = B[i]; C[i] = A[i]` inside one loop is a RAW within a single iteration, and it is the reason a loop body cannot be reordered freely. Ordering instances by `(iteration, statement)` rather than by iteration alone is what admits them, and it is the convention the classical literature uses.
 
-> **Definition 36.2 (Distance and direction).** For a dependence from `(I, s)` to `(J, t)`, the *distance vector* is `J − I`. The *direction vector* is its sign, componentwise: `<`, `=` or `>`. A dependence is *carried by level `ℓ`* if its direction is `=` at every level above `ℓ` and `<` at level `ℓ`; it is *loop-independent* if the direction is `=` everywhere, in which case the two instances lie in the same iteration and their order is fixed by `s ≺ t` rather than by any loop.
+> **Definition 36.2 (Distance and direction).** **(classical)** For a dependence from `(I, s)` to `(J, t)`, the *distance vector* is `J − I`. The *direction vector* is its sign, componentwise: `<`, `=` or `>`. A dependence is *carried by level `ℓ`* if its direction is `=` at every level above `ℓ` and `<` at level `ℓ`; it is *loop-independent* if the direction is `=` everywhere, in which case the two instances lie in the same iteration and their order is fixed by `s ≺ t` rather than by any loop.
 
 > **Direction vectors are lexicographically positive, by construction.** Because Definition 36.1 orders the two instances, the leftmost non-`=` component of a direction vector is always `<`. A pair whose difference has a leading `>` is not a different dependence; it is *the same* dependence with its endpoints named the wrong way round, and the fix is to swap them and negate every component. This is a normalization step, it is not optional, and §36.7 is where its absence from this implementation becomes a wrong answer.
 
 Definition 36.2 is where the payoff lives:
 
-> **Theorem 36.3 (Loop parallelism).** The iterations of the loop at level `ℓ` may be run in any order — including concurrently — if and only if no dependence in the nest is carried by level `ℓ`.
+> **Theorem 36.3 (Loop parallelism).** **(classical)** The iterations of the loop at level `ℓ` may be run in any order — including concurrently — if and only if no dependence in the nest is carried by level `ℓ`.
 
 *Proof sketch.* (⇐) Take any dependence and look at its direction at level `ℓ`. Either it is `=`, in which case both ends lie in the same iteration of `ℓ` and reordering `ℓ` does not separate them — this covers loop-independent dependences and those carried at a level *below* `ℓ`. Or it is not `=`, in which case some level above `ℓ` must already be non-`=`, since otherwise the dependence would be carried at `ℓ`; the first such level is carried, so the two ends lie in different iterations of an *outer* loop whose order is untouched. Either way no dependent pair is reordered. (⇒) If a dependence is carried at `ℓ`, its two ends lie in different iterations of `ℓ` with identical outer indices; running those iterations in reverse or concurrently reorders them, and by Definition 36.1 one of the two accesses is a write. ∎
 
 ### The three tests
 
-> **Theorem 36.4 (GCD test).** *(Classical; Banerjee, Towle, 1976.)* Let one subscript be `a·i + c_s` and the other `b·j + c_d` over the same loop level. If `gcd(a, b)` does not divide `c_d − c_s`, no integer solution to `a·i = b·j + (c_d − c_s)` exists, and the accesses are independent.
+> **Theorem 36.4 (GCD test; Banerjee, Towle, 1976).** **(classical)** Let one subscript be `a·i + c_s` and the other `b·j + c_d` over the same loop level. If `gcd(a, b)` does not divide `c_d − c_s`, no integer solution to `a·i = b·j + (c_d − c_s)` exists, and the accesses are independent.
 
 *Proof.* Every integer of the form `a·i − b·j` is a multiple of `gcd(a,b)`, so if the constant difference is not, there is nothing to solve. ∎
 
 The GCD test is cheap, always applicable, and weak: it ignores the loop bounds entirely, so it proves independence only when the *unbounded* equation has no solution.
 
-> **Theorem 36.5 (Strong SIV test).** *(Classical.)* If a single loop level appears, with the *same* coefficient `a ≠ 0` in both subscripts, then a dependence exists if and only if `a` divides `δ = c_d − c_s` and `|δ/a| < e`, where `e` is the loop's extent. When it exists, the distance at that level is exactly `−δ/a`.
+> **Theorem 36.5 (Strong SIV test).** **(classical)** If a single loop level appears, with the *same* coefficient `a ≠ 0` in both subscripts, then a dependence exists if and only if `a` divides `δ = c_d − c_s` and `|δ/a| < e`, where `e` is the loop's extent. When it exists, the distance at that level is exactly `−δ/a`.
 
 *Proof.* The equation is `a·i + c_s = a·j + c_d`, so `a(j − i) = −δ`. An integer solution requires `a | δ`, and then `j − i = −δ/a` is forced — a single value, not a family. Both `i` and `j` must lie in `[0, e)`, which is possible exactly when `|j − i| < e`. ∎
 
 "SIV" is *single index variable*. Theorem 36.5 is exact — it gives the distance, not merely existence — and it covers the overwhelming majority of subscripts in real code, because a subscript like `A[i]` versus `A[i+1]` is precisely this case.
 
-> **Definition 36.6 (MIV).** A subscript pair is *multiple index variable* if more than one loop level appears in it. No exact test for the general MIV case is used here; the fallback is Theorem 36.4 applied to the gcd of all involved coefficients.
+> **Definition 36.6 (MIV).** **(classical)** A subscript pair is *multiple index variable* if more than one loop level appears in it. No exact test for the general MIV case is used here; the fallback is Theorem 36.4 applied to the gcd of all involved coefficients.
 
 There is one MIV case the compiler does decide exactly, and it comes straight out of Chapter 35:
 
-> **Theorem 36.7 (Coincidence of a mixed-radix subscript, stated here).** If both subscripts are the *same* affine form `f`, `f` is in mixed-radix form (Definition 35.7), and the constant difference is zero, then the two accesses coincide exactly when every involved index agrees — that is, the direction is `=` at every involved level.
+> **Theorem 36.7 (Coincidence of a mixed-radix subscript).** **(stated here)** If both subscripts are the *same* affine form `f`, `f` is in mixed-radix form (Definition 35.7), and the constant difference is zero, then the two accesses coincide exactly when every involved index agrees — that is, the direction is `=` at every involved level.
 
 *Proof.* By Theorem 35.8, `f` takes each value in its range exactly once as the involved variables range over their domain. So `f(I) = f(J)` forces `I = J` on those components. ∎
 
@@ -77,13 +77,13 @@ Without Theorem 36.7 a subscript like `A[3i + j]` in both accesses would fall to
 
 ### Permutation
 
-> **Theorem 36.8 (Legality of loop interchange).** *(Classical.)* A permutation `σ` of the loops in a perfect nest is legal if and only if, for every dependence, the permuted direction vector is not lexicographically negative — that is, its first non-`=` component is not `>`.
+> **Theorem 36.8 (Legality of loop interchange).** **(classical)** A permutation `σ` of the loops in a perfect nest is legal if and only if, for every dependence, the permuted direction vector is not lexicographically negative — that is, its first non-`=` component is not `>`.
 
 The proof is the same argument as Theorem 36.3 one level up: a lexicographically negative direction vector means the dependence now runs backwards, which is a source executing after its sink. This chapter builds the machinery; Chapter 42 is where it is used and where the counterexample is worked.
 
 ## 36.4 In mlfw: collect, then test
 
-Two files. [`analysis/buffer_access.ts`](../../../src/compiler/analysis/buffer_access.ts), 274 lines, walks a nest and records every access. [`analysis/dependence.ts`](../../../src/compiler/analysis/dependence.ts), 261 lines, is Theorems 36.4 to 36.7.
+Two files. [`analysis/buffer_access.ts`](../../../src/compiler/analysis/buffer_access.ts), 274 lines, walks a nest and records every access. [`analysis/dependence.ts`](../../../src/compiler/analysis/dependence.ts), 280 lines, is Theorems 36.4 to 36.7.
 
 ### Collection
 
@@ -99,7 +99,7 @@ Two files. [`analysis/buffer_access.ts`](../../../src/compiler/analysis/buffer_a
 
 Two versions of each subscript, for two different questions. The *raw* form, over whatever variables are written in the subscript, feeds `coverRangeOfForm` — Theorem 35.8 — to get the region of the buffer this access covers. The *composed* form, substituted down to loop variables, is what the dependence test needs, because two accesses can only be compared in a common vocabulary.
 
-Note what a loop whose `min` or `extent` is not an integer literal contributes ([`buffer_access.ts:180`](../../../src/compiler/analysis/buffer_access.ts)): a level that still records the loop node and the loop variable, carrying `null` for both bounds. The variable is still bound to its own linear form, so subscripts written over it still compose, and the level still occupies its position in every direction vector. What is missing is the *range*, and the range is needed by three of the refinements below — every one of which can only ever prove *more* independence than the test would otherwise report. A symbolic extent therefore costs precision, not visibility, and the distinction is worth the paragraph: getting it the other way round is a soundness bug rather than a slow program, and §36.7 is where that history is.
+Note what a loop whose `min` or `extent` is not an integer literal contributes ([`buffer_access.ts:180`](../../../src/compiler/analysis/buffer_access.ts)): a level that still records the loop node and the loop variable, carrying `null` for both bounds. The variable is still bound to its own linear form, so subscripts written over it still compose, and the level still occupies its position in every direction vector. What is missing is the *range*, and the range is needed by three of the refinements below — every one of which can only ever prove *more* independence than the test would otherwise report. A symbolic extent therefore costs precision, not visibility, and the distinction is worth the paragraph: getting it the other way round is a soundness bug rather than a slow program, and §36.8's fourth trap is where that history is.
 
 ### The common nest
 
@@ -308,6 +308,23 @@ Definition 36.2 closed with a claim that needs establishing rather than assuming
 > ```
 >
 > iteration `(i, j)` reads the element that iteration `(i+1, j-1)` writes. Since `(i, j) ≺ (i+1, j-1)` lexicographically, the read happens **first**: this is a **WAR** dependence with direction `(<, >)`. Named by textual position, with the write as source, it comes out as RAW with direction `(>, <)` — the wrong kind and the reverse direction.
+
+Drawn on the iteration space, with the pair at `(1,2)` and `(2,1)`:
+
+```
+   j=0   j=1   j=2   j=3
+ i=0  .     .     .     .        execution order is row by row, left to right,
+ i=1  .     .    (R)    .        so (1,2) runs BEFORE (2,1)
+ i=2  .    (W)    .     .
+ i=3  .     .     .     .        (R) at (1,2) reads  A[2,1]
+                                 (W) at (2,1) writes A[2,1]
+   difference (2,1) - (1,2) = (+1, -1)  ->  direction (<, >)
+   earlier instance READS, later instance WRITES        ->  WAR
+
+   named by textual position instead, with the store as source:
+   difference (1,2) - (2,1) = (-1, +1)  ->  direction (>, <)   and kind RAW
+                                              both wrong
+```
 
 That matters because `permutationPreservesDependences` is Theorem 36.8's test: *does a permutation reverse a direction vector?* Interchanging `i` and `j` maps the true `(<, >)` to `(>, <)`, which is lexicographically negative and therefore **illegal**. It maps the reversed reading back to `(<, >)`, which looks fine — so the interchange is accepted, and after it iteration `(j, i)` reads an element that has already been overwritten. **That is the failure mode dependence analysis exists to make impossible**: not "I could not tell", but a confident answer wrong in the permissive direction (Chapter 42 §42.4).
 

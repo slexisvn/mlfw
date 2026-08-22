@@ -1,3 +1,5 @@
+import { isTensor } from '../tensor/core/is_tensor.js';
+
 enum IValueTag {
   TENSOR = 0,
   INT = 1,
@@ -113,20 +115,16 @@ export class KernelFunction {
   }
 }
 
-function hasImpl(val: unknown): boolean {
-  return typeof val === 'object' && val !== null && '_impl' in val;
-}
-
 function _toIValue(val: unknown): IValue {
   if (val instanceof IValue) return val;
-  if (hasImpl(val)) return IValue.tensor(val);
+  if (isTensor(val)) return IValue.tensor(val);
   if (typeof val === 'number') {
     return Number.isInteger(val) ? IValue.int(val) : IValue.float(val);
   }
   if (typeof val === 'boolean') return IValue.bool(val);
   if (typeof val === 'string') return IValue.string(val);
   if (Array.isArray(val)) {
-    if (val.length > 0 && hasImpl(val[0])) return IValue.tensorList(val);
+    if (val.length > 0 && isTensor(val[0])) return IValue.tensorList(val);
     return IValue.intList(val);
   }
   if (val === null || val === undefined) return IValue.none();

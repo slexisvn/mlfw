@@ -39,17 +39,17 @@ In the loop nest, the algorithm is the **block** of Chapter 33 — the body, the
 
 ## 38.3 Theory
 
-> **Definition 38.1 (Schedule).** Let `P` be a `PrimFunc`. A *schedule* on `P` is a finite sequence of *primitives* `p₁,…,p_n`, each a partial function on `PrimFunc`s. The scheduled program is `p_n(⋯p₁(P)⋯)`, undefined if any primitive is applied outside its domain.
+> **Definition 38.1 (Schedule).** **(stated here)** Let `P` be a `PrimFunc`. A *schedule* on `P` is a finite sequence of *primitives* `p₁,…,p_n`, each a partial function on `PrimFunc`s. The scheduled program is `p_n(⋯p₁(P)⋯)`, undefined if any primitive is applied outside its domain.
 
 "Partial" is the operative word, and it is how legality is expressed in this compiler: a primitive that would be illegal is not applied and returns an error, rather than being applied and repaired afterwards. Chapter 42 is entirely about the domains.
 
-> **Definition 38.2 (Semantic equivalence for a `PrimFunc`, stated here).** Two `PrimFunc`s over the same buffer signature are *equivalent* if, for every initial contents of their input buffers, they leave identical contents in every buffer that outlives the function.
+> **Definition 38.2 (Semantic equivalence for a `PrimFunc`).** **(stated here)** Two `PrimFunc`s over the same buffer signature are *equivalent* if, for every initial contents of their input buffers, they leave identical contents in every buffer that outlives the function.
 
 Note what this definition deliberately does not say. It does not quantify over intermediate states, so a schedule may materialise scratch buffers, and it does not quantify over the *order* of the writes, so two schedules that write the same locations in different orders are equivalent. It also says *identical*, not *close*: under floating-point arithmetic this makes reassociation inequivalent, which is why Chapter 41's `rfactor` needs a licence that Chapter 40's `split` does not.
 
-> **Definition 38.3 (Sound primitive, stated here).** A primitive `p` is *sound* if `p(P)` is equivalent to `P` for every `P` in its domain.
+> **Definition 38.3 (Sound primitive).** **(stated here)** A primitive `p` is *sound* if `p(P)` is equivalent to `P` for every `P` in its domain.
 
-> **Proposition 38.4 (Soundness composes, stated here).** If every primitive in a schedule is sound, the scheduled program is equivalent to the original.
+> **Proposition 38.4 (Soundness composes).** **(stated here)** If every primitive in a schedule is sound, the scheduled program is equivalent to the original.
 
 *Proof.* Equivalence is transitive, and each step preserves it. ∎
 
@@ -63,13 +63,13 @@ The other twenty-one are worth a sentence each in Chapters 40 and 41, because th
 
 So state the guarantee in the conditional form it actually has:
 
-> **Proposition 38.4 buys "a search cannot produce a wrong program" only for the primitives that are sound.** It is a theorem about composition, and composition of a false premise proves nothing. A search that reaches `rfactor` on a float reduction can change a result at N1 without reporting anything. Part VIII §44 onward assumes this proposition throughout, and inherits that one exception.
+> **What Proposition 38.4 buys is conditional.** It buys "a search cannot produce a wrong program" only for the primitives that are sound. It is a theorem about composition, and composition of a false premise proves nothing. A search that reaches `rfactor` on a float reduction can change a result at N1 without reporting anything. Part VIII §44 onward assumes this proposition throughout, and inherits that one exception.
 
 The design is what makes that statement possible at all. Reducing "is this schedule correct?" to twenty-two questions asked once is what makes the exceptions *enumerable* — one of them, named, with a measured counterexample — which is not something a compiler without this structure could say about itself.
 
 There is a third question hiding behind the second, and it is the one this chapter's second lab is about.
 
-> **Definition 38.5 (Advisory annotation, stated here).** A loop *annotation* — `parallel`, `vectorized`, `unrolled`, `thread_binding` — is *advisory* on a backend if that backend emits the same code with and without it.
+> **Definition 38.5 (Advisory annotation).** **(stated here)** A loop *annotation* — `parallel`, `vectorized`, `unrolled`, `thread_binding` — is *advisory* on a backend if that backend emits the same code with and without it.
 
 An advisory annotation is sound for free: a backend that ignores it cannot be broken by it. That is a real property and not a good one, because the primitive that sets it is still legality-checked, still recorded in the trace, still costed by Part VIII's model, and still buys nothing.
 
@@ -98,7 +98,7 @@ The defaults are worth reading against that code. `CompilerConfig` starts from `
 
 ### The primitives
 
-`Schedule` ([`schedule/schedule.ts:202`](../../../src/compiler/schedule/schedule.ts)) is 1,137 lines and holds four things — the function, a `ScheduleState` (Chapter 39), a `ScheduleTrace` (Chapter 48) and a `ScheduleMutator`, the 44-line helper that does the actual splicing — behind twenty-eight public members. Six are queries (`getBlock`, `getBlockSRef`, `getLoops`, `getTrace`, `verify`, and the constructor); the other twenty-two are the primitives:
+`Schedule` ([`schedule/schedule.ts:202`](../../../src/compiler/schedule/schedule.ts)) is 1,185 lines and holds four things — the function, a `ScheduleState` (Chapter 39), a `ScheduleTrace` (Chapter 48) and a `ScheduleMutator`, the 44-line helper that does the actual splicing — behind twenty-eight public members. Six are queries (`getBlock`, `getBlockSRef`, `getLoops`, `getTrace`, `verify`, and the constructor); the other twenty-two are the primitives:
 
 | Group | Primitives | Chapter |
 |---|---|---|

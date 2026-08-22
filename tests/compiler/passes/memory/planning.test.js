@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { MemoryPlanner } from '../../../../src/compiler/passes/memory/memory_planning.js';
 import { Buffer } from '../../../../src/compiler/ir/tensor/buffer.js';
 import {
-  PrimFunc, BlockNode, SeqNode, BufferStoreNode, BufferLoadNode,
+  PrimFunc, BlockNode, SeqNode, BufferStoreNode, BufferLoadNode, ForNode, ForKind,
   IntImmNode, MathOpNode, VariableNode, BlockRealizeNode, AllocateNode
 } from '../../../../src/compiler/ir/tensor/nodes.js';
 
@@ -14,10 +14,19 @@ function makeBind(name) {
   return new BlockRealizeNode(makeVar(name + '_v'), makeVar(name));
 }
 
+function makeCoveringBody(writeBuf, readBufs) {
+  const iv = makeVar(`${writeBuf.name}_i`);
+  const value = readBufs.length > 0
+    ? new BufferLoadNode(readBufs[0], [iv])
+    : new IntImmNode(0);
+  const store = new BufferStoreNode(writeBuf, [iv], value);
+  return new ForNode(iv, new IntImmNode(0), new IntImmNode(writeBuf.shape[0]), ForKind.SERIAL, store);
+}
+
 function makeBlock(name, reads, writes) {
   const binds = [makeBind('i')];
   const body = writes.length > 0
-    ? new BufferStoreNode(writes[0].buffer, [], reads.length > 0 ? new BufferLoadNode(reads[0].buffer, []) : new IntImmNode(0))
+    ? makeCoveringBody(writes[0].buffer, reads.map((r) => r.buffer))
     : new IntImmNode(0);
   return new BlockNode(name, binds, reads, writes, body);
 }

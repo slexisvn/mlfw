@@ -1,8 +1,8 @@
 import { SymInt, symVarName } from '../compiler/analysis/sym_int.js';
 import type { SymExpr, SymIntOp } from '../compiler/analysis/sym_int.js';
 import type { Buffer } from '../compiler/ir/tensor/buffer.js';
-import type { AllocateNode, BlockNode, BufferStoreNode, ForNode, IfThenElseNode, LetStmtNode, NodeSlots, PrimFunc, TirNode, VecCopyNode, WhileNode } from '../compiler/ir/tensor/nodes.js';
-import type { IRStmtNode, LIRAccumulatorNode, LIRBindingsNode, LIRFlatStoreNode, LIRFunc, LIRThreadBinding } from '../compiler/ir/lir/nodes.js';
+import type { AllocateNode, BlockNode, BufferStoreNode, ForNode, IfThenElseNode, LetStmtNode, PrimFunc, VecCopyNode, WhileNode } from '../compiler/ir/tensor/nodes.js';
+import type { IRStmtNode, LIRAccumulatorNode, LIRBindingsNode, LIRFlatStoreNode, LIRFunc } from '../compiler/ir/lir/nodes.js';
 
 export type CodegenDialect = 'c' | 'js' | 'wat' | 'wgsl';
 export type CodegenFunc = PrimFunc | LIRFunc;

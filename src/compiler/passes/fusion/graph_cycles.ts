@@ -1,7 +1,6 @@
 export type GraphEdge = readonly [number, number];
 
 export class GraphCycles {
-  private _n: number;
   private _parent: Int32Array;
   private _rank: Int32Array;
   private _nodeAtRank: Int32Array;
@@ -9,7 +8,6 @@ export class GraphCycles {
   private _in: Set<number>[];
 
   constructor(n: number, edges?: readonly GraphEdge[] | null) {
-    this._n = n;
     this._parent = new Int32Array(n);
     this._rank = new Int32Array(n);
     this._nodeAtRank = new Int32Array(n);

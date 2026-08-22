@@ -48,11 +48,11 @@ That last step is the part that turns twenty independent rules into a cascade. `
 
 ## 17.3 Theory
 
-This is term rewriting, and the vocabulary is a hundred years old.
+This is term rewriting, and the vocabulary predates the machines it is being applied to — the confluence results below are from the 1930s and 1940s.
 
-> **Definition 17.1 (Rewrite rule).** A *rule* is a pair `(m, r)` where `m` is a predicate on operations and `r` is a partial function editing the IR at a matched operation. A rule is *applicable* at `op` if `m(op)` holds and `r` succeeds.
+> **Definition 17.1 (Rewrite rule).** **(classical)** A *rule* is a pair `(m, r)` where `m` is a predicate on operations and `r` is a partial function editing the IR at a matched operation. A rule is *applicable* at `op` if `m(op)` holds and `r` succeeds.
 
-> **Definition 17.2 (Normal form).** IR is in *normal form* with respect to a rule set if no rule in the set is applicable anywhere in it.
+> **Definition 17.2 (Normal form).** **(classical)** IR is in *normal form* with respect to a rule set if no rule in the set is applicable anywhere in it.
 
 Two properties decide whether a rule set is any good, and they are independent.
 
@@ -60,7 +60,7 @@ Two properties decide whether a rule set is any good, and they are independent.
 
 **Confluence.** If two different rules apply, the order does not matter: the results can be rewritten to a common form. Confluence is what makes "the canonical form" a meaningful phrase rather than "one of the canonical forms, depending on which rule the applicator happened to try first".
 
-> **Theorem 17.3 (Newman's Lemma).** *(Newman, 1942.)* A terminating rewrite system that is locally confluent is confluent. In a terminating and confluent system, every term has a unique normal form.
+> **Theorem 17.3 (Newman's Lemma; Newman, 1942).** **(classical)** A terminating rewrite system that is locally confluent is confluent. In a terminating and confluent system, every term has a unique normal form.
 
 Local confluence is the weaker and checkable version: whenever two rules apply to the same term, the two one-step results can each be rewritten to a common term. Newman's Lemma is what upgrades it to the global property, and the global property is what a canonicalizer is for.
 
@@ -202,18 +202,20 @@ This is the same shape as Chapter 15's `max-iter` line, at a different level of 
 [`passes/canonicalize/canonicalize.ts:15`](../../../src/compiler/passes/canonicalize/canonicalize.ts) builds its set from the op registry rather than from a list:
 
 ```ts
-function traitPatternsFor(def: OpDef): Pattern[] {
+function traitPatternsFor(def: OpDef, fastMath: boolean): Pattern[] {
   const patterns: Pattern[] = [];
   if (def.isCommutative) {
     patterns.push(new CommutativeConstantRight(def.name));
-    if (def.isAssociative && def.fold) patterns.push(new AssociativeConstantReassoc(def.name));
+    if (def.isAssociative && def.fold) patterns.push(new AssociativeConstantReassoc(def.name, fastMath));
   }
   if (def.hasTrait(OpTrait.IDEMPOTENT)) patterns.push(new IdempotentSelf(def.name));
   return patterns;
 }
 ```
 
-This is Chapter 11's argument arriving at its destination. Nobody wrote "`maximum` may have its constant moved to the right". `maximum` declares `COMMUTATIVE`, and a pattern instance is *generated* for it, rooted at its name so the index still works. Register a new commutative operation tomorrow and it gets a canonicalization rule with no further code. The rest of the set comes from `def.getCanonicalizationPatterns()` — the per-operation rules the op author wrote — and the whole thing is built once and cached.
+This is Chapter 11's argument arriving at its destination. Nobody wrote "`maximum` may have its constant moved to the right". `maximum` declares `COMMUTATIVE`, and a pattern instance is *generated* for it, rooted at its name so the index still works. Register a new commutative operation tomorrow and it gets a canonicalization rule with no further code. The rest of the set comes from `def.getCanonicalizationPatterns()` — the per-operation rules the op author wrote — and the whole thing is built once per `fastMath` setting and cached.
+
+Ignore the second parameter for now. It is there because one of the three traits consulted above is not true for every dtype the operation accepts, and a *generated* pattern has no other route by which that could reach it; §17.7 is the whole of that argument.
 
 The other pattern pass builds its set from an explicit list instead ([`simplify/algebraic.ts:9`](../../../src/compiler/passes/simplify/algebraic.ts)), 13 patterns, plus three more when `fastMath` is on.
 

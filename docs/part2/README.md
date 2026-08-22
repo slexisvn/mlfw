@@ -24,7 +24,73 @@ A graph IR is a set of **values**, each produced by exactly one **operation** �
 - **Regions** (Chapter 9), without which fusion has nowhere to put the operations it merges and `scan` has to be unrolled.
 - **The specificity order on dimensions as a partial order, and the least upper bound in it as what type inference propagates** (Definitions 10.1–10.2). *Compatibility* — the relation `shapeCompatible` actually decides — is reflexive and symmetric and **not** transitive, so it is not a partial order at all; Theorem 10.3 is the counterexample.
 - **Traits as queryable data** (Chapter 11), which is why the fusion engine in Part IV works on operations nobody had written when it was designed.
-- **The invariant set** (Chapter 12), which the pipeline checks at four boundaries and which Chapter 64 turns into a debugging procedure.
+- **The invariant set** (Chapter 12), which the pipeline checks at four boundaries, Chapter 64 revisits as a verification strategy, and Chapter 67 turns into a debugging procedure.
+
+## One pass, end to end
+
+Six chapters build a data structure and never show you a complete consumer of it. That is the right order — you cannot read a pass before you can read the IR — but it leaves the loop open, so here it is closed. This is the whole of `DCEPass.run`, minus its tracing block ([`passes/simplify/dce.ts:20`](../../src/compiler/passes/simplify/dce.ts)):
+
+```ts
+  override run(target: PassTarget, analysisManager?: AnalysisManager): PassResultValue {
+    const func = target as GraphFunction;
+    let changed = false;
+    const memEffects = this.getAnalysis(MemoryEffectAnalysis as never, func, analysisManager) as MemoryEffectResult;
+
+    const worklist: Operation[] = [];
+    for (const op of func.opsRecursive()) {
+      if (this._isDead(op, memEffects)) worklist.push(op);
+    }
+
+    while (worklist.length > 0) {
+      const op = worklist.pop() as Operation;
+      if (!op.parentBlock) continue;
+      if (!this._isDead(op, memEffects)) continue;
+
+      const operandDefs: Operation[] = [];
+      for (const consumed of this._valuesReadBy(op)) {
+        const defOp = consumed.definingOp;
+        if (defOp && defOp.parentBlock) operandDefs.push(defOp);
+      }
+
+      this._eraseRecursively(op);
+      changed = true;
+
+      for (const defOp of operandDefs) {
+        if (defOp.parentBlock && this._isDead(defOp, memEffects)) worklist.push(defOp);
+      }
+    }
+
+    return changed ? PassResult.CHANGED : PassResult.UNCHANGED;
+  }
+```
+
+and the predicate the whole thing turns on ([`dce.ts:81`](../../src/compiler/passes/simplify/dce.ts)):
+
+```ts
+  _isDead(op: Operation, memEffects: MemoryEffectResult): boolean {
+    if (isTerminatorOp(op.opName)) return false;
+    for (let i = 0; i < op.numResults; i++) {
+      if (op.getResult(i).hasUses) return false;
+    }
+    return !memEffects.hasSideEffect(op);
+  }
+```
+
+**Every line of that is a chapter of this part.** Read it back with the chapter numbers attached:
+
+| The code | The chapter it comes from |
+|---|---|
+| `op.getResult(i).hasUses` | Chapter 8. This is the intrusive use list, and it is why "is anybody reading this?" is a field test rather than a scan of the function. In a representation without it, DCE would be quadratic |
+| `func.opsRecursive()` | Chapter 9. The generator that descends into regions. Written with `ops()` instead, this pass would silently never look inside a `fusion` or a `scan` |
+| `_eraseRecursively`, `dropAllOperands` first | Chapter 9 again. Erasing an operation that owns a region means erasing its contents first, innermost last, dropping operands as you go so no use list is left pointing at a dead operation |
+| `isTerminatorOp(op.opName)` | Chapters 11 and 12. A `return` has no results, so the loop above would call it dead every time. The trait is what rescues it, and the pass asks the registry rather than comparing against the string `'return'` |
+| `memEffects.hasSideEffect(op)` | Chapter 11. "Has no users" is not grounds for deletion — Counterexample 8.5 — and the side-effect kind is declared on the `OpDef`, so a `scan` whose body writes memory is not deletable however unused its results look |
+| the worklist, re-checking `_isDead` on pop | Chapter 8's Theorem 8.4. Deleting an operation orphans its producers, so the pass pushes them back and lets order sort itself out. Nothing here has to reason about *where in the block* anything sits |
+| `CHANGED` / `UNCHANGED` | Chapter 14, the one thing in this listing Part II did not give you |
+
+Forty lines, and the only thing it knows about any particular operation is what the registry told it. That ratio — a small pass over a well-chosen representation — is the argument of this whole part, and it is why the six chapters came before the transformations rather than after.
+
+Two things this listing is *not*. It is not the full treatment of dead code elimination: Chapter 19 is, and it is mostly about the cases where `hasSideEffect` is the hard question. And it is not typical in its simplicity — the fusion engine of Part IV is two orders of magnitude larger. What is typical is the shape: ask the registry, walk the use lists, edit through the API, report whether anything moved.
 
 ## Labs
 

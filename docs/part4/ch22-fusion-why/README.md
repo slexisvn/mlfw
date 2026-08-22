@@ -19,6 +19,32 @@ Executed one at a time, each is a loop that reads its operands from memory and w
 
 Now look at what the program actually needs. It consumes `x` and `y` and produces `r`; three transfers. The other nine are avoidable, and they are avoidable for two different reasons. Six of them are `t1`, `t2` and `t3` — values that exist only to be handed to the next operation, so the compiler stores each one and immediately loads it back. The remaining three are `x` and `y` themselves: `x` is read by three of the four loops and `y` by two, and each of those loops fetches it from memory again. Keep that split in mind; §22.3 is the theorem that counts both kinds, and stating only the first is the easy way to get it wrong.
 
+Drawn, with every arrow a tensor crossing the memory boundary:
+
+```
+  unfused: four loops, twelve crossings          fused: one loop, three crossings
+
+     x  y                                            x  y
+      \ |                                             \ |
+    [ loop 1 ] -> t1  (write)                       [ one loop ]
+       t1 x                                          |  r = ((x+y)*x - y) + x
+      (read,read)                                    |  t1 t2 t3 never leave registers
+    [ loop 2 ] -> t2  (write)                        v
+       t2 y                                          r
+      (read,read)
+    [ loop 3 ] -> t3  (write)                     reads : x, y      = 2
+       t3 x                                       writes: r         = 1
+      (read,read)                                 ------------------------
+    [ loop 4 ] -> r   (write)                     total             = 3
+
+  reads : x,y | t1,x | t2,y | t3,x  = 8
+  writes: t1  | t2   | t3   | r     = 4
+  ---------------------------------------
+  total                             = 12
+```
+
+Nine of the twelve are avoidable, and the two reasons are visible in the left column: six of them are the write-then-read pairs on `t1`, `t2` and `t3`, and three more are the repeated fetches of `x` and `y`.
+
 If instead you write one loop:
 
 ```
@@ -40,15 +66,15 @@ So fusion at the graph level is not "prove these loops can merge". It is "decide
 
 ## 22.3 Theory
 
-> **Definition 22.1 (Memory traffic of a kernel).** The *traffic* of a kernel is the total bytes of its input tensors plus the total bytes of its output tensors, counting each distinct tensor once.
+> **Definition 22.1 (Memory traffic of a kernel).** **(stated here)** The *traffic* of a kernel is the total bytes of its input tensors plus the total bytes of its output tensors, counting each distinct tensor once.
 
 This is a model, and it is worth being explicit about what it assumes: that every input is read exactly once from memory and every output written exactly once, with no reuse across kernels. For elementwise kernels over tensors larger than cache, both assumptions hold well. For small tensors they do not — the second kernel finds its input still in cache — and §22.5 measures exactly where the model starts to be right.
 
-> **Definition 22.2 (Fusion of a group).** Let `G` be a set of operations. Its *inputs* are the values used by an operation in `G` and produced outside it; its *outputs* are the values produced in `G` and used outside it, or returned. Fusing `G` replaces its operations with one kernel whose traffic is the bytes of its inputs plus the bytes of its outputs.
+> **Definition 22.2 (Fusion of a group).** **(stated here)** Let `G` be a set of operations. Its *inputs* are the values used by an operation in `G` and produced outside it; its *outputs* are the values produced in `G` and used outside it, or returned. Fusing `G` replaces its operations with one kernel whose traffic is the bytes of its inputs plus the bytes of its outputs.
 
 The accounting is easier to get right if you stop thinking about edges and think about *touches*. Before fusion, a value costs a transfer every time an operation in the group touches it — once for the operation that produces it, once for each operation that reads it. After fusion there is one kernel, so it costs a transfer only if it crosses the boundary. Write `writes_G(w) ∈ {0,1}` for whether an operation in `G` produces `w`, and `reads_G(w)` for how many operations in `G` take `w` as an operand.
 
-> **Theorem 22.3 (What fusion removes, stated here).** Let `G` be fused, and let `∂G` be its inputs and outputs in the sense of Definition 22.2. For every value `w` touched by an operation in `G`,
+> **Theorem 22.3 (What fusion removes).** **(stated here)** Let `G` be fused, and let `∂G` be its inputs and outputs in the sense of Definition 22.2. For every value `w` touched by an operation in `G`,
 >
 > `traffic_unfused(G) − traffic_fused(G) = Σ_w (writes_G(w) + reads_G(w) − [w ∈ ∂G]) · bytes(w)`
 >
@@ -63,7 +89,7 @@ Two special cases carry almost all the intuition, and it is worth naming them be
 
 The second case is the one that gets dropped, and dropping it understates the saving badly on exactly the graphs fusion is for. §22.5's chain reads `x` in three of its four operations and `y` in two, so three of the nine tensor round trips it removes — a third of the total — are of the second kind. The theorem also credits a value read *twice* inside the group with `1 + 2 = 3` transfers saved, which is right for traffic and is precisely where the implementation disagrees: it charges that value as shared-memory pressure instead and may refuse the fusion outright. That is the distinction Chapter 24 will pay a factor of two for.
 
-> **Corollary 22.4 (Chains are the ideal case).** For a chain of `k` elementwise binary operations over `n`-element tensors of `b` bytes each, where every intermediate is used once, unfused traffic is `3knb` — two reads and one write per operation. Fused traffic is `(i + 1)nb`, where `i` is the number of *distinct* external inputs, so the ratio is `3k / (i + 1)`. In the case §22.5 measures, where the whole chain is written over the same two tensors, `i = 2` and the ratio is exactly `k`.
+> **Corollary 22.4 (Chains are the ideal case).** **(stated here)** For a chain of `k` elementwise binary operations over `n`-element tensors of `b` bytes each, where every intermediate is used once, unfused traffic is `3knb` — two reads and one write per operation. Fused traffic is `(i + 1)nb`, where `i` is the number of *distinct* external inputs, so the ratio is `3k / (i + 1)`. In the case §22.5 measures, where the whole chain is written over the same two tensors, `i = 2` and the ratio is exactly `k`.
 
 Which gives the headline: **fusing a chain of `k` operations over a fixed set of inputs reduces memory traffic by a factor of `k`**, and for memory-bound kernels the runtime follows. A chain that pulls in a fresh tensor at every step keeps those inputs and saves less.
 
@@ -174,11 +200,11 @@ Each timing is the median of 25 rounds (Node 24.9, 2026-08-21), and the last col
 
 Three things to take from this table, and the third is the most important.
 
-**The speedup is real and large.** Two and a half times, for a transformation that changed no arithmetic whatsoever. Nothing else in Part IV comes close: Chapter 19's three passes removed operations that were doing nothing, and this one removed nothing at all — it only changed where the numbers live between operations.
+**The speedup is real and large.** Roughly a factor of two — 1.9 as a central figure across the rows outside the noise, 2.4 at its best — for a transformation that changed no arithmetic whatsoever. Nothing else in Part IV comes close: Chapter 19's three passes removed operations that were doing nothing, and this one removed nothing at all — it only changed where the numbers live between operations.
 
 **The speedup is flat once the tensors leave cache.** From 64 KiB to 16 MiB — a 256-fold span — the ratio stays in a band roughly 1.5 to 2.4 on the machine that produced this table, with no trend across the span, and stays in a similarly narrow band on others. That flatness is the model being right: traffic saved scales linearly with `n`, traffic total scales linearly with `n`, so the ratio is a constant. A speedup that climbed or fell *steadily* with size would mean the model had missed the dominant term; a couple of tenths of drift between adjacent rows is cache behaviour, and the reason to trust that reading rather than inventing a story for it is the IQR column.
 
-**And it is about 1.9, not the 4.0 the traffic ratio predicts.** The model says twelve transfers become three. The clock says roughly 1.9. The gap is the model's assumption: `T ∝ bytes` holds for a kernel that is purely memory-bound, and these kernels also execute four arithmetic operations and a loop per element, which the fused version still does. Traffic went down 4×; the part of the runtime that was traffic went down 4×; the rest did not. Chapter 4's roofline says the same thing in one sentence: you can only remove the memory-bound part of a memory-bound kernel.
+**And it is about 1.9, not the 4.0 the traffic ratio predicts — which is the interesting part.** The model says twelve transfers become three. The clock says roughly 1.9. The gap is the model's assumption: `T ∝ bytes` holds for a kernel that is purely memory-bound, and these kernels also execute four arithmetic operations and a loop per element, which the fused version still does. Traffic went down 4×; the part of the runtime that was traffic went down 4×; the rest did not. Chapter 4's roofline says the same thing in one sentence: you can only remove the memory-bound part of a memory-bound kernel.
 
 The small end is the other boundary. At 4 KiB the two tensors fit in L1, so the "unfused" version is not really doing twelve trips to memory — it is doing twelve trips to cache — and what remains is mostly four loop nests and three temporary buffers becoming one nest and none, which is Chapter 4's `α` in its CPU form. Note that it is *not* four launches becoming one: this backend issues none. The model's assumption fails exactly where you would expect it to.
 

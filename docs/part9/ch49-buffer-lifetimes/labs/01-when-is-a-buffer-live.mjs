@@ -10,6 +10,7 @@ async function tirOf(fn, inputs, opts = {}) {
   const compiled = compile({ forward: fn }, inputs, {
     target: CPUTarget(),
     fusion: { enabled: false },
+    memory: { inplaceReuse: false },
     ...opts,
     trace: {
       level: TraceLevel.DEBUG,
@@ -21,7 +22,9 @@ async function tirOf(fn, inputs, opts = {}) {
     },
   });
   await compiled(...inputs);
-  return { text, memory };
+  const allocated = [...compiled.source().matchAll(/new Float32Array\((\d+)\)/g)]
+    .map((m) => Number(m[1]) * 4).reduce((a, b) => a + b, 0);
+  return { text, memory, allocated };
 }
 
 function blocksInOrder(text) {
@@ -48,19 +51,10 @@ function intervals(blocks) {
   return [...live.values()].sort((a, b) => a.firstUse - b.firstUse || a.buf.localeCompare(b.buf));
 }
 
-function sizesFrom(text) {
-  const sizes = new Map();
-  for (const m of text.matchAll(/(buf_\d+)\s*=\s*buffer_map\([^)]*shape=\[([^\]]*)\]/g)) {
-    const dims = m[2].split(',').filter(Boolean).map(Number);
-    sizes.set(m[1], dims.reduce((a, b) => a * b, 1) * 4);
-  }
-  return sizes;
-}
-
 const x = randn([N, N]);
 const chain = (t) => t.mul(2).add(1).relu().mul(3);
 
-const { text, memory } = await tirOf(chain, [x]);
+const { text, memory, allocated } = await tirOf(chain, [x]);
 const blocks = blocksInOrder(text);
 const ivs = intervals(blocks);
 
@@ -79,7 +73,6 @@ for (const iv of ivs) {
 }
 
 console.log('\n=== which pairs may share storage (disjoint intervals) ===');
-const sizes = sizesFrom(text);
 let shareable = 0;
 let interfering = 0;
 for (let i = 0; i < ivs.length; i++) {
@@ -97,6 +90,7 @@ const maxLive = Math.max(...blocks.map((_, i) =>
   ivs.filter((iv) => i >= iv.firstUse && i <= iv.lastUse).length));
 console.log(`  widest point of the program: ${maxLive} buffers live at once, out of ${ivs.length} total`);
 console.log(`  the planner reported peak: ${memory.peakMemory} bytes over ${memory.totalTemporaries} temporaries`);
+console.log(`  the emitted program allocates: ${allocated} bytes`);
 
 console.log('\n=== the same program, fused ===');
 const fused = await tirOf(chain, [x], { fusion: { enabled: true } });

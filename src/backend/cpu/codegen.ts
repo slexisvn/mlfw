@@ -1,9 +1,10 @@
+import { CodegenBase } from '../codegen_base.js';
 import { ForKind } from '../../compiler/ir/tensor/nodes.js';
 import { jsTypedArray, isJSMathFunc, isDtypeInt, dtypeBytes, jsCompareOp } from '../../util/dtype_map.js';
 import { flattenRowMajorIndex } from '../index_emit.js';
 import { inferDtype } from '../../compiler/ir/lir/nodes.js';
 import { walk } from '../../compiler/ir/ir_visitor.js';
-import { dynamicDimProduct, resolveShapeParam, isZeroFillBody } from '../codegen_utils.js';
+import { resolveShapeParam } from '../codegen_utils.js';
 
 import { LANCZOS_G, LANCZOS_COEFFS, ERF_A, ERF_P } from '../../util/special_math.js';
 
@@ -45,10 +46,7 @@ function _gammaExpr(arg: string): string {
 
 const EXACT_EXTERNS: ReadonlySet<string> = new Set(['max', 'min', 'abs', 'floor', 'ceil', 'round', 'sign', 'sqrt', 'fmod']);
 
-export class CPUCodegen {
-  target: TargetFeatures;
-  _indent: number;
-  _lines: string[];
+export class CPUCodegen extends CodegenBase {
   _loopStack: string[];
   declare _aliases: Map<string, string>;
   declare _accTarget: AccTarget | null;
@@ -59,12 +57,8 @@ export class CPUCodegen {
   declare _zeroBuffers: Set<string>;
   declare _constantBuffers: Map<string, number>;
   declare _localBuffers: Set<string>;
-  declare _primFunc: CodegenFunc;
-
   constructor(target: TargetFeatures) {
-    this.target = target;
-    this._indent = 0;
-    this._lines = [];
+    super(target);
     this._loopStack = [];
   }
 
@@ -149,10 +143,6 @@ export class CPUCodegen {
     this._emit('}');
 
     return this._cleanupSource(this._lines.join('\n'));
-  }
-
-  _emit(line: string): void {
-    this._lines.push('  '.repeat(this._indent) + line);
   }
 
   _allocRhs(buf: Buffer, numel: number): string {
@@ -558,16 +548,8 @@ export class CPUCodegen {
     return vals.length > 0 ? vals[0] : '0';
   }
 
-  _dynamicNumel(buffer: Buffer): string {
-    return dynamicDimProduct(buffer, 0, (b, j) => this._resolveShapeParam(b, j));
-  }
-
   _flatIndex(buffer: Buffer, indices: readonly IRStmtNode[]): string {
     return flattenRowMajorIndex(buffer, indices, (e) => this._exprToJS(e), (b, i) => this._computeDynamicStride(b, i), true);
-  }
-
-  _computeDynamicStride(buffer: Buffer, dimIdx: number): string {
-    return dynamicDimProduct(buffer, dimIdx + 1, (b, j) => this._resolveShapeParam(b, j));
   }
 
   _resolveShapeParam(buffer: Buffer, dimIdx: number): string {
@@ -622,10 +604,6 @@ export class CPUCodegen {
       return false;
     }
     return false;
-  }
-
-  _isZeroFillBody(body: IRStmtNode): boolean {
-    return isZeroFillBody(body);
   }
 
   _scanTree(root: IRStmtNode, usedBuffers: Map<string, Buffer>, allocatedBuffers: Set<string>, readBuffers: Set<string>): void {

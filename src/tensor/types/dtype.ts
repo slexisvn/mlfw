@@ -7,6 +7,7 @@ import {
   isBoolType as _isBoolType,
   promoteDtype as _promoteDtype,
 } from '../../compiler/ir/graph/types.js';
+import { typedArrayCtor as dtypeTypedArrayCtor } from '../../util/dtype_map.js';
 import type { ScalarDType } from '../../compiler/ir/graph/types.js';
 
 export const ScalarType = _ScalarType;
@@ -37,22 +38,8 @@ export type NumericTypedArrayConstructor =
   | BigInt64ArrayConstructor
   | Uint8ArrayConstructor;
 
-const _TYPED_ARRAY_CTORS = Object.freeze({
-  [ScalarType.F16]: Uint16Array,
-  [ScalarType.BF16]: Uint16Array,
-  [ScalarType.F32]: Float32Array,
-  [ScalarType.F64]: Float64Array,
-  [ScalarType.I8]: Int8Array,
-  [ScalarType.I16]: Int16Array,
-  [ScalarType.I32]: Int32Array,
-  [ScalarType.I64]: BigInt64Array,
-  [ScalarType.UI8]: Uint8Array,
-  [ScalarType.BOOL]: Uint8Array,
-  [ScalarType.INDEX]: Int32Array,
-});
-
 export function typedArrayCtor(dtype: DType): NumericTypedArrayConstructor {
-  return _TYPED_ARRAY_CTORS[dtype] || Float32Array;
+  return dtypeTypedArrayCtor(dtype);
 }
 
 const _VALID_DTYPES = new Set<string>(Object.values(ScalarType));

@@ -1,5 +1,5 @@
 import { DispatchKey } from './dispatch_key.js';
-import type { DispatchKeyValue, DispatchKeySet } from './dispatch_key.js';
+import type { DispatchKeyValue } from './dispatch_key.js';
 import { KernelFunction } from './boxing.js';
 import { dispatcher } from './dispatcher.js';
 import { jitCompile } from './jit_cache.js';
@@ -7,6 +7,7 @@ import type { TargetLike } from './jit_cache.js';
 import { isEagerDeferred } from './eager_mode.js';
 import { CPUTarget, CUDATarget, WasmTarget, WebGPUTarget } from '../backend/target.js';
 import { Tensor } from '../tensor/core/tensor.js';
+import { isTensor } from '../tensor/core/is_tensor.js';
 import { TensorImpl } from '../tensor/core/tensor_impl.js';
 import { Storage } from '../tensor/core/storage.js';
 import { computeStrides, computeNumel, broadcastShapes, matmulOutputShape } from '../tensor/utils/shape_utils.js';
@@ -36,10 +37,6 @@ const _TARGET_FOR_KEY: Partial<Record<DispatchKeyValue, TargetFactory>> = {
 let _webgpuEagerFn: DynamicFn | null = null;
 export function setWebGPUEagerFn(fn: DynamicFn | null) { _webgpuEagerFn = fn; }
 
-function hasTensorImpl(value: unknown): value is Tensor {
-  return typeof value === 'object' && value !== null && '_impl' in value;
-}
-
 function _extractTensorsAndScalars(opName: string, args: readonly unknown[]): { tensors: Tensor[]; scalars: ScalarMap } {
   const tensors: Tensor[] = [];
   const scalars: ScalarMap = {};
@@ -48,11 +45,11 @@ function _extractTensorsAndScalars(opName: string, args: readonly unknown[]): { 
 
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
-    if (hasTensorImpl(a)) {
+    if (isTensor(a)) {
       tensors.push(a);
-    } else if (Array.isArray(a) && a.length > 0 && hasTensorImpl(a[0])) {
+    } else if (Array.isArray(a) && a.length > 0 && isTensor(a[0])) {
       for (const el of a) {
-        if (hasTensorImpl(el)) tensors.push(el);
+        if (isTensor(el)) tensors.push(el);
       }
     } else if (a !== undefined && a !== null) {
       if (spec && scalarIdx < spec.length) {
@@ -77,11 +74,12 @@ function paddingScalar(value: unknown): readonly (readonly number[])[] {
   return Array.isArray(value) ? value as readonly (readonly number[])[] : [[0, 0], [0, 0]];
 }
 
+const REDUCE_OPS: ReadonlySet<string> = new Set(['sum', 'mean', 'max', 'min', 'prod', 'argmax', 'argmin']);
+
 function _inferOutputShape(opName: string, tensorArgs: readonly Tensor[], scalars: ScalarMap): number[] {
   if (tensorArgs.length === 0) return [];
 
-  const _REDUCE_SET = new Set(['sum', 'mean', 'max', 'min', 'prod', 'argmax', 'argmin']);
-  if (_REDUCE_SET.has(opName)) {
+  if (REDUCE_OPS.has(opName)) {
     const inputShape = tensorArgs[0].shape;
     const dim = scalars.dim;
     const keepdim = scalars.keepdim;

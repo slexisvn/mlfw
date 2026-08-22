@@ -4,7 +4,7 @@ import { transform } from '../../ir/ir_visitor.js';
 import { cloneTensorIR } from '../../autotune/tune_ir.js';
 import { Analyzer } from '../../analysis/analyzer.js';
 import { proveTrue } from '../../analysis/ir_arith.js';
-import type { CompareNode, ForKindValue, ForNode as ForNodeType, IfThenElseNode, IntImmNode as IntImmNodeType, MathOpNode, PrimFunc, TirNode, VariableNode as VariableNodeType } from '../../ir/tensor/nodes.js';
+import type { CompareNode, ForKindValue, IfThenElseNode, IntImmNode as IntImmNodeType, MathOpNode, PrimFunc, TirNode, VariableNode as VariableNodeType } from '../../ir/tensor/nodes.js';
 import type { IRNode } from '../../ir/ir_visitor.js';
 import type { TirPassCtx } from '../tir_pass.js';
 

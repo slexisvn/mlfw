@@ -34,7 +34,7 @@ So the design is: rules that are valid under position one are always on; rules t
 
 Write `≡` for "produces the same bits for every input", with two exclusions stated once and relied on below. A *signalling* NaN is excluded, because every arithmetic operation quiets one, so `x × 1` returns a quiet NaN where the rewrite returns the signalling one it started with. NaN *payloads* are excluded too, because WebAssembly permits an implementation to return a canonical NaN instead of propagating an operand's bits. Admit either and every identity in Theorem 20.1 fails except negation, which is why the relation is defined to stand outside them: neither is reachable from a tensor program this compiler accepts.
 
-> **Theorem 20.1 (Identities valid over floats).** For IEEE 754 binary arithmetic with default rounding:
+> **Theorem 20.1 (Identities valid over floats).** **(classical)** For IEEE 754 binary arithmetic with default rounding:
 > - `x × 1 ≡ x`
 > - `x ÷ 1 ≡ x`
 > - `x − 0 ≡ x`
@@ -42,7 +42,7 @@ Write `≡` for "produces the same bits for every input", with two exclusions st
 
 *Proof sketch.* Multiplication and division by exactly 1 are exact and preserve sign and payload, so they are the identity on every finite value, on both infinities, and on NaN. `x − 0`: for finite non-zero `x` the result is `x` exactly; for `x = +0` it is `+0`; for `x = −0` it is `−0 − +0 = −0` — subtraction of a positive zero preserves a negative zero, which is precisely the case that breaks the addition version. Negation flips one bit. ∎
 
-> **Theorem 20.2 (Identities not valid over floats).** Each of the following fails on at least one input:
+> **Theorem 20.2 (Identities not valid over floats).** **(classical)** Each of the following fails on at least one input:
 > - `x + 0 ≢ x`. **Counterexample:** `x = −0`. IEEE addition gives `(−0) + (+0) = +0`; the rewrite yields `−0`. The two differ under `1/x` and under `copysign`.
 > - `x × 0 ≢ 0`. **Counterexamples:** `x = ∞` gives NaN, not 0. `x = NaN` gives NaN. `x = −0` gives `−0`, not `+0`.
 > - `x − x ≢ 0`. **Counterexamples:** `x = ∞` gives NaN. `x = NaN` gives NaN.
@@ -50,7 +50,7 @@ Write `≡` for "produces the same bits for every input", with two exclusions st
 
 Note the shape of these. `x + 0` fails only on signed zero — a quiet, single-bit difference that surfaces only if something downstream divides by the result or inspects its sign. The other three fail loudly, turning a NaN into a number, which is worse: a NaN is a diagnostic, and erasing it converts a detectable failure into a plausible wrong answer.
 
-> **Definition 20.3 (Fast-math licence, stated here).** A *fast-math licence* is a user assertion about every value the program computes, intermediates included and not only its inputs and outputs: that none is infinite or NaN, that signed zero is never observed, and that every operation is applied inside its domain — no division by zero, no logarithm of a non-positive number. Under it, the compiler may apply identities that hold over the reals, and results may differ from IEEE 754 in bits, in NaN propagation, and in signed zero.
+> **Definition 20.3 (Fast-math licence).** **(stated here)** A *fast-math licence* is a user assertion about every value the program computes, intermediates included and not only its inputs and outputs: that none is infinite or NaN, that signed zero is never observed, and that every operation is applied inside its domain — no division by zero, no logarithm of a non-positive number. Under it, the compiler may apply identities that hold over the reals, and results may differ from IEEE 754 in bits, in NaN propagation, and in signed zero.
 
 Each clause pays for a different rule, and the third is the one that is easy to leave out. Finiteness alone licenses `x − x → 0` and `x × 0 → 0`; the signed-zero clause licenses `x + 0 → x`; but `x ÷ x → 1` needs `x ≠ 0`, and zero is perfectly finite, while `exp(log x) → x` needs `x > 0`. A licence phrased only in terms of finiteness would gate those three rules behind an assertion that does not imply them.
 

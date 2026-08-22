@@ -56,7 +56,7 @@ The result is a bug report naming the wrong pass. The pass that is running when 
 
 Why three values rather than two? Because "I did not change anything" and "I could not do my job" are different facts and lead to different actions. UNCHANGED means the driver may proceed and may keep everything it knows. FAILED means the IR is in an unknown state: analyses computed over it must be thrown away, and the driver has to decide whether to abandon the compilation or quarantine what broke. Collapsing them loses the distinction exactly when you need it.
 
-> **Definition 14.2 (Pass granularity).** A pass is *function-scoped* if its verdict and its edits depend only on one function of the module, and *module-scoped* otherwise.
+> **Definition 14.2 (Pass granularity).** **(stated here)** A pass is *function-scoped* if its verdict and its edits depend only on one function of the module, and *module-scoped* otherwise.
 
 This is not a stylistic choice. It is a claim about what the pass reads, and it buys two things. A function-scoped pass can be run over functions independently — in any order, and in principle in parallel — and a failure in one function does not implicate the others. A module-scoped pass cannot make either promise, because it may read a function it is not currently editing. Inlining is the standard example: to inline a call, you must read the callee, which is a different function.
 

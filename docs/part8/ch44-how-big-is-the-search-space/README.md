@@ -34,20 +34,20 @@ The second intuition is the one that motivates the rest of the part. A menu of 2
 
 Fix a block and a skeleton. The skeleton exposes a finite list of named choices.
 
-> **Definition 44.1 (Schedule space, stated here).** Let `S` be a *sketch*: a name, a finite list of *search variables* `V₁,…,V_k` with finite candidate sets `C₁,…,C_k`, and a function that applies a parameter assignment to a schedule. The *schedule space* of `S` is the product `C₁ × ⋯ × C_k`. The schedule space of a block is the disjoint union of the spaces of every sketch derived for it.
+> **Definition 44.1 (Schedule space).** **(stated here)** Let `S` be a *sketch*: a name, a finite list of *search variables* `V₁,…,V_k` with finite candidate sets `C₁,…,C_k`, and a function that applies a parameter assignment to a schedule. The *schedule space* of `S` is the product `C₁ × ⋯ × C_k`. The schedule space of a block is the disjoint union of the spaces of every sketch derived for it.
 
 Nothing in Definition 44.1 says the map from parameters to programs is injective; it usually is not, and Chapter 45 measures how far from injective. What the definition gives is a finite object to search, which a sequence of primitives is not.
 
 The dominant factor in that product, for every skeleton in this compiler that does real work, is the number of ways to cut an axis.
 
-> **Theorem 44.2 (Ordered factorisations).** *(Classical; stars and bars applied to each prime exponent.)* Let `n = ∏_p p^{e_p}`. The number of ordered `L`-tuples `(f₁,…,f_L)` of positive integers with `∏ f_i = n` is
+> **Theorem 44.2 (Ordered factorisations; stars and bars, per prime exponent).** **(classical)** Let `n = ∏_p p^{e_p}`. The number of ordered `L`-tuples `(f₁,…,f_L)` of positive integers with `∏ f_i = n` is
 > ```
 >   F(n, L) = ∏_p C(e_p + L − 1, L − 1).
 > ```
 
 *Proof.* An ordered `L`-tuple with product `n` is the same thing as, for each prime `p` dividing `n`, an ordered `L`-tuple of non-negative exponents summing to `e_p`; the choices for distinct primes are independent. The number of ways to write `e` as an ordered sum of `L` non-negative integers is the number of ways to place `L−1` bars among `e` stars, which is `C(e + L − 1, L − 1)`. Multiplying over primes gives the claim. ∎
 
-> **Corollary 44.3 (Size of a multi-level tiling space, stated here).** For a block with spatial axes of extents `n₁,…,n_s` and reduction axes of extents `m₁,…,m_r`, tiled by a structure with `L_S` spatial and `L_R` reduction levels, the schedule space has
+> **Corollary 44.3 (Size of a multi-level tiling space).** **(stated here)** For a block with spatial axes of extents `n₁,…,n_s` and reduction axes of extents `m₁,…,m_r`, tiled by a structure with `L_S` spatial and `L_R` reduction levels, the schedule space has
 > ```
 >   ∏_{i≤s} F(n_i, L_S) · ∏_{j≤r} F(m_j, L_R)
 > ```
@@ -58,14 +58,14 @@ The dominant factor in that product, for every skeleton in this compiler that do
 > **The product form assumes the choices are independent, and legality does not respect that.** Definition 44.1 defines the space as `C₁ × ⋯ × C_k` and Corollary 44.3 multiplies the per-axis counts, which is exact for *enumeration* — the generator really does produce that many parameter assignments — and is an **upper bound** on the number of distinct, legal, schedulable programs. Three effects separate the two, and all three are measured later in this part:
 >
 > - **Later choices are conditional on earlier ones.** A tile size chosen at one level changes the extent the next level is cutting, so the candidate set for a search variable is not fixed independently of the others. Where the generator enumerates them as fixed sets, it produces assignments that no consistent schedule realises.
-> - **A primitive may refuse.** §45.6 derives 6,125 points of `ssrsrs_cpu` and finds *all* of them refused by the schedule, because the sketch is written against a block shape the lowering rules do not emit. Those 6,125 points are in the product and not in the space.
+> - **A primitive may refuse.** §45.6 derives 6,125 points of `ssrsrs_cpu` — its count on the 16×16×16 matmul that chapter uses, against the 16,128 this one counts on a 64×64 — and finds *all* of them refused by the schedule, because the sketch is written against a block shape the lowering rules do not emit. Those points are in the product and not in the space.
 > - **Distinct assignments may be the same program.** §43's six GPU block sizes collapse to four programs, because two pairs of parameters produce identical schedules.
 >
 > So `2,304` and `92,190` below are counts of *forms the generator can fill in*, which is the honest thing for them to be and is what the labs check. Read them as the size of the space the search *pays to explore*, not as the number of distinct programs available — those two numbers differ by more than an order of magnitude on at least one sketch in this compiler.
 
 The number the search actually gets is smaller, and not by a uniform thinning.
 
-> **Proposition 44.4 (The offered space is a biased subset, stated here).** `enumerateFactorizations(n, L, m)` returns at most `m` tuples. It halts the enumeration once `m·8` tuples have been generated ([`factorization.ts:48`](../../../src/compiler/autotune/factorization.ts)) and only then subsamples. The recursion fixes the outermost factor first and walks divisors in ascending order ([`factorization.ts:55`](../../../src/compiler/autotune/factorization.ts)), so when the halt is reached the retained tuples are exactly those whose leading factor is smallest.
+> **Proposition 44.4 (The offered space is a biased subset).** **(invariant)** `enumerateFactorizations(n, L, m)` returns at most `m` tuples. It halts the enumeration once `m·8` tuples have been generated ([`factorization.ts:48`](../../../src/compiler/autotune/factorization.ts)) and only then subsamples. The recursion fixes the outermost factor first and walks divisors in ascending order ([`factorization.ts:55`](../../../src/compiler/autotune/factorization.ts)), so when the halt is reached the retained tuples are exactly those whose leading factor is smallest.
 
 *Proof sketch.* `rec` iterates `divisorsOf(remaining)`, which is sorted ascending, and recurses depth-first; so the generation order is lexicographic in the factor tuple. The `all.length >= limit` test terminates generation, leaving a prefix of that order — a prefix which, being lexicographic, contains every tuple with a small first factor and none with a large one. `selectDiverse` then samples the *sorted unique* prefix at even index intervals, which redistributes within the prefix and cannot recover what was never generated. ∎
 
@@ -73,9 +73,9 @@ For `F(n,4) ≤ 384` the halt never fires and the subsample is a genuine even th
 
 Now the other half of the chapter's question: why not just pick one?
 
-> **Definition 44.5 (Regret, stated here).** Let `T(p)` be the running time of the program at point `p` of a schedule space `P`, and let `p*` minimise it. The *regret* of a selection procedure that returns `p̂` is `T(p̂) − T(p*)`, and its *speedup gap* is `T(p̂)/T(p*)`.
+> **Definition 44.5 (Regret).** **(classical)** Let `T(p)` be the running time of the program at point `p` of a schedule space `P`, and let `p*` minimise it. The *regret* of a selection procedure that returns `p̂` is `T(p̂) − T(p*)`, and its *speedup gap* is `T(p̂)/T(p*)`.
 
-> **Proposition 44.6 (A heuristic is constant on its blind spot, stated here).** A schedule heuristic is a function `h(P, T)` of the program and the target's declared attributes. If two workloads `A` and `B` agree on everything `h` reads, then `h` returns the same point `p̂` for both. Consequently `regret_A(p̂) + regret_B(p̂) ≥ |T_A(p̂) − T_A(p*_A)| + |T_B(p̂) − T_B(p*_B)|`, and `h` cannot achieve zero regret on both unless some single point is optimal for both.
+> **Proposition 44.6 (A heuristic is constant on its blind spot).** **(stated here)** A schedule heuristic is a function `h(P, T)` of the program and the target's declared attributes. If two workloads `A` and `B` agree on everything `h` reads, then `h` returns the same point `p̂` for both. Consequently `regret_A(p̂) + regret_B(p̂) ≥ |T_A(p̂) − T_A(p*_A)| + |T_B(p̂) − T_B(p*_B)|`, and `h` cannot achieve zero regret on both unless some single point is optimal for both.
 
 *Proof.* Immediate from `h` being a function. ∎
 
@@ -85,7 +85,7 @@ So the proposition says what it says and no more: **a heuristic is constant wher
 
 Where the proposition does bite hardest is the direction it points: a heuristic improves not by becoming cleverer about what it already reads, but only by reading something else — which for a schedule means reading a measurement.
 
-> **Corollary 44.7 (The shipped CPU matmul tile is shape-independent, stated here).** `MatmulTiledCPURule` computes `tileDim = max(8, min(64, ⌊√(L1/4)⌋))` ([`rules.ts:317`](../../../src/compiler/schedule/rules.ts)), a function of `target.l1CacheBytes` alone. Every CPU target with `l1CacheBytes ≥ 16384` gets `tileDim = 64`, so every matrix multiply this rule fires on receives the same tile dimension whatever its extents. Chapter 40 shows the case where that costs the whole of the parallelism: on a 64×64 matmul both tiled axes have extent 64, so both outer loops have extent 1, and the rule parallelises one of them.
+> **Corollary 44.7 (The shipped CPU matmul tile is shape-independent).** **(invariant)** `MatmulTiledCPURule` computes `tileDim = max(8, min(64, ⌊√(L1/4)⌋))` ([`rules.ts:317`](../../../src/compiler/schedule/rules.ts)), a function of `target.l1CacheBytes` alone. Every CPU target with `l1CacheBytes ≥ 16384` gets `tileDim = 64`, so every matrix multiply this rule fires on receives the same tile dimension whatever its extents. Chapter 40 shows the case where that costs the whole of the parallelism: on a 64×64 matmul both tiled axes have extent 64, so both outer loops have extent 1, and the rule parallelises one of them.
 
 Chapter 4's cost model is what makes Corollary 44.7 a criticism rather than an observation. The time of a tiled nest depends on whether the tile's working set fits in cache, and the working set is `O(tile² · element size)` while the number of tiles is `O((n/tile)²)`: both depend on `n`. A tile chosen from the cache size alone is optimal for the one `n` at which the two happen to balance.
 
@@ -200,7 +200,7 @@ Four sketches for the accumulation block, one for the zeroing block, and 92,190 
 
 `r0[1]` is `F(64, 1) = 1`: under `mlt_cpu` the contraction axis is a search variable with exactly one candidate, `[64]`, and `multiLevelSplit` on a one-element factorisation performs zero splits. The compiler's default CPU tiling does not tile `k`.
 
-`ssrsrs_cpu` offers `r0[7]` — the seven ordered pairs with product 64 — and 16,128 points in total, which is 87% of the block's advertised space. Chapter 45 shows that all 16,128 throw.
+`ssrsrs_cpu` offers `r0[7]` — the seven ordered pairs with product 64 — and 16,128 points in total, which is 87% of the block's advertised space. Chapter 45 shows that every point of it throws, on its own smaller example.
 
 `reads=0` on `matmul_init_0` is Chapter 33's unverified read set arriving here: the init block's declared read set is empty, because `bufRefs` builds it from the operation's operands and a zeroing block has none. `analyzeBlockStructure` reads that declaration ([`block_analysis.ts:47`](../../../src/compiler/autotune/block_analysis.ts)), and the derivation rule at priority 10 tests `reads >= 2`. Here the declaration is right and nothing turns on it, but it is another of the small handful of places where the unverified read set is load-bearing.
 

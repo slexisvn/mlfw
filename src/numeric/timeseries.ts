@@ -1,6 +1,7 @@
 import { fft, ifft } from './transforms.js';
 import { chi2 as chi2Dist } from './distributions.js';
-import { hostVector, nextPow2 } from './_array.js';
+import { hostVector } from './_array.js';
+import { f64, nextPow2 } from '../util/numeric_array.js';
 import { toHostTensor } from '../tensor/utils/host_matrix.js';
 import { tensorToContiguous } from '../dispatcher/jit_dispatch.js';
 import type { Tensor } from '../tensor/core/tensor.js';
@@ -10,10 +11,6 @@ import type { NumericVectorInput, TestResult } from './types.js';
 type AcfOptions = { nlags?: number };
 type LjungBoxOptions = { lags?: number; modelDf?: number };
 type PeriodogramOptions = { detrend?: boolean };
-
-function f64(data: ArrayLike<number | bigint>, index: number): number {
-  return Number(data[index]);
-}
 
 function defaultNlags(n: number): number {
   return Math.max(1, Math.min(n - 1, Math.floor(10 * Math.log10(n))));

@@ -1,3 +1,4 @@
+import { isDtypeWideStorage } from '../../util/dtype_map.js';
 import { TensorImpl } from './tensor_impl.js';
 import { AutogradMeta } from './autograd_meta.js';
 import type { DType, NumericTypedArray } from '../types/dtype.js';
@@ -6,7 +7,6 @@ import type { DispatchKeySet } from '../../dispatcher/dispatch_key.js';
 
 import { readFromStorage } from '../utils/half.js';
 
-const _EXPAND_DTYPES = new Set(['f16', 'bf16', 'i64']);
 
 export class Tensor {
   readonly _impl: TensorImpl;
@@ -137,7 +137,7 @@ export class Tensor {
     }
     const raw = this._impl.storage.data!;
     const v = raw[this._impl.storageOffset];
-    return _EXPAND_DTYPES.has(this._impl.dtype) ? readFromStorage(this._impl.dtype, v) : v;
+    return isDtypeWideStorage(this._impl.dtype) ? readFromStorage(this._impl.dtype, v) : v;
   }
 
   toArray(): number | bigint | NestedArray {
@@ -145,7 +145,7 @@ export class Tensor {
     const strides = this.strides;
     const data = this._impl.storage.data!;
     const offset = this._impl.storageOffset;
-    const dtype = _EXPAND_DTYPES.has(this._impl.dtype) ? this._impl.dtype : null;
+    const dtype = isDtypeWideStorage(this._impl.dtype) ? this._impl.dtype : null;
 
     if (sizes.length === 0) return dtype ? readFromStorage(dtype, data[offset]) : data[offset];
     return _toNestedArray(data, sizes, strides, offset, 0, dtype);

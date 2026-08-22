@@ -1,12 +1,11 @@
 import { walk, some, find, irChildNodes } from '../ir/ir_visitor.js';
+import { ACCESS_NODE_TYPES as ACCESS_TYPES, STORE_NODE_TYPES as STORE_TYPES } from '../ir/node_kinds.js';
 import type { IRNode } from '../ir/ir_visitor.js';
 import type { Buffer } from '../ir/tensor/buffer.js';
 import type { ForNode, TirNode } from '../ir/tensor/nodes.js';
 
 export type ScopeBinding = { name: string; expr: IRNode };
 
-const STORE_TYPES = new Set(['BufferStoreNode', 'LIRFlatStoreNode']);
-const ACCESS_TYPES = new Set(['BufferLoadNode', 'BufferStoreNode', 'LIRFlatLoadNode', 'LIRFlatStoreNode']);
 
 export function collectVarNames(node: IRNode | null | undefined, out: Set<string>): Set<string> {
   if (node) walk(node, (n) => { if (n.type === 'VariableNode') out.add((n as unknown as { name: string }).name); });

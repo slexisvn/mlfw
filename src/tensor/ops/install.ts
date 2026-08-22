@@ -3,7 +3,6 @@ import { fromBuffer } from '../factory/from_ops.js';
 import type { Tensor } from '../core/tensor.js';
 import type { Device } from '../types/device.js';
 
-type TensorMethod = (this: Tensor, ...args: unknown[]) => unknown;
 type TensorProto = Record<string, unknown>;
 type TensorClass = {
   prototype: TensorProto;

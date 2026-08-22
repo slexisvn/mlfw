@@ -14,7 +14,7 @@ It also decides what a test can say. A test that asserts on a printed string is 
 
 The property that makes the difference is round-tripping:
 
-> **Definition 13.1 (Lossless round-trip).** A printer *P* and parser *Q* round-trip losslessly on a class of programs when `P(Q(P(m))) = P(m)` for every module *m* in that class — printing, reading back, and printing again yields identical text.
+> **Definition 13.1 (Lossless round-trip).** **(stated here)** A printer *P* and parser *Q* round-trip losslessly on a class of programs when `P(Q(P(m))) = P(m)` for every module *m* in that class — printing, reading back, and printing again yields identical text.
 
 Note the shape of the equation. It is not `Q(P(m)) = m`, which is too strong to be useful: the reconstructed module has different object identities, different internal `id` numbers, and a different history. Equality of the *printed form* is the right notion, because it says everything the text is meant to carry survived.
 

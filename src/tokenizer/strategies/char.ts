@@ -1,23 +1,12 @@
-export class CharStrategy {
-  private readonly _lowercase: boolean;
+import { SegmentStrategy } from './segment_strategy.js';
 
-  constructor({ lowercase = false }: { lowercase?: boolean } = {}) {
-    this._lowercase = lowercase;
-  }
-
-  fit(_texts?: readonly string[], _options?: { vocabSize?: number | null }): void {}
-
+export class CharStrategy extends SegmentStrategy {
   segment(text: string): string[] {
-    const normalized = this._lowercase ? String(text).toLowerCase() : String(text);
-    return Array.from(normalized);
+    return Array.from(this._normalize(text));
   }
 
   detokenize(tokens: readonly string[]): string {
     return tokens.join('');
-  }
-
-  toJSON(): { lowercase: boolean } {
-    return { lowercase: this._lowercase };
   }
 
   static fromJSON(data: { lowercase?: boolean } = {}): CharStrategy {

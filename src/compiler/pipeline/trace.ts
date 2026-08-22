@@ -40,7 +40,6 @@ export class TraceLog {
   level: number;
   sink: TraceSink;
   irSnapshot: IRSnapshotFlags;
-  private _compileStart: number;
 
   constructor(config: TraceLogConfig = {}) {
     this.level = config.level ?? TraceLevel.SILENT;
@@ -51,7 +50,6 @@ export class TraceLog {
       afterScheduling: false,
       ...(config.irSnapshot || {}),
     };
-    this._compileStart = 0;
   }
 
   emit(event: TraceEvent): void {

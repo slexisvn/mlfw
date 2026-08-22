@@ -116,9 +116,9 @@ The last beat matters more than it looks. Compilers are full of places where the
 
 This book states definitions precisely and proves the important claims. Formal material appears in labelled blocks:
 
-> **Definition 1.1 (Legal transformation).** A program transformation is *legal* if the transformed program produces the same result as the original for every input on which the original is defined.
+> **Definition 1.1 (Legal transformation).** **(classical)** A program transformation is *legal* if the transformed program produces the same result as the original for every input on which the original is defined.
 
-> **Theorem 1.2.** Let two operations have no effect on the world beyond reading and writing memory — no I/O, no hidden state, no trap that depends on when it fires. If neither operation accesses any location the other writes, reordering them is legal.
+> **Theorem 1.2 (Disjoint accesses may be reordered).** **(classical)** Let two operations have no effect on the world beyond reading and writing memory — no I/O, no hidden state, no trap that depends on when it fires. If neither operation accesses any location the other writes, reordering them is legal.
 
 > *Proof sketch.* The hypothesis rules out all three ways that order can matter: neither reads what the other writes, neither writes what the other reads, and neither writes where the other writes. Every load therefore returns the same value in either order, so every store writes the same value, and the two orders leave memory in the same state. ∎
 
@@ -139,7 +139,7 @@ Two rules follow, and the book holds itself to both. **First, a transformation m
 
 Where this book states that the shipped compiler obeys the ladder, it does so as an **(invariant)**, with the enforcement mechanism named. One primitive stands outside it by construction: Chapter 41's `rfactor` re-brackets a reduction, which is an N2 transformation whatever the implementation, and the autotuner offers it at N1 without asking. It is documented with an executed counterexample where it arises, and listed in §1.11.
 
-**Where a result comes from is marked, and there are four kinds.** A labelled block in this book can be making four quite different sorts of claim, and they fail in four different ways. Confusing them is the single easiest way to misread the book, so every labelled block carries a marker saying which kind it is.
+**Where a result comes from is marked, and there are four kinds.** A labelled block in this book can be making four quite different sorts of claim, and they fail in four different ways. Confusing them is the single easiest way to misread the book, so every labelled block carries a marker saying which kind it is — written as **(classical)**, **(stated here)**, **(invariant)** or **(measured)** immediately after the block's title, and never as a fifth thing. **Counterexample** and **Note** blocks are the exception and carry no marker of their own: a counterexample exists to bound a neighbouring statement and inherits that statement's kind, and a Note is commentary rather than a claim.
 
 **(classical)** — a mathematical result that can be looked up: the roofline bound, Amdahl's law, the GCD test for dependence, the √n checkpointing result. These carry an attribution in parentheses after the name, like *(Williams et al., 2009)*. The book's phrasing is one presentation among many. A classical result is wrong only if you have misapplied it — check the hypotheses, not the theorem.
 

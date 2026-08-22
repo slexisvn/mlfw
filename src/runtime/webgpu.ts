@@ -7,7 +7,6 @@ import type { ExecutionPlan, PlanStepRuntime, RuntimeTensor } from './runtime.js
 
 type WgslView = Int32Array | Uint32Array | Uint16Array | Float32Array;
 type WgslViewCtor = Int32ArrayConstructor | Uint32ArrayConstructor | Uint16ArrayConstructor | Float32ArrayConstructor;
-type PackedEntry = NonNullable<WebGPUBinding['packed']>[number];
 
 export type WebGPUKernel = {
   name: string;
@@ -55,7 +54,6 @@ let _gpuInitPromise: Promise<GPUDevice> | null = null;
 let _bufferUsage: typeof GPUBufferUsage | null = null;
 let _mapMode: typeof GPUMapMode | null = null;
 let _shaderStage: typeof GPUShaderStage | null = null;
-let _dawnInstance: DawnModule | null = null;
 let _exitRegistered = false;
 
 function wgslViewCtor(dtype: string): WgslViewCtor {
@@ -98,7 +96,6 @@ async function ensureDevice(): Promise<GPUDevice> {
     if (!gpu) {
       try {
         const mod = await import('webgpu') as unknown as DawnModule;
-        _dawnInstance = mod;
         gpu = mod.create([]);
         if (mod.globals) {
           _bufferUsage = mod.globals.GPUBufferUsage as typeof GPUBufferUsage;
@@ -162,7 +159,6 @@ export function resetDevice(): void {
   _bufferUsage = null;
   _mapMode = null;
   _shaderStage = null;
-  _dawnInstance = null;
 }
 
 function bindingBufferType(binding: WebGPUBinding): GPUBufferBindingType {

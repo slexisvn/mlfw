@@ -1,21 +1,13 @@
 import { AutogradNode } from '../node.js';
+import { addAt } from '../../tensor/utils/typed_array.js';
 import * as ops from '../../tensor/ops/ops.js';
 import { zeros } from '../../tensor/factory/creation_ops.js';
 import { narrow, contiguous, select } from '../../tensor/ops/ops.js';
 import { normalizeAxis as _normDim } from '../../tensor/utils/shape_utils.js';
 import type { Tensor } from '../../tensor/core/tensor.js';
-import type { NumericTypedArray } from '../../tensor/types/dtype.js';
 import type { GradInputList, GradOutputList } from '../types.js';
 
 type GpuIndexSelectBackward = (grad: Tensor, index: Tensor, inputShape: readonly number[], dim: number) => Tensor | null;
-
-function _addAt(data: NumericTypedArray, index: number, value: number | bigint): void {
-  if (typeof value === 'bigint') {
-    (data as BigInt64Array)[index] += value;
-  } else {
-    (data as Exclude<NumericTypedArray, BigInt64Array>)[index] += value;
-  }
-}
 
 export class CatBackward extends AutogradNode {
   constructor() { super(0); }
@@ -135,7 +127,7 @@ export class IndexSelectBackward extends AutogradNode {
         const idx = d === dim ? Number(idxData[idxOff + indices[d]]) : indices[d];
         oi += idx * resultStrides[d];
       }
-      _addAt(outData, oi, gData[gi]);
+      addAt(outData, oi, gData[gi]);
 
       for (let d = ndim - 1; d >= 0; d--) {
         indices[d]++;

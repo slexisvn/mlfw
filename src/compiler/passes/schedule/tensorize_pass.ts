@@ -1,3 +1,4 @@
+import { isDtypeHalf } from '../../../util/dtype_map.js';
 import { PrimFuncPass } from '../tir_pass.js';
 import { Schedule } from '../../schedule/schedule.js';
 import { FuncAttr } from '../../ir/func_attrs.js';
@@ -8,7 +9,6 @@ import type { CompilerConfig, CompileTarget } from '../../pipeline/pipeline_type
 export type WmmaMatmulInfo = { M: number; N: number; K: number; a: string; b: string; c: string };
 
 const WMMA_TILE = 16;
-const HALF_DTYPES = new Set(['f16', 'bf16']);
 
 function findMatmulBlock(primFunc: PrimFunc): BlockNode | null {
   const blocks: BlockNode[] = [];
@@ -36,7 +36,7 @@ export function detectWmmaMatmul(primFunc: PrimFunc): WmmaMatmulInfo | null {
   const matmul = findMatmulBlock(primFunc);
   if (!matmul) return null;
   const A = matmul.reads[0].buffer, B = matmul.reads[1].buffer, C = matmul.writes[0].buffer;
-  if (!HALF_DTYPES.has(A.dtype) || !HALF_DTYPES.has(B.dtype) || C.dtype !== 'f32') return null;
+  if (!isDtypeHalf(A.dtype) || !isDtypeHalf(B.dtype) || C.dtype !== 'f32') return null;
   if (A.shape.length !== 2 || B.shape.length !== 2 || C.shape.length !== 2) return null;
   const M = C.shape[0] as number, N = C.shape[1] as number, K = A.shape[1] as number;
   if (![M, N, K].every(d => typeof d === 'number' && d > 0 && d % WMMA_TILE === 0)) return null;

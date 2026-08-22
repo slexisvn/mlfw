@@ -131,7 +131,6 @@ registerVJPRule('scatter', (ctx) => {
 registerVJPRule('pad', (ctx) => {
   const grad = ctx.gradOutputs[0]!;
   const low = ctx.op.getAttr<readonly number[]>('low')!;
-  const high = ctx.op.getAttr<readonly number[]>('high')!;
   const [input] = ctx.operands;
   const inputShape = input.type.shape;
 

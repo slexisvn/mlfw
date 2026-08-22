@@ -1,14 +1,17 @@
+import { Estimator } from './estimator.js';
 import { _dispatch } from '../tensor/ops/ops.js';
-import { accuracy_score } from './metrics.js';
+import './metrics.js';
 import type { MLTensor } from './types.js';
 
-export class GaussianNB {
+export class GaussianNB extends Estimator {
+  protected readonly _classify = true;
   means_: MLTensor | null;
   variances_: MLTensor | null;
   priors_: MLTensor | null;
   classes_: MLTensor | null;
 
   constructor() {
+    super();
     this.means_ = null;
     this.variances_ = null;
     this.priors_ = null;
@@ -28,7 +31,4 @@ export class GaussianNB {
     return _dispatch('gaussian_nb_predict', X, this.means_, this.variances_, this.priors_, this.classes_) as MLTensor;
   }
 
-  score(X: MLTensor, y: MLTensor): number {
-    return accuracy_score(y, this.predict(X));
-  }
 }

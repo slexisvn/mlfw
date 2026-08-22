@@ -28,6 +28,38 @@ A traced graph arrives full of work nobody asked for — duplicated subexpressio
 - **Contraction acyclicity** (Theorem 23.2), which reappears unchanged as the convexity requirement for partitioning and BYOC in Chapters 26 and 58.
 - **`fusion` regions** as the unit that reaches lowering: after this part, a "kernel" is a region, and Part VI's job is to turn one region into one loop nest.
 
+## The order these passes run in
+
+Part III said the pipeline is *built* rather than written down, which means no chapter of this part can show you the list. Here it is, as [`buildGraphPipeline`](../../src/compiler/pipeline/graph_pipeline.ts) assembles it, with the conditions that decide whether each entry exists at all. Everything unmarked runs on every compile.
+
+```
+  registry passes for phase 'pre'
+  CallInlinerPass                                        ch14 (the one ModulePass)
+  DecompositionPass                                      ch21
+  FixedPointGroup 'canonicalize', bound 8:               ch15
+        CanonicalizePass                                 ch17, ch20
+        AlgebraicSimplificationPass                      ch20
+        ConstantFoldPass                                 ch19
+        CSEPass                                          ch19
+        DCEPass                                          ch19
+  --- if optimization.layout and a target ---            ch25  (off by default)
+  LayoutTransformPass ; DCEPass
+  --- if quantization.enabled ---                        ch26  (off by default)
+  CalibrationPass  (only when the caller supplied batches, and immediately before:)
+  QuantizationPass ; CanonicalizePass ; DCEPass
+  --- if fusion.enabled and target.enableEpilogueFusion ---   ch24 (CUDA only)
+  EpilogueFusionPass ; DCEPass
+  --- if fusion.enabled, one of three branches ---        ch22, ch23, ch24
+  strategy 'priority' (default): PriorityFusionPass ; MultiOutputFusionPass
+  strategy 'dominator':          DominatorFusionPass
+  anything else:                 FusionPass ; FusionMergerPass ; MultiOutputFusionPass
+  DCEPass
+  external codegen providers' own passes                 ch58
+  registry passes for phase 'post'
+```
+
+Three things are worth reading off it before any chapter does. `DCEPass` appears five times, because Chapter 19's rule — *a rewrite pass should make things unnecessary, not remove them* — means somebody has to sweep after every pass that leaves orphans. Rematerialization and partitioning are not in this list at all: they are TIR-level and phase-level respectively, which is why Chapter 26 covers them as pipelines rather than as entries. And on a default CPU compile only nine of the twenty-one graph passes are ever constructed.
+
 ## Labs
 
 ```bash

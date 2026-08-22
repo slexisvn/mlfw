@@ -1,4 +1,4 @@
-import { OpDef, OpTrait } from '../op_registry.js';
+import { OpDef } from '../op_registry.js';
 import type { OpRegistry } from '../op_registry.js';
 import {
   inferUnaryElementwise, verifyUnaryElementwise, unaryElementwiseTraits,

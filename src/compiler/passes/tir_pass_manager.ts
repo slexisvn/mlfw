@@ -1,9 +1,8 @@
 import { CompilationError } from '../pipeline/trace.js';
 import { printTensorIR } from '../ir/tensor/printer.js';
-import { checkIRInvariants } from '../pipeline/invariant_check.js';
+import { PassManagerBase } from './pass_manager_base.js';
 import { IRLevel } from '../ir/verify.js';
 import type { TirModule } from '../ir/tensor/module.js';
-import type { PrimFunc } from '../ir/tensor/nodes.js';
 import type { PrimFuncPass, TirModulePass, TirPassCtx } from './tir_pass.js';
 import type { TraceLog } from '../pipeline/trace.js';
 
@@ -15,29 +14,7 @@ export type TirRunCtx = TirPassCtx & {
   resilient: boolean;
 };
 
-export class TirPassManager {
-  passes: TirPassAny[];
-  trace: TraceLog | null;
-  checkEachPass: boolean;
-
-  constructor() {
-    this.passes = [];
-    this.trace = null;
-    this.checkEachPass = false;
-  }
-
-  addPass(pass: TirPassAny): void {
-    this.passes.push(pass);
-  }
-
-  setTrace(trace: TraceLog | null): void {
-    this.trace = trace;
-  }
-
-  setCheckEachPass(enabled: boolean): void {
-    this.checkEachPass = enabled;
-  }
-
+export class TirPassManager extends PassManagerBase<TirPassAny> {
   run(module: TirModule, ctx: TirRunCtx): TirModule {
     for (const pass of this.passes) {
       this._runPass(pass, module, ctx);
@@ -64,7 +41,7 @@ export class TirPassManager {
       }
     }
 
-    if (this.checkEachPass) this._verifyFuncs(module, ctx, pass.name);
+    if (this.checkEachPass) this._verifyFuncs(IRLevel.TIR, module, ctx, pass.name);
     pass.trace = null;
   }
 
@@ -95,15 +72,4 @@ export class TirPassManager {
     }
   }
 
-  _verifyFuncs(module: TirModule, ctx: TirRunCtx, passName: string): void {
-    for (const pf of module) {
-      if (ctx.failed.has(pf.name)) continue;
-      const err = checkIRInvariants(IRLevel.TIR, pf, pf.name, passName);
-      if (!err) continue;
-      ctx.errors.push(err);
-      ctx.failed.add(pf.name);
-      ctx.trace.errorEvent('verification', pf.name, err.message);
-      if (!ctx.resilient) throw new Error(err.toString());
-    }
-  }
 }

@@ -1,15 +1,15 @@
 import { IRBuilder } from '../compiler/ir/graph/builder.js';
 import { GraphModule } from '../compiler/ir/graph/module.js';
 import { GraphFunction } from '../compiler/ir/graph/function.js';
-import { TensorType, DYNAMIC } from '../compiler/ir/graph/types.js';
-import { registry } from '../compiler/ir/graph/ops.js';
+import { TensorType } from '../compiler/ir/graph/types.js';
+import '../compiler/ir/graph/ops.js';
 import { SymbolicTensor } from './symbolic_tensor.js';
 import { ShapeEnv } from './shape_env.js';
 import { buildMappedOp } from '../tensor/ops/ir_mapping.js';
 import type { DType } from '../tensor/types/dtype.js';
 import type { Tensor } from '../tensor/core/tensor.js';
 import type { Shape } from '../tensor/utils/shape_utils.js';
-import type { AttrMap, GraphFunctionLike, GraphModuleLike, IRBuilderLike, IROperationLike, IRValueLike, MutableSymbolicShape, SymbolicShape, TensorOutput } from './types.js';
+import type { AttrMap, GraphFunctionLike, GraphModuleLike, IRBuilderLike, IROperationLike, IRValueLike, SymbolicShape, TensorOutput } from './types.js';
 
 let _activeTracer: Tracer | null = null;
 
@@ -29,7 +29,6 @@ export class Tracer {
   private _inputSymShapes: SymbolicShape[];
   private _outputTypes: TensorType[];
   private _outputSymShapes: SymbolicShape[];
-  private _inputs: SymbolicTensor[];
   private _func: GraphFunctionLike | null;
   private _builder: IRBuilderLike | null;
   private _module: GraphModuleLike | null;
@@ -43,7 +42,6 @@ export class Tracer {
     this._inputSymShapes = [];
     this._outputTypes = [];
     this._outputSymShapes = [];
-    this._inputs = [];
     this._func = null;
     this._builder = null;
     this._module = null;
@@ -88,7 +86,6 @@ export class Tracer {
       const st = new SymbolicTensor(irValue, tt.shape as readonly number[], tt.dtype, this, this._inputSymShapes[i]);
       symbolicInputs.push(st);
     }
-    this._inputs = symbolicInputs;
     return symbolicInputs;
   }
 

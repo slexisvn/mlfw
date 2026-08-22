@@ -108,6 +108,9 @@ export function wasmLoad(dtype: string): string { return (WASM_TYPE_TABLE[dtype]
 export function wasmStore(dtype: string): string { return (WASM_TYPE_TABLE[dtype] || DEFAULT_WASM_ENTRY).store; }
 export function wasmBytes(dtype: string): number { return (WASM_TYPE_TABLE[dtype] || DEFAULT_WASM_ENTRY).bytes; }
 
+export const WASM_NATIVE_OPS: ReadonlySet<string> = new Set(['sqrt', 'abs', 'ceil', 'floor', 'min', 'max']);
+export const WASM_FLOAT_PREFIX_OPS: ReadonlySet<string> = new Set([...WASM_NATIVE_OPS, 'rsqrt']);
+
 export function wasmSimdEntry(dtype: string): SimdInfo | null { return WASM_SIMD_TABLE[dtype] || null; }
 export function wasmVecOp(dtype: string, op: keyof SimdInfo): string | number | null { const e = WASM_SIMD_TABLE[dtype]; return e ? (e[op] || null) : null; }
 export function wasmVecLoad(dtype: string): string | null { const e = WASM_SIMD_TABLE[dtype]; return e ? e.vecLoad : null; }
@@ -123,8 +126,23 @@ export function dtypeInfo(dtype: string): DTypeInfo {
   return DTYPE_TABLE[dtype] || DEFAULT_ENTRY;
 }
 
+export function dtypeKeys(): string[] {
+  return Object.keys(DTYPE_TABLE);
+}
+
 export function jsTypedArray(dtype: string): string {
   return dtypeInfo(dtype).js;
+}
+
+const TYPED_ARRAY_BY_NAME = {
+  Uint16Array, Float32Array, Float64Array,
+  Int8Array, Int16Array, Int32Array, BigInt64Array, Uint8Array,
+};
+
+export type TypedArrayConstructor = (typeof TYPED_ARRAY_BY_NAME)[keyof typeof TYPED_ARRAY_BY_NAME];
+
+export function typedArrayCtor(dtype: string): TypedArrayConstructor {
+  return TYPED_ARRAY_BY_NAME[jsTypedArray(dtype) as keyof typeof TYPED_ARRAY_BY_NAME] || Float32Array;
 }
 
 export function cType(dtype: string): string {
@@ -153,6 +171,15 @@ export function isDtypeFloat(dtype: string): boolean {
 
 export function isDtypeInt(dtype: string): boolean {
   return dtypeInfo(dtype).isInt;
+}
+
+export function isDtypeHalf(dtype: string): boolean {
+  const info = dtypeInfo(dtype);
+  return info.isFloat && info.bytes === 2;
+}
+
+export function isDtypeWideStorage(dtype: string): boolean {
+  return isDtypeHalf(dtype) || jsTypedArray(dtype) === 'BigInt64Array';
 }
 
 const INT_RANGE: Record<string, readonly [number, number]> = {
@@ -196,6 +223,18 @@ export function jsCompareOp(direction: string): string {
   const op = COMPARE_JS_OPS[direction];
   if (!op) throw new Error(`unsupported compare direction '${direction}'`);
   return op;
+}
+
+const MATH_OP_TO_DIRECTION: Readonly<Record<string, string>> =
+  Object.fromEntries(Object.entries(COMPARE_C_OPS).map(([direction, op]) => [op, direction]));
+
+export const COMPARE_DIRECTIONS: ReadonlySet<string> = new Set(Object.keys(COMPARE_C_OPS));
+export const COMPARE_MATH_OPS: ReadonlySet<string> = new Set(Object.values(COMPARE_C_OPS));
+
+export function compareDirectionOf(mathOp: string): string {
+  const direction = MATH_OP_TO_DIRECTION[mathOp];
+  if (!direction) throw new Error(`unsupported compare operator '${mathOp}'`);
+  return direction;
 }
 
 const JS_MATH_FUNCS = new Set([

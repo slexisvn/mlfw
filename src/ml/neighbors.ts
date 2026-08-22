@@ -1,14 +1,15 @@
+import { Estimator } from './estimator.js';
 import { _dispatch } from '../tensor/ops/ops.js';
-import { accuracy_score, r2_score } from './metrics.js';
 import type { MLTensor } from './types.js';
 
-class BaseKNN {
+class BaseKNN extends Estimator {
   nNeighbors: number;
   protected _classify: boolean;
   protected _X: MLTensor | null;
   protected _y: MLTensor | null;
 
   constructor(nNeighbors: number, classify: boolean) {
+    super();
     this.nNeighbors = nNeighbors;
     this._classify = classify;
     this._X = null;
@@ -31,9 +32,6 @@ export class KNeighborsClassifier extends BaseKNN {
     super(nNeighbors, true);
   }
 
-  score(X: MLTensor, y: MLTensor): number {
-    return accuracy_score(y, this.predict(X));
-  }
 }
 
 export class KNeighborsRegressor extends BaseKNN {
@@ -41,7 +39,4 @@ export class KNeighborsRegressor extends BaseKNN {
     super(nNeighbors, false);
   }
 
-  score(X: MLTensor, y: MLTensor): number {
-    return r2_score(y, this.predict(X));
-  }
 }
