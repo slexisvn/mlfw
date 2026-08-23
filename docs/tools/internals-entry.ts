@@ -1,11 +1,3 @@
-// Bundle entry for the book's Part VII labs.
-//
-// Part VII is about the scheduling language, and `Schedule` is not part of the
-// package's public surface: nothing outside the compiler is meant to reshape a
-// loop nest by hand. The labs need to, so this file names the internal modules
-// they reach for. `docs/part7/_internals.mjs` bundles it with esbuild on the
-// first run of any lab; no build step is required of the reader.
-
 export * from '../../src/index.js';
 
 export { Schedule, resetVarCounter } from '../../src/compiler/schedule/schedule.js';
@@ -38,9 +30,6 @@ export {
   profileGpuAccesses, launchGeometry, crossBlockRAWBuffers, threadSharedIntermediates,
 } from '../../src/compiler/analysis/gpu_race.js';
 
-// --- Part VIII: the autotuner. Nothing in `src/compiler/autotune/` is public;
-// the labs drive the search, the cost models and the tuning database directly.
-
 export { enumerateFactorizations } from '../../src/compiler/autotune/factorization.js';
 export { getTileStructure, levelCounts, CPU_TILING_SSRSRS } from '../../src/compiler/autotune/tile_structure.js';
 export { createMultiLevelTilingSketch, createSSRSRSTilingSketch } from '../../src/compiler/autotune/tiling.js';
@@ -72,3 +61,37 @@ export { ScheduleStep } from '../../src/compiler/schedule/trace.js';
 export { compileGraph } from '../../src/compiler/pipeline/compiler.js';
 export { buildFunction } from '../../src/compiler/ir/graph/builder.js';
 export { TensorType, ScalarType } from '../../src/compiler/ir/graph/types.js';
+
+export { lowerToLIR } from '../../src/compiler/passes/lowering/tensor_to_lir.js';
+export { detectAccumulator, ACCUMULATOR_OPS } from '../../src/compiler/passes/lowering/accumulator.js';
+export { scanMetadata } from '../../src/compiler/ir/lir/scanner.js';
+export { flattenIndex, computeDynamicStride, computeNumelExpr } from '../../src/compiler/ir/lir/flatten.js';
+export { verifyLIR, LIRVerificationError } from '../../src/compiler/ir/lir/verifier.js';
+export { buildLirPipeline } from '../../src/compiler/pipeline/lir_pipeline.js';
+export { LirPassManager } from '../../src/compiler/passes/lir_pass_manager.js';
+export { FlatIndexSimplifyPass } from '../../src/compiler/passes/simplify/flat_index_simplify.js';
+export {
+  LIRFunc, LIRFlatLoadNode, LIRFlatStoreNode, LIRAccumulatorNode, LIRBindingsNode,
+  LIRMetadata, inferDtype, normalizeDtype, isWasmNativeOp,
+} from '../../src/compiler/ir/lir/nodes.js';
+
+export { CPUCodegen } from '../../src/backend/cpu/codegen.js';
+export { WasmCodegen } from '../../src/backend/wasm/codegen.js';
+export { CUDACodegen } from '../../src/backend/cuda/codegen.js';
+export { WebGPUCodegen } from '../../src/backend/webgpu/codegen.js';
+export { encodeWat } from '../../src/backend/wasm/wat_encoder.js';
+export { flattenRowMajorIndex } from '../../src/backend/index_emit.js';
+export { emitSymInt } from '../../src/backend/codegen_utils.js';
+export { TargetKind } from '../../src/backend/target.js';
+export {
+  registerCodegen, getCodegenEntry,
+  registerExternalCodegen, getExternalCodegen, unregisterExternalCodegen,
+} from '../../src/backend/codegen_registry.js';
+export { getCudaIntrin, registerCudaIntrin } from '../../src/backend/cuda/tensor_intrin.js';
+
+export {
+  detectPureMatmul, CUBLAS_PROVIDER, isExternalCodegenEnabled,
+  registerExternalCodegenProvider, unregisterExternalCodegenProvider,
+  activeExternalCodegenProviders,
+} from '../../src/compiler/pipeline/external_codegen.js';
+export { FuncAttr } from '../../src/compiler/ir/func_attrs.js';

@@ -2,10 +2,6 @@ import {
   compile, CPUTarget, TraceLevel, randn, ops,
 } from '../../../../dist/index.node.js';
 
-// Every elementwise operation in the registry is lowered by the same function.
-// The nest, the block, the read set and the store are produced once; the rule
-// supplies one callback that builds the leaf expression.
-
 function normalise(text) {
   const names = new Map();
   return text

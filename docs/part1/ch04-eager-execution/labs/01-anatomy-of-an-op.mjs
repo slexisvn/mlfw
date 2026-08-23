@@ -19,12 +19,6 @@ function timeOp(build, n, inner) {
   return sample(run, 21, inner);
 }
 
-// Weighted least squares for T = alpha + beta*n, with n the ELEMENT count.
-// The tensors are square, so a row labelled side=64 carries n=4096 elements;
-// the fit never sees the side length.
-// Weights are 1/T^2, so the fit minimizes *relative* error: without them the
-// 1048576-element point would be the only one the residual sum can see, and
-// the "fit" would degenerate into reading beta off the largest row.
 function fitAffine(points) {
   let sw = 0, sm = 0, st = 0, smm = 0, smt = 0;
   for (const [m, t] of points) {
@@ -67,9 +61,6 @@ console.log(`worst relative residual     = ${(worst * 100).toFixed(1)}%`);
 console.log(`break-even size             = ${Math.round(breakEven)} elements` +
             ` (a ${Math.round(Math.sqrt(breakEven))}x${Math.round(Math.sqrt(breakEven))} tensor)`);
 
-// The two-point shortcut, printed next to the fit so the difference is visible.
-// It is not a fit: it reads alpha off the smallest row and beta off the largest,
-// so it cannot disagree with either, and it cannot report a residual.
 const naiveAlpha = points[0][1] * 1000;
 const naiveBeta = points[points.length - 1][1] * 1e6 / points[points.length - 1][0];
 console.log(`\nfor comparison, the two-point shortcut alpha=T(1), beta=T(N)/N:`);
@@ -82,8 +73,8 @@ const N = 1024;
 const addS = timeOp(addAt, N, 20);
 const tanhS = timeOp(tanhAt, N, 20);
 const elems = N * N;
-const addBytes = 3 * elems * 4;   // two reads + one write
-const tanhBytes = 2 * elems * 4;  // one read + one write
+const addBytes = 3 * elems * 4;
+const tanhBytes = 2 * elems * 4;
 console.log(`\nat ${N}x${N} (${(elems * 4 / 1048576).toFixed(0)} MB per tensor)`);
 console.log(`  add   ${format(addS)}`);
 console.log(`         ${(addBytes / 1048576).toFixed(0)} MB moved -> ${(addBytes / addS.median / 1e6).toFixed(2)} GB/s`);

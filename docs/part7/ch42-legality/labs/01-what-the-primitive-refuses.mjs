@@ -3,12 +3,7 @@ import {
   CPUTarget, WasmTarget, randn, compile,
 } from '../../_internals.mjs';
 
-// Three layers of this compiler answer "may the reduction axis of a matmul run
-// in parallel?" and they do not agree. This lab asks all three.
-
 const build = async () => new Schedule(await lowerToTir((a, b) => a.matmul(b), [randn([4, 6]), randn([6, 5])]));
-
-// -------------------------------------- what the block declares about its axes
 
 const decl = await build();
 console.log('=== the block\'s own declaration ===\n');
@@ -17,8 +12,6 @@ for (const iv of decl.getBlock('matmul_1').iterVars) {
 }
 console.log('\n  `markCommReduce` tagged the contraction axis when the lowering rule');
 console.log('  built the block (Chapter 33). Nothing has verified the tag.');
-
-// ------------------------------------------------ layer 1: the primitive
 
 console.log('\n=== layer 1: what each primitive says about that axis ===\n');
 for (const primitive of ['parallelize', 'vectorize', 'unroll']) {
@@ -36,8 +29,6 @@ console.log('  IterVarPolicy.SPATIAL, which admits DataPar only; `vectorize` pas
 console.log('  ACCUMULABLE, which admits CommReduce too (legality.ts:17). The');
 console.log('  dependence is found in both cases and overruled in one.');
 
-// --------------------------------------------------- layer 2: the validator
-
 const vec = await build();
 vec.vectorize(vec.getLoops('matmul_1')[2]);
 
@@ -49,8 +40,6 @@ console.log('  `Schedule.verify()`; the one production caller is the autotuner\'
 console.log('  session (autotune/session.ts:186). A schedule the rule policy built');
 console.log('  is never validated; a schedule the search built always is.');
 
-// ---------------------------------------------------- layer 3: the backend
-
 console.log('\n=== layer 3: what each backend does with it ===\n');
 const cpu = new BackendPipeline(CPUTarget()).compile(vec.func).source;
 console.log('  CPU  : SIMD in the emitted JavaScript? ' +
@@ -61,9 +50,6 @@ console.log(`  WASM : ${wasmDirect.split('\n').filter((l) => /f32x4/.test(l)).le
   + ' — `_vectorizationIsLegal` ends with `!loopCarriedDependenceIn(body)`');
 console.log('         (backend/wasm/codegen.ts:1606) and declines.');
 
-// The shipping pipeline reaches the same annotation by a different route, and
-// runs AccumulatorDetectionPass first, which gives the backend a node it can
-// vectorise correctly.
 const x = randn([8, 64]);
 const shipped = compile({ forward: (a) => a.sum(1) }, [x], {
   target: WasmTarget({ numCores: 4 }), fusion: { enabled: false }, scheduling: { enabled: true },

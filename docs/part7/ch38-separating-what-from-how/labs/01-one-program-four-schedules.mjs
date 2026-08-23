@@ -2,15 +2,10 @@ import {
   compile, CPUTarget, WasmTarget, CUDATarget, TraceLevel, randn, resetVarCounter,
 } from '../../_internals.mjs';
 
-// One graph, four targets. The block is the same object in all four printouts.
-// Everything that differs is a loop.
-
 async function scheduled(label, target, opts = {}) {
   const snaps = [];
   const explains = [];
   const x = randn([4096]);
-  // The fresh-variable counter is process-global, so reset it and the four
-  // printouts differ only where the schedule differs.
   resetVarCounter();
   const compiled = compile({ forward: (a) => a.mul(2.0) }, [x], {
     target,
@@ -29,7 +24,6 @@ async function scheduled(label, target, opts = {}) {
   try {
     await compiled(x);
   } catch (e) {
-    // CUDA and WebGPU compile without a device; only the launch needs one.
   }
   console.log(`=== ${label} ===`);
   const body = snaps[snaps.length - 1].split('\n');

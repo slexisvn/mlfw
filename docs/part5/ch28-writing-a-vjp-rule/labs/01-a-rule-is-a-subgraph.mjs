@@ -2,9 +2,6 @@ import {
   tensor, compileWithBackward, CPUTarget, TraceLevel, ones,
 } from '../../../../dist/index.node.js';
 
-// Each VJP rule emits a small subgraph into the backward function.
-// Differentiate one operation at a time and read what each rule wrote.
-
 const x = tensor([[0.5, 2.0]]);
 
 const CASES = [

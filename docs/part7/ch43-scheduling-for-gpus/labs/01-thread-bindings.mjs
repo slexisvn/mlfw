@@ -3,14 +3,8 @@ import {
   CUDATarget, WebGPUTarget, launchGeometry, randn,
 } from '../../_internals.mjs';
 
-// On a GPU the outer loops do not run: they are the index space the hardware
-// hands each thread. This lab binds them by hand, reads the launch geometry the
-// bindings imply, and then watches a rule do the same thing.
-
 const N = 4096;
 const fresh = async () => new Schedule(await lowerToTir((x) => x.mul(2.0), [randn([N])], CUDATarget()));
-
-// -------------------------------------------------------------- by hand
 
 const sch = await fresh();
 const [i] = sch.getLoops('mul_block_0');
@@ -37,8 +31,6 @@ console.log('  read once into the variables the loops used to bind, and the body
 console.log('  runs exactly once per thread. The grid is not in the source at all —');
 console.log('  it is metadata the runtime passes to the launch.');
 
-// ------------------------------------------------- what the tag has to be
-
 console.log('\n=== bindThread checks the tag and nothing else ===\n');
 for (const tag of ['threadIdx.x', 'threadIdx.w', 'blockIdx.z', 'warpIdx.x']) {
   const t = await fresh();
@@ -52,8 +44,6 @@ for (const tag of ['threadIdx.x', 'threadIdx.w', 'blockIdx.z', 'warpIdx.x']) {
 console.log('\n  No dependence question is asked. `bindThread` is the one annotation');
 console.log('  primitive with no legality check at all (schedule.ts:611) — the');
 console.log('  backends check instead, which is §43.6.');
-
-// --------------------------------------------------- what the rule chooses
 
 console.log('\n=== the same nest, left to ElementwiseGPURule ===\n');
 for (const [label, target] of [['CUDA', CUDATarget()], ['WebGPU', WebGPUTarget()]]) {

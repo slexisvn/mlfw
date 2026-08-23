@@ -4,15 +4,6 @@ import {
   lowerToTir, randn, CPUTarget, WebGPUTarget, printTensorIR,
 } from '../../_internals.mjs';
 
-// The search space of a schedule is a product of finite choices. This lab
-// counts it: first for one axis in closed form, then for one block, then for
-// one function.
-
-// -------------------------------------------------- 1. one axis, in closed form
-
-// An ordered factorization of n into L factors distributes each prime
-// exponent e_p among L slots independently, so the count is a product of
-// multiset coefficients. This is the formula of Theorem 44.2, written out.
 function primeExponents(n) {
   const e = new Map();
   for (let p = 2; p * p <= n; p++) while (n % p === 0) { e.set(p, (e.get(p) || 0) + 1); n /= p; }
@@ -34,8 +25,6 @@ console.log('  middle column is what the search actually gets: `maxCandidates`')
 console.log('  defaults to 48 (factorization.ts:45), so from 64 upwards the space');
 console.log('  is subsampled rather than enumerated.');
 
-// -------------------------------------------------- 2. the tile structures
-
 console.log('\n\n=== the three tile structures (tile_structure.ts) ===\n');
 for (const [label, st] of [['CPU  (default)', getTileStructure(CPUTarget())],
                            ['GPU  (default)', getTileStructure(WebGPUTarget())],
@@ -50,8 +39,6 @@ console.log('\n  The default CPU structure has one reduction level, and one leve
 console.log('  means one factor: `enumerateFactorizations(K, 1)` returns `[[K]]`');
 console.log('  (factorization.ts:46). The contraction axis of a matmul is never');
 console.log('  split by `mlt_cpu`. Only `ssrsrs_cpu` has two R levels.');
-
-// -------------------------------------------------- 3. one block, then one function
 
 const pf = await lowerToTir((a, b) => a.matmul(b), [randn([64, 64]), randn([64, 64])]);
 console.log('\n\n=== a 64x64x64 matmul, as the autotuner sees it ===\n');
@@ -74,8 +61,6 @@ for (const name of collectAllBlockNames(pf.body)) {
 }
 console.log(`\n  Two blocks, tuned independently, so the function's joint space is the`);
 console.log(`  product: ${joint.toLocaleString('en-US')} distinct schedules for one matrix multiply.`);
-
-// -------------------------------------------------- 4. what the cap throws away
 
 console.log('\n\n=== the cap is a truncation, not a sample ===\n');
 const full = enumerateFactorizations(4096, 4, 1e6);

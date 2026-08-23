@@ -2,16 +2,10 @@ import {
   lowerToTir, printTensorIR, Schedule, randn,
 } from '../../_internals.mjs';
 
-// The sref tree is the schedule's index into the IR: every loop and every block
-// gets a node that knows its parent. This lab prints one, then splits a loop and
-// asks which nodes of the tree survived the edit.
-
 const pf = await lowerToTir((x) => x.mul(x).sum(1), [randn([4, 6])]);
 const sch = new Schedule(pf);
 
 console.log(printTensorIR(pf));
-
-// ---------------------------------------------------------------- the tree
 
 const loopName = (s) => s.node.loopVar.name;
 const label = (s) => (s.isLoop
@@ -32,16 +26,12 @@ console.log('  ForNode and BlockNode get an sref (sref.ts:117). Three statement'
 console.log('  chains hang off nothing. Every query in the file goes through the');
 console.log('  name and node maps instead, which is why nothing notices.');
 
-// ------------------------------------------------------- what a query costs
-
 console.log('\n=== the two queries a primitive actually uses ===\n');
 console.log(`  getLoops('reduce_acc_2')  -> ${sch.getLoops('reduce_acc_2').map((l) => l.loopVar.name).join(', ')}`);
 console.log(`  getLoops('mul_block_0')   -> ${sch.getLoops('mul_block_0').map((l) => l.loopVar.name).join(', ')}`);
 console.log('\n  `loopsOf` walks parent pointers from the block upward and reverses');
 console.log('  (sref.ts:172), so it is O(depth) and needs no search. Without the');
 console.log('  tree it would be a walk of the whole function per question.');
-
-// ------------------------------------------------------ the incremental edit
 
 console.log('\n=== which srefs survive a split? ===\n');
 

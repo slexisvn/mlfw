@@ -2,15 +2,9 @@ import {
   lowerToTir, printTensorIR, Schedule, toKernel, randn,
 } from '../../_internals.mjs';
 
-// rfactor turns one sequential reduction into `factor` independent partial
-// reductions plus a combine. It is the only primitive in the compiler whose
-// soundness needs an algebraic property of the operator.
-
 const K = 8;
 const build = async () => new Schedule(await lowerToTir((x) => x.sum(1), [randn([1, K])]));
 const accLoop = (sch) => sch.getLoops('reduce_acc_1')[1].loopVar.name;
-
-// --------------------------------------------------------------- the shape
 
 const before = await build();
 console.log('=== the reduction as lowered ===');
@@ -24,8 +18,6 @@ console.log(`\n  blocks now: ${after.state.allBlockNames().join(', ')}`);
 console.log('  The accumulation block became two: `_rf_p` runs 4 independent');
 console.log('  partial sums, `_rf_c` adds the 4 partials. Both carry an `init {}`,');
 console.log('  which no lowering rule ever sets (Chapter 33) and rfactor always does.');
-
-// ------------------------------------------------------- the summation order
 
 const serial = toKernel((await build()).func).call;
 const factored = toKernel(after.func).call;
@@ -55,8 +47,6 @@ console.log('  and the six surviving 1s sum to 6.');
 console.log('  Both answers are correct additions of the same eight f32 values in');
 console.log('  different orders. Neither is the real sum, which is 6 exactly and');
 console.log('  which the serial order cannot reach.');
-
-// --------------------------------------------------------- the preconditions
 
 console.log('\n=== what rfactor refuses ===\n');
 for (const factor of [1, 3, 8, 16]) {

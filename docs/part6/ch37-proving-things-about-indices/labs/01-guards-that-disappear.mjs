@@ -2,10 +2,6 @@ import {
   compile, CPUTarget, TraceLevel, randn, ops,
 } from '../../../../dist/index.node.js';
 
-// The pad rule emits a bounds test for every axis, without looking at whether
-// the axis was padded. The analyser then removes the ones it can prove. This
-// lab counts the comparisons at both ends.
-
 async function pad(label, low, high, shape) {
   const snaps = [];
   const x = randn(shape);

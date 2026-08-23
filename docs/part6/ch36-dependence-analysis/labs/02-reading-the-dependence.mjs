@@ -2,12 +2,6 @@ import {
   compile, CPUTarget, TraceLevel, randn,
 } from '../../../../dist/index.node.js';
 
-// Where the answer comes from. For each loop enclosing a block, this lab does
-// by hand what accessDependence does properly: compare the subscripts of the
-// write with the subscripts of the reads, and see whether the loop variable
-// appears in both. If it appears in neither subscript of a buffer the block
-// both reads and writes, that loop carries the dependence.
-
 async function analyse(label, fn, inputs) {
   const snaps = [];
   const compiled = compile({ forward: fn }, inputs, {
@@ -24,8 +18,6 @@ async function analyse(label, fn, inputs) {
   const before = snaps.find((s) => s.label === 'afterLowering').text;
   const after = snaps.find((s) => s.label === 'afterScheduling').text;
 
-  // Loop variable -> kind, from the scheduled IR. Split loops keep the original
-  // name as a prefix, so a split loop inherits its parent's answer.
   const kindOf = new Map();
   for (const m of after.matchAll(/for (\S+) in 0\.\.\S+ (?:@(\w+) )?/g)) kindOf.set(m[1], m[2] || 'serial');
 
@@ -46,8 +38,6 @@ async function analyse(label, fn, inputs) {
       const [, buf, idx, rhs] = target;
       const selfRead = rhs.includes(`${buf}[`);
       for (const l of loops) {
-        // The block binds an iteration variable to each loop variable; look for
-        // either name in the write subscript.
         const binds = before.slice(bodyStart).split('\n').slice(0, 8)
           .map((s) => s.trim().match(/^bind (\S+) = (\S+)$/)).filter(Boolean);
         const iv = binds.find((b) => b[2] === l.name);

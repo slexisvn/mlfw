@@ -2,10 +2,6 @@ import {
   compile, CPUTarget, TraceLevel, randn, nn,
 } from '../../../../dist/index.node.js';
 
-// Every value in the graph becomes a buffer. This lab counts them, shows the
-// one place the lowering rules ask for a scratch buffer in a scope other than
-// global, and shows what the block's declared read set leaves out.
-
 async function tir(fn, inputs, opts = {}) {
   const snaps = [];
   const compiled = compile(typeof fn === 'function' ? { forward: fn } : fn, inputs, {

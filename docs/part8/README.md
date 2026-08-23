@@ -34,10 +34,10 @@ A schedule space is a product of independent finite choices, and the dominant fa
 
 ## Labs
 
-Part VIII's labs drive the autotuner by hand, and nothing under `src/compiler/autotune/` is part of the package's public surface — a user asks for `scheduling: { autotune: true }` and never sees a sketch, a cost model or a workload key. Each lab therefore imports [`docs/part8/_internals.mjs`](_internals.mjs), which bundles the internal surface listed in [`docs/tools/internals-entry.ts`](../tools/internals-entry.ts) with esbuild, a devDependency the repository already has. The bundle lands in the OS temp directory and takes about a tenth of a second to build; nothing is written inside the repository, and there is still no build step to run.
+Part VIII's labs drive the autotuner by hand, and nothing under `src/compiler/autotune/` is part of the package's public surface — a user asks for `scheduling: { autotune: true }` and never sees a sketch, a cost model or a workload key. Each lab therefore imports [`docs/part8/_internals.mjs`](_internals.mjs), which names the internal surface this part reaches for and reads it from `dist/internals.node.js`: a second bundle `npm run build` emits beside the public one, from the module list in [`docs/tools/internals-entry.ts`](../tools/internals-entry.ts). It is the same build a user runs, with a wider entry point — and like Part IX's labs, these refuse to run against a `dist/` older than `src/`.
 
 ```bash
-npm install   # once, if you have not already — the labs need esbuild
+npm install && npm run build   # once, if you have not already
 
 node docs/part8/ch44-how-big-is-the-search-space/labs/01-counting-the-space.mjs
 node docs/part8/ch44-how-big-is-the-search-space/labs/02-what-the-space-is-worth.mjs

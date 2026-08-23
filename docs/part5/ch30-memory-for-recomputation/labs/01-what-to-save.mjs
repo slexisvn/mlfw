@@ -2,11 +2,6 @@ import {
   tensor, Linear, compileWithBackward, CPUTarget, TraceLevel, ones, manual_seed,
 } from '../../../../dist/index.node.js';
 
-// `rematPolicy` is consulted once per forward operation whose result the
-// backward pass could want: true means "do not save it, rebuild it".
-// It is duck-typed -- any object with shouldRematerialize(op) will do --
-// so the saved set can be driven from outside the compiler.
-
 const x = tensor([[0.5, 1.0, 1.5, 2.0]]);
 const fwd = (a) => a.exp().tanh().mul(a).sqrt().sum();
 
@@ -31,7 +26,7 @@ async function study(label, rematPolicy) {
   const out = await settle(cf(x));
   const grads = await settle(cf.backward(ones(out.shape)));
 
-  const saved = argsOf(snaps[1]) - 1;          // minus the incoming cotangent
+  const saved = argsOf(snaps[1]) - 1;
   const fwdOuts = (sigOf(snaps[0]).split('->')[1].match(/tensor</g) || []).length;
   console.log(`${label.padEnd(30)} forward returns ${String(fwdOuts).padStart(2)}   ` +
               `backward: ${String(saved).padStart(2)} saved, ${String(opsOf(snaps[1])).padStart(2)} ops`);

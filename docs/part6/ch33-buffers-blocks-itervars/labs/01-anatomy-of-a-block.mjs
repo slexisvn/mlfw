@@ -2,10 +2,6 @@ import {
   compile, CPUTarget, TraceLevel, randn,
 } from '../../../../dist/index.node.js';
 
-// A block is the unit the scheduler moves. This lab prints three of them and
-// reads off the four parts every block has: a name, a list of iteration
-// variables with their bindings, a declared read set, and a declared write set.
-
 async function tir(fn, inputs) {
   const snaps = [];
   const compiled = compile({ forward: fn }, inputs, {
@@ -33,8 +29,6 @@ const b = randn([3, 2]);
 show('one elementwise block', await tir((x) => x.mul(x), [a]));
 show('a reduction: two blocks, one buffer', await tir((x) => x.sum(1), [a]));
 show('a contraction: an init block and an accumulation block', await tir((x, y) => x.matmul(y), [a, b]));
-
-// What the block header does and does not tell you.
 
 const reduceText = await tir((x) => x.sum(1), [a]);
 const blocks = [...reduceText.matchAll(/block (\w+) \{([\s\S]*?)\n\s*\}/g)];

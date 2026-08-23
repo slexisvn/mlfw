@@ -4,15 +4,6 @@ import {
   ScheduleValidator,
 } from '../../_internals.mjs';
 
-// A sketch advertises |V1| x ... x |Vk| points. That is an upper bound on the
-// number of programs, not a count of them: two parameter values collapse to one
-// program whenever the apply function clamps them, ignores them, or takes the
-// same branch. This lab instantiates every point of five sketches and counts
-// the distinct nests that come out.
-
-// The loop-variable counter is global (schedule.ts:193), so every
-// instantiation must start from the same counter value for two nests to be
-// comparable by name. `enumerate` resets it before each point.
 function enumerate(makeFunc, blockName, sketch, target, points) {
   const seen = new Map();
   let refused = 0, invalid = 0;
@@ -45,8 +36,6 @@ const report = (label, sketch, r) => {
   console.log(`  ${label.padEnd(30)} nominal ${String(nominal).padStart(5)}   distinct ${String(r.distinct).padStart(5)}   refused ${String(r.refused).padStart(5)}   invalid ${String(r.invalid).padStart(3)}`);
 };
 
-// ------------------------------------------------ CPU
-
 const mm = await lowerToTir((a, b) => a.matmul(b), [randn([16, 16]), randn([16, 16])]);
 const cpuSketches = getSketchesForBlock(mm, 'matmul_1', CPUTarget());
 const ewSketch = getSketchesForBlock(mm, 'matmul_init_0', CPUTarget())[0];
@@ -78,8 +67,6 @@ console.log('  loop and loses two on a 4-wide one, because its apply function gu
 console.log('  the split with `extent >= vector_width` (sketch_generators.ts:71), and');
 console.log('  every width that fails that test produces the same bare `parallelize`.');
 
-// ------------------------------------------------ GPU
-
 const gmm = await lowerToTir((a, b) => a.matmul(b), [randn([16, 16]), randn([16, 16])], WebGPUTarget());
 console.log('\n\n=== the same matmul, WebGPU ===\n');
 for (const s of getSketchesForBlock(gmm, 'matmul_1', WebGPUTarget())) {
@@ -99,8 +86,6 @@ console.log('\n  `BLOCK_SIZE_CANDIDATES` (sketch_generators.ts:7) offers six thr
 console.log('  sizes up to 1024. `gpuThreadCap` (sketch_generators.ts:10) then clamps');
 console.log('  every one of them to at most 256, so 256, 512 and 1024 all name the');
 console.log('  same kernel: two of the six advertised points are aliases of a third.');
-
-// ------------------------------------------------ what the extra points cost
 
 console.log('\n\n=== an alias is not free ===\n');
 const s = getSketchesForBlock(gmm, 'matmul_init_0', WebGPUTarget())[0];

@@ -2,9 +2,6 @@ import {
   compile, CPUTarget, TraceLevel, tensor, Linear, ReLU, Sequential, manual_seed,
 } from '../../../../dist/index.node.js';
 
-// One program, three representations. The graph says what; the TIR says how;
-// the emitted source says where. Nothing here is a different program.
-
 async function levels(model, inputs, opts = {}) {
   const snaps = new Map();
   const compiled = compile(model, inputs, {
@@ -23,8 +20,6 @@ async function levels(model, inputs, opts = {}) {
 
 const indent = (text) => text.split('\n').map((l) => '  ' + l).join('\n');
 
-// ---- the smallest possible program, at all three levels ---------------------
-
 const a = tensor([[1, 2], [3, 4]]);
 const b = tensor([[5, 6], [7, 8]]);
 const one = await levels({ forward: (p, q) => p.add(q) }, [a, b]);
@@ -36,8 +31,6 @@ console.log(indent(one.tir));
 console.log('\n=== 3. emitted CPU source — flat offsets ===');
 console.log(indent(one.src));
 
-// ---- the book's running example, as a loop nest -----------------------------
-
 manual_seed(0);
 const model = new Sequential(new Linear(2, 8), new ReLU(), new Linear(8, 1));
 const x = tensor([[0.5, -1.5], [1.0, 2.0]]);
@@ -46,8 +39,6 @@ console.log('\n\n=== the running example, as a loop nest ===');
 console.log('  Sequential(Linear(2,8), ReLU(), Linear(8,1)) — the program from Chapter 1\n');
 const run = await levels(model, [x], { fusion: { enabled: true } });
 console.log(indent(run.tir));
-
-// ---- how much bigger does the program get? ----------------------------------
 
 console.log('\n\n=== the same program, counted at each level ===\n');
 

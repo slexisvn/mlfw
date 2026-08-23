@@ -164,7 +164,7 @@ Read the first two rows together. The first is the shipped default. It finds fou
 
 **The two columns move together, and the emitted one moves further.** The plan is quoted over aligned slots and counts the chain's five scalar constants at 64 bytes each; the emitted program folds those constants into the expressions that use them and allocates only the two full-size buffers, so it comes in under the plan rather than over it. The pooled rows are the same story with the arena's own bookkeeping added. Every configuration is bit-identical, which is Theorem 51.3 checked rather than assumed.
 
-Both numbers were worth printing because they have not always agreed. An earlier version of this pass recorded its candidates, dropped the destination's allocation, and then materialized nothing — the plan halved and the emitted program allocated 2.5× *more*, because the pair had also been removed from the slot reuse that would otherwise have covered it. The lab is the regression test for that: `plan says` and `allocates` are read against each other, and against the same program with the feature off.
+Both numbers are printed because they can disagree, and not hypothetically — §51.6 has the version of this pass in which they moved in opposite directions. The lab is the regression test for it: `plan says` and `allocates` are read against each other, and against the same program with the feature off.
 
 **Try this.** Lengthen the chain and watch both columns stay flat while `candidates` grows: an *n*-operation chain needs two buffers without this pass and one with it, whatever *n* is. Then switch fusion back on and watch the whole table collapse to the constants, which is Chapter 49 §49.5's point arriving again — there are no intermediates left to overwrite.
 

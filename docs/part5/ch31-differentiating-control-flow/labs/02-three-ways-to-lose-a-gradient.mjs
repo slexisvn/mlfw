@@ -2,9 +2,6 @@ import {
   tensor, compileWithBackward, CPUTarget, TraceLevel, ones,
 } from '../../../../dist/index.node.js';
 
-// A gradient can go missing three ways. Two of them are silent and produce
-// zeros; they differ in what the backward graph spends getting there.
-
 const x = tensor([[1.7, -2.3, 0.4, 3.9]]);
 
 async function settle(v) { return v && v.then ? await v : v; }
@@ -56,8 +53,6 @@ console.log('  the addition survives -- x + 0 is not an identity on floats, so')
 console.log('  AddZero declines without a fast-math licence. Part IV cleans up after');
 console.log('  Part V only as far as IEEE 754 lets it.');
 
-// The same three programs, with the simplification passes switched off, so the
-// waste the rules actually emit is visible.
 console.log('\n=== the same programs with canonicalize/simplify disabled ===');
 for (const [label, fwd] of [
   ['sum(floor(x))', (a) => a.floor().sum()],

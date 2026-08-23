@@ -1,3 +1,4 @@
+import '../../../tools/freshness.mjs';
 import {
   compile, CPUTarget, TraceLevel, randn,
 } from '../../../../dist/index.node.js';

@@ -2,10 +2,6 @@ import {
   tensor, Linear, ReLU, Sequential, compileWithBackward, CPUTarget, TraceLevel, ones, manual_seed,
 } from '../../../../dist/index.node.js';
 
-// The same derivative, packaged two ways:
-//   'separate' -- one forward function plus one backward function
-//   'joint'    -- a single function returning outputs and gradients together
-
 const x = tensor([[0.5, -1.5], [1.0, 2.0]]);
 
 function model() {

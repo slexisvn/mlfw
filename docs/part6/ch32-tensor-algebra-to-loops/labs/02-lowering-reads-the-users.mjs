@@ -2,10 +2,6 @@ import {
   compile, CPUTarget, TraceLevel, tensor, ops,
 } from '../../../../dist/index.node.js';
 
-// The same operation, with the same operands and the same attributes, lowered
-// twice. What changes is who reads its result — and that decides whether the
-// operation becomes a loop nest or nothing at all.
-
 async function study(label, fn, inputs) {
   const snaps = new Map();
   const compiled = compile({ forward: fn }, inputs, {
@@ -33,15 +29,12 @@ async function study(label, fn, inputs) {
 
 const row = tensor([[10, 20, 30]]);
 
-// broadcast_in_dim(row) -> [4,3], then a consumer that can read it with an index.
 await study(
   'broadcast_in_dim -> mul   (consumer is elementwise)',
   (r) => ops.broadcast_in_dim(r, [4, 3], [0, 1]).mul(2.0),
   [row],
 );
 
-// The identical broadcast, consumed by a reduction, which is not on the
-// view-safe list in graph_to_tensor.ts.
 await study(
   'broadcast_in_dim -> sum   (consumer is a reduction)',
   (r) => ops.broadcast_in_dim(r, [4, 3], [0, 1]).sum(0),
@@ -53,8 +46,6 @@ console.log('no statement at all: the [1,3] buffer is read as buf_1[0, j] from i
 console.log("the consumer's nest. In the second the 4x3 result is materialised —");
 console.log('12 extra elements written and read back — because a reduce cannot');
 console.log('absorb the index rewrite.');
-
-// And the same thing from the other side: two different graphs, one TIR.
 
 async function tirOnly(fn, inputs) {
   const snaps = [];

@@ -2,13 +2,8 @@ import {
   lowerToTir, Schedule, randn,
 } from '../../_internals.mjs';
 
-// A block scope is the second index the schedule keeps: a producer-consumer
-// graph over the sibling blocks of one scope, with a dependence kind and a
-// buffer on every edge. This lab builds one and reads it.
-
 const sch = new Schedule(await lowerToTir((x) => x.mul(x).sum(1), [randn([4, 6])]));
 
-// `state.scopes` is a lazy getter; touching it is what runs buildBlockScopes.
 const scopes = sch.state.scopes;
 
 console.log('=== the scopes of one function ===\n');
@@ -46,8 +41,6 @@ console.log('  is a store at the top of the function body and');
 console.log("  not inside any block. buildBlockScopes files it under the null");
 console.log('  scope as an opaque access (block_scope.ts:205), and one opaque');
 console.log('  access sets `pipeline = false` for the whole scope (block_scope.ts:241).');
-
-// ---------------------------------------------------------------- reachability
 
 console.log('\n=== who asks for any of this ===\n');
 const consumers = {

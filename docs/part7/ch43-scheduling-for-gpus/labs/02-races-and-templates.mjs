@@ -2,10 +2,6 @@ import {
   compile, CUDATarget, TraceLevel, randn,
 } from '../../_internals.mjs';
 
-// Two things the GPU path does that the scheduling language does not: replace a
-// whole function body with a hand-written template, and refuse a schedule the
-// primitives accepted because the backend cannot prove it race-free.
-
 async function cuda(label, fn, inputs, show) {
   const snaps = [];
   const compiled = compile({ forward: fn }, inputs, {
@@ -21,19 +17,14 @@ async function cuda(label, fn, inputs, show) {
   try {
     await compiled(...inputs);
   } catch (e) {
-    // No GPU on this machine; every artefact below is produced at compile time.
   }
   console.log(`=== ${label} ===`);
   show({ tir: snaps[snaps.length - 1] ?? '', source: compiled.source() });
   console.log();
 }
 
-// ------------------------------------------- a schedule the primitives wrote
-
 await cuda('elementwise: the rule uses the primitives', (a) => a.mul(2.0), [randn([4096])],
   ({ source }) => console.log(source.split('\n').slice(1).join('\n').trimEnd()));
-
-// ------------------------------------------------- a body that was replaced
 
 await cuda('matmul 128x128: the body was replaced wholesale',
   (a, b) => a.matmul(b), [randn([128, 128]), randn([128, 128])],
@@ -55,8 +46,6 @@ await cuda('matmul 128x128: the body was replaced wholesale',
     console.log('  built by the scheduling language.');
   });
 
-// --------------------------------------------- a race the backend repaired
-
 await cuda('row-sum then scale: an intermediate crosses threads',
   (a) => a.sum(1).mul(2.0), [randn([8, 1024])],
   ({ source }) => {
@@ -67,8 +56,6 @@ await cuda('row-sum then scale: an intermediate crosses threads',
     console.log('  chose to repair rather than refuse: `_promoteCrossThreadToShared`');
     console.log('  moved it to __shared__ and turned barriers on.');
   });
-
-// ------------------------------------------- a race the backend refused
 
 await cuda('two chained reductions over 300 rows',
   (a) => a.sum(1).sum(0), [randn([300, 4])],

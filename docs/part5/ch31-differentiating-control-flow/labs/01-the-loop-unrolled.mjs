@@ -2,9 +2,6 @@ import {
   tensor, LSTM, compileWithBackward, CPUTarget, TraceLevel, ones, manual_seed,
 } from '../../../../dist/index.node.js';
 
-// An LSTM traces to a `scan`: one operation holding a loop body, whose size
-// does not depend on the sequence length. Its backward does not.
-
 async function settle(v) { return v && v.then ? await v : v; }
 
 const countOps = (ir) => (ir.match(/^\s+%\d+ = /gm) || []).length;

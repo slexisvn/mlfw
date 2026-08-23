@@ -2,12 +2,8 @@ import {
   tensor, compileWithBackward, CPUTarget, TraceLevel, ones,
 } from '../../../../dist/index.node.js';
 
-// `add` has the simplest VJP rule in the compiler: return the incoming
-// gradient, twice. But `x + b` with a broadcast b does not have a gradient
-// of b's shape -- somebody has to put it back. This lab finds who.
-
-const x = tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]);   // [2, 3]
-const b = tensor([0.5, 0.5, 0.5]);                      // [3], broadcast over rows
+const x = tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]);
+const b = tensor([0.5, 0.5, 0.5]);
 
 async function settle(v) { return v && v.then ? await v : v; }
 

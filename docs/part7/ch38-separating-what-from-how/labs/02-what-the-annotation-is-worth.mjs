@@ -2,10 +2,6 @@ import {
   compile, CPUTarget, WasmTarget, CUDATarget, randn, resetVarCounter,
 } from '../../_internals.mjs';
 
-// A schedule is a promise about how to run the loops. Whether the promise is
-// kept is a property of the backend, not of the schedule. This lab reads the
-// emitted kernel for the three backends that receive the same two annotations.
-
 async function source(target, scheduling, shape) {
   resetVarCounter();
   const x = randn(shape);
@@ -15,7 +11,6 @@ async function source(target, scheduling, shape) {
   try {
     await compiled(x);
   } catch (e) {
-    // No GPU on this machine; the source is emitted either way.
   }
   return compiled.source().split('\n').slice(1).join('\n').trimEnd();
 }
@@ -26,8 +21,6 @@ async function emit(label, target, scheduling, shape = [100]) {
   console.log();
 }
 
-// ---------------------------------------------------------------- CPU
-
 await emit('CPU, scheduling off (the shipped default)', CPUTarget(), null);
 await emit('CPU, scheduling on', CPUTarget(), { enabled: true });
 
@@ -36,8 +29,6 @@ console.log('The CPU backend reads exactly one loop kind, ForKind.UNROLLED');
 console.log('(backend/cpu/codegen.ts:231); the other four are ignored. What the');
 console.log('schedule did contribute is the split — two loops and a guard where');
 console.log('there was one loop and no guard.\n');
-
-// ---------------------------------------------------------------- WASM
 
 const wat = await source(WasmTarget({ numCores: 4 }), { enabled: true }, [4096]);
 const simd = wat.split('\n').filter((l) => /f32x4|v128/.test(l));
@@ -53,8 +44,6 @@ console.log();
 console.log('Same two annotations, a backend that spends them: `_par_start`/`_par_end`');
 console.log("are the worker pool's slice of the parallel loop, and the `f32x4.*`");
 console.log('opcodes are the vectorised one. On WASM the annotations are the schedule.\n');
-
-// ---------------------------------------------------------------- CUDA
 
 await emit('CUDA, DEFAULT scheduling config', CUDATarget(), null, [4096]);
 await emit('CUDA, scheduling.enabled = true', CUDATarget(), { enabled: true }, [4096]);

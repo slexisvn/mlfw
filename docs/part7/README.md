@@ -28,10 +28,10 @@ A loop nest answers two questions at once — what is computed and in what order
 
 ## Labs
 
-Part VII's labs drive the scheduling primitives by hand, and `Schedule` is not part of the package's public surface — nothing outside the compiler is meant to reshape a loop nest. Each lab therefore imports [`docs/part7/_internals.mjs`](_internals.mjs), which bundles the internal surface listed in [`docs/tools/internals-entry.ts`](../tools/internals-entry.ts) with esbuild, a devDependency the repository already has. The bundle lands in the OS temp directory and takes about a tenth of a second to build; nothing is written inside the repository, and there is still no build step to run.
+Part VII's labs drive the scheduling primitives by hand, and `Schedule` is not part of the package's public surface — nothing outside the compiler is meant to reshape a loop nest. Each lab therefore imports [`docs/part7/_internals.mjs`](_internals.mjs), which names the internal surface this part reaches for and reads it from `dist/internals.node.js`: a second bundle `npm run build` emits beside the public one, from the module list in [`docs/tools/internals-entry.ts`](../tools/internals-entry.ts). It is the same build a user runs, with a wider entry point — and like Part IX's labs, these refuse to run against a `dist/` older than `src/`.
 
 ```bash
-npm install   # once, if you have not already — the labs need esbuild
+npm install && npm run build   # once, if you have not already
 
 node docs/part7/ch38-separating-what-from-how/labs/01-one-program-four-schedules.mjs
 node docs/part7/ch38-separating-what-from-how/labs/02-what-the-annotation-is-worth.mjs

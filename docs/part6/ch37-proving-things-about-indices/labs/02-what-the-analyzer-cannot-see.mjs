@@ -2,11 +2,6 @@ import {
   compile, CPUTarget, TraceLevel, tensor, randn, nn,
 } from '../../../../dist/index.node.js';
 
-// Interval arithmetic is sound in one direction only: it answers "in bounds"
-// or "unknown", never "in bounds" wrongly. This lab shows the three shapes of
-// "unknown" that matter, and what the framework does about the one that has to
-// be answered somewhere.
-
 async function emitted(label, fn, inputs) {
   const compiled = compile({ forward: fn }, inputs, { target: CPUTarget(), fusion: { enabled: false } });
   await compiled(...inputs);

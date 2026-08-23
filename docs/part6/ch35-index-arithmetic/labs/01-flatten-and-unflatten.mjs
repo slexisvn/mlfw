@@ -2,11 +2,6 @@ import {
   compile, CPUTarget, TraceLevel, randn,
 } from '../../../../dist/index.node.js';
 
-// A reshape is the purest index problem there is: no arithmetic on the data,
-// only arithmetic on the coordinates. The rule always emits the same thing —
-// flatten the output coordinate, then divide and modulo it back apart. What
-// differs is how much of that survives the simplifier.
-
 function normalise(text) {
   const names = new Map();
   return text

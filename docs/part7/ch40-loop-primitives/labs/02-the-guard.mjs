@@ -2,37 +2,27 @@ import {
   lowerToTir, printTensorIR, Schedule, toKernel, randn, compile, CUDATarget,
 } from '../../_internals.mjs';
 
-// Theorem 40.2 says `split` needs a guard exactly when the factor does not
-// divide the extent. This lab removes the guard from a real program and reads
-// what the program then does.
-
 const N = 12;
 const build = async () => new Schedule(await lowerToTir((x) => x.mul(2.0), [randn([N])]));
 const tail = (sch) => printTensorIR(sch.func).split('\n').slice(4, -1).join('\n');
 
 const input = new Float32Array(N).map((_, i) => i + 1);
 const runOn = (sch) => {
-  const out = new Float32Array(N + 4).fill(-1);   // four elements of slack past the end
+  const out = new Float32Array(N + 4).fill(-1);
   toKernel(sch.func).call(input, out);
   return out;
 };
-
-// ------------------------------------------------------------- the baseline
 
 const base = await build();
 console.log('=== unscheduled ===');
 console.log(tail(base));
 console.log('  output:', [...runOn(base)].join(' '));
 
-// -------------------------------------------------------- split with a guard
-
 const guarded = await build();
 guarded.split(guarded.getLoops('mul_block_0')[0], 5);
 console.log('\n=== split(i, 5): ceil(12/5) = 3 outer, 5 inner, 15 >= 12 ===');
 console.log(tail(guarded));
 console.log('  output:', [...runOn(guarded)].join(' '));
-
-// ------------------------------------------------------ the same, unguarded
 
 function dropGuards(node) {
   let removed = 0;
@@ -64,8 +54,6 @@ console.log('  the output. Against a typed array the read is undefined and the')
 console.log('  write is discarded; against a pooled arena (Chapter 50) both land in');
 console.log('  the next buffer.');
 
-// ------------------------------------------------------- split, then fuse
-
 const roundTrip = await build();
 const [o, i] = roundTrip.split(roundTrip.getLoops('mul_block_0')[0], 5);
 roundTrip.fuseLoops(o, i);
@@ -81,8 +69,6 @@ console.log('  That last expression is Chapter 35\'s finding 8 arriving from the
 console.log('  other direction: there a reshape produced it, here the scheduler did.');
 console.log('  trace:', JSON.stringify(roundTrip.getTrace().serialize()));
 
-// ------------------------------------------- and through the real pipeline
-
 const y = randn([12, 5]);
 const cuda = compile({ forward: (a) => a.mul(2.0) }, [y], {
   target: CUDATarget(), fusion: { enabled: false }, scheduling: { enabled: true },
@@ -90,7 +76,6 @@ const cuda = compile({ forward: (a) => a.mul(2.0) }, [y], {
 try {
   await cuda(y);
 } catch (e) {
-  // No GPU; the source is emitted either way.
 }
 console.log('\n=== the same expression, out of the shipping compiler ===');
 console.log(cuda.source().split('\n').slice(1).join('\n').trimEnd());

@@ -7,13 +7,6 @@ import {
   VariableNode, IntImmNode, MathOpNode, ForNode, ForKind,
 } from '../../_internals.mjs';
 
-// Measuring is the only part of an autotuner that is not a pure function, and
-// the tuning database is the only part that outlives the process. This lab
-// looks at what the measurement summarises away, what the cache key keeps, and
-// what a cache hit reproduces.
-
-// -------------------------------------------------- 1. the statistics
-
 console.log('=== robustStats: what a benchmark reports (benchmark.ts:71) ===\n');
 console.log(`  ${'samples'.padEnd(30)} ${'median'.padStart(12)} ${'min'.padStart(7)} ${'trimmedMean'.padStart(13)} ${'cv'.padStart(8)}`);
 for (const [label, s] of [
@@ -31,8 +24,6 @@ console.log('  three costs nothing either. `cv` is computed and only acted on wh
 console.log('  `maxCv > 0`; the default is 0 (autotuner.ts:130), so the re-measure');
 console.log('  loop (benchmark.ts:184) always breaks after one round.');
 
-// -------------------------------------------------- 2. the workload key
-
 console.log('\n\n=== the workload key: what makes two blocks the same problem ===\n');
 const shapes = [[8, 8, 8], [16, 8, 8], [8, 8, 16]];
 console.log(`  ${'program'.padEnd(34)} ${'block'.padEnd(15)} key`);
@@ -49,8 +40,6 @@ console.log(`  ${'... on CPUTarget({vectorWidth:4})'.padEnd(34)} ${'matmul_1'.pa
 console.log(`  CPUTarget().name is "${CPUTarget().name}" for both, and the key ends with`);
 console.log('  `target.name` and `target.kind` (workload_key.ts:57).');
 
-// The key is built from the block's declared buffers and its expression tree.
-// Nothing in it describes the loop nest.
 function nest(extent) {
   const A = new Buffer('A', [64], 'f32', 'global');
   const C = new Buffer('C', [64], 'f32', 'global');
@@ -74,10 +63,6 @@ console.log('  block\'s expression tree (workload_key.ts:30-38); the loop nest i
 console.log('  part of it. For a matmul the shapes determine the extents and the key');
 console.log('  is adequate; for a block whose domain is not its buffer shape it is not.');
 
-// ------------------------------------------- 2b. and the key is 32 bits wide
-
-// The same block over buffers of a different size — so the description the key
-// is built from really does differ.
 function sized(n) {
   const A = new Buffer('A', [n], 'f32', 'global');
   const C = new Buffer('C', [n], 'f32', 'global');
@@ -102,8 +87,6 @@ console.log('  Nothing can detect it. `TuningRecord` stores the key and never th
 console.log('  description it hashed (tuning_db.ts:29), so a lookup has nothing to');
 console.log('  re-check against, and `lookup` returns the record for whichever workload');
 console.log('  was tuned first.');
-
-// -------------------------------------------------- 3. the database
 
 console.log('\n\n=== the database: ranking, versioning, and what it keeps ===\n');
 const db = new TuningDatabase(1);
@@ -140,8 +123,6 @@ console.log('  and a genuine pre-versioning file is missing both. The hole in th
 console.log('  guard is real and is covered by the second.');
 console.log('  The per-record `version` is still stored and never compared.');
 
-// -------------------------------------------------- 4. what a cache hit reproduces
-
 console.log('\n\n=== a cache hit, end to end ===\n');
 const F = ScalarType.F32;
 const T = (sh) => new TensorType(sh, F);
@@ -177,8 +158,6 @@ console.log('  (autotuner.ts:230) and re-derives the sketch from the block, so t
 console.log('  kernel comes out the same up to the fresh-variable counter — which is');
 console.log('  a module global and is not part of anything the database stores.');
 console.log('  Chapter 48 is about the object that would have to carry it.');
-
-// -------------------------------------------------- 5. the shipped default
 
 console.log('\n\n=== is anything measured at all? ===\n');
 const probe = new Autotuner(CPUTarget(), {});

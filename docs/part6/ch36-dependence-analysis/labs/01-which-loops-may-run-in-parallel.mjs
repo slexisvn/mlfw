@@ -2,10 +2,6 @@ import {
   compile, CPUTarget, TraceLevel, randn, zeros, scan,
 } from '../../../../dist/index.node.js';
 
-// Scheduling is off by default. Turned on, the CPU policy asks one question of
-// every loop before it marks it parallel or vectorised: does this loop carry a
-// dependence? These are the answers, read off the scheduled IR.
-
 async function kinds(label, fn, inputs) {
   const snaps = [];
   const compiled = compile({ forward: fn }, inputs, {

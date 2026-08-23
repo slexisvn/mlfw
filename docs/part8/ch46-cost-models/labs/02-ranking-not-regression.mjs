@@ -4,13 +4,7 @@ import {
   LearnedCostModel, AnalyticalCostModel, GuidedCostModel, EvolutionarySearch,
 } from '../../_internals.mjs';
 
-// The learned model is a squared-error regressor, and the search uses only the
-// order it induces. This lab separates the two: what a training sample is, what
-// the search actually consumes, and where the gap between them bites.
-
 const target = CPUTarget();
-
-// -------------------------------------------------- 1. what a sample is
 
 const mm = await lowerToTir((a, b) => a.matmul(b).relu(), [randn([16, 16]), randn([16, 16])]);
 const stmts = FeatureExtractor.extractStatements(mm);
@@ -35,13 +29,9 @@ console.log('  seven in MAX_FEATURE_NAMES and the one in MEAN_FEATURE_NAMES, the
 console.log(`  appends the statement count, giving a ${STATEMENT_FEATURE_SCHEMA.length + 1}-dimensional row. Two schedules`);
 console.log('  with the same row are, to this model, the same program.');
 
-// -------------------------------------------------- 2. only the order is used
-
 console.log('\n\n=== Theorem 46.3, executed: monotone transforms are invisible ===\n');
 const mini = extractBlockMini(mm, 'matmul_1', buildBlockMap(mm.body));
 const mlt = getSketchesForBlock(mm, 'matmul_1', target).find((s) => s.name === 'mlt_cpu');
-// A scoring function with a genuine gradient, so the search has something to
-// climb — the shipped analytic model is flat here (§46.5).
 const rawScore = (sketch, params) => {
   const work = clonePrimFunc(mini);
   try { sketch.instantiate(params)(new Schedule(work), 'matmul_1', target); } catch (e) { return null; }
@@ -62,12 +52,10 @@ console.log('  trajectory. Nothing downstream of `evaluator` reads the value:');
 console.log('  `scored.sort((a, b) => b.score - a.score)` (search.ts:134) and `_consider`');
 console.log('  (session.ts:235) are both comparisons.');
 
-// -------------------------------------------------- 3. lower error, worse choice
-
 console.log('\n\n=== Counterexample 46.5: error and regret are different objectives ===\n');
 console.log('  Definition 46.2 scores higher-is-better; this table is in predicted');
 console.log('  *cost*, lower-is-better, so the model picks an argmin.\n');
-const truth = [1.0, 2.0, 100.0];   // milliseconds; lower is better
+const truth = [1.0, 2.0, 100.0];
 console.log('  model                prediction            MSE   picks   true cost   regret');
 for (const [name, p] of Object.entries({
   'A  perfect        ': [1.0, 2.0, 100.0],
@@ -82,11 +70,6 @@ console.log('\n  C\'s squared error is more than three thousand times B\'s and i
 console.log('  is zero. The model is fitted with `(pred - measured)^2` (gbt.ts:45) and');
 console.log('  used as a comparator; the two are related but not the same objective.');
 
-// -------------------------------------------------- 4. the learning curve
-
-// The training set the session actually builds: features of one block's mini
-// function, labelled with a measured time. The "measurement" here is a fixed
-// function of the features, so the whole table is deterministic.
 const rows = [];
 for (const n of [16, 32, 64, 128]) {
   const src = await lowerToTir((a, b) => a.mul(b).relu(), [randn([n, n]), randn([n, n])]);
@@ -127,8 +110,6 @@ console.log('  That is the usual case, and it is why fitting is worth doing. Wha
 console.log('  Counterexample 46.5 rules out is the converse — that a lower error is');
 console.log('  by itself evidence of a better search.');
 
-// -------------------------------------------------- 5. what the max aggregation hides
-
 console.log('\n\n=== why the session scores the mini function and not the real one ===\n');
 const big = await lowerToTir((a, b) => a.mul(b).relu(), [randn([64, 64]), randn([64, 64])]);
 const bigSketch = getSketchesForBlock(big, 'maximum_block_1', target)[0];
@@ -167,8 +148,6 @@ console.log('\n  The label does not get the same treatment. `_measure` benchmark
 console.log('  whole scheduled function and pairs its median with the mini function\'s');
 console.log('  features (session.ts:229-231), so in a multi-block program every');
 console.log('  sample is labelled with time the block did not spend.');
-
-// -------------------------------------------------- 6. the handover
 
 console.log('\n\n=== GuidedCostModel: the handover, at eight samples ===\n');
 const analytic = new AnalyticalCostModel(target);

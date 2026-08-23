@@ -192,4 +192,4 @@ An elementwise chain has one topological order, so its peak is not a choice and 
 
 ---
 
-Part IX ends here. The plan is complete: every temporary has a lifetime, an address, possibly a buffer it shares with the operation that produced it, and an order chosen to keep the widest moment narrow. [Part X](../../OUTLINE.md) takes that plan and emits code against it — which is where the two numbers this part has been careful to keep apart, what the plan says and what the machine allocates, finally have to agree.
+Part IX ends here. The plan is complete: every temporary has a lifetime, an address, possibly a buffer it shares with the operation that produced it, and an order chosen to keep the widest moment narrow. [Part X](../../part10/README.md) takes that plan and emits code against it — which is where the two numbers this part has been careful to keep apart, what the plan says and what the machine allocates, finally have to agree.

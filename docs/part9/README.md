@@ -17,7 +17,7 @@ A temporary buffer is not needed for the whole program — it is needed from the
 
 ## What Part IX establishes for later parts
 
-Part X generates code against the plan this part produces: a buffer's `poolByteOffset` and the `AllocateNode`s inserted here are what the backends turn into real allocations, and Chapter 53's flattened indices are computed against those offsets. Part XI's runtime owns the arena itself.
+[Part X](../part10/README.md) generates code against the plan this part produces: a buffer's `poolByteOffset` and the `AllocateNode`s inserted here are what the backends turn into real allocations, and Chapter 53's flattened indices are computed against those offsets. Part XI's runtime owns the arena itself.
 
 ## What this part does not cover
 
@@ -38,7 +38,9 @@ node docs/part9/ch51-inplace-and-donation/labs/01-overwriting-your-own-input.mjs
 node docs/part9/ch52-scheduling-for-peak/labs/01-the-order-is-not-given.mjs
 ```
 
-One lab per chapter, and all four use only `compile` and the trace stream of Chapter 18 — nothing here reaches past the documented surface, which is a change from Parts VII and VIII and is possible because a memory plan is reported as an ordinary trace event. Each lab switches off the optimizations belonging to *later* chapters so that the number it reports is the one its own chapter is responsible for: Chapter 49's lab pins in-place reuse off, Chapter 50's turns pool allocation on, Chapter 51's sweeps both. Nothing in this part is timed, and every byte count, interval, offset and candidate count is deterministic and should reproduce exactly.
+One lab per chapter, and all four use only `compile` and the trace stream of Chapter 18 — nothing here reaches past the documented surface, which is a change from Parts VII and VIII and is possible because a memory plan is reported as an ordinary trace event.
+
+That has one cost, and [`docs/tools/freshness.mjs`](../tools/freshness.mjs) pays it. Reading the public surface means reading the *built* package, and a `dist/` older than `src/` would make these labs describe a compiler that no longer exists — quietly, since every number here is plausible. Chapter 51's lab against a stale build reports the shipped default allocating 2.5× *more* than the same program with the feature switched off, which is to the byte the defect §51.6 describes and closes. So the labs check the build's timestamp against the source and refuse to run rather than mislead. Parts VII, VIII and X read a built package too — the internals bundle rather than the public one — and share the same guard. Each lab switches off the optimizations belonging to *later* chapters so that the number it reports is the one its own chapter is responsible for: Chapter 49's lab pins in-place reuse off, Chapter 50's turns pool allocation on, Chapter 51's sweeps both. Nothing in this part is timed, and every byte count, interval, offset and candidate count is deterministic and should reproduce exactly.
 
 ## A note on what this part found
 

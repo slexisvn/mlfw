@@ -2,11 +2,6 @@ import {
   tensor, Linear, Sequential, compileWithBackward, compile, CPUTarget, manual_seed,
 } from '../../../../dist/index.node.js';
 
-// f : R^4 -> R^3. Its Jacobian is a 3x4 matrix.
-// Reverse mode produces one ROW per backward pass (a cotangent times J).
-// Finite differences produce one COLUMN per pair of forward evaluations.
-// Both fill the same matrix; which is cheaper depends only on 3 vs 4.
-
 const N_IN = 4;
 const N_OUT = 3;
 
@@ -22,7 +17,6 @@ function oneHot(i, n) {
   return tensor([Array.from({ length: n }, (_, k) => (k === i ? 1 : 0))]);
 }
 
-// --- rows, by reverse mode -------------------------------------------------
 const cf = compileWithBackward({ forward: fwd }, [x], { target: CPUTarget() });
 await settle(cf(x));
 
@@ -32,7 +26,6 @@ for (let i = 0; i < N_OUT; i++) {
   rows.push(grads[0].toArray()[0]);
 }
 
-// --- columns, by central differences ---------------------------------------
 const plain = compile({ forward: fwd }, [x], { target: CPUTarget() });
 await plain._ready;
 const EPS = 1e-3;

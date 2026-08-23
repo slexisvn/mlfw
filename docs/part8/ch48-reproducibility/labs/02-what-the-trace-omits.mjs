@@ -4,15 +4,6 @@ import {
   compileGraph, buildFunction, TensorType, ScalarType,
 } from '../../_internals.mjs';
 
-// Replay is only faithful if the trace is complete. This lab asks which
-// primitives record a step, what the tuning database does with the trace it
-// stores, and what a cache hit is actually keyed on.
-
-// -------------------------------------------------- 1. which primitives record
-
-// Every primitive that mutates guards `this.trace.record(...)` with
-// `!this._replaying`. The guard is in the method body, so the method's own
-// source says whether it records.
 const QUERIES = new Set(['getBlockSRef', 'getBlock', 'getLoops', 'getTrace', 'verify']);
 const members = Object.getOwnPropertyNames(Schedule.prototype)
   .filter((n) => n !== 'constructor' && !n.startsWith('_'))
@@ -33,10 +24,6 @@ console.log('  a composite. It sets a function attribute (schedule.ts:1099) and'
 console.log('  records nothing, so a schedule that tensorises has a trace that does');
 console.log('  not describe it.');
 
-// ------------------------------------- 1b. and one argument type that is not
-
-// Every primitive but one records names and numbers. `annotate` takes
-// `value: unknown` and records it verbatim (schedule.ts:1089).
 console.log('\n\n=== `annotate` records whatever it is given ===\n');
 {
   const base = await lowerToTir((a, b) => a.matmul(b), [randn([8, 8]), randn([8, 8])]);
@@ -64,8 +51,6 @@ console.log('  (Chapter 38), so nothing in the compiler can reach this today. It
 console.log('  argument type, not the value, that the trace format never constrained:');
 console.log('  `ScheduleArgs` is `readonly unknown[]` (trace.ts:1).');
 
-// -------------------------------------------------- 2. tensorize, watched
-
 console.log('\n\n=== `tensorize`, watched ===\n');
 const mm = await lowerToTir((a, b) => a.matmul(b), [randn([16, 16]), randn([16, 16])]);
 const ts = new Schedule(clonePrimFunc(mm));
@@ -76,8 +61,6 @@ console.log(`  trace steps before tensorize: ${before}   after: ${ts.trace.lengt
 console.log(`  the function did change:      TENSOR_INTRIN = ${JSON.stringify(ts.func.getAttr('tensor_intrin'))}`);
 console.log('\n  Replaying this trace reproduces the split and loses the intrinsic. The');
 console.log('  backend reads the attribute, so the two programs compile differently.');
-
-// -------------------------------------------------- 3. the sketch with no trace at all
 
 console.log('\n\n=== the register-blocked GPU matmul ===\n');
 const gpu = await lowerToTir((a, b) => a.matmul(b), [randn([128, 128]), randn([128, 128])], CUDATarget());
@@ -92,8 +75,6 @@ const record = new TuningRecord('gpu-key', rich.name, { config_index: 3 }, -1.0,
 console.log(`  the TuningRecord it would produce: traceData = ${JSON.stringify(record.traceData)}`);
 console.log('\n  An empty trace replays to the unscheduled function. Whether that');
 console.log('  matters depends on who reads the trace, which is the next section.');
-
-// -------------------------------------------------- 4. what a cache hit replays
 
 console.log('\n\n=== what a cache hit is keyed on, and what it ignores ===\n');
 const F = ScalarType.F32;
@@ -114,7 +95,6 @@ for (const e of entries) {
   console.log(`    ${' '.repeat(13)}traceData: ${(e.traceData || []).length} steps  ${steps}`);
 }
 
-// Corrupt every stored trace, then compile again through the cache.
 for (const e of entries) {
   const r = db.lookup(e.workloadKey);
   r.traceData = [{ primitive: 'thisWouldThrowIfAnyoneReplayedIt', args: [] }];
@@ -134,8 +114,6 @@ console.log('  also why the counter dependence of §48.5 has never been noticed:
 console.log('  cache re-derives instead of replaying, so it needs the sketch to still');
 console.log('  exist under the same name and to still accept the same parameters —');
 console.log('  a different set of assumptions from the ones a trace would need.');
-
-// -------------------------------------------------- 5. what a trace is bound to
 
 console.log('\n\n=== what a trace is bound to ===\n');
 const other = await lowerToTir((a, b) => a.matmul(b), [randn([14, 14]), randn([14, 14])]);

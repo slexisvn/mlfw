@@ -3,10 +3,6 @@ import {
 } from '../../../../dist/index.node.js';
 import { summarize } from '../../../tools/measure.mjs';
 
-// A scalar-valued function of n inputs. Reverse mode gets every partial
-// derivative from one backward pass; finite differences need one forward
-// evaluation per input. This lab measures both sides of that claim.
-
 function model() {
   manual_seed(0);
   return new Sequential(new Linear(8, 16), new ReLU(), new Linear(16, 1));
@@ -93,8 +89,6 @@ for (const n of [8, 32, 128]) {
   await settle(fwd(xn));
   const sFwd = await sample(async () => { await settle(fwd(xn)); }, 15);
 
-  // Measure the finite-difference sweep itself rather than extrapolating from a
-  // single forward pass: 2n perturbed evaluations, exactly as a user would run it.
   const base = xn.toArray()[0];
   const eps = 1e-3;
   const runFd = async () => {

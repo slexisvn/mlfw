@@ -4,19 +4,12 @@ import {
   STATEMENT_FEATURE_SCHEMA, AnalyticalCostModel, ScheduleValidator,
 } from '../../_internals.mjs';
 
-// The analytical cost model is seven bounded terms over twenty-three features.
-// This lab prints the terms for one nest, then asks what happens to them as the
-// schedule changes — first over the elementwise space, then over the whole of
-// the multi-level tiling space.
-
 const target = CPUTarget();
 const cm = new AnalyticalCostModel(target);
 const mm = await lowerToTir((a, b) => a.matmul(b), [randn([64, 64]), randn([64, 64])]);
 const blockMap = buildBlockMap(mm.body);
 const mini = extractBlockMini(mm, 'matmul_1', blockMap);
 const mlt = getSketchesForBlock(mm, 'matmul_1', target).find((s) => s.name === 'mlt_cpu');
-
-// -------------------------------------------------- 1. the two feature sets
 
 console.log('=== two extractors, two disjoint feature sets ===\n');
 const whole = FeatureExtractor.extract(mini);
@@ -34,8 +27,6 @@ console.log(`    ${unread.join(', ')}`);
 console.log('\n  `totalIterations` is in that list. The model has no term for how much');
 console.log('  work the nest does.');
 
-// -------------------------------------------------- 2. the breakdown
-
 console.log('\n\n=== the seven terms, on the lowered matmul nest ===\n');
 const est = cm.estimateFromFeatures(whole);
 const W = { parallelism: 2.0, vectorization: 1.5, memoryCoalescing: 2.0, occupancy: 1.0, arithmeticIntensity: 1.0, loopOverhead: -0.5, codeSize: -0.3 };
@@ -44,8 +35,6 @@ for (const [k, v] of Object.entries(est.breakdown)) {
   console.log(`  ${k.padEnd(20)}  ${v.toFixed(6).padStart(9)}  ${String(W[k]).padStart(7)}  ${(v * W[k]).toFixed(6).padStart(14)}`);
 }
 console.log(`  ${'total'.padEnd(20)}  ${' '.repeat(9)}  ${' '.repeat(7)}  ${est.score.toFixed(6).padStart(14)}`);
-
-// -------------------------------------------------- 3. a space with a gradient
 
 console.log('\n\n=== the elementwise space: a real gradient, from one term ===\n');
 const initMini = extractBlockMini(mm, 'matmul_init_0', blockMap);
@@ -64,8 +53,6 @@ console.log('  term is constant down the column, so the model\'s entire preferen
 console.log('  over this space is "make the innermost extent at least the vector');
 console.log('  width" — and Chapter 42 measured what the CPU backend does with a');
 console.log('  `@vectorized` annotation: nothing. On WASM the term is meaningful.');
-
-// -------------------------------------------------- 4. a space without one
 
 console.log('\n\n=== the tiling space: no gradient at all ===\n');
 const scores = new Map();
@@ -107,8 +94,6 @@ console.log('  extent. `innermostExtent` is the last loop the walk visits, which
 console.log('  `mlt_cpu` is the reduction axis: the one axis the structure never');
 console.log('  splits. So the term meant to score the vectorised loop is reading the');
 console.log('  loop below it.');
-
-// -------------------------------------------------- 5. the GPU path is different
 
 console.log('\n\n=== the same question on a GPU target ===\n');
 const gmm = await lowerToTir((a2, b2) => a2.matmul(b2), [randn([64, 64]), randn([64, 64])], WebGPUTarget());

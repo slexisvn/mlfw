@@ -7,13 +7,6 @@ import {
   VariableNode, IntImmNode, MathOpNode, ForNode, ForKind,
 } from '../../_internals.mjs';
 
-// A sketch generator is a classifier followed by a constructor: look at the
-// block's shape, pick a skeleton, hand back the holes. This lab runs the
-// classifier on the blocks of four programs, instantiates the skeleton it
-// picks for a matmul, and then looks at the two rules that never fire.
-
-// ------------------------------------------------ 1. the derivation table
-
 const CASES = [
   ['a matmul', (a, b) => a.matmul(b), [randn([16, 16]), randn([16, 16])]],
   ['matmul then relu', (a, b) => a.matmul(b).relu(), [randn([16, 16]), randn([16, 16])]],
@@ -42,8 +35,6 @@ console.log('  takes any other reduction. Priority 30 matches everything left, s
 console.log('  the derivation is total. The classification is structural: nothing');
 console.log('  in it looks at the block name.');
 
-// ------------------------------------------------ 2. a hole is a finite list
-
 const pf = await lowerToTir((a, b) => a.matmul(b), [randn([16, 16]), randn([16, 16])]);
 console.log('\n\n=== the holes of `mlt_cpu` on a 16x16x16 matmul ===\n');
 const mlt = getSketchesForBlock(pf, 'matmul_1', CPUTarget()).find((s) => s.name === 'mlt_cpu');
@@ -68,8 +59,6 @@ console.log('  outermost spatial level and vectorises the innermost one. The fac
 console.log('  appear only as extents and as multipliers in the two bindings — the');
 console.log('  mixed-radix reconstruction of Proposition 45.5, and no guard appears,');
 console.log('  because at every step the split factor divides the extent exactly.');
-
-// ------------------------------------------------ 3. the two rules that cannot fire
 
 console.log('\n\n=== `ssrsrs_cpu`: the standard reduction tiling, and what stops it ===\n');
 const ssrsrs = getSketchesForBlock(pf, 'matmul_1', CPUTarget()).find((s) => s.name === 'ssrsrs_cpu');
@@ -97,7 +86,6 @@ console.log(`\n  matmul_1: enclosing spatial loop variables [${info.loops.filter
 console.log(`            store subscript variables        [${blk.body.indices.map((i) => i.name)}]`);
 console.log(`            findFusibleConsumer -> ${findFusibleConsumer(relu, rdag, 'matmul_1', classifyBlock)}`);
 
-// The same test on a nest that indexes with its loop variables directly.
 function directNest() {
   const A = new Buffer('A', [8], 'f32', 'global'), T = new Buffer('T', [8], 'f32', 'global'), C = new Buffer('C', [8], 'f32', 'global');
   const i = new VariableNode('i', 'int32'), j = new VariableNode('j', 'int32');
@@ -120,8 +108,6 @@ console.log('  lowering rules emit binds `v...` iteration variables to `...` loo
 console.log('  variables, so the two name lists never match and the comparison always');
 console.log('  fails. The mechanism works; the shape it was written for is not the');
 console.log('  shape this compiler produces.');
-
-// ------------------------------- 3b. and one primitive that fires when it should not
 
 console.log('\n\n=== what the primitives refuse, and what they do not ===\n');
 {
@@ -168,8 +154,6 @@ console.log('\n  Nothing in this compiler asks for it — `createRfactorSketch` 
 console.log('  axes drawn from `blockInfo.reductionLoopVars` (sketch_generators.ts:34) —');
 console.log('  and the search path runs `ScheduleValidator`, which rejects the result.');
 console.log('  It is a precondition the primitive relies on its callers to hold.');
-
-// ------------------------------------------------ 4. the sketch that is not a schedule
 
 console.log('\n\n=== the GPU escape hatch: a sketch that replaces the body ===\n');
 const gpu = await lowerToTir((a, b) => a.matmul(b), [randn([128, 128]), randn([128, 128])], CUDATarget());

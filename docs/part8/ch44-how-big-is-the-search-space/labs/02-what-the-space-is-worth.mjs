@@ -3,14 +3,6 @@ import {
   toKernel, AnalyticalCostModel, FeatureExtractor,
 } from '../../_internals.mjs';
 
-// Counting a space says nothing about whether it is worth searching. This lab
-// compiles eight points of one sketch's space, runs all eight, and asks two
-// questions: do they agree, and do they cost the same?
-//
-// The timings below are MEASURED. They will not reproduce: they depend on the
-// machine, the JIT and what else the CPU is doing. Everything else in this lab
-// is deterministic and should match exactly.
-
 const N = 256;
 const target = CPUTarget();
 const base = await lowerToTir((a, b) => a.matmul(b), [randn([N, N]), randn([N, N])]);

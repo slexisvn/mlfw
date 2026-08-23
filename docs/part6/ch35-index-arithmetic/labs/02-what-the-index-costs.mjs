@@ -2,9 +2,6 @@ import {
   compile, CPUTarget, randn,
 } from '../../../../dist/index.node.js';
 
-// Two reshapes that move exactly the same number of elements. One has an index
-// the analyser can decompose; the other does not. Nothing else differs.
-
 async function build(inShape, outShape) {
   const x = randn(inShape);
   const compiled = compile({ forward: (t) => t.reshape(outShape) }, [x], {

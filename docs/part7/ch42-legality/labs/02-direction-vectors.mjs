@@ -5,10 +5,6 @@ import {
   BufferStoreNode, BufferLoadNode, VariableNode, IntImmNode, MathOpNode, ForKind,
 } from '../../_internals.mjs';
 
-// A permutation is legal when it reverses no dependence. This lab reads the
-// direction vectors of two nests and then asks `reorder` about every
-// permutation of each.
-
 const DIR = (m) => (m === Direction.EQ ? '='
   : m === Direction.LT ? '<'
   : m === Direction.GT ? '>'
@@ -47,8 +43,6 @@ async function tryEveryOrder(label, make, blockName) {
   }
 }
 
-// ---------------------------------------------------------------- a matmul
-
 const mm = () => lowerToTir((a, b) => a.matmul(b), [randn([4, 6]), randn([6, 5])])
   .then((pf) => new Schedule(pf));
 
@@ -68,16 +62,6 @@ console.log('  first, and these axes are declared DataPar/DataPar/CommReduce, so
 console.log('  the dependence above was never consulted. It would have accepted');
 console.log('  all six as well, but it was not asked.');
 
-// ------------------------------------------------------- a hand-built stencil
-
-// No program this compiler lowers has a genuinely order-sensitive nest: every
-// same-buffer read a lowering rule emits is at the same subscript as the write.
-// Here is the smallest nest that does not have that property, built by hand.
-//    for i, j in [0,4):  A[i + 1, j] = A[i, j + 1] + 1     over a 5x5 buffer
-//
-// `tagged` chooses how the block declares its two axes: as untyped iteration
-// variables, the shape the tests use, or as DataPar BlockRealizeNodes, the
-// shape every lowering rule emits.
 function stencilFunc(tagged) {
   const A = new Buffer('A', [5, 5], 'f32', 'global');
   const i = new VariableNode('i', 'int32');
@@ -114,7 +98,6 @@ console.log('  first, and a block whose axes are all DataPar permits any');
 console.log('  permutation, so the dependence above is never consulted. The');
 console.log('  declaration is false: the two iterations are not independent.');
 
-// And the two programs compute different things.
 const runStencil = (func) => {
   const A = new Float32Array(25).fill(0);
   toKernel(func).call(A);

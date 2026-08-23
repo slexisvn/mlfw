@@ -2,13 +2,8 @@ import {
   lowerToTir, printTensorIR, Schedule, randn,
 } from '../../_internals.mjs';
 
-// The four primitives that change the shape of a nest, applied one at a time to
-// the same lowered matmul, with the nest printed after each.
-
 const build = async () => new Schedule(await lowerToTir((a, b) => a.matmul(b), [randn([12, 8]), randn([8, 6])]));
 
-// Print only the last top-level statement of the function — the accumulation
-// nest. The zeroing nest above it never changes and would triple the output.
 function nest(sch) {
   const lines = printTensorIR(sch.func).split('\n');
   let start = 0;
@@ -18,8 +13,6 @@ function nest(sch) {
 
 console.log('=== the nest as lowered ===');
 console.log(nest(await build()));
-
-// -------------------------------------------------------------------- split
 
 {
   const sch = await build();
@@ -37,8 +30,6 @@ console.log(nest(await build()));
   console.log(nest(sch));
 }
 
-// --------------------------------------------------------------------- fuse
-
 {
   const sch = await build();
   const [m, n] = sch.getLoops('matmul_1');
@@ -47,8 +38,6 @@ console.log(nest(await build()));
   console.log(nest(sch));
 }
 
-// ------------------------------------------------------------------ reorder
-
 {
   const sch = await build();
   const [m, n, k] = sch.getLoops('matmul_1');
@@ -56,8 +45,6 @@ console.log(nest(await build()));
   console.log('\n=== reorder(k, m, n) — the reduction axis moved outermost ===');
   console.log(nest(sch));
 }
-
-// --------------------------------------------------------------------- tile
 
 {
   const sch = await build();

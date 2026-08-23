@@ -3,22 +3,16 @@ import {
   printTensorIR, resetVarCounter, clonePrimFunc, toKernel,
 } from '../../_internals.mjs';
 
-// A schedule trace is a list of (primitive, arguments) pairs. This lab records
-// one, serialises it, replays it into a fresh program, and then finds the piece
-// of state the trace does not carry.
-
 const target = CPUTarget();
 const mk = () => lowerToTir((a, b) => a.matmul(b), [randn([8, 8]), randn([8, 8])]);
-
-// -------------------------------------------------- 1. what a trace contains
 
 console.log('=== recording ===\n');
 const p1 = await mk();
 const s1 = new Schedule(p1);
 s1.split(s1.getLoops('matmul_1')[0], 4);
 {
-  const l = s1.getLoops('matmul_1');            // [m_outer, m_inner, n, k]
-  s1.reorder(l[0], l[2], l[1]);                 // -> m_outer, n, m_inner, k
+  const l = s1.getLoops('matmul_1');
+  s1.reorder(l[0], l[2], l[1]);
 }
 {
   const l = s1.getLoops('matmul_1');
@@ -38,10 +32,8 @@ const ir1 = printTensorIR(p1);
 console.log('\n  the nest it produced:');
 console.log(ir1.split('\n').filter((l) => /for /.test(l)).map((l) => '   ' + l.trim()).join('\n'));
 
-// -------------------------------------------------- 2. replay
-
 console.log('\n\n=== replaying into a fresh copy of the same program ===\n');
-const p2 = await mk();                          // lowerToTir resets the counter
+const p2 = await mk();
 const s2 = new Schedule(p2);
 ScheduleTrace.deserialize(recorded).replay(s2);
 console.log(`  identical IR: ${printTensorIR(p2) === ir1}`);
@@ -50,11 +42,9 @@ console.log('\n  `replay` sets `_replaying` around each call (trace.ts:54) and e
 console.log('  primitive guards its `trace.record` with it, so replaying a trace into');
 console.log('  a schedule does not duplicate the trace.');
 
-// -------------------------------------------------- 3. the state the trace does not carry
-
 console.log('\n\n=== the same trace, replayed with the counter in another state ===\n');
 const p3 = await mk();
-new Schedule(clonePrimFunc(p3)).split('ls0_6', 2);   // two fresh variables
+new Schedule(clonePrimFunc(p3)).split('ls0_6', 2);
 const s3 = new Schedule(p3);
 try {
   ScheduleTrace.deserialize(recorded).replay(s3);
@@ -84,8 +74,6 @@ console.log('\n  `resetVarCounter` is the only way to set the counter, it is exp
 console.log('  from the schedule module for exactly this reason, and `TuningRecord`');
 console.log('  (tuning_db.ts:29) does not store it.');
 
-// -------------------------------------------------- 4. replay is not verification
-
 console.log('\n\n=== a trace records what was done, not that it was right ===\n');
 const p4 = await mk();
 try {
@@ -102,8 +90,6 @@ console.log('  arguments are wrong gets whatever the primitive does with them, a
 console.log('  step that fails leaves every earlier step in place. There is no');
 console.log('  transaction and no validation pass: `ScheduleValidator` is run by the');
 console.log('  tuning session (session.ts:186), never by `replay`.');
-
-// -------------------------------------------------- 5. and the replayed program runs
 
 const A = new Float32Array(64), B = new Float32Array(64);
 for (let i = 0; i < 64; i++) { A[i] = Math.sin(i * 0.5); B[i] = Math.cos(i * 0.25); }

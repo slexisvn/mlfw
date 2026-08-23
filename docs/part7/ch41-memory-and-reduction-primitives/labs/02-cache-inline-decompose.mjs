@@ -4,8 +4,6 @@ import {
 
 const show = (sch, from = 4) => console.log(printTensorIR(sch.func).split('\n').slice(from, -1).join('\n'));
 
-// ----------------------------------------------------------- computeInline
-
 const inline = new Schedule(await lowerToTir((x) => x.mul(x).add(1.0), [randn([2, 3])]));
 console.log(`=== two blocks, one intermediate: ${inline.state.allBlockNames().join(', ')} ===`);
 show(inline);
@@ -23,8 +21,6 @@ console.log('\n  Note the operand is now duplicated: `buf_1[..] * buf_1[..]` was
 console.log('  load of buf_5 and is now two loads of buf_1. Inlining trades memory');
 console.log('  traffic for recomputation, and nothing here counts the trade.');
 
-// ------------------------------------------------------------- cacheRead
-
 const cr = new Schedule(await lowerToTir((a, b) => a.matmul(b), [randn([4, 6]), randn([6, 5])]));
 cr.cacheRead('matmul_1', cr.getBlock('matmul_1').reads[0].buffer.name, 'local');
 console.log('\n=== cacheRead("matmul_1", "buf_1", "local") ===');
@@ -36,16 +32,12 @@ console.log('  (schedule.ts:1014) and not from the region the block reads. On a 
 console.log('  the useful version of this primitive stages one tile inside the');
 console.log('  k-loop; that version would need computeAt, which §41.6 gets to.');
 
-// ------------------------------------------------------------ cacheWrite
-
 const cw = new Schedule(await lowerToTir((a, b) => a.matmul(b), [randn([4, 6]), randn([6, 5])]));
 cw.cacheWrite('matmul_1', 'buf_5', 'local');
 console.log('\n=== cacheWrite("matmul_1", "buf_5", "local") ===');
 show(cw, 15);
 console.log('\n  Same shape, mirrored: the block now writes the cache and a flush');
 console.log('  nest copies it back afterwards.');
-
-// ---------------------------------------------------- what runs, and what not
 
 console.log('\n=== do the four memory primitives change the answer? ===\n');
 const A = new Float32Array([...Array(24).keys()].map((i) => i + 1));
@@ -73,8 +65,6 @@ console.log('  `const int x = x;`, because cacheWrite reuses one VariableNode as
 console.log('  both the loop variable and the block iteration variable');
 console.log('  (schedule.ts:767). Neither is caught by anything, and neither');
 console.log('  matters today: no code in src/ calls cacheWrite.');
-
-// ------------------------------------------------------ decomposeReduction
 
 const dr = new Schedule(await lowerToTir((x) => x.sum(1), [randn([2, 8])]));
 console.log('\n=== decomposeReduction on a lowered reduction ===\n');

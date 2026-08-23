@@ -2,10 +2,6 @@ import {
   compile, compileWithBackward, CPUTarget, TraceLevel, tensor, randn, ones, ops, nn,
 } from '../../../../dist/index.node.js';
 
-// What actually arrives at the lowering phase, and what each arrival becomes.
-// The middle column is the graph after every pass of Parts III and IV; the
-// right column is the blocks the lowering rules emitted for it.
-
 async function pair(label, fn, inputs) {
   const snaps = new Map();
   const compiled = compile({ forward: fn }, inputs, {
@@ -91,9 +87,6 @@ console.log('  can still be present when the lowering phase starts.');
 console.log('\n\n=== a rule whose index comes from the data ===\n');
 header();
 await pair('table.gather(0, idx)', (t, i) => t.gather(0, i), [randn([5, 3]), tensor([[0, 2, 3], [1, 1, 4]], 'i32')]);
-
-// One rule in the registry has no forward producer at all. It is reached only
-// through the backward pass of a convolution, which flips the kernel.
 
 console.log('\n\n=== a rule only the backward pass reaches ===\n');
 

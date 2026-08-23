@@ -5,15 +5,6 @@ import {
   Schedule, extractBlockMini, buildBlockMap, ScheduleValidator,
 } from '../../_internals.mjs';
 
-// The search is an elitist genetic algorithm over a seeded LCG. This lab looks
-// at the three parts of that sentence in turn: the generator, the elitism, and
-// the budget that stops it.
-
-// -------------------------------------------------- 1. the generator
-
-// search.ts:21 — x <- (1664525 x + 1013904223) mod 2^31, and `_rng(max)` is
-// `x % max`. The modulus is a power of two, so the low k bits of x are
-// themselves an LCG modulo 2^k.
 const nextLcg = (s) => (s * 1664525 + 1013904223) & 0x7fffffff;
 console.log('=== the low bits of a power-of-two LCG ===\n');
 console.log('  multiplier 1664525 mod 4 =', 1664525 % 4, '   increment 1013904223 mod 4 =', 1013904223 % 4);
@@ -29,15 +20,11 @@ console.log('  that modulus and steps by a constant. For 5 and 48 the high bits 
 console.log('  involved and the values look random. The number of sketches is a');
 console.log('  power of two on both CPU (four) and GPU (two).');
 
-// -------------------------------------------------- 2. what that does to the population
-
 console.log('\n\n=== `_initPopulation` draws the sketch index with `_rng(sketches.length)` ===\n');
 const mm = await lowerToTir((a, b) => a.matmul(b), [randn([64, 64]), randn([64, 64])]);
 const sketches = getSketchesForBlock(mm, 'matmul_1', CPUTarget());
 console.log(`  sketches: ${sketches.map((s, i) => `${i}=${s.name}(${s.variables.length}v)`).join('  ')}\n`);
 
-// Replay `_initPopulation`'s draw order without running the search: one draw
-// for the sketch, then one per search variable of whichever sketch it picked.
 for (const seed of [1, 7, 42, 123]) {
   let s = seed;
   const rng = (max) => { s = nextLcg(s); return s % max; };
@@ -77,8 +64,6 @@ console.log('  `matmul_1` — the only block in this function that costs anythin
 console.log('  gets no tuning result at all. `RandomSearch` is immune because it');
 console.log('  iterates over the sketch list rather than sampling it (search.ts:62).');
 
-// -------------------------------------------------- 3. elitism
-
 console.log('\n\n=== elitism: best-so-far is monotone, and the memo is why ===\n');
 const mini = extractBlockMini(mm, 'matmul_1', buildBlockMap(mm.body));
 const mlt = sketches.find((s) => s.name === 'mlt_cpu');
@@ -86,7 +71,6 @@ const scoreOf = (sketch, params) => {
   const work = clonePrimFunc(mini);
   try { sketch.instantiate(params)(new Schedule(work), 'matmul_1', CPUTarget()); } catch (e) { return null; }
   if (ScheduleValidator.validate(work).length > 0) return null;
-  // a synthetic objective with a gradient: prefer a large outermost tile
   return Math.log2(params.s0[0] * params.s1[0] + 1) - 0.1 * params.s0[3];
 };
 let calls = 0;
@@ -118,10 +102,7 @@ console.log('  present in generation g+1. The `evalMemo` cache (search.ts:116) i
 console.log('  makes that argument sound — a re-evaluated elite must score the same,');
 console.log('  and here it is not re-evaluated at all.');
 
-// -------------------------------------------------- 4. the budget
-
 console.log('\n\n=== the deadline, and how far past it a search can run ===\n');
-// one variable, so no two individuals collide in the evaluation memo
 const dummy = new ScheduleSketch('s', [new SearchVariable('x', Array.from({ length: 97 }, (_, i) => i))], () => {});
 for (const [label, make] of [
   ['RandomSearch(numTrials 1000)', (d) => new RandomSearch({ numTrials: 1000, seed: 1, deadline: d })],
@@ -139,8 +120,6 @@ console.log('  generation (search.ts:125) and then evaluates a whole population,
 console.log('  overruns by up to `populationSize` evaluations — plus one more pass,');
 console.log('  because the final scoring loop (search.ts:157) has no deadline test at');
 console.log('  all. Both are bounded; neither is tight.');
-
-// -------------------------------------------------- 5. the task scheduler
 
 console.log('\n\n=== the task scheduler, with the gains it is designed for ===\n');
 const policy = new GradientSchedulerPolicy();
