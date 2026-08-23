@@ -1,3 +1,4 @@
+import { onProcessExit } from '#io/exit_hook';
 import { wgslType, wgslBytes } from '../util/dtype_map.js';
 import type { WebGPUBinding } from '../backend/webgpu/codegen.js';
 import type { NumericTypedArray } from '../tensor/types/dtype.js';
@@ -131,9 +132,9 @@ async function ensureDevice(): Promise<GPUDevice> {
     if (adapter.features && adapter.features.has('shader-f16')) requiredFeatures.push('shader-f16');
     _gpuDevice = await adapter.requestDevice({ requiredLimits, requiredFeatures });
 
-    if (!_exitRegistered && typeof process !== 'undefined' && process.on) {
+    if (!_exitRegistered) {
       _exitRegistered = true;
-      process.on('exit', () => {
+      onProcessExit(() => {
         if (_gpuDevice) {
           _gpuDevice.destroy();
           _gpuDevice = null;

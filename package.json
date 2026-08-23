@@ -20,6 +20,14 @@
       "browser": "./src/runtime/browser/fs.ts",
       "default": "./src/runtime/node/fs.ts"
     },
+    "#io/exit_hook": {
+      "browser": "./src/runtime/browser/exit_hook.ts",
+      "default": "./src/runtime/node/exit_hook.ts"
+    },
+    "#io/progress": {
+      "browser": "./src/runtime/browser/progress.ts",
+      "default": "./src/runtime/node/progress.ts"
+    },
     "#io/wasm_pool": {
       "browser": "./src/runtime/browser/wasm_pool.ts",
       "default": "./src/runtime/node/wasm_pool.ts"

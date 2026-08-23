@@ -16,6 +16,11 @@ export interface MemFs {
   remove(path: string): void;
 }
 
+export interface ProgressSink {
+  update(line: string): void;
+  finish(): void;
+}
+
 export interface WasmInstance {
   exports: WebAssembly.Exports;
   memory: WebAssembly.Memory;

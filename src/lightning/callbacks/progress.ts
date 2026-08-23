@@ -1,3 +1,4 @@
+import { progress } from '#io/progress';
 import { Callback } from './callback.js';
 import type { TrainerLike } from '../types.js';
 
@@ -7,17 +8,11 @@ type ProgressOptions = {
   barLength?: number;
 };
 
-function stdoutWrite(text: string): void {
-  (globalThis as unknown as { process: { stdout: { write(value: string): void } } }).process.stdout.write(text);
-}
-
 export class ProgressCallback extends Callback {
   private _barLength: number;
   private _trainBatchCount: number;
   private _valBatchCount: number;
   private _epochStartTime: number;
-  private _lastLen: number;
-  private _active: boolean;
 
   constructor({ barLength = 24 }: ProgressOptions = {}) {
     super();
@@ -25,8 +20,6 @@ export class ProgressCallback extends Callback {
     this._trainBatchCount = 0;
     this._valBatchCount = 0;
     this._epochStartTime = 0;
-    this._lastLen = 0;
-    this._active = false;
   }
 
   onTrainEpochStart(trainer: TrainerLike, _model: unknown): void {
@@ -48,9 +41,7 @@ export class ProgressCallback extends Callback {
   }
 
   onTrainEnd(_trainer: unknown, _model: unknown): void {
-    if (this._active) stdoutWrite('\n');
-    this._active = false;
-    this._lastLen = 0;
+    progress.finish();
   }
 
   onValidationEpochStart(_trainer: unknown, _model: unknown): void {
@@ -87,11 +78,7 @@ export class ProgressCallback extends Callback {
     const eta = rate > 0 ? (total - current) / rate : 0;
     const timing = `${fmtTime(elapsed)}<${fmtTime(eta)}, ${rate.toFixed(2)}it/s`;
     const metrics = this._formatProgBarMetrics(state);
-    const line = `${head}: ${pct}%|${bar}| ${current}/${total} [${timing}${metrics}]`;
-    const pad = Math.max(0, this._lastLen - line.length);
-    stdoutWrite('\r' + line + ' '.repeat(pad));
-    this._lastLen = line.length;
-    this._active = true;
+    progress.update(`${head}: ${pct}%|${bar}| ${current}/${total} [${timing}${metrics}]`);
   }
 
   private _bar(frac: number): string {
