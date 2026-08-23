@@ -1,7 +1,6 @@
 import { MathOpNode, FloatImmNode, IntImmNode, BufferStoreNode, BufferLoadNode, BlockNode, SeqNode, CallExternNode, IfThenElseNode, CompareNode, AllocateNode } from '../../../ir/tensor/nodes.js';
 import { Buffer } from '../../../ir/tensor/buffer.js';
-import { DYNAMIC } from '../../../ir/graph/types.js';
-import { registerLoweringRule, buildSpatialNest, wrapLoopsWithNodes, concatIterVars, markCommReduce } from '../lowering_registry.js';
+import { registerLoweringRule, buildSpatialNest, wrapLoopsWithNodes, concatIterVars, markCommReduce, buildReduceGeometry, splitReduceDims, emitReduceMeanDiv } from '../lowering_registry.js';
 import { isDtypeInt } from '../../../../util/dtype_map.js';
 import type { TirNode } from '../../../ir/tensor/nodes.js';
 import type { SpatialNest } from '../lowering_registry.js';
@@ -19,6 +18,8 @@ function argReduceSentinel(dtype: string, isGt: boolean): TirNode {
   return new FloatImmNode(isGt ? -Infinity : Infinity);
 }
 
+const REDUCE_NEST_PREFIXES = Object.freeze({ init: 'si', spatial: 'sa', reduce: 'r', reduceIter: 'rv' });
+
 const REDUCE_COMBINERS: Record<string, ReduceCombiner> = {
   'sum':  (a, b) => new MathOpNode('+', a, b),
   'mean': (a, b) => new MathOpNode('+', a, b),
@@ -29,67 +30,34 @@ const REDUCE_COMBINERS: Record<string, ReduceCombiner> = {
   'or':   (a, b, dt) => new CallExternNode('max', [a, b], dt)
 };
 
+export function getReduceCombiner(rType: string): ReduceCombiner | undefined {
+  return REDUCE_COMBINERS[rType];
+}
+
 export function register(): void {
   registerLoweringRule('reduce', (ctx, op, inputs, outputs) => {
     const inBuf = inputs[0];
     const initBuf = inputs[1];
     const outBuf = outputs[0];
-    const dims = op.getAttr<readonly number[]>('dimensions') || [];
     const rType = op.getAttr<string>('reduce_type') || 'sum';
-    const dimSet = new Set(dims);
-    const spatialDims: number[] = [];
-    const reduceDims: number[] = [];
-    for (let i = 0; i < inBuf.shape.length; i++) {
-      (dimSet.has(i) ? reduceDims : spatialDims).push(i);
-    }
-
-    const initNest = buildSpatialNest(ctx, 'si', spatialDims, inBuf.shape, inBuf);
-    const initStore = new BufferStoreNode(outBuf, initNest.indices, new BufferLoadNode(initBuf, []));
-    const initBlock = new BlockNode(ctx.blockName('reduce_init'), initNest.ivs, [{ buffer: initBuf }], [{ buffer: outBuf }], initStore);
-    const initBody = spatialDims.length > 0 ? initNest.wrap(initBlock) : initBlock;
-
-    const accNest = buildSpatialNest(ctx, 'sa', spatialDims, inBuf.shape, inBuf);
-    const rVars = ctx.allocVarArray('r', reduceDims.length);
-    const rIvs = markCommReduce(ctx.allocBindArray('rv', rVars));
-    const inIndices: TirNode[] = new Array(inBuf.shape.length);
-    for (let i = 0; i < spatialDims.length; i++) inIndices[spatialDims[i]] = accNest.ivs[i].iterVar;
-    for (let i = 0; i < reduceDims.length; i++) inIndices[reduceDims[i]] = rIvs[i].iterVar;
-    const loadA = new BufferLoadNode(outBuf, accNest.indices);
-    const loadB = new BufferLoadNode(inBuf, inIndices);
     const combiner = REDUCE_COMBINERS[rType];
     if (!combiner) throw new Error(`reduction lowering: unsupported reduce_type '${rType}'`);
-    const store = new BufferStoreNode(outBuf, accNest.indices, combiner(loadA, loadB, outBuf.dtype));
-    const rExtentNodes: TirNode[] = new Array(reduceDims.length);
-    for (let i = 0; i < reduceDims.length; i++) rExtentNodes[i] = ctx.extentNode(inBuf.shape[reduceDims[i]], inBuf, reduceDims[i]);
-    const accBlock = new BlockNode(ctx.blockName('reduce_acc'), concatIterVars(accNest.ivs, rIvs), [{ buffer: inBuf }], [{ buffer: outBuf }], store);
-    let accBody: TirNode = wrapLoopsWithNodes(accBlock, rVars, rExtentNodes);
-    accBody = accNest.wrap(accBody);
+    const { spatialDims, reduceDims } = splitReduceDims(inBuf.shape.length, op.getAttr<readonly number[]>('dimensions') || []);
+    const geo = buildReduceGeometry(ctx, inBuf.shape, inBuf, spatialDims, reduceDims, REDUCE_NEST_PREFIXES);
 
-    const parts: TirNode[] = [initBody, accBody];
+    const initStore = new BufferStoreNode(outBuf, geo.init.indices, new BufferLoadNode(initBuf, []));
+    const initBlock = new BlockNode(ctx.blockName('reduce_init'), geo.init.ivs, [{ buffer: initBuf }], [{ buffer: outBuf }], initStore);
+    const initBody = spatialDims.length > 0 ? geo.init.wrap(initBlock) : initBlock;
 
+    const loadA = new BufferLoadNode(outBuf, geo.spatial.indices);
+    const loadB = new BufferLoadNode(inBuf, geo.fullIdx);
+    const accStore = new BufferStoreNode(outBuf, geo.spatial.indices, combiner(loadA, loadB, outBuf.dtype));
+    const accBlock = new BlockNode(ctx.blockName('reduce_acc'), geo.accIvs, [{ buffer: inBuf }], [{ buffer: outBuf }], accStore);
+
+    const parts: TirNode[] = [initBody, geo.wrapAcc(accBlock)];
     if (rType === 'mean') {
-      let staticSize = 1;
-      const dynExtents: TirNode[] = [];
-      for (let i = 0; i < reduceDims.length; i++) {
-        const d = inBuf.shape[reduceDims[i]];
-        if (d === DYNAMIC) dynExtents.push(ctx.extentNode(DYNAMIC, inBuf, reduceDims[i]));
-        else staticSize *= d as number;
-      }
-      const meanNest = buildSpatialNest(ctx, 'sm', spatialDims, inBuf.shape, inBuf);
-      const meanLoad = new BufferLoadNode(outBuf, meanNest.indices);
-      let divExpr: TirNode;
-      if (dynExtents.length === 0) {
-        divExpr = new MathOpNode('*', meanLoad, new FloatImmNode(1.0 / staticSize));
-      } else {
-        let divisor: TirNode = new IntImmNode(staticSize);
-        for (const e of dynExtents) divisor = new MathOpNode('*', divisor, e);
-        divExpr = new MathOpNode('/', meanLoad, divisor);
-      }
-      const meanStore = new BufferStoreNode(outBuf, meanNest.indices, divExpr);
-      const meanBlock = new BlockNode(ctx.blockName('mean_div'), meanNest.ivs, [{ buffer: outBuf }], [{ buffer: outBuf }], meanStore);
-      parts.push(spatialDims.length > 0 ? meanNest.wrap(meanBlock) : meanBlock);
+      parts.push(emitReduceMeanDiv(ctx, outBuf, inBuf.shape, inBuf, spatialDims, reduceDims, 'sm', 'mean_div'));
     }
-
     return new SeqNode(parts);
   });
 

@@ -243,7 +243,7 @@ describe('elementwise with CSE — common subexpressions eliminated', () => {
 
     const result = compile(func);
     const src = result.getSource('cse_test');
-    expect(src).toMatch(/\bcse\d+/);
+    expect(src).toMatch(/\bcse_\d+/);
     const addCount = (src.match(/buf_\d+\[i\d+_\d+\]\s*\+\s*buf_\d+\[i\d+_\d+\]/g) || []).length;
     expect(addCount).toBe(1);
     const [out] = runKernel(result, 'cse_test', [[1, 2, 3], [4, 5, 6]], [[3]]);

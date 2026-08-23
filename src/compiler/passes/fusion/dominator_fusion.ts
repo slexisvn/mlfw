@@ -93,7 +93,7 @@ export class DominatorFusionPass extends FunctionPass {
   _explain(group: FusionGroup, fuse: boolean, reason: string | null): void {
     if (!this.trace || !this.trace.explainsEnabled) return;
     const ops = group.ops.map(o => o.opName);
-    this.trace.explain('fusion', ops.join('+'), fuse ? 'fused' : 'not-fused', reason || null, { groupSize: ops.length, strategy: 'dominator' });
+    this.trace.explain('fusion', ops.join('+'), fuse ? 'grouped' : 'not-grouped', reason || null, { groupSize: ops.length, strategy: 'dominator' });
   }
 
   _buildGroups(topo: readonly Operation[], pdom: PostDominance): FusionGroup[] {

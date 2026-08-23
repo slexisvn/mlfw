@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
-  ForNode, BlockNode, BufferStoreNode, BufferLoadNode,
+  ForNode, BlockNode, BufferStoreNode, BufferLoadNode, LetStmtNode, SeqNode,
   VariableNode, IntImmNode, MathOpNode, ForKind, PrimFunc,
 } from '../../../src/compiler/ir/tensor/nodes.js';
 import { Buffer } from '../../../src/compiler/ir/tensor/buffer.js';
@@ -78,6 +78,33 @@ describe('parallelize/vectorize reject reduction loops before mutating the IR', 
     const sch = new Schedule(matmulFunc());
     expect([...reductionLoopVars(sch.getBlock('mm'))]).toEqual(['k']);
     expect([...reductionLoopVars(sch.getBlock('mm'))]).not.toContain('m');
+  });
+
+  it('keeps a declared reduction axis reducing when a second store indexes it', () => {
+    // A fused reduction nest stores the elementwise value it is about to accumulate, so the
+    // reduction axis does appear in a write index. Binding it to a thread would race the sum.
+    const X = new Buffer('X', [4, 6], 'float32', 'global');
+    const T = new Buffer('T', [4, 6], 'float32', 'global');
+    const S = new Buffer('S', [4], 'float32', 'global');
+    const i = new VariableNode('i', 'int32');
+    const r = new VariableNode('r', 'int32');
+    const t = new VariableNode('t', 'float32');
+    const body = new SeqNode([
+      new BufferStoreNode(T, [i, r], t),
+      new BufferStoreNode(S, [i], new MathOpNode('+', new BufferLoadNode(S, [i]), t)),
+    ]);
+    const block = new BlockNode('fused', [spatialIter(i), reduceIter(r)],
+      [{ buffer: X }], [{ buffer: S }, { buffer: T }],
+      new LetStmtNode(t, new BufferLoadNode(X, [i, r]), body));
+    let nest = block;
+    for (const [v, e] of [[r, 6], [i, 4]]) {
+      nest = new ForNode(v, new IntImmNode(0), new IntImmNode(e), ForKind.SERIAL, nest);
+    }
+    const func = new PrimFunc('fused', [], nest, new Map([['X', X], ['T', T], ['S', S]]));
+
+    const vars = reductionLoopVars(new Schedule(func).getBlock('fused'));
+    expect([...vars]).toEqual(['r']);
+    expect(vars.has('t')).toBe(false);
   });
 });
 

@@ -82,6 +82,7 @@ export type LIRAccumulatorConfig = Readonly<{
   body: IRStmtNode;
   flushStore: LIRFlatStoreNode;
   initBody?: IRStmtNode | null;
+  prologue?: IRStmtNode | null;
 }>;
 
 export class LIRAccumulatorNode extends TensorNode {
@@ -96,6 +97,7 @@ export class LIRAccumulatorNode extends TensorNode {
   body: IRStmtNode;
   flushStore: LIRFlatStoreNode;
   initBody: IRStmtNode | null;
+  prologue: IRStmtNode | null;
 
   constructor(config: LIRAccumulatorConfig) {
     super();
@@ -109,10 +111,12 @@ export class LIRAccumulatorNode extends TensorNode {
     this.body = config.body;
     this.flushStore = config.flushStore;
     this.initBody = config.initBody || null;
+    this.prologue = config.prologue || null;
     this._setChild('initLoad', config.initLoad);
     this._setChild('body', config.body);
     this._setChild('flushStore', config.flushStore);
     this._setChild('initBody', config.initBody || null);
+    this._setChild('prologue', config.prologue || null);
   }
 }
 

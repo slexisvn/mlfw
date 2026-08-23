@@ -91,7 +91,7 @@ export class FusionPass extends FunctionPass {
       reason: reason || null,
       level: TraceLevel.DEBUG,
     });
-    this.trace.explain('fusion', ops.join('+'), fuse ? 'fused' : 'not-fused', reason || null, { groupSize: ops.length });
+    this.trace.explain('fusion', ops.join('+'), fuse ? 'grouped' : 'not-grouped', reason || null, { groupSize: ops.length });
   }
 
   _createsCycle(func: GraphFunction, group: FusionGroup): boolean {

@@ -249,6 +249,10 @@ function lowerAccumulator(forNode: ForNode, acc: AccumulatorInfo, ctx: LowerCtx)
     ? (bindingSubs.size > 0 ? substituteVarsStmt(acc.block.initBody, bindingSubs) : acc.block.initBody)
     : null;
 
+  const resolvedPrologue = acc.prologue
+    ? (bindingSubs.size > 0 ? substituteVarsStmt(acc.prologue, bindingSubs) : acc.prologue)
+    : null;
+
   return new LIRAccumulatorNode({
     localName,
     dtype,
@@ -260,6 +264,7 @@ function lowerAccumulator(forNode: ForNode, acc: AccumulatorInfo, ctx: LowerCtx)
     body: loweredValue,
     flushStore,
     initBody: resolvedInitBody ? lowerStmt(resolvedInitBody, ctx) : null,
+    prologue: resolvedPrologue ? lowerStmt(resolvedPrologue, ctx) : null,
   }) as unknown as TirNode;
 }
 
@@ -356,6 +361,15 @@ function substituteVarsStmt(node: TirNode, subs: VarSubs): TirNode {
       const body = substituteVarsStmt((node as ForNode).body, subs);
       if (body === (node as ForNode).body) return node;
       const result = { ...node, body };
+      Object.setPrototypeOf(result, Object.getPrototypeOf(node));
+      return result as TirNode;
+    }
+    case 'LetStmtNode': {
+      const letStmt = node as LetStmtNode;
+      const value = substituteVars(letStmt.value, subs);
+      const body = substituteVarsStmt(letStmt.body, subs);
+      if (value === letStmt.value && body === letStmt.body) return node;
+      const result = { ...node, value, body };
       Object.setPrototypeOf(result, Object.getPrototypeOf(node));
       return result as TirNode;
     }

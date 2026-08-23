@@ -148,6 +148,7 @@ function verifyAccumulator(node: LIRAccumulatorNode, ctx: LIRVerifyContext): voi
   const had = node.localName ? ctx.boundVars.has(node.localName) : true;
   if (node.localName) ctx.boundVars.add(node.localName);
   verifyExpr(node.initLoad, ctx);
+  if (node.prologue) verifyStmt(node.prologue, ctx);
   verifyExpr(node.body, ctx);
   verifyStmt(node.flushStore, ctx);
   if (node.initBody) verifyStmt(node.initBody, ctx);

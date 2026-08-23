@@ -54,7 +54,7 @@ const SCHEMA: Readonly<Record<string, readonly FieldSpec[]>> = {
 
   LIRFunc: [field('body', 'stmt')],
   LIRFlatStoreNode: [field('offsetExpr', 'expr'), field('value', 'expr')],
-  LIRAccumulatorNode: [field('loopVar', 'expr', { bind: true }), field('extent', 'expr'), field('initLoad', 'stmt'), field('initBody', 'stmt'), field('body', 'expr'), field('flushStore', 'stmt')],
+  LIRAccumulatorNode: [field('loopVar', 'expr', { bind: true }), field('extent', 'expr'), field('initLoad', 'stmt'), field('initBody', 'stmt'), field('prologue', 'stmt'), field('body', 'expr'), field('flushStore', 'stmt')],
   LIRBindingsNode: [field('bindings', 'expr', { bindingsExpr: true }), field('body', 'stmt')],
 };
 

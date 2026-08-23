@@ -114,6 +114,7 @@ function simplifyStmt(node: TirNode, ctx: SimplifyCtx): TirNode {
       const prev = bindLoopVar(ctx, acc.loopVar.name, acc.extent as TirNode);
       const body = simplifyExpr(acc.body as TirNode, ctx);
       const initBody = acc.initBody ? simplifyStmt(acc.initBody as TirNode, ctx) : null;
+      const prologue = acc.prologue ? simplifyStmt(acc.prologue as TirNode, ctx) : null;
       const initLoad = simplifyExpr(acc.initLoad as unknown as TirNode, ctx);
       const flushStore = simplifyStmt(acc.flushStore as unknown as TirNode, ctx);
       ctx.analyzer.setVarBound(acc.loopVar.name, prev);
@@ -128,6 +129,7 @@ function simplifyStmt(node: TirNode, ctx: SimplifyCtx): TirNode {
         body,
         flushStore: flushStore as unknown as LIRFlatStoreNode,
         initBody,
+        prologue,
       }) as unknown as TirNode;
     }
     default:

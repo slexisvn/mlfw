@@ -412,39 +412,54 @@ export class LayoutTransformIdentity extends Pattern {
   }
 }
 
+function foldableTransposeOperand(op: Operation, i: number): { source: Value; perm: readonly number[] } | null {
+  const def = op.getOperand(i).definingOp;
+  if (!def || def.opName !== 'transpose') return null;
+  const perm = def.getAttr<readonly number[]>('permutation');
+  if (!perm) return null;
+  const rank = perm.length;
+  const contracting = op.getAttr<readonly number[]>(i === 0 ? 'lhs_contracting' : 'rhs_contracting') || [];
+  const batch = op.getAttr<readonly number[]>(i === 0 ? 'lhs_batch' : 'rhs_batch') || [];
+  const bound = new Set<number>(contracting);
+  for (const d of batch) bound.add(d);
+  const free: number[] = [];
+  for (let d = 0; d < rank; d++) {
+    if (!bound.has(d)) free.push(d);
+  }
+  if (!isOrderPreserving(perm, free) || !isOrderPreserving(perm, batch)) return null;
+  return { source: def.getOperand(0), perm };
+}
+
+function isOrderPreserving(perm: readonly number[], dims: readonly number[]): boolean {
+  for (let j = 1; j < dims.length; j++) {
+    if (perm[dims[j - 1]] >= perm[dims[j]]) return false;
+  }
+  return true;
+}
+
 export class FoldTransposeIntoDot extends Pattern {
   constructor() { super('fold_transpose_into_dot', 10); this.rootOpName = 'dot'; }
   override match(op: Operation): boolean {
     for (let i = 0; i < 2; i++) {
-      const def = op.getOperand(i).definingOp;
-      if (!def || def.opName !== 'transpose') continue;
-      const perm = def.getAttr<readonly number[]>('permutation')!;
-      if (!perm || perm.length !== 2) continue;
-      if (perm[0] !== 1 || perm[1] !== 0) continue;
-      return true;
+      if (foldableTransposeOperand(op, i)) return true;
     }
     return false;
   }
   override rewrite(op: Operation, builder: IRBuilder): boolean {
     const operands = [op.getOperand(0), op.getOperand(1)];
-    const lhsC = [...op.getAttr<readonly number[]>('lhs_contracting')!];
-    const rhsC = [...op.getAttr<readonly number[]>('rhs_contracting')!];
-    const lhsB = [...(op.getAttr<readonly number[]>('lhs_batch')! || [])];
-    const rhsB = [...(op.getAttr<readonly number[]>('rhs_batch')! || [])];
+    const contracting = [[...op.getAttr<readonly number[]>('lhs_contracting')!], [...op.getAttr<readonly number[]>('rhs_contracting')!]];
+    const batch = [[...(op.getAttr<readonly number[]>('lhs_batch') || [])], [...(op.getAttr<readonly number[]>('rhs_batch') || [])]];
     for (let i = 0; i < 2; i++) {
-      const def = operands[i].definingOp;
-      if (!def || def.opName !== 'transpose') continue;
-      const perm = def.getAttr<readonly number[]>('permutation')!;
-      if (!perm || perm.length !== 2 || perm[0] !== 1 || perm[1] !== 0) continue;
-      operands[i] = def.getOperand(0);
-      const dims = i === 0 ? lhsC : rhsC;
-      const batch = i === 0 ? lhsB : rhsB;
-      for (let j = 0; j < dims.length; j++) dims[j] = dims[j] === 0 ? 1 : 0;
-      for (let j = 0; j < batch.length; j++) batch[j] = batch[j] === 0 ? 1 : 0;
+      const folded = foldableTransposeOperand(op, i);
+      if (!folded) continue;
+      operands[i] = folded.source;
+      for (const dims of [contracting[i], batch[i]]) {
+        for (let j = 0; j < dims.length; j++) dims[j] = folded.perm[dims[j]];
+      }
     }
-    const newDot = builder.dot(operands[0], operands[1], lhsC, rhsC);
-    if (lhsB.length > 0) newDot.setAttr('lhs_batch', lhsB);
-    if (rhsB.length > 0) newDot.setAttr('rhs_batch', rhsB);
+    const newDot = builder.dot(operands[0], operands[1], contracting[0], contracting[1], batch[0], batch[1]);
+    const outDtype = op.getAttr<string>('out_dtype');
+    if (outDtype) newDot.setAttr('out_dtype', outDtype);
     op.replaceAllResultsWith([newDot.getResult(0)]);
     op.erase();
     return true;

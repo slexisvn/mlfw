@@ -835,6 +835,7 @@ export class WebGPUCodegen extends GpuCodegenBase {
     const extent = this._exprToWGSL(node.extent);
     this._emit(`for (var ${varName}: i32 = 0; ${varName} < ${extent}; ${varName} = ${varName} + 1) {`);
     this._indent++;
+    if (node.prologue) this._visitNode(node.prologue);
     const accOp = node.op || '+';
     const accBody = this._exprToWGSL(node.body);
     this._emit(`${accVar} = ${(accOp === 'max' || accOp === 'min') ? `${accOp}(${accVar}, ${accBody})` : `(${accVar} ${accOp} ${accBody})`};`);

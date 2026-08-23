@@ -55,6 +55,15 @@ export type ConvNestOpts = {
   leafBuilder(inIdx: TirNode[], kerIdx: TirNode[]): TirNode;
 };
 export type PointwiseExprBuilder = (op: Operation, loads: BufferLoadNode[], dtype: string) => TirNode;
+export type ReduceNestPrefixes = { init: string; spatial: string; reduce: string; reduceIter: string };
+export type ReduceGeometry = {
+  init: SpatialNest;
+  spatial: SpatialNest;
+  reduceIvs: BlockRealizeNode[];
+  accIvs: BlockRealizeNode[];
+  fullIdx: TirNode[];
+  wrapAcc(body: TirNode): TirNode;
+};
 export type ConstBuffer = { buffer: Buffer; data: ArrayLike<number> };
 
 const GENERIC_PLEVEL = 10;
@@ -396,6 +405,58 @@ export function buildSpatialNest(ctx: LoweringContext, prefix: string, dims: rea
     vars, ivs, indices, extentNodes,
     wrap(body: TirNode): TirNode { return wrapLoopsWithNodes(body, vars, extentNodes); }
   };
+}
+
+export function splitReduceDims(rank: number, dims: readonly number[]): { spatialDims: number[]; reduceDims: number[] } {
+  const dimSet = new Set(dims);
+  const spatialDims: number[] = [];
+  const reduceDims: number[] = [];
+  for (let i = 0; i < rank; i++) {
+    (dimSet.has(i) ? reduceDims : spatialDims).push(i);
+  }
+  return { spatialDims, reduceDims };
+}
+
+export function buildReduceGeometry(ctx: LoweringContext, shape: Shape, anchor: Buffer, spatialDims: readonly number[], reduceDims: readonly number[], prefixes: ReduceNestPrefixes): ReduceGeometry {
+  const init = buildSpatialNest(ctx, prefixes.init, spatialDims, shape, anchor);
+  const spatial = buildSpatialNest(ctx, prefixes.spatial, spatialDims, shape, anchor);
+  const rVars = ctx.allocVarArray(prefixes.reduce, reduceDims.length);
+  const reduceIvs = markCommReduce(ctx.allocBindArray(prefixes.reduceIter, rVars));
+  const fullIdx: TirNode[] = new Array(shape.length);
+  for (let i = 0; i < spatialDims.length; i++) fullIdx[spatialDims[i]] = spatial.ivs[i].iterVar;
+  for (let i = 0; i < reduceDims.length; i++) fullIdx[reduceDims[i]] = reduceIvs[i].iterVar;
+  const rExtents: TirNode[] = new Array(reduceDims.length);
+  for (let i = 0; i < reduceDims.length; i++) rExtents[i] = ctx.extentNode(shape[reduceDims[i]], anchor, reduceDims[i]);
+  return {
+    init,
+    spatial,
+    reduceIvs,
+    accIvs: concatIterVars(spatial.ivs, reduceIvs),
+    fullIdx,
+    wrapAcc(body: TirNode): TirNode { return spatial.wrap(wrapLoopsWithNodes(body, rVars, rExtents)); },
+  };
+}
+
+export function emitReduceMeanDiv(ctx: LoweringContext, outBuf: Buffer, shape: Shape, anchor: Buffer, spatialDims: readonly number[], reduceDims: readonly number[], prefix: string, blockName: string): TirNode {
+  let staticSize = 1;
+  const dynExtents: TirNode[] = [];
+  for (let i = 0; i < reduceDims.length; i++) {
+    const d = shape[reduceDims[i]];
+    if (d === DYNAMIC) dynExtents.push(ctx.extentNode(DYNAMIC, anchor, reduceDims[i]));
+    else staticSize *= d as number;
+  }
+  const nest = buildSpatialNest(ctx, prefix, spatialDims, shape, anchor);
+  const load = new BufferLoadNode(outBuf, nest.indices);
+  let divExpr: TirNode;
+  if (dynExtents.length === 0) {
+    divExpr = new MathOpNode('*', load, new FloatImmNode(1.0 / staticSize));
+  } else {
+    let divisor: TirNode = new IntImmNode(staticSize);
+    for (const e of dynExtents) divisor = new MathOpNode('*', divisor, e);
+    divExpr = new MathOpNode('/', load, divisor);
+  }
+  const block = new BlockNode(ctx.blockName(blockName), nest.ivs, [{ buffer: outBuf }], [{ buffer: outBuf }], new BufferStoreNode(outBuf, nest.indices, divExpr));
+  return spatialDims.length > 0 ? nest.wrap(block) : block;
 }
 
 export function computeBroadcastIndices(inBuf: Buffer, outBuf: Buffer, outIndices: readonly TirNode[]): TirNode[] {

@@ -2,7 +2,7 @@ import { walk as irWalk, collect as irCollect } from '../../ir/ir_visitor.js';
 import { toLinearForm } from '../../analysis/iter_map.js';
 import type { Buffer } from '../../ir/tensor/buffer.js';
 import type { Dim } from '../../ir/graph/types.js';
-import type { BlockNode, BufferLoadNode, BufferStoreNode, CastNode, CompareNode, FloatImmNode, IntImmNode, MathOpNode, PrimFunc, TirNode, VariableNode } from '../../ir/tensor/nodes.js';
+import type { BlockNode, BufferLoadNode, BufferStoreNode, CastNode, CompareNode, FloatImmNode, IntImmNode, LetStmtNode, MathOpNode, PrimFunc, SeqNode, TirNode, VariableNode } from '../../ir/tensor/nodes.js';
 import type { IRNode } from '../../ir/ir_visitor.js';
 import type { BufferLivenessResult } from './buffer_liveness.js';
 
@@ -151,6 +151,37 @@ function walkNodes(root: TirNode | null | undefined, visit: (node: TirNode) => v
   if (root) irWalk(root as unknown as IRNode, visit as never);
 }
 
+type EvalStep = { expr: TirNode; store: BufferStoreNode | null };
+
+function linearizeEvalOrder(node: TirNode | null | undefined, out: EvalStep[]): void {
+  if (!node) return;
+  switch (node.type) {
+    case 'LetStmtNode':
+      out.push({ expr: (node as LetStmtNode).value, store: null });
+      linearizeEvalOrder((node as LetStmtNode).body, out);
+      return;
+    case 'SeqNode':
+      for (const stmt of (node as SeqNode).stmts) linearizeEvalOrder(stmt, out);
+      return;
+    case 'BufferStoreNode': {
+      const store = node as BufferStoreNode;
+      out.push({ expr: store.value, store });
+      for (const idx of store.indices) out.push({ expr: idx, store });
+      return;
+    }
+    default:
+      out.push({ expr: node, store: null });
+  }
+}
+
+function readsBuffer(root: TirNode, buf: Buffer): boolean {
+  let found = false;
+  walkNodes(root, (node: TirNode) => {
+    if (node.type === 'BufferLoadNode' && (node as BufferLoadNode).buffer === buf) found = true;
+  });
+  return found;
+}
+
 function isInplaceComputeSafe(block: BlockNode, srcBuf: Buffer, dstBuf: Buffer): boolean {
   const dstStores: BufferStoreNode[] = [];
   const srcLoads: BufferLoadNode[] = [];
@@ -171,25 +202,20 @@ function isInplaceComputeSafe(block: BlockNode, srcBuf: Buffer, dstBuf: Buffer):
     if (!indexListEqual(load.indices, writeIndex)) return false;
   }
 
-  const loadsInsideStore = new Set<BufferLoadNode>();
-  for (const root of [store.value, ...store.indices]) {
-    if (!root) continue;
-    walkNodes(root, (node: TirNode) => {
-      if (node.type === 'BufferLoadNode' && (node as BufferLoadNode).buffer === srcBuf) loadsInsideStore.add(node as BufferLoadNode);
-    });
+  const value = store.value as BufferLoadNode;
+  if (value && value.type === 'BufferLoadNode' && value.buffer === srcBuf && indexListEqual(value.indices, writeIndex)) {
+    return true;
   }
 
-  let allInside = true;
-  for (const load of srcLoads) {
-    if (!loadsInsideStore.has(load)) { allInside = false; break; }
+  const steps: EvalStep[] = [];
+  linearizeEvalOrder(block.initBody, steps);
+  linearizeEvalOrder(block.body, steps);
+  let seenStore = false;
+  for (const step of steps) {
+    if (step.store === store) { seenStore = true; continue; }
+    if (seenStore && readsBuffer(step.expr, srcBuf)) return false;
   }
-  if (!allInside) {
-    const v = store.value as BufferLoadNode;
-    const pureCopy = v && v.type === 'BufferLoadNode' && v.buffer === srcBuf && indexListEqual(v.indices, writeIndex);
-    if (!pureCopy) return false;
-  }
-
-  return true;
+  return seenStore;
 }
 
 function collectBlocks(node: TirNode | null | undefined, result: BlockNode[]): void {

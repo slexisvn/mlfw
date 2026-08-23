@@ -480,7 +480,7 @@ export class Compiler {
     const tirModule = new TirModule(graphModule.name);
     this._eachFunc(graphModule, 'lowering', trace, errors, failed, resilient, (func) => {
       const ft0 = performance.now();
-      const primFunc = lowerGraphToPrimFunc(func, this.config.target as unknown as null, this.context as unknown as null);
+      const primFunc = lowerGraphToPrimFunc(func, this.config.target as unknown as null, this.context as unknown as null, trace);
       if (this.config.target.isGPU && this.config.target.isGPU() && !(this.config.target.isWebGPU && this.config.target.isWebGPU())) {
         const convInfo = detectPureConv(func);
         if (convInfo) primFunc.setAttr(FuncAttr.CONV_INFO, convInfo);

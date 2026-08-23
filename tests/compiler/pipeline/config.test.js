@@ -150,7 +150,7 @@ describe('explain logs for why-not-fused / why-this-schedule', () => {
     expect(fusion[0]).toHaveProperty('reason');
   });
 
-  it('explains why a cyclic dominator group is not fused', () => {
+  it('explains why a cyclic dominator group is not grouped', () => {
     const inT = new TensorType([3, 4], F32);
     const outT = new TensorType([3], F32);
     const func = buildFunction('sm', [inT], [outT], (b, a) => {
@@ -160,8 +160,8 @@ describe('explain logs for why-not-fused / why-this-schedule', () => {
     });
 
     const ex = collectExplains(func, CPUTarget(), { fusion: { strategy: 'dominator' } });
-    const notFused = ex.filter(e => e.category === 'fusion' && e.decision === 'not-fused');
-    expect(notFused.some(e => /cycle/.test(e.reason || ''))).toBe(true);
+    const notGrouped = ex.filter(e => e.category === 'fusion' && e.decision === 'not-grouped');
+    expect(notGrouped.some(e => /cycle/.test(e.reason || ''))).toBe(true);
   });
 
   it('emits a schedule explain naming the rule applied to each block', () => {

@@ -11,7 +11,7 @@ import { register as registerLinalg } from './rules/linalg.js';
 import { register as registerControlFlow } from './rules/control_flow.js';
 import { register as registerLayout } from './rules/layout.js';
 import { register as registerQuantization } from './rules/quantization.js';
-import { register as registerFusion, canInlineFuse, lowerFusion, canLowerAsElementwiseFusion, lowerFusionAsIndividualOps, registerInlineFusionBuilder } from './rules/fusion.js';
+import { register as registerFusion, canInlineFuse, lowerFusionOp, registerInlineFusionBuilder } from './rules/fusion.js';
 import { register as registerPooling } from './rules/pooling.js';
 import { register as registerResize } from './rules/resize.js';
 import { register as registerAttention } from './rules/attention.js';
@@ -27,6 +27,7 @@ import type { TirNode, VariableNode } from '../../ir/tensor/nodes.js';
 import type { TensorType } from '../../ir/graph/types.js';
 import type { CompilerContext } from '../../pipeline/compiler_context.js';
 import type { CompileTarget } from '../../pipeline/pipeline_types.js';
+import type { TraceLog } from '../../pipeline/trace.js';
 
 const BROADCAST_VIEW_SAFE_EXTRA = ['compare', 'select', 'clamp', 'convert', 'copy_to_device', 'dot', 'fusion'];
 
@@ -72,7 +73,26 @@ function topologicalOps(graphFunc: GraphFunction): Operation[] {
   return topoSortOpSet([...graphFunc.ops()], 'ignore');
 }
 
-export function lowerGraphToPrimFunc(graphFunc: GraphFunction, target: CompileTarget | null = null, context: CompilerContext | null = null): PrimFunc {
+const FUSION_LOWERING_REASON: Record<string, string> = {
+  'inline-loop': 'region body inlined into a single elementwise loop nest',
+  'reduction-nest': 'elementwise producers folded into the reduction nest; consumers read the reduction result per row',
+  'per-op': 'region body has no shared loop structure the lowering can honour; emitted one loop nest per inner op',
+};
+
+function explainFusionLowering(trace: TraceLog | null, funcName: string, op: Operation, strategy: string): void {
+  if (!trace || !trace.explainsEnabled) return;
+  const names: string[] = [];
+  for (const innerOp of (op.regions[0].entryBlock as Block).ops()) {
+    if (!isTerminatorOp(innerOp.opName)) names.push(innerOp.opName);
+  }
+  trace.explain('fusion.lowering', names.join('+'), strategy, FUSION_LOWERING_REASON[strategy] || null, {
+    funcName,
+    fusionKind: op.getAttr<string>('fusion_kind') || null,
+    groupSize: names.length,
+  });
+}
+
+export function lowerGraphToPrimFunc(graphFunc: GraphFunction, target: CompileTarget | null = null, context: CompilerContext | null = null, trace: TraceLog | null = null): PrimFunc {
   const ctx = new LoweringContext();
   ctx.target = target;
   const params: VariableNode[] = [];
@@ -124,11 +144,7 @@ export function lowerGraphToPrimFunc(graphFunc: GraphFunction, target: CompileTa
     if (isConstantOp(op.opName)) continue;
 
     if (op.opName === 'fusion') {
-      if (canLowerAsElementwiseFusion(op)) {
-        stmts.push(lowerFusion(ctx, op));
-      } else {
-        lowerFusionAsIndividualOps(ctx, op, stmts);
-      }
+      explainFusionLowering(trace, graphFunc.name, op, lowerFusionOp(ctx, op, stmts));
       continue;
     }
 

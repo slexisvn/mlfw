@@ -322,6 +322,7 @@ export class CPUCodegen extends CodegenBase {
     this._emit('for (let ' + varName + ' = 0; ' + varName + ' < ' + extent + '; ' + varName + '++) {');
     this._indent++;
     this._loopStack.push(varName);
+    if (node.prologue) this._visitNode(node.prologue);
     const accBody = this._exprToJS(node.body);
     const accOp = node.op || '+';
     let accRhs: string;

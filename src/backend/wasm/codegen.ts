@@ -550,7 +550,7 @@ export class WasmCodegen extends CodegenBase {
     const extent = this._constExtent(node.extent);
     const accOp = node.op || '+';
     const laneDtype = vectorValueDtype(node.body, dtype);
-    const simdEntry = accOp === '+' && extent !== null && node.loopKind === ForKind.VECTORIZED
+    const simdEntry = accOp === '+' && extent !== null && !node.prologue && node.loopKind === ForKind.VECTORIZED
       && this.target.supportsSimd() && laneDtype === dtype ? wasmSimdEntry(dtype) : null;
     const lanes = simdEntry ? this.target.vectorWidth : 0;
 
@@ -581,6 +581,7 @@ export class WasmCodegen extends CodegenBase {
     this._emit('i32.ge_s');
     this._emit('br_if $break_' + varName);
 
+    if (node.prologue) this._visitNode(node.prologue);
     this._emit('(local.get $' + accLocal + ')');
     this._emitCoercedTo(node.body, this._numPrefix(dtype));
     this._emit(this._numPrefix(dtype) + '.' + this._accumInstr(accOp, dtype));

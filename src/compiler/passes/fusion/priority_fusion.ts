@@ -243,7 +243,7 @@ export class PriorityFusionPass extends FunctionPass {
   _explain(group: FusionGroup): void {
     if (!this.trace || !this.trace.explainsEnabled) return;
     const ops = group.ops.map(o => o.opName);
-    this.trace.explain('fusion', ops.join('+'), 'fused', null, { groupSize: ops.length, strategy: 'priority' });
+    this.trace.explain('fusion', ops.join('+'), 'grouped', null, { groupSize: ops.length, strategy: 'priority' });
   }
 }
 

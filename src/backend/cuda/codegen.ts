@@ -444,6 +444,7 @@ export class CUDACodegen extends GpuCodegenBase {
     const extent = this._exprToC(node.extent);
     this._emit(`for (int ${varName} = 0; ${varName} < ${extent}; ${varName}++) {`);
     this._indent++;
+    if (node.prologue) this._visitNode(node.prologue);
     const accBody = this._exprToC(node.body);
     const accOp = node.op || '+';
     let accRhs: string;
@@ -577,7 +578,10 @@ export class CUDACodegen extends GpuCodegenBase {
       const blockThreads = this._blockDim[0] * this._blockDim[1] * this._blockDim[2];
       const crossThread = threadSharedIntermediates(profile);
       if (blockThreads * gridThreads > 1 && crossThread.size > 0) {
-        if (!storedUnderBlockBinding(profile, crossThread) && this._promoteCrossThreadToShared(func, crossThread)) {
+        // Shared memory is per block, so a buffer written under a blockIdx binding can only
+        // live there when the grid is a single block.
+        const sharedIsVisibleToEveryWriter = gridThreads === 1 || !storedUnderBlockBinding(profile, crossThread);
+        if (sharedIsVisibleToEveryWriter && this._promoteCrossThreadToShared(func, crossThread)) {
           this._needsBarriers = true;
           return;
         }

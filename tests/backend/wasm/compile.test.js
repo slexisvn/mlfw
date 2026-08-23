@@ -1654,3 +1654,36 @@ describe('WASM codegen — rsqrt extern', () => {
     for (let i = 0; i < 4; i++) expect(out[i]).toBeCloseTo(expected[i], 4);
   });
 });
+
+describe('WASM codegen — fused reduction nest', () => {
+  function softmaxFunc(name, shape) {
+    const tin = new TensorType(shape, ScalarType.F32);
+    return buildFunction(name, [tin], [tin], (b, a) => {
+      b.returnOp([b.softmax(a[0], shape.length - 1).getResult(0)]);
+    });
+  }
+
+  it('emits the prologue store inside the accumulator loop, matching the CPU result', () => {
+    const shape = [3, 8];
+    const wasm = compile(softmaxFunc('w_softmax', shape));
+    expect(wasm.succeeded).toBe(true);
+
+    const cpu = compileGraph(softmaxFunc('c_softmax', shape), CPUTarget(), { scheduling: { enabled: true } });
+    const xd = new Float32Array([
+      0.5, -1.25, 2, 0.125, -0.75, 1.5, 0.25, -0.5,
+      3, 0.5, -2, 1.75, 0.625, -0.25, 1, 0.375,
+      -1, 0.875, 0.5, 2.25, -1.5, 0.75, 1.125, 0,
+    ]);
+    const wasmOut = new Float32Array(24);
+    const cpuOut = new Float32Array(24);
+    wasm.run('w_softmax', xd, wasmOut);
+    cpu.run('c_softmax', xd, cpuOut);
+
+    for (let r = 0; r < shape[0]; r++) {
+      let rowSum = 0;
+      for (let i = 0; i < shape[1]; i++) rowSum += wasmOut[r * shape[1] + i];
+      expect(rowSum).toBeCloseTo(1, 5);
+    }
+    for (let i = 0; i < 24; i++) expect(wasmOut[i]).toBeCloseTo(cpuOut[i], 6);
+  });
+});

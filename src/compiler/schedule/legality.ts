@@ -146,12 +146,37 @@ export function collectWriteIndexVars(block: BlockNode, out: Set<string>): void 
   }
 }
 
+function collectLetBoundVars(node: TirNode | null | undefined, out: Set<string>): void {
+  const stack: (TirNode | null | undefined)[] = [node];
+  while (stack.length > 0) {
+    const n = stack.pop();
+    if (!n || typeof n !== 'object') continue;
+    if (n.type === 'LetStmtNode') {
+      const ls = n as LetStmtNode;
+      if (ls.variable) out.add(ls.variable.name);
+      stack.push(ls.body);
+      continue;
+    }
+    if (n.type === 'SeqNode') { for (const x of (n as SeqNode).stmts) stack.push(x); continue; }
+    if (n.type === 'IfThenElseNode') { const ite = n as IfThenElseNode; stack.push(ite.thenBody); if (ite.elseBody) stack.push(ite.elseBody); continue; }
+  }
+}
+
+/**
+ * Loop vars that carry a reduction, so a schedule may not run their iterations in parallel.
+ * A declared CommReduce axis is authoritative; the write-index heuristic only classifies axes
+ * the block did not label, and cannot see past a block that writes at more than one rank.
+ */
 export function reductionLoopVars(block: BlockNode): Set<string> {
   const writeIdx = new Set<string>();
   collectWriteIndexVars(block, writeIdx);
   const used = new Set<string>();
   collectVarsUsed(block.body, used);
   if (block.initBody) collectVarsUsed(block.initBody, used);
+
+  const letBound = new Set<string>();
+  collectLetBoundVars(block.body, letBound);
+  collectLetBoundVars(block.initBody, letBound);
 
   const own = new Set<string>();
   const spatial = new Set<string>();
@@ -161,11 +186,13 @@ export function reductionLoopVars(block: BlockNode): Set<string> {
     own.add(iv.iterVar.name);
     const bindVars = new Set<string>();
     collectVarsUsed(iv.binding, bindVars);
-    const isSpatial = writeIdx.has(iv.iterVar.name) || [...bindVars].some((v) => writeIdx.has(v));
+    const isSpatial = iv.kind !== IterVarKind.COMM_REDUCE
+      && (writeIdx.has(iv.iterVar.name) || [...bindVars].some((v) => writeIdx.has(v)));
     for (const v of bindVars) (isSpatial ? spatial : reduction).add(v);
   }
   for (const name of used) {
-    if (!own.has(name) && !writeIdx.has(name)) reduction.add(name);
+    if (own.has(name) || letBound.has(name) || writeIdx.has(name)) continue;
+    reduction.add(name);
   }
   for (const name of spatial) reduction.delete(name);
   return reduction;
