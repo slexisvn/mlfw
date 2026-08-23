@@ -2,3 +2,4 @@ node_modules
 coverage
 dist/
 lightning_logs/
+tools/visualizer/dist

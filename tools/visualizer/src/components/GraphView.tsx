@@ -1,0 +1,373 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type React from 'react';
+import { layoutDag } from '../ir/dag.js';
+import { layoutNest } from '../ir/nest.js';
+import { driftScore, frameAt, linkLowering, linkRewrites, linkSourceLines, planTransition } from '../ir/transition.js';
+import { useStore } from '../store.js';
+import type { Box, Layout } from '../ir/dag.js';
+import type { Change, Frame, Plan } from '../ir/transition.js';
+import type { CompileStep, Dag, NestNode, Snapshot } from '../protocol.js';
+
+const EMPTY_LAYOUT: Layout = { width: 0, height: 0, boxes: [], edges: [] };
+
+type Side = { dag: Dag | null; nest: NestNode | null };
+
+function sideOf(snapshot: Snapshot, index: number): Side {
+  return { dag: snapshot.dags[index] ?? null, nest: snapshot.nests[index] ?? snapshot.nests[0] ?? null };
+}
+
+async function layoutSide(side: Side): Promise<Layout> {
+  if (side.dag) return layoutDag(side.dag);
+  if (side.nest) return layoutNest(side.nest);
+  return EMPTY_LAYOUT;
+}
+
+function linksBetween(from: Side, to: Side): { links: Map<string, string>; change: Change } {
+  if (from.dag && to.dag) return { links: linkRewrites(from.dag, to.dag), change: 'rewritten' };
+  if (from.dag && to.nest) return { links: linkLowering(from.dag, to.nest), change: 'lowered' };
+  if (from.nest && to.nest && to.nest.kind === 'source') {
+    return { links: linkSourceLines(from.nest, to.nest), change: 'emitted' };
+  }
+  return { links: new Map(), change: 'rewritten' };
+}
+
+const BASE_DURATION_MS = 900;
+const DRIFT_LIMIT = 0.55;
+const PADDING = 14;
+const MIN_ZOOM = 0.25;
+const MAX_ZOOM = 6;
+const WHEEL_SENSITIVITY = 0.0016;
+const STALL_GRACE_MS = 1200;
+
+type View = { k: number; tx: number; ty: number };
+
+const RESET_VIEW: View = { k: 1, tx: 0, ty: 0 };
+
+type Prepared = { key: string; before: Layout; after: Layout; plan: Plan; drift: number };
+
+export function GraphView({ step }: { step: CompileStep }) {
+  const speed = useStore(s => s.speed);
+  const [dagIndex, setDagIndex] = useState(0);
+  const [prepared, setPrepared] = useState<Prepared | null>(null);
+  const [frame, setFrame] = useState<Frame | null>(null);
+  const [replayToken, setReplayToken] = useState(0);
+  const [failure, setFailure] = useState<string | null>(null);
+  const [view, setView] = useState<View>(RESET_VIEW);
+  const raf = useRef(0);
+  const played = useRef<string | null>(null);
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const panFrom = useRef<{ x: number; y: number } | null>(null);
+  const endPan = useRef<(() => void) | null>(null);
+  const [panning, setPanning] = useState(false);
+
+  const dags = step.after.dags.length > 0 ? step.after.dags : step.before.dags;
+  const index = Math.min(dagIndex, Math.max(dags.length - 1, 0));
+  const before = sideOf(step.before, index);
+  const after = sideOf(step.after, index);
+  const empty = !before.dag && !before.nest && !after.dag && !after.nest;
+
+  useEffect(() => {
+    if (empty) { setPrepared(null); return; }
+    let cancelled = false;
+    setFailure(null);
+
+    void (async () => {
+      const b = await layoutSide(before);
+      const a = await layoutSide(after);
+      if (cancelled) return;
+      const { links, change } = linksBetween(before, after);
+      setPrepared({
+        key: `${step.index}:${index}`,
+        before: b,
+        after: a,
+        plan: planTransition(b, a, links, change),
+        drift: driftScore(b, a),
+      });
+    })().catch((error: unknown) => {
+      if (!cancelled) setFailure(error instanceof Error ? error.message : String(error));
+    });
+
+    return () => { cancelled = true; };
+  }, [step.index, index, empty]);
+
+  useEffect(() => {
+    if (!prepared) return;
+    const { before: from, after: to, plan, drift } = prepared;
+    const key = `${prepared.key}:${replayToken}`;
+    const stepChanged = played.current !== null && played.current !== key;
+    played.current = key;
+    const instant = speed === 0 || drift > DRIFT_LIMIT || !stepChanged;
+
+    if (instant) {
+      setFrame(frameAt(from, to, plan, 1));
+      return;
+    }
+
+    const duration = BASE_DURATION_MS / speed;
+    const started = performance.now();
+    setFrame(frameAt(from, to, plan, 0));
+
+    const guard = setTimeout(() => setFrame(frameAt(from, to, plan, 1)), duration + STALL_GRACE_MS);
+
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - started) / duration);
+      setFrame(frameAt(from, to, plan, t));
+      if (t < 1) raf.current = requestAnimationFrame(tick);
+      else clearTimeout(guard);
+    };
+
+    raf.current = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(raf.current);
+      clearTimeout(guard);
+    };
+  }, [prepared, speed, replayToken]);
+
+  const onWheel = useCallback((event: WheelEvent) => {
+    event.preventDefault();
+    const point = toUserSpace(event.currentTarget as SVGSVGElement, event.clientX, event.clientY);
+    setView(current => {
+      const k = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, current.k * Math.exp(-event.deltaY * WHEEL_SENSITIVITY)));
+      const ratio = k / current.k;
+      return {
+        k,
+        tx: point.x - (point.x - current.tx) * ratio,
+        ty: point.y - (point.y - current.ty) * ratio,
+      };
+    });
+  }, []);
+
+  const attachSvg = useCallback((node: SVGSVGElement | null) => {
+    const previous = svgRef.current;
+    if (previous) previous.removeEventListener('wheel', onWheel);
+    svgRef.current = node;
+    if (node) node.addEventListener('wheel', onWheel, { passive: false });
+  }, [onWheel]);
+
+  const beginPan = (event: React.PointerEvent<SVGSVGElement>): void => {
+    const svg = svgRef.current;
+    if (!svg || event.button !== 0 || endPan.current) return;
+
+    panFrom.current = toUserSpace(svg, event.clientX, event.clientY);
+    setPanning(true);
+
+    const move = (moved: PointerEvent) => {
+      const from = panFrom.current;
+      if (!from) return;
+      const to = toUserSpace(svg, moved.clientX, moved.clientY);
+      const dx = to.x - from.x;
+      const dy = to.y - from.y;
+      panFrom.current = to;
+      setView(current => ({ ...current, tx: current.tx + dx, ty: current.ty + dy }));
+    };
+
+    const end = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', end);
+      window.removeEventListener('pointercancel', end);
+      panFrom.current = null;
+      endPan.current = null;
+      setPanning(false);
+    };
+
+    endPan.current = end;
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
+  };
+
+  useEffect(() => () => endPan.current?.(), []);
+
+  const viewBox = useMemo(() => {
+    if (!prepared) return '0 0 100 100';
+    const width = Math.max(prepared.before.width, prepared.after.width) + PADDING * 2;
+    const height = Math.max(prepared.before.height, prepared.after.height) + PADDING * 2;
+    return `${-PADDING} ${-PADDING} ${width} ${height}`;
+  }, [prepared]);
+
+  if (empty) {
+    return <div className="pane-empty">Nothing structural to show for this step.</div>;
+  }
+
+  if (failure) return <div className="pane-empty">graph layout failed: {failure}</div>;
+  if (!prepared || !frame) return <div className="pane-empty">laying out the graph…</div>;
+
+  const edges = collectEdges(prepared, frame);
+
+  return (
+    <div className="graph">
+      <div className="graph-bar">
+        <Legend plan={prepared.plan} />
+        {dags.length > 1 && (
+          <select value={index} onChange={e => setDagIndex(Number(e.target.value))}>
+            {dags.map((dag, i) => <option key={dag.func} value={i}>{dag.func}</option>)}
+          </select>
+        )}
+        {prepared.drift > DRIFT_LIMIT && <span className="drift">layout moved too far to animate</span>}
+        <div className="graph-tools">
+          <span className="zoom">{Math.round(view.k * 100)}%</span>
+          <button onClick={() => setView(RESET_VIEW)} title="fit the whole graph">fit</button>
+          <button
+            onClick={() => setReplayToken(token => token + 1)}
+            disabled={step.kind === 'input'}
+            title="replay the transition into this pass"
+          >
+            replay
+          </button>
+        </div>
+      </div>
+
+      <svg
+        ref={attachSvg}
+        className={panning ? 'graph-svg panning' : 'graph-svg'}
+        viewBox={viewBox}
+        preserveAspectRatio="xMidYMin meet"
+        onPointerDown={beginPan}
+      >
+        <defs>
+          <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0,0 L8,4 L0,8 z" className="arrowhead" />
+          </marker>
+        </defs>
+
+        <g transform={`translate(${view.tx} ${view.ty}) scale(${view.k})`}>
+        <g className="edges">
+          {edges.map(edge => (
+            <path key={edge.id} d={edge.d} className="edge" style={{ opacity: edge.opacity }} markerEnd="url(#arrow)" />
+          ))}
+        </g>
+
+        <g className="nodes">
+          {[...frame.placements.values()]
+            .sort((a, b) => a.box.depth - b.box.depth || rank(a.box.kind) - rank(b.box.kind))
+            .map(placement => (
+              <g
+                key={placement.box.id}
+                className={`node ${placement.box.kind} ${placement.change}`}
+                style={{ opacity: placement.opacity }}
+                transform={transformFor(placement)}
+              >
+                <rect
+                  width={placement.width}
+                  height={placement.height}
+                  rx={placement.box.kind === 'op' ? 6 : 9}
+                />
+                <text x={10} y={headerY(placement)}>{placement.box.label}</text>
+                {showsDetail(placement) && (
+                  <text className="detail" x={placement.width - 10} y={headerY(placement)} textAnchor="end">
+                    {placement.box.detail}
+                  </text>
+                )}
+                {placement.box.detail && (
+                  <title>{`${placement.box.label} : ${placement.box.detail}`}</title>
+                )}
+              </g>
+            ))}
+        </g>
+        </g>
+      </svg>
+    </div>
+  );
+}
+
+function toUserSpace(svg: SVGSVGElement, clientX: number, clientY: number): { x: number; y: number } {
+  const matrix = svg.getScreenCTM();
+  if (!matrix) return { x: clientX, y: clientY };
+  const point = svg.createSVGPoint();
+  point.x = clientX;
+  point.y = clientY;
+  const mapped = point.matrixTransform(matrix.inverse());
+  return { x: mapped.x, y: mapped.y };
+}
+
+const CONTAINER_KINDS = new Set(['region', 'nest', 'nest-block', 'nest-func', 'source', 'line']);
+
+function rank(kind: string): number {
+  if (kind === 'region' || kind === 'nest-func' || kind === 'source') return 0;
+  if (CONTAINER_KINDS.has(kind)) return 1;
+  return 2;
+}
+
+const DETAIL_KINDS = new Set(['region', 'nest', 'nest-block', 'nest-func', 'source']);
+const LABEL_CHAR = 6.7;
+const DETAIL_CHAR = 6.1;
+const TEXT_GAP = 18;
+
+function showsDetail(placement: { box: Box; width: number }): boolean {
+  const { box } = placement;
+  if (!box.detail || !DETAIL_KINDS.has(box.kind)) return false;
+  const needed = box.label.length * LABEL_CHAR + box.detail.length * DETAIL_CHAR + TEXT_GAP + 20;
+  return needed <= placement.width;
+}
+
+function headerY(placement: { box: Box; height: number }): number {
+  const stacked = placement.box.kind === 'region' || CONTAINER_KINDS.has(placement.box.kind);
+  return stacked && placement.height > 30 ? 15 : placement.height / 2 + 4;
+}
+
+function transformFor(placement: { x: number; y: number; width: number; height: number; scale: number }): string {
+  if (placement.scale === 1) return `translate(${placement.x} ${placement.y})`;
+  const cx = placement.width / 2;
+  const cy = placement.height / 2;
+  return `translate(${placement.x} ${placement.y}) translate(${cx} ${cy}) scale(${placement.scale}) translate(${-cx} ${-cy})`;
+}
+
+type DrawnEdge = { id: string; d: string; opacity: number };
+
+function collectEdges(prepared: Prepared, frame: Frame): DrawnEdge[] {
+  const seen = new Set<string>();
+  const drawn: DrawnEdge[] = [];
+
+  for (const edge of [...prepared.after.edges, ...prepared.before.edges]) {
+    if (seen.has(edge.id)) continue;
+    seen.add(edge.id);
+
+    const from = frame.placements.get(edge.from);
+    const to = frame.placements.get(edge.to);
+    if (!from || !to) continue;
+
+    const x1 = from.x + from.width / 2;
+    const y1 = from.y + from.height;
+    const x2 = to.x + to.width / 2;
+    const y2 = to.y;
+    const mid = (y1 + y2) / 2;
+
+    drawn.push({
+      id: edge.id,
+      d: `M ${x1} ${y1} C ${x1} ${mid}, ${x2} ${mid}, ${x2} ${y2 - 2}`,
+      opacity: Math.min(from.opacity, to.opacity) * 0.75,
+    });
+  }
+
+  return drawn;
+}
+
+const LEGEND: { change: Change; label: string }[] = [
+  { change: 'kept', label: 'kept' },
+  { change: 'added', label: 'added' },
+  { change: 'removed', label: 'removed' },
+  { change: 'rewritten', label: 'rewritten' },
+  { change: 'lowered', label: 'linked to its loops' },
+  { change: 'emitted', label: 'became code' },
+];
+
+function quiet(plan: Plan): boolean {
+  return plan.counts.added === 0 && plan.counts.removed === 0 && plan.counts.rewritten === 0
+    && plan.counts.lowered === 0 && plan.counts.emitted === 0 && plan.links.size === 0;
+}
+
+function Legend({ plan }: { plan: Plan }) {
+  return (
+    <div className="legend">
+      {quiet(plan)
+        ? <span className="chip quiet">{plan.counts.kept} ops · no structural change</span>
+        : LEGEND.map(entry => (
+          plan.counts[entry.change] > 0 && (
+            <span key={entry.change} className={`chip ${entry.change}`}>
+              {plan.counts[entry.change]} {entry.label}
+            </span>
+          )
+        ))}
+    </div>
+  );
+}

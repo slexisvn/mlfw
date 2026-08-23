@@ -11,12 +11,6 @@ import type { GraphFunction } from '../ir/graph/function.js';
 import type { Pass, PassResultValue, PassTarget } from './pass.js';
 import type { TraceLog } from '../pipeline/trace.js';
 
-export type PassInstrument = {
-  runBeforePass?(pass: Pass, target: PassTarget, result: PassResultValue | null): void;
-  runAfterPass?(pass: Pass, target: PassTarget, result: PassResultValue | null): void;
-  [key: string]: unknown;
-};
-
 export type PassManagerEntry = Pass | FixedPointGroup;
 
 export type PassRunCtx = {
@@ -64,23 +58,12 @@ export class FixedPointGroup {
 
 export class PassManager extends PassManagerBase<PassManagerEntry> {
   analysisManager: AnalysisManager;
-  instruments: PassInstrument[];
+
+  protected override readonly irLevel = IRLevel.GRAPH_MODULE;
 
   constructor() {
     super();
     this.analysisManager = new AnalysisManager();
-    this.instruments = [];
-  }
-
-  addInstrument(instrument: PassInstrument): void {
-    this.instruments.push(instrument);
-  }
-
-  _notify(method: string, pass: Pass, target: PassTarget, result: PassResultValue | null): void {
-    for (const inst of this.instruments) {
-      const fn = inst[method];
-      if (typeof fn === 'function') (fn as (p: Pass, t: PassTarget, r: PassResultValue | null) => void)(pass, target, result);
-    }
   }
 
   _verifyAfter(pass: Pass, target: PassTarget, isModule: boolean): CompilationError | null {
@@ -92,7 +75,7 @@ export class PassManager extends PassManagerBase<PassManagerEntry> {
 
   _applyPass(pass: Pass, module: GraphModule, ctx: PassRunCtx, results: PassResultValue[]): { changed: boolean; fatal: boolean } {
     if (this.trace) pass.trace = this.trace;
-    if (this.instruments.length) this._notify('runBeforePass', pass, module, null);
+    this._notifyBefore(pass, module);
     const verbose = ctx.verbose;
     const resilient = ctx.resilient;
     let changed = false;
@@ -113,6 +96,8 @@ export class PassManager extends PassManagerBase<PassManagerEntry> {
         this.analysisManager.invalidateAll();
         results.push(PassResult.FAILED);
         ctx.errors.push(new CompilationError('graphPasses', module.name || '<module>', (e as Error).message, pass.name));
+        this._notifyAfter(pass, module, PassResult.FAILED);
+        pass.trace = null;
         return { changed, fatal: false };
       }
       results.push(result);
@@ -192,7 +177,7 @@ export class PassManager extends PassManagerBase<PassManagerEntry> {
       changed = passChanged;
     }
 
-    if (this.instruments.length) this._notify('runAfterPass', pass, module, changed ? PassResult.CHANGED : PassResult.UNCHANGED);
+    this._notifyAfter(pass, module, changed ? PassResult.CHANGED : PassResult.UNCHANGED);
     pass.trace = null;
     return { changed, fatal };
   }

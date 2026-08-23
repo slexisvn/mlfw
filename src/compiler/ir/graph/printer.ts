@@ -188,7 +188,7 @@ for (const dtype of dtypeKeys()) {
   if (!(name in DENSE_DTYPE_BY_ARRAY)) DENSE_DTYPE_BY_ARRAY[name] = dtype;
 }
 
-function formatAttrValue(val: AttrValue | undefined): string {
+export function formatAttrValue(val: AttrValue | undefined): string {
   if (val === null || val === undefined) return 'null';
   if (typeof val === 'number') {
     if (Number.isFinite(val)) return String(val);

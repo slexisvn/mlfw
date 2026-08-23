@@ -43,6 +43,7 @@
   },
   "scripts": {
     "build": "tsup",
+    "viz": "npm --prefix tools/visualizer run dev",
     "test": "vitest run --project unit --project e2e --project webgpu",
     "test:unit": "vitest run --project unit",
     "test:e2e": "vitest run --project e2e",

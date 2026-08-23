@@ -46,6 +46,7 @@ import type { VerifyLevelValue } from './invariant_check.js';
 import type { TraceLogConfig, TraceSink, IRSnapshotFlags } from './trace.js';
 import type { GpuLaunchDiagnosis } from '../analysis/gpu_race.js';
 import type { IRLevelValue } from '../ir/verify.js';
+import type { PassInstrument } from '../passes/pass_instrument.js';
 
 export type SchedulingConfig = { enabled?: boolean; autotune?: boolean; gpuTiling?: boolean; [key: string]: unknown };
 export type PartitionConfig = {
@@ -74,6 +75,7 @@ export type CompilerConfigOpts = Readonly<{
   passContext?: unknown;
   loweringRules?: ReadonlyMap<string, unknown> | Record<string, unknown> | null;
   codegenEntries?: ReadonlyMap<string, unknown> | Record<string, unknown> | null;
+  instruments?: readonly PassInstrument[];
   trace?: Partial<TraceConfig> & TraceLogConfig;
 }>;
 
@@ -129,6 +131,7 @@ export class CompilerConfig {
   passContext: unknown;
   loweringRules: ReadonlyMap<string, unknown> | Record<string, unknown> | null;
   codegenEntries: ReadonlyMap<string, unknown> | Record<string, unknown> | null;
+  instruments: readonly PassInstrument[];
   trace: TraceConfig;
 
   constructor(opts: CompilerConfigOpts = {}) {
@@ -178,6 +181,7 @@ export class CompilerConfig {
     this.passContext = opts.passContext || null;
     this.loweringRules = opts.loweringRules || null;
     this.codegenEntries = opts.codegenEntries || null;
+    this.instruments = opts.instruments || [];
 
     const t = opts.trace || {};
     this.trace = {
@@ -398,6 +402,11 @@ export class Compiler {
     return collector;
   }
 
+  _attachInstruments(pm: { addInstrument(instrument: PassInstrument): void }): void {
+    const instruments = this.config.instruments;
+    for (let i = 0; i < instruments.length; i++) pm.addInstrument(instruments[i]);
+  }
+
   _runGraphPasses(graphModule: GraphModule, original: GraphModule, trace: TraceLog, errors: CompilationError[], failed: Set<string>, resilient: boolean): void {
     const pm = new PassManager();
 
@@ -408,6 +417,7 @@ export class Compiler {
 
     pm.setTrace(trace);
     pm.setCheckEachPass(this.config.verifyEachPass);
+    this._attachInstruments(pm);
 
     trace.phaseStart('graphPasses');
     const t0 = performance.now();
@@ -441,6 +451,7 @@ export class Compiler {
     pm.addPass(new PartitionMaterializationPass());
 
     pm.setTrace(trace);
+    this._attachInstruments(pm);
 
     trace.phaseStart('partition');
     const t0 = performance.now();
@@ -489,6 +500,7 @@ export class Compiler {
     for (const pass of buildTirPipeline(this.config)) tirPM.addPass(pass);
     tirPM.setTrace(ctx.trace);
     tirPM.setCheckEachPass(this.config.verifyEachPass);
+    this._attachInstruments(tirPM);
     tirPM.run(ctx.tirModule as TirModule, {
       trace: ctx.trace,
       errors: ctx.errors,
@@ -568,6 +580,7 @@ export class Compiler {
     for (const pass of buildLirPipeline(this.config)) pm.addPass(pass);
     pm.setTrace(ctx.trace);
     pm.setCheckEachPass(this.config.verifyEachPass);
+    this._attachInstruments(pm);
     pm.run(ctx.lirFuncs as LIRFunc[], {
       trace: ctx.trace,
       config: this.config,

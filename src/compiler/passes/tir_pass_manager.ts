@@ -1,9 +1,11 @@
 import { CompilationError } from '../pipeline/trace.js';
 import { printTensorIR } from '../ir/tensor/printer.js';
 import { PassManagerBase } from './pass_manager_base.js';
+import { PassResult } from './pass.js';
 import { IRLevel } from '../ir/verify.js';
 import type { TirModule } from '../ir/tensor/module.js';
 import type { PrimFuncPass, TirModulePass, TirPassCtx } from './tir_pass.js';
+import type { PassResultValue } from './pass.js';
 import type { TraceLog } from '../pipeline/trace.js';
 
 export type TirPassAny = PrimFuncPass | TirModulePass;
@@ -15,6 +17,8 @@ export type TirRunCtx = TirPassCtx & {
 };
 
 export class TirPassManager extends PassManagerBase<TirPassAny> {
+  protected override readonly irLevel = IRLevel.TIR;
+
   run(module: TirModule, ctx: TirRunCtx): TirModule {
     for (const pass of this.passes) {
       this._runPass(pass, module, ctx);
@@ -28,10 +32,19 @@ export class TirPassManager extends PassManagerBase<TirPassAny> {
     trace.phaseStart(pass.phase);
     const t0 = performance.now();
 
-    pass.begin(ctx);
-    if ((pass as TirModulePass).runModule) this._runModulePass(pass as TirModulePass, module, ctx);
-    else this._runFunctionPass(pass as PrimFuncPass, module, ctx);
-    pass.end(ctx);
+    this._notifyBefore(pass, module);
+    let result: PassResultValue | null = null;
+    try {
+      pass.begin(ctx);
+      if ((pass as TirModulePass).runModule) this._runModulePass(pass as TirModulePass, module, ctx);
+      else this._runFunctionPass(pass as PrimFuncPass, module, ctx);
+      pass.end(ctx);
+    } catch (e) {
+      result = PassResult.FAILED;
+      throw e;
+    } finally {
+      this._notifyAfter(pass, module, result);
+    }
 
     trace.phaseEnd(pass.phase, performance.now() - t0);
 
