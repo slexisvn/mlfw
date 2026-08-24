@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type React from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { layoutDag } from '../ir/dag.js';
 import { layoutNest } from '../ir/nest.js';
 import { driftScore, frameAt, linkLowering, linkRewrites, linkSourceLines, planTransition } from '../ir/transition.js';
 import { useStore } from '../store.js';
+import { usePanZoom } from './pan_zoom.js';
 import type { Box, Layout } from '../ir/dag.js';
 import type { Change, Frame, Plan } from '../ir/transition.js';
 import type { CompileStep, Dag, NestNode, Snapshot } from '../protocol.js';
@@ -34,14 +34,7 @@ function linksBetween(from: Side, to: Side): { links: Map<string, string>; chang
 const BASE_DURATION_MS = 900;
 const DRIFT_LIMIT = 0.55;
 const PADDING = 14;
-const MIN_ZOOM = 0.25;
-const MAX_ZOOM = 6;
-const WHEEL_SENSITIVITY = 0.0016;
 const STALL_GRACE_MS = 1200;
-
-type View = { k: number; tx: number; ty: number };
-
-const RESET_VIEW: View = { k: 1, tx: 0, ty: 0 };
 
 type Prepared = { key: string; before: Layout; after: Layout; plan: Plan; drift: number };
 
@@ -52,13 +45,9 @@ export function GraphView({ step }: { step: CompileStep }) {
   const [frame, setFrame] = useState<Frame | null>(null);
   const [replayToken, setReplayToken] = useState(0);
   const [failure, setFailure] = useState<string | null>(null);
-  const [view, setView] = useState<View>(RESET_VIEW);
   const raf = useRef(0);
   const played = useRef<string | null>(null);
-  const svgRef = useRef<SVGSVGElement | null>(null);
-  const panFrom = useRef<{ x: number; y: number } | null>(null);
-  const endPan = useRef<(() => void) | null>(null);
-  const [panning, setPanning] = useState(false);
+  const { view, panning, reset, ref: attachSvg, surface } = usePanZoom();
 
   const dags = step.after.dags.length > 0 ? step.after.dags : step.before.dags;
   const index = Math.min(dagIndex, Math.max(dags.length - 1, 0));
@@ -123,61 +112,6 @@ export function GraphView({ step }: { step: CompileStep }) {
     };
   }, [prepared, speed, replayToken]);
 
-  const onWheel = useCallback((event: WheelEvent) => {
-    event.preventDefault();
-    const point = toUserSpace(event.currentTarget as SVGSVGElement, event.clientX, event.clientY);
-    setView(current => {
-      const k = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, current.k * Math.exp(-event.deltaY * WHEEL_SENSITIVITY)));
-      const ratio = k / current.k;
-      return {
-        k,
-        tx: point.x - (point.x - current.tx) * ratio,
-        ty: point.y - (point.y - current.ty) * ratio,
-      };
-    });
-  }, []);
-
-  const attachSvg = useCallback((node: SVGSVGElement | null) => {
-    const previous = svgRef.current;
-    if (previous) previous.removeEventListener('wheel', onWheel);
-    svgRef.current = node;
-    if (node) node.addEventListener('wheel', onWheel, { passive: false });
-  }, [onWheel]);
-
-  const beginPan = (event: React.PointerEvent<SVGSVGElement>): void => {
-    const svg = svgRef.current;
-    if (!svg || event.button !== 0 || endPan.current) return;
-
-    panFrom.current = toUserSpace(svg, event.clientX, event.clientY);
-    setPanning(true);
-
-    const move = (moved: PointerEvent) => {
-      const from = panFrom.current;
-      if (!from) return;
-      const to = toUserSpace(svg, moved.clientX, moved.clientY);
-      const dx = to.x - from.x;
-      const dy = to.y - from.y;
-      panFrom.current = to;
-      setView(current => ({ ...current, tx: current.tx + dx, ty: current.ty + dy }));
-    };
-
-    const end = () => {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', end);
-      window.removeEventListener('pointercancel', end);
-      panFrom.current = null;
-      endPan.current = null;
-      setPanning(false);
-    };
-
-    endPan.current = end;
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', end);
-    window.addEventListener('pointercancel', end);
-  };
-
-  useEffect(() => () => endPan.current?.(), []);
-
   const viewBox = useMemo(() => {
     if (!prepared) return '0 0 100 100';
     const width = Math.max(prepared.before.width, prepared.after.width) + PADDING * 2;
@@ -206,7 +140,7 @@ export function GraphView({ step }: { step: CompileStep }) {
         {prepared.drift > DRIFT_LIMIT && <span className="drift">layout moved too far to animate</span>}
         <div className="graph-tools">
           <span className="zoom">{Math.round(view.k * 100)}%</span>
-          <button onClick={() => setView(RESET_VIEW)} title="fit the whole graph">fit</button>
+          <button onClick={reset} title="fit the whole graph">fit</button>
           <button
             onClick={() => setReplayToken(token => token + 1)}
             disabled={step.kind === 'input'}
@@ -222,7 +156,7 @@ export function GraphView({ step }: { step: CompileStep }) {
         className={panning ? 'graph-svg panning' : 'graph-svg'}
         viewBox={viewBox}
         preserveAspectRatio="xMidYMin meet"
-        onPointerDown={beginPan}
+        {...surface}
       >
         <defs>
           <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
@@ -268,16 +202,6 @@ export function GraphView({ step }: { step: CompileStep }) {
       </svg>
     </div>
   );
-}
-
-function toUserSpace(svg: SVGSVGElement, clientX: number, clientY: number): { x: number; y: number } {
-  const matrix = svg.getScreenCTM();
-  if (!matrix) return { x: clientX, y: clientY };
-  const point = svg.createSVGPoint();
-  point.x = clientX;
-  point.y = clientY;
-  const mapped = point.matrixTransform(matrix.inverse());
-  return { x: mapped.x, y: mapped.y };
 }
 
 const CONTAINER_KINDS = new Set(['region', 'nest', 'nest-block', 'nest-func', 'source', 'line']);

@@ -377,7 +377,14 @@ kbd {
 
 .graph-tools { display: flex; align-items: center; gap: 6px; margin-left: auto; }
 .graph-tools .zoom { color: var(--ink-dim); font: 11px var(--mono); min-width: 38px; text-align: right; }
-.graph-svg { cursor: grab; touch-action: none; }
+.graph-svg {
+  cursor: grab;
+  touch-action: none;
+  overscroll-behavior: contain;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
 .graph-svg.panning { cursor: grabbing; }
 
 .graph-svg .node.nest rect,
