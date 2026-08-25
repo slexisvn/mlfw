@@ -6,6 +6,7 @@ import { BlockNode } from '../../../../src/compiler/ir/tensor/nodes.js';
 import { Schedule } from '../../../../src/compiler/schedule/schedule.js';
 import { SchedulePolicy } from '../../../../src/compiler/schedule/rules.js';
 import { CUDATarget } from '../../../../src/backend/target.js';
+import { BlockRole, numberedBlockName, opOfBlockName } from '../../../../src/compiler/ir/tensor/block_name.js';
 
 function lower(name, inTypes, outTypes, bodyFn) {
   const func = buildFunction(name, inTypes, outTypes, bodyFn);
@@ -159,5 +160,57 @@ describe('GPU scheduling with unique block names', () => {
 
     const matmulRules = [...applied.entries()].filter(([name]) => name.includes('matmul'));
     expect(matmulRules.length).toBeGreaterThan(0);
+  });
+});
+
+describe('a block name carries back the op it was lowered from', () => {
+  it('names an elementwise block after the graph op itself', () => {
+    const t = new TensorType([4], ScalarType.F32);
+    const pf = lower('addmul', [t, t], [t], (b, args) => {
+      b.returnOp([b.add(args[0], args[1]).getResult(0)]);
+    });
+
+    const ops = collectBlockNames(pf.body).map(opOfBlockName);
+    expect(ops).toContain('add');
+  });
+
+  it('gives the init half and the accumulate half of a reduction the same op', () => {
+    const x = new TensorType([4, 8], ScalarType.F32);
+    const init = new TensorType([], ScalarType.F32);
+    const out = new TensorType([4], ScalarType.F32);
+    const pf = lower('rowsum', [x, init], [out], (b, args) => {
+      b.returnOp([b.reduce(args[0], args[1], [1], 'sum').getResult(0)]);
+    });
+
+    const names = collectBlockNames(pf.body);
+    const roleNames = names.filter(n => n.includes('_init') || n.includes('_acc'));
+
+    expect(roleNames.length).toBeGreaterThan(1);
+    expect(new Set(roleNames.map(opOfBlockName)).size).toBe(1);
+  });
+
+  it('reads through the run number that keeps repeated blocks apart', () => {
+    const t = new TensorType([4, 4], ScalarType.F32);
+    const pf = lower('mm2', Array(3).fill(t), [t], (b, args) => {
+      const a = b.matmul(args[0], args[1]).getResult(0);
+      b.returnOp([b.matmul(a, args[2]).getResult(0)]);
+    });
+
+    const names = collectBlockNames(pf.body);
+    const unnamed = names.filter(name => opOfBlockName(name) === null);
+
+    expect(unnamed, `block names no op can be read from: ${unnamed.join(', ')}`).toEqual([]);
+    expect(names.every(name => !/\d$/.test(opOfBlockName(name)))).toBe(true);
+  });
+
+  it('strips every role a lowering rule may append to the hint', () => {
+    for (const role of Object.values(BlockRole)) {
+      expect(opOfBlockName(numberedBlockName(`conv_${role}`, 7))).toBe('conv');
+    }
+  });
+
+  it('keeps a hint that carries no role at all', () => {
+    expect(opOfBlockName(numberedBlockName('scatter_update', 0))).toBe('scatter');
+    expect(opOfBlockName(numberedBlockName('fa_initm', 3))).toBe('fa_initm');
   });
 });

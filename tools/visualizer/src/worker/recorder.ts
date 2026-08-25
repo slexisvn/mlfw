@@ -1,6 +1,7 @@
 import { PassResult } from 'mlfw/compiler/passes/pass.js';
 import { takeSnapshot } from './snapshot.js';
 import { sourceSnapshot } from './source_nest.js';
+import { levelLabel } from '../catalog/naming.js';
 import type { CompileStep, IRLevelName, Kernel, PassOutcome, Snapshot, TraceEventLite } from '../protocol.js';
 
 const OUTCOMES: Record<number, PassOutcome> = {
@@ -10,13 +11,6 @@ const OUTCOMES: Record<number, PassOutcome> = {
 };
 
 const GRAPH_PHASE_FALLBACK = 'graphPasses';
-
-const LEVEL_LABEL: Record<IRLevelName, string> = {
-  'graph-module': 'graph IR',
-  'graph-func': 'graph IR',
-  tir: 'tensor IR',
-  lir: 'low-level IR',
-};
 
 type OpenStep = {
   pass: string;
@@ -105,7 +99,7 @@ export class CompileRecorder {
           kind: 'lowering',
           level: step.level,
           phase: 'lowering',
-          pass: `${LEVEL_LABEL[previous.level]} → ${LEVEL_LABEL[step.level]}`,
+          pass: `${levelLabel(previous.level)} → ${levelLabel(step.level)}`,
           outcome: 'changed',
           durationMs: 0,
           before: previous.after,
@@ -123,7 +117,7 @@ export class CompileRecorder {
         kind: 'lowering',
         level: last.level,
         phase: 'codegen',
-        pass: `${LEVEL_LABEL[last.level]} → kernel source`,
+        pass: `${levelLabel(last.level)} → kernel source`,
         outcome: 'changed',
         durationMs: 0,
         before: last.after,

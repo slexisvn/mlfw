@@ -6,7 +6,7 @@ export type PassNote = {
 
 const BOOK = 'https://github.com/slexisvn/mlfw/tree/main/docs';
 
-const NOTES: Record<string, PassNote> = {
+export const PASS_NOTES: Record<string, PassNote> = {
   CallInlinerPass: {
     summary: 'Pastes called functions into their caller so later passes see one flat graph.',
     chapter: 'part3/ch14-what-a-pass-is',
@@ -160,7 +160,7 @@ const NOTES: Record<string, PassNote> = {
 };
 
 export function passNote(name: string): PassNote | null {
-  return NOTES[name] ?? null;
+  return PASS_NOTES[name] ?? null;
 }
 
 export function chapterUrl(note: PassNote): string {

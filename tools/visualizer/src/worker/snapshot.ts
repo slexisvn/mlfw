@@ -1,6 +1,8 @@
 import { IRPrinter, formatAttrValue } from 'mlfw/compiler/ir/graph/printer.js';
 import { typeToString } from 'mlfw/compiler/ir/graph/types.js';
 import { printLIR, LIRPrinter } from 'mlfw/compiler/ir/lir/printer.js';
+import { opOfBlockName } from 'mlfw/compiler/ir/tensor/block_name.js';
+import { ForKind, IterVarKind } from 'mlfw/compiler/ir/tensor/nodes.js';
 import { walk } from 'mlfw/compiler/ir/ir_visitor.js';
 import type { Block } from 'mlfw/compiler/ir/graph/block.js';
 import type { GraphFunction } from 'mlfw/compiler/ir/graph/function.js';
@@ -100,19 +102,9 @@ function countNodes(root: object): number {
   return total;
 }
 
-const BLOCK_SUFFIXES = ['_block', '_init', '_acc', '_update'];
-
 function expr(node: unknown): string {
   if (!node || typeof node !== 'object') return String(node ?? '');
   return new LIRPrinter().print(node as never).replace(/\s+/g, ' ').trim();
-}
-
-function opFromBlockName(name: string): string | null {
-  const trimmed = name.replace(/_\d+$/, '');
-  for (const suffix of BLOCK_SUFFIXES) {
-    if (trimmed.endsWith(suffix)) return trimmed.slice(0, -suffix.length) || null;
-  }
-  return trimmed || null;
 }
 
 type TirLike = Record<string, unknown> & { type: string };
@@ -139,7 +131,7 @@ function nestFor(node: unknown, path: string): NestNode[] {
     case 'ForNode': {
       const loopVar = n.loopVar as { name: string };
       const kind = String(n.kind);
-      const tag = n.threadTag ? ` @${String(n.threadTag)}` : kind === 'serial' ? '' : ` ${kind}`;
+      const tag = n.threadTag ? ` @${String(n.threadTag)}` : kind === ForKind.SERIAL ? '' : ` ${kind}`;
       return wrap('for', `for ${loopVar.name} < ${expr(n.extent)}${tag}`, kind,
         nestFor(n.body, `${path}.b`), `for:${loopVar.name}`);
     }
@@ -147,11 +139,11 @@ function nestFor(node: unknown, path: string): NestNode[] {
     case 'BlockNode': {
       const name = String(n.name);
       const iterVars = (n.iterVars as { kind: string }[]) ?? [];
-      const reduce = iterVars.filter(iv => iv.kind !== 'DataPar').length;
+      const reduce = iterVars.filter(iv => iv.kind !== IterVarKind.DATA_PAR).length;
       const detail = `${iterVars.length} iter var${iterVars.length === 1 ? '' : 's'}`
         + (reduce > 0 ? `, ${reduce} reduction` : '');
       const children = [...nestFor(n.initBody, `${path}.i`), ...nestFor(n.body, `${path}.b`)];
-      return wrap('block', name, detail, children, `block:${name}`, opFromBlockName(name));
+      return wrap('block', name, detail, children, `block:${name}`, opOfBlockName(name));
     }
 
     case 'AllocateNode': {

@@ -71,3 +71,42 @@ describe('memory-aware statement scheduling', () => {
     expect(events.filter((e) => e.type === 'function' && e.phase === 'memoryScheduling')).toHaveLength(0);
   });
 });
+
+function explainsFor(func, level) {
+  const events = [];
+  compileGraph(func, CPUTarget(), {
+    memory: { scheduleForPeak: true },
+    fusion: { enabled: false },
+    trace: { level, sink: (e) => events.push(e) },
+  });
+  return events.filter((e) => e.type === 'explain' && e.category === 'memory');
+}
+
+function shortChain() {
+  return buildFunction('chain', [t([SMALL])], [t([SMALL])], (b, a) => {
+    let x = a[0];
+    for (let i = 0; i < 4; i++) x = b.add(x, x).getResult(0);
+    b.returnOp([x]);
+  });
+}
+
+describe('memory scheduling says what it decided about the order', () => {
+  it('reports the peak it reached against the one the program order held', () => {
+    const [explained] = explainsFor(widePeaksBeforeReductions(), TraceLevel.DEBUG);
+
+    expect(explained).toMatchObject({ subject: 'chains', decision: 'reordered' });
+    expect(explained.peakBytes).toBeLessThan(explained.originalPeakBytes);
+  });
+
+  it('reports keeping an order it could not improve on, with a reason', () => {
+    const [explained] = explainsFor(shortChain(), TraceLevel.DEBUG);
+
+    expect(explained).toMatchObject({ subject: 'chain', decision: 'kept-order' });
+    expect(explained.reason).toBeTruthy();
+  });
+
+  it('says nothing at a trace level that does not ask for explanations', () => {
+    expect(explainsFor(widePeaksBeforeReductions(), TraceLevel.VERBOSE)).toEqual([]);
+    expect(explainsFor(shortChain(), TraceLevel.VERBOSE)).toEqual([]);
+  });
+});

@@ -5,6 +5,8 @@ import {
 } from '../../../../src/compiler/ir/tensor/nodes.js';
 import { Buffer } from '../../../../src/compiler/ir/tensor/buffer.js';
 import { simplifyPrimFunc } from '../../../../src/compiler/passes/simplify/simplify_tir.js';
+import { SimplifyPass } from '../../../../src/compiler/passes/simplify/simplify_pass.js';
+import { TraceLog, TraceLevel } from '../../../../src/compiler/pipeline/trace.js';
 
 const iv = (n) => new VariableNode(n, 'int32');
 const c = (x) => new IntImmNode(x);
@@ -79,5 +81,78 @@ describe('SimplifyPrimFunc (TVM tir.Simplify analog)', () => {
     expect(val.type).toBe('MathOpNode');
     expect(val.op).toBe('*');
     expect(val.b).toMatchObject({ type: 'FloatImmNode', value: 2.5 });
+  });
+});
+
+function guardedStore(condition) {
+  const A = new Buffer('A', [8], 'float32', 'global');
+  const i = iv('i');
+  const store = new BufferStoreNode(A, [i], new FloatImmNode(0));
+  const body = new ForNode(i, c(0), c(8), ForKind.SERIAL, new IfThenElseNode(condition(i), store));
+  return new PrimFunc('guarded', [], body);
+}
+
+function runTraced(primFunc, level) {
+  const events = [];
+  const trace = new TraceLog({ level, sink: (event) => events.push(event) });
+  const out = new SimplifyPass().run(primFunc, { trace });
+  return { out, events, of: (type) => events.filter((e) => e.type === type) };
+}
+
+describe('SimplifyPrimFunc counts the guards it decided', () => {
+  it('counts a guard it proved and left out of the body', () => {
+    const stats = { branchesFolded: 0 };
+    simplifyPrimFunc(guardedStore((i) => new CompareNode('lt', i, c(8))), stats);
+    expect(stats.branchesFolded).toBe(1);
+  });
+
+  it('counts nothing when the guard survives', () => {
+    const stats = { branchesFolded: 0 };
+    simplifyPrimFunc(guardedStore((i) => new CompareNode('lt', i, c(4))), stats);
+    expect(stats.branchesFolded).toBe(0);
+  });
+
+  it('counts a folded ternary inside an expression, not only a statement guard', () => {
+    const A = new Buffer('A', [8], 'float32', 'global');
+    const stats = { branchesFolded: 0 };
+    const f = loopBlock('i', 8, (i) =>
+      new IfThenElseNode(new CompareNode('lt', i, c(8)), new BufferLoadNode(A, [i]), new FloatImmNode(0)));
+
+    simplifyPrimFunc(f, stats);
+
+    expect(stats.branchesFolded).toBe(1);
+  });
+});
+
+describe('SimplifyPass reports what it simplified', () => {
+  it('hands back the same function it was given', () => {
+    const f = guardedStore((i) => new CompareNode('lt', i, c(8)));
+    expect(runTraced(f, TraceLevel.DEBUG).out).toBe(f);
+  });
+
+  it('reports the nodes it removed and the guards it folded', () => {
+    const { of } = runTraced(guardedStore((i) => new CompareNode('lt', i, c(8))), TraceLevel.DEBUG);
+    const detail = of('pass_detail')[0];
+
+    expect(detail.passName).toBe('SimplifyPass');
+    expect(detail.branchesFolded).toBe(1);
+    expect(detail.nodesRemoved).toBeGreaterThan(0);
+  });
+
+  it('explains a function it could fold and one it could not, by name', () => {
+    const folded = runTraced(guardedStore((i) => new CompareNode('lt', i, c(8))), TraceLevel.DEBUG).of('explain')[0];
+    const kept = runTraced(guardedStore((i) => new CompareNode('lt', i, c(4))), TraceLevel.DEBUG).of('explain')[0];
+
+    expect(folded).toMatchObject({ category: 'simplify', subject: 'guarded', decision: 'folded' });
+    expect(kept).toMatchObject({ category: 'simplify', subject: 'guarded', decision: 'unchanged' });
+    expect(kept.nodesRemoved).toBeUndefined();
+  });
+
+  it('times every run but only counts nodes when the detail would be read', () => {
+    const quiet = runTraced(guardedStore((i) => new CompareNode('lt', i, c(8))), TraceLevel.INFO);
+
+    expect(quiet.of('function')[0]).toMatchObject({ phase: 'simplify', funcName: 'guarded' });
+    expect(quiet.of('pass_detail')).toEqual([]);
+    expect(quiet.of('explain')).toEqual([]);
   });
 });

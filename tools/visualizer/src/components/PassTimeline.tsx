@@ -1,19 +1,12 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { actions, changedCount, disabledPasses, useStore, visibleSteps } from '../store.js';
 import { markFor } from '../catalog/glossary.js';
-import { levelLabel, passLabel, phaseLabel } from '../catalog/naming.js';
+import { levelBadge, levelLabel, passLabel, phaseLabel } from '../catalog/naming.js';
 import { OpCountChart } from './OpCountChart.js';
 import type { DisabledPass } from '../store.js';
-import type { CompileStep } from '../protocol.js';
+import type { CompileStep, IRLevelName } from '../protocol.js';
 
-const LEVEL_OF: Record<string, string> = {
-  'graph-module': 'graph',
-  'graph-func': 'graph',
-  tir: 'tir',
-  lir: 'lir',
-};
-
-type Group = { phase: string; level: string; steps: CompileStep[]; disabled: DisabledPass[] };
+type Group = { phase: string; level: IRLevelName | null; steps: CompileStep[]; disabled: DisabledPass[] };
 
 export function PassTimeline() {
   const result = useStore(s => s.result);
@@ -50,9 +43,11 @@ export function PassTimeline() {
           <section key={`${group.phase}-${group.steps[0]?.index ?? group.phase}`}>
             <header className="phase">
               <span className="phase-name">{phaseLabel(group.phase)}</span>
-              <span className="phase-level" title={`this phase works on the ${levelLabel(group.level)}`}>
-                {group.level}
-              </span>
+              {group.level && (
+                <span className="phase-level" title={`this phase works on the ${levelLabel(group.level)}`}>
+                  {levelBadge(group.level)}
+                </span>
+              )}
             </header>
             {group.steps.map(step => (
               <Row
@@ -176,7 +171,7 @@ function groupSteps(steps: readonly CompileStep[], disabled: readonly DisabledPa
   for (const step of steps) {
     const last = groups[groups.length - 1];
     if (last && last.phase === step.phase) last.steps.push(step);
-    else groups.push({ phase: step.phase, level: LEVEL_OF[step.level] ?? step.level, steps: [step], disabled: [] });
+    else groups.push({ phase: step.phase, level: step.level, steps: [step], disabled: [] });
   }
 
   const orphans: DisabledPass[] = [];
@@ -187,7 +182,7 @@ function groupSteps(steps: readonly CompileStep[], disabled: readonly DisabledPa
   }
 
   if (orphans.length > 0) {
-    groups.push({ phase: 'turned off', level: '', steps: [], disabled: orphans });
+    groups.push({ phase: 'turned off', level: null, steps: [], disabled: orphans });
   }
   return groups;
 }

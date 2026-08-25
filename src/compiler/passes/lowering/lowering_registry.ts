@@ -5,6 +5,7 @@ import { Buffer } from '../../ir/tensor/buffer.js';
 import { isDtypeInt } from '../../../util/dtype_map.js';
 import { ForNode, BlockNode, SeqNode, BufferStoreNode, BufferLoadNode, VariableNode, IntImmNode, FloatImmNode, BlockRealizeNode, IterVarKind, ForKind, MathOpNode, CompareNode, IfThenElseNode, CastNode, mathOp } from '../../ir/tensor/nodes.js';
 import { symIntToNode } from '../../ir/tensor/sym_lower.js';
+import { numberedBlockName } from '../../ir/tensor/block_name.js';
 
 import { isConstantOp } from '../../ir/graph/op_traits.js';
 import { registerOpStrategy, getOpStrategy, selectImplementation } from './op_strategy.js';
@@ -116,7 +117,7 @@ export class LoweringContext {
   }
 
   blockName(hint: string): string {
-    return `${hint}_${this._blockCounter++}`;
+    return numberedBlockName(hint, this._blockCounter++);
   }
 
   allocVar(nameHint: string, dtype = 'int32'): VariableNode {

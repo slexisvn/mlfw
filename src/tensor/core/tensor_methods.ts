@@ -49,9 +49,3 @@ export interface TensorMethods extends DerivedMethods, ShapeMethods, TensorSugar
 type SameKeys<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
 
 export const SUGAR_NAMES_MATCH_DECLARATIONS: SameKeys<TensorSugarMethodName, keyof TensorSugarMethods> = true;
-
-export const TENSOR_METHOD_NAMES: readonly string[] = [
-  ...TENSOR_OP_METHODS,
-  ...TENSOR_SHAPE_METHODS,
-  ...TENSOR_SUGAR_METHODS,
-];

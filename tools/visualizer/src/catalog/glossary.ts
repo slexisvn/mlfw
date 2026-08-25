@@ -87,12 +87,14 @@ export const SHORTCUTS: Shortcut[] = [
   { keys: 'Esc', action: 'close this guide' },
 ];
 
-export type TabNote = { tab: string; meaning: string };
+export const TAB_NOTES = [
+  { id: 'ir', label: 'IR', meaning: 'The program before and after the selected step, as a diff.' },
+  { id: 'graph', label: 'Graph', meaning: 'The same thing drawn as boxes and arrows, animated across the step.' },
+  { id: 'why', label: 'Why', meaning: 'What the pass is for, and the decisions it recorded while running.' },
+  { id: 'output', label: 'Output', meaning: 'The kernel source that falls out of the far end of the pipeline.' },
+  { id: 'result', label: 'Result', meaning: 'That kernel actually executed, checked against the same model run eagerly.' },
+] as const;
 
-export const TAB_NOTES: TabNote[] = [
-  { tab: 'IR', meaning: 'The program before and after the selected step, as a diff.' },
-  { tab: 'Graph', meaning: 'The same thing drawn as boxes and arrows, animated across the step.' },
-  { tab: 'Why', meaning: 'What the pass is for, and the decisions it recorded while running.' },
-  { tab: 'Output', meaning: 'The kernel source that falls out of the far end of the pipeline.' },
-  { tab: 'Result', meaning: 'That kernel actually executed, checked against the same model run eagerly.' },
-];
+export type TabNote = (typeof TAB_NOTES)[number];
+
+export type StageTab = TabNote['id'];

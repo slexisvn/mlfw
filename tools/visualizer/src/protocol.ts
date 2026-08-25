@@ -1,4 +1,9 @@
-export type IRLevelName = 'graph-module' | 'graph-func' | 'tir' | 'lir';
+import type { IRLevelValue } from 'mlfw/compiler/ir/verify.js';
+import type { TargetName } from './catalog/targets.js';
+
+export type { TargetName };
+
+export type IRLevelName = IRLevelValue;
 
 export type PassOutcome = 'changed' | 'unchanged' | 'failed' | 'unreported';
 
@@ -108,8 +113,6 @@ export type CompileOptions = {
   layout: boolean;
   disabledPasses: string[];
 };
-
-export type TargetName = 'cpu' | 'wasm' | 'cuda' | 'webgpu';
 
 export type InitRequest = { kind: 'init'; id: number };
 

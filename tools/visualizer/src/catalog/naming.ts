@@ -1,19 +1,24 @@
+import type { IRLevelName } from '../protocol.js';
+
 const CAMEL_BOUNDARY = /([a-z0-9])([A-Z])/g;
 const SEPARATORS = /[_\-.]+/g;
 const PASS_SUFFIX = /Pass$/;
-const RUN_SUFFIX = /_\d+$/;
 
 const ABBREVIATIONS: Record<string, string> = {
   dce: 'dead code elimination',
   cse: 'common subexpression elimination',
-  tir: 'tensor IR',
-  lir: 'low-level IR',
   ir: 'IR',
 };
 
-const OP_LABELS: Record<string, string> = {
+const LEVELS: Record<IRLevelName, { badge: string; label: string }> = {
+  'graph-module': { badge: 'graph', label: 'graph IR' },
+  'graph-func': { badge: 'graph', label: 'graph IR' },
+  tir: { badge: 'tir', label: 'tensor IR' },
+  lir: { badge: 'lir', label: 'low-level IR' },
+};
+
+export const OP_LABELS: Record<string, string> = {
   dot: 'matrix multiply',
-  matmul: 'matrix multiply',
   maximum: 'element-wise maximum',
   minimum: 'element-wise minimum',
   broadcast_in_dim: 'broadcast to shape',
@@ -30,18 +35,16 @@ const OP_LABELS: Record<string, string> = {
   tanh: 'tanh',
   sqrt: 'square root',
   rsqrt: 'reciprocal square root',
-  reduce_sum: 'sum along axes',
-  reduce_max: 'maximum along axes',
-  reduce_mean: 'mean along axes',
+  reduce: 'combine along axes',
   select: 'pick per element',
   compare: 'compare per element',
   convert: 'change dtype',
   slice: 'take a sub-tensor',
-  concatenate: 'join tensors',
+  concat: 'join tensors',
   pad: 'pad with a value',
-  convolution: 'convolution',
+  conv: 'convolution',
   fusion: 'fused kernel',
-  reduce_window: 'sliding-window reduce',
+  pool2d: 'sliding-window reduce',
   iota: 'index ramp',
   return: 'function result',
 };
@@ -82,13 +85,16 @@ export function phaseLabel(phase: string): string {
   return humanize(phase);
 }
 
-export function levelLabel(level: string): string {
-  return ABBREVIATIONS[level] ?? humanize(level);
+export function levelLabel(level: IRLevelName): string {
+  return LEVELS[level].label;
+}
+
+export function levelBadge(level: IRLevelName): string {
+  return LEVELS[level].badge;
 }
 
 export function opLabel(opName: string): string {
-  const base = opName.replace(RUN_SUFFIX, '');
-  return OP_LABELS[base] ?? humanize(base);
+  return OP_LABELS[opName] ?? humanize(opName);
 }
 
 export function metricLabel(key: string): string {

@@ -1,4 +1,5 @@
 import { noGrad } from 'mlfw/index.js';
+import { targetNote } from '../catalog/targets.js';
 import type { RunResult, TargetName, TensorPreview } from '../protocol.js';
 
 const WARMUP = 2;
@@ -6,10 +7,6 @@ const MIN_BATCH_MS = 25;
 const MAX_TOTAL_MS = 400;
 const MAX_ITERATIONS = 4096;
 const PREVIEW_VALUES = 8;
-
-const SKIP: Partial<Record<TargetName, string>> = {
-  cuda: 'CUDA kernels need a native driver — the source above is real, but nothing here can launch it.',
-};
 
 type TensorLike = {
   shape?: readonly number[];
@@ -86,7 +83,7 @@ export async function executeCompiled(
     maxAbsDiff: null, compiledMs: null, eagerMs: null, iterations: 0,
   };
 
-  const skipped = SKIP[target];
+  const skipped = targetNote(target).skipReason;
   if (skipped) return { ...empty, skipped };
 
   try {

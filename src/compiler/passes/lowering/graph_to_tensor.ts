@@ -1,5 +1,6 @@
 import { PrimFunc, SeqNode, BufferStoreNode, BufferLoadNode, BlockNode } from '../../ir/tensor/nodes.js';
 import { topoSortOpSet } from '../../ir/graph/graph_algorithms.js';
+import { CONSTANT_BLOCK_HINT } from '../../ir/tensor/block_name.js';
 import { registry } from '../../ir/graph/ops.js';
 
 import { LoweringContext, registerLoweringRule, hasLoweringRule, getLoweringRule, lowerConstant, expandConstantStores, isConstantOp, makeLoopNest, wrapInLoops } from './lowering_registry.js';
@@ -191,7 +192,7 @@ export function lowerGraphToPrimFunc(graphFunc: GraphFunction, target: CompileTa
   const constBuffers: ConstBuffer[] = [];
   for (const cb of ctx.constBuffers) {
     if (boundBuffers.has(cb.buffer)) {
-      stmts.push(expandConstantStores(cb.buffer, cb.data, ctx.blockName('constant_block')));
+      stmts.push(expandConstantStores(cb.buffer, cb.data, ctx.blockName(CONSTANT_BLOCK_HINT)));
       continue;
     }
     const v = ctx.allocVar('const');

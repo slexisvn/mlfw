@@ -60,8 +60,8 @@ export function GuidePanel() {
             <h3>The five tabs</h3>
             <dl className="guide-terms">
               {TAB_NOTES.map(note => (
-                <div key={note.tab}>
-                  <dt>{note.tab}</dt>
+                <div key={note.id}>
+                  <dt>{note.label}</dt>
                   <dd>{note.meaning}</dd>
                 </div>
               ))}

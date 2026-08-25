@@ -1,29 +1,17 @@
-import { compile, manual_seed, CPUTarget, WasmTarget, CUDATarget, WebGPUTarget, TraceLevel } from 'mlfw/index.js';
+import { compile, manual_seed, TraceLevel } from 'mlfw/index.js';
 import { PassContext } from 'mlfw/compiler/passes/pass.js';
 import { CompileRecorder } from './recorder.js';
 import { executeCompiled } from './execute.js';
 import { evaluateModelSource, frameworkGlobals } from './evaluate.js';
 import { recordSourceLines } from './source_map.js';
+import { targetNote } from '../catalog/targets.js';
+import { TARGET_FACTORIES } from './targets.js';
 import type { CompileOptions, CompileResponse, Kernel, RunResult, SourceLink, TargetName, WorkerRequest } from '../protocol.js';
 
 const NOT_RUN: RunResult = {
   ran: false, skipped: null, error: null,
   inputs: [], outputs: [], eagerOutputs: [],
   maxAbsDiff: null, compiledMs: null, eagerMs: null, iterations: 0,
-};
-
-const TARGETS: Record<TargetName, () => unknown> = {
-  cpu: CPUTarget,
-  wasm: WasmTarget,
-  cuda: CUDATarget,
-  webgpu: WebGPUTarget,
-};
-
-const KERNEL_LANGUAGE: Record<TargetName, string> = {
-  cpu: 'javascript',
-  wasm: 'wat',
-  cuda: 'cpp',
-  webgpu: 'wgsl',
 };
 
 const SEED = 0;
@@ -52,7 +40,7 @@ function asCompilable(model: unknown): Compilable {
 
 function compilerOptions(options: CompileOptions): Record<string, unknown> {
   return {
-    target: TARGETS[options.target](),
+    target: TARGET_FACTORIES[options.target](),
     fusion: { enabled: options.fusion, strategy: options.fusionStrategy },
     scheduling: { enabled: options.scheduling },
     optimization: { layout: options.layout },
@@ -69,11 +57,12 @@ function collectKernels(handle: { result(): unknown }, target: TargetName): Kern
   } | null;
   if (!result) return [];
 
+  const language = targetNote(target).kernelLanguage;
   const kernels: Kernel[] = [];
   for (const name of result.listKernels()) {
     const source = result.getSource(name);
     if (source === null) continue;
-    kernels.push({ name, source, language: KERNEL_LANGUAGE[target] });
+    kernels.push({ name, source, language });
   }
   return kernels;
 }

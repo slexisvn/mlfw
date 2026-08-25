@@ -7,18 +7,7 @@ import { OutputPanel } from './OutputPanel.js';
 import { ResultPanel } from './ResultPanel.js';
 import { Playbar } from './Playbar.js';
 import { WhyPanel } from './WhyPanel.js';
-import type { StageTab } from '../store.js';
 import type { CompileStep } from '../protocol.js';
-
-const TABS: { id: StageTab; label: string }[] = [
-  { id: 'ir', label: 'IR' },
-  { id: 'graph', label: 'Graph' },
-  { id: 'why', label: 'Why' },
-  { id: 'output', label: 'Output' },
-  { id: 'result', label: 'Result' },
-];
-
-const NOTE_BY_TAB = new Map(TAB_NOTES.map(note => [note.tab, note.meaning]));
 
 function captionFor(step: CompileStep): string {
   if (step.kind === 'input') return 'your model, straight out of tracing';
@@ -35,12 +24,12 @@ export function StageTabs() {
   return (
     <section className="stage">
       <nav className="tabs">
-        {TABS.map(t => (
+        {TAB_NOTES.map(t => (
           <button
             key={t.id}
             className={t.id === tab ? 'active' : ''}
             aria-current={t.id === tab ? 'true' : undefined}
-            title={NOTE_BY_TAB.get(t.label)}
+            title={t.meaning}
             onClick={() => actions.setTab(t.id)}
           >
             {t.label}

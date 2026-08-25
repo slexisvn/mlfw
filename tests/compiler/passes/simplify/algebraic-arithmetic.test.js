@@ -3,6 +3,7 @@ import { buildFunction } from '../../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../../src/compiler/ir/graph/types.js';
 import { AlgebraicSimplificationPass } from '../../../../src/compiler/passes/simplify/algebraic.js';
 import { PassResult } from '../../../../src/compiler/passes/pass.js';
+import { canonicalizationPatternNames } from '../../../../src/compiler/passes/canonicalize/canonicalize.js';
 
 function run(func) {
   return new AlgebraicSimplificationPass().run(func);
@@ -209,5 +210,74 @@ describe('cross-pattern chains', () => {
     expect(mulOp.opName).toBe('mul');
     expect(mulOp.getOperand(0)).toBe(func.args[0]);
     expect(mulOp.getOperand(1)).toBe(func.args[1]);
+  });
+});
+
+function patternNames(opts) {
+  return new AlgebraicSimplificationPass(opts).patterns.patterns.map(p => p.name);
+}
+
+function mulOne() {
+  const t = new TensorType([4], ScalarType.F32);
+  return buildFunction('f', [t], [t], (b, args) => {
+    const one = b.scalarConstant(1, ScalarType.F32);
+    b.returnOp([b.mul(args[0], one.getResult(0)).getResult(0)]);
+  });
+}
+
+function doubleTranspose() {
+  const t = new TensorType([4, 8], ScalarType.F32);
+  return buildFunction('f', [t], [t], (b, args) => {
+    const once = b.transpose(args[0], [1, 0]);
+    b.returnOp([b.transpose(once.getResult(0), [1, 0]).getResult(0)]);
+  });
+}
+
+describe('patterns an op already declares can be left to whoever applies them', () => {
+  it('drops exactly the patterns the other pass owns, and nothing else', () => {
+    const owned = canonicalizationPatternNames(false);
+    const alone = patternNames({});
+    const shared = patternNames({ ownedElsewhere: owned });
+
+    expect(shared).toEqual(alone.filter(name => !owned.has(name)));
+    expect(alone.filter(name => owned.has(name)).length).toBeGreaterThan(0);
+  });
+
+  it('keeps the rewrites that pair two different ops, which no single op declares', () => {
+    const shared = patternNames({ ownedElsewhere: canonicalizationPatternNames(false) });
+
+    expect(shared).toContain('transpose_transpose');
+    expect(shared).not.toContain('mul_one');
+  });
+
+  it('leaves an identity alone when it was handed off, and folds it when it was not', () => {
+    const handedOff = new AlgebraicSimplificationPass({ ownedElsewhere: canonicalizationPatternNames(false) });
+    const onItsOwn = new AlgebraicSimplificationPass();
+    const kept = mulOne();
+    const folded = mulOne();
+
+    expect(handedOff.run(kept)).toBe(PassResult.UNCHANGED);
+    expect(retVal(kept).definingOp.opName).toBe('mul');
+
+    expect(onItsOwn.run(folded)).toBe(PassResult.CHANGED);
+    expect(retVal(folded)).toBe(folded.args[0]);
+  });
+
+  it('still folds a cross-op rewrite after the handoff', () => {
+    const pass = new AlgebraicSimplificationPass({ ownedElsewhere: canonicalizationPatternNames(false) });
+    const func = doubleTranspose();
+
+    expect(pass.run(func)).toBe(PassResult.CHANGED);
+    expect(retVal(func).definingOp.getAttr('permutation')).toEqual([0, 1]);
+    expect(retVal(func).definingOp.getOperand(0)).toBe(func.args[0]);
+  });
+
+  it('adds the fast-math rewrites on top, none of which the handoff takes away', () => {
+    const owned = canonicalizationPatternNames(true);
+    const fast = patternNames({ fastMath: true, ownedElsewhere: owned });
+
+    expect(fast).toContain('exp_log');
+    expect(fast).toContain('div_self');
+    expect(patternNames({ ownedElsewhere: owned })).not.toContain('exp_log');
   });
 });

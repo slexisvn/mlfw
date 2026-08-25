@@ -3,8 +3,7 @@ import { DEFAULT_OPTIONS } from './protocol.js';
 import { EXAMPLES } from './examples/index.js';
 import { readSession, shareUrl, writeSession } from './session.js';
 import type { CompileOptions, CompileResponse, CompileStep, WorkerRequest, WorkerRequestDraft, WorkerResponse } from './protocol.js';
-
-export type StageTab = 'ir' | 'graph' | 'why' | 'output' | 'result';
+import type { StageTab } from './catalog/glossary.js';
 
 const REDUCED_MOTION = typeof matchMedia === 'function'
   && matchMedia('(prefers-reduced-motion: reduce)').matches;

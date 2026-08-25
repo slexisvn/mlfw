@@ -3,6 +3,7 @@ import { buildFunction } from '../../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../../src/compiler/ir/graph/types.js';
 import { CSEPass } from '../../../../src/compiler/passes/simplify/cse.js';
 import { PassResult } from '../../../../src/compiler/passes/pass.js';
+import { TraceLog, TraceLevel } from '../../../../src/compiler/pipeline/trace.js';
 
 function run(func) {
   return new CSEPass().run(func);
@@ -322,5 +323,70 @@ describe('redundancy is matched across enclosing scopes, not just within a block
 
     expect(run(func)).toBe(PassResult.UNCHANGED);
     expect([...func.opsRecursive()].filter(op => op.opName === 'mul').length).toBe(2);
+  });
+});
+
+function runTraced(func, level = TraceLevel.DEBUG) {
+  const events = [];
+  const pass = new CSEPass();
+  pass.trace = new TraceLog({ level, sink: (event) => events.push(event) });
+  const result = pass.run(func);
+  return { result, events, of: (type) => events.filter((e) => e.type === type) };
+}
+
+function twoIdenticalAdds() {
+  const t = new TensorType([4], ScalarType.F32);
+  return buildFunction('f', [t, t], [t, t], (b, args) => {
+    const a1 = b.add(args[0], args[1]);
+    const a2 = b.add(args[0], args[1]);
+    b.returnOp([a1.getResult(0), a2.getResult(0)]);
+  });
+}
+
+describe('CSE says which ops it removed', () => {
+  it('names the op behind every value it deduplicated', () => {
+    const explains = runTraced(twoIdenticalAdds()).of('explain');
+
+    expect(explains.length).toBe(1);
+    expect(explains[0]).toMatchObject({ category: 'cse', subject: 'add', decision: 'deduplicated' });
+  });
+
+  it('explains once per removed op, counting the ones inside regions', () => {
+    const t = new TensorType([4], ScalarType.F32);
+    const boolT = new TensorType([], ScalarType.BOOL);
+    const func = buildFunction('f', [t, t, boolT], [t], (b, args) => {
+      const outer = b.add(args[0], args[1]);
+      const branch = b.ifOp(args[2], [t], (tb) => {
+        tb.yieldOp([tb.add(args[0], args[1]).getResult(0)]);
+      }, (eb) => {
+        eb.yieldOp([eb.add(args[0], args[1]).getResult(0)]);
+      });
+      b.returnOp([b.add(outer.getResult(0), branch.getResult(0)).getResult(0)]);
+    });
+
+    const { of } = runTraced(func);
+
+    expect(of('explain').length).toBe(2);
+    expect(of('pass_detail')[0].eliminated).toBe(2);
+  });
+
+  it('stays quiet when it found nothing to remove', () => {
+    const t = new TensorType([4], ScalarType.F32);
+    const func = buildFunction('f', [t, t], [t, t], (b, args) => {
+      b.returnOp([b.add(args[0], args[1]).getResult(0), b.mul(args[0], args[1]).getResult(0)]);
+    });
+
+    const { result, of } = runTraced(func);
+
+    expect(result).toBe(PassResult.UNCHANGED);
+    expect(of('explain')).toEqual([]);
+    expect(of('pass_detail')).toEqual([]);
+  });
+
+  it('keeps quiet below the level the explanation is emitted at', () => {
+    const { result, of } = runTraced(twoIdenticalAdds(), TraceLevel.VERBOSE);
+
+    expect(result).toBe(PassResult.CHANGED);
+    expect(of('explain')).toEqual([]);
   });
 });

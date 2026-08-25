@@ -316,3 +316,32 @@ describe('hardwareMeasure resolves the measurer from the target kind', () => {
     registerMeasurer('webgpu', null);
   });
 });
+
+describe('the identity folds live in exactly one pass of the built pipeline', () => {
+  async function algebraicPatternsFor(passContext) {
+    const { buildGraphPipeline } = await import('../../../src/compiler/pipeline/graph_pipeline.js');
+    const { CompilerConfig } = await import('../../../src/compiler/pipeline/compiler.js');
+    const target = CPUTarget();
+    const config = new CompilerConfig({ target, passContext });
+    const flat = buildGraphPipeline(config, target).flatMap(p => (p.passes ? p.passes : [p]));
+    const algebraic = flat.find(p => p.name === 'algebraic_simplify');
+
+    return { names: algebraic.patterns.patterns.map(p => p.name), flat };
+  }
+
+  it('hands the op-declared identities to canonicalize while it is in the pipeline', async () => {
+    const { names, flat } = await algebraicPatternsFor(null);
+
+    expect(flat.some(p => p.name === 'canonicalize')).toBe(true);
+    expect(names).not.toContain('mul_one');
+    expect(names).toContain('transpose_transpose');
+  });
+
+  it('takes them back when canonicalize is switched off, so nothing stops folding', async () => {
+    const { PassContext } = await import('../../../src/compiler/passes/pass.js');
+    const { names } = await algebraicPatternsFor(new PassContext({ disabledPasses: ['canonicalize'] }));
+
+    expect(names).toContain('mul_one');
+    expect(names).toContain('transpose_transpose');
+  });
+});
