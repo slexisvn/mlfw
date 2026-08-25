@@ -342,8 +342,10 @@ kbd {
 .graph { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .graph-bar {
   display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 6px 8px;
   padding: 5px 10px;
   border-bottom: 1px solid var(--line);
   font-size: 11px;
@@ -355,16 +357,17 @@ kbd {
   border-radius: 4px;
   padding: 2px 8px;
   font: inherit;
+  white-space: nowrap;
 }
 .graph-bar .drift { color: var(--warn); }
-.graph-bar button:last-child { margin-left: auto; }
 
-.legend { display: flex; gap: 5px; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 5px; min-width: 0; }
 .chip {
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 1px 8px;
   color: var(--ink-dim);
+  white-space: nowrap;
 }
 .chip.added { color: var(--added); border-color: #2c5c52; }
 .chip.removed { color: var(--removed); border-color: #6b2a2a; }
@@ -412,7 +415,7 @@ kbd {
 
 .step-row.input .mark, .step-row.input .pass-name { color: var(--accent); }
 
-.graph-tools { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.graph-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-left: auto; }
 .graph-tools .zoom { color: var(--ink-dim); font: 11px var(--mono); min-width: 38px; text-align: right; }
 .graph-svg {
   cursor: grab;
@@ -579,6 +582,7 @@ kbd {
   .tabs button { white-space: nowrap; }
   .timings { flex-direction: column; }
   .speedup { padding: 2px 0; }
+  .graph-tools { margin-left: 0; }
 }
 
 :focus-visible {
@@ -619,7 +623,6 @@ kbd {
 
 .graph-hint { color: var(--ink-dim); font-size: 11px; white-space: nowrap; }
 .graph-tools button.active { color: var(--ink); border-color: var(--accent); }
-.graph-bar button:last-child { margin-left: 0; }
 
 .graph-svg .node.traceable { cursor: pointer; }
 .graph-svg .node.traceable:hover rect { stroke: var(--accent); stroke-width: 1.6; }
