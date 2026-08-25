@@ -27,10 +27,17 @@ export function Controls() {
   const stale = useStore(isStale);
   const hasResult = useStore(s => s.result !== null);
   const [copied, setCopied] = useState(false);
+  const [optionsOpen, setOptionsOpen] = useState(false);
   const example = EXAMPLES.find(e => e.id === exampleId);
   const edited = exampleId === '';
   const target = targetNote(options.target);
   const strategy = STRATEGIES.find(s => s.id === options.fusionStrategy) as (typeof STRATEGIES)[number];
+  const off = options.disabledPasses.length;
+  const summary = [
+    target.label,
+    ...TOGGLES.filter(toggle => options[toggle.key] as boolean).map(toggle => toggle.label),
+    off > 0 ? `${off} ${off === 1 ? 'pass' : 'passes'} off` : null,
+  ].filter(part => part !== null).join(' · ');
 
   const copyLink = async (): Promise<void> => {
     await navigator.clipboard.writeText(actions.share());
@@ -57,77 +64,89 @@ export function Controls() {
         </button>
       </div>
 
-      <p className="blurb">
-        {edited
-          ? 'Your own code. End it with run(model, inputs) and press Run.'
-          : (example as (typeof EXAMPLES)[number]).blurb}
-      </p>
-
       {stale && (
         <p className="stale-note" role="status">
           You changed something since the last compile — press Run to update what is on screen.
         </p>
       )}
 
-      <div className="control-row">
-        <label className="control">
-          <span>Target</span>
-          <select
-            value={options.target}
-            onChange={e => actions.setOptions({ target: e.target.value as TargetName })}
-          >
-            {TARGETS.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
-          </select>
-        </label>
-        <label className="control">
-          <span>Fusion</span>
-          <select
-            value={options.fusionStrategy}
-            disabled={!options.fusion}
-            onChange={e => actions.setOptions({ fusionStrategy: e.target.value as CompileOptions['fusionStrategy'] })}
-          >
-            {STRATEGIES.map(s => <option key={s.id} value={s.id}>{s.id}</option>)}
-          </select>
-        </label>
-      </div>
+      <button
+        className="options-toggle"
+        aria-controls="compile-options"
+        aria-expanded={optionsOpen}
+        onClick={() => setOptionsOpen(open => !open)}
+      >
+        <span>{summary}</span>
+        <em>{optionsOpen ? 'hide options ▴' : 'options ▾'}</em>
+      </button>
 
-      <p className="control-note">
-        {target.note}
-        {options.fusion ? ` · ${strategy.note}` : ' · fusion is off'}
-      </p>
+      <div id="compile-options" className={optionsOpen ? 'control-more open' : 'control-more'}>
+        <p className="blurb">
+          {edited
+            ? 'Your own code. End it with run(model, inputs) and press Run.'
+            : (example as (typeof EXAMPLES)[number]).blurb}
+        </p>
 
-      <div className="toggles">
-        {TOGGLES.map(toggle => (
-          <Toggle
-            key={toggle.key}
-            label={toggle.label}
-            note={toggle.note}
-            on={options[toggle.key] as boolean}
-            onChange={value => actions.setOptions({ [toggle.key]: value } as Partial<CompileOptions>)}
-          />
-        ))}
-      </div>
-
-      {options.disabledPasses.length > 0 && (
-        <div className="disabled-passes">
-          <span>turned off:</span>
-          {options.disabledPasses.map(name => (
-            <button
-              key={name}
-              title={`put ${passLabel(name)} back and recompile`}
-              onClick={() => actions.togglePass(name)}
+        <div className="control-row">
+          <label className="control">
+            <span>Target</span>
+            <select
+              value={options.target}
+              onChange={e => actions.setOptions({ target: e.target.value as TargetName })}
             >
-              {name} ↺
-            </button>
+              {TARGETS.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+            </select>
+          </label>
+          <label className="control">
+            <span>Fusion</span>
+            <select
+              value={options.fusionStrategy}
+              disabled={!options.fusion}
+              onChange={e => actions.setOptions({ fusionStrategy: e.target.value as CompileOptions['fusionStrategy'] })}
+            >
+              {STRATEGIES.map(s => <option key={s.id} value={s.id}>{s.id}</option>)}
+            </select>
+          </label>
+        </div>
+
+        <p className="control-note">
+          {target.note}
+          {options.fusion ? ` · ${strategy.note}` : ' · fusion is off'}
+        </p>
+
+        <div className="toggles">
+          {TOGGLES.map(toggle => (
+            <Toggle
+              key={toggle.key}
+              label={toggle.label}
+              note={toggle.note}
+              on={options[toggle.key] as boolean}
+              onChange={value => actions.setOptions({ [toggle.key]: value } as Partial<CompileOptions>)}
+            />
           ))}
         </div>
-      )}
 
-      {hasResult && (
-        <button className="share" onClick={() => { void copyLink(); }}>
-          {copied ? 'link copied' : 'copy a link to this'}
-        </button>
-      )}
+        {options.disabledPasses.length > 0 && (
+          <div className="disabled-passes">
+            <span>turned off:</span>
+            {options.disabledPasses.map(name => (
+              <button
+                key={name}
+                title={`put ${passLabel(name)} back and recompile`}
+                onClick={() => actions.togglePass(name)}
+              >
+                {name} ↺
+              </button>
+            ))}
+          </div>
+        )}
+
+        {hasResult && (
+          <button className="share" onClick={() => { void copyLink(); }}>
+            {copied ? 'link copied' : 'copy a link to this'}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

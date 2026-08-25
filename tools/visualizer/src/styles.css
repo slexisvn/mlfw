@@ -121,6 +121,8 @@ button:disabled { opacity: 0.5; cursor: default; }
 
 .blurb { margin: 0 0 8px; color: var(--ink-dim); font-size: 12px; }
 
+.options-toggle { display: none; }
+
 .toggles { display: flex; gap: 6px; flex-wrap: wrap; }
 .toggle {
   display: inline-flex;
@@ -575,7 +577,21 @@ kbd {
   .columns.show-stage > .stage { display: flex; }
 
   .control-row { flex-wrap: wrap; }
-  .controls { max-height: none; }
+  .controls { padding: 8px 10px; max-height: 50%; }
+
+  .options-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    color: var(--ink-dim);
+    font-size: 12px;
+  }
+  .options-toggle > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .options-toggle > em { flex: 0 0 auto; font-style: normal; color: var(--accent); }
+  .control-more { display: none; }
+  .control-more.open { display: block; margin-top: 8px; }
   .playbar { flex-wrap: wrap; }
   .playbar .scrub { order: 3; flex-basis: 100%; }
   .tabs { overflow-x: auto; }
