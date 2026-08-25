@@ -3,10 +3,43 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta
+      name="description"
+      content="Type a model, press Run, and step through every pass a machine-learning compiler runs on it."
+    />
     <title>mlfw pass visualizer</title>
+    <style>
+      html, body { height: 100%; margin: 0; background: #0b0d12; }
+      .boot {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        color: #7d879c;
+        font: 13px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+        text-align: center;
+        padding: 24px;
+      }
+      .boot strong { color: #d6dbe6; font-size: 14px; font-weight: 600; }
+      .boot span { max-width: 46ch; }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div class="boot">
+        <strong>mlfw pass visualizer</strong>
+        <span>Loading the compiler. It runs entirely in this tab — nothing is sent anywhere.</span>
+      </div>
+    </div>
+    <noscript>
+      <div class="boot">
+        <strong>mlfw pass visualizer</strong>
+        <span>This page compiles models in your browser, so it needs JavaScript switched on.</span>
+      </div>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -61,19 +61,31 @@ export class InlineReindexPass extends PrimFuncPass {
     this.snapshotPoint = 'afterInlineReindex';
   }
 
+  _skip(ctx: TirPassCtx, pf: PrimFunc, reason: string): void {
+    if (ctx.trace.explainsEnabled) ctx.trace.explain('inline-reindex', pf.name, 'left-alone', reason, {});
+  }
+
   override run(pf: PrimFunc, ctx: TirPassCtx): void {
-    if (!this.target.isGPU() || this.target.isWebGPU()) return;
-    if (pf.hasAttr(FuncAttr.EXTERNAL_CODEGEN) || pf.hasAttr(FuncAttr.TENSOR_INTRIN)) return;
-    if (primFuncHasRecurrence(pf)) return;
+    if (!this.target.isGPU() || this.target.isWebGPU()) {
+      return this._skip(ctx, pf, 'folding index-only blocks away only pays off on a GPU target, where a whole kernel launch would exist just to renumber');
+    }
+    if (pf.hasAttr(FuncAttr.EXTERNAL_CODEGEN) || pf.hasAttr(FuncAttr.TENSOR_INTRIN)) {
+      return this._skip(ctx, pf, 'this function is handed to an external kernel, so its blocks are not ours to move');
+    }
+    if (primFuncHasRecurrence(pf)) {
+      return this._skip(ctx, pf, 'a block reads what a later iteration writes, so inlining it would change the order of the reads');
+    }
     const sCfg = this.config.scheduling as Record<string, boolean>;
-    if (!(sCfg.enabled || sCfg.gpuTiling || sCfg.autotune)) return;
+    if (!(sCfg.enabled || sCfg.gpuTiling || sCfg.autotune)) {
+      return this._skip(ctx, pf, 'scheduling is switched off, so the loop nests stay exactly as lowering produced them');
+    }
 
     const storage = new Set<string>();
     for (const [, buf] of pf.bufferMap) storage.add(buf.name);
 
     const { blocks, loadCount, storeWriters } = analyzeFunc(pf.body);
     const sch = new Schedule(pf);
-    let inlined = false;
+    const inlined: string[] = [];
     for (const b of blocks) {
       if (b.hasInit || b.writes.size === 0) continue;
       const writes = [...b.writes];
@@ -83,10 +95,20 @@ export class InlineReindexPass extends PrimFuncPass {
       if (!duplicationIsBounded(b, loadCount)) continue;
       try {
         sch.computeInlineBlock(b.name);
-        inlined = true;
+        inlined.push(b.name);
       } catch (_) {}
     }
 
-    if (inlined) invalidateClassifyCache(pf);
+    if (inlined.length === 0) {
+      return this._skip(ctx, pf, 'no block here writes a temporary that exactly one consumer reads back, which is what makes inlining free');
+    }
+
+    invalidateClassifyCache(pf);
+    if (ctx.trace.explainsEnabled) {
+      for (const name of inlined) {
+        ctx.trace.explain('inline-reindex', name, 'inlined',
+          'the block only renumbers indices into a temporary that one consumer reads, so the consumer can index the source directly', {});
+      }
+    }
   }
 }

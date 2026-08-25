@@ -1,23 +1,69 @@
 import { chapterUrl, passNote } from '../catalog/passes.js';
+import { isHiddenMetric, levelLabel, metricLabel, metricValue, passLabel, phaseLabel } from '../catalog/naming.js';
 import type { CompileStep, TraceEventLite } from '../protocol.js';
 
 const INTERESTING = new Set(['explain', 'pass_detail', 'warning', 'memory', 'codegen', 'error']);
+const BASE_KEYS = ['type', 'level', 'timestamp'];
+const EXPLAIN_KEYS = [...BASE_KEYS, 'category', 'subject', 'decision', 'reason'];
+const SUBJECT_LIMIT = 6;
+
+type Group = { event: TraceEventLite; subjects: string[] };
+
+function groupEvents(events: readonly TraceEventLite[]): Group[] {
+  const groups: Group[] = [];
+  const byKey = new Map<string, Group>();
+
+  for (const event of events) {
+    const key = [event.type, event.category, event.decision, event.reason].map(String).join('|');
+    const existing = byKey.get(key);
+    const subject = event.subject === undefined ? null : String(event.subject);
+
+    if (existing) {
+      if (subject) existing.subjects.push(subject);
+      continue;
+    }
+
+    const group: Group = { event, subjects: subject ? [subject] : [] };
+    byKey.set(key, group);
+    groups.push(group);
+  }
+
+  return groups;
+}
 
 export function WhyPanel({ step }: { step: CompileStep }) {
   const events = step.events.filter(event => INTERESTING.has(event.type));
+  const groups = groupEvents(events);
+  const explains = step.kind !== 'pass';
 
   return (
     <div className="why">
       <PassCard step={step} />
-      {events.length === 0
-        ? (step.kind === 'input' ? null : (
-          <p className="why-quiet">
-            This run emitted no decisions. Passes explain themselves through the trace log, and this one
-            had nothing to report for this graph.
-          </p>
-        ))
-        : events.map((event, i) => <EventCard key={i} event={event} />)}
+      {groups.length === 0
+        ? (explains ? null : <QuietNote step={step} />)
+        : groups.map((group, i) => <EventCard key={i} group={group} />)}
     </div>
+  );
+}
+
+function QuietNote({ step }: { step: CompileStep }) {
+  const delta = step.after.ops - step.before.ops;
+
+  if (step.outcome !== 'changed') {
+    return (
+      <p className="why-quiet">
+        This run recorded no decisions. Passes explain themselves through the trace log, and this one
+        had nothing to report for this graph.
+      </p>
+    );
+  }
+
+  return (
+    <p className="why-quiet">
+      This pass rewrote the {levelLabel(step.level)} without recording a decision — {step.before.ops}{' '}
+      nodes in, {step.after.ops} out{delta !== 0 && ` (${delta > 0 ? '+' : ''}${delta})`}. What it did is
+      in the IR beside this panel; why it did it never reached the trace.
+    </p>
   );
 }
 
@@ -57,10 +103,13 @@ function PassCard({ step }: { step: CompileStep }) {
         </p>
         <p className="reason">
           An op is linked to its loop nest when the block still carries its name — lowering builds blocks
-          called <code>add_block_5</code>, <code>fusion_block_2</code>. Ops whose rule names the block after
-          the math instead of the op (<code>dot</code> becomes <code>matmul_init</code> and
-          <code>matmul_acc</code>) cannot be linked, so they dissolve and their loops appear instead. That
-          gap is real: past this boundary the IR no longer remembers which op it came from.
+          called <code>add_block_5</code>, <code>fusion_block_2</code>. Two things break that link. A rule
+          can name the block after the math instead of the op: <code>dot</code> lowers to
+          <code>matmul_init_0</code> and <code>matmul_1</code>, and no op in the graph is called
+          <code>matmul</code>. Or the name survives only in shortened form:
+          <code>broadcast_in_dim</code> lowers to <code>broadcast_block_5</code>, which reads back as
+          <code>broadcast</code>. Either way the op dissolves and its loops appear instead. That gap is
+          real: past this boundary the IR no longer remembers which op it came from.
         </p>
       </article>
     );
@@ -86,10 +135,11 @@ function PassCard({ step }: { step: CompileStep }) {
       <header>
         <span className="tag">pass</span>
         <span className="subject">{step.pass}</span>
+        <span className="expansion">{passLabel(step.pass)}</span>
       </header>
       {note && <p className="decision">{note.summary}</p>}
       <p className="reason">
-        ran in {step.phase} · {step.before.ops} ops in, {step.after.ops} out
+        ran in {phaseLabel(step.phase)} · {step.before.ops} ops in, {step.after.ops} out
         {delta !== 0 && ` (${delta > 0 ? '+' : ''}${delta})`} · {step.durationMs.toFixed(1)}ms
       </p>
       {note && (
@@ -101,17 +151,21 @@ function PassCard({ step }: { step: CompileStep }) {
   );
 }
 
-function EventCard({ event }: { event: TraceEventLite }) {
+function EventCard({ group }: { group: Group }) {
+  const { event, subjects } = group;
+  const times = Math.max(subjects.length, 1);
+
   if (event.type === 'explain') {
     return (
       <article className="why-card explain">
         <header>
           <span className="tag">{String(event.category)}</span>
-          <span className="subject">{String(event.subject)}</span>
+          <span className="subject">{summarize(subjects)}</span>
+          {times > 1 && <span className="repeat">{times}×</span>}
         </header>
         <p className="decision">{String(event.decision)}</p>
         {event.reason ? <p className="reason">because {String(event.reason)}</p> : null}
-        <Extras event={event} skip={['type', 'level', 'timestamp', 'category', 'subject', 'decision', 'reason']} />
+        <Extras event={event} skip={EXPLAIN_KEYS} />
       </article>
     );
   }
@@ -127,31 +181,31 @@ function EventCard({ event }: { event: TraceEventLite }) {
 
   return (
     <article className={`why-card ${event.type}`}>
-      <header><span className="tag">{event.type}</span></header>
-      <Extras event={event} skip={['type', 'level', 'timestamp']} />
+      <header><span className="tag">{event.type.replace('_', ' ')}</span></header>
+      <Extras event={event} skip={BASE_KEYS} />
     </article>
   );
 }
 
+function summarize(subjects: readonly string[]): string {
+  if (subjects.length === 0) return '';
+  if (subjects.length <= SUBJECT_LIMIT) return subjects.join(', ');
+  return `${subjects.slice(0, SUBJECT_LIMIT).join(', ')} and ${subjects.length - SUBJECT_LIMIT} more`;
+}
+
 function Extras({ event, skip }: { event: TraceEventLite; skip: readonly string[] }) {
   const entries = Object.entries(event).filter(([key, value]) =>
-    !skip.includes(key) && value !== null && value !== undefined);
+    !skip.includes(key) && !isHiddenMetric(key) && value !== null && value !== undefined);
   if (entries.length === 0) return null;
 
   return (
     <dl className="extras">
       {entries.map(([key, value]) => (
         <div key={key}>
-          <dt>{key}</dt>
-          <dd>{format(value)}</dd>
+          <dt>{metricLabel(key)}</dt>
+          <dd>{metricValue(key, value)}</dd>
         </div>
       ))}
     </dl>
   );
-}
-
-function format(value: unknown): string {
-  if (typeof value === 'number') return Number.isInteger(value) ? String(value) : value.toFixed(2);
-  if (typeof value === 'string') return value;
-  return JSON.stringify(value);
 }

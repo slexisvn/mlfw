@@ -18,12 +18,12 @@ const NOTES: Record<string, PassNote> = {
     chapterTitle: 'Decomposition',
   },
   canonicalize: {
-    summary: 'Puts equivalent programs in one agreed shape so later patterns only need one form.',
+    summary: 'Puts equivalent programs in one agreed shape, and folds every identity an op declares about itself — x * 1, neg(neg(x)).',
     chapter: 'part4/ch20-algebra-and-ieee754',
     chapterTitle: 'Algebra and IEEE-754',
   },
   algebraic_simplify: {
-    summary: 'Applies identities — x + 0, x * 1, neg(neg(x)) — that hold for the dtype in play.',
+    summary: 'Rewrites that pair two different ops — transpose(transpose(x)), (-a) * (-b), a + (-b). It picks up the single-op identities too, when canonicalize is off.',
     chapter: 'part4/ch20-algebra-and-ieee754',
     chapterTitle: 'Algebra and IEEE-754',
   },

@@ -11,6 +11,7 @@ import type { AnalysisManager } from '../../analysis/analysis_manager.js';
 import type { PassResultValue, PassTarget } from '../pass.js';
 
 const _cachedPatterns = new Map<boolean, PatternSet>();
+const _cachedNames = new Map<boolean, ReadonlySet<string>>();
 
 function traitPatternsFor(def: OpDef, fastMath: boolean): Pattern[] {
   const patterns: Pattern[] = [];
@@ -29,7 +30,7 @@ function getCanonicalizationPatterns(fastMath: boolean): PatternSet {
   for (const def of registry.allOps()) {
     for (const p of traitPatternsFor(def, fastMath)) set.add(p);
     if (def.getCanonicalizationPatterns) {
-      const opPatterns = def.getCanonicalizationPatterns();
+      const opPatterns = def.getCanonicalizationPatterns(fastMath);
       if (opPatterns) {
         for (const p of opPatterns) {
           set.add(p);
@@ -56,6 +57,16 @@ export class CanonicalizePass extends FunctionPass {
   }
 }
 
+export function canonicalizationPatternNames(fastMath: boolean): ReadonlySet<string> {
+  const cached = _cachedNames.get(fastMath);
+  if (cached) return cached;
+  const names = new Set<string>();
+  for (const pattern of getCanonicalizationPatterns(fastMath).patterns) names.add(pattern.name);
+  _cachedNames.set(fastMath, names);
+  return names;
+}
+
 export function resetCanonicalizationCache(): void {
   _cachedPatterns.clear();
+  _cachedNames.clear();
 }

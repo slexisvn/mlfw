@@ -1,4 +1,3 @@
-import ElkBundle from 'elkjs/lib/elk.bundled.js';
 import type { Dag, DagNode, DagValue } from '../protocol.js';
 
 type ElkEngine = { layout(graph: unknown): Promise<unknown> };
@@ -10,6 +9,7 @@ export type Box = {
   kind: 'op' | 'region' | 'arg' | 'output' | 'nest' | 'nest-block' | 'nest-func' | 'source' | 'line';
   label: string;
   detail: string;
+  note: string;
   x: number;
   y: number;
   width: number;
@@ -31,8 +31,17 @@ export type Layout = {
   edges: Edge[];
 };
 
-const Elk = ElkBundle as unknown as ElkModule;
-const elk: ElkEngine = new (Elk.default ?? Elk)();
+let engine: Promise<ElkEngine> | null = null;
+
+function elk(): Promise<ElkEngine> {
+  if (!engine) {
+    engine = import('elkjs/lib/elk.bundled.js').then(module => {
+      const Elk = (module.default ?? module) as unknown as ElkModule;
+      return new (Elk.default ?? Elk)();
+    });
+  }
+  return engine;
+}
 
 const NODE_HEIGHT = 30;
 const PILL_HEIGHT = 22;
@@ -67,6 +76,10 @@ function widthFor(label: string, min = MIN_NODE_WIDTH): number {
   return Math.max(min, Math.round(label.length * CHAR_WIDTH) + NODE_PADDING);
 }
 
+export type NoteLookup = (opId: number) => string;
+
+const NO_NOTE: NoteLookup = () => '';
+
 function shortType(type: string): string {
   return type.replace(/^tensor</, '').replace(/>$/, '');
 }
@@ -79,7 +92,7 @@ export function argId(valueId: number): string {
   return `arg${valueId}`;
 }
 
-export function buildLayoutRequest(dag: Dag): { graph: ElkNode; meta: Map<string, Box> } {
+export function buildLayoutRequest(dag: Dag, note: NoteLookup = NO_NOTE): { graph: ElkNode; meta: Map<string, Box> } {
   const meta = new Map<string, Box>();
   const producers = new Map<number, number>();
   const valueById = new Map<number, DagValue>();
@@ -92,7 +105,7 @@ export function buildLayoutRequest(dag: Dag): { graph: ElkNode; meta: Map<string
   const argNodes: ElkNode[] = dag.args.map(arg => {
     const label = `${arg.name}: ${shortType(arg.type)}`;
     meta.set(argId(arg.id), {
-      id: argId(arg.id), opId: null, kind: 'arg', label, detail: arg.type,
+      id: argId(arg.id), opId: null, kind: 'arg', label, detail: arg.type, note: '',
       x: 0, y: 0, width: widthFor(label, 60), height: PILL_HEIGHT, depth: 0,
     });
     return { id: argId(arg.id), width: widthFor(label, 60), height: PILL_HEIGHT };
@@ -123,12 +136,15 @@ export function buildLayoutRequest(dag: Dag): { graph: ElkNode; meta: Map<string
       else if (enclosing) addEdge(enclosing, id, edgeLabel);
     }
 
+    const badge = note(node.id);
+    const boxWidth = widthFor(badge ? `${label}  ${badge}` : label);
+
     if (!hasRegions) {
       meta.set(id, {
-        id, opId: node.id, kind: 'op', label, detail,
-        x: 0, y: 0, width: widthFor(label), height: NODE_HEIGHT, depth,
+        id, opId: node.id, kind: 'op', label, detail, note: badge,
+        x: 0, y: 0, width: boxWidth, height: NODE_HEIGHT, depth,
       });
-      return { id, width: widthFor(label), height: NODE_HEIGHT };
+      return { id, width: boxWidth, height: NODE_HEIGHT };
     }
 
     const children: ElkNode[] = [];
@@ -137,7 +153,7 @@ export function buildLayoutRequest(dag: Dag): { graph: ElkNode; meta: Map<string
     }
 
     meta.set(id, {
-      id, opId: node.id, kind: 'region', label, detail,
+      id, opId: node.id, kind: 'region', label, detail, note: badge,
       x: 0, y: 0, width: 0, height: 0, depth,
     });
 
@@ -154,7 +170,7 @@ export function buildLayoutRequest(dag: Dag): { graph: ElkNode; meta: Map<string
     const label = value ? `return ${value.name}` : 'return';
     const id = `out${index}`;
     meta.set(id, {
-      id, opId: null, kind: 'output', label, detail: value ? value.type : '',
+      id, opId: null, kind: 'output', label, detail: value ? value.type : '', note: '',
       x: 0, y: 0, width: widthFor(label, 70), height: PILL_HEIGHT, depth: 0,
     });
     outputs.push({ id, width: widthFor(label, 70), height: PILL_HEIGHT });
@@ -176,20 +192,20 @@ export function buildLayoutRequest(dag: Dag): { graph: ElkNode; meta: Map<string
 const cache = new WeakMap<Dag, Promise<Layout>>();
 let queue: Promise<unknown> = Promise.resolve();
 
-export function layoutDag(dag: Dag): Promise<Layout> {
+export function layoutDag(dag: Dag, note: NoteLookup = NO_NOTE): Promise<Layout> {
   const cached = cache.get(dag);
   if (cached) return cached;
 
-  const settled = () => runLayout(dag);
+  const settled = () => runLayout(dag, note);
   const pending = queue.then(settled, settled);
   queue = pending.then(() => undefined, () => undefined);
   cache.set(dag, pending);
   return pending;
 }
 
-async function runLayout(dag: Dag): Promise<Layout> {
-  const { graph, meta } = buildLayoutRequest(dag);
-  const laid = await elk.layout(graph as never) as ElkNode & { width?: number; height?: number };
+async function runLayout(dag: Dag, note: NoteLookup): Promise<Layout> {
+  const { graph, meta } = buildLayoutRequest(dag, note);
+  const laid = await (await elk()).layout(graph as never) as ElkNode & { width?: number; height?: number };
 
   const boxes: Box[] = [];
   const place = (node: ElkNode, offsetX: number, offsetY: number): void => {

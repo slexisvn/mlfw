@@ -1,120 +1,193 @@
-import { useEffect } from 'react';
-import { actions, useStore, visibleSteps } from '../store.js';
+import { useEffect, useMemo, useRef } from 'react';
+import { actions, changedCount, disabledPasses, useStore, visibleSteps } from '../store.js';
+import { markFor } from '../catalog/glossary.js';
+import { levelLabel, passLabel, phaseLabel } from '../catalog/naming.js';
 import { OpCountChart } from './OpCountChart.js';
+import type { DisabledPass } from '../store.js';
 import type { CompileStep } from '../protocol.js';
 
-const OUTCOME_MARK: Record<CompileStep['outcome'], string> = {
-  changed: '●',
-  unchanged: '○',
-  failed: '✕',
-  unreported: '◐',
-};
-
-const LEVEL_LABEL: Record<string, string> = {
+const LEVEL_OF: Record<string, string> = {
   'graph-module': 'graph',
   'graph-func': 'graph',
   tir: 'tir',
   lir: 'lir',
 };
 
+type Group = { phase: string; level: string; steps: CompileStep[]; disabled: DisabledPass[] };
+
 export function PassTimeline() {
   const result = useStore(s => s.result);
   const selected = useStore(s => s.selected);
-  const disabled = useStore(s => s.options.disabledPasses);
   const onlyChanged = useStore(s => s.onlyChanged);
   const steps = useStore(visibleSteps);
+  const changed = useStore(changedCount);
+  const disabled = useStore(disabledPasses);
+  const activeRow = useRef<HTMLButtonElement>(null);
+
+  const ordinals = useMemo(() => runOrdinals(result ? result.steps : []), [result]);
 
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
-      if (event.key === 'ArrowDown' || event.key === 'j') actions.step(1);
-      else if (event.key === 'ArrowUp' || event.key === 'k') actions.step(-1);
-      else return;
-      event.preventDefault();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [selected]);
+    activeRow.current?.scrollIntoView({ block: 'nearest' });
+  }, [selected, onlyChanged]);
 
   if (!result || result.steps.length === 0) {
     return (
       <aside className="timeline empty">
-        <p>No compile yet. Press <kbd>Run</kbd> to walk the pipeline.</p>
+        <p>Nothing compiled yet. Press <kbd>Run</kbd> and every pass the compiler runs shows up here.</p>
       </aside>
     );
   }
 
-  const groups = groupByPhase(steps);
-  const hidden = result.steps.length - steps.length;
+  const total = result.steps.length;
+  const quiet = total - changed;
+  const groups = groupSteps(steps, disabled);
 
   return (
     <aside className="timeline">
       <OpCountChart steps={steps} selected={selected} />
       <div className="timeline-scroll">
         {groups.map(group => (
-          <section key={`${group.phase}-${group.steps[0].index}`}>
+          <section key={`${group.phase}-${group.steps[0]?.index ?? group.phase}`}>
             <header className="phase">
-              <span className="phase-name">{group.phase}</span>
-              <span className="phase-level">{LEVEL_LABEL[group.steps[0].level]}</span>
+              <span className="phase-name">{phaseLabel(group.phase)}</span>
+              <span className="phase-level" title={`this phase works on the ${levelLabel(group.level)}`}>
+                {group.level}
+              </span>
             </header>
             {group.steps.map(step => (
               <Row
                 key={step.index}
                 step={step}
+                ordinal={ordinals.get(step.index) ?? null}
                 active={step.index === selected}
-                off={disabled.includes(step.pass)}
+                rowRef={step.index === selected ? activeRow : undefined}
               />
             ))}
+            {group.disabled.map(entry => <OffRow key={entry.name} name={entry.name} />)}
           </section>
         ))}
       </div>
       <footer className="timeline-foot">
         <span>
-          {steps.length} of {result.steps.length} pass runs changed something · {result.totalMs.toFixed(0)}ms
+          {changed} of {total} pass runs changed the IR · {result.totalMs.toFixed(0)}ms
         </span>
-        <button onClick={() => actions.toggleOnlyChanged()}>
-          {onlyChanged ? `show all ${result.steps.length}` : `hide the ${hidden === 0 ? 'quiet' : hidden} quiet ones`}
+        <button
+          onClick={() => actions.toggleOnlyChanged()}
+          title={onlyChanged
+            ? 'also list the passes that ran and did nothing'
+            : 'list only the passes that rewrote something'}
+        >
+          {onlyChanged ? `show all ${total}` : `hide ${quiet} quiet`}
         </button>
       </footer>
     </aside>
   );
 }
 
-function Row({ step, active, off }: { step: CompileStep; active: boolean; off: boolean }) {
+function Row(
+  { step, ordinal, active, rowRef }: {
+    step: CompileStep;
+    ordinal: string | null;
+    active: boolean;
+    rowRef?: React.RefObject<HTMLButtonElement | null>;
+  },
+) {
   const delta = step.after.ops - step.before.ops;
+  const mark = markFor(step);
+  const isPass = step.kind === 'pass';
 
   return (
-    <div
-      className={['step', active ? 'active' : '', step.outcome, off ? 'off' : ''].filter(Boolean).join(' ')}
-      onClick={() => actions.select(step.index)}
-    >
-      <span className="mark">{step.kind === 'pass' ? OUTCOME_MARK[step.outcome] : step.kind === 'input' ? '▸' : '⇣'}</span>
-      <span className="pass-name">{step.pass}</span>
-      <span className="ops">
-        {step.before.ops}
-        {delta !== 0 && <em>→{step.after.ops}</em>}
-      </span>
-      <span className="ms">{step.kind === 'pass' ? step.durationMs.toFixed(1) : ''}</span>
-      {step.kind !== 'pass' ? <span /> : (
+    <div className={['step-row', active ? 'active' : '', step.outcome, step.kind].filter(Boolean).join(' ')}>
+      <button
+        ref={rowRef}
+        className="step"
+        aria-current={active ? 'true' : undefined}
+        title={isPass ? `${passLabel(step.pass)} — ${mark.label}` : mark.label}
+        onClick={() => actions.select(step.index)}
+      >
+        <span className="mark" aria-hidden="true">{mark.glyph}</span>
+        <span className="pass-name">
+          {step.pass}
+          {ordinal && <em className="ordinal">{ordinal}</em>}
+        </span>
+        <span className="ops">
+          {step.before.ops}
+          {delta !== 0 && <em>→{step.after.ops}</em>}
+        </span>
+        <span className="ms">{isPass ? step.durationMs.toFixed(1) : ''}</span>
+      </button>
+      {isPass && (
         <button
           className="skip"
-          title={off ? 'run this pass again' : 'turn this pass off and recompile'}
-          onClick={event => { event.stopPropagation(); actions.togglePass(step.pass); }}
+          aria-label={`turn ${step.pass} off and recompile`}
+          title="turn this pass off and recompile, to see what it was buying you"
+          onClick={() => actions.togglePass(step.pass)}
         >
-          {off ? '↺' : '⊘'}
+          ⊘
         </button>
       )}
     </div>
   );
 }
 
-function groupByPhase(steps: readonly CompileStep[]): { phase: string; steps: CompileStep[] }[] {
-  const groups: { phase: string; steps: CompileStep[] }[] = [];
+function OffRow({ name }: { name: string }) {
+  return (
+    <div className="step-row off">
+      <span className="step">
+        <span className="mark" aria-hidden="true">⊘</span>
+        <span className="pass-name">{name}</span>
+        <span className="ops">off</span>
+        <span className="ms" />
+      </span>
+      <button
+        className="skip restore"
+        aria-label={`put ${name} back and recompile`}
+        title={`put ${passLabel(name)} back and recompile`}
+        onClick={() => actions.togglePass(name)}
+      >
+        ↺
+      </button>
+    </div>
+  );
+}
+
+function runOrdinals(steps: readonly CompileStep[]): Map<number, string> {
+  const totals = new Map<string, number>();
+  for (const step of steps) {
+    if (step.kind !== 'pass') continue;
+    totals.set(step.pass, (totals.get(step.pass) ?? 0) + 1);
+  }
+
+  const seen = new Map<string, number>();
+  const ordinals = new Map<number, string>();
+  for (const step of steps) {
+    if (step.kind !== 'pass') continue;
+    const total = totals.get(step.pass) as number;
+    if (total < 2) continue;
+    const at = (seen.get(step.pass) ?? 0) + 1;
+    seen.set(step.pass, at);
+    ordinals.set(step.index, `${at}/${total}`);
+  }
+  return ordinals;
+}
+
+function groupSteps(steps: readonly CompileStep[], disabled: readonly DisabledPass[]): Group[] {
+  const groups: Group[] = [];
   for (const step of steps) {
     const last = groups[groups.length - 1];
     if (last && last.phase === step.phase) last.steps.push(step);
-    else groups.push({ phase: step.phase, steps: [step] });
+    else groups.push({ phase: step.phase, level: LEVEL_OF[step.level] ?? step.level, steps: [step], disabled: [] });
+  }
+
+  const orphans: DisabledPass[] = [];
+  for (const entry of disabled) {
+    const home = groups.find(group => group.phase === entry.phase);
+    if (home) home.disabled.push(entry);
+    else orphans.push(entry);
+  }
+
+  if (orphans.length > 0) {
+    groups.push({ phase: 'turned off', level: '', steps: [], disabled: orphans });
   }
   return groups;
 }

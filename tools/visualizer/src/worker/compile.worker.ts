@@ -3,7 +3,8 @@ import { PassContext } from 'mlfw/compiler/passes/pass.js';
 import { CompileRecorder } from './recorder.js';
 import { executeCompiled } from './execute.js';
 import { evaluateModelSource, frameworkGlobals } from './evaluate.js';
-import type { CompileOptions, CompileResponse, Kernel, RunResult, TargetName, WorkerRequest } from '../protocol.js';
+import { recordSourceLines } from './source_map.js';
+import type { CompileOptions, CompileResponse, Kernel, RunResult, SourceLink, TargetName, WorkerRequest } from '../protocol.js';
 
 const NOT_RUN: RunResult = {
   ran: false, skipped: null, error: null,
@@ -26,22 +27,26 @@ const KERNEL_LANGUAGE: Record<TargetName, string> = {
 };
 
 const SEED = 0;
-
-class Model {
-  forward: (...args: unknown[]) => unknown;
-
-  constructor(forward: (...args: unknown[]) => unknown) {
-    this.forward = forward;
-  }
-}
+const NON_IDENTIFIER = /[^A-Za-z0-9_$]/g;
+const FALLBACK_NAME = 'model';
 
 type Compilable = Parameters<typeof compile>[0];
+type ForwardFn = (...args: unknown[]) => unknown;
+
+function identifier(name: string): string {
+  const cleaned = name.replace(NON_IDENTIFIER, '');
+  return /^[A-Za-z_$]/.test(cleaned) ? cleaned : FALLBACK_NAME;
+}
+
+function wrap(forward: ForwardFn): Compilable {
+  const wrapper = class { forward = forward; };
+  Object.defineProperty(wrapper, 'name', { value: identifier(forward.name) });
+  return new wrapper() as unknown as Compilable;
+}
 
 function asCompilable(model: unknown): Compilable {
   if (model && typeof (model as { forward?: unknown }).forward === 'function') return model as Compilable;
-  if (typeof model === 'function') {
-    return new Model(model as (...args: unknown[]) => unknown) as unknown as Compilable;
-  }
+  if (typeof model === 'function') return wrap(model as ForwardFn);
   throw new Error('run(model, inputs): model must be an nn.Module or a function');
 }
 
@@ -74,16 +79,20 @@ function collectKernels(handle: { result(): unknown }, target: TargetName): Kern
 }
 
 async function runCompile(id: number, source: string, options: CompileOptions): Promise<CompileResponse> {
-  const recorder = new CompileRecorder();
   const startedAt = performance.now();
   let error: string | null = null;
   let errorPhase: string | null = null;
   let kernels: Kernel[] = [];
   let run: RunResult = NOT_RUN;
+  let sourceLinks: SourceLink[] = [];
+  let stopRecordingLines = (): void => {};
+  const recorder = new CompileRecorder(() => { stopRecordingLines(); });
 
   try {
     manual_seed(SEED);
-    const { model, inputs } = evaluateModelSource(source);
+    const { model, inputs, baseLine } = evaluateModelSource(source);
+    const lineRecorder = recordSourceLines(baseLine);
+    stopRecordingLines = lineRecorder.stop;
     const compilable = asCompilable(model);
     const handle = compile(compilable, inputs as never[], {
       ...compilerOptions(options),
@@ -95,10 +104,13 @@ async function runCompile(id: number, source: string, options: CompileOptions): 
     kernels = collectKernels(handle, options.target);
     manual_seed(SEED);
     run = await executeCompiled(handle, compilable, inputs, options.target);
+    sourceLinks = [...lineRecorder.lines];
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
     errorPhase = recorder.currentOpenPass();
     recorder.closeOpenSteps();
+  } finally {
+    stopRecordingLines();
   }
 
   return {
@@ -110,6 +122,7 @@ async function runCompile(id: number, source: string, options: CompileOptions): 
     steps: recorder.timeline(kernels),
     kernels,
     events: recorder.events,
+    sourceLinks,
     totalMs: performance.now() - startedAt,
     run,
   };

@@ -1,16 +1,22 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { EDITOR_THEME, editor, IR_LANGUAGE, setupMonaco } from '../monaco/setup.js';
+import { useElementSize } from './use_element_size.js';
 import type { CompileStep } from '../protocol.js';
 
+const SIDE_BY_SIDE_MIN_PX = 820;
+const FALLBACK_SIZE = { width: SIDE_BY_SIDE_MIN_PX, height: 400 };
+
 export function IRDiff({ step }: { step: CompileStep }) {
-  const host = useRef<HTMLDivElement>(null);
   const diff = useRef<editor.IStandaloneDiffEditor | null>(null);
   const models = useRef<{ original: editor.ITextModel; modified: editor.ITextModel } | null>(null);
-  const [sideBySide, setSideBySide] = useState(true);
+  const [preferSideBySide, setPreferSideBySide] = useState(true);
+  const { size, ref: measure } = useElementSize<HTMLDivElement>(FALLBACK_SIZE);
   const identical = step.before.text === step.after.text;
+  const roomy = size.width >= SIDE_BY_SIDE_MIN_PX;
+  const sideBySide = preferSideBySide && roomy && !identical;
 
-  useEffect(() => {
-    const node = host.current;
+  const host = useCallback((node: HTMLDivElement | null) => {
+    measure(node);
     if (!node) return;
 
     setupMonaco();
@@ -32,14 +38,14 @@ export function IRDiff({ step }: { step: CompileStep }) {
 
     diff.current = created;
     models.current = { original, modified };
+  }, [measure]);
 
-    return () => {
-      created.dispose();
-      original.dispose();
-      modified.dispose();
-      diff.current = null;
-      models.current = null;
-    };
+  useEffect(() => () => {
+    diff.current?.dispose();
+    models.current?.original.dispose();
+    models.current?.modified.dispose();
+    diff.current = null;
+    models.current = null;
   }, []);
 
   useEffect(() => {
@@ -51,8 +57,8 @@ export function IRDiff({ step }: { step: CompileStep }) {
   }, [step]);
 
   useEffect(() => {
-    diff.current?.updateOptions({ renderSideBySide: sideBySide && !identical });
-  }, [sideBySide, identical]);
+    diff.current?.updateOptions({ renderSideBySide: sideBySide });
+  }, [sideBySide]);
 
   return (
     <div className="irdiff">
@@ -61,13 +67,17 @@ export function IRDiff({ step }: { step: CompileStep }) {
           {step.kind === 'lowering'
             ? <><strong>{step.pass}</strong> — the same program, a different language</>
             : step.kind === 'input'
-            ? <>the graph as <strong>traced</strong>, before any pass ran</>
-            : identical
-              ? <><strong>{step.pass}</strong> left the IR untouched</>
-              : <>before <strong>{step.pass}</strong> → after</>}
+              ? <>the graph as <strong>traced</strong>, before any pass ran</>
+              : identical
+                ? <><strong>{step.pass}</strong> left the IR untouched</>
+                : <>before <strong>{step.pass}</strong> → after</>}
         </span>
         {!identical && (
-          <button onClick={() => setSideBySide(v => !v)}>
+          <button
+            disabled={!roomy}
+            title={roomy ? undefined : 'the pane is too narrow to show two columns'}
+            onClick={() => setPreferSideBySide(v => !v)}
+          >
             {sideBySide ? 'inline' : 'side by side'}
           </button>
         )}

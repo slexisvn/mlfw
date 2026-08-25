@@ -65,6 +65,8 @@ export type CompileStep = {
   events: TraceEventLite[];
 };
 
+export type SourceLink = [opId: number, line: number];
+
 export type Kernel = {
   name: string;
   source: string;
@@ -130,6 +132,7 @@ export type CompileResponse = {
   steps: CompileStep[];
   kernels: Kernel[];
   events: TraceEventLite[];
+  sourceLinks: SourceLink[];
   totalMs: number;
   run: RunResult;
 };

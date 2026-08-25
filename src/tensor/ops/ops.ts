@@ -6,7 +6,7 @@ import { assertIndicesInRange } from '../../util/index_bounds.js';
 import { isTensor } from '../core/is_tensor.js';
 import type { Tensor } from '../core/tensor.js';
 
-type TensorInput = Tensor | number;
+export type TensorInput = Tensor | number;
 type PaddingArg = readonly number[] | readonly (readonly number[])[];
 
 function _asTensor(value: TensorInput, ref: Tensor): Tensor {
@@ -131,8 +131,8 @@ export function sort(self: Tensor, dim = -1, descending = false): Tensor { retur
 export function argsort(self: Tensor, dim = -1, descending = false): Tensor { return _dispatchTensor('argsort', self, dim, descending); }
 export function topk(self: Tensor, k: number, dim = -1, largest = true): Tensor[] { return _dispatchTensorArray('topk', self, k, dim, largest); }
 
-export function softmax(self: Tensor, dim: number): Tensor { return _dispatchTensor('softmax', self, dim); }
-export function log_softmax(self: Tensor, dim: number): Tensor { return _dispatchTensor('log_softmax', self, dim); }
+export function softmax(self: Tensor, dim = -1): Tensor { return _dispatchTensor('softmax', self, dim); }
+export function log_softmax(self: Tensor, dim = -1): Tensor { return _dispatchTensor('log_softmax', self, dim); }
 export function layer_norm(input: Tensor, weight: Tensor, bias: Tensor, axis: number, eps: number): Tensor { return _dispatchTensor('layer_norm', input, weight, bias, axis, eps); }
 export function batch_norm(input: Tensor, weight: Tensor, bias: Tensor, mean: Tensor, variance: Tensor, axis: number, eps: number): Tensor { return _dispatchTensor('batch_norm', input, weight, bias, mean, variance, axis, eps); }
 export function conv2d(input: Tensor, weight: Tensor, strides: readonly number[], padding: PaddingArg, dilation: readonly number[], groups: number): Tensor { return _dispatchTensor('conv2d', input, weight, strides, padding, dilation, groups); }

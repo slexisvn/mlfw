@@ -61,24 +61,30 @@ export class CSEPass extends FunctionPass {
   override run(target: PassTarget, analysisManager?: AnalysisManager): PassResultValue {
     const func = target as GraphFunction;
     const table = new ScopedOpTable();
-    let eliminated = 0;
+    const eliminated: string[] = [];
     for (const block of func.body) {
-      eliminated += this._simplifyBlock(block, table);
+      this._simplifyBlock(block, table, eliminated);
     }
 
-    if (this.trace && this.trace.level >= TraceLevel.DEBUG && eliminated > 0) {
+    if (this.trace && this.trace.level >= TraceLevel.DEBUG && eliminated.length > 0) {
       this.trace.emit({
         type: 'pass_detail', passName: this.name,
-        eliminated, level: TraceLevel.DEBUG,
+        eliminated: eliminated.length, level: TraceLevel.DEBUG,
       });
     }
 
-    return eliminated > 0 ? PassResult.CHANGED : PassResult.UNCHANGED;
+    if (this.trace && this.trace.explainsEnabled) {
+      for (const opName of eliminated) {
+        this.trace.explain('cse', opName, 'deduplicated',
+          'an op already in scope has the same operands and attributes, so both compute the same value', {});
+      }
+    }
+
+    return eliminated.length > 0 ? PassResult.CHANGED : PassResult.UNCHANGED;
   }
 
-  _simplifyBlock(block: Block, table: ScopedOpTable): number {
+  _simplifyBlock(block: Block, table: ScopedOpTable, eliminated: string[]): void {
     table.push();
-    let eliminated = 0;
 
     for (const op of [...block.ops()]) {
       if (!op.parentBlock) continue;
@@ -88,7 +94,7 @@ export class CSEPass extends FunctionPass {
         if (existing) {
           op.replaceAllResultsWith(existing.results);
           op.erase();
-          eliminated++;
+          eliminated.push(op.opName);
           continue;
         }
         table.insert(op);
@@ -96,12 +102,11 @@ export class CSEPass extends FunctionPass {
 
       for (const region of op.regions) {
         for (const inner of region.blocks) {
-          eliminated += this._simplifyBlock(inner, table);
+          this._simplifyBlock(inner, table, eliminated);
         }
       }
     }
 
     table.pop();
-    return eliminated;
   }
 }

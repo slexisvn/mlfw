@@ -253,19 +253,29 @@ export class MemorySchedulePass extends PrimFuncPass {
     this.config = config;
   }
 
+  _keepOrder(ctx: TirPassCtx, primFunc: PrimFunc, reason: string): void {
+    if (ctx.trace.explainsEnabled) ctx.trace.explain('memory', primFunc.name, 'kept-order', reason, {});
+  }
+
   override run(primFunc: PrimFunc, ctx: TirPassCtx): void {
     const body = primFunc.body as SeqNode;
-    if (!body || body.type !== 'SeqNode' || body.stmts.length < 2) return;
+    if (!body || body.type !== 'SeqNode' || body.stmts.length < 2) {
+      return this._keepOrder(ctx, primFunc, 'the body is one statement, so there is no order left to choose');
+    }
 
     const units = buildUnits(body.stmts, collectBufferAccesses(body));
-    if (!units) return;
+    if (!units) {
+      return this._keepOrder(ctx, primFunc, 'a statement has an effect that cannot be sequenced against the others, so nothing may move');
+    }
     buildDependenceEdges(units);
 
     const paramBuffers = new Set<Buffer>();
     for (const [, buffer] of primFunc.bufferMap) paramBuffers.add(buffer);
 
     const result = scheduleForPeakMemory(units, paramBuffers);
-    if (!result) return;
+    if (!result) {
+      return this._keepOrder(ctx, primFunc, 'no order that respects the dependences held fewer bytes live than the one already there');
+    }
 
     const replacement = new SeqNode(result.order.map((u) => u.stmt));
     primFunc.body = replacement;
@@ -274,5 +284,10 @@ export class MemorySchedulePass extends PrimFuncPass {
       peakBytes: result.peak,
       originalPeakBytes: result.originalPeak,
     });
+    if (ctx.trace.explainsEnabled) {
+      ctx.trace.explain('memory', primFunc.name, 'reordered',
+        'moving each producer next to its consumer ends the buffer lifetime sooner, so fewer temporaries overlap',
+        { peakBytes: result.peak, originalPeakBytes: result.originalPeak });
+    }
   }
 }

@@ -4,9 +4,12 @@ import { AutogradMeta } from './autograd_meta.js';
 import type { DType, NumericTypedArray } from '../types/dtype.js';
 import type { Device } from '../types/device.js';
 import type { DispatchKeySet } from '../../dispatcher/dispatch_key.js';
+import type { TensorMethods } from './tensor_methods.js';
 
 import { readFromStorage } from '../utils/half.js';
 
+
+export interface Tensor extends TensorMethods {}
 
 export class Tensor {
   readonly _impl: TensorImpl;

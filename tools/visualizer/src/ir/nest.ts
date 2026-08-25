@@ -62,6 +62,7 @@ function place(node: NestNode, x: number, y: number, width: number, depth: numbe
     kind: BOX_KIND[node.kind] ?? 'nest',
     label: node.label,
     detail: node.detail,
+    note: '',
     x,
     y,
     width,

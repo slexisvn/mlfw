@@ -6,24 +6,75 @@ import {
   MathOpNode, CompareNode, CastNode, CallExternNode, BlockRealizeNode,
 } from '../../ir/tensor/nodes.js';
 import { LIRFlatLoadNode, LIRFlatStoreNode, LIRAccumulatorNode, LIRBindingsNode } from '../../ir/lir/nodes.js';
+import { walk } from '../../ir/ir_visitor.js';
+import { TraceLevel } from '../../pipeline/trace.js';
 import type { IntImmNode, PrimFunc, TirNode } from '../../ir/tensor/nodes.js';
+import type { IRNode } from '../../ir/ir_visitor.js';
 import type { LIRFunc } from '../../ir/lir/nodes.js';
+import type { TraceLog } from '../../pipeline/trace.js';
 
-type SimplifyCtx = { analyzer: Analyzer; simp: RewriteSimplify };
+export type SimplifyStats = { branchesFolded: number };
+export type SimplifyPassLike = { name: string; phase: string };
+
+type SimplifyCtx = { analyzer: Analyzer; simp: RewriteSimplify; stats: SimplifyStats };
 type VarBound = ReturnType<Analyzer['getVarBound']>;
 
-export function simplifyPrimFunc(primFunc: PrimFunc): PrimFunc {
-  const ctx = { analyzer: new Analyzer(), simp: null } as unknown as SimplifyCtx;
+function newCtx(stats: SimplifyStats): SimplifyCtx {
+  const ctx = { analyzer: new Analyzer(), simp: null, stats } as unknown as SimplifyCtx;
   ctx.simp = new RewriteSimplify(ctx.analyzer);
+  return ctx;
+}
+
+function countIRNodes(root: object): number {
+  let total = 0;
+  walk(root as IRNode, () => { total++; });
+  return total;
+}
+
+function report(trace: TraceLog, pass: SimplifyPassLike, funcName: string, removed: number, stats: SimplifyStats): void {
+  trace.emit({
+    type: 'pass_detail', passName: pass.name,
+    nodesRemoved: removed, branchesFolded: stats.branchesFolded,
+    level: TraceLevel.DEBUG,
+  });
+  if (!trace.explainsEnabled) return;
+  if (removed === 0 && stats.branchesFolded === 0) {
+    trace.explain(pass.phase, funcName, 'unchanged',
+      'nothing here reduced further under the bounds the loops give', {});
+    return;
+  }
+  trace.explain(pass.phase, funcName, 'folded',
+    'loop extents bound every index expression, so the analyzer can evaluate the arithmetic and decide the guards',
+    { nodesRemoved: removed, branchesFolded: stats.branchesFolded });
+}
+
+export function simplifyAndReport<T extends object>(
+  pass: SimplifyPassLike,
+  func: T,
+  simplify: (f: T, stats: SimplifyStats) => T,
+  trace: TraceLog,
+): T {
+  const t0 = performance.now();
+  const measure = trace.level >= TraceLevel.DEBUG;
+  const nodesBefore = measure ? countIRNodes(func) : 0;
+  const stats: SimplifyStats = { branchesFolded: 0 };
+  const out = simplify(func, stats);
+  const funcName = String((out as { name?: unknown }).name ?? '');
+  trace.functionEvent(pass.phase, funcName, { durationMs: performance.now() - t0 });
+  if (measure) report(trace, pass, funcName, nodesBefore - countIRNodes(out), stats);
+  return out;
+}
+
+export function simplifyPrimFunc(primFunc: PrimFunc, stats: SimplifyStats = { branchesFolded: 0 }): PrimFunc {
+  const ctx = newCtx(stats);
   const body = simplifyStmt(primFunc.body, ctx);
   primFunc.body = body;
   primFunc._setChild('body', body);
   return primFunc;
 }
 
-export function simplifyLirFunc(lirFunc: LIRFunc): LIRFunc {
-  const ctx = { analyzer: new Analyzer(), simp: null } as unknown as SimplifyCtx;
-  ctx.simp = new RewriteSimplify(ctx.analyzer);
+export function simplifyLirFunc(lirFunc: LIRFunc, stats: SimplifyStats = { branchesFolded: 0 }): LIRFunc {
+  const ctx = newCtx(stats);
   const body = simplifyStmt(lirFunc.body as TirNode, ctx);
   lirFunc.body = body;
   lirFunc._setChild('body', body);
@@ -73,8 +124,14 @@ function simplifyStmt(node: TirNode, ctx: SimplifyCtx): TirNode {
     case 'IfThenElseNode': {
       const ite = node as IfThenElseNode;
       const cond = simplifyExpr(ite.condition, ctx);
-      if (proveTrue(ctx.analyzer, cond)) return simplifyStmt(ite.thenBody, ctx);
-      if (proveFalse(ctx.analyzer, cond)) return ite.elseBody ? simplifyStmt(ite.elseBody, ctx) : new SeqNode([]);
+      if (proveTrue(ctx.analyzer, cond)) {
+        ctx.stats.branchesFolded++;
+        return simplifyStmt(ite.thenBody, ctx);
+      }
+      if (proveFalse(ctx.analyzer, cond)) {
+        ctx.stats.branchesFolded++;
+        return ite.elseBody ? simplifyStmt(ite.elseBody, ctx) : new SeqNode([]);
+      }
       return new IfThenElseNode(cond, simplifyStmt(ite.thenBody, ctx), ite.elseBody ? simplifyStmt(ite.elseBody, ctx) : null);
     }
     case 'BufferStoreNode': {
@@ -181,8 +238,14 @@ function simplifyExpr(node: TirNode, ctx: SimplifyCtx): TirNode {
       const cond = simplifyExpr(ite.condition, ctx);
       const thenE = simplifyExpr(ite.thenBody, ctx);
       const elseE = ite.elseBody ? simplifyExpr(ite.elseBody, ctx) : null;
-      if (proveTrue(ctx.analyzer, cond)) return thenE;
-      if (elseE !== null && proveFalse(ctx.analyzer, cond)) return elseE;
+      if (proveTrue(ctx.analyzer, cond)) {
+        ctx.stats.branchesFolded++;
+        return thenE;
+      }
+      if (elseE !== null && proveFalse(ctx.analyzer, cond)) {
+        ctx.stats.branchesFolded++;
+        return elseE;
+      }
       return new IfThenElseNode(cond, thenE, elseE);
     }
     case 'LIRFlatLoadNode': {

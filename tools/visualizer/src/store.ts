@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import { DEFAULT_OPTIONS } from './protocol.js';
 import { EXAMPLES } from './examples/index.js';
+import { readSession, shareUrl, writeSession } from './session.js';
 import type { CompileOptions, CompileResponse, CompileStep, WorkerRequest, WorkerRequestDraft, WorkerResponse } from './protocol.js';
 
 export type StageTab = 'ir' | 'graph' | 'why' | 'output' | 'result';
@@ -12,6 +13,8 @@ export const SPEEDS = [0, 0.5, 1, 2] as const;
 export type Status = 'starting' | 'idle' | 'compiling' | 'ready' | 'failed';
 export type Pane = 'source' | 'timeline' | 'stage';
 
+export type Failure = { error: string; errorPhase: string | null };
+
 export type State = {
   source: string;
   exampleId: string;
@@ -19,12 +22,18 @@ export type State = {
   globals: string[];
   status: Status;
   result: CompileResponse | null;
+  failure: Failure | null;
+  ranSource: string | null;
+  ranOptions: CompileOptions | null;
+  passPhases: Record<string, string>;
   selected: number;
   tab: StageTab;
   speed: number;
   playing: boolean;
   onlyChanged: boolean;
   pane: Pane;
+  guideOpen: boolean;
+  focusLine: number | null;
 };
 
 const worker = new Worker(new URL('./worker/compile.worker.ts', import.meta.url), { type: 'module' });
@@ -47,19 +56,27 @@ function ask(request: WorkerRequestDraft): Promise<WorkerResponse> {
   });
 }
 
+const restored = readSession();
+
 let state: State = {
-  source: EXAMPLES[0].source,
-  exampleId: EXAMPLES[0].id,
-  options: DEFAULT_OPTIONS,
+  source: restored ? restored.source : EXAMPLES[0].source,
+  exampleId: restored ? restored.exampleId : EXAMPLES[0].id,
+  options: restored ? restored.options : DEFAULT_OPTIONS,
   globals: [],
   status: 'starting',
   result: null,
+  failure: null,
+  ranSource: null,
+  ranOptions: null,
+  passPhases: {},
   selected: 0,
   tab: 'ir',
   speed: REDUCED_MOTION ? 0 : 1,
   playing: false,
   onlyChanged: true,
   pane: 'source',
+  guideOpen: false,
+  focusLine: null,
 };
 
 const listeners = new Set<() => void>();
@@ -67,6 +84,10 @@ const listeners = new Set<() => void>();
 function set(patch: Partial<State>): void {
   state = { ...state, ...patch };
   for (const listener of listeners) listener();
+}
+
+function persist(): void {
+  writeSession({ source: state.source, exampleId: state.exampleId, options: state.options });
 }
 
 export function useStore<T>(select: (s: State) => T): T {
@@ -97,6 +118,42 @@ export function visibleSteps(s: State): CompileStep[] {
   return steps;
 }
 
+export function changedCount(s: State): number {
+  if (!s.result) return 0;
+  return s.result.steps.filter(step => step.kind !== 'pass' || step.outcome !== 'unchanged').length;
+}
+
+export function isStale(s: State): boolean {
+  if (!s.result || s.ranOptions === null) return false;
+  if (s.ranSource !== s.source) return true;
+  const keys = Object.keys(s.options) as (keyof CompileOptions)[];
+  return keys.some(key => JSON.stringify(s.options[key]) !== JSON.stringify((s.ranOptions as CompileOptions)[key]));
+}
+
+const sourceLineCache = new WeakMap<CompileResponse, Map<number, number>>();
+const NO_LINES: Map<number, number> = new Map();
+
+export function sourceLines(s: State): Map<number, number> {
+  if (!s.result) return NO_LINES;
+  const cached = sourceLineCache.get(s.result);
+  if (cached) return cached;
+  const map = new Map(s.result.sourceLinks);
+  sourceLineCache.set(s.result, map);
+  return map;
+}
+
+export type DisabledPass = { name: string; phase: string };
+
+const disabledCache = new WeakMap<State, DisabledPass[]>();
+
+export function disabledPasses(s: State): DisabledPass[] {
+  const cached = disabledCache.get(s);
+  if (cached) return cached;
+  const entries = s.options.disabledPasses.map(name => ({ name, phase: s.passPhases[name] ?? 'turned off' }));
+  disabledCache.set(s, entries);
+  return entries;
+}
+
 function nearestVisible(s: State, index: number): number {
   const steps = visibleSteps(s);
   if (steps.length === 0) return 0;
@@ -107,6 +164,14 @@ function nearestVisible(s: State, index: number): number {
   return best.index;
 }
 
+function phasesOf(response: CompileResponse, previous: Record<string, string>): Record<string, string> {
+  const merged = { ...previous };
+  for (const step of response.steps) {
+    if (step.kind === 'pass') merged[step.pass] = step.phase;
+  }
+  return merged;
+}
+
 export const actions = {
   async init(): Promise<void> {
     const response = await ask({ kind: 'init' }) as { globals: string[] };
@@ -115,16 +180,19 @@ export const actions = {
 
   setSource(source: string): void {
     set({ source, exampleId: '' });
+    persist();
   },
 
   loadExample(id: string): void {
     const example = EXAMPLES.find(e => e.id === id);
     if (!example) return;
     set({ source: example.source, exampleId: id });
+    persist();
   },
 
   setOptions(patch: Partial<CompileOptions>): void {
     set({ options: { ...state.options, ...patch } });
+    persist();
   },
 
   select(index: number): void {
@@ -170,35 +238,58 @@ export const actions = {
     if (state.playing) set({ playing: false });
   },
 
+  setGuide(open: boolean): void {
+    set({ guideOpen: open });
+  },
+
+  focusSource(line: number | null): void {
+    set({ focusLine: line });
+  },
+
+  share(): string {
+    return shareUrl({ source: state.source, exampleId: state.exampleId, options: state.options });
+  },
+
   togglePass(name: string): void {
     const disabled = state.options.disabledPasses;
-    set({
-      options: {
-        ...state.options,
-        disabledPasses: disabled.includes(name)
-          ? disabled.filter(p => p !== name)
-          : [...disabled, name],
-      },
+    actions.setOptions({
+      disabledPasses: disabled.includes(name)
+        ? disabled.filter(p => p !== name)
+        : [...disabled, name],
     });
     void actions.run();
   },
 
   async run(): Promise<void> {
     if (state.status === 'compiling') return;
+    const source = state.source;
+    const options = state.options;
     set({ status: 'compiling' });
-    const response = await ask({
-      kind: 'compile',
-      source: state.source,
-      options: state.options,
-    }) as CompileResponse;
+
+    const response = await ask({ kind: 'compile', source, options }) as CompileResponse;
+
+    if (!response.ok) {
+      set({
+        status: 'failed',
+        failure: { error: response.error ?? 'compile failed', errorPhase: response.errorPhase },
+        playing: false,
+        pane: 'source',
+      });
+      return;
+    }
+
     const next = { ...state, result: response };
     const first = visibleSteps(next)[0];
     set({
       result: response,
-      status: response.ok ? 'ready' : 'failed',
+      failure: null,
+      status: 'ready',
+      ranSource: source,
+      ranOptions: options,
+      passPhases: phasesOf(response, state.passPhases),
       selected: first ? first.index : 0,
       playing: false,
-      pane: response.ok ? 'timeline' : 'source',
+      pane: 'timeline',
     });
   },
 };

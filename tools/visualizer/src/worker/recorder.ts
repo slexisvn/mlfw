@@ -33,6 +33,11 @@ export class CompileRecorder {
 
   private readonly phases: string[] = [];
   private readonly open: OpenStep[] = [];
+  private onTracingDone: (() => void) | null;
+
+  constructor(onTracingDone: () => void = () => {}) {
+    this.onTracingDone = onTracingDone;
+  }
 
   sink = (event: TraceEventLite): void => {
     this.events.push(event);
@@ -42,6 +47,10 @@ export class CompileRecorder {
   };
 
   runBeforePass = (pass: { name: string }, target: unknown, level: IRLevelName): void => {
+    if (this.onTracingDone) {
+      this.onTracingDone();
+      this.onTracingDone = null;
+    }
     this.open.push({
       pass: pass.name,
       level,

@@ -7,6 +7,7 @@ const RESET_VIEW: View = { k: 1, tx: 0, ty: 0 };
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 6;
 const WHEEL_SENSITIVITY = 0.0016;
+const DRAG_SLOP = 2;
 
 type Point = { x: number; y: number };
 type Anchor = { mid: Point; spread: number };
@@ -22,6 +23,8 @@ export type PanZoom = {
   view: View;
   panning: boolean;
   reset: () => void;
+  zoomBy: (factor: number) => void;
+  dragged: () => boolean;
   ref: (node: SVGSVGElement | null) => void;
   surface: Surface;
 };
@@ -58,6 +61,7 @@ export function usePanZoom(): PanZoom {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const points = useRef(new Map<number, Point>());
   const anchor = useRef<Anchor | null>(null);
+  const moved = useRef(false);
 
   const onWheel = useCallback((event: WheelEvent) => {
     const svg = svgRef.current;
@@ -90,6 +94,7 @@ export function usePanZoom(): PanZoom {
     svg.setPointerCapture(event.pointerId);
     points.current.set(event.pointerId, userSpace(svg, event.clientX, event.clientY));
     anchor.current = anchorOf(points.current);
+    moved.current = false;
     setPanning(true);
   };
 
@@ -101,6 +106,7 @@ export function usePanZoom(): PanZoom {
     const to = anchorOf(points.current);
     if (!to) return;
     anchor.current = to;
+    if (Math.hypot(to.mid.x - from.mid.x, to.mid.y - from.mid.y) > DRAG_SLOP) moved.current = true;
     setView(current => {
       const pinched = from.spread > 0 && to.spread > 0
         ? zoomed(current, to.spread / from.spread, to.mid)
@@ -115,10 +121,20 @@ export function usePanZoom(): PanZoom {
     if (points.current.size === 0) setPanning(false);
   };
 
+  const zoomBy = useCallback((factor: number) => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    const at = userSpace(svg, rect.left + rect.width / 2, rect.top + rect.height / 2);
+    setView(current => zoomed(current, factor, at));
+  }, []);
+
   return {
     view,
     panning,
     reset: () => setView(RESET_VIEW),
+    zoomBy,
+    dragged: () => moved.current,
     ref,
     surface: {
       onPointerDown: track,

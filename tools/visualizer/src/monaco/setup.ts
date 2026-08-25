@@ -1,9 +1,9 @@
-import { editor, languages, KeyCode, KeyMod, typescript } from 'monaco-editor';
+import { editor, languages, KeyCode, KeyMod, Range, typescript } from 'monaco-editor';
 import editorWorker from 'monaco-editor/editor/editor.worker.js?worker';
 import tsWorker from 'monaco-editor/languages/features/typescript/ts.worker.js?worker';
 import mlfwTypes from 'mlfw-dist/index.d.ts?raw';
 
-export { editor, languages, KeyCode, KeyMod };
+export { editor, languages, KeyCode, KeyMod, Range };
 
 const { javascriptDefaults, ModuleKind, ModuleResolutionKind, ScriptTarget } = typescript;
 
@@ -13,6 +13,8 @@ export const EDITOR_THEME = 'mlfw-dark';
 const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 const MLFW_TYPES_PATH = 'file:///node_modules/mlfw/index.d.ts';
 const GLOBALS_PATH = 'file:///mlfw-globals.d.ts';
+
+const IMPLICIT_ANY_CODES = [7005, 7006, 7008, 7016, 7031, 7034, 7053, 80004];
 
 let installed = false;
 
@@ -33,10 +35,17 @@ export function setupMonaco(): void {
     moduleResolution: ModuleResolutionKind.NodeJs,
     allowNonTsExtensions: true,
     allowJs: true,
-    checkJs: false,
+    checkJs: true,
+    noImplicitAny: false,
+    strict: false,
     lib: ['es2022'],
   });
-  javascriptDefaults.setDiagnosticsOptions({ noSemanticValidation: true, noSyntaxValidation: false });
+  javascriptDefaults.setDiagnosticsOptions({
+    noSemanticValidation: false,
+    noSyntaxValidation: false,
+    noSuggestionDiagnostics: true,
+    diagnosticCodesToIgnore: IMPLICIT_ANY_CODES,
+  });
   javascriptDefaults.addExtraLib(mlfwTypes, MLFW_TYPES_PATH);
 
   registerIRLanguage();
@@ -53,8 +62,10 @@ export function installFrameworkGlobals(names: readonly string[]): void {
     [
       `import * as M from 'mlfw';`,
       'declare global {',
+      '  type ModelFunction = (...inputs: M.Tensor[]) => unknown;',
+      '  type Compilable = { forward(...inputs: M.Tensor[]): unknown } | ModelFunction;',
       declarations,
-      '  function run(model: unknown, inputs: unknown[]): void;',
+      '  function run(model: Compilable, inputs: M.Tensor[]): void;',
       '}',
       'export {};',
     ].join('\n'),

@@ -26,7 +26,7 @@ export function register(registry: OpRegistry) {
     traits: commBinaryArithTraits,
     inferResultTypes: inferBinaryElementwise,
     verify: verifyBinaryElementwise,
-    getCanonicalizationPatterns() { return [new pat.AddZero()]; },
+    getCanonicalizationPatterns(fastMath) { return [new pat.AddZero(fastMath)]; },
     fold: scalarBinaryFold((a, b) => a + b)
   }));
 
@@ -37,7 +37,7 @@ export function register(registry: OpRegistry) {
     traits: commBinaryArithTraits,
     inferResultTypes: inferBinaryElementwise,
     verify: verifyBinaryElementwise,
-    getCanonicalizationPatterns() { return [new pat.MulOne(), new pat.MulZero()]; },
+    getCanonicalizationPatterns(fastMath) { return [new pat.MulOne(), new pat.MulZero(fastMath)]; },
     fold: scalarBinaryFold((a, b) => a * b)
   }));
 
@@ -48,7 +48,7 @@ export function register(registry: OpRegistry) {
     traits: binaryArithTraits,
     inferResultTypes: inferBinaryElementwise,
     verify: verifyBinaryElementwise,
-    getCanonicalizationPatterns() { return [new pat.SubZero(), new pat.SubSelf()]; },
+    getCanonicalizationPatterns(fastMath) { return [new pat.SubZero(), new pat.SubSelf(fastMath)]; },
     fold: scalarBinaryFold((a, b) => a - b)
   }));
 

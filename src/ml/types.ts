@@ -2,12 +2,11 @@ import type { Tensor } from '../tensor/core/tensor.js';
 import type { DType } from '../tensor/types/dtype.js';
 import type { Device } from '../tensor/types/device.js';
 
-export type MLTensor = Tensor & {
+export type MLTensor = {
   reshape(shape: readonly number[]): MLTensor;
   transpose(dim0: number, dim1: number): MLTensor;
   narrow(dim: number, start: number, length: number): MLTensor;
-  toArray(): ArrayLike<number | bigint>;
-};
+} & Tensor;
 
 export type HostMatrix = { data: Float64Array; rows: number; cols: number };
 export type HostVector = { data: Float64Array; n: number };

@@ -82,7 +82,7 @@ export type FoldFn = (
   constOps: readonly Operation[],
 ) => AttrValue | undefined;
 
-export type CanonicalizationPatternsFn = () => Pattern[];
+export type CanonicalizationPatternsFn = (fastMath: boolean) => Pattern[];
 
 export type FlopsFn = (op: Operation) => number;
 

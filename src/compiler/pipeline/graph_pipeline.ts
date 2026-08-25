@@ -1,5 +1,5 @@
 import { FixedPointGroup } from '../passes/pass_manager.js';
-import { CanonicalizePass } from '../passes/canonicalize/canonicalize.js';
+import { CanonicalizePass, canonicalizationPatternNames } from '../passes/canonicalize/canonicalize.js';
 import { AlgebraicSimplificationPass } from '../passes/simplify/algebraic.js';
 import { ConstantFoldPass } from '../passes/simplify/constant_fold.js';
 import { CSEPass } from '../passes/simplify/cse.js';
@@ -16,6 +16,7 @@ import { CalibrationPass } from '../passes/quantization/calibration_pass.js';
 import { DecompositionPass } from '../passes/decompose/decomposition_pass.js';
 import { RematerializationPass } from '../passes/memory/rematerialization.js';
 import { CallInlinerPass } from '../passes/inline/call_inliner.js';
+import { PassContext } from '../passes/pass.js';
 import { activeExternalCodegenProviders } from './external_codegen.js';
 import { graphPassesForPhase } from './graph_pass_registry.js';
 import type { CompileFn } from '../analysis/calibrate_exec.js';
@@ -38,9 +39,18 @@ export function buildGraphPipeline(config: CompilerConfig, target: GraphPipeline
 
   passes.push(new CallInlinerPass());
   passes.push(new DecompositionPass(target as unknown as null));
+
+  const fastMath = !!config.optimization.fastMath;
+  const canonicalize = new CanonicalizePass({ fastMath });
+  const passContext = (config.passContext as PassContext | null) || new PassContext();
+  const simplify = new AlgebraicSimplificationPass({
+    fastMath,
+    ownedElsewhere: passContext.shouldRun(canonicalize) ? canonicalizationPatternNames(fastMath) : null,
+  });
+
   passes.push(new FixedPointGroup('canonicalize', [
-    new CanonicalizePass({ fastMath: config.optimization.fastMath }),
-    new AlgebraicSimplificationPass({ fastMath: config.optimization.fastMath }),
+    canonicalize,
+    simplify,
     new ConstantFoldPass(),
     new CSEPass(),
     new DCEPass(),
@@ -64,7 +74,7 @@ export function buildGraphPipeline(config: CompilerConfig, target: GraphPipeline
       }));
     }
     passes.push(quantize);
-    passes.push(new CanonicalizePass({ fastMath: config.optimization.fastMath }));
+    passes.push(new CanonicalizePass({ fastMath }));
     passes.push(new DCEPass());
   }
 

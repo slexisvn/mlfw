@@ -2,43 +2,61 @@ import { FunctionPass } from '../pass.js';
 import { PatternSet } from '../../ir/rewrite/pattern.js';
 import { PatternApplicator } from '../rewrite/pattern.js';
 import * as pat from '../../ir/graph/patterns.js';
+import type { Pattern } from '../../ir/rewrite/pattern.js';
 import type { GraphFunction } from '../../ir/graph/function.js';
 import type { AnalysisManager } from '../../analysis/analysis_manager.js';
 import type { PassResultValue, PassTarget } from '../pass.js';
 
-function buildAlgebraicPatterns(fastMath: boolean): PatternSet {
-  const set = new PatternSet();
-  set.add(new pat.AddZero(fastMath));
-  set.add(new pat.SubZero());
-  set.add(new pat.SubSelf(fastMath));
-  set.add(new pat.MulOne());
-  set.add(new pat.MulZero(fastMath));
-  set.add(new pat.DivOne());
-  set.add(new pat.DoubleNeg());
-  set.add(new pat.TransposeTranspose());
-  set.add(new pat.ReshapeReshape());
-  set.add(new pat.MulNegNeg());
-  set.add(new pat.AddNegToSub());
-  set.add(new pat.SubNegToAdd());
-  set.add(new pat.DoubleConvert());
+export type AlgebraicSimplificationOpts = Readonly<{
+  fastMath?: boolean;
+  ownedElsewhere?: ReadonlySet<string> | null;
+}>;
+
+function registryDeclaredPatterns(fastMath: boolean): Pattern[] {
+  return [
+    new pat.AddZero(fastMath),
+    new pat.SubZero(),
+    new pat.SubSelf(fastMath),
+    new pat.MulOne(),
+    new pat.MulZero(fastMath),
+    new pat.DivOne(),
+    new pat.DoubleNeg(),
+    new pat.ReshapeReshape(),
+  ];
+}
+
+function crossOpPatterns(fastMath: boolean): Pattern[] {
+  const patterns: Pattern[] = [
+    new pat.TransposeTranspose(),
+    new pat.MulNegNeg(),
+    new pat.AddNegToSub(),
+    new pat.SubNegToAdd(),
+    new pat.DoubleConvert(),
+  ];
   if (fastMath) {
-    set.add(new pat.DivSelf(fastMath));
-    set.add(new pat.ExpLog(fastMath));
-    set.add(new pat.LogExp(fastMath));
+    patterns.push(new pat.DivSelf(fastMath));
+    patterns.push(new pat.ExpLog(fastMath));
+    patterns.push(new pat.LogExp(fastMath));
+  }
+  return patterns;
+}
+
+function buildAlgebraicPatterns(fastMath: boolean, ownedElsewhere: ReadonlySet<string> | null): PatternSet {
+  const set = new PatternSet();
+  for (const pattern of [...registryDeclaredPatterns(fastMath), ...crossOpPatterns(fastMath)]) {
+    if (ownedElsewhere && ownedElsewhere.has(pattern.name)) continue;
+    set.add(pattern);
   }
   return set;
 }
 
-const _soundPatterns = buildAlgebraicPatterns(false);
-const _fastMathPatterns = buildAlgebraicPatterns(true);
-
 export class AlgebraicSimplificationPass extends FunctionPass {
   patterns: PatternSet;
 
-  constructor(opts: Readonly<{ fastMath?: boolean }> = {}) {
+  constructor(opts: AlgebraicSimplificationOpts = {}) {
     super('algebraic_simplify');
     this.preservedAnalyses = new Set();
-    this.patterns = opts.fastMath ? _fastMathPatterns : _soundPatterns;
+    this.patterns = buildAlgebraicPatterns(!!opts.fastMath, opts.ownedElsewhere ?? null);
   }
 
   override run(func: PassTarget, analysisManager?: AnalysisManager): PassResultValue {

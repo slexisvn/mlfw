@@ -14,8 +14,32 @@ const DOUBLE_NEG_PAT = isOp('neg', isOp('neg', wildcard()));
 const EXP_LOG_PAT = isOp('exp', isOp('log', wildcard()));
 const LOG_EXP_PAT = isOp('log', isOp('exp', wildcard()));
 
+function isDense(value: unknown): value is ArrayLike<number | bigint> {
+  return Array.isArray(value) || (ArrayBuffer.isView(value) && !(value instanceof DataView));
+}
+
+function constantValueOf(op: Operation | null): AttrValue | undefined {
+  if (!op) return undefined;
+  const def = registry.get(op.opName);
+  if (!def) return undefined;
+  if (def.isConstant) return op.getAttr<AttrValue>('value');
+  if (def.isBroadcast && op.numOperands === 1) return constantValueOf(op.getOperand(0).definingOp);
+  return undefined;
+}
+
+function isSplatOf(value: AttrValue, val: AttrValue): boolean {
+  if (!isDense(value)) return value === val;
+  if (value.length === 0) return false;
+  const target = typeof value[0] === 'bigint' ? BigInt(val as number) : val;
+  for (let i = 0; i < value.length; i++) {
+    if (value[i] !== target) return false;
+  }
+  return true;
+}
+
 function isConstantVal(op: Operation | null, val: AttrValue): boolean {
-  return (op && op.opName === 'constant' && op.getAttr<AttrValue>('value')! === val) as boolean;
+  const value = constantValueOf(op);
+  return value !== undefined && isSplatOf(value, val);
 }
 
 export class FoldTrivialReshape extends Pattern {

@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { layoutDag } from '../ir/dag.js';
 import { layoutNest } from '../ir/nest.js';
 import { driftScore, frameAt, linkLowering, linkRewrites, linkSourceLines, planTransition } from '../ir/transition.js';
-import { useStore } from '../store.js';
+import { actions, sourceLines, useStore } from '../store.js';
+import { opLabel } from '../catalog/naming.js';
 import { usePanZoom } from './pan_zoom.js';
-import type { Box, Layout } from '../ir/dag.js';
+import { useElementSize } from './use_element_size.js';
+import type { Box, Layout, NoteLookup } from '../ir/dag.js';
 import type { Change, Frame, Plan } from '../ir/transition.js';
 import type { CompileStep, Dag, NestNode, Snapshot } from '../protocol.js';
 
@@ -16,8 +18,8 @@ function sideOf(snapshot: Snapshot, index: number): Side {
   return { dag: snapshot.dags[index] ?? null, nest: snapshot.nests[index] ?? snapshot.nests[0] ?? null };
 }
 
-async function layoutSide(side: Side): Promise<Layout> {
-  if (side.dag) return layoutDag(side.dag);
+async function layoutSide(side: Side, note: NoteLookup): Promise<Layout> {
+  if (side.dag) return layoutDag(side.dag, note);
   if (side.nest) return layoutNest(side.nest);
   return EMPTY_LAYOUT;
 }
@@ -35,19 +37,47 @@ const BASE_DURATION_MS = 900;
 const DRIFT_LIMIT = 0.55;
 const PADDING = 14;
 const STALL_GRACE_MS = 1200;
+const TALL_RATIO = 1.35;
+const ZOOM_STEP = 1.4;
+const DEFAULT_VIEWPORT = { width: 800, height: 600 };
 
 type Prepared = { key: string; before: Layout; after: Layout; plan: Plan; drift: number };
 
+const OP_KINDS = new Set(['op', 'region', 'output']);
+
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
+
+function shapeOf(layout: Layout, fallback: number): string {
+  let ops = 0;
+  let inputs = 0;
+  for (const box of layout.boxes) {
+    if (OP_KINDS.has(box.kind)) ops++;
+    else if (box.kind === 'arg') inputs++;
+  }
+  if (ops === 0 && inputs === 0) return plural(fallback, 'box');
+  return [plural(ops, 'op'), inputs > 0 ? plural(inputs, 'input') : ''].filter(Boolean).join(' · ');
+}
+
 export function GraphView({ step }: { step: CompileStep }) {
   const speed = useStore(s => s.speed);
+  const lines = useStore(sourceLines);
   const [dagIndex, setDagIndex] = useState(0);
   const [prepared, setPrepared] = useState<Prepared | null>(null);
   const [frame, setFrame] = useState<Frame | null>(null);
   const [replayToken, setReplayToken] = useState(0);
   const [failure, setFailure] = useState<string | null>(null);
+  const [wholeGraph, setWholeGraph] = useState(false);
+  const { size: viewport, ref: measureSvg } = useElementSize<SVGSVGElement>(DEFAULT_VIEWPORT);
   const raf = useRef(0);
   const played = useRef<string | null>(null);
-  const { view, panning, reset, ref: attachSvg, surface } = usePanZoom();
+  const { view, panning, reset, zoomBy, dragged, ref: attachSvg, surface } = usePanZoom();
+
+  const note = useMemo<NoteLookup>(
+    () => (opId: number) => (lines.has(opId) ? `line ${lines.get(opId) as number}` : ''),
+    [lines],
+  );
 
   const dags = step.after.dags.length > 0 ? step.after.dags : step.before.dags;
   const index = Math.min(dagIndex, Math.max(dags.length - 1, 0));
@@ -55,14 +85,19 @@ export function GraphView({ step }: { step: CompileStep }) {
   const after = sideOf(step.after, index);
   const empty = !before.dag && !before.nest && !after.dag && !after.nest;
 
+  const measure = useCallback((node: SVGSVGElement | null) => {
+    attachSvg(node);
+    measureSvg(node);
+  }, [attachSvg, measureSvg]);
+
   useEffect(() => {
     if (empty) { setPrepared(null); return; }
     let cancelled = false;
     setFailure(null);
 
     void (async () => {
-      const b = await layoutSide(before);
-      const a = await layoutSide(after);
+      const b = await layoutSide(before, note);
+      const a = await layoutSide(after, note);
       if (cancelled) return;
       const { links, change } = linksBetween(before, after);
       setPrepared({
@@ -77,7 +112,7 @@ export function GraphView({ step }: { step: CompileStep }) {
     });
 
     return () => { cancelled = true; };
-  }, [step.index, index, empty]);
+  }, [step.index, index, empty, note]);
 
   useEffect(() => {
     if (!prepared) return;
@@ -112,39 +147,54 @@ export function GraphView({ step }: { step: CompileStep }) {
     };
   }, [prepared, speed, replayToken]);
 
-  const viewBox = useMemo(() => {
-    if (!prepared) return '0 0 100 100';
+  const geometry = useMemo(() => {
+    if (!prepared) return { viewBox: '0 0 100 100', cropped: false };
     const width = Math.max(prepared.before.width, prepared.after.width) + PADDING * 2;
     const height = Math.max(prepared.before.height, prepared.after.height) + PADDING * 2;
-    return `${-PADDING} ${-PADDING} ${width} ${height}`;
-  }, [prepared]);
+    const windowHeight = width * (viewport.height / viewport.width);
+    const cropped = !wholeGraph && height > windowHeight * TALL_RATIO;
+    const shown = cropped ? windowHeight : height;
+    return { viewBox: `${-PADDING} ${-PADDING} ${width} ${shown}`, cropped };
+  }, [prepared, viewport, wholeGraph]);
 
   if (empty) {
-    return <div className="pane-empty">Nothing structural to show for this step.</div>;
+    return <div className="pane-empty">This step has no structure to draw — the IR tab shows what it changed.</div>;
   }
 
   if (failure) return <div className="pane-empty">graph layout failed: {failure}</div>;
   if (!prepared || !frame) return <div className="pane-empty">laying out the graph…</div>;
 
   const edges = collectEdges(prepared, frame);
+  const zoom = Math.round(view.k * 100);
+  const linked = prepared.after.boxes.some(box => box.note !== '');
 
   return (
     <div className="graph">
       <div className="graph-bar">
-        <Legend plan={prepared.plan} />
+        <Legend plan={prepared.plan} layout={prepared.after} isInput={step.kind === 'input'} />
         {dags.length > 1 && (
-          <select value={index} onChange={e => setDagIndex(Number(e.target.value))}>
+          <select value={index} aria-label="function" onChange={e => setDagIndex(Number(e.target.value))}>
             {dags.map((dag, i) => <option key={dag.func} value={i}>{dag.func}</option>)}
           </select>
         )}
         {prepared.drift > DRIFT_LIMIT && <span className="drift">layout moved too far to animate</span>}
         <div className="graph-tools">
-          <span className="zoom">{Math.round(view.k * 100)}%</span>
-          <button onClick={reset} title="fit the whole graph">fit</button>
+          {linked && <span className="graph-hint">click a box to find its line</span>}
+          <button onClick={() => zoomBy(1 / ZOOM_STEP)} aria-label="zoom out" title="zoom out">−</button>
+          <span className="zoom">{zoom}%</span>
+          <button onClick={() => zoomBy(ZOOM_STEP)} aria-label="zoom in" title="zoom in">+</button>
+          <button
+            className={wholeGraph ? 'active' : ''}
+            onClick={() => { setWholeGraph(v => !v); reset(); }}
+            title={wholeGraph ? 'go back to a readable size' : 'shrink until the whole graph fits'}
+          >
+            {wholeGraph ? 'readable' : 'whole graph'}
+          </button>
+          <button onClick={reset} title="back to the starting view">reset</button>
           <button
             onClick={() => setReplayToken(token => token + 1)}
             disabled={step.kind === 'input'}
-            title="replay the transition into this pass"
+            title="replay the transition into this step"
           >
             replay
           </button>
@@ -152,9 +202,9 @@ export function GraphView({ step }: { step: CompileStep }) {
       </div>
 
       <svg
-        ref={attachSvg}
+        ref={measure}
         className={panning ? 'graph-svg panning' : 'graph-svg'}
-        viewBox={viewBox}
+        viewBox={geometry.viewBox}
         preserveAspectRatio="xMidYMin meet"
         {...surface}
       >
@@ -165,43 +215,62 @@ export function GraphView({ step }: { step: CompileStep }) {
         </defs>
 
         <g transform={`translate(${view.tx} ${view.ty}) scale(${view.k})`}>
-        <g className="edges">
-          {edges.map(edge => (
-            <path key={edge.id} d={edge.d} className="edge" style={{ opacity: edge.opacity }} markerEnd="url(#arrow)" />
-          ))}
-        </g>
-
-        <g className="nodes">
-          {[...frame.placements.values()]
-            .sort((a, b) => a.box.depth - b.box.depth || rank(a.box.kind) - rank(b.box.kind))
-            .map(placement => (
-              <g
-                key={placement.box.id}
-                className={`node ${placement.box.kind} ${placement.change}`}
-                style={{ opacity: placement.opacity }}
-                transform={transformFor(placement)}
-              >
-                <rect
-                  width={placement.width}
-                  height={placement.height}
-                  rx={placement.box.kind === 'op' ? 6 : 9}
-                />
-                <text x={10} y={headerY(placement)}>{placement.box.label}</text>
-                {showsDetail(placement) && (
-                  <text className="detail" x={placement.width - 10} y={headerY(placement)} textAnchor="end">
-                    {placement.box.detail}
-                  </text>
-                )}
-                {placement.box.detail && (
-                  <title>{`${placement.box.label} : ${placement.box.detail}`}</title>
-                )}
-              </g>
+          <g className="edges">
+            {edges.map(edge => (
+              <path key={edge.id} d={edge.d} className="edge" style={{ opacity: edge.opacity }} markerEnd="url(#arrow)" />
             ))}
-        </g>
+          </g>
+
+          <g className="nodes">
+            {[...frame.placements.values()]
+              .sort((a, b) => a.box.depth - b.box.depth || rank(a.box.kind) - rank(b.box.kind))
+              .map(placement => {
+                const line = placement.box.opId === null ? undefined : lines.get(placement.box.opId);
+                return (
+                  <g
+                    key={placement.box.id}
+                    className={[
+                      'node',
+                      placement.box.kind,
+                      placement.change,
+                      line === undefined ? '' : 'traceable',
+                    ].filter(Boolean).join(' ')}
+                    style={{ opacity: placement.opacity }}
+                    transform={transformFor(placement)}
+                    onClick={() => { if (line !== undefined && !dragged()) actions.focusSource(line); }}
+                  >
+                    <rect
+                      width={placement.width}
+                      height={placement.height}
+                      rx={placement.box.kind === 'op' ? 6 : 9}
+                    />
+                    <text x={10} y={headerY(placement)}>{placement.box.label}</text>
+                    {showsDetail(placement) && (
+                      <text className="detail" x={placement.width - 10} y={headerY(placement)} textAnchor="end">
+                        {placement.box.detail}
+                      </text>
+                    )}
+                    {placement.box.note !== '' && !showsDetail(placement) && (
+                      <text className="note" x={placement.width - 10} y={headerY(placement)} textAnchor="end">
+                        {placement.box.note}
+                      </text>
+                    )}
+                    <title>{tooltipFor(placement.box, line)}</title>
+                  </g>
+                );
+              })}
+          </g>
         </g>
       </svg>
     </div>
   );
+}
+
+function tooltipFor(box: Box, line: number | undefined): string {
+  const parts: string[] = [box.kind === 'op' ? `${box.label} — ${opLabel(box.label)}` : box.label];
+  if (box.detail) parts.push(box.detail);
+  if (line !== undefined) parts.push(`from line ${line} of your code`);
+  return parts.join('\n');
 }
 
 const CONTAINER_KINDS = new Set(['region', 'nest', 'nest-block', 'nest-func', 'source', 'line']);
@@ -280,18 +349,25 @@ function quiet(plan: Plan): boolean {
     && plan.counts.lowered === 0 && plan.counts.emitted === 0 && plan.links.size === 0;
 }
 
-function Legend({ plan }: { plan: Plan }) {
+function Legend({ plan, layout, isInput }: { plan: Plan; layout: Layout; isInput: boolean }) {
+  if (quiet(plan)) {
+    return (
+      <div className="legend">
+        <span className="chip quiet">{shapeOf(layout, plan.counts.kept)}</span>
+        <span className="chip quiet">{isInput ? 'the starting point' : 'this step drew the same shape'}</span>
+      </div>
+    );
+  }
+
   return (
     <div className="legend">
-      {quiet(plan)
-        ? <span className="chip quiet">{plan.counts.kept} ops · no structural change</span>
-        : LEGEND.map(entry => (
-          plan.counts[entry.change] > 0 && (
-            <span key={entry.change} className={`chip ${entry.change}`}>
-              {plan.counts[entry.change]} {entry.label}
-            </span>
-          )
-        ))}
+      {LEGEND.map(entry => (
+        plan.counts[entry.change] > 0 && (
+          <span key={entry.change} className={`chip ${entry.change}`}>
+            {plan.counts[entry.change]} {entry.label}
+          </span>
+        )
+      ))}
     </div>
   );
 }

@@ -40,13 +40,11 @@ run(forward, [a, b]);
   {
     id: 'algebra',
     title: 'Algebraic identities',
-    blurb: 'x + 0, x * 1, and a double negation for the simplifier to eat.',
+    blurb: 'x * 1 and a double negation go in canonicalize; x + 0 stays, because -0 + 0 is +0. Press ⊘ on canonicalize to see who else could have done it.',
     source: `const forward = (x) => {
-  const zero = zeros([32]);
-  const one = ones([32]);
-  const shifted = x.add(zero);
-  const scaled = shifted.mul(one);
-  return scaled.neg().neg().relu();
+  const scaled = x.mul(1);
+  const shifted = scaled.add(0);
+  return shifted.neg().neg().relu();
 };
 
 const x = randn([32]);
@@ -100,7 +98,7 @@ run(model, [x]);
   {
     id: 'conv',
     title: 'Conv stack',
-    blurb: 'Convolution, normalization and pooling, on the way to a tiled kernel.',
+    blurb: 'Convolution, normalization and pooling: one six-deep conv nest, and elementwise loops split to vector width.',
     source: `const model = new Sequential(
   new Conv2d(3, 8, 3, { padding: 1 }),
   new BatchNorm2d(8),

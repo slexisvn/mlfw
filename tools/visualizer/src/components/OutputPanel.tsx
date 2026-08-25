@@ -9,8 +9,11 @@ const GRAMMAR: Record<string, string> = {
   wat: 'scheme',
 };
 
+const COPY_RESET_MS = 1600;
+
 export function OutputPanel({ kernels }: { kernels: readonly Kernel[] }) {
   const [active, setActive] = useState(0);
+  const [copied, setCopied] = useState(false);
 
   if (kernels.length === 0) {
     return <div className="pane-empty">No kernel yet — run a compile and the generated source lands here.</div>;
@@ -18,15 +21,26 @@ export function OutputPanel({ kernels }: { kernels: readonly Kernel[] }) {
 
   const kernel = kernels[Math.min(active, kernels.length - 1)];
 
+  const copy = async (): Promise<void> => {
+    await navigator.clipboard.writeText(kernel.source);
+    setCopied(true);
+    setTimeout(() => setCopied(false), COPY_RESET_MS);
+  };
+
   return (
     <div className="output">
       <div className="kernel-tabs">
-        {kernels.map((k, i) => (
-          <button key={k.name} className={i === active ? 'active' : ''} onClick={() => setActive(i)}>
-            {k.name}
-          </button>
-        ))}
+        {kernels.length > 1
+          ? kernels.map((k, i) => (
+            <button key={k.name} className={i === active ? 'active' : ''} onClick={() => setActive(i)}>
+              {k.name}
+            </button>
+          ))
+          : <span className="kernel-name">{kernel.name}</span>}
         <span className="kernel-lang">{kernel.language}</span>
+        <button className="copy" onClick={() => { void copy(); }}>
+          {copied ? 'copied' : 'copy'}
+        </button>
       </div>
       <KernelSource kernel={kernel} />
     </div>
