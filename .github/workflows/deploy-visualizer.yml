@@ -1,4 +1,4 @@
-name: visualizer
+name: Deploy visualizer
 
 on:
   push:
@@ -9,7 +9,7 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - 'tsup.config.ts'
-      - '.github/workflows/visualizer.yml'
+      - '.github/workflows/deploy-visualizer.yml'
   workflow_dispatch:
 
 permissions:
