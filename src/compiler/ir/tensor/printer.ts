@@ -1,7 +1,16 @@
 import { cCompareOp } from '../../../util/dtype_map.js';
-import type { TensorNode, PrimFunc, SeqNode, ForNode, BlockNode, BufferStoreNode, BufferLoadNode, IfThenElseNode, LetStmtNode, AllocateNode, EvaluateNode, MathOpNode, CompareNode, CallExternNode, VariableNode, IntImmNode, FloatImmNode, CastNode } from './nodes.js';
+import { ForKind, IterVarKind } from './nodes.js';
+import type { Buffer } from './buffer.js';
+import type { TensorNode, PrimFunc, SeqNode, ForNode, BlockNode, BlockRealizeNode, BufferStoreNode, BufferLoadNode, IfThenElseNode, LetStmtNode, AllocateNode, EvaluateNode, WhileNode, VecCopyNode, MathOpNode, CompareNode, CallExternNode, VariableNode, IntImmNode, FloatImmNode, CastNode } from './nodes.js';
 
 type VisitDispatch = Record<string, ((node: TensorNode) => void) | undefined>;
+
+export type PrintableFunc = Readonly<{
+  name: string;
+  params: readonly VariableNode[];
+  body: TensorNode;
+  bufferMap: ReadonlyMap<VariableNode, Buffer>;
+}>;
 
 export class TensorIRPrinter {
   indent: number;
@@ -26,6 +35,24 @@ export class TensorIRPrinter {
     this.out.push('\n' + '  '.repeat(this.indent));
   }
 
+  open(prefix: string): void {
+    this.push(`${prefix}{`);
+    this.indent++;
+    this.newline();
+  }
+
+  close(): void {
+    this.indent--;
+    this.newline();
+    this.push('}');
+  }
+
+  scope(prefix: string, body: TensorNode | null | undefined): void {
+    this.open(prefix);
+    this.visit(body);
+    this.close();
+  }
+
   visit(node: TensorNode | null | undefined): void {
     if (!node) return;
     const method = 'visit' + node.type;
@@ -37,10 +64,8 @@ export class TensorIRPrinter {
     }
   }
 
-  visitPrimFunc(node: PrimFunc): void {
-    this.push(`prim_func ${node.name}(${node.params.map(p => p.name).join(', ')}) {`);
-    this.indent++;
-    this.newline();
+  printFunc(keyword: string, node: PrintableFunc): void {
+    this.open(`${keyword} ${node.name}(${node.params.map(p => p.name).join(', ')}) `);
 
     for (const [v, buf] of node.bufferMap) {
       this.push(`${buf.name} = buffer_map(${v.name}, shape=[${buf.shape.join(',')}], dtype=${buf.dtype})`);
@@ -48,9 +73,34 @@ export class TensorIRPrinter {
     }
 
     this.visit(node.body);
-    this.indent--;
-    this.newline();
-    this.push('}');
+    this.close();
+  }
+
+  openLoop(loopVar: VariableNode, extent: TensorNode, kind: string, threadTag: string | null): void {
+    const annotation = kind === ForKind.SERIAL ? '' : `@${kind} `;
+    const tag = threadTag ? `[${threadTag}] ` : '';
+    this.push(`for ${loopVar.name} in 0..`);
+    this.visit(extent);
+    this.open(` ${annotation}${tag}`);
+  }
+
+  printBufferRef(name: string, indices: readonly TensorNode[]): void {
+    this.push(`${name}[`);
+    for (let i = 0; i < indices.length; i++) {
+      this.visit(indices[i]);
+      if (i < indices.length - 1) this.push(', ');
+    }
+    this.push(`]`);
+  }
+
+  printBinding(realize: BlockRealizeNode): void {
+    const kind = realize.kind === IterVarKind.DATA_PAR ? '' : `:${realize.kind}`;
+    this.push(`bind ${realize.iterVar.name}${kind} = `);
+    this.visit(realize.binding);
+  }
+
+  visitPrimFunc(node: PrimFunc): void {
+    this.printFunc('prim_func', node);
   }
 
   visitSeqNode(node: SeqNode): void {
@@ -61,27 +111,16 @@ export class TensorIRPrinter {
   }
 
   visitForNode(node: ForNode): void {
-    const kind = node.kind === 'serial' ? '' : `@${node.kind} `;
-    const tag = node.threadTag ? `[${node.threadTag}] ` : '';
-    this.push(`for ${node.loopVar.name} in 0..`);
-    this.visit(node.extent);
-    this.push(` ${kind}${tag}{`);
-    this.indent++;
-    this.newline();
+    this.openLoop(node.loopVar, node.extent, node.kind, node.threadTag);
     this.visit(node.body);
-    this.indent--;
-    this.newline();
-    this.push('}');
+    this.close();
   }
 
   visitBlockNode(node: BlockNode): void {
-    this.push(`block ${node.name} {`);
-    this.indent++;
-    this.newline();
+    this.open(`block ${node.name} `);
 
     for (const r of node.iterVars) {
-      this.push(`bind ${r.iterVar.name} = `);
-      this.visit(r.binding);
+      this.printBinding(r);
       this.newline();
     }
 
@@ -100,60 +139,33 @@ export class TensorIRPrinter {
     }
 
     if (node.initBody) {
-      this.push(`init {`);
-      this.indent++;
-      this.newline();
-      this.visit(node.initBody);
-      this.indent--;
-      this.newline();
-      this.push(`}`);
+      this.scope(`init `, node.initBody);
       this.newline();
     }
 
     this.visit(node.body);
-    this.indent--;
-    this.newline();
-    this.push('}');
+    this.close();
+  }
+
+  visitBlockRealizeNode(node: BlockRealizeNode): void {
+    this.printBinding(node);
   }
 
   visitBufferStoreNode(node: BufferStoreNode): void {
-    this.push(`${node.buffer.name}[`);
-    for (let i = 0; i < node.indices.length; i++) {
-      this.visit(node.indices[i]);
-      if (i < node.indices.length - 1) this.push(', ');
-    }
-    this.push(`] = `);
+    this.printBufferRef(node.buffer.name, node.indices);
+    this.push(` = `);
     this.visit(node.value);
   }
 
   visitBufferLoadNode(node: BufferLoadNode): void {
-    this.push(`${node.buffer.name}[`);
-    for (let i = 0; i < node.indices.length; i++) {
-      this.visit(node.indices[i]);
-      if (i < node.indices.length - 1) this.push(', ');
-    }
-    this.push(`]`);
+    this.printBufferRef(node.buffer.name, node.indices);
   }
 
   visitIfThenElseNode(node: IfThenElseNode): void {
     this.push(`if (`);
     this.visit(node.condition);
-    this.push(`) {`);
-    this.indent++;
-    this.newline();
-    this.visit(node.thenBody);
-    this.indent--;
-    this.newline();
-    this.push('}');
-    if (node.elseBody) {
-      this.push(` else {`);
-      this.indent++;
-      this.newline();
-      this.visit(node.elseBody);
-      this.indent--;
-      this.newline();
-      this.push('}');
-    }
+    this.scope(`) `, node.thenBody);
+    if (node.elseBody) this.scope(` else `, node.elseBody);
   }
 
   visitLetStmtNode(node: LetStmtNode): void {
@@ -164,13 +176,15 @@ export class TensorIRPrinter {
   }
 
   visitAllocateNode(node: AllocateNode): void {
-    this.push(`allocate ${node.buffer.name}[${node.buffer.shape.join(', ')}] (${node.scope}) {`);
-    this.indent++;
+    this.scope(`allocate ${node.buffer.name}[${node.buffer.shape.join(', ')}] (${node.scope}) `, node.body);
+  }
+
+  visitWhileNode(node: WhileNode): void {
+    this.open(`while ${node.condVar.name} `);
+    this.scope(`cond `, node.condBody);
     this.newline();
-    this.visit(node.body);
-    this.indent--;
-    this.newline();
-    this.push('}');
+    this.visit(node.loopBody);
+    this.close();
   }
 
   visitEvaluateNode(node: EvaluateNode): void {
@@ -178,8 +192,20 @@ export class TensorIRPrinter {
     this.visit(node.value);
   }
 
+  visitSyncThreadsNode(): void {
+    this.push(`sync_threads()`);
+  }
+
+  visitVecCopyNode(node: VecCopyNode): void {
+    this.printBufferRef(node.dstBuffer.name, [node.dstIndex]);
+    this.push(` = vec_copy<${node.width}>(`);
+    this.printBufferRef(node.srcBuffer.name, [node.srcIndex]);
+    this.push(`)`);
+  }
+
   visitMathOpNode(node: MathOpNode): void {
     this.push(`(`);
+    if (!node.b) this.push(node.op);
     this.visit(node.a);
     if (node.b) {
       this.push(` ${node.op} `);

@@ -1,6 +1,6 @@
 import { IRPrinter, formatAttrValue } from 'mlfw/compiler/ir/graph/printer.js';
 import { typeToString } from 'mlfw/compiler/ir/graph/types.js';
-import { printTensorIR, TensorIRPrinter } from 'mlfw/compiler/ir/tensor/printer.js';
+import { printLIR, LIRPrinter } from 'mlfw/compiler/ir/lir/printer.js';
 import { walk } from 'mlfw/compiler/ir/ir_visitor.js';
 import type { Block } from 'mlfw/compiler/ir/graph/block.js';
 import type { GraphFunction } from 'mlfw/compiler/ir/graph/function.js';
@@ -104,7 +104,7 @@ const BLOCK_SUFFIXES = ['_block', '_init', '_acc', '_update'];
 
 function expr(node: unknown): string {
   if (!node || typeof node !== 'object') return String(node ?? '');
-  return new TensorIRPrinter().print(node as never).replace(/\s+/g, ' ').trim();
+  return new LIRPrinter().print(node as never).replace(/\s+/g, ' ').trim();
 }
 
 function opFromBlockName(name: string): string | null {
@@ -219,7 +219,7 @@ function nestedSnapshot(funcs: Iterable<{ name: string }>): Snapshot {
   let ops = 0;
 
   for (const func of funcs) {
-    chunks.push(printTensorIR(func as never));
+    chunks.push(printLIR(func as never));
     ops += countNodes(func);
     nests.push(nestForFunc(func as { name: string; body?: unknown }));
   }
