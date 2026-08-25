@@ -31,7 +31,6 @@ export type State = {
   playing: boolean;
   onlyChanged: boolean;
   pane: Pane;
-  guideOpen: boolean;
   focusLine: number | null;
 };
 
@@ -74,7 +73,6 @@ let state: State = {
   playing: false,
   onlyChanged: true,
   pane: 'source',
-  guideOpen: false,
   focusLine: null,
 };
 
@@ -235,10 +233,6 @@ export const actions = {
 
   stopPlay(): void {
     if (state.playing) set({ playing: false });
-  },
-
-  setGuide(open: boolean): void {
-    set({ guideOpen: open });
   },
 
   focusSource(line: number | null): void {
