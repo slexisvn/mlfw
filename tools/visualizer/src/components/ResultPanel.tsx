@@ -1,12 +1,15 @@
 import { useStore } from '../store.js';
 import { targetNote } from '../catalog/targets.js';
+import { graphCostOf } from '../catalog/metrics.js';
 import type { RunResult, TensorPreview } from '../protocol.js';
 
 const CLOSE_ENOUGH = 1e-4;
 
 export function ResultPanel({ run }: { run: RunResult | null }) {
   const target = useStore(s => (s.ranOptions ? s.ranOptions.target : null));
+  const result = useStore(s => s.result);
   const ranOn = target ? targetNote(target).label : null;
+  const cost = result ? graphCostOf(result) : null;
 
   if (!run || (!run.ran && !run.skipped && !run.error)) {
     return <div className="pane-empty">Run a compile and the kernel it produced gets executed here.</div>;
@@ -28,26 +31,32 @@ export function ResultPanel({ run }: { run: RunResult | null }) {
     );
   }
 
-  const exact = run.maxAbsDiff === 0;
-  const close = run.maxAbsDiff !== null && run.maxAbsDiff < CLOSE_ENOUGH;
+  const trained = run.gradients.length > 0;
+  const worst = trained && run.maxAbsGradDiff !== null && run.maxAbsDiff !== null
+    ? Math.max(run.maxAbsDiff, run.maxAbsGradDiff)
+    : run.maxAbsDiff;
+  const exact = worst === 0;
+  const close = worst !== null && worst < CLOSE_ENOUGH;
   const speedup = run.eagerMs && run.compiledMs ? run.eagerMs / run.compiledMs : null;
   const faster = speedup !== null && speedup >= 1;
 
   return (
     <div className="result">
       <Verdict
-        tone={run.maxAbsDiff === null ? 'skipped' : exact ? 'exact' : close ? 'close' : 'off'}
+        tone={worst === null ? 'skipped' : exact ? 'exact' : close ? 'close' : 'off'}
         ranOn={ranOn}
         headline={
-          run.maxAbsDiff === null
-            ? 'ran, but the outputs could not be compared'
+          worst === null
+            ? `ran, but the ${trained ? 'gradients' : 'outputs'} could not be compared`
             : exact
-              ? 'bit-exact against eager'
-              : `matches eager to ${run.maxAbsDiff.toExponential(1)}`
+              ? `bit-exact against eager${trained ? ', gradients included' : ''}`
+              : `matches eager to ${worst.toExponential(1)}`
         }
         note={
-          run.maxAbsDiff === null || exact
-            ? 'The compiled kernel and the same model run op by op produced the same values.'
+          worst === null || exact
+            ? trained
+              ? 'The compiled training step and the same step run op by op through autograd produced the same values and the same gradients.'
+              : 'The compiled kernel and the same model run op by op produced the same values.'
             : close
               ? 'Within float32 rounding — the passes reordered arithmetic, they did not change the answer.'
               : 'Larger than float32 rounding explains. An optimization changed the result.'
@@ -58,7 +67,8 @@ export function ResultPanel({ run }: { run: RunResult | null }) {
         <h3>
           timing
           <span>
-            per call, averaged over {run.iterations} call{run.iterations === 1 ? '' : 's'}
+            per {trained ? 'training step' : 'call'}, averaged over {run.iterations}{' '}
+            {trained ? 'step' : 'call'}{run.iterations === 1 ? '' : 's'}
           </span>
         </h3>
         <div className="timings">
@@ -78,6 +88,8 @@ export function ResultPanel({ run }: { run: RunResult | null }) {
         )}
       </section>
 
+      {cost && run.compiledMs !== null && <Roofline cost={cost} ms={run.compiledMs} />}
+
       {run.inputs.length > 0 && (
         <section className="result-block">
           <h3>inputs<span>what the model was fed</span></h3>
@@ -94,7 +106,58 @@ export function ResultPanel({ run }: { run: RunResult | null }) {
           </div>
         ))}
       </section>
+
+      {trained && (
+        <section className="result-block">
+          <h3>
+            gradients
+            <span>one per input, then one per parameter — compiled, then eager autograd</span>
+          </h3>
+          {run.gradients.map((tensor, i) => (
+            <div className="output-pair" key={i}>
+              <TensorRow tensor={tensor} tag="compiled" />
+              {run.eagerGradients[i] && <TensorRow tensor={run.eagerGradients[i]} tag="eager" muted />}
+            </div>
+          ))}
+          {run.maxAbsGradDiff !== null && (
+            <p className="timing-note">
+              Worst gradient disagreement: {run.maxAbsGradDiff.toExponential(1)}. The backward graph was
+              derived from the forward one by rule, so this number is the only evidence that the derivation
+              and the optimizations applied to it are both right.
+            </p>
+          )}
+        </section>
+      )}
     </div>
+  );
+}
+
+const MS_PER_SECOND = 1000;
+const GIGA = 1e9;
+
+function Roofline({ cost, ms }: { cost: { bytes: number; flops: number }; ms: number }) {
+  const seconds = ms / MS_PER_SECOND;
+  const bandwidth = cost.bytes / seconds / GIGA;
+  const throughput = cost.flops / seconds / GIGA;
+  const intensity = cost.flops / cost.bytes;
+  const machineRatio = throughput / bandwidth;
+
+  return (
+    <section className="result-block">
+      <h3>where the time went<span>the two coordinates a roofline is drawn in</span></h3>
+      <div className="timings">
+        <Timing label="moved" ms={null} value={`${bandwidth.toFixed(2)} GB/s`} />
+        <Timing label="computed" ms={null} value={`${throughput.toFixed(2)} GFLOP/s`} />
+        <Timing label="intensity" ms={null} value={`${intensity.toFixed(2)} flop/byte`} />
+      </div>
+      <p className="timing-note">
+        The graph reads and writes {(cost.bytes / 1024).toFixed(1)} KB and does{' '}
+        {(cost.flops / 1000).toFixed(1)}k floating-point operations, so it asks the machine for{' '}
+        {machineRatio.toFixed(2)} flops per byte. A machine that can do more than that per byte finishes
+        this program waiting on memory, and no amount of faster arithmetic will help it — that is the
+        argument fusion is making when it cuts the traffic.
+      </p>
+    </section>
   );
 }
 
@@ -110,11 +173,13 @@ function Verdict(
   );
 }
 
-function Timing({ label, ms, highlight }: { label: string; ms: number | null; highlight: boolean }) {
+function Timing(
+  { label, ms, highlight, value }: { label: string; ms: number | null; highlight?: boolean; value?: string },
+) {
   return (
     <div className={highlight ? 'timing-cell best' : 'timing-cell'}>
       <span className="timing-label">{label}</span>
-      <span className="timing-value">{ms === null ? '—' : `${ms.toFixed(3)}ms`}</span>
+      <span className="timing-value">{value ?? (ms === null ? '—' : `${ms.toFixed(3)}ms`)}</span>
     </div>
   );
 }

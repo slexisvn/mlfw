@@ -6,6 +6,7 @@ import { UseDefAnalysis } from '../../analysis/use_def.js';
 import { QuantizationScheme, QuantizationParams, DEFAULT_EXCLUDE_OPS, DEFAULT_QUANTIZABLE_OPS } from '../../ir/graph/quantization_types.js';
 import type { QuantizationSchemeValue } from '../../ir/graph/quantization_types.js';
 import { TraceLevel } from '../../pipeline/trace.js';
+import { explainer } from '../explain.js';
 import { isTerminatorOp } from '../../ir/graph/op_traits.js';
 import type { GraphFunction } from '../../ir/graph/function.js';
 import type { Value } from '../../ir/graph/value.js';
@@ -86,6 +87,7 @@ export class QuantizationPass extends FunctionPass {
     const quantizedValues = new Set<Value>();
     this._paramsByValue = new Map();
     const cfg = this.config;
+    const explain = explainer(this.trace, this.name);
     let changed = false;
 
     if (cfg.target && !cfg.target.supportsInt8) return PassResult.UNCHANGED;
@@ -94,17 +96,30 @@ export class QuantizationPass extends FunctionPass {
       const op = topo[i];
       if (isTerminatorOp(op.opName)) continue;
       if (cfg.excludeOps.has(op.opName) || !cfg.quantizableOps.has(op.opName)) {
+        if (explain) {
+          explain(op.opName, 'left in float',
+            'no int8 form of this op is declared, so its operands are dequantized back before it runs');
+        }
         changed = this._dequantizeOperands(op, quantizedValues, cfg) || changed;
         continue;
       }
 
       if (cfg.sensitivityResult && cfg.sensitivityThreshold > 0
           && cfg.sensitivityResult.isSensitive(op, cfg.sensitivityThreshold)) {
+        if (explain) {
+          explain(op.opName, 'left in float',
+            'calibration measured this op above the sensitivity threshold, so int8 would move its output too far',
+            { sensitivityThreshold: cfg.sensitivityThreshold });
+        }
         changed = this._dequantizeOperands(op, quantizedValues, cfg) || changed;
         continue;
       }
 
       if (cfg.weightOnly && !hasConstantOperand(op)) {
+        if (explain) {
+          explain(op.opName, 'left in float',
+            'weight-only quantization was asked for and no operand of this op is a compile-time constant');
+        }
         changed = this._dequantizeOperands(op, quantizedValues, cfg) || changed;
         continue;
       }
@@ -113,13 +128,25 @@ export class QuantizationPass extends FunctionPass {
       const nativeVariant = opDef ? opDef.getAttr<string>('quantizedVariant') : null;
       if (nativeVariant && allOperandsCanQuantize(op, quantizedValues, cfg)) {
         if (cfg.scheme === QuantizationScheme.PER_CHANNEL && this._canPerChannelDot(op, quantizedValues)) {
+          if (explain) {
+            explain(op.opName, `replaced with ${nativeVariant}, one scale per channel`,
+              'every operand is already integer and a per-channel scale keeps more of the range than one scale for the whole tensor');
+          }
           changed = this._replacePerChannelDot(op, cfg) || changed;
         } else {
+          if (explain) {
+            explain(op.opName, `replaced with ${nativeVariant}`,
+              'every operand is already integer, so the op runs in int8 without a round trip through float');
+          }
           changed = this._replaceWithNativeQuantized(op, nativeVariant, quantizedValues, cfg) || changed;
         }
         continue;
       }
 
+      if (explain) {
+        explain(op.opName, 'wrapped in a dequantize/quantize pair',
+          'an int8 form exists but at least one operand is still float, so the boundary is paid here');
+      }
       changed = this._insertDequantQuantBoundary(op, quantizedValues, cfg) || changed;
     }
 

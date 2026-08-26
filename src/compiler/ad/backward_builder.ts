@@ -5,6 +5,7 @@ import { UseDefAnalysis } from '../analysis/use_def.js';
 import { readValues } from '../ir/graph/graph_algorithms.js';
 import { GradAccumulator, gradOrZero } from './grad_accumulator.js';
 import { getVJPRule, isGradientBarrier, requireVJPRuleOrBarrier, getRegionVJP } from './vjp_registry.js';
+import type { Explain } from '../passes/explain.js';
 import { regionFreeVars } from './scan_backward.js';
 import { REGION_CONTROL_FLOW } from './control_flow_ops.js';
 
@@ -35,12 +36,14 @@ export type BackpropOptions = {
   needsGrad: ReadonlySet<number>;
   resolveValue: ResolveValueFn;
   handleRegionOp?: ((op: Operation) => boolean) | null;
+  explain?: Explain | null;
 };
 
 export type BackwardBuilderOpts = Readonly<{
   rematPolicy?: RematPolicy | null;
   checkpointPolicy?: CheckpointPolicy | null;
   scanCheckpoint?: unknown;
+  explain?: Explain | null;
 }>;
 
 export type BackwardBuildResult = {
@@ -53,7 +56,7 @@ type SavedValueInfo = { savedValues: Value[]; savedValueIndices: Map<number, num
 
 const FALLBACK_REMAT_OPS = new Set(['neg', 'abs', 'sign', 'floor', 'ceil']);
 
-export function backpropOps(orderedOps: readonly Operation[], { accumulator, builder, needsGrad, resolveValue, handleRegionOp = null }: BackpropOptions): void {
+export function backpropOps(orderedOps: readonly Operation[], { accumulator, builder, needsGrad, resolveValue, handleRegionOp = null, explain = null }: BackpropOptions): void {
   for (let i = orderedOps.length - 1; i >= 0; i--) {
     const op = orderedOps[i];
     if (op.opName === 'return' || op.opName === 'constant') continue;
@@ -69,6 +72,16 @@ export function backpropOps(orderedOps: readonly Operation[], { accumulator, bui
 
     const rule = requireVJPRuleOrBarrier(op.opName);
     if (!rule) continue;
+
+    if (explain) {
+      if (isGradientBarrier(op.opName)) {
+        explain(op.opName, 'gradient stops here',
+          'this op is declared a gradient barrier, so nothing downstream of it contributes to the input gradients');
+      } else {
+        explain(op.opName, 'chain rule applied backwards',
+          'its VJP rule turns the gradient of its output into a gradient for each operand that needs one');
+      }
+    }
 
     const operandValues = new Array<Value>(op.numOperands);
     for (let o = 0; o < op.numOperands; o++) operandValues[o] = resolveValue(op.getOperand(o));
@@ -155,11 +168,13 @@ export class BackwardGraphBuilder {
   private _rematPolicy: RematPolicy | null;
   private _checkpointPolicy: CheckpointPolicy | null;
   private _scanCheckpoint: unknown;
+  private _explain: Explain | null;
 
   constructor(opts: BackwardBuilderOpts = {}) {
     this._rematPolicy = opts.rematPolicy || null;
     this._checkpointPolicy = opts.checkpointPolicy || null;
     this._scanCheckpoint = opts.scanCheckpoint || null;
+    this._explain = opts.explain || null;
   }
 
   build(forwardFunc: GraphFunction): BackwardBuildResult {
@@ -219,7 +234,7 @@ export class BackwardGraphBuilder {
     }
 
     backpropOps(topoOrder, {
-      accumulator, builder, needsGrad,
+      accumulator, builder, needsGrad, explain: this._explain,
       resolveValue: (v: Value) => this._materialize(v, valueMap, builder),
       handleRegionOp: (op: Operation) => {
         const regionFn = getRegionVJP(op.opName);
@@ -237,6 +252,12 @@ export class BackwardGraphBuilder {
     }
 
     builder.returnOp(returnValues);
+
+    if (this._explain) {
+      this._explain(bwdFunc.name, 'built as a separate function',
+        'the backward reads the gradient of every forward output plus whatever forward values it still needs, and returns one gradient per input that asked for one',
+        { gradOutputs: gradOutputTypes.length, savedValues: savedValues.length, inputGradients: returnValues.length });
+    }
 
     return {
       backwardFunc: bwdFunc,
@@ -352,10 +373,18 @@ export class BackwardGraphBuilder {
   }
 
   _shouldSaveResult(op: Operation): boolean {
-    if (this._rematPolicy) {
-      return !this._rematPolicy.shouldRematerialize(op);
+    const save = this._rematPolicy
+      ? !this._rematPolicy.shouldRematerialize(op)
+      : !FALLBACK_REMAT_OPS.has(op.opName);
+
+    if (this._explain) {
+      this._explain(op.opName, save ? 'kept alive for the backward' : 'recomputed in the backward',
+        save
+          ? 'the backward needs this value and recomputing it would cost more than the memory it occupies until then'
+          : 'this op is cheap enough that running it again in the backward beats holding its result live across the whole forward');
     }
-    return !FALLBACK_REMAT_OPS.has(op.opName);
+
+    return save;
   }
 
   _getGradInputIndices(forwardInputs: readonly Value[], needsGrad: ReadonlySet<number>): number[] {

@@ -7,6 +7,7 @@ import { Schedule } from '../../../../src/compiler/schedule/schedule.js';
 import { SchedulePolicy } from '../../../../src/compiler/schedule/rules.js';
 import { CUDATarget } from '../../../../src/backend/target.js';
 import { BlockRole, numberedBlockName, opOfBlockName } from '../../../../src/compiler/ir/tensor/block_name.js';
+import { clonePrimFunc } from '../../../../src/compiler/autotune/tune_ir.js';
 
 function lower(name, inTypes, outTypes, bodyFn) {
   const func = buildFunction(name, inTypes, outTypes, bodyFn);
@@ -15,15 +16,15 @@ function lower(name, inTypes, outTypes, bodyFn) {
 
 const SKIP_KEYS = new Set(['_parent', '_parentKey', '_parentIdx', '_module']);
 
-function collectBlockNames(node) {
-  const names = [];
+function collectBlocks(node) {
+  const blocks = [];
   const visited = new Set();
   const stack = [node];
   while (stack.length > 0) {
     const n = stack.pop();
     if (!n || typeof n !== 'object' || visited.has(n)) continue;
     visited.add(n);
-    if (n instanceof BlockNode) names.push(n.name);
+    if (n instanceof BlockNode) blocks.push(n);
     for (const key of Object.keys(n)) {
       if (SKIP_KEYS.has(key)) continue;
       const val = n[key];
@@ -31,7 +32,11 @@ function collectBlockNames(node) {
       else if (val && typeof val === 'object') stack.push(val);
     }
   }
-  return names;
+  return blocks;
+}
+
+function collectBlockNames(node) {
+  return collectBlocks(node).map((block) => block.name);
 }
 
 function nodeCount(root) {
@@ -212,5 +217,66 @@ describe('a block name carries back the op it was lowered from', () => {
   it('keeps a hint that carries no role at all', () => {
     expect(opOfBlockName(numberedBlockName('scatter_update', 0))).toBe('scatter');
     expect(opOfBlockName(numberedBlockName('fa_initm', 3))).toBe('fa_initm');
+  });
+});
+
+describe('a block carries back the id of the graph op it was lowered from', () => {
+  const mmT = new TensorType([8, 8], ScalarType.F32);
+
+  function matmulThenTanh() {
+    return buildFunction('mm', [mmT, mmT], [mmT], (b, args) => {
+      const d = b.dot(args[0], args[1], [1], [0], [], []).getResult(0);
+      b.returnOp([b.tanh(d).getResult(0)]);
+    });
+  }
+
+  it('stamps every block a lowering rule produced', () => {
+    const t = new TensorType([16], ScalarType.F32);
+    const pf = lower('chain', [t, t], [t], (b, args) => {
+      const sum = b.add(args[0], args[1]).getResult(0);
+      b.returnOp([b.tanh(sum).getResult(0)]);
+    });
+
+    const blocks = collectBlocks(pf.body);
+    expect(blocks.length).toBeGreaterThan(0);
+    for (const block of blocks) {
+      expect(block.sourceOp).toBeDefined();
+      expect(typeof block.sourceOp.name).toBe('string');
+      expect(typeof block.sourceOp.id).toBe('number');
+    }
+  });
+
+  it('names the op that produced the block, not the rule the name was hinted from', () => {
+    const blocks = collectBlocks(lowerGraphToPrimFunc(matmulThenTanh()).body);
+    const named = blocks.filter((block) => block.name.startsWith('matmul'));
+
+    expect(named.length).toBeGreaterThan(0);
+    for (const block of named) expect(block.sourceOp.name).toBe('dot');
+  });
+
+  it('points every block a single op produced at that one op', () => {
+    const graph = matmulThenTanh();
+    const dot = [...graph.ops()].find((op) => op.opName === 'dot');
+    const blocks = collectBlocks(lowerGraphToPrimFunc(graph).body);
+    const fromDot = blocks.filter((block) => block.sourceOp.id === dot.id);
+
+    expect(fromDot.length).toBeGreaterThan(1);
+    expect(new Set(fromDot.map((block) => block.name)).size).toBe(fromDot.length);
+  });
+
+  it('matches ids that exist in the graph it was lowered from', () => {
+    const graph = matmulThenTanh();
+    const graphOpIds = new Set([...graph.ops()].map((op) => op.id));
+
+    for (const block of collectBlocks(lowerGraphToPrimFunc(graph).body)) {
+      expect(graphOpIds.has(block.sourceOp.id)).toBe(true);
+    }
+  });
+
+  it('survives the clone the scheduler works on', () => {
+    const pf = lowerGraphToPrimFunc(matmulThenTanh());
+    const stamp = (node) => collectBlocks(node).map((b) => `${b.name}:${b.sourceOp.name}:${b.sourceOp.id}`);
+
+    expect(stamp(clonePrimFunc(pf).body)).toEqual(stamp(pf.body));
   });
 });

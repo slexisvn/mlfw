@@ -53,7 +53,7 @@ export class CanonicalizePass extends FunctionPass {
   override run(func: PassTarget, analysisManager?: AnalysisManager): PassResultValue {
     const patterns = getCanonicalizationPatterns(this.fastMath);
     const applicator = new PatternApplicator(patterns);
-    return applicator.applyPatterns(func as GraphFunction, 10, this.trace) as PassResultValue;
+    return applicator.applyPatterns(func as GraphFunction, { trace: this.trace, category: this.name }) as PassResultValue;
   }
 }
 

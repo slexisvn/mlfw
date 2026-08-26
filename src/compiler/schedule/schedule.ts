@@ -5,6 +5,7 @@ import {
 import { Buffer } from '../ir/tensor/buffer.js';
 import type { BufferRegionLike } from '../ir/tensor/buffer.js';
 import { ScheduleTrace } from './trace.js';
+import type { ScheduleArgs } from './trace.js';
 import { ScheduleValidator } from './validator.js';
 import { ScheduleState } from './schedule_state.js';
 import { ScheduleMutator } from './mutator.js';
@@ -232,13 +233,28 @@ export class Schedule {
   state: ScheduleState;
   mutator: ScheduleMutator;
   _replaying: boolean;
+  _minted: string[];
+  private _mintMark: number;
 
   constructor(primFunc: PrimFunc) {
     this.func = primFunc;
     this.trace = new ScheduleTrace();
     this.state = new ScheduleState(primFunc);
     this._replaying = false;
+    this._minted = [];
+    this._mintMark = 0;
     this.mutator = new ScheduleMutator(primFunc);
+  }
+
+  _freshVar(hint: string, dtype = 'int32'): VariableNode {
+    const variable = freshVar(hint, dtype);
+    this._minted.push(variable.name);
+    return variable;
+  }
+
+  _record(primitive: string, args: ScheduleArgs): void {
+    this.trace.record(primitive, args, this._minted.slice(this._mintMark));
+    this._mintMark = this._minted.length;
   }
 
   _replaceInTree(oldNode: TirNode, newNode: TirNode): void {
@@ -298,8 +314,8 @@ export class Schedule {
     const minValue = getConstExtent(loop.min);
     const shift = (node: TirNode): TirNode =>
       minValue === 0 ? node : new MathOpNode('+', cloneExprTree(loop.min), node);
-    const outerVar = freshVar(`${loop.loopVar.name}_o`);
-    const innerVar = freshVar(`${loop.loopVar.name}_i`);
+    const outerVar = this._freshVar(`${loop.loopVar.name}_o`);
+    const innerVar = this._freshVar(`${loop.loopVar.name}_i`);
     const oldVarName = loop.loopVar.name;
 
     const clonedBody = cloneExprTree(loop.body);
@@ -344,7 +360,7 @@ export class Schedule {
     this._replaceInTree(loop, outerLoop);
 
     if (!this._replaying) {
-      this.trace.record('split', [loop.loopVar.name, factor]);
+      this._record('split', [loop.loopVar.name, factor]);
     }
 
     return [outerLoop, innerLoop];
@@ -394,7 +410,7 @@ export class Schedule {
     this._replaceInTree(topmostLoop, chain[0]);
 
     if (!this._replaying) {
-      this.trace.record('reorder', [newOrder.map(l => l.loopVar.name)]);
+      this._record('reorder', [newOrder.map(l => l.loopVar.name)]);
     }
   }
 
@@ -535,7 +551,7 @@ export class Schedule {
     }
 
     const fusedExtent = outerExtent * innerExtent;
-    const fusedVar = freshVar(`${outer.loopVar.name}_${inner.loopVar.name}_fused`);
+    const fusedVar = this._freshVar(`${outer.loopVar.name}_${inner.loopVar.name}_fused`);
     const outerName = outer.loopVar.name;
     const innerName = inner.loopVar.name;
 
@@ -558,7 +574,7 @@ export class Schedule {
     this._replaceInTree(outer, fusedLoop);
 
     if (!this._replaying) {
-      this.trace.record('fuseLoops', [outerName, innerName]);
+      this._record('fuseLoops', [outerName, innerName]);
     }
 
     return fusedLoop;
@@ -615,7 +631,7 @@ export class Schedule {
     loop.kind = ForKind.VECTORIZED;
     this.state.invalidate();
     if (!this._replaying) {
-      this.trace.record('vectorize', [loop.loopVar.name]);
+      this._record('vectorize', [loop.loopVar.name]);
     }
   }
 
@@ -625,7 +641,7 @@ export class Schedule {
     loop.kind = ForKind.UNROLLED;
     this.state.invalidate();
     if (!this._replaying) {
-      this.trace.record('unroll', [loop.loopVar.name]);
+      this._record('unroll', [loop.loopVar.name]);
     }
   }
 
@@ -637,7 +653,7 @@ export class Schedule {
     loop.kind = ForKind.PARALLEL;
     this.state.invalidate();
     if (!this._replaying) {
-      this.trace.record('parallelize', [loop.loopVar.name]);
+      this._record('parallelize', [loop.loopVar.name]);
     }
   }
 
@@ -655,7 +671,7 @@ export class Schedule {
     loop.threadTag = threadTag;
     this.state.invalidate();
     if (!this._replaying) {
-      this.trace.record('bindThread', [loop.loopVar.name, threadTag]);
+      this._record('bindThread', [loop.loopVar.name, threadTag]);
     }
   }
 
@@ -700,11 +716,11 @@ export class Schedule {
     const KO = K / factor;
     const partialBuf = new Buffer(`${acc.name}_rf`, [factor, ...acc.shape], acc.dtype, acc.scope);
 
-    const kiVar = freshVar(`${reductionVarName}_rfi`);
-    const koVar = freshVar(`${reductionVarName}_rfo`);
-    const piVar = freshVar(`${reductionVarName}_rfp`);
-    const kiIter = new BlockRealizeNode(freshVar(`${reductionVarName}_rfvi`), kiVar, IterVarKind.DATA_PAR);
-    const piIter = new BlockRealizeNode(freshVar(`${reductionVarName}_rfvp`), piVar, IterVarKind.COMM_REDUCE);
+    const kiVar = this._freshVar(`${reductionVarName}_rfi`);
+    const koVar = this._freshVar(`${reductionVarName}_rfo`);
+    const piVar = this._freshVar(`${reductionVarName}_rfp`);
+    const kiIter = new BlockRealizeNode(this._freshVar(`${reductionVarName}_rfvi`), kiVar, IterVarKind.DATA_PAR);
+    const piIter = new BlockRealizeNode(this._freshVar(`${reductionVarName}_rfvp`), piVar, IterVarKind.COMM_REDUCE);
 
     const splitK = () => new MathOpNode('+', new MathOpNode('*', koVar, new IntImmNode(factor)), kiVar);
     const cfIdx = (iterVar: TirNode): TirNode[] => [iterVar, ...spatialIdx.map(cloneExprTree)];
@@ -747,7 +763,7 @@ export class Schedule {
     this.mutator.replaceNode(loops[0], rfReplacement);
     this._replaceInTree(loops[0], rfReplacement);
     if (!this._replaying) {
-      this.trace.record('rfactor', [blockName, reductionVarName, factor]);
+      this._record('rfactor', [blockName, reductionVarName, factor]);
     }
     return partialBuf;
   }
@@ -784,7 +800,7 @@ export class Schedule {
     this.mutator.replaceNode(loops[0], decompReplacement);
     this._replaceInTree(loops[0], decompReplacement);
     if (!this._replaying) {
-      this.trace.record('decomposeReduction', [blockName]);
+      this._record('decomposeReduction', [blockName]);
     }
   }
 
@@ -816,7 +832,7 @@ export class Schedule {
     this.mutator.replaceNode(blockNest, alloc);
     seq.stmts.push(blockNest, backNest);
     this._replaceInTree(blockNest, alloc);
-    if (!this._replaying) this.trace.record('cacheWrite', [blockName, bufferName, scope]);
+    if (!this._replaying) this._record('cacheWrite', [blockName, bufferName, scope]);
   }
 
   setScope(blockName: string, bufferName: string, scope: string): void {
@@ -825,7 +841,7 @@ export class Schedule {
     if (!writeEntry) throw new Error(`setScope: block '${blockName}' does not write '${bufferName}'`);
     writeEntry.buffer.scope = scope;
     this.state.invalidate();
-    if (!this._replaying) this.trace.record('setScope', [blockName, bufferName, scope]);
+    if (!this._replaying) this._record('setScope', [blockName, bufferName, scope]);
   }
 
   storageAlign(blockName: string, bufferName: string, axis: number, factor: number, offset: number): void {
@@ -835,7 +851,7 @@ export class Schedule {
     if (!Number.isInteger(factor) || factor <= 0) throw new Error('storageAlign: factor must be a positive integer');
     entry.buffer.storageAlign = { axis, factor, offset: offset || 0 };
     this.state.invalidate();
-    if (!this._replaying) this.trace.record('storageAlign', [blockName, bufferName, axis, factor, offset || 0]);
+    if (!this._replaying) this._record('storageAlign', [blockName, bufferName, axis, factor, offset || 0]);
   }
 
   _writeIndexLoopVars(primitive: string, block: BlockNode, store: BufferStoreNode): Set<string> {
@@ -926,7 +942,7 @@ export class Schedule {
     if (total === 0) throw new Error(`${primitive}: block '${producerName}' has no consumers to inline into`);
     for (const { store } of plan.plans) retargetBufferReads(this.func.body, store.buffer.name, plan.prod.reads);
     this._removeBlockNest(producerName, plan.sref);
-    if (!this._replaying) this.trace.record(primitive, [producerName]);
+    if (!this._replaying) this._record(primitive, [producerName]);
   }
 
   computeInline(producerName: string): void {
@@ -1033,12 +1049,12 @@ export class Schedule {
 
   computeAt(producerName: string, targetLoopRef: LoopRef): void {
     const targetVar = this._relocateBlockToLoop('computeAt', producerName, targetLoopRef, true);
-    if (!this._replaying) this.trace.record('computeAt', [producerName, targetVar]);
+    if (!this._replaying) this._record('computeAt', [producerName, targetVar]);
   }
 
   reverseComputeAt(consumerName: string, targetLoopRef: LoopRef): void {
     const targetVar = this._relocateBlockToLoop('reverseComputeAt', consumerName, targetLoopRef, false);
-    if (!this._replaying) this.trace.record('reverseComputeAt', [consumerName, targetVar]);
+    if (!this._replaying) this._record('reverseComputeAt', [consumerName, targetVar]);
   }
 
   cacheRead(blockName: string, bufferName: string, scope = 'local'): void {
@@ -1069,7 +1085,7 @@ export class Schedule {
     this.mutator.replaceNode(blockNest, alloc);
     seq.stmts.push(blockNest);
     this._replaceInTree(blockNest, alloc);
-    if (!this._replaying) this.trace.record('cacheRead', [blockName, bufferName, scope]);
+    if (!this._replaying) this._record('cacheRead', [blockName, bufferName, scope]);
   }
 
   fuseConsumer(producerBlockName: string, consumerBlockName: string): void {
@@ -1113,7 +1129,7 @@ export class Schedule {
     this._replaceInTree(pLoops[0], fused);
     this._removeFromTree(consumerNest);
     if (!this._replaying) {
-      this.trace.record('fuseConsumer', [producerBlockName, consumerBlockName]);
+      this._record('fuseConsumer', [producerBlockName, consumerBlockName]);
     }
   }
 
@@ -1125,7 +1141,7 @@ export class Schedule {
     lp.annotations[key] = value;
     this.state.invalidate();
     if (!this._replaying) {
-      this.trace.record('annotate', [loop.loopVar.name, key, value]);
+      this._record('annotate', [loop.loopVar.name, key, value]);
     }
   }
 
@@ -1156,7 +1172,7 @@ export class Schedule {
     wrapper.body = loop;
     wrapper._setChild('body', loop);
     this._replaceInTree(loop, wrapper);
-    if (!this._replaying) this.trace.record('blockize', [loop.loopVar.name]);
+    if (!this._replaying) this._record('blockize', [loop.loopVar.name]);
     return wrapper;
   }
 

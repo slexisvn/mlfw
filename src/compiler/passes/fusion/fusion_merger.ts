@@ -4,6 +4,8 @@ import { Block, Region } from '../../ir/graph/block.js';
 import { TensorType, DYNAMIC } from '../../ir/graph/types.js';
 import { registry } from '../../ir/graph/ops.js';
 import { TraceLevel } from '../../pipeline/trace.js';
+import { fusionSubject } from './fusion_utils.js';
+import { explainer } from '../explain.js';
 import { classifyFusionKind } from './fusion_analysis.js';
 import {
   getYieldOp, countInnerOps, countReductions,
@@ -49,16 +51,31 @@ export class FusionMergerPass extends FunctionPass {
     const edges = this._buildProducerConsumerEdges(fusionOps, fusionSet);
     if (edges.length === 0) return PassResult.UNCHANGED;
 
+    const explain = explainer(this.trace, this.name);
     let changed = false;
     let mergeCount = 0;
     const merged = new Set<Operation>();
 
     for (const { producer, consumer, sharedResults } of edges) {
       if (merged.has(producer) || merged.has(consumer)) continue;
-      if (!this._canMerge(producer, consumer)) continue;
-      if (!this._shouldMerge(producer, consumer, sharedResults)) continue;
-      if (this._mergeCreatesCycle(producer, consumer, fusionSet)) continue;
+      const pair = `${fusionSubject(producer)} → ${fusionSubject(consumer)}`;
+      if (!this._canMerge(producer, consumer)) {
+        if (explain) explain(pair, 'left separate', 'the two groups have incompatible fusion kinds or the merged group would exceed the size budget');
+        continue;
+      }
+      if (!this._shouldMerge(producer, consumer, sharedResults)) {
+        if (explain) explain(pair, 'left separate', 'the producer feeds readers outside the consumer, so merging would recompute it for them');
+        continue;
+      }
+      if (this._mergeCreatesCycle(producer, consumer, fusionSet)) {
+        if (explain) explain(pair, 'left separate', 'a value flows out of the producer and back into the consumer through a third group, so one kernel cannot order both');
+        continue;
+      }
 
+      if (explain) {
+        explain(pair, 'merged into one kernel',
+          'the producer result is read only by this consumer, so it can stay in registers instead of going out to memory and back');
+      }
       this._merge(producer, consumer, sharedResults);
       merged.add(producer);
       merged.add(consumer);

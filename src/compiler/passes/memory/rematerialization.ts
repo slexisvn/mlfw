@@ -4,6 +4,7 @@ import { TensorType, DYNAMIC } from '../../ir/graph/types.js';
 import { registry } from '../../ir/graph/ops.js';
 
 import { TraceLevel } from '../../pipeline/trace.js';
+import { explainer } from '../explain.js';
 import { LivenessAnalysis } from '../../analysis/liveness.js';
 import { isConstantOp, isTerminatorOp } from '../../ir/graph/op_traits.js';
 import type { GraphFunction } from '../../ir/graph/function.js';
@@ -58,6 +59,7 @@ export class RematerializationPass extends FunctionPass {
     const graphFunc = func as GraphFunction;
     if (this.config.memoryBudget === Infinity) return PassResult.UNCHANGED;
 
+    const explain = explainer(this.trace, this.name);
     let changed = false;
     let iterations = 0;
 
@@ -70,7 +72,14 @@ export class RematerializationPass extends FunctionPass {
       if (candidates.length === 0) break;
 
       candidates.sort((a, b) => b.score - a.score);
-      this._rematerialize(graphFunc, candidates[0], opIndex);
+      const chosen = candidates[0];
+      if (explain) {
+        explain(chosen.definingOp.opName, 'recomputed instead of kept alive',
+          'peak live memory is over budget, and of every value still live across the peak this one frees the most bytes per unit of recompute',
+          { bytesFreed: chosen.memorySaved, recomputeCost: chosen.recomputeCost,
+            peakPressure, budget: this.config.memoryBudget });
+      }
+      this._rematerialize(graphFunc, chosen, opIndex);
       changed = true;
       iterations++;
     }

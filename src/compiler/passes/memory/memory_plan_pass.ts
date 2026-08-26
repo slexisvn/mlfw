@@ -1,6 +1,7 @@
 import { PrimFuncPass } from '../tir_pass.js';
 import { MemoryPlanner } from './memory_planning.js';
 import { FuncAttr } from '../../ir/func_attrs.js';
+import { explainer } from '../explain.js';
 import type { PrimFunc } from '../../ir/tensor/nodes.js';
 import type { TirPassCtx } from '../tir_pass.js';
 import type { CompilerConfig, CompileTarget } from '../../pipeline/pipeline_types.js';
@@ -38,5 +39,14 @@ export class MemoryPlanPass extends PrimFuncPass {
       totalTemporaries: report.totalTemporaries,
       totalInplace: report.totalInplace,
     });
+
+    ctx.trace.memoryPlan(pf.name, plan.lifetimes());
+
+    const explain = explainer(ctx.trace, this.name);
+    if (explain) {
+      explain(pf.name, `${report.totalTemporaries} temporaries fit in ${report.peakMemory} bytes`,
+        'buffers whose live ranges never overlap can share one slot, so the function allocates its peak rather than its total',
+        { peakMemory: report.peakMemory, totalTemporaries: report.totalTemporaries, reusedInPlace: report.totalInplace });
+    }
   }
 }

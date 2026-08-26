@@ -123,8 +123,11 @@ export class ForNode extends TensorNode {
   }
 }
 
+export type BlockSourceOp = { name: string; id: number };
+
 export class BlockNode extends TensorNode {
   declare type: 'BlockNode';
+  declare sourceOp?: BlockSourceOp;
   name: string;
   iterVars: BlockRealizeNode[];
   reads: BufferRegionLike[];

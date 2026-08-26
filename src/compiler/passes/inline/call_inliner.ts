@@ -1,5 +1,6 @@
 import { ModulePass, PassResult } from '../pass.js';
 import { TraceLevel } from '../../pipeline/trace.js';
+import { explainer } from '../explain.js';
 import type { GraphModule } from '../../ir/graph/module.js';
 import type { GraphFunction } from '../../ir/graph/function.js';
 import type { Operation } from '../../ir/graph/operation.js';
@@ -85,12 +86,18 @@ export class CallInlinerPass extends ModulePass {
   override run(module: PassTarget): PassResultValue {
     const mod = module as GraphModule;
     const order = callGraphOrder(mod);
+    const explain = explainer(this.trace, this.name);
     let inlined = 0;
     for (const name of order) {
       const func = mod.getFunction(name) as GraphFunction;
       for (const op of callsIn(func)) {
-        inlineCall(op, mod.getFunction(calleeOf(op) as string) as GraphFunction);
+        const callee = calleeOf(op) as string;
+        inlineCall(op, mod.getFunction(callee) as GraphFunction);
         inlined++;
+        if (explain) {
+          explain(callee, `pasted into ${name}`,
+            'one flat graph lets fusion and dead-code elimination cross what used to be a call boundary');
+        }
       }
       if (inlined > 0) func.bumpVersion();
     }

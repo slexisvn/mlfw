@@ -4,7 +4,8 @@ import { RUN_SHORTCUT } from '../platform.js';
 import { actions, isStale, useStore } from '../store.js';
 import { passLabel } from '../catalog/naming.js';
 import { TARGETS, targetNote } from '../catalog/targets.js';
-import type { CompileOptions, TargetName } from '../protocol.js';
+import { LessonBar, LessonPicker } from './LessonBar.js';
+import type { BackwardMode, CompileOptions, TargetName } from '../protocol.js';
 
 const STRATEGIES: { id: CompileOptions['fusionStrategy']; note: string }[] = [
   { id: 'priority', note: 'merge the most profitable pair first' },
@@ -15,7 +16,22 @@ const STRATEGIES: { id: CompileOptions['fusionStrategy']; note: string }[] = [
 const TOGGLES: { key: keyof CompileOptions; label: string; note: string }[] = [
   { key: 'fusion', label: 'fuse', note: 'merge neighbouring ops into one kernel' },
   { key: 'scheduling', label: 'schedule', note: 'choose loop order, tiling and threads' },
+  { key: 'autotune', label: 'tune', note: 'search for a schedule instead of deriving one from rules' },
   { key: 'layout', label: 'layout', note: 'pick memory layouts and insert transposes' },
+];
+
+const BACKWARD_MODES: { id: BackwardMode; label: string; note: string }[] = [
+  { id: 'off', label: 'inference', note: 'compile the forward pass only' },
+  {
+    id: 'separate',
+    label: 'train · separate',
+    note: 'differentiate the graph and compile the backward as its own function, the way a training step usually runs',
+  },
+  {
+    id: 'joint',
+    label: 'train · joint',
+    note: 'put forward and backward in one graph, so fusion can work across the boundary between them',
+  },
 ];
 
 const COPY_RESET_MS = 1600;
@@ -33,8 +49,10 @@ export function Controls() {
   const target = targetNote(options.target);
   const strategy = STRATEGIES.find(s => s.id === options.fusionStrategy) as (typeof STRATEGIES)[number];
   const off = options.disabledPasses.length;
+  const backwardMode = BACKWARD_MODES.find(m => m.id === options.backward) as (typeof BACKWARD_MODES)[number];
   const summary = [
     target.label,
+    options.backward === 'off' ? null : backwardMode.label,
     ...TOGGLES.filter(toggle => options[toggle.key] as boolean).map(toggle => toggle.label),
     off > 0 ? `${off} ${off === 1 ? 'pass' : 'passes'} off` : null,
   ].filter(part => part !== null).join(' · ');
@@ -47,6 +65,8 @@ export function Controls() {
 
   return (
     <div className="controls">
+      <LessonBar />
+
       <div className="control-row">
         <label className="control">
           <span>Example</span>
@@ -88,6 +108,10 @@ export function Controls() {
         </p>
 
         <div className="control-row">
+          <LessonPicker />
+        </div>
+
+        <div className="control-row">
           <label className="control">
             <span>Target</span>
             <select
@@ -95,6 +119,15 @@ export function Controls() {
               onChange={e => actions.setOptions({ target: e.target.value as TargetName })}
             >
               {TARGETS.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+            </select>
+          </label>
+          <label className="control">
+            <span>Direction</span>
+            <select
+              value={options.backward}
+              onChange={e => actions.setOptions({ backward: e.target.value as BackwardMode })}
+            >
+              {BACKWARD_MODES.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
             </select>
           </label>
           <label className="control">
@@ -113,6 +146,8 @@ export function Controls() {
           {target.note}
           {options.fusion ? ` · ${strategy.note}` : ' · fusion is off'}
         </p>
+
+        <p className="control-note">{backwardMode.note}</p>
 
         <div className="toggles">
           {TOGGLES.map(toggle => (

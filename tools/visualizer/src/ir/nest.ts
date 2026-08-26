@@ -98,3 +98,17 @@ export function nestOps(root: NestNode): Map<string, string> {
   walk(root);
   return byId;
 }
+
+export function nestOpIds(root: NestNode): Map<number, string[]> {
+  const byOpId = new Map<number, string[]>();
+  const walk = (node: NestNode): void => {
+    if (node.opId !== null) {
+      const bucket = byOpId.get(node.opId);
+      if (bucket) bucket.push(node.id);
+      else byOpId.set(node.opId, [node.id]);
+    }
+    for (const child of node.children) walk(child);
+  };
+  walk(root);
+  return byOpId;
+}

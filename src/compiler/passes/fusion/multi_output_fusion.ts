@@ -4,6 +4,8 @@ import { Block, Region } from '../../ir/graph/block.js';
 import { TensorType, DYNAMIC } from '../../ir/graph/types.js';
 import { classifyFusionKind } from './fusion_analysis.js';
 import { TraceLevel } from '../../pipeline/trace.js';
+import { fusionSubject } from './fusion_utils.js';
+import { explainer } from '../explain.js';
 import {
   getYieldOp, countInnerOps, countReductions,
   allInnerOpsFusable, makeComesBefore
@@ -49,15 +51,27 @@ export class MultiOutputFusionPass extends FunctionPass {
     const candidates = this._findCandidates(fusionOps);
     if (candidates.length === 0) return PassResult.UNCHANGED;
 
+    const explain = explainer(this.trace, this.name);
     let changed = false;
     let mergeCount = 0;
     const merged = new Set<Operation>();
 
     for (const { left, right } of candidates) {
       if (merged.has(left) || merged.has(right)) continue;
-      if (!this._canMerge(left, right)) continue;
-      if (this._mergeCreatesCycle(left, right)) continue;
+      const pair = `${fusionSubject(left)} & ${fusionSubject(right)}`;
+      if (!this._canMerge(left, right)) {
+        if (explain) explain(pair, 'kept as two kernels', 'the two groups do not iterate the same shape, so one loop nest cannot produce both outputs');
+        continue;
+      }
+      if (this._mergeCreatesCycle(left, right)) {
+        if (explain) explain(pair, 'kept as two kernels', 'one group already depends on the other, so a single kernel would have to read its own output');
+        continue;
+      }
 
+      if (explain) {
+        explain(pair, 'merged into one kernel with two outputs',
+          'both groups read the same input over the same iteration space, so one pass over that input can write both results');
+      }
       this._mergeMultiOutput(left, right);
       merged.add(left);
       merged.add(right);

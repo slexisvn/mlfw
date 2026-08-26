@@ -20,6 +20,7 @@ export function nestForSource(kernel: Kernel): NestNode {
     label: kernel.name,
     detail: kernel.language,
     op: null,
+    opId: null,
     children: [],
   };
 
@@ -39,6 +40,7 @@ export function nestForSource(kernel: Kernel): NestNode {
       label: text.length > LABEL_LIMIT ? `${text.slice(0, LABEL_LIMIT)}…` : text,
       detail: '',
       op: null,
+      opId: null,
       children: [],
     };
 
@@ -52,7 +54,7 @@ export function nestForSource(kernel: Kernel): NestNode {
 export function sourceSnapshot(kernels: readonly Kernel[]): Snapshot {
   return {
     text: kernels.map(k => k.source).join('\n\n'),
-    ops: kernels.reduce((total, k) => total + k.source.split('\n').filter(l => l.trim() !== '').length, 0),
+    bytes: 0, flops: 0, ops: kernels.reduce((total, k) => total + k.source.split('\n').filter(l => l.trim() !== '').length, 0),
     dags: [],
     nests: kernels.map(nestForSource),
   };

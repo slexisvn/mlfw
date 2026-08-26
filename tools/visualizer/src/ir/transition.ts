@@ -1,6 +1,6 @@
 import type { Dag, DagNode, NestNode } from '../protocol.js';
 import type { Box, Layout } from './dag.js';
-import { nestOps } from './nest.js';
+import { nestOps, nestOpIds } from './nest.js';
 
 export type Change = 'kept' | 'added' | 'removed' | 'rewritten' | 'lowered' | 'emitted';
 
@@ -73,6 +73,7 @@ export function linkLowering(dag: Dag | null, nest: NestNode | null): Map<string
   const links = new Map<string, string>();
   if (!dag || !nest) return links;
 
+  const blocksByOpId = nestOpIds(nest);
   const blocksByOp = new Map<string, string[]>();
   for (const [id, op] of nestOps(nest)) {
     const bucket = blocksByOp.get(op);
@@ -80,9 +81,22 @@ export function linkLowering(dag: Dag | null, nest: NestNode | null): Map<string
     else blocksByOp.set(op, [id]);
   }
 
-  for (const node of flatten(dag.nodes).values()) {
+  const claimed = new Set<string>();
+  const nodes = flatten(dag.nodes);
+
+  for (const node of nodes.values()) {
+    const exact = blocksByOpId.get(node.id);
+    if (!exact || exact.length === 0) continue;
+    links.set(`op${node.id}`, exact[0]);
+    for (const id of exact) claimed.add(id);
+  }
+
+  for (const node of nodes.values()) {
+    if (links.has(`op${node.id}`)) continue;
     const bucket = blocksByOp.get(node.opName);
-    if (!bucket || bucket.length === 0) continue;
+    if (!bucket) continue;
+    while (bucket.length > 0 && claimed.has(bucket[0])) bucket.shift();
+    if (bucket.length === 0) continue;
     links.set(`op${node.id}`, bucket.shift() as string);
   }
 

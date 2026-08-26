@@ -1,6 +1,9 @@
 import { PassResult } from '../passes/pass.js';
+import type { MemoryPlanTrace } from '../passes/memory/memory_planning.js';
+import type { SerializedStep } from '../schedule/trace.js';
 
 export type TraceEvent = Record<string, unknown> & { level: number; type: string; timestamp?: number };
+
 export type TraceSink = (event: TraceEvent) => void;
 export type IRSnapshotFlags = { afterGraphPasses: boolean; afterLowering: boolean; afterScheduling: boolean };
 export type TraceLogConfig = Readonly<{ level?: number; sink?: TraceSink; irSnapshot?: Partial<IRSnapshotFlags> }>;
@@ -94,6 +97,15 @@ export class TraceLog {
 
   memoryStats(funcName: string, stats: Record<string, unknown>): void {
     this.emit({ type: 'memory', funcName, ...stats, level: TraceLevel.VERBOSE });
+  }
+
+  memoryPlan(funcName: string, plan: MemoryPlanTrace): void {
+    this.emit({ type: 'memory_plan', funcName, ...plan, level: TraceLevel.DEBUG });
+  }
+
+  scheduleTrace(funcName: string, steps: readonly SerializedStep[]): void {
+    if (steps.length === 0) return;
+    this.emit({ type: 'schedule_trace', funcName, steps, level: TraceLevel.DEBUG });
   }
 
   autotuneStats(funcName: string, stats: Record<string, unknown>): void {

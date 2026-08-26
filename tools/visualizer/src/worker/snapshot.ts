@@ -4,17 +4,19 @@ import { printLIR, LIRPrinter } from 'mlfw/compiler/ir/lir/printer.js';
 import { opOfBlockName } from 'mlfw/compiler/ir/tensor/block_name.js';
 import { ForKind, IterVarKind } from 'mlfw/compiler/ir/tensor/nodes.js';
 import { walk } from 'mlfw/compiler/ir/ir_visitor.js';
+import { functionCost, sumCosts } from './cost.js';
 import type { Block } from 'mlfw/compiler/ir/graph/block.js';
 import type { GraphFunction } from 'mlfw/compiler/ir/graph/function.js';
 import type { GraphModule } from 'mlfw/compiler/ir/graph/module.js';
 import type { Value } from 'mlfw/compiler/ir/graph/value.js';
+import type { Cost } from './cost.js';
 import type { Dag, DagNode, DagValue, IRLevelName, NestKind, NestNode, Snapshot } from '../protocol.js';
 
 const ATTR_TEXT_LIMIT = 96;
 const DENSE_ELEMENT_LIMIT = 8;
 const RETURN_OP = 'return';
 
-const EMPTY: Snapshot = { text: '', ops: 0, dags: [], nests: [] };
+const EMPTY: Snapshot = { text: '', ops: 0, bytes: 0, flops: 0, dags: [], nests: [] };
 
 function attrText(value: unknown): string {
   if (ArrayBuffer.isView(value) && !(value instanceof DataView)) {
@@ -90,21 +92,32 @@ function dagOf(func: GraphFunction): Dag {
 function graphSnapshot(module: GraphModule): Snapshot {
   const text = new IRPrinter().printModule(module);
   const dags: Dag[] = [];
+  const costs: Cost[] = [];
   let ops = 0;
 
   for (const func of module) {
     ops += func.numOps();
     dags.push(dagOf(func));
+    costs.push(functionCost(func));
   }
 
-  return { text, ops, dags, nests: [] };
+  const cost = sumCosts(costs);
+  return { text, ops, bytes: cost.bytes, flops: cost.flops, dags, nests: [] };
 }
 
 function functionSnapshot(func: GraphFunction): Snapshot {
   const printer = new IRPrinter();
   const lines: string[] = [];
   printer.printFunction(func, lines);
-  return { text: lines.join('\n'), ops: func.numOps(), dags: [dagForFunction(func, printer.valueNames)], nests: [] };
+  const cost = functionCost(func);
+  return {
+    text: lines.join('\n'),
+    ops: func.numOps(),
+    bytes: cost.bytes,
+    flops: cost.flops,
+    dags: [dagForFunction(func, printer.valueNames)],
+    nests: [],
+  };
 }
 
 function countNodes(root: object): number {
@@ -125,15 +138,17 @@ const STORE_LABEL_LIMIT = 88;
 function store(target: string, value: string, path: string): NestNode[] {
   const full = value === '' ? target : `${target} = ${value}`;
   const label = full.length > STORE_LABEL_LIMIT ? `${full.slice(0, STORE_LABEL_LIMIT)}…` : full;
-  return [{ id: `store:${path}`, kind: 'store', label, detail: label === full ? '' : full, op: null, children: [] }];
+  return [{ id: `store:${path}`, kind: 'store', label, detail: label === full ? '' : full, op: null, opId: null, children: [] }];
 }
 
 function nestFor(node: unknown, path: string): NestNode[] {
   if (!node || typeof node !== 'object') return [];
   const n = node as TirLike;
 
-  const wrap = (kind: NestKind, label: string, detail: string, children: NestNode[] = [], id?: string, op: string | null = null): NestNode[] =>
-    [{ id: id ?? `${kind}:${path}`, kind, label, detail, op, children }];
+  const wrap = (
+    kind: NestKind, label: string, detail: string, children: NestNode[] = [],
+    id?: string, op: string | null = null, opId: number | null = null,
+  ): NestNode[] => [{ id: id ?? `${kind}:${path}`, kind, label, detail, op, opId, children }];
 
   switch (n.type) {
     case 'SeqNode':
@@ -149,12 +164,14 @@ function nestFor(node: unknown, path: string): NestNode[] {
 
     case 'BlockNode': {
       const name = String(n.name);
+      const source = n.sourceOp as { name: string; id: number } | undefined;
       const iterVars = (n.iterVars as { kind: string }[]) ?? [];
       const reduce = iterVars.filter(iv => iv.kind !== IterVarKind.DATA_PAR).length;
       const detail = `${iterVars.length} iter var${iterVars.length === 1 ? '' : 's'}`
         + (reduce > 0 ? `, ${reduce} reduction` : '');
       const children = [...nestFor(n.initBody, `${path}.i`), ...nestFor(n.body, `${path}.b`)];
-      return wrap('block', name, detail, children, `block:${name}`, opOfBlockName(name));
+      return wrap('block', name, detail, children, `block:${name}`,
+        source ? source.name : opOfBlockName(name), source ? source.id : null);
     }
 
     case 'AllocateNode': {
@@ -212,6 +229,7 @@ function nestForFunc(func: { name: string; body?: unknown }): NestNode {
     label: func.name,
     detail: '',
     op: null,
+    opId: null,
     children: nestFor(func.body, 'r'),
   };
 }
@@ -227,7 +245,7 @@ function nestedSnapshot(funcs: Iterable<{ name: string }>): Snapshot {
     nests.push(nestForFunc(func as { name: string; body?: unknown }));
   }
 
-  return { text: chunks.join('\n\n'), ops, dags: [], nests };
+  return { text: chunks.join('\n\n'), ops, bytes: 0, flops: 0, dags: [], nests };
 }
 
 export function takeSnapshot(target: unknown, level: IRLevelName): Snapshot {

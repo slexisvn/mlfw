@@ -4,6 +4,7 @@ import { registry } from '../../ir/graph/ops.js';
 import { isBroadcastOp, isConstantOp } from '../../ir/graph/op_traits.js';
 
 import { TraceLevel } from '../../pipeline/trace.js';
+import { explainer } from '../explain.js';
 import type { GraphFunction } from '../../ir/graph/function.js';
 import type { Block } from '../../ir/graph/block.js';
 import type { Value } from '../../ir/graph/value.js';
@@ -196,6 +197,7 @@ export class EpilogueFusionPass extends FunctionPass {
       return PassResult.UNCHANGED;
     }
 
+    const explain = explainer(this.trace, this.name);
     let changed = false;
 
     const dots: Operation[] = [];
@@ -206,7 +208,14 @@ export class EpilogueFusionPass extends FunctionPass {
 
     for (const dotOp of dots) {
       const analysis = collectChainAndAnalyze(dotOp);
-      if (analysis.chain.length > this.maxEpilogueOps) continue;
+      if (analysis.chain.length > this.maxEpilogueOps) {
+        if (explain) {
+          explain(dotOp.opName, 'tail left unfused',
+            `the elementwise chain behind it is ${analysis.chain.length} ops long, past the ${this.maxEpilogueOps}-op budget for one epilogue`,
+            { chainLength: analysis.chain.length, maxEpilogueOps: this.maxEpilogueOps });
+        }
+        continue;
+      }
 
       const prologue = collectPrologue(dotOp);
       const hasEpilogue = analysis.chain.length > 0;
@@ -250,7 +259,13 @@ export class EpilogueFusionPass extends FunctionPass {
       removedSet.add(dotOp);
       for (const r of prologue.removed) removedSet.add(r);
 
-      if (hasEscapingUse(removedSet, lastOp)) continue;
+      if (hasEscapingUse(removedSet, lastOp)) {
+        if (explain) {
+          explain(dotOp.opName, 'tail left unfused',
+            'an op in the chain is read from outside it, so folding the chain away would delete a value someone else still needs');
+        }
+        continue;
+      }
 
       let insertAfter: Operation | null = null;
       for (const val of allInputs) {
@@ -279,6 +294,11 @@ export class EpilogueFusionPass extends FunctionPass {
         if (r.parentBlock) r.parentBlock.removeOp(r);
       }
 
+      if (explain) {
+        explain(dotOp.opName, `absorbed ${chain.length} elementwise ops into its tail`,
+          'the chain reads the dot output once and elementwise, so it can run on each tile while that tile is still in registers',
+          { epilogueOps: chain.map(o => o.opName).join('+') });
+      }
       changed = true;
     }
 

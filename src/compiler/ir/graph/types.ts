@@ -132,6 +132,28 @@ export function isIntType(dtype: ScalarDType): boolean { return INT_TYPES.has(dt
 export function isNumericType(dtype: ScalarDType): boolean { return FLOAT_TYPES.has(dtype) || INT_TYPES.has(dtype); }
 export function isBoolType(dtype: ScalarDType): boolean { return dtype === ScalarType.BOOL; }
 
+const VALUE_PRESERVING_WIDENINGS: Readonly<Partial<Record<ScalarDType, readonly ScalarDType[]>>> = {
+  [ScalarType.BOOL]: [ScalarType.I8, ScalarType.I16, ScalarType.I32, ScalarType.I64, ScalarType.F16, ScalarType.BF16, ScalarType.F32, ScalarType.F64],
+  [ScalarType.UI8]: [ScalarType.I16, ScalarType.I32, ScalarType.I64, ScalarType.F16, ScalarType.BF16, ScalarType.F32, ScalarType.F64],
+  [ScalarType.I8]: [ScalarType.I16, ScalarType.I32, ScalarType.I64, ScalarType.F16, ScalarType.BF16, ScalarType.F32, ScalarType.F64],
+  [ScalarType.I16]: [ScalarType.I32, ScalarType.I64, ScalarType.F32, ScalarType.F64],
+  [ScalarType.I32]: [ScalarType.I64, ScalarType.F64],
+  [ScalarType.F16]: [ScalarType.F32, ScalarType.F64],
+  [ScalarType.BF16]: [ScalarType.F32, ScalarType.F64],
+  [ScalarType.F32]: [ScalarType.F64]
+};
+
+const VALUE_PRESERVING_TARGETS = new Map<ScalarDType, ReadonlySet<ScalarDType>>();
+for (const [from, targets] of Object.entries(VALUE_PRESERVING_WIDENINGS)) {
+  VALUE_PRESERVING_TARGETS.set(from as ScalarDType, new Set(targets as readonly ScalarDType[]));
+}
+
+export function isValuePreservingCast(from: ScalarDType, to: ScalarDType): boolean {
+  if (from === to) return true;
+  const targets = VALUE_PRESERVING_TARGETS.get(from);
+  return !!targets && targets.has(to);
+}
+
 export function promoteDtype(a: ScalarDType, b: ScalarDType): ScalarDType | null {
   if (a === b) return a;
   const ai = isIntType(a), af = isFloatType(a);

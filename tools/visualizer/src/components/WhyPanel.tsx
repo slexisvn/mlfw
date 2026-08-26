@@ -1,4 +1,5 @@
 import { chapterUrl, passNote } from '../catalog/passes.js';
+import { formatMetric } from '../catalog/metrics.js';
 import { isHiddenMetric, levelLabel, metricLabel, metricValue, passLabel, phaseLabel } from '../catalog/naming.js';
 import type { CompileStep, TraceEventLite } from '../protocol.js';
 
@@ -102,14 +103,34 @@ function PassCard({ step }: { step: CompileStep }) {
           node count stops meaning what it meant: {step.before.ops} ops became {step.after.ops} IR nodes.
         </p>
         <p className="reason">
-          An op is linked to its loop nest when the block still carries its name — lowering builds blocks
-          called <code>add_block_5</code>, <code>fusion_block_2</code>. Two things break that link. A rule
-          can name the block after the math instead of the op: <code>dot</code> lowers to
-          <code>matmul_init_0</code> and <code>matmul_1</code>, and no op in the graph is called
-          <code>matmul</code>. Or the name survives only in shortened form:
-          <code>broadcast_in_dim</code> lowers to <code>broadcast_block_5</code>, which reads back as
-          <code>broadcast</code>. Either way the op dissolves and its loops appear instead. That gap is
-          real: past this boundary the IR no longer remembers which op it came from.
+          The link survives the boundary: as each op is lowered, the block its rule produces is stamped
+          with that op’s identity, so the graph node and the loop nest on the right are matched exactly
+          rather than guessed from a name. That matters because names do not survive. <code>dot</code>{' '}
+          lowers to blocks called <code>matmul_init_0</code> and <code>matmul_1</code>, and no op in the
+          graph is called <code>matmul</code>; a fused group lowers to several blocks, all belonging to
+          the one fusion node. What does not survive is the direction — past this point the loop nest is
+          the program, and no pass can ask what op it used to be beyond the stamp it is carrying.
+        </p>
+      </article>
+    );
+  }
+
+  if (step.kind === 'primitive') {
+    return (
+      <article className="why-card pass">
+        <header>
+          <span className="tag">primitive</span>
+          <span className="subject">{step.pass}</span>
+          <span className="expansion">on {step.parent ?? 'the loop nest'}</span>
+        </header>
+        <p className="decision">
+          One schedule primitive, replayed on the loop nest as it stood before the scheduling pass ran.
+          The pass applies the whole sequence at once; this row is what that one call did on its own.
+        </p>
+        <p className="reason">
+          {step.before.ops} IR nodes in, {step.after.ops} out
+          {delta !== 0 && ` (${delta > 0 ? '+' : ''}${delta})`} — a primitive changes how the work is
+          arranged, never what it computes.
         </p>
       </article>
     );
@@ -142,12 +163,32 @@ function PassCard({ step }: { step: CompileStep }) {
         ran in {phaseLabel(step.phase)} · {step.before.ops} ops in, {step.after.ops} out
         {delta !== 0 && ` (${delta > 0 ? '+' : ''}${delta})`} · {step.durationMs.toFixed(1)}ms
       </p>
+      <TrafficNote step={step} />
       {note && (
         <a className="chapter" href={chapterUrl(note)} target="_blank" rel="noreferrer">
           read {note.chapterTitle} →
         </a>
       )}
     </article>
+  );
+}
+
+function TrafficNote({ step }: { step: CompileStep }) {
+  const before = step.before.bytes;
+  const after = step.after.bytes;
+  if (before === 0 || after === 0 || before === after) return null;
+
+  const ratio = before / after;
+  const beforeIntensity = step.before.flops / before;
+  const afterIntensity = step.after.flops / after;
+
+  return (
+    <p className="reason">
+      the ops that survive now read and write {formatMetric('bytes', after)} instead of{' '}
+      {formatMetric('bytes', before)}
+      {ratio > 1 ? ` — ${ratio.toFixed(2)}× less traffic` : ` — ${(1 / ratio).toFixed(2)}× more traffic`}, at{' '}
+      {afterIntensity.toFixed(2)} flop per byte against {beforeIntensity.toFixed(2)} before.
+    </p>
   );
 }
 

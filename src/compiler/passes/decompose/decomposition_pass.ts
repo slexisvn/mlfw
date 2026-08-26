@@ -2,6 +2,7 @@ import { FunctionPass, PassResult } from '../pass.js';
 import { IRBuilder, broadcastDimsExcluding } from '../../ir/graph/builder.js';
 import { ScalarType, TensorType } from '../../ir/graph/types.js';
 import { TraceLevel } from '../../pipeline/trace.js';
+import { explainer } from '../explain.js';
 import type { GraphFunction } from '../../ir/graph/function.js';
 import type { Operation } from '../../ir/graph/operation.js';
 import type { Value } from '../../ir/graph/value.js';
@@ -48,6 +49,7 @@ export class DecompositionPass extends FunctionPass {
     if (worklist.length === 0) return PassResult.UNCHANGED;
 
     const builder = new IRBuilder(func as GraphFunction);
+    const explain = explainer(this.trace, this.name);
     const decomposed: string[] = [];
 
     for (const op of worklist) {
@@ -56,7 +58,13 @@ export class DecompositionPass extends FunctionPass {
       builder.block = op.parentBlock as Block;
       builder.setInsertionPoint(op);
       decomposed.push(op.opName);
+      const sizeBefore = (op.parentBlock as Block).size;
       rule(op, builder);
+      if (explain) {
+        explain(op.opName, 'rewritten into primitives',
+          'no lowering rule exists for this op, so it is re-expressed with ops every target can lower',
+          { opsAdded: (op.parentBlock as Block | null) ? (op.parentBlock as Block).size - sizeBefore : 0 });
+      }
     }
 
     if (this.trace && this.trace.level >= TraceLevel.DEBUG) {

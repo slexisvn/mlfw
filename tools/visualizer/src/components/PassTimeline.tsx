@@ -1,20 +1,21 @@
 import { useEffect, useMemo, useRef } from 'react';
-import { actions, changedCount, disabledPasses, useStore, visibleSteps } from '../store.js';
+import { actions, childCount, disabledPasses, isCollapsed, passRunCount, useStore, visibleSteps } from '../store.js';
 import { markFor } from '../catalog/glossary.js';
 import { levelBadge, levelLabel, passLabel, phaseLabel } from '../catalog/naming.js';
 import { OpCountChart } from './OpCountChart.js';
 import type { DisabledPass } from '../store.js';
 import type { CompileStep, IRLevelName } from '../protocol.js';
 
-type Group = { phase: string; level: IRLevelName | null; steps: CompileStep[]; disabled: DisabledPass[] };
+type Group = { phase: string; unit: string | null; level: IRLevelName | null; steps: CompileStep[]; disabled: DisabledPass[] };
 
 export function PassTimeline() {
   const result = useStore(s => s.result);
   const selected = useStore(s => s.selected);
   const onlyChanged = useStore(s => s.onlyChanged);
   const steps = useStore(visibleSteps);
-  const changed = useStore(changedCount);
+  const runs = useStore(passRunCount);
   const disabled = useStore(disabledPasses);
+  const folded = useStore(s => s.collapsed.size);
   const activeRow = useRef<HTMLButtonElement>(null);
 
   const ordinals = useMemo(() => runOrdinals(result ? result.steps : []), [result]);
@@ -31,9 +32,8 @@ export function PassTimeline() {
     );
   }
 
-  const total = result.steps.length;
-  const quiet = total - changed;
   const groups = groupSteps(steps, disabled);
+  const units = new Set(result.steps.map(step => step.unit).filter(unit => unit !== null));
 
   return (
     <aside className="timeline">
@@ -43,6 +43,11 @@ export function PassTimeline() {
           <section key={`${group.phase}-${group.steps[0]?.index ?? group.phase}`}>
             <header className="phase">
               <span className="phase-name">{phaseLabel(group.phase)}</span>
+              {units.size > 1 && group.unit && (
+                <span className="phase-unit" title="which function this phase was compiling">
+                  {group.unit}
+                </span>
+              )}
               {group.level && (
                 <span className="phase-level" title={`this phase works on the ${levelLabel(group.level)}`}>
                   {levelBadge(group.level)}
@@ -64,15 +69,20 @@ export function PassTimeline() {
       </div>
       <footer className="timeline-foot">
         <span>
-          {changed} of {total} pass runs changed the IR · {result.totalMs.toFixed(0)}ms
+          {runs.changed} of {runs.total} pass runs changed the IR · {result.totalMs.toFixed(0)}ms
         </span>
+        {folded > 0 && (
+          <button onClick={() => actions.expandAll()} title="open every folded pass at once">
+            unfold {folded}
+          </button>
+        )}
         <button
           onClick={() => actions.toggleOnlyChanged()}
           title={onlyChanged
             ? 'also list the passes that ran and did nothing'
             : 'list only the passes that rewrote something'}
         >
-          {onlyChanged ? `show all ${total}` : `hide ${quiet} quiet`}
+          {onlyChanged ? `show all ${result.steps.length}` : `hide ${runs.quiet} quiet`}
         </button>
       </footer>
     </aside>
@@ -87,12 +97,31 @@ function Row(
     rowRef?: React.RefObject<HTMLButtonElement | null>;
   },
 ) {
+  const kids = useStore(s => childCount(s, step.index));
+  const folded = useStore(s => isCollapsed(s, step.index));
   const delta = step.after.ops - step.before.ops;
   const mark = markFor(step);
   const isPass = step.kind === 'pass';
 
   return (
     <div className={['step-row', active ? 'active' : '', step.outcome, step.kind].filter(Boolean).join(' ')}>
+      {kids > 0 ? (
+        <button
+          className="twist"
+          aria-expanded={!folded}
+          aria-label={folded
+            ? `show the ${kids} primitives ${step.pass} applied`
+            : `fold the ${kids} primitives ${step.pass} applied away`}
+          title={folded
+            ? `${kids} schedule primitives are folded in here`
+            : 'fold these primitives back into the pass'}
+          onClick={() => actions.toggleCollapse(step.index)}
+        >
+          {folded ? '▸' : '▾'}
+        </button>
+      ) : (
+        <span className="twist" />
+      )}
       <button
         ref={rowRef}
         className="step"
@@ -104,6 +133,7 @@ function Row(
         <span className="pass-name">
           {step.pass}
           {ordinal && <em className="ordinal">{ordinal}</em>}
+          {kids > 0 && folded && <em className="kids">+{kids}</em>}
         </span>
         <span className="ops">
           {step.before.ops}
@@ -128,6 +158,7 @@ function Row(
 function OffRow({ name }: { name: string }) {
   return (
     <div className="step-row off">
+      <span className="twist" />
       <span className="step">
         <span className="mark" aria-hidden="true">⊘</span>
         <span className="pass-name">{name}</span>
@@ -170,8 +201,8 @@ function groupSteps(steps: readonly CompileStep[], disabled: readonly DisabledPa
   const groups: Group[] = [];
   for (const step of steps) {
     const last = groups[groups.length - 1];
-    if (last && last.phase === step.phase) last.steps.push(step);
-    else groups.push({ phase: step.phase, level: step.level, steps: [step], disabled: [] });
+    if (last && last.phase === step.phase && last.unit === step.unit) last.steps.push(step);
+    else groups.push({ phase: step.phase, unit: step.unit, level: step.level, steps: [step], disabled: [] });
   }
 
   const orphans: DisabledPass[] = [];
@@ -182,7 +213,7 @@ function groupSteps(steps: readonly CompileStep[], disabled: readonly DisabledPa
   }
 
   if (orphans.length > 0) {
-    groups.push({ phase: 'turned off', level: null, steps: [], disabled: orphans });
+    groups.push({ phase: 'turned off', unit: null, level: null, steps: [], disabled: orphans });
   }
   return groups;
 }

@@ -1,11 +1,18 @@
 import { PassResult } from '../pass.js';
 import { IRBuilder } from '../../ir/graph/builder.js';
 import { TraceLevel } from '../../pipeline/trace.js';
+import { explainer } from '../explain.js';
 import type { GraphFunction } from '../../ir/graph/function.js';
 import type { Operation } from '../../ir/graph/operation.js';
 import type { PatternSet } from '../../ir/rewrite/pattern.js';
 import type { TraceLog } from '../../pipeline/trace.js';
 import type { PassResultValue } from '../pass.js';
+
+export type ApplyPatternsOpts = Readonly<{
+  maxIterations?: number;
+  trace?: TraceLog | null;
+  category?: string;
+}>;
 
 export class PatternApplicator {
   patternSet: PatternSet;
@@ -14,8 +21,10 @@ export class PatternApplicator {
     this.patternSet = patternSet;
   }
 
-  applyPatterns(func: GraphFunction, maxIterations = 10, trace: TraceLog | null = null): PassResultValue {
+  applyPatterns(func: GraphFunction, opts: ApplyPatternsOpts = {}): PassResultValue {
+    const { maxIterations = 10, trace = null, category = 'rewrite' } = opts;
     const builder = new IRBuilder(func);
+    const explain = explainer(trace, category);
     let totalRewrites = 0;
 
     const worklist = [...func.opsRecursive()];
@@ -55,9 +64,11 @@ export class PatternApplicator {
 
         builder.block = block;
         builder.setInsertionPoint(op);
+        const rewritten = op.opName;
         if (!pattern.rewrite(op, builder)) continue;
 
         totalRewrites++;
+        if (explain) explain(rewritten, `matched ${pattern.name}`, pattern.why);
         for (const a of affected) enqueue(a);
         let cur = prevOp ? prevOp._next : block._head;
         let guard = block._size + 2;

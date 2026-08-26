@@ -1,6 +1,6 @@
-import { noGrad } from 'mlfw/index.js';
+import { noGrad, onesLike } from 'mlfw/index.js';
 import { targetNote } from '../catalog/targets.js';
-import type { RunResult, TargetName, TensorPreview } from '../protocol.js';
+import type { BackwardMode, RunResult, TargetName, TensorPreview } from '../protocol.js';
 
 const WARMUP = 2;
 const MIN_BATCH_MS = 25;
@@ -12,14 +12,34 @@ type TensorLike = {
   shape?: readonly number[];
   dtype?: unknown;
   data?: ArrayLike<number>;
+  grad?: TensorLike | null;
   contiguous?: () => { data: ArrayLike<number> };
+  requiresGrad_?: (flag?: boolean) => TensorLike;
+  backward?: (grad?: unknown) => void;
+};
+
+type Trainable = {
+  (...inputs: unknown[]): unknown;
+  backward(...gradOutputs: unknown[]): unknown;
+  capturedParams(): TensorLike[];
+};
+
+export type Model = { forward(...args: never[]): unknown };
+
+const EMPTY: RunResult = {
+  ran: false, skipped: null, error: null,
+  inputs: [], outputs: [], eagerOutputs: [],
+  gradients: [], eagerGradients: [],
+  maxAbsDiff: null, maxAbsGradDiff: null,
+  compiledMs: null, eagerMs: null, iterations: 0,
 };
 
 function asTensors(output: unknown): TensorLike[] {
   return (Array.isArray(output) ? output : [output]) as TensorLike[];
 }
 
-function valuesOf(tensor: TensorLike): number[] {
+function valuesOf(tensor: TensorLike | null | undefined): number[] {
+  if (!tensor) return [];
   const array = tensor.contiguous ? tensor.contiguous().data : tensor.data;
   if (!array) return [];
   const values = new Array<number>(array.length);
@@ -34,6 +54,11 @@ function describe(tensor: TensorLike, values: readonly number[]): TensorPreview 
     numel: values.length,
     preview: values.slice(0, PREVIEW_VALUES),
   };
+}
+
+function previews(tensors: readonly TensorLike[]): { previews: TensorPreview[]; values: number[][] } {
+  const values = tensors.map(valuesOf);
+  return { previews: tensors.map((tensor, i) => describe(tensor, values[i])), values };
 }
 
 function maxAbsDiff(a: readonly number[][], b: readonly number[][]): number | null {
@@ -71,43 +96,101 @@ async function timed(call: () => unknown): Promise<{ output: unknown; ms: number
   return { output, ms: batchMs / iterations, iterations };
 }
 
+async function seededOnes(compiled: (...args: unknown[]) => unknown, inputs: readonly unknown[]): Promise<TensorLike[]> {
+  return asTensors(await compiled(...inputs)).map(tensor => onesLike(tensor as never) as TensorLike);
+}
+
+function eagerStep(model: Model, inputs: readonly TensorLike[], params: readonly TensorLike[], seeds: readonly TensorLike[]) {
+  return async (): Promise<{ outputs: TensorLike[]; grads: TensorLike[] }> => {
+    for (const tensor of [...inputs, ...params]) {
+      tensor.requiresGrad_?.(true);
+      tensor.grad = null;
+    }
+    const outputs = asTensors(await model.forward(...(inputs as never[])));
+    for (let i = 0; i < outputs.length; i++) outputs[i].backward?.(seeds[i]);
+    return { outputs, grads: [...inputs, ...params].map(tensor => tensor.grad as TensorLike) };
+  };
+}
+
+async function runInference(
+  compiled: (...inputs: unknown[]) => unknown,
+  model: Model,
+  inputs: readonly TensorLike[],
+): Promise<RunResult> {
+  const run = await timed(() => compiled(...inputs));
+  const eager = await timed(() => noGrad(() => model.forward(...(inputs as never[]))));
+
+  const compiledOut = previews(asTensors(run.output));
+  const eagerOut = previews(asTensors(eager.output));
+
+  return {
+    ...EMPTY,
+    ran: true,
+    inputs: previews(inputs).previews,
+    outputs: compiledOut.previews,
+    eagerOutputs: eagerOut.previews,
+    maxAbsDiff: maxAbsDiff(compiledOut.values, eagerOut.values),
+    compiledMs: run.ms,
+    eagerMs: eager.ms,
+    iterations: run.iterations,
+  };
+}
+
+async function runTraining(
+  handle: Trainable,
+  model: Model,
+  inputs: readonly TensorLike[],
+): Promise<RunResult> {
+  const seeds = await seededOnes(handle, inputs);
+  const params = handle.capturedParams();
+
+  const run = await timed(async () => {
+    const outputs = asTensors(await handle(...inputs));
+    const grads = asTensors(await handle.backward(...seeds));
+    return { outputs, grads };
+  });
+
+  const eager = await timed(eagerStep(model, inputs, params, seeds));
+
+  const compiledStep = run.output as { outputs: TensorLike[]; grads: TensorLike[] };
+  const eagerStepOut = eager.output as { outputs: TensorLike[]; grads: TensorLike[] };
+
+  const compiledOut = previews(compiledStep.outputs);
+  const eagerOut = previews(eagerStepOut.outputs);
+  const compiledGrads = previews(compiledStep.grads);
+  const eagerGrads = previews(eagerStepOut.grads);
+
+  return {
+    ...EMPTY,
+    ran: true,
+    inputs: previews(inputs).previews,
+    outputs: compiledOut.previews,
+    eagerOutputs: eagerOut.previews,
+    gradients: compiledGrads.previews,
+    eagerGradients: eagerGrads.previews,
+    maxAbsDiff: maxAbsDiff(compiledOut.values, eagerOut.values),
+    maxAbsGradDiff: maxAbsDiff(compiledGrads.values, eagerGrads.values),
+    compiledMs: run.ms,
+    eagerMs: eager.ms,
+    iterations: run.iterations,
+  };
+}
+
 export async function executeCompiled(
-  compiled: (...args: unknown[]) => unknown,
-  model: { forward(...args: never[]): unknown },
+  compiled: (...inputs: unknown[]) => unknown,
+  model: Model,
   inputs: readonly unknown[],
   target: TargetName,
+  backward: BackwardMode,
 ): Promise<RunResult> {
-  const empty: RunResult = {
-    ran: false, skipped: null, error: null,
-    inputs: [], outputs: [], eagerOutputs: [],
-    maxAbsDiff: null, compiledMs: null, eagerMs: null, iterations: 0,
-  };
-
   const skipped = targetNote(target).skipReason;
-  if (skipped) return { ...empty, skipped };
+  if (skipped) return { ...EMPTY, skipped };
 
   try {
-    const run = await timed(() => compiled(...inputs));
-    const eager = await timed(() => noGrad(() => model.forward(...(inputs as never[]))));
-
-    const compiledTensors = asTensors(run.output);
-    const eagerTensors = asTensors(eager.output);
-    const compiledValues = compiledTensors.map(valuesOf);
-    const eagerValues = eagerTensors.map(valuesOf);
-
-    return {
-      ran: true,
-      skipped: null,
-      error: null,
-      inputs: (inputs as TensorLike[]).map(tensor => describe(tensor, valuesOf(tensor))),
-      outputs: compiledTensors.map((tensor, i) => describe(tensor, compiledValues[i])),
-      eagerOutputs: eagerTensors.map((tensor, i) => describe(tensor, eagerValues[i])),
-      maxAbsDiff: maxAbsDiff(compiledValues, eagerValues),
-      compiledMs: run.ms,
-      eagerMs: eager.ms,
-      iterations: run.iterations,
-    };
+    return backward === 'off'
+      ? await runInference(compiled, model, inputs as TensorLike[])
+      : await runTraining(compiled as Trainable, model, inputs as TensorLike[]);
   } catch (error) {
-    return { ...empty, error: error instanceof Error ? error.message : String(error) };
+    return { ...EMPTY, error: error instanceof Error ? error.message : String(error) };
   }
 }

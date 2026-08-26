@@ -2,10 +2,13 @@ import { FunctionPass, PassResult } from '../pass.js';
 import { Operation } from '../../ir/graph/operation.js';
 import { TensorType, ScalarType, isFloatType } from '../../ir/graph/types.js';
 import { registry } from '../../ir/graph/ops.js';
+import { redundantConvertPairSource } from '../../ir/graph/patterns.js';
+import { explainer } from '../explain.js';
 import type { GraphFunction } from '../../ir/graph/function.js';
 import type { Value } from '../../ir/graph/value.js';
 import type { AttrValue, IRType, ScalarDType } from '../../ir/graph/types.js';
 import type { PassResultValue, PassTarget } from '../pass.js';
+import type { Explain } from '../explain.js';
 
 export type PrecisionClassValue = (typeof PrecisionClass)[keyof typeof PrecisionClass];
 export type AutocastOpts = {
@@ -13,6 +16,7 @@ export type AutocastOpts = {
   dtype?: string;
   propagateFollow?: boolean;
   follow?: ReadonlySet<string>;
+  explain?: Explain | null;
 };
 export type MixedPrecisionConfig = { allow?: ReadonlySet<string>; dtype?: string };
 
@@ -141,11 +145,11 @@ function resultIsLow(op: Operation, lowDtype: string): boolean {
 function foldDoubleConverts(func: GraphFunction): boolean {
   let changed = false;
   for (const op of [...func.opsArray()]) {
-    if (!op.parentBlock || op.opName !== 'convert') continue;
-    const inner = op.getOperand(0).definingOp;
-    if (!inner || inner.opName !== 'convert') continue;
-    if ((inner.getOperand(0).type as TensorType).dtype !== op.getAttr<string>('target_dtype')) continue;
-    op.getResult(0).replaceAllUsesWith(inner.getOperand(0));
+    if (!op.parentBlock) continue;
+    const source = redundantConvertPairSource(op);
+    if (!source) continue;
+    const inner = op.getOperand(0).definingOp!;
+    op.getResult(0).replaceAllUsesWith(source);
     op.erase();
     if (inner.getResult(0).uses && [...inner.getResult(0).uses()].length === 0) inner.erase();
     changed = true;
@@ -156,11 +160,17 @@ function foldDoubleConverts(func: GraphFunction): boolean {
 export function applyAutocast(func: GraphFunction, opts: AutocastOpts = {}): boolean {
   const allow = autocastAllowSet(opts.allow);
   const lowDtype: string = opts.dtype || ScalarType.F16;
+  const explain = opts.explain ?? null;
   let changed = false;
   for (const op of [...func.opsArray()]) {
     if (!op.parentBlock) continue;
     if (!allow.has(op.opName)) continue;
-    changed = castOpToLowPrecision(op, lowDtype) || changed;
+    if (!castOpToLowPrecision(op, lowDtype)) continue;
+    changed = true;
+    if (explain) {
+      explain(op.opName, `demoted to ${lowDtype}`,
+        'this op is on the autocast allow list: it accumulates in a wider type, so narrow inputs do not move its result');
+    }
   }
 
   if (opts.propagateFollow && changed) {
@@ -172,7 +182,12 @@ export function applyAutocast(func: GraphFunction, opts: AutocastOpts = {}): boo
         if (!op.parentBlock || !follow.has(op.opName)) continue;
         if (resultIsLow(op, lowDtype)) continue;
         if (!followHasLowInput(op, lowDtype)) continue;
-        if (castOpToLowPrecision(op, lowDtype)) progress = true;
+        if (!castOpToLowPrecision(op, lowDtype)) continue;
+        progress = true;
+        if (explain) {
+          explain(op.opName, `demoted to ${lowDtype}`,
+            'an input already arrives narrow, so widening it back just to run this op would buy nothing but a conversion');
+        }
       }
       if (foldDoubleConverts(func)) progress = true;
     }
@@ -192,7 +207,9 @@ export class MixedPrecisionPass extends FunctionPass {
   }
 
   override run(func: PassTarget): PassResultValue {
-    const changed = applyAutocast(func as GraphFunction, { allow: this.allow, dtype: this.dtype });
+    const changed = applyAutocast(func as GraphFunction, {
+      allow: this.allow, dtype: this.dtype, explain: explainer(this.trace, this.name),
+    });
     return changed ? PassResult.CHANGED : PassResult.UNCHANGED;
   }
 }

@@ -1,9 +1,9 @@
 import { Pattern } from '../rewrite/pattern.js';
-import { TensorType } from './types.js';
-import { isDtypeInt } from '../../../util/dtype_map.js';
+import { TensorType, isValuePreservingCast } from './types.js';
+import { isDtypeInt, isDtypeFloat } from '../../../util/dtype_map.js';
 import { isOp, wildcard, matchPattern } from '../rewrite/dfpattern.js';
 import { registry } from './ops.js';
-import type { AttrValue } from './types.js';
+import type { AttrValue, ScalarDType } from './types.js';
 import type { Value } from './value.js';
 import type { Operation } from './operation.js';
 import type { IRBuilder } from './builder.js';
@@ -43,7 +43,7 @@ function isConstantVal(op: Operation | null, val: AttrValue): boolean {
 }
 
 export class FoldTrivialReshape extends Pattern {
-  constructor() { super('fold_trivial_reshape', 10); this.rootOpName = 'reshape'; }
+  constructor() { super('fold_trivial_reshape', 10, 'the output shape equals the input shape, so the reshape moves no data'); this.rootOpName = 'reshape'; }
   override match(op: Operation): boolean {
     const input = op.getOperand(0).type;
     const output = op.getResult(0).type;
@@ -57,7 +57,7 @@ export class FoldTrivialReshape extends Pattern {
 }
 
 export class ReshapeReshape extends Pattern {
-  constructor() { super('reshape_reshape', 10); this.rootOpName = 'reshape'; }
+  constructor() { super('reshape_reshape', 10, 'two reshapes in a row are one reshape to the outer shape, and the middle shape is never read'); this.rootOpName = 'reshape'; }
   override match(op: Operation): boolean {
     return matchPattern(RESHAPE_RESHAPE_PAT, op) !== null;
   }
@@ -72,7 +72,7 @@ export class ReshapeReshape extends Pattern {
 }
 
 export class FoldTrivialTranspose extends Pattern {
-  constructor() { super('fold_trivial_transpose', 10); this.rootOpName = 'transpose'; }
+  constructor() { super('fold_trivial_transpose', 10, 'the permutation is the identity, so no axis moves'); this.rootOpName = 'transpose'; }
   override match(op: Operation): boolean {
     const perm = op.getAttr<readonly number[]>('permutation')!;
     if (!perm) return false;
@@ -89,7 +89,7 @@ export class FoldTrivialTranspose extends Pattern {
 }
 
 export class TransposeTranspose extends Pattern {
-  constructor() { super('transpose_transpose', 10); this.rootOpName = 'transpose'; }
+  constructor() { super('transpose_transpose', 10, 'composing the two permutations gives one transpose, and the intermediate is never read'); this.rootOpName = 'transpose'; }
   override match(op: Operation): boolean {
     return matchPattern(TRANSPOSE_TRANSPOSE_PAT, op) !== null;
   }
@@ -109,7 +109,7 @@ export class TransposeTranspose extends Pattern {
 }
 
 export class FoldTrivialPad extends Pattern {
-  constructor() { super('fold_trivial_pad', 10); this.rootOpName = 'pad'; }
+  constructor() { super('fold_trivial_pad', 10, 'every pad width is zero, so no element is added'); this.rootOpName = 'pad'; }
   override match(op: Operation): boolean {
     const low = op.getAttr<readonly number[]>('low')!;
     const high = op.getAttr<readonly number[]>('high')!;
@@ -127,7 +127,7 @@ export class FoldTrivialPad extends Pattern {
 }
 
 export class FoldTrivialSlice extends Pattern {
-  constructor() { super('fold_trivial_slice', 10); this.rootOpName = 'slice'; }
+  constructor() { super('fold_trivial_slice', 10, 'the slice starts at zero, strides by one and keeps the whole shape'); this.rootOpName = 'slice'; }
   override match(op: Operation): boolean {
     const inputType = op.getOperand(0).type;
     const outputType = op.getResult(0).type;
@@ -147,7 +147,7 @@ export class FoldTrivialSlice extends Pattern {
 
 export class CommutativeConstantRight extends Pattern {
   constructor(opName: string | null = null) {
-    super(`commutative_constant_right${opName ? '_' + opName : ''}`, 5);
+    super(`commutative_constant_right${opName ? '_' + opName : ''}`, 5, 'the op is commutative, so moving the constant to the right leaves every later pattern one shape to match');
     this.rootOpName = opName;
   }
   override match(op: Operation): boolean {
@@ -170,7 +170,7 @@ export function commutativeConstantRightFor(opName: string): Pattern {
 }
 
 export class CanonicalizeCompare extends Pattern {
-  constructor() { super('canonicalize_compare', 5); this.rootOpName = 'compare'; }
+  constructor() { super('canonicalize_compare', 5, 'swapping the operands and flipping the direction states the same predicate with the constant on the right'); this.rootOpName = 'compare'; }
   override match(op: Operation): boolean {
     const lhsDef = op.getOperand(0).definingOp;
     const rhsDef = op.getOperand(1).definingOp;
@@ -190,7 +190,7 @@ export class CanonicalizeCompare extends Pattern {
 
 export class AddZero extends Pattern {
   fastMath: boolean;
-  constructor(fastMath = false) { super('add_zero', 5); this.rootOpName = 'add'; this.fastMath = fastMath; }
+  constructor(fastMath = false) { super('add_zero', 5, 'x + 0 is x on integers, but on floats it turns -0 into +0, so this only fires under fast math'); this.rootOpName = 'add'; this.fastMath = fastMath; }
   override match(op: Operation): boolean {
     if (!isDtypeInt((op.getResult(0).type as TensorType).dtype) && !this.fastMath) return false;
     return isConstantVal(op.getOperand(1).definingOp, 0) || isConstantVal(op.getOperand(0).definingOp, 0);
@@ -207,7 +207,7 @@ export class AddZero extends Pattern {
 }
 
 export class SubZero extends Pattern {
-  constructor() { super('sub_zero', 5); this.rootOpName = 'sub'; }
+  constructor() { super('sub_zero', 5, 'subtracting a zero on the right returns x unchanged, -0 and NaN included'); this.rootOpName = 'sub'; }
   override match(op: Operation): boolean {
     return isConstantVal(op.getOperand(1).definingOp, 0);
   }
@@ -224,7 +224,7 @@ export class SubZero extends Pattern {
 
 export class SubSelf extends Pattern {
   fastMath: boolean;
-  constructor(fastMath = false) { super('sub_self', 5); this.rootOpName = 'sub'; this.fastMath = fastMath; }
+  constructor(fastMath = false) { super('sub_self', 5, 'x - x is 0 on integers, but on floats it is NaN when x is NaN or infinite, so this only fires under fast math'); this.rootOpName = 'sub'; this.fastMath = fastMath; }
   override match(op: Operation): boolean {
     if (op.getOperand(0) !== op.getOperand(1)) return false;
     return isDtypeInt((op.getResult(0).type as TensorType).dtype) || this.fastMath;
@@ -243,7 +243,7 @@ export class SubSelf extends Pattern {
 }
 
 export class MulOne extends Pattern {
-  constructor() { super('mul_one', 5); this.rootOpName = 'mul'; }
+  constructor() { super('mul_one', 5, 'multiplying by one returns x unchanged, NaN and -0 included'); this.rootOpName = 'mul'; }
   override match(op: Operation): boolean {
     return isConstantVal(op.getOperand(1).definingOp, 1) || isConstantVal(op.getOperand(0).definingOp, 1);
   }
@@ -260,7 +260,7 @@ export class MulOne extends Pattern {
 
 export class MulZero extends Pattern {
   fastMath: boolean;
-  constructor(fastMath = false) { super('mul_zero', 5); this.rootOpName = 'mul'; this.fastMath = fastMath; }
+  constructor(fastMath = false) { super('mul_zero', 5, 'x * 0 is 0 on integers, but on floats NaN * 0 is NaN and -1 * 0 is -0, so this only fires under fast math'); this.rootOpName = 'mul'; this.fastMath = fastMath; }
   override match(op: Operation): boolean {
     if (!isDtypeInt((op.getResult(0).type as TensorType).dtype) && !this.fastMath) return false;
     return isConstantVal(op.getOperand(1).definingOp, 0) || isConstantVal(op.getOperand(0).definingOp, 0);
@@ -279,7 +279,7 @@ export class MulZero extends Pattern {
 }
 
 export class DivOne extends Pattern {
-  constructor() { super('div_one', 5); this.rootOpName = 'div'; }
+  constructor() { super('div_one', 5, 'dividing by one returns x unchanged'); this.rootOpName = 'div'; }
   override match(op: Operation): boolean {
     return isConstantVal(op.getOperand(1).definingOp, 1);
   }
@@ -295,7 +295,7 @@ export class DivOne extends Pattern {
 }
 
 export class DoubleNeg extends Pattern {
-  constructor() { super('double_neg', 5); this.rootOpName = 'neg'; }
+  constructor() { super('double_neg', 5, 'two sign flips cancel exactly at every dtype'); this.rootOpName = 'neg'; }
   override match(op: Operation): boolean {
     return matchPattern(DOUBLE_NEG_PAT, op) !== null;
   }
@@ -309,7 +309,7 @@ export class DoubleNeg extends Pattern {
 
 export class ExpLog extends Pattern {
   fastMath: boolean;
-  constructor(fastMath = false) { super('exp_log', 5); this.rootOpName = 'exp'; this.fastMath = fastMath; }
+  constructor(fastMath = false) { super('exp_log', 5, 'exp(log(x)) is x only for positive finite x, so this only fires under fast math'); this.rootOpName = 'exp'; this.fastMath = fastMath; }
   override match(op: Operation): boolean {
     return this.fastMath && matchPattern(EXP_LOG_PAT, op) !== null;
   }
@@ -322,7 +322,7 @@ export class ExpLog extends Pattern {
 
 export class LogExp extends Pattern {
   fastMath: boolean;
-  constructor(fastMath = false) { super('log_exp', 5); this.rootOpName = 'log'; this.fastMath = fastMath; }
+  constructor(fastMath = false) { super('log_exp', 5, 'log(exp(x)) is x only where exp neither overflows nor flushes to zero, so this only fires under fast math'); this.rootOpName = 'log'; this.fastMath = fastMath; }
   override match(op: Operation): boolean {
     return this.fastMath && matchPattern(LOG_EXP_PAT, op) !== null;
   }
@@ -335,7 +335,7 @@ export class LogExp extends Pattern {
 
 export class DivSelf extends Pattern {
   fastMath: boolean;
-  constructor(fastMath = false) { super('div_self', 5); this.rootOpName = 'div'; this.fastMath = fastMath; }
+  constructor(fastMath = false) { super('div_self', 5, 'x / x is 1 except at zero, infinity and NaN, so this only fires under fast math'); this.rootOpName = 'div'; this.fastMath = fastMath; }
   override match(op: Operation): boolean {
     if (!this.fastMath) return false;
     return op.getOperand(0) === op.getOperand(1);
@@ -354,7 +354,7 @@ export class DivSelf extends Pattern {
 }
 
 export class MulNegNeg extends Pattern {
-  constructor() { super('mul_neg_neg', 4); this.rootOpName = 'mul'; }
+  constructor() { super('mul_neg_neg', 4, 'the two sign flips cancel and the multiply rounds identically'); this.rootOpName = 'mul'; }
   override match(op: Operation): boolean {
     const lDef = op.getOperand(0).definingOp;
     const rDef = op.getOperand(1).definingOp;
@@ -371,7 +371,7 @@ export class MulNegNeg extends Pattern {
 }
 
 export class AddNegToSub extends Pattern {
-  constructor() { super('add_neg_to_sub', 4); this.rootOpName = 'add'; }
+  constructor() { super('add_neg_to_sub', 4, 'a + (-b) and a - b round to the same float, and the sub form spends one op fewer'); this.rootOpName = 'add'; }
   override match(op: Operation): boolean {
     const rDef = op.getOperand(1).definingOp;
     return (rDef && rDef.opName === 'neg') as boolean;
@@ -387,7 +387,7 @@ export class AddNegToSub extends Pattern {
 }
 
 export class SubNegToAdd extends Pattern {
-  constructor() { super('sub_neg_to_add', 4); this.rootOpName = 'sub'; }
+  constructor() { super('sub_neg_to_add', 4, 'a - (-b) and a + b round to the same float, and the add form spends one op fewer'); this.rootOpName = 'sub'; }
   override match(op: Operation): boolean {
     const rDef = op.getOperand(1).definingOp;
     return (rDef && rDef.opName === 'neg') as boolean;
@@ -402,24 +402,37 @@ export class SubNegToAdd extends Pattern {
   }
 }
 
+export function redundantConvertPairSource(op: Operation, allowLossyFloatRoundTrip = false): Value | null {
+  if (op.opName !== 'convert') return null;
+  const inner = op.getOperand(0).definingOp;
+  if (!inner || inner.opName !== 'convert') return null;
+  const source = inner.getOperand(0);
+  if (!(source.type instanceof TensorType) || !(inner.getResult(0).type instanceof TensorType)) return null;
+  const origDtype = source.type.dtype;
+  if (origDtype !== op.getAttr<string>('target_dtype')) return null;
+  const midDtype = (inner.getResult(0).type as TensorType).dtype;
+  if (isValuePreservingCast(origDtype as ScalarDType, midDtype as ScalarDType)) return source;
+  if (allowLossyFloatRoundTrip && isDtypeFloat(origDtype) && isDtypeFloat(midDtype)) return source;
+  return null;
+}
+
 export class DoubleConvert extends Pattern {
-  constructor() { super('double_convert', 6); this.rootOpName = 'convert'; }
+  fastMath: boolean;
+  constructor(fastMath = false) { super('double_convert', 6, 'the pair of converts ends at the dtype it started from, so both are dropped when the middle dtype holds every source value exactly; a middle dtype that rounds (f32 through f16) is dropped only under fast math, and one that truncates (f32 through i32) is never dropped'); this.rootOpName = 'convert'; this.fastMath = fastMath; }
   override match(op: Operation): boolean {
-    const inputOp = op.getOperand(0).definingOp;
-    if (!inputOp || inputOp.opName !== 'convert') return false;
-    const origDtype = (inputOp.getOperand(0).type as TensorType).dtype;
-    const finalDtype = op.getAttr<string>('target_dtype')!;
-    return origDtype === finalDtype;
+    return redundantConvertPairSource(op, this.fastMath) !== null;
   }
   override rewrite(op: Operation, builder: IRBuilder): boolean {
-    op.replaceAllResultsWith([op.getOperand(0).definingOp!.getOperand(0)]);
+    const source = redundantConvertPairSource(op, this.fastMath);
+    if (!source) return false;
+    op.replaceAllResultsWith([source]);
     op.erase();
     return true;
   }
 }
 
 export class LayoutTransformIdentity extends Pattern {
-  constructor() { super('layout_transform_identity', 10); this.rootOpName = 'layout_transform'; }
+  constructor() { super('layout_transform_identity', 10, 'source and destination layouts are the same permutation, so nothing is rearranged'); this.rootOpName = 'layout_transform'; }
   override match(op: Operation): boolean {
     const src = op.getAttr<readonly number[]>('src_layout')!;
     const dst = op.getAttr<readonly number[]>('dst_layout')!;
@@ -462,7 +475,7 @@ function isOrderPreserving(perm: readonly number[], dims: readonly number[]): bo
 }
 
 export class FoldTransposeIntoDot extends Pattern {
-  constructor() { super('fold_transpose_into_dot', 10); this.rootOpName = 'dot'; }
+  constructor() { super('fold_transpose_into_dot', 10, 'dot names its own contracting and batch dimensions, so a transpose in front of it is absorbed by renumbering them'); this.rootOpName = 'dot'; }
   override match(op: Operation): boolean {
     for (let i = 0; i < 2; i++) {
       if (foldableTransposeOperand(op, i)) return true;
@@ -491,7 +504,7 @@ export class FoldTransposeIntoDot extends Pattern {
 }
 
 export class LayoutTransformCompose extends Pattern {
-  constructor() { super('layout_transform_compose', 10); this.rootOpName = 'layout_transform'; }
+  constructor() { super('layout_transform_compose', 10, 'two layout changes compose into one permutation, so the middle layout never has to exist'); this.rootOpName = 'layout_transform'; }
   override match(op: Operation): boolean {
     const inputOp = op.getOperand(0).definingOp;
     return (inputOp && inputOp.opName === 'layout_transform') as boolean;
@@ -516,7 +529,7 @@ export class LayoutTransformCompose extends Pattern {
 
 export class IdempotentSelf extends Pattern {
   constructor(opName: string) {
-    super(`idempotent_self_${opName}`, 10);
+    super(`idempotent_self_${opName}`, 10, 'the op is idempotent and both operands are the same value, so the result is that value');
     this.rootOpName = opName;
   }
   override match(op: Operation): boolean {
@@ -532,7 +545,7 @@ export class IdempotentSelf extends Pattern {
 export class AssociativeConstantReassoc extends Pattern {
   fastMath: boolean;
   constructor(opName: string, fastMath = false) {
-    super(`associative_constant_reassoc_${opName}`, 4);
+    super(`associative_constant_reassoc_${opName}`, 4, 'the op is associative, so the two constants fold into one, but regrouping floats changes the rounding, so this only fires under fast math');
     this.rootOpName = opName;
     this.fastMath = fastMath;
   }

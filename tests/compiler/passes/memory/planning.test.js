@@ -5,6 +5,11 @@ import {
   PrimFunc, BlockNode, SeqNode, BufferStoreNode, BufferLoadNode, ForNode, ForKind,
   IntImmNode, MathOpNode, VariableNode, BlockRealizeNode, AllocateNode
 } from '../../../../src/compiler/ir/tensor/nodes.js';
+import { buildFunction } from '../../../../src/compiler/ir/graph/builder.js';
+import { TensorType, ScalarType } from '../../../../src/compiler/ir/graph/types.js';
+import { CPUTarget } from '../../../../src/backend/target.js';
+import { compileGraph } from '../../../../src/compiler/pipeline/compiler.js';
+import { TraceLevel } from '../../../../src/compiler/pipeline/trace.js';
 
 function makeVar(name) {
   return new VariableNode(name, 'int32');
@@ -214,5 +219,98 @@ describe('MemoryPlan.getReport', () => {
     expect(report.peakMemory).toBeGreaterThan(0);
     expect(report.totalTemporaries).toBe(1);
     expect(report.assignments.size).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('buffer lifetimes reported by the memory plan', () => {
+  const vecT = new TensorType([64], ScalarType.F32);
+
+  function planOf(func) {
+    const events = [];
+    compileGraph(func, CPUTarget(), {
+      fusion: { enabled: false },
+      trace: { level: TraceLevel.DEBUG, sink: (e) => events.push(e) },
+    });
+    const plans = events.filter((e) => e.type === 'memory_plan' && e.funcName === func.name);
+    expect(plans).toHaveLength(1);
+    return plans[0];
+  }
+
+  function chainOfFour() {
+    return buildFunction('chain', [vecT, vecT], [vecT], (b, args) => {
+      const [x, y] = args;
+      const a = b.mul(x, y).getResult(0);
+      const c = b.add(a, x).getResult(0);
+      const d = b.mul(c, c).getResult(0);
+      b.returnOp([b.tanh(d).getResult(0)]);
+    });
+  }
+
+  function twoLiveAtOnce() {
+    return buildFunction('diamond', [vecT, vecT], [vecT], (b, args) => {
+      const [x, y] = args;
+      const left = b.mul(x, y).getResult(0);
+      const right = b.add(x, y).getResult(0);
+      b.returnOp([b.mul(left, right).getResult(0)]);
+    });
+  }
+
+  it('reports one interval per temporary, ordered by first use', () => {
+    const plan = planOf(chainOfFour());
+
+    expect(plan.buffers).toHaveLength(3);
+    expect(new Set(plan.buffers.map((b) => b.name)).size).toBe(plan.buffers.length);
+    for (let i = 1; i < plan.buffers.length; i++) {
+      expect(plan.buffers[i].firstUse).toBeGreaterThanOrEqual(plan.buffers[i - 1].firstUse);
+    }
+  });
+
+  it('keeps every interval inside the statement order it was measured against', () => {
+    const plan = planOf(chainOfFour());
+
+    for (const buffer of plan.buffers) {
+      expect(buffer.firstUse).toBeGreaterThanOrEqual(0);
+      expect(buffer.lastUse).toBeGreaterThanOrEqual(buffer.firstUse);
+      expect(buffer.lastUse).toBeLessThan(plan.steps);
+    }
+  });
+
+  it('gives non-overlapping temporaries the same slot, so the peak stays under the total', () => {
+    const plan = planOf(chainOfFour());
+
+    expect(new Set(plan.buffers.map((b) => b.slot)).size).toBe(1);
+    expect(plan.peakMemory).toBeLessThan(plan.totalBytesIfNeverShared);
+  });
+
+  it('gives temporaries that are live at the same time different slots', () => {
+    const plan = planOf(twoLiveAtOnce());
+
+    expect(plan.buffers).toHaveLength(2);
+    const [first, second] = plan.buffers;
+    expect(second.firstUse).toBeLessThanOrEqual(first.lastUse);
+    expect(second.slot).not.toBe(first.slot);
+    expect(plan.peakMemory).toBe(plan.totalBytesIfNeverShared);
+  });
+
+  it('names the buffer whose storage a reusing temporary took over', () => {
+    const plan = planOf(chainOfFour());
+    const byName = new Map(plan.buffers.map((b) => [b.name, b]));
+    const reusers = plan.buffers.filter((b) => b.sharesWith !== null);
+
+    expect(reusers.length).toBeGreaterThan(0);
+    for (const reuser of reusers) {
+      const donor = byName.get(reuser.sharesWith);
+      expect(donor).toBeDefined();
+      expect(donor.slot).toBe(reuser.slot);
+      expect(donor.lastUse).toBeLessThanOrEqual(reuser.firstUse);
+    }
+  });
+
+  it('totals every temporary it planned as the footprint sharing saved', () => {
+    const plan = planOf(chainOfFour());
+    const total = plan.buffers.reduce((sum, b) => sum + b.bytes, 0);
+
+    expect(plan.totalBytesIfNeverShared).toBe(total);
+    expect(plan.peakMemory).toBe(Math.max(...plan.buffers.map((b) => b.bytes)));
   });
 });

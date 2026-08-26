@@ -1,6 +1,7 @@
 import { FunctionPass, PassResult } from '../pass.js';
 import { IRBuilder } from '../../ir/graph/builder.js';
 import { registry } from '../../ir/graph/ops.js';
+import { explainer } from '../explain.js';
 import { TraceLevel } from '../../pipeline/trace.js';
 import { isIntType } from '../../ir/graph/types.js';
 import { roundToDtype } from '../../../tensor/utils/half.js';
@@ -79,6 +80,7 @@ export class ConstantFoldPass extends FunctionPass {
     let changed = false;
     let foldedCount = 0;
     const builder = new IRBuilder(graphFunc);
+    const explain = explainer(this.trace, this.name);
     const memo: FoldMemo = new Map();
 
     for (const op of [...graphFunc.opsRecursive()]) {
@@ -112,6 +114,10 @@ export class ConstantFoldPass extends FunctionPass {
         builder.block = op.parentBlock as Block;
         builder.setInsertionPoint(op);
         const newConst = builder.constant(resultVal, op.getResult(0).type as TensorType);
+        if (explain) {
+          explain(op.opName, 'folded to a constant',
+            'every operand was already known at compile time, so the op can run now instead of at every call');
+        }
         op.replaceAllResultsWith([newConst.getResult(0)]);
         op.erase();
         changed = true;

@@ -1,6 +1,7 @@
 import { FunctionPass, PassResult } from '../pass.js';
 import { registry } from '../../ir/graph/ops.js';
 import { TraceLevel } from '../../pipeline/trace.js';
+import { explainer } from '../explain.js';
 import type { GraphFunction } from '../../ir/graph/function.js';
 import type { Block } from '../../ir/graph/block.js';
 import type { Operation } from '../../ir/graph/operation.js';
@@ -73,10 +74,11 @@ export class CSEPass extends FunctionPass {
       });
     }
 
-    if (this.trace && this.trace.explainsEnabled) {
+    const explain = explainer(this.trace, this.name);
+    if (explain) {
       for (const opName of eliminated) {
-        this.trace.explain('cse', opName, 'deduplicated',
-          'an op already in scope has the same operands and attributes, so both compute the same value', {});
+        explain(opName, 'deduplicated',
+          'an op already in scope has the same operands and attributes, so both compute the same value');
       }
     }
 

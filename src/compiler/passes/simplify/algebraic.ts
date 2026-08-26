@@ -31,7 +31,7 @@ function crossOpPatterns(fastMath: boolean): Pattern[] {
     new pat.MulNegNeg(),
     new pat.AddNegToSub(),
     new pat.SubNegToAdd(),
-    new pat.DoubleConvert(),
+    new pat.DoubleConvert(fastMath),
   ];
   if (fastMath) {
     patterns.push(new pat.DivSelf(fastMath));
@@ -61,6 +61,6 @@ export class AlgebraicSimplificationPass extends FunctionPass {
 
   override run(func: PassTarget, analysisManager?: AnalysisManager): PassResultValue {
     const applicator = new PatternApplicator(this.patterns);
-    return applicator.applyPatterns(func as GraphFunction, 10, this.trace) as PassResultValue;
+    return applicator.applyPatterns(func as GraphFunction, { trace: this.trace, category: this.name }) as PassResultValue;
   }
 }

@@ -1,4 +1,4 @@
-import { compile, manual_seed, TraceLevel } from 'mlfw/index.js';
+import { compile, compileWithBackward, manual_seed, TraceLevel } from 'mlfw/index.js';
 import { PassContext } from 'mlfw/compiler/passes/pass.js';
 import { CompileRecorder } from './recorder.js';
 import { executeCompiled } from './execute.js';
@@ -6,12 +6,15 @@ import { evaluateModelSource, frameworkGlobals } from './evaluate.js';
 import { recordSourceLines } from './source_map.js';
 import { targetNote } from '../catalog/targets.js';
 import { TARGET_FACTORIES } from './targets.js';
-import type { CompileOptions, CompileResponse, Kernel, RunResult, SourceLink, TargetName, WorkerRequest } from '../protocol.js';
+import { SEARCH_BUDGET } from '../catalog/tuning.js';
+import type { BackwardMode, CompileOptions, CompileResponse, Kernel, RunResult, SourceLink, TargetName, WorkerRequest } from '../protocol.js';
 
 const NOT_RUN: RunResult = {
   ran: false, skipped: null, error: null,
   inputs: [], outputs: [], eagerOutputs: [],
-  maxAbsDiff: null, compiledMs: null, eagerMs: null, iterations: 0,
+  gradients: [], eagerGradients: [],
+  maxAbsDiff: null, maxAbsGradDiff: null,
+  compiledMs: null, eagerMs: null, iterations: 0,
 };
 
 const SEED = 0;
@@ -42,7 +45,7 @@ function compilerOptions(options: CompileOptions): Record<string, unknown> {
   return {
     target: TARGET_FACTORIES[options.target](),
     fusion: { enabled: options.fusion, strategy: options.fusionStrategy },
-    scheduling: { enabled: options.scheduling },
+    scheduling: { enabled: options.scheduling, autotune: options.autotune, ...SEARCH_BUDGET },
     optimization: { layout: options.layout },
     passContext: options.disabledPasses.length > 0
       ? new PassContext({ disabledPasses: options.disabledPasses })
@@ -50,21 +53,28 @@ function compilerOptions(options: CompileOptions): Record<string, unknown> {
   };
 }
 
-function collectKernels(handle: { result(): unknown }, target: TargetName): Kernel[] {
-  const result = handle.result() as {
-    listKernels(): string[];
-    getSource(name: string): string | null;
-  } | null;
-  if (!result) return [];
+type KernelSource = { listKernels(): string[]; getSource(name: string): string | null };
+type InferenceHandle = ((...args: unknown[]) => unknown) & { _ready: Promise<void> | null; result(): unknown };
+type TrainingHandle = ((...args: unknown[]) => unknown) & { compiledUnits(): { name: string; result: unknown }[] };
 
-  const language = targetNote(target).kernelLanguage;
+function kernelsOf(result: KernelSource | null, language: string, prefix: string): Kernel[] {
+  if (!result) return [];
   const kernels: Kernel[] = [];
   for (const name of result.listKernels()) {
     const source = result.getSource(name);
     if (source === null) continue;
-    kernels.push({ name, source, language });
+    kernels.push({ name: prefix ? `${prefix} · ${name}` : name, source, language });
   }
   return kernels;
+}
+
+function collectKernels(handle: InferenceHandle | TrainingHandle, target: TargetName, backward: BackwardMode): Kernel[] {
+  const language = targetNote(target).kernelLanguage;
+  if (backward === 'off') {
+    return kernelsOf((handle as InferenceHandle).result() as KernelSource | null, language, '');
+  }
+  const units = (handle as TrainingHandle).compiledUnits();
+  return units.flatMap(unit => kernelsOf(unit.result as KernelSource, language, unit.name));
 }
 
 async function runCompile(id: number, source: string, options: CompileOptions): Promise<CompileResponse> {
@@ -83,16 +93,21 @@ async function runCompile(id: number, source: string, options: CompileOptions): 
     const lineRecorder = recordSourceLines(baseLine);
     stopRecordingLines = lineRecorder.stop;
     const compilable = asCompilable(model);
-    const handle = compile(compilable, inputs as never[], {
+    const settings = {
       ...compilerOptions(options),
       instruments: [recorder],
       trace: { level: TraceLevel.DEBUG, sink: recorder.sink },
-    } as never) as ((...args: unknown[]) => unknown) & { _ready: Promise<void> | null; result(): unknown };
+    };
 
-    if (handle._ready) await handle._ready;
-    kernels = collectKernels(handle, options.target);
+    const handle = options.backward === 'off'
+      ? compile(compilable, inputs as never[], settings as never) as InferenceHandle
+      : compileWithBackward(compilable, inputs as never[], { ...settings, mode: options.backward } as never) as TrainingHandle;
+
+    const ready = (handle as InferenceHandle)._ready;
+    if (ready) await ready;
+    kernels = collectKernels(handle, options.target, options.backward);
     manual_seed(SEED);
-    run = await executeCompiled(handle, compilable, inputs, options.target);
+    run = await executeCompiled(handle, compilable, inputs, options.target, options.backward);
     sourceLinks = [...lineRecorder.lines];
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
@@ -112,6 +127,8 @@ async function runCompile(id: number, source: string, options: CompileOptions): 
     kernels,
     events: recorder.events,
     sourceLinks,
+    memoryPlans: recorder.memoryPlans(),
+    tuningRounds: recorder.tuningRounds(),
     totalMs: performance.now() - startedAt,
     run,
   };

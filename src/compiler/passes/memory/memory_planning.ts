@@ -13,6 +13,21 @@ import type { InplaceCandidate } from './inplace_analysis.js';
 import type { BufferAssignmentEntry } from './buffer_assignment.js';
 
 export type ScopeUsage = { peakUsage: number; numBuffers: number; numReused: number };
+export type BufferLifetime = {
+  name: string;
+  scope: string;
+  bytes: number;
+  slot: number;
+  firstUse: number;
+  lastUse: number;
+  sharesWith: string | null;
+};
+export type MemoryPlanTrace = {
+  peakMemory: number;
+  totalBytesIfNeverShared: number;
+  steps: number;
+  buffers: readonly BufferLifetime[];
+};
 export type MemoryPlanReport = {
   peakMemory: number;
   scopeBreakdown: Map<string, ScopeUsage>;
@@ -54,6 +69,36 @@ export class MemoryPlan {
 
   peakMemory(scope: string | null = null): number {
     return this.assignment.peakMemory(scope);
+  }
+
+  lifetimes(): MemoryPlanTrace {
+    const buffers: BufferLifetime[] = [];
+    let totalBytesIfNeverShared = 0;
+
+    for (const interval of this.liveness.getTemporaries()) {
+      const entry = this.assignment.assignments.get(interval.buffer);
+      if (!entry) continue;
+      const shared = this.assignment.inplaceMap.get(interval.buffer);
+      totalBytesIfNeverShared += entry.size;
+      buffers.push({
+        name: interval.buffer.name,
+        scope: entry.scope,
+        bytes: entry.size,
+        slot: entry.offset,
+        firstUse: interval.firstUse,
+        lastUse: interval.lastUse,
+        sharesWith: shared ? shared.name : null,
+      });
+    }
+
+    buffers.sort((a, b) => a.firstUse - b.firstUse || a.slot - b.slot);
+
+    return {
+      peakMemory: this.peakMemory(),
+      totalBytesIfNeverShared,
+      steps: this.liveness.stmtOrder.length,
+      buffers,
+    };
   }
 
   getReport(): MemoryPlanReport {

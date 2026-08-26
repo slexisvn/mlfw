@@ -14,6 +14,18 @@ export function getYieldOp(block: Block): Operation | null {
   return last && last.opName === 'yield' ? last : null;
 }
 
+export function fusionSubject(fusionOp: Operation): string {
+  const region = fusionOp.regions[0];
+  if (!region) return fusionOp.opName;
+  const names: string[] = [];
+  for (const block of region.blocks) {
+    for (const op of block.ops()) {
+      if (op.opName !== 'yield') names.push(op.opName);
+    }
+  }
+  return names.length > 0 ? names.join('+') : fusionOp.opName;
+}
+
 export function countInnerOps(fusionOp: Operation): number {
   let count = 0;
   const block = fusionOp.regions[0]?.entryBlock;

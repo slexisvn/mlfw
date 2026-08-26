@@ -61,6 +61,7 @@ export class SchedulePass extends PrimFuncPass {
       if (!handled && sCfg.enabled) {
         (this._policy as SchedulePolicy).applyToAllBlocks(sch);
       }
+      trace.scheduleTrace(pf.name, sch.trace.serialize());
       trace.functionEvent('scheduling', pf.name, { durationMs: performance.now() - ft0 });
     }
   }

@@ -2,6 +2,7 @@ import { PrimFunc, SeqNode, BufferStoreNode, BufferLoadNode, BlockNode } from '.
 import { topoSortOpSet } from '../../ir/graph/graph_algorithms.js';
 import { CONSTANT_BLOCK_HINT } from '../../ir/tensor/block_name.js';
 import { registry } from '../../ir/graph/ops.js';
+import { walk } from '../../ir/ir_visitor.js';
 
 import { LoweringContext, registerLoweringRule, hasLoweringRule, getLoweringRule, lowerConstant, expandConstantStores, isConstantOp, makeLoopNest, wrapInLoops } from './lowering_registry.js';
 import { isTerminatorOp, isBroadcastOp } from '../../ir/graph/op_traits.js';
@@ -18,6 +19,7 @@ import { register as registerResize } from './rules/resize.js';
 import { register as registerAttention } from './rules/attention.js';
 import { elementwiseOpNames } from './rules/elementwise.js';
 import { FuncAttr } from '../../ir/func_attrs.js';
+import type { IRNode } from '../../ir/ir_visitor.js';
 import type { GraphFunction } from '../../ir/graph/function.js';
 import type { Operation } from '../../ir/graph/operation.js';
 import type { Value } from '../../ir/graph/value.js';
@@ -93,6 +95,14 @@ function explainFusionLowering(trace: TraceLog | null, funcName: string, op: Ope
   });
 }
 
+function stampSourceOp(stmt: TirNode, op: Operation): void {
+  walk(stmt as unknown as IRNode, (node) => {
+    const block = node as BlockNode;
+    if (block.type !== 'BlockNode' || block.sourceOp) return;
+    block.sourceOp = { name: op.opName, id: op.id };
+  });
+}
+
 export function lowerGraphToPrimFunc(graphFunc: GraphFunction, target: CompileTarget | null = null, context: CompilerContext | null = null, trace: TraceLog | null = null): PrimFunc {
   const ctx = new LoweringContext();
   ctx.target = target;
@@ -145,7 +155,9 @@ export function lowerGraphToPrimFunc(graphFunc: GraphFunction, target: CompileTa
     if (isConstantOp(op.opName)) continue;
 
     if (op.opName === 'fusion') {
+      const mark = stmts.length;
       explainFusionLowering(trace, graphFunc.name, op, lowerFusionOp(ctx, op, stmts));
+      for (let i = mark; i < stmts.length; i++) stampSourceOp(stmts[i], op);
       continue;
     }
 
@@ -177,7 +189,10 @@ export function lowerGraphToPrimFunc(graphFunc: GraphFunction, target: CompileTa
     for (let i = 0; i < op.numResults; i++) outputs[i] = ctx.getOrAllocBuffer(op.getResult(i));
 
     const stmt = rule(ctx, op, inputs, outputs);
-    if (stmt) stmts.push(stmt);
+    if (stmt) {
+      stampSourceOp(stmt, op);
+      stmts.push(stmt);
+    }
   }
 
   for (const { src, dst } of copyPairs) {

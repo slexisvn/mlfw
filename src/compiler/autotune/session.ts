@@ -18,6 +18,14 @@ export type BenchmarkResult = { medianMs: number; minMs: number };
 export type BenchmarkRunnerLike = { run(primFunc: PrimFunc): BenchmarkResult | null };
 export type CostModelLike = { score(primFunc: PrimFunc): number };
 export type WarnFn = (phase: string, subject: string, err: unknown) => void;
+export type RoundReport = {
+  blockName: string;
+  round: number;
+  candidates: readonly ScoredCandidate[];
+  best: ScoredCandidate | null;
+  measured: boolean;
+};
+export type RoundObserver = (report: RoundReport) => void;
 export type EnumerableSketch = ScheduleSketch & { enumerate(): SketchParams[] };
 
 export type SessionConfig = Readonly<{ topKForBenchmark: number; [key: string]: unknown }>;
@@ -31,6 +39,7 @@ export type SessionOpts = {
   config: SessionConfig;
   deadline?: Deadline | null;
   warn?: WarnFn;
+  onRound?: RoundObserver | null;
   costModel: CostModelLike & { analytical?: AnalyticalCostModel };
   learnedModel?: LearnedCostModel | null;
   blockMap: ReadonlyMap<string, BlockNode>;
@@ -79,6 +88,8 @@ export class BlockTuningSession {
   population: PopulationMember[] | null;
   plateaued: boolean;
   private _warn: WarnFn;
+  private _onRound: RoundObserver | null;
+  private _rounds: number;
   private _warnedEvalSketches: Set<string>;
   private _best: TuningRecordDraft | null;
 
@@ -91,6 +102,8 @@ export class BlockTuningSession {
     this.config = opts.config;
     this.deadline = opts.deadline || null;
     this._warn = opts.warn || (() => {});
+    this._onRound = opts.onRound || null;
+    this._rounds = 0;
     this._warnedEvalSketches = new Set();
 
     const needsWholeFunc = this.sketches.some(s => s.name === 'fused');
@@ -134,6 +147,16 @@ export class BlockTuningSession {
       this.plateaued = true;
     }
     const now = this._best ? this._best.measuredScore : -Infinity;
+    if (this._onRound) {
+      this._onRound({
+        blockName: this.blockName,
+        round: this._rounds,
+        candidates,
+        best: this.best(),
+        measured: this.benchmarkRunner !== null,
+      });
+    }
+    this._rounds++;
     return Math.max(0, now - prev);
   }
 

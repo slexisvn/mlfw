@@ -96,6 +96,21 @@ run(model, [x]);
 `,
   },
   {
+    id: 'train',
+    title: 'Training step',
+    blurb: 'Switch Direction to one of the train modes and the timeline compiles a backward graph too — derived from this forward one, rule by rule.',
+    source: `const model = new Sequential(
+  new Linear(16, 32),
+  new ReLU(),
+  new Linear(32, 1),
+);
+
+const x = randn([8, 16]);
+
+run(model, [x]);
+`,
+  },
+  {
     id: 'conv',
     title: 'Conv stack',
     blurb: 'Convolution, normalization and pooling: one six-deep conv nest, and elementwise loops split to vector width.',

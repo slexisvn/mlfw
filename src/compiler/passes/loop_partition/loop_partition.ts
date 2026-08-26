@@ -1,4 +1,5 @@
 import { PrimFuncPass } from '../tir_pass.js';
+import { explainer } from '../explain.js';
 import { ForNode, SeqNode, IntImmNode, VariableNode, ForKind } from '../../ir/tensor/nodes.js';
 import { transform } from '../../ir/ir_visitor.js';
 import { cloneTensorIR } from '../../autotune/tune_ir.js';
@@ -7,6 +8,7 @@ import { proveTrue } from '../../analysis/ir_arith.js';
 import type { CompareNode, ForKindValue, IfThenElseNode, IntImmNode as IntImmNodeType, MathOpNode, PrimFunc, TirNode, VariableNode as VariableNodeType } from '../../ir/tensor/nodes.js';
 import type { IRNode } from '../../ir/ir_visitor.js';
 import type { TirPassCtx } from '../tir_pass.js';
+import type { Explain } from '../explain.js';
 
 const PARTITIONABLE_KINDS = new Set<ForKindValue>([
   ForKind.SERIAL, ForKind.PARALLEL, ForKind.VECTORIZED, ForKind.UNROLLED,
@@ -18,7 +20,8 @@ export class LoopPartitionPass extends PrimFuncPass {
   }
 
   override run(pf: PrimFunc, ctx: TirPassCtx): PrimFunc {
-    const newBody = transform(pf.body as unknown as IRNode, ((n: TirNode) => partitionLoop(n) || n) as never) as unknown as TirNode;
+    const explain = explainer(ctx.trace, this.name);
+    const newBody = transform(pf.body as unknown as IRNode, ((n: TirNode) => partitionLoop(n, explain) || n) as never) as unknown as TirNode;
     if (newBody && newBody !== pf.body) {
       pf.body = newBody;
       pf._setChild('body', newBody);
@@ -31,7 +34,7 @@ function intImm(node: TirNode | null | undefined): number | null {
   return node && node.type === 'IntImmNode' ? (node as IntImmNodeType).value : null;
 }
 
-function partitionLoop(node: TirNode): TirNode | null {
+function partitionLoop(node: TirNode, explain: Explain | null): TirNode | null {
   if (!node || node.type !== 'ForNode') return null;
   const outer = node as ForNode;
   if (!PARTITIONABLE_KINDS.has(outer.kind)) return null;
@@ -72,6 +75,12 @@ function partitionLoop(node: TirNode): TirNode | null {
     (n.type === 'VariableNode' && (n as VariableNodeType).name === outer.loopVar.name) ? new IntImmNode(q) : n) as never) as unknown as TirNode;
   const epiInnerVar = new VariableNode(inner.loopVar.name, inner.loopVar.dtype);
   const epilogue = new ForNode(epiInnerVar, new IntImmNode(0), new IntImmNode(r), inner.kind, epiBody, inner.threadTag);
+
+  if (explain) {
+    explain(outer.loopVar.name, `split into ${q} full steps plus a ${r}-iteration tail`,
+      'inside the full steps the guard is provably true, so it is dropped there and only the tail still checks the bound',
+      { fullIterations: q, tailIterations: r, innerExtent: F });
+  }
 
   return new SeqNode([mainOuter, epilogue]);
 }

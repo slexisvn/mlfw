@@ -5,11 +5,13 @@ export class Pattern {
   name: string;
   benefit: number;
   rootOpName: string | null;
+  why: string | null;
 
-  constructor(name: string, benefit = 1) {
+  constructor(name: string, benefit = 1, why: string | null = null) {
     this.name = name;
     this.benefit = benefit;
     this.rootOpName = null;
+    this.why = why;
   }
 
   match(op: Operation): boolean { return false; }

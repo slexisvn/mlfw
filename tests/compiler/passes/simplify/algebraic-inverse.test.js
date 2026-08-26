@@ -3,9 +3,24 @@ import { buildFunction } from '../../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../../src/compiler/ir/graph/types.js';
 import { AlgebraicSimplificationPass } from '../../../../src/compiler/passes/simplify/algebraic.js';
 import { PassResult } from '../../../../src/compiler/passes/pass.js';
+import { compileGraph } from '../../../../src/compiler/pipeline/compiler.js';
+import { CPUTarget } from '../../../../src/backend/target.js';
+import { roundToDtype } from '../../../../src/tensor/utils/half.js';
 
 function run(func) {
   return new AlgebraicSimplificationPass().run(func);
+}
+
+function runFast(func) {
+  return new AlgebraicSimplificationPass({ fastMath: true }).run(func);
+}
+
+function roundTrip(origDtype, midDtype, shape = [4], name = 'f') {
+  const t = new TensorType(shape, origDtype);
+  return buildFunction(name, [t], [t], (b, args) => {
+    const mid = b.convert(args[0], midDtype);
+    b.returnOp([b.convert(mid.getResult(0), origDtype).getResult(0)]);
+  });
 }
 
 function retVal(func) {
@@ -162,53 +177,108 @@ describe('transpose(transpose(x)) composition', () => {
   });
 });
 
-describe('convert(convert(x, dt1), dt2) → x when dt2 == original dtype', () => {
-  it('eliminates roundtrip cast f32 → i32 → f32', () => {
-    const t = new TensorType([4, 8], ScalarType.F32);
-    const func = buildFunction('f', [t], [t], (b, args) => {
-      const toInt = b.convert(args[0], ScalarType.I32);
-      b.returnOp([b.convert(toInt.getResult(0), ScalarType.F32).getResult(0)]);
+describe('convert round trips fold only when the middle dtype holds every source value', () => {
+  const exact = [
+    ['f16 → f32 → f16', ScalarType.F16, ScalarType.F32],
+    ['bf16 → f32 → bf16', ScalarType.BF16, ScalarType.F32],
+    ['f32 → f64 → f32', ScalarType.F32, ScalarType.F64],
+    ['i8 → i32 → i8', ScalarType.I8, ScalarType.I32],
+    ['i16 → f32 → i16', ScalarType.I16, ScalarType.F32],
+  ];
+
+  for (const [label, orig, mid] of exact) {
+    it(`folds ${label}: the middle dtype represents every source value, so nothing is lost`, () => {
+      const func = roundTrip(orig, mid);
+
+      expect(run(func)).toBe(PassResult.CHANGED);
+      expect(retVal(func)).toBe(func.args[0]);
     });
+  }
 
-    run(func);
+  const lossyFloat = [
+    ['f32 → f16 → f32', ScalarType.F32, ScalarType.F16],
+    ['f32 → bf16 → f32', ScalarType.F32, ScalarType.BF16],
+    ['f64 → f32 → f64', ScalarType.F64, ScalarType.F32],
+    ['f16 → bf16 → f16', ScalarType.F16, ScalarType.BF16],
+  ];
 
-    expect(retVal(func)).toBe(func.args[0]);
-  });
+  for (const [label, orig, mid] of lossyFloat) {
+    it(`keeps ${label} by default and drops it under fastMath: the middle dtype rounds`, () => {
+      const kept = roundTrip(orig, mid);
+      expect(run(kept)).toBe(PassResult.UNCHANGED);
+      expect(retVal(kept).definingOp.opName).toBe('convert');
 
-  it('does NOT eliminate when final dtype differs from original', () => {
+      const fast = roundTrip(orig, mid);
+      expect(runFast(fast)).toBe(PassResult.CHANGED);
+      expect(retVal(fast)).toBe(fast.args[0]);
+    });
+  }
+
+  const truncating = [
+    ['f32 → i32 → f32', ScalarType.F32, ScalarType.I32],
+    ['i32 → i8 → i32', ScalarType.I32, ScalarType.I8],
+    ['i32 → f32 → i32', ScalarType.I32, ScalarType.F32],
+    ['i64 → f64 → i64', ScalarType.I64, ScalarType.F64],
+  ];
+
+  for (const [label, orig, mid] of truncating) {
+    it(`keeps ${label} even under fastMath: the middle dtype discards whole values, not ulps`, () => {
+      const kept = roundTrip(orig, mid);
+      expect(run(kept)).toBe(PassResult.UNCHANGED);
+
+      const fast = roundTrip(orig, mid);
+      expect(runFast(fast)).toBe(PassResult.UNCHANGED);
+      expect(retVal(fast).definingOp.opName).toBe('convert');
+    });
+  }
+
+  it('leaves a pair whose final dtype differs from the original alone', () => {
     const inT = new TensorType([4], ScalarType.F32);
     const outT = new TensorType([4], ScalarType.F64);
     const func = buildFunction('f', [inT], [outT], (b, args) => {
-      const toInt = b.convert(args[0], ScalarType.I32);
-      b.returnOp([b.convert(toInt.getResult(0), ScalarType.F64).getResult(0)]);
+      const mid = b.convert(args[0], ScalarType.F16);
+      b.returnOp([b.convert(mid.getResult(0), ScalarType.F64).getResult(0)]);
     });
 
-    run(func);
-
-    const outerConvert = retVal(func).definingOp;
-    expect(outerConvert.opName).toBe('convert');
+    expect(runFast(func)).toBe(PassResult.UNCHANGED);
+    expect(retVal(func).definingOp.opName).toBe('convert');
   });
 
-  it('eliminates f64 → f32 → f64 roundtrip', () => {
-    const t = new TensorType([4], ScalarType.F64);
-    const func = buildFunction('f', [t], [t], (b, args) => {
-      const down = b.convert(args[0], ScalarType.F32);
-      b.returnOp([b.convert(down.getResult(0), ScalarType.F64).getResult(0)]);
-    });
-
-    run(func);
-
-    expect(retVal(func)).toBe(func.args[0]);
-  });
-
-  it('single convert is untouched', () => {
+  it('leaves a lone convert alone', () => {
     const inT = new TensorType([4], ScalarType.F32);
-    const outT = new TensorType([4], ScalarType.I32);
+    const outT = new TensorType([4], ScalarType.F16);
     const func = buildFunction('f', [inT], [outT], (b, args) => {
-      b.returnOp([b.convert(args[0], ScalarType.I32).getResult(0)]);
+      b.returnOp([b.convert(args[0], ScalarType.F16).getResult(0)]);
     });
 
-    expect(run(func)).toBe(PassResult.UNCHANGED);
+    expect(runFast(func)).toBe(PassResult.UNCHANGED);
+  });
+});
+
+describe('a compiled f32 → f16 → f32 round trip keeps the f16 rounding', () => {
+  const X = new Float32Array([1.1, 0.1, 2.5, 65536, 1e-8]);
+
+  function compiled(fastMath) {
+    const func = roundTrip(ScalarType.F32, ScalarType.F16, [X.length], 'half_trip');
+    const out = new Float32Array(X.length);
+    compileGraph(func, CPUTarget(), { optimization: { fastMath } }).run('half_trip', X, out);
+    return out;
+  }
+
+  it('returns each input rounded to f16, including the overflow to Infinity', () => {
+    const out = compiled(false);
+
+    for (let i = 0; i < X.length; i++) expect(out[i]).toBe(roundToDtype('f16', X[i]));
+    expect(out[0]).not.toBe(X[0]);
+    expect(out[2]).toBe(X[2]);
+    expect(out[3]).toBe(Infinity);
+    expect(out[4]).toBe(0);
+  });
+
+  it('returns the inputs untouched under fastMath, where the round trip is folded away', () => {
+    const out = compiled(true);
+
+    for (let i = 0; i < X.length; i++) expect(out[i]).toBe(X[i]);
   });
 });
 
@@ -231,8 +301,8 @@ describe('pass behavior', () => {
     const func = buildFunction('f', [t, t], [t], (b, args) => {
       const nb = b.neg(args[1]);
       const sum = b.add(args[0], nb.getResult(0));
-      const toInt = b.convert(sum.getResult(0), ScalarType.I32);
-      b.returnOp([b.convert(toInt.getResult(0), ScalarType.F32).getResult(0)]);
+      const wide = b.convert(sum.getResult(0), ScalarType.F64);
+      b.returnOp([b.convert(wide.getResult(0), ScalarType.F32).getResult(0)]);
     });
 
     run(func);

@@ -3,16 +3,22 @@ import { DEFAULT_OPTIONS } from './protocol.js';
 import { EXAMPLES } from './examples/index.js';
 import { readSession, shareUrl, writeSession } from './session.js';
 import type { CompileOptions, CompileResponse, CompileStep, WorkerRequest, WorkerRequestDraft, WorkerResponse } from './protocol.js';
+import { lessonById } from './catalog/lessons.js';
+import type { Lesson } from './catalog/lessons.js';
 import type { StageTab } from './catalog/glossary.js';
 
 const REDUCED_MOTION = typeof matchMedia === 'function'
   && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const RUNS: ReadonlySet<string> = new Set(['pass', 'primitive']);
 
 export const SPEEDS = [0, 0.5, 1, 2] as const;
 export type Status = 'starting' | 'idle' | 'compiling' | 'ready' | 'failed';
 export type Pane = 'source' | 'timeline' | 'stage';
 
 export type Failure = { error: string; errorPhase: string | null };
+export type Baseline = { response: CompileResponse; options: CompileOptions; source: string };
+export type LessonProgress = { id: string; at: number; picked: number | null };
 
 export type State = {
   source: string;
@@ -21,6 +27,7 @@ export type State = {
   globals: string[];
   status: Status;
   result: CompileResponse | null;
+  baseline: Baseline | null;
   failure: Failure | null;
   ranSource: string | null;
   ranOptions: CompileOptions | null;
@@ -30,8 +37,10 @@ export type State = {
   speed: number;
   playing: boolean;
   onlyChanged: boolean;
+  collapsed: ReadonlySet<number>;
   pane: Pane;
   focusLine: number | null;
+  lesson: LessonProgress | null;
 };
 
 const worker = new Worker(new URL('./worker/compile.worker.ts', import.meta.url), { type: 'module' });
@@ -63,6 +72,7 @@ let state: State = {
   globals: [],
   status: 'starting',
   result: null,
+  baseline: null,
   failure: null,
   ranSource: null,
   ranOptions: null,
@@ -72,8 +82,10 @@ let state: State = {
   speed: REDUCED_MOTION ? 0 : 1,
   playing: false,
   onlyChanged: true,
+  collapsed: new Set(),
   pane: 'source',
   focusLine: null,
+  lesson: null,
 };
 
 const listeners = new Set<() => void>();
@@ -98,26 +110,101 @@ export function getState(): State {
   return state;
 }
 
+const familyCache = new WeakMap<CompileResponse, Family>();
+
+export type Family = { ownerOf: Map<number, number>; childrenOf: Map<number, number[]> };
+
+export function family(response: CompileResponse): Family {
+  const cached = familyCache.get(response);
+  if (cached) return cached;
+
+  const ownerOf = new Map<number, number>();
+  const childrenOf = new Map<number, number[]>();
+  let owner: number | null = null;
+
+  for (const step of response.steps) {
+    if (step.kind !== 'primitive') {
+      owner = step.kind === 'pass' ? step.index : null;
+      continue;
+    }
+    if (owner === null) continue;
+    ownerOf.set(step.index, owner);
+    const kids = childrenOf.get(owner);
+    if (kids) kids.push(step.index);
+    else childrenOf.set(owner, [step.index]);
+  }
+
+  const computed = { ownerOf, childrenOf };
+  familyCache.set(response, computed);
+  return computed;
+}
+
+export function childCount(s: State, index: number): number {
+  if (!s.result) return 0;
+  return (family(s.result).childrenOf.get(index) ?? []).length;
+}
+
+export function isCollapsed(s: State, index: number): boolean {
+  return s.collapsed.has(index);
+}
+
+function collapsedByDefault(response: CompileResponse): Set<number> {
+  return new Set(family(response).childrenOf.keys());
+}
+
 const visibleCache = new WeakMap<State, CompileStep[]>();
 
 export function visibleSteps(s: State): CompileStep[] {
   const cached = visibleCache.get(s);
   if (cached) return cached;
 
-  const computed = !s.result
-    ? []
-    : s.onlyChanged
-      ? s.result.steps.filter(step => step.kind !== 'pass' || step.outcome !== 'unchanged')
-      : s.result.steps;
+  const computed = !s.result ? [] : s.result.steps.filter(step => shown(s, step));
   const steps = computed.length > 0 || !s.result ? computed : s.result.steps;
 
   visibleCache.set(s, steps);
   return steps;
 }
 
-export function changedCount(s: State): number {
-  if (!s.result) return 0;
-  return s.result.steps.filter(step => step.kind !== 'pass' || step.outcome !== 'unchanged').length;
+function quiet(s: State, step: CompileStep | undefined): boolean {
+  return !!step && s.onlyChanged && step.outcome === 'unchanged' && RUNS.has(step.kind);
+}
+
+function shown(s: State, step: CompileStep): boolean {
+  if (quiet(s, step)) return false;
+  if (step.kind !== 'primitive') return true;
+
+  const result = s.result as CompileResponse;
+  const owner = family(result).ownerOf.get(step.index);
+  if (owner === undefined) return true;
+  if (s.collapsed.has(owner)) return false;
+
+  return !quiet(s, result.steps[owner]);
+}
+
+export type RunTally = { total: number; changed: number; quiet: number };
+
+const NO_RUNS: RunTally = { total: 0, changed: 0, quiet: 0 };
+const tallyCache = new WeakMap<CompileResponse, RunTally>();
+
+export function passRunCount(s: State): RunTally {
+  if (!s.result) return NO_RUNS;
+  const cached = tallyCache.get(s.result);
+  if (cached) return cached;
+
+  let total = 0;
+  let changed = 0;
+  let quiet = 0;
+  for (const step of s.result.steps) {
+    if (step.kind === 'pass') {
+      total++;
+      if (step.outcome === 'changed') changed++;
+    }
+    if (RUNS.has(step.kind) && step.outcome === 'unchanged') quiet++;
+  }
+
+  const tally = { total, changed, quiet };
+  tallyCache.set(s.result, tally);
+  return tally;
 }
 
 export function isStale(s: State): boolean {
@@ -169,6 +256,36 @@ function phasesOf(response: CompileResponse, previous: Record<string, string>): 
   return merged;
 }
 
+function focusStep(pass: string, tab: StageTab): void {
+  const result = state.result;
+  if (!result) return;
+  const step = result.steps.find(candidate => candidate.pass === pass);
+  set({ tab, pane: 'stage' });
+  if (!step) return;
+  if (family(result).childrenOf.has(step.index)) {
+    const collapsed = new Set(state.collapsed);
+    collapsed.delete(step.index);
+    set({ collapsed });
+  }
+  actions.select(step.index);
+}
+
+async function applyBeat(lesson: Lesson, at: number): Promise<void> {
+  const beat = lesson.beats[at];
+  const patch: Partial<State> = { lesson: { id: lesson.id, at, picked: null } };
+  if (beat.source !== undefined) {
+    patch.source = beat.source;
+    patch.exampleId = '';
+  }
+  if (beat.options) patch.options = { ...state.options, ...beat.options };
+  set(patch);
+  persist();
+
+  if (beat.run) await actions.run();
+  if (beat.focus) focusStep(beat.focus.pass, beat.focus.tab);
+  else if (beat.tab) set({ tab: beat.tab, pane: 'stage' });
+}
+
 export const actions = {
   async init(): Promise<void> {
     const response = await ask({ kind: 'init' }) as { globals: string[] };
@@ -208,9 +325,60 @@ export const actions = {
     actions.select(next.index);
   },
 
+  toggleCollapse(index: number): void {
+    if (!state.result) return;
+    const collapsed = new Set(state.collapsed);
+    if (collapsed.has(index)) collapsed.delete(index);
+    else collapsed.add(index);
+
+    const next = { ...state, collapsed };
+    const owner = family(state.result).ownerOf.get(state.selected);
+    const hidden = owner !== undefined && collapsed.has(owner);
+    set({
+      collapsed,
+      selected: hidden ? owner : nearestVisible(next, state.selected),
+      playing: false,
+    });
+  },
+
+  expandAll(): void {
+    set({ collapsed: new Set(), playing: false });
+  },
+
   toggleOnlyChanged(): void {
     const next = { ...state, onlyChanged: !state.onlyChanged };
     set({ onlyChanged: next.onlyChanged, selected: nearestVisible(next, state.selected), playing: false });
+  },
+
+  async startLesson(id: string): Promise<void> {
+    const lesson = lessonById(id);
+    if (!lesson) return;
+    await applyBeat(lesson, 0);
+  },
+
+  endLesson(): void {
+    set({ lesson: null });
+  },
+
+  async gotoBeat(at: number): Promise<void> {
+    const progress = state.lesson;
+    const lesson = progress ? lessonById(progress.id) : null;
+    if (!lesson) return;
+    await applyBeat(lesson, Math.max(0, Math.min(lesson.beats.length - 1, at)));
+  },
+
+  pick(choice: number): void {
+    if (!state.lesson) return;
+    set({ lesson: { ...state.lesson, picked: choice } });
+  },
+
+  pinBaseline(): void {
+    if (!state.result) return;
+    set({ baseline: { response: state.result, options: state.ranOptions ?? state.options, source: state.ranSource ?? state.source } });
+  },
+
+  clearBaseline(): void {
+    set({ baseline: null });
   },
 
   setTab(tab: StageTab): void {
@@ -271,10 +439,12 @@ export const actions = {
       return;
     }
 
-    const next = { ...state, result: response };
+    const collapsed = collapsedByDefault(response);
+    const next = { ...state, result: response, collapsed };
     const first = visibleSteps(next)[0];
     set({
       result: response,
+      collapsed,
       failure: null,
       status: 'ready',
       ranSource: source,

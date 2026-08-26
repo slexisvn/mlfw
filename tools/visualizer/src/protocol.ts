@@ -44,23 +44,56 @@ export type NestNode = {
   label: string;
   detail: string;
   op: string | null;
+  opId: number | null;
   children: NestNode[];
 };
 
 export type Snapshot = {
   text: string;
   ops: number;
+  bytes: number;
+  flops: number;
   dags: Dag[];
   nests: NestNode[];
 };
 
 export type TraceEventLite = Record<string, unknown> & { type: string };
 
-export type StepKind = 'input' | 'pass' | 'lowering';
+export type BufferLifetime = {
+  name: string;
+  scope: string;
+  bytes: number;
+  slot: number;
+  firstUse: number;
+  lastUse: number;
+  sharesWith: string | null;
+};
+
+export type TuningRound = {
+  func: string;
+  blockName: string;
+  round: number;
+  measured: boolean;
+  scores: { sketch: string; score: number }[];
+  bestSketch: string | null;
+  bestScore: number | null;
+};
+
+export type MemoryPlan = {
+  func: string;
+  peakMemory: number;
+  totalBytesIfNeverShared: number;
+  steps: number;
+  buffers: BufferLifetime[];
+};
+
+export type StepKind = 'input' | 'pass' | 'lowering' | 'primitive';
 
 export type CompileStep = {
   index: number;
   kind: StepKind;
+  parent: string | null;
+  unit: string | null;
   level: IRLevelName;
   phase: string;
   pass: string;
@@ -93,7 +126,10 @@ export type RunResult = {
   inputs: TensorPreview[];
   outputs: TensorPreview[];
   eagerOutputs: TensorPreview[];
+  gradients: TensorPreview[];
+  eagerGradients: TensorPreview[];
   maxAbsDiff: number | null;
+  maxAbsGradDiff: number | null;
   compiledMs: number | null;
   eagerMs: number | null;
   iterations: number;
@@ -106,11 +142,15 @@ export type CompileRequest = {
   options: CompileOptions;
 };
 
+export type BackwardMode = 'off' | 'separate' | 'joint';
+
 export type CompileOptions = {
   target: TargetName;
+  backward: BackwardMode;
   fusionStrategy: 'priority' | 'dominator' | 'greedy';
   fusion: boolean;
   scheduling: boolean;
+  autotune: boolean;
   layout: boolean;
   disabledPasses: string[];
 };
@@ -137,6 +177,8 @@ export type CompileResponse = {
   kernels: Kernel[];
   events: TraceEventLite[];
   sourceLinks: SourceLink[];
+  memoryPlans: MemoryPlan[];
+  tuningRounds: TuningRound[];
   totalMs: number;
   run: RunResult;
 };
@@ -145,9 +187,11 @@ export type WorkerResponse = InitResponse | CompileResponse;
 
 export const DEFAULT_OPTIONS: CompileOptions = {
   target: 'cpu',
+  backward: 'off',
   fusionStrategy: 'priority',
   fusion: true,
   scheduling: true,
+  autotune: false,
   layout: false,
   disabledPasses: [],
 };

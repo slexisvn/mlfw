@@ -1,6 +1,7 @@
 import { FunctionPass, PassResult } from '../pass.js';
 import { MemoryEffectAnalysis } from '../../analysis/memory_effect.js';
 import { isTerminatorOp } from '../../ir/graph/op_traits.js';
+import { explainer } from '../explain.js';
 
 import { TraceLevel } from '../../pipeline/trace.js';
 import type { GraphFunction } from '../../ir/graph/function.js';
@@ -23,6 +24,7 @@ export class DCEPass extends FunctionPass {
 
     const memEffects = this.getAnalysis(MemoryEffectAnalysis as never, func, analysisManager) as MemoryEffectResult;
 
+    const explain = explainer(this.trace, this.name);
     const worklist: Operation[] = [];
     for (const op of func.opsRecursive()) {
       if (this._isDead(op, memEffects)) {
@@ -30,6 +32,7 @@ export class DCEPass extends FunctionPass {
       }
     }
 
+    const cascaded = new Set<Operation>();
     let erasedCount = 0;
 
     while (worklist.length > 0) {
@@ -43,12 +46,19 @@ export class DCEPass extends FunctionPass {
         if (defOp && defOp.parentBlock) operandDefs.push(defOp);
       }
 
+      if (explain) {
+        explain(op.opName, 'deleted', cascaded.has(op)
+          ? 'its only reader was deleted a moment ago, so nothing reads it any more'
+          : 'nothing reads its result and it declares no side effect');
+      }
+
       this._eraseRecursively(op);
       changed = true;
       erasedCount++;
 
       for (const defOp of operandDefs) {
         if (defOp.parentBlock && this._isDead(defOp, memEffects)) {
+          cascaded.add(defOp);
           worklist.push(defOp);
         }
       }

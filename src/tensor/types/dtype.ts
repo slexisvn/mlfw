@@ -6,6 +6,7 @@ import {
   isNumericType as _isNumericType,
   isBoolType as _isBoolType,
   promoteDtype as _promoteDtype,
+  isValuePreservingCast as _isValuePreservingCast,
 } from '../../compiler/ir/graph/types.js';
 import { typedArrayCtor as dtypeTypedArrayCtor } from '../../util/dtype_map.js';
 import type { ScalarDType } from '../../compiler/ir/graph/types.js';
@@ -17,6 +18,7 @@ export const isIntType = _isIntType;
 export const isNumericType = _isNumericType;
 export const isBoolType = _isBoolType;
 export const promoteDtype = _promoteDtype;
+export const canCast = _isValuePreservingCast;
 
 export type DType = ScalarDType;
 export type NumericTypedArray =
@@ -66,54 +68,6 @@ export function resultDtype(a: DType, b: DType): DType {
   const pa = _PRECEDENCE_MAP.get(a) ?? 0;
   const pb = _PRECEDENCE_MAP.get(b) ?? 0;
   return pa >= pb ? a : b;
-}
-
-const _CAST_TABLE = new Map<DType, Set<DType>>();
-
-function _addCastPair(from: DType, to: DType) {
-  let set = _CAST_TABLE.get(from);
-  if (!set) { set = new Set(); _CAST_TABLE.set(from, set); }
-  set.add(to);
-}
-
-_addCastPair(ScalarType.BOOL, ScalarType.I8);
-_addCastPair(ScalarType.BOOL, ScalarType.I16);
-_addCastPair(ScalarType.BOOL, ScalarType.I32);
-_addCastPair(ScalarType.BOOL, ScalarType.I64);
-_addCastPair(ScalarType.BOOL, ScalarType.F16);
-_addCastPair(ScalarType.BOOL, ScalarType.F32);
-_addCastPair(ScalarType.BOOL, ScalarType.F64);
-_addCastPair(ScalarType.UI8, ScalarType.I16);
-_addCastPair(ScalarType.UI8, ScalarType.I32);
-_addCastPair(ScalarType.UI8, ScalarType.I64);
-_addCastPair(ScalarType.UI8, ScalarType.F16);
-_addCastPair(ScalarType.UI8, ScalarType.F32);
-_addCastPair(ScalarType.UI8, ScalarType.F64);
-_addCastPair(ScalarType.I8, ScalarType.I16);
-_addCastPair(ScalarType.I8, ScalarType.I32);
-_addCastPair(ScalarType.I8, ScalarType.I64);
-_addCastPair(ScalarType.I8, ScalarType.F16);
-_addCastPair(ScalarType.I8, ScalarType.F32);
-_addCastPair(ScalarType.I8, ScalarType.F64);
-_addCastPair(ScalarType.I16, ScalarType.I32);
-_addCastPair(ScalarType.I16, ScalarType.I64);
-_addCastPair(ScalarType.I16, ScalarType.F32);
-_addCastPair(ScalarType.I16, ScalarType.F64);
-_addCastPair(ScalarType.I32, ScalarType.I64);
-_addCastPair(ScalarType.I32, ScalarType.F64);
-_addCastPair(ScalarType.F16, ScalarType.F32);
-_addCastPair(ScalarType.F16, ScalarType.F64);
-_addCastPair(ScalarType.BF16, ScalarType.F32);
-_addCastPair(ScalarType.BF16, ScalarType.F64);
-_addCastPair(ScalarType.BOOL, ScalarType.BF16);
-_addCastPair(ScalarType.UI8, ScalarType.BF16);
-_addCastPair(ScalarType.I8, ScalarType.BF16);
-_addCastPair(ScalarType.F32, ScalarType.F64);
-
-export function canCast(from: DType, to: DType): boolean {
-  if (from === to) return true;
-  const set = _CAST_TABLE.get(from);
-  return set ? set.has(to) : false;
 }
 
 export function dtypeSize(dtype: DType): number {

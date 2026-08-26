@@ -159,6 +159,8 @@ export const PASS_NOTES: Record<string, PassNote> = {
   },
 };
 
+export const REPLAYABLE_PASSES: ReadonlySet<string> = new Set(['SchedulePass']);
+
 export function passNote(name: string): PassNote | null {
   return PASS_NOTES[name] ?? null;
 }

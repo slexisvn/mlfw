@@ -5,6 +5,7 @@ import { LayoutPolicy } from './layout_policy.js';
 import { LayoutAnalysis } from '../../analysis/layout_analysis.js';
 import { UseDefAnalysis } from '../../analysis/use_def.js';
 import { TraceLevel } from '../../pipeline/trace.js';
+import { explainer } from '../explain.js';
 import type { GraphFunction } from '../../ir/graph/function.js';
 import type { Block } from '../../ir/graph/block.js';
 import type { Value } from '../../ir/graph/value.js';
@@ -22,6 +23,11 @@ type ConversionGroup = {
   cost: number;
   benefit: number;
 };
+
+function layoutSubject(group: ConversionGroup): string {
+  const def = group.value.definingOp;
+  return def ? def.opName : `arg%${group.value.id}`;
+}
 
 export class LayoutTransformPass extends FunctionPass {
   target: LayoutPolicyTarget | null;
@@ -62,10 +68,18 @@ export class LayoutTransformPass extends FunctionPass {
       g.benefit += capable ? (this._policy as LayoutPolicy).estimateBenefit(consumer, value.type, 1) : 0;
     }
 
+    const explain = explainer(this.trace, this.name);
     let totalCost = 0, totalBenefit = 0;
     const keep: ConversionGroup[] = [];
     for (const g of groups.values()) {
-      if (g.benefit < g.cost) continue;
+      if (g.benefit < g.cost) {
+        if (explain) {
+          explain(layoutSubject(g), 'left in its current layout',
+            'the transpose this layout would need costs more than the ops reading it would gain',
+            { conversionCost: g.cost, estimatedBenefit: g.benefit });
+        }
+        continue;
+      }
       keep.push(g);
       totalCost += g.cost;
       totalBenefit += g.benefit;
@@ -89,6 +103,11 @@ export class LayoutTransformPass extends FunctionPass {
       }
       const tr = transformOp.getResult(0);
       for (const c of g.consumers) c.consumer.replaceOperand(c.operandIdx, tr);
+      if (explain) {
+        explain(layoutSubject(g), `laid out as [${dstOrder.join(', ')}]`,
+          'the ops reading this value run faster in that order by more than the inserted transpose costs',
+          { conversionCost: g.cost, estimatedBenefit: g.benefit, readers: g.consumers.length });
+      }
     }
 
     if (this.trace && this.trace.level >= TraceLevel.DEBUG) {

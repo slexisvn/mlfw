@@ -21,7 +21,9 @@ import type { CostModelTarget } from './cost_model.js';
 import type { MeasurerLike } from './benchmark.js';
 import type { SchedulerPolicy, TuningTask } from './task_scheduler.js';
 import type { SketchParams, ScheduleSketch } from './sketch.js';
+import { TraceLevel } from '../pipeline/trace.js';
 import type { TraceLog } from '../pipeline/trace.js';
+import type { RoundReport } from './session.js';
 
 export type AutotuneWarning = { stage: string; func: string | null; block: string | null; message: string; error: unknown };
 export type AutotunerTarget = CostModelTarget;
@@ -217,7 +219,8 @@ export class Autotuner {
         target: this.target, primFunc, blockName: name, blockMap, sketches,
         costModel: this.costModel, learnedModel: this.learnedModel,
         benchmarkRunner: this.benchmarkRunner, config: this.config, deadline,
-        warn: (stage: string, block: string | null, e: unknown) => this._warn(stage, block, e)
+        warn: (stage: string, block: string | null, e: unknown) => this._warn(stage, block, e),
+        onRound: this.trace ? (report: RoundReport) => this._reportRound(primFunc.name, report) : null
       });
       tasksByKey.set(key, { key, kind: 'session', session, weight: 1 });
     }
@@ -336,6 +339,7 @@ export class Autotuner {
       }
 
       this._scheduleResidualBlocks(sch, fusedAway);
+      if (this.trace) this.trace.scheduleTrace(primFunc.name, sch.trace.serialize());
       return work;
     } catch (e) {
       this._warn('build-tuned-schedule', null, e);
@@ -378,6 +382,20 @@ export class Autotuner {
       this._warn('build-default-schedule', null, e);
       return null;
     }
+  }
+
+  _reportRound(funcName: string, report: RoundReport): void {
+    (this.trace as TraceLog).emit({
+      type: 'autotune_round',
+      funcName,
+      blockName: report.blockName,
+      round: report.round,
+      measured: report.measured,
+      scores: report.candidates.map(candidate => ({ sketch: candidate.sketchName, score: candidate.score })),
+      bestSketch: report.best ? report.best.sketchName : null,
+      bestScore: report.best ? report.best.score : null,
+      level: TraceLevel.DEBUG,
+    });
   }
 
   _adoptSchedule(target: PrimFunc, src: PrimFunc): void {

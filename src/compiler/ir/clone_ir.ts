@@ -24,6 +24,7 @@ export function cloneIRShared(node: unknown, rec: CloneRecurse, handleOther: Clo
       return copy;
     case 'BlockNode':
       copy.name = src.name;
+      copy.sourceOp = src.sourceOp;
       copy.iterVars = (src.iterVars as unknown[]).map(rec);
       copy.reads = src.reads;
       copy.writes = src.writes;

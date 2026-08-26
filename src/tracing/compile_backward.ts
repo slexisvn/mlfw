@@ -6,6 +6,9 @@ import { BackwardGraphBuilder } from '../compiler/ad/backward_builder.js';
 import { IRBuilder } from '../compiler/ir/graph/builder.js';
 import { JointGraphBuilder } from '../compiler/ad/joint_builder.js';
 import { RematPolicy } from '../compiler/ad/remat_policy.js';
+import { TraceLog } from '../compiler/pipeline/trace.js';
+import { explainer } from '../compiler/passes/explain.js';
+import type { TraceLogConfig } from '../compiler/pipeline/trace.js';
 import type { InputSignature } from './types.js';
 import '../compiler/ad/index.js';
 import { tensorToContiguous, tensorToContiguousCopy, wrapResult } from '../dispatcher/jit_dispatch.js';
@@ -89,6 +92,7 @@ type JointBuilderResult = {
   numGradInputs: number;
 };
 type AsyncKernelResult = Promise<unknown> | null;
+export type CompiledUnit = { name: string; result: CompiledResult };
 
 export function compileWithBackward(model: CompilableModel, exampleInputs?: Tensor[], opts: CompileOptions = {}): unknown {
   const target = opts.target ?? CPUTarget();
@@ -96,6 +100,7 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
   const rematPolicy = opts.rematPolicy || new RematPolicy(opts.remat || {});
   const compilerOpts = { target, ...opts, backward: undefined, mode: undefined, rematPolicy: undefined, remat: undefined };
   const dynamicShapes = resolveDynamicShapes(opts);
+  const adExplain = explainer(opts.trace ? new TraceLog(opts.trace as TraceLogConfig) : null, 'autodiff');
 
   const _cacheEntries: BackwardMeta[] = [];
   let _savedValues: SavedContext | null = null;
@@ -126,7 +131,7 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
   }
 
   function _compileSeparate(forwardFunc: GraphFunctionLike, traced: TracedCore, policy: BackwardPolicy): SeparateMeta {
-    const bwdBuilder = new BackwardGraphBuilder({ rematPolicy: policy as unknown as RematPolicy });
+    const bwdBuilder = new BackwardGraphBuilder({ rematPolicy: policy as unknown as RematPolicy, explain: adExplain });
     const { backwardFunc, savedValues, gradInputIndices } = bwdBuilder.build(forwardFunc as unknown as GraphFunction) as unknown as FunctionBuilderResult;
 
     const realReturnOp = forwardFunc.getReturnOp();
@@ -188,7 +193,7 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
   }
 
   function _compileJoint(forwardFunc: GraphFunctionLike, traced: TracedCore, policy: BackwardPolicy): JointMeta {
-    const jointBuilder = new JointGraphBuilder({ rematPolicy: policy as unknown as RematPolicy });
+    const jointBuilder = new JointGraphBuilder({ rematPolicy: policy as unknown as RematPolicy, explain: adExplain });
     const { jointFunc, numForwardOutputs, numGradInputs } = jointBuilder.build(forwardFunc as unknown as GraphFunction) as unknown as JointBuilderResult;
 
     const module = new GraphModule('joint') as unknown as GraphModuleLike;
@@ -424,6 +429,7 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
     backwardGraph(): GraphFunctionLike | null;
     forwardGraph(): GraphFunctionLike | null;
     capturedParams(): Tensor[];
+    compiledUnits(): CompiledUnit[];
   };
 
   typedForward.backward = function (...gradOutputs: Tensor[]): MaybePromise<TensorOutput[]> {
@@ -489,6 +495,13 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
   };
 
   typedForward.capturedParams = () => (_cacheEntries.length ? _cacheEntries[0].capturedParams : []);
+
+  typedForward.compiledUnits = () => {
+    if (_cacheEntries.length === 0) return [];
+    const meta = _cacheEntries[0];
+    if (meta.mode === 'joint') return [{ name: 'joint', result: meta.result }];
+    return [{ name: 'forward', result: meta.fwdResult }, { name: 'backward', result: meta.bwdResult }];
+  };
 
   if (exampleInputs) {
     const compiled = _compile(exampleInputs);

@@ -1,4 +1,5 @@
 import { GraphFunction } from '../ir/graph/function.js';
+import type { Explain } from '../passes/explain.js';
 import { IRBuilder } from '../ir/graph/builder.js';
 import { UseDefAnalysis } from '../analysis/use_def.js';
 import { readValues } from '../ir/graph/graph_algorithms.js';
@@ -15,6 +16,7 @@ export type JointBuilderOpts = Readonly<{
   rematPolicy?: RematPolicy;
   remat?: RematPolicyOpts;
   checkpointPolicy?: CheckpointPolicy | null;
+  explain?: Explain | null;
 }>;
 
 export type JointBuildResult = {
@@ -61,10 +63,12 @@ function regionBackprop(accumulator: GradAccumulator, builder: IRBuilder, needsG
 export class JointGraphBuilder {
   private _rematPolicy: RematPolicy;
   private _checkpointPolicy: CheckpointPolicy | null;
+  private _explain: Explain | null;
 
   constructor(opts: JointBuilderOpts = {}) {
     this._rematPolicy = opts.rematPolicy || new RematPolicy(opts.remat || {});
     this._checkpointPolicy = opts.checkpointPolicy || null;
+    this._explain = opts.explain || null;
   }
 
   build(forwardFunc: GraphFunction): JointBuildResult {
@@ -75,7 +79,7 @@ export class JointGraphBuilder {
     const resolve = (v: Value) => s.valueMap.get(v.id) || v;
     backpropOps(s.topoOrder, {
       accumulator: s.accumulator, builder: s.builder, needsGrad: s.needsGrad,
-      resolveValue: resolve,
+      resolveValue: resolve, explain: this._explain,
       handleRegionOp: regionBackprop(s.accumulator, s.builder, s.needsGrad, resolve),
     });
     return this._finish(s);
@@ -96,7 +100,7 @@ export class JointGraphBuilder {
 
       backpropOps(seg.ops, {
         accumulator: s.accumulator, builder: s.builder, needsGrad: s.needsGrad,
-        resolveValue: resolve,
+        resolveValue: resolve, explain: this._explain,
         handleRegionOp: regionBackprop(s.accumulator, s.builder, s.needsGrad, resolve),
       });
     }
@@ -154,6 +158,11 @@ export class JointGraphBuilder {
       gradInputValues.push(gradOrZero(s.builder, s.forwardInputs[i], s.accumulator));
     }
     s.builder.returnOp([...s.fwdOutputValues, ...gradInputValues]);
+    if (this._explain) {
+      this._explain(s.jointFunc.name, 'built as one function',
+        'forward and backward live in the same graph, so every forward value the backward needs is already in scope and nothing has to be handed between two kernels',
+        { forwardOutputs: s.forwardOutputs.length, inputGradients: gradInputValues.length });
+    }
     return {
       jointFunc: s.jointFunc,
       numForwardOutputs: s.forwardOutputs.length,
