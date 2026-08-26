@@ -40,14 +40,27 @@ function dagForFunction(func: GraphFunction, names: ReadonlyMap<Value, string>):
     producer: value.definingOp ? value.definingOp.id : null,
   });
 
-  const visitBlock = (block: Block, into: DagNode[]): void => {
-    for (const arg of block.arguments) values.push(describe(arg));
+  const visitBlock = (block: Block, into: DagNode[]): number[] => {
+    const blockArgs: number[] = [];
+    for (const arg of block.arguments) {
+      values.push(describe(arg));
+      blockArgs.push(arg.id);
+    }
     for (const op of block) {
       if (op.opName === RETURN_OP) {
         for (const operand of op.operands) returns.push(operand.id);
         continue;
       }
       for (const result of op.results) values.push(describe(result));
+      const regions: DagNode[][] = [];
+      const regionArgs: number[][] = [];
+      for (const region of op.regions) {
+        const inner: DagNode[] = [];
+        const args: number[] = [];
+        for (const inner_block of region) args.push(...visitBlock(inner_block, inner));
+        regions.push(inner);
+        regionArgs.push(args);
+      }
       into.push({
         id: op.id,
         opName: op.opName,
@@ -55,13 +68,11 @@ function dagForFunction(func: GraphFunction, names: ReadonlyMap<Value, string>):
         results: op.results.map(v => v.id),
         resultTypes: op.results.map(v => typeToString(v.type)),
         attrs: [...op.attributes].map(([key, value]) => [key, attrText(value)] as [string, string]),
-        regions: op.regions.map(region => {
-          const inner: DagNode[] = [];
-          for (const inner_block of region) visitBlock(inner_block, inner);
-          return inner;
-        }),
+        regions,
+        regionArgs,
       });
     }
+    return blockArgs;
   };
 
   for (const arg of func.args) args.push(describe(arg));

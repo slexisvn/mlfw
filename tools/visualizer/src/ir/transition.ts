@@ -132,6 +132,9 @@ export function planTransition(before: Layout, after: Layout, links: Map<string,
   const beforeIds = new Set(before.boxes.map(box => box.id));
   const afterIds = new Set(after.boxes.map(box => box.id));
   const linkedTargets = new Set(links.values());
+  const scaffolding = new Set(
+    [...before.boxes, ...after.boxes].filter(box => box.kind === 'port').map(box => box.id),
+  );
 
   for (const id of beforeIds) {
     if (afterIds.has(id)) changes.set(id, 'kept');
@@ -146,6 +149,7 @@ export function planTransition(before: Layout, after: Layout, links: Map<string,
 
   for (const [id, change] of changes) {
     if (change === linkChange && links.has(id)) continue;
+    if (scaffolding.has(id)) continue;
     counts[change]++;
   }
 

@@ -15,6 +15,7 @@ export type DagNode = {
   resultTypes: string[];
   attrs: [string, string][];
   regions: DagNode[][];
+  regionArgs: number[][];
 };
 
 export type DagValue = {

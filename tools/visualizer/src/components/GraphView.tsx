@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactElement } from 'react';
 import { layoutDag } from '../ir/dag.js';
 import { layoutNest } from '../ir/nest.js';
 import { driftScore, frameAt, linkLowering, linkRewrites, linkSourceLines, planTransition } from '../ir/transition.js';
@@ -7,7 +8,7 @@ import { opLabel } from '../catalog/naming.js';
 import { usePanZoom } from './pan_zoom.js';
 import { useElementSize } from './use_element_size.js';
 import type { Box, Layout, NoteLookup } from '../ir/dag.js';
-import type { Change, Frame, Plan } from '../ir/transition.js';
+import type { Change, Frame, Placement, Plan } from '../ir/transition.js';
 import type { CompileStep, Dag, NestNode, Snapshot } from '../protocol.js';
 
 const EMPTY_LAYOUT: Layout = { width: 0, height: 0, boxes: [], edges: [] };
@@ -168,6 +169,47 @@ export function GraphView({ step }: { step: CompileStep }) {
   const zoom = Math.round(view.k * 100);
   const linked = prepared.after.boxes.some(box => box.note !== '');
 
+  const ordered = [...frame.placements.values()]
+    .sort((a, b) => a.box.depth - b.box.depth || rank(a.box.kind) - rank(b.box.kind));
+  const frames = ordered.filter(placement => CONTAINER_KINDS.has(placement.box.kind));
+  const leaves = ordered.filter(placement => !CONTAINER_KINDS.has(placement.box.kind));
+
+  const drawNode = (placement: Placement): ReactElement => {
+    const line = placement.box.opId === null ? undefined : lines.get(placement.box.opId);
+    return (
+      <g
+        key={placement.box.id}
+        className={[
+          'node',
+          placement.box.kind,
+          placement.change,
+          line === undefined ? '' : 'traceable',
+        ].filter(Boolean).join(' ')}
+        style={{ opacity: placement.opacity }}
+        transform={transformFor(placement)}
+        onClick={() => { if (line !== undefined && !dragged()) actions.focusSource(line); }}
+      >
+        <rect
+          width={placement.width}
+          height={placement.height}
+          rx={placement.box.kind === 'op' ? 6 : 9}
+        />
+        {showsLabel(placement) && <text x={10} y={headerY(placement)}>{placement.box.label}</text>}
+        {showsDetail(placement) && (
+          <text className="detail" x={placement.width - 10} y={headerY(placement)} textAnchor="end">
+            {placement.box.detail}
+          </text>
+        )}
+        {placement.box.note !== '' && !showsDetail(placement) && (
+          <text className="note" x={placement.width - 10} y={headerY(placement)} textAnchor="end">
+            {placement.box.note}
+          </text>
+        )}
+        <title>{tooltipFor(placement.box, line)}</title>
+      </g>
+    );
+  };
+
   return (
     <div className="graph">
       <div className="graph-bar">
@@ -215,51 +257,15 @@ export function GraphView({ step }: { step: CompileStep }) {
         </defs>
 
         <g transform={`translate(${view.tx} ${view.ty}) scale(${view.k})`}>
+          <g className="frames">{frames.map(drawNode)}</g>
+
           <g className="edges">
             {edges.map(edge => (
               <path key={edge.id} d={edge.d} className="edge" style={{ opacity: edge.opacity }} markerEnd="url(#arrow)" />
             ))}
           </g>
 
-          <g className="nodes">
-            {[...frame.placements.values()]
-              .sort((a, b) => a.box.depth - b.box.depth || rank(a.box.kind) - rank(b.box.kind))
-              .map(placement => {
-                const line = placement.box.opId === null ? undefined : lines.get(placement.box.opId);
-                return (
-                  <g
-                    key={placement.box.id}
-                    className={[
-                      'node',
-                      placement.box.kind,
-                      placement.change,
-                      line === undefined ? '' : 'traceable',
-                    ].filter(Boolean).join(' ')}
-                    style={{ opacity: placement.opacity }}
-                    transform={transformFor(placement)}
-                    onClick={() => { if (line !== undefined && !dragged()) actions.focusSource(line); }}
-                  >
-                    <rect
-                      width={placement.width}
-                      height={placement.height}
-                      rx={placement.box.kind === 'op' ? 6 : 9}
-                    />
-                    <text x={10} y={headerY(placement)}>{placement.box.label}</text>
-                    {showsDetail(placement) && (
-                      <text className="detail" x={placement.width - 10} y={headerY(placement)} textAnchor="end">
-                        {placement.box.detail}
-                      </text>
-                    )}
-                    {placement.box.note !== '' && !showsDetail(placement) && (
-                      <text className="note" x={placement.width - 10} y={headerY(placement)} textAnchor="end">
-                        {placement.box.note}
-                      </text>
-                    )}
-                    <title>{tooltipFor(placement.box, line)}</title>
-                  </g>
-                );
-              })}
-          </g>
+          <g className="nodes">{leaves.map(drawNode)}</g>
         </g>
       </svg>
     </div>
@@ -285,6 +291,11 @@ const DETAIL_KINDS = new Set(['region', 'nest', 'nest-block', 'nest-func', 'sour
 const LABEL_CHAR = 6.7;
 const DETAIL_CHAR = 6.1;
 const TEXT_GAP = 18;
+const MIN_LABEL_HEIGHT = 16;
+
+function showsLabel(placement: { box: Box; height: number }): boolean {
+  return placement.box.label !== '' && placement.height >= MIN_LABEL_HEIGHT;
+}
 
 function showsDetail(placement: { box: Box; width: number }): boolean {
   const { box } = placement;

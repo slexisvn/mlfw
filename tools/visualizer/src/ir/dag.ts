@@ -6,7 +6,7 @@ type ElkModule = (new () => ElkEngine) & { default?: new () => ElkEngine };
 export type Box = {
   id: string;
   opId: number | null;
-  kind: 'op' | 'region' | 'arg' | 'output' | 'nest' | 'nest-block' | 'nest-func' | 'source' | 'line';
+  kind: 'op' | 'region' | 'arg' | 'output' | 'port' | 'nest' | 'nest-block' | 'nest-func' | 'source' | 'line';
   label: string;
   detail: string;
   note: string;
@@ -48,6 +48,9 @@ const PILL_HEIGHT = 22;
 const CHAR_WIDTH = 7.1;
 const NODE_PADDING = 26;
 const MIN_NODE_WIDTH = 74;
+const PORT_SIZE = 8;
+const ROOT_ID = 'root';
+const YIELD_OP = 'yield';
 
 const REGION_OPTIONS: Record<string, string> = {
   'elk.algorithm': 'layered',
@@ -58,11 +61,24 @@ const REGION_OPTIONS: Record<string, string> = {
   'elk.spacing.edgeNode': '14',
   'elk.layered.crossingMinimization.semiInteractive': 'true',
   'elk.padding': '[top=26,left=14,bottom=14,right=14]',
+  'elk.portConstraints': 'FIXED_SIDE',
+  'elk.layered.nodePlacement.strategy': 'LINEAR_SEGMENTS',
 };
 
 const ROOT_OPTIONS: Record<string, string> = {
   ...REGION_OPTIONS,
   'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
+};
+
+type ElkEdge = { id: string; sources: string[]; targets: string[]; label: string };
+
+type ElkPort = {
+  id: string;
+  width: number;
+  height: number;
+  x?: number;
+  y?: number;
+  layoutOptions: Record<string, string>;
 };
 
 type ElkNode = {
@@ -72,7 +88,8 @@ type ElkNode = {
   x?: number;
   y?: number;
   children?: ElkNode[];
-  edges?: unknown[];
+  ports?: ElkPort[];
+  edges?: ElkEdge[];
   layoutOptions?: Record<string, string>;
 };
 
@@ -96,7 +113,18 @@ export function argId(valueId: number): string {
   return `arg${valueId}`;
 }
 
-export function buildLayoutRequest(dag: Dag, note: NoteLookup = NO_NOTE): { graph: ElkNode; meta: Map<string, Box> } {
+export function inPortId(valueId: number): string {
+  return `pin${valueId}`;
+}
+
+export function outPortId(valueId: number): string {
+  return `pout${valueId}`;
+}
+
+export function buildLayoutRequest(
+  dag: Dag,
+  note: NoteLookup = NO_NOTE,
+): { graph: ElkNode; meta: Map<string, Box>; edges: Edge[] } {
   const meta = new Map<string, Box>();
   const producers = new Map<number, number>();
   const valueById = new Map<number, DagValue>();
@@ -105,6 +133,67 @@ export function buildLayoutRequest(dag: Dag, note: NoteLookup = NO_NOTE): { grap
     valueById.set(value.id, value);
     if (value.producer !== null) producers.set(value.id, value.producer);
   }
+
+  const funcArgs = new Set(dag.args.map(arg => arg.id));
+  const typeOf = (valueId: number): string => valueById.get(valueId)?.type ?? '';
+  const nameOf = (valueId: number): string => valueById.get(valueId)?.name ?? '';
+
+  const inPorts = new Set<number>();
+  const outPorts = new Set<number>();
+  const portsOf = new Map<string, ElkPort[]>();
+
+  const addPort = (owner: string, portId: string, valueId: number, side: string, depth: number): void => {
+    const port: ElkPort = { id: portId, width: PORT_SIZE, height: PORT_SIZE, layoutOptions: { 'elk.port.side': side } };
+    const existing = portsOf.get(owner);
+    if (existing) existing.push(port);
+    else portsOf.set(owner, [port]);
+    meta.set(portId, {
+      id: portId, opId: null, kind: 'port', label: nameOf(valueId), detail: typeOf(valueId), note: '',
+      x: 0, y: 0, width: PORT_SIZE, height: PORT_SIZE, depth,
+    });
+  };
+
+  const registerPorts = (nodes: readonly DagNode[], depth: number): void => {
+    for (const node of nodes) {
+      if (node.regions.some(region => region.length > 0)) {
+        const owner = nodeId(node.id);
+        for (const valueId of node.regionArgs.flat()) {
+          inPorts.add(valueId);
+          addPort(owner, inPortId(valueId), valueId, 'NORTH', depth + 1);
+        }
+        for (const valueId of node.results) {
+          outPorts.add(valueId);
+          addPort(owner, outPortId(valueId), valueId, 'SOUTH', depth + 1);
+        }
+      }
+      for (const region of node.regions) registerPorts(region, depth + 1);
+    }
+  };
+
+  registerPorts(dag.nodes, 0);
+
+  const sourceOf = (valueId: number): string | null => {
+    if (inPorts.has(valueId)) return inPortId(valueId);
+    if (outPorts.has(valueId)) return outPortId(valueId);
+    const producer = producers.get(valueId);
+    if (producer !== undefined) return nodeId(producer);
+    return funcArgs.has(valueId) ? argId(valueId) : null;
+  };
+
+  const byOwner = new Map<string, ElkEdge[]>();
+  const seenEdges = new Set<string>();
+  const edges: Edge[] = [];
+
+  const addEdge = (owner: string, from: string, to: string, label: string): void => {
+    const id = `${from}->${to}`;
+    if (seenEdges.has(id)) return;
+    seenEdges.add(id);
+    const existing = byOwner.get(owner);
+    const elkEdge: ElkEdge = { id, sources: [from], targets: [to], label };
+    if (existing) existing.push(elkEdge);
+    else byOwner.set(owner, [elkEdge]);
+    edges.push({ id, from, to, label });
+  };
 
   const argNodes: ElkNode[] = dag.args.map(arg => {
     const label = `${arg.name}: ${shortType(arg.type)}`;
@@ -115,33 +204,24 @@ export function buildLayoutRequest(dag: Dag, note: NoteLookup = NO_NOTE): { grap
     return { id: argId(arg.id), width: widthFor(label, 60), height: PILL_HEIGHT };
   });
 
-  const edges: { id: string; sources: string[]; targets: string[]; label: string }[] = [];
-  const seenEdges = new Set<string>();
-
-  const addEdge = (from: string, to: string, label: string): void => {
-    const id = `${from}->${to}`;
-    if (seenEdges.has(id)) return;
-    seenEdges.add(id);
-    edges.push({ id, sources: [from], targets: [to], label });
-  };
-
-  const convert = (node: DagNode, depth: number, enclosing: string | null): ElkNode => {
+  const convert = (node: DagNode, depth: number, container: string): ElkNode => {
     const id = nodeId(node.id);
     const hasRegions = node.regions.some(region => region.length > 0);
     const detail = node.resultTypes.map(shortType).join(', ');
     const label = node.opName;
-
-    for (const operand of node.operands) {
-      const producer = producers.get(operand);
-      const value = valueById.get(operand);
-      const edgeLabel = value ? value.name : '';
-      if (producer !== undefined) addEdge(nodeId(producer), id, edgeLabel);
-      else if (valueById.has(operand) && dag.args.some(a => a.id === operand)) addEdge(argId(operand), id, edgeLabel);
-      else if (enclosing) addEdge(enclosing, id, edgeLabel);
-    }
-
     const badge = note(node.id);
     const boxWidth = widthFor(badge ? `${label}  ${badge}` : label);
+
+    const blockArgs = node.regionArgs.flat();
+    const feedsPorts = hasRegions
+      && blockArgs.length === node.operands.length
+      && blockArgs.every((blockArg, index) => typeOf(blockArg) === typeOf(node.operands[index]));
+
+    node.operands.forEach((operand, index) => {
+      const from = sourceOf(operand);
+      if (from === null) return;
+      addEdge(container, from, feedsPorts ? inPortId(blockArgs[index]) : id, nameOf(operand));
+    });
 
     if (!hasRegions) {
       meta.set(id, {
@@ -156,17 +236,27 @@ export function buildLayoutRequest(dag: Dag, note: NoteLookup = NO_NOTE): { grap
       for (const inner of region) children.push(convert(inner, depth + 1, id));
     }
 
+    const yielded = node.regions.flat().filter(inner => inner.opName === YIELD_OP);
+    const yieldOp = yielded.length === 1 ? yielded[0] : null;
+    if (yieldOp
+      && yieldOp.operands.length === node.results.length
+      && yieldOp.operands.every((operand, index) => typeOf(operand) === node.resultTypes[index])) {
+      node.results.forEach((result, index) => {
+        addEdge(id, nodeId(yieldOp.id), outPortId(result), nameOf(yieldOp.operands[index]));
+      });
+    }
+
     meta.set(id, {
       id, opId: node.id, kind: 'region', label, detail, note: badge,
       x: 0, y: 0, width: 0, height: 0, depth,
     });
 
-    return { id, children, layoutOptions: REGION_OPTIONS };
+    return { id, children, ports: portsOf.get(id), edges: byOwner.get(id), layoutOptions: REGION_OPTIONS };
   };
 
   const opNodes = [...dag.nodes]
     .sort((a, b) => a.id - b.id)
-    .map(node => convert(node, 0, null));
+    .map(node => convert(node, 0, ROOT_ID));
 
   const outputs: ElkNode[] = [];
   dag.returns.forEach((valueId, index) => {
@@ -178,18 +268,19 @@ export function buildLayoutRequest(dag: Dag, note: NoteLookup = NO_NOTE): { grap
       x: 0, y: 0, width: widthFor(label, 70), height: PILL_HEIGHT, depth: 0,
     });
     outputs.push({ id, width: widthFor(label, 70), height: PILL_HEIGHT });
-    const producer = producers.get(valueId);
-    if (producer !== undefined) addEdge(nodeId(producer), id, '');
+    const from = sourceOf(valueId);
+    if (from !== null) addEdge(ROOT_ID, from, id, '');
   });
 
   return {
     graph: {
-      id: 'root',
+      id: ROOT_ID,
       layoutOptions: ROOT_OPTIONS,
       children: [...argNodes, ...opNodes, ...outputs],
-      edges,
+      edges: byOwner.get(ROOT_ID) ?? [],
     },
     meta,
+    edges,
   };
 }
 
@@ -208,7 +299,7 @@ export function layoutDag(dag: Dag, note: NoteLookup = NO_NOTE): Promise<Layout>
 }
 
 async function runLayout(dag: Dag, note: NoteLookup): Promise<Layout> {
-  const { graph, meta } = buildLayoutRequest(dag, note);
+  const { graph, meta, edges } = buildLayoutRequest(dag, note);
   const laid = await (await elk()).layout(graph as never) as ElkNode & { width?: number; height?: number };
 
   const boxes: Box[] = [];
@@ -219,13 +310,14 @@ async function runLayout(dag: Dag, note: NoteLookup): Promise<Layout> {
     if (info) {
       boxes.push({ ...info, x, y, width: node.width ?? info.width, height: node.height ?? info.height });
     }
+    for (const port of node.ports ?? []) {
+      const portInfo = meta.get(port.id);
+      if (portInfo) boxes.push({ ...portInfo, x: x + (port.x ?? 0), y: y + (port.y ?? 0) });
+    }
     for (const child of node.children ?? []) place(child, x, y);
   };
 
   for (const child of laid.children ?? []) place(child, 0, 0);
-
-  const edges: Edge[] = (graph.edges as { id: string; sources: string[]; targets: string[]; label: string }[])
-    .map(edge => ({ id: edge.id, from: edge.sources[0], to: edge.targets[0], label: edge.label }));
 
   return {
     width: laid.width ?? 0,

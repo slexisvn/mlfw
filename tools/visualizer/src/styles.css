@@ -390,6 +390,7 @@ kbd {
 .graph-svg .node.arg rect, .graph-svg .node.output rect { fill: #16202c; stroke: #2f4256; }
 .graph-svg .node.arg text, .graph-svg .node.output text { fill: var(--ink-dim); }
 .graph-svg .node.region rect { fill: #171d2c66; stroke: var(--accent); stroke-dasharray: 4 3; }
+.graph-svg .node.port rect { fill: var(--accent); stroke: var(--accent); }
 .graph-svg .node.region text { fill: var(--accent); font-size: 10px; letter-spacing: 0.06em; }
 .graph-svg .node.added rect { fill: #14312a; stroke: var(--added); }
 .graph-svg .node.removed rect { fill: #33191c; stroke: var(--removed); }
