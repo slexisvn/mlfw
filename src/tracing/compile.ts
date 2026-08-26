@@ -17,7 +17,6 @@ import { cloneGraphModule } from '../compiler/ir/graph/module.js';
 import {
   BASELINE, candidateByName, gateCacheKey, graphSignature, optimizationCandidates, selectWinner,
 } from '../compiler/pipeline/opt_gate.js';
-
 import type { ArgIndexBound } from '../util/index_bounds.js';
 import type { CandidateMeasurement, GateDecision, GateTarget } from '../compiler/pipeline/opt_gate.js';
 import type { Tensor } from '../tensor/core/tensor.js';
