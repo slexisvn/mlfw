@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import { DEFAULT_OPTIONS } from './protocol.js';
 import { EXAMPLES } from './examples/index.js';
-import { readSession, shareUrl, writeSession } from './session.js';
+import { readSession, writeSession } from './session.js';
 import type { CompileOptions, CompileResponse, CompileStep, WorkerRequest, WorkerRequestDraft, WorkerResponse } from './protocol.js';
 import { lessonById } from './catalog/lessons.js';
 import type { Lesson } from './catalog/lessons.js';
@@ -341,10 +341,6 @@ export const actions = {
     });
   },
 
-  expandAll(): void {
-    set({ collapsed: new Set(), playing: false });
-  },
-
   toggleOnlyChanged(): void {
     const next = { ...state, onlyChanged: !state.onlyChanged };
     set({ onlyChanged: next.onlyChanged, selected: nearestVisible(next, state.selected), playing: false });
@@ -405,10 +401,6 @@ export const actions = {
 
   focusSource(line: number | null): void {
     set({ focusLine: line });
-  },
-
-  share(): string {
-    return shareUrl({ source: state.source, exampleId: state.exampleId, options: state.options });
   },
 
   togglePass(name: string): void {

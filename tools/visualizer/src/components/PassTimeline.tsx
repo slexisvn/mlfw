@@ -15,7 +15,6 @@ export function PassTimeline() {
   const steps = useStore(visibleSteps);
   const runs = useStore(passRunCount);
   const disabled = useStore(disabledPasses);
-  const folded = useStore(s => s.collapsed.size);
   const activeRow = useRef<HTMLButtonElement>(null);
 
   const ordinals = useMemo(() => runOrdinals(result ? result.steps : []), [result]);
@@ -71,11 +70,6 @@ export function PassTimeline() {
         <span>
           {runs.changed} of {runs.total} pass runs changed the IR · {result.totalMs.toFixed(0)}ms
         </span>
-        {folded > 0 && (
-          <button onClick={() => actions.expandAll()} title="open every folded pass at once">
-            unfold {folded}
-          </button>
-        )}
         <button
           onClick={() => actions.toggleOnlyChanged()}
           title={onlyChanged

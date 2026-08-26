@@ -34,15 +34,11 @@ const BACKWARD_MODES: { id: BackwardMode; label: string; note: string }[] = [
   },
 ];
 
-const COPY_RESET_MS = 1600;
-
 export function Controls() {
   const options = useStore(s => s.options);
   const exampleId = useStore(s => s.exampleId);
   const status = useStore(s => s.status);
   const stale = useStore(isStale);
-  const hasResult = useStore(s => s.result !== null);
-  const [copied, setCopied] = useState(false);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const example = EXAMPLES.find(e => e.id === exampleId);
   const edited = exampleId === '';
@@ -56,12 +52,6 @@ export function Controls() {
     ...TOGGLES.filter(toggle => options[toggle.key] as boolean).map(toggle => toggle.label),
     off > 0 ? `${off} ${off === 1 ? 'pass' : 'passes'} off` : null,
   ].filter(part => part !== null).join(' · ');
-
-  const copyLink = async (): Promise<void> => {
-    await navigator.clipboard.writeText(actions.share());
-    setCopied(true);
-    setTimeout(() => setCopied(false), COPY_RESET_MS);
-  };
 
   return (
     <div className="controls">
@@ -174,12 +164,6 @@ export function Controls() {
               </button>
             ))}
           </div>
-        )}
-
-        {hasResult && (
-          <button className="share" onClick={() => { void copyLink(); }}>
-            {copied ? 'link copied' : 'copy a link to this'}
-          </button>
         )}
       </div>
     </div>
