@@ -49,16 +49,20 @@ const CHAR_WIDTH = 7.1;
 const NODE_PADDING = 26;
 const MIN_NODE_WIDTH = 74;
 
-const LAYOUT_OPTIONS: Record<string, string> = {
+const REGION_OPTIONS: Record<string, string> = {
   'elk.algorithm': 'layered',
   'elk.direction': 'DOWN',
   'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
   'elk.layered.spacing.nodeNodeBetweenLayers': '34',
   'elk.spacing.nodeNode': '16',
   'elk.spacing.edgeNode': '14',
-  'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
   'elk.layered.crossingMinimization.semiInteractive': 'true',
   'elk.padding': '[top=26,left=14,bottom=14,right=14]',
+};
+
+const ROOT_OPTIONS: Record<string, string> = {
+  ...REGION_OPTIONS,
+  'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
 };
 
 type ElkNode = {
@@ -157,7 +161,7 @@ export function buildLayoutRequest(dag: Dag, note: NoteLookup = NO_NOTE): { grap
       x: 0, y: 0, width: 0, height: 0, depth,
     });
 
-    return { id, children, layoutOptions: LAYOUT_OPTIONS };
+    return { id, children, layoutOptions: REGION_OPTIONS };
   };
 
   const opNodes = [...dag.nodes]
@@ -181,7 +185,7 @@ export function buildLayoutRequest(dag: Dag, note: NoteLookup = NO_NOTE): { grap
   return {
     graph: {
       id: 'root',
-      layoutOptions: LAYOUT_OPTIONS,
+      layoutOptions: ROOT_OPTIONS,
       children: [...argNodes, ...opNodes, ...outputs],
       edges,
     },
