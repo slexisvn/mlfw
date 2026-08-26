@@ -391,9 +391,13 @@ export class Autotuner {
       blockName: report.blockName,
       round: report.round,
       measured: report.measured,
-      scores: report.candidates.map(candidate => ({ sketch: candidate.sketchName, score: candidate.score })),
+      scores: report.candidates.map(candidate => ({
+        sketch: candidate.sketchName, score: candidate.score, params: candidate.params
+      })),
       bestSketch: report.best ? report.best.sketchName : null,
+      bestParams: report.best ? report.best.params : null,
       bestScore: report.best ? report.best.score : null,
+      bestMedianMs: report.best ? report.best.medianMs ?? null : null,
       level: TraceLevel.DEBUG,
     });
   }

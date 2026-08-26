@@ -18,11 +18,12 @@ export type BenchmarkResult = { medianMs: number; minMs: number };
 export type BenchmarkRunnerLike = { run(primFunc: PrimFunc): BenchmarkResult | null };
 export type CostModelLike = { score(primFunc: PrimFunc): number };
 export type WarnFn = (phase: string, subject: string, err: unknown) => void;
+export type TimedCandidate = ScoredCandidate & { medianMs?: number | null; minMs?: number | null };
 export type RoundReport = {
   blockName: string;
   round: number;
   candidates: readonly ScoredCandidate[];
-  best: ScoredCandidate | null;
+  best: TimedCandidate | null;
   measured: boolean;
 };
 export type RoundObserver = (report: RoundReport) => void;

@@ -822,31 +822,86 @@ kbd {
 .compare button.unpin { color: var(--ink-dim); }
 
 .tuning { padding: 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
+
+.tuning-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  padding: 8px 12px;
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+.tuning-key > span { display: inline-flex; align-items: center; gap: 6px; }
+
+.tuning .key.best, .tuning .key.other {
+  width: 7px;
+  height: 7px;
+  border: 0;
+  border-radius: 50%;
+  margin: 0;
+}
+.tuning .key.best { background: var(--changed); }
+.tuning .key.other { background: #4f7fd0; opacity: 0.65; }
+
+.tuning-plot { display: grid; grid-template-columns: 58px 1fr; gap: 8px; }
+.tuning-scale {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-end;
+  padding: 2px 0;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-dim);
+}
+.tuning-scale-dir { font-family: inherit; opacity: 0.8; }
+
 .tuning-chart {
   position: relative;
   width: 100%;
-  height: 72px;
+  height: 84px;
   background: var(--panel-2);
   border: 1px solid var(--line);
   border-radius: 6px;
-  padding: 8px 0;
-  box-sizing: border-box;
 }
 .tuning-chart .candidate {
   position: absolute;
-  width: 5px;
-  height: 5px;
-  margin: -2.5px 0 0 -2.5px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: #4f7fd0;
   opacity: 0.65;
+  transform: translate(-50%, 50%);
 }
 .tuning-chart .candidate.best { background: var(--changed); opacity: 1; }
+.tuning-round { position: absolute; top: 5px; bottom: 5px; width: 1px; background: var(--line); }
+
+.tuning-axis { margin: 5px 0 0 66px; font-size: 11px; color: var(--ink-dim); }
+.tuning-note { margin: 4px 0 0; font-size: 11px; color: var(--ink-dim); }
+.tuning-note code, .tuning .memory-legend code {
+  font-family: var(--mono);
+  color: var(--ink);
+}
 .tuning-winner { color: var(--changed); font-family: var(--mono); font-size: 11px; }
 .tuning-flat { color: var(--ink-dim); }
 
 .tuning-head { align-items: baseline; }
 .tuning-head code { text-transform: none; letter-spacing: 0; font-family: var(--mono); color: var(--ink); }
+
+.tuning-tied { display: flex; flex-direction: column; gap: 4px; }
+.tuning-tied-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.4fr) 96px 132px minmax(120px, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+.tuning-tied-row code { font-family: var(--mono); color: var(--ink); }
 
 .lesson {
   border: 1px solid var(--line);

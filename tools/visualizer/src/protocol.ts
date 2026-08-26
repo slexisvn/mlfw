@@ -69,14 +69,20 @@ export type BufferLifetime = {
   sharesWith: string | null;
 };
 
+export type TuningParams = Record<string, number | number[]>;
+
+export type TuningCandidate = { sketch: string; score: number; params: TuningParams };
+
 export type TuningRound = {
   func: string;
   blockName: string;
   round: number;
   measured: boolean;
-  scores: { sketch: string; score: number }[];
+  scores: TuningCandidate[];
   bestSketch: string | null;
+  bestParams: TuningParams | null;
   bestScore: number | null;
+  bestMedianMs: number | null;
 };
 
 export type MemoryPlan = {

@@ -5,7 +5,7 @@ import { captureBaselines, primitiveSteps } from './schedule_steps.js';
 import { levelLabel } from '../catalog/naming.js';
 import { REPLAYABLE_PASSES } from '../catalog/passes.js';
 import type { PrimFunc } from 'mlfw/compiler/ir/tensor/nodes.js';
-import type { BufferLifetime, CompileStep, IRLevelName, Kernel, MemoryPlan, PassOutcome, Snapshot, TraceEventLite, TuningRound } from '../protocol.js';
+import type { BufferLifetime, CompileStep, IRLevelName, Kernel, MemoryPlan, PassOutcome, Snapshot, TraceEventLite, TuningCandidate, TuningParams, TuningRound } from '../protocol.js';
 
 const OUTCOMES: Record<number, PassOutcome> = {
   [PassResult.UNCHANGED]: 'unchanged',
@@ -196,9 +196,13 @@ export class CompileRecorder {
         blockName: String(event.blockName),
         round: Number(event.round),
         measured: event.measured === true,
-        scores: event.scores as { sketch: string; score: number }[],
+        scores: event.scores as TuningCandidate[],
         bestSketch: event.bestSketch === null ? null : String(event.bestSketch),
+        bestParams: (event.bestParams ?? null) as TuningParams | null,
         bestScore: event.bestScore === null ? null : Number(event.bestScore),
+        bestMedianMs: event.bestMedianMs === null || event.bestMedianMs === undefined
+          ? null
+          : Number(event.bestMedianMs),
       });
     }
     return rounds;
