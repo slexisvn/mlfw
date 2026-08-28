@@ -3,8 +3,6 @@ import { DEFAULT_OPTIONS } from './protocol.js';
 import { EXAMPLES } from './examples/index.js';
 import { readSession, writeSession } from './session.js';
 import type { CompileOptions, CompileResponse, CompileStep, WorkerRequest, WorkerRequestDraft, WorkerResponse } from './protocol.js';
-import { lessonById } from './catalog/lessons.js';
-import type { Lesson } from './catalog/lessons.js';
 import type { StageTab } from './catalog/glossary.js';
 
 const REDUCED_MOTION = typeof matchMedia === 'function'
@@ -18,7 +16,6 @@ export type Pane = 'source' | 'timeline' | 'stage';
 
 export type Failure = { error: string; errorPhase: string | null };
 export type Baseline = { response: CompileResponse; options: CompileOptions; source: string };
-export type LessonProgress = { id: string; at: number; picked: number | null };
 
 export type State = {
   source: string;
@@ -40,7 +37,6 @@ export type State = {
   collapsed: ReadonlySet<number>;
   pane: Pane;
   focusLine: number | null;
-  lesson: LessonProgress | null;
 };
 
 const worker = new Worker(new URL('./worker/compile.worker.ts', import.meta.url), { type: 'module' });
@@ -85,7 +81,6 @@ let state: State = {
   collapsed: new Set(),
   pane: 'source',
   focusLine: null,
-  lesson: null,
 };
 
 const listeners = new Set<() => void>();
@@ -148,22 +143,29 @@ export function isCollapsed(s: State, index: number): boolean {
   return s.collapsed.has(index);
 }
 
+function derived<T>(deps: (s: State) => readonly unknown[], compute: (s: State) => T): (s: State) => T {
+  let last: readonly unknown[] | null = null;
+  let value: T;
+  return (s: State) => {
+    const next = deps(s);
+    if (last !== null && last.length === next.length && last.every((dep, i) => dep === next[i])) return value;
+    last = next;
+    value = compute(s);
+    return value;
+  };
+}
+
 function collapsedByDefault(response: CompileResponse): Set<number> {
   return new Set(family(response).childrenOf.keys());
 }
 
-const visibleCache = new WeakMap<State, CompileStep[]>();
-
-export function visibleSteps(s: State): CompileStep[] {
-  const cached = visibleCache.get(s);
-  if (cached) return cached;
-
-  const computed = !s.result ? [] : s.result.steps.filter(step => shown(s, step));
-  const steps = computed.length > 0 || !s.result ? computed : s.result.steps;
-
-  visibleCache.set(s, steps);
-  return steps;
-}
+export const visibleSteps = derived(
+  s => [s.result, s.onlyChanged, s.collapsed],
+  (s): CompileStep[] => {
+    const computed = !s.result ? [] : s.result.steps.filter(step => shown(s, step));
+    return computed.length > 0 || !s.result ? computed : s.result.steps;
+  },
+);
 
 function quiet(s: State, step: CompileStep | undefined): boolean {
   return !!step && s.onlyChanged && step.outcome === 'unchanged' && RUNS.has(step.kind);
@@ -222,15 +224,10 @@ export function sourceLines(s: State): readonly number[] {
 
 export type DisabledPass = { name: string; phase: string };
 
-const disabledCache = new WeakMap<State, DisabledPass[]>();
-
-export function disabledPasses(s: State): DisabledPass[] {
-  const cached = disabledCache.get(s);
-  if (cached) return cached;
-  const entries = s.options.disabledPasses.map(name => ({ name, phase: s.passPhases[name] ?? 'turned off' }));
-  disabledCache.set(s, entries);
-  return entries;
-}
+export const disabledPasses = derived(
+  s => [s.options.disabledPasses, s.passPhases],
+  (s): DisabledPass[] => s.options.disabledPasses.map(name => ({ name, phase: s.passPhases[name] ?? 'turned off' })),
+);
 
 function nearestVisible(s: State, index: number): number {
   const steps = visibleSteps(s);
@@ -250,36 +247,6 @@ function phasesOf(response: CompileResponse, previous: Record<string, string>): 
   return merged;
 }
 
-function focusStep(pass: string, tab: StageTab): void {
-  const result = state.result;
-  if (!result) return;
-  const step = result.steps.find(candidate => candidate.pass === pass);
-  set({ tab, pane: 'stage' });
-  if (!step) return;
-  if (family(result).childrenOf.has(step.index)) {
-    const collapsed = new Set(state.collapsed);
-    collapsed.delete(step.index);
-    set({ collapsed });
-  }
-  actions.select(step.index);
-}
-
-async function applyBeat(lesson: Lesson, at: number): Promise<void> {
-  const beat = lesson.beats[at];
-  const patch: Partial<State> = { lesson: { id: lesson.id, at, picked: null } };
-  if (beat.source !== undefined) {
-    patch.source = beat.source;
-    patch.exampleId = '';
-  }
-  if (beat.options) patch.options = { ...state.options, ...beat.options };
-  set(patch);
-  persist();
-
-  if (beat.run) await actions.run();
-  if (beat.focus) focusStep(beat.focus.pass, beat.focus.tab);
-  else if (beat.tab) set({ tab: beat.tab, pane: 'stage' });
-}
-
 export const actions = {
   async init(): Promise<void> {
     const response = await ask({ kind: 'init' }) as { globals: string[] };
@@ -287,14 +254,14 @@ export const actions = {
   },
 
   setSource(source: string): void {
-    set({ source, exampleId: '' });
+    set({ source, exampleId: '', focusLine: null });
     persist();
   },
 
   loadExample(id: string): void {
     const example = EXAMPLES.find(e => e.id === id);
     if (!example) return;
-    set({ source: example.source, exampleId: id });
+    set({ source: example.source, exampleId: id, focusLine: null });
     persist();
   },
 
@@ -340,28 +307,6 @@ export const actions = {
     set({ onlyChanged: next.onlyChanged, selected: nearestVisible(next, state.selected), playing: false });
   },
 
-  async startLesson(id: string): Promise<void> {
-    const lesson = lessonById(id);
-    if (!lesson) return;
-    await applyBeat(lesson, 0);
-  },
-
-  endLesson(): void {
-    set({ lesson: null });
-  },
-
-  async gotoBeat(at: number): Promise<void> {
-    const progress = state.lesson;
-    const lesson = progress ? lessonById(progress.id) : null;
-    if (!lesson) return;
-    await applyBeat(lesson, Math.max(0, Math.min(lesson.beats.length - 1, at)));
-  },
-
-  pick(choice: number): void {
-    if (!state.lesson) return;
-    set({ lesson: { ...state.lesson, picked: choice } });
-  },
-
   pinBaseline(): void {
     if (!state.result) return;
     set({ baseline: { response: state.result, options: state.ranOptions ?? state.options, source: state.ranSource ?? state.source } });
@@ -394,7 +339,7 @@ export const actions = {
   },
 
   focusSource(line: number | null): void {
-    set({ focusLine: line });
+    if (state.focusLine !== line) set({ focusLine: line });
   },
 
   togglePass(name: string): void {

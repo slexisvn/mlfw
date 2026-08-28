@@ -77,11 +77,11 @@ export function stackLocationSource({ match, lineOffset = 0 }: StackLocationOpts
 
 type StackLimited = { stackTraceLimit?: number };
 
-export function installStackLocations(opts: StackLocationOpts): () => void {
+export function installLocationSource(source: LocationSource, frameLimit?: number): () => void {
   const limited = Error as unknown as StackLimited;
   const previousLimit = limited.stackTraceLimit;
-  if (opts.frameLimit !== undefined) limited.stackTraceLimit = opts.frameLimit;
-  const previousSource = setDefaultLocationSource(stackLocationSource(opts));
+  if (frameLimit !== undefined) limited.stackTraceLimit = frameLimit;
+  const previousSource = setDefaultLocationSource(source);
   let active = true;
 
   return () => {
@@ -90,4 +90,8 @@ export function installStackLocations(opts: StackLocationOpts): () => void {
     setDefaultLocationSource(previousSource);
     limited.stackTraceLimit = previousLimit;
   };
+}
+
+export function installStackLocations(opts: StackLocationOpts): () => void {
+  return installLocationSource(stackLocationSource(opts), opts.frameLimit);
 }

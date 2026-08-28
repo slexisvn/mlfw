@@ -9,7 +9,6 @@ export type Box = {
   kind: 'op' | 'region' | 'arg' | 'output' | 'port' | 'nest' | 'nest-block' | 'nest-func' | 'source' | 'line';
   label: string;
   detail: string;
-  note: string;
   line: number | null;
   x: number;
   y: number;
@@ -98,10 +97,6 @@ function widthFor(label: string, min = MIN_NODE_WIDTH): number {
   return Math.max(min, Math.round(label.length * CHAR_WIDTH) + NODE_PADDING);
 }
 
-export type NoteLookup = (node: DagNode) => string;
-
-const NO_NOTE: NoteLookup = () => '';
-
 function shortType(type: string): string {
   return type.replace(/^tensor</, '').replace(/>$/, '');
 }
@@ -122,10 +117,7 @@ export function outPortId(valueId: number): string {
   return `pout${valueId}`;
 }
 
-export function buildLayoutRequest(
-  dag: Dag,
-  note: NoteLookup = NO_NOTE,
-): { graph: ElkNode; meta: Map<string, Box>; edges: Edge[] } {
+export function buildLayoutRequest(dag: Dag): { graph: ElkNode; meta: Map<string, Box>; edges: Edge[] } {
   const meta = new Map<string, Box>();
   const producers = new Map<number, number>();
   const valueById = new Map<number, DagValue>();
@@ -149,7 +141,7 @@ export function buildLayoutRequest(
     if (existing) existing.push(port);
     else portsOf.set(owner, [port]);
     meta.set(portId, {
-      id: portId, opId: null, kind: 'port', label: nameOf(valueId), detail: typeOf(valueId), note: '', line: null,
+      id: portId, opId: null, kind: 'port', label: nameOf(valueId), detail: typeOf(valueId), line: null,
       x: 0, y: 0, width: PORT_SIZE, height: PORT_SIZE, depth,
     });
   };
@@ -199,7 +191,7 @@ export function buildLayoutRequest(
   const argNodes: ElkNode[] = dag.args.map(arg => {
     const label = `${arg.name}: ${shortType(arg.type)}`;
     meta.set(argId(arg.id), {
-      id: argId(arg.id), opId: null, kind: 'arg', label, detail: arg.type, note: '', line: null,
+      id: argId(arg.id), opId: null, kind: 'arg', label, detail: arg.type, line: null,
       x: 0, y: 0, width: widthFor(label, 60), height: PILL_HEIGHT, depth: 0,
     });
     return { id: argId(arg.id), width: widthFor(label, 60), height: PILL_HEIGHT };
@@ -210,9 +202,8 @@ export function buildLayoutRequest(
     const hasRegions = node.regions.some(region => region.length > 0);
     const detail = node.resultTypes.map(shortType).join(', ');
     const label = node.opName;
-    const badge = note(node);
     const line = node.lines.length > 0 ? node.lines[0] : null;
-    const boxWidth = widthFor(badge ? `${label}  ${badge}` : label);
+    const boxWidth = widthFor(label);
 
     const blockArgs = node.regionArgs.flat();
     const feedsPorts = hasRegions
@@ -227,7 +218,7 @@ export function buildLayoutRequest(
 
     if (!hasRegions) {
       meta.set(id, {
-        id, opId: node.id, kind: 'op', label, detail, note: badge, line,
+        id, opId: node.id, kind: 'op', label, detail, line,
         x: 0, y: 0, width: boxWidth, height: NODE_HEIGHT, depth,
       });
       return { id, width: boxWidth, height: NODE_HEIGHT };
@@ -249,7 +240,7 @@ export function buildLayoutRequest(
     }
 
     meta.set(id, {
-      id, opId: node.id, kind: 'region', label, detail, note: badge, line,
+      id, opId: node.id, kind: 'region', label, detail, line,
       x: 0, y: 0, width: 0, height: 0, depth,
     });
 
@@ -266,7 +257,7 @@ export function buildLayoutRequest(
     const label = value ? `return ${value.name}` : 'return';
     const id = `out${index}`;
     meta.set(id, {
-      id, opId: null, kind: 'output', label, detail: value ? value.type : '', note: '', line: null,
+      id, opId: null, kind: 'output', label, detail: value ? value.type : '', line: null,
       x: 0, y: 0, width: widthFor(label, 70), height: PILL_HEIGHT, depth: 0,
     });
     outputs.push({ id, width: widthFor(label, 70), height: PILL_HEIGHT });
@@ -289,19 +280,19 @@ export function buildLayoutRequest(
 const cache = new WeakMap<Dag, Promise<Layout>>();
 let queue: Promise<unknown> = Promise.resolve();
 
-export function layoutDag(dag: Dag, note: NoteLookup = NO_NOTE): Promise<Layout> {
+export function layoutDag(dag: Dag): Promise<Layout> {
   const cached = cache.get(dag);
   if (cached) return cached;
 
-  const settled = () => runLayout(dag, note);
+  const settled = () => runLayout(dag);
   const pending = queue.then(settled, settled);
   queue = pending.then(() => undefined, () => undefined);
   cache.set(dag, pending);
   return pending;
 }
 
-async function runLayout(dag: Dag, note: NoteLookup): Promise<Layout> {
-  const { graph, meta, edges } = buildLayoutRequest(dag, note);
+async function runLayout(dag: Dag): Promise<Layout> {
+  const { graph, meta, edges } = buildLayoutRequest(dag);
   const laid = await (await elk()).layout(graph as never) as ElkNode & { width?: number; height?: number };
 
   const boxes: Box[] = [];

@@ -5,7 +5,7 @@ import {
   formatLocation, parseLocation, locationSites, locationNames, primarySite,
   LocationParseError,
 } from '../../../src/compiler/ir/location.js';
-import { parseStackFrame, stackLocationSource, installStackLocations, currentLocation } from '../../../src/compiler/ir/loc_source.js';
+import { parseStackFrame, stackLocationSource, installLocationSource, installStackLocations, currentLocation } from '../../../src/compiler/ir/loc_source.js';
 
 describe('fileLocation', () => {
   it('returns the same object for the same file, line and column', () => {
@@ -215,6 +215,31 @@ describe('stackLocationSource', () => {
     const plain = stackLocationSource({ match: file => file.includes('location.test.js') });
     expect(primarySite(plain()).line - primarySite(shifted()).line).toBe(2);
     expect(stackLocationSource({ match: file => file.includes('location.test.js'), lineOffset: 100000 })()).toBeNull();
+  });
+});
+
+describe('installLocationSource', () => {
+  it('installs any source and restores the previous one', () => {
+    const outer = fileLocation('outer.js', 1, 1);
+    const inner = fileLocation('inner.js', 2, 1);
+    const restoreOuter = installLocationSource(() => outer);
+    try {
+      const restoreInner = installLocationSource(() => inner);
+      expect(primarySite(currentLocation()).file).toBe('inner.js');
+      restoreInner();
+      expect(primarySite(currentLocation()).file).toBe('outer.js');
+    } finally {
+      restoreOuter();
+    }
+    expect(currentLocation()).toBeNull();
+  });
+
+  it('raises the stack limit only while installed', () => {
+    const before = Error.stackTraceLimit;
+    const restore = installLocationSource(() => null, before + 25);
+    expect(Error.stackTraceLimit).toBe(before + 25);
+    restore();
+    expect(Error.stackTraceLimit).toBe(before);
   });
 });
 

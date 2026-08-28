@@ -1,10 +1,10 @@
 import * as mlfw from 'mlfw/index.js';
-import { lineFromStack, MODEL_SOURCE_URL } from './source_map.js';
+import { lineFromStack, MODEL_SOURCE_URL, recordSourceLocations } from './source_map.js';
+import { isLayerClass, siteRecording } from './layer_sites.js';
 
 export type ModelRun = {
   model: unknown;
   inputs: unknown[];
-  baseLine: number;
 };
 
 const RUN_HINT = 'call run(model, inputs) at the end of your code, for example: run(model, [x])';
@@ -14,12 +14,14 @@ export function frameworkGlobals(): string[] {
   return Object.keys(mlfw).filter(name => name !== 'default').sort();
 }
 
-export function evaluateModelSource(source: string): ModelRun {
+export function evaluateModelSource(source: string, beginRecording: (stop: () => void) => void): ModelRun {
   const names = frameworkGlobals();
-  const values = names.map(name => (mlfw as Record<string, unknown>)[name]);
+  const values = names.map(name => {
+    const value = (mlfw as Record<string, unknown>)[name];
+    return isLayerClass(value) ? siteRecording(value) : value;
+  });
 
   let captured: { model: unknown; inputs: unknown[] } | null = null;
-  let baseLine = 0;
 
   const run = (model: unknown, inputs: unknown): void => {
     if (captured) throw new Error('run() was called more than once; a visualized compile takes a single model');
@@ -28,7 +30,7 @@ export function evaluateModelSource(source: string): ModelRun {
   };
 
   const probe = (error: Error): void => {
-    baseLine = lineFromStack(error.stack, 0) ?? 0;
+    beginRecording(recordSourceLocations(lineFromStack(error.stack, 0) ?? 0));
   };
 
   const body = `${PROBE}\n${source}\n;return undefined;\n//# sourceURL=${MODEL_SOURCE_URL}`;
@@ -36,5 +38,5 @@ export function evaluateModelSource(source: string): ModelRun {
   factory(...values, run, probe);
 
   if (!captured) throw new Error(`no model to compile: ${RUN_HINT}`);
-  return { ...(captured as { model: unknown; inputs: unknown[] }), baseLine };
+  return captured as { model: unknown; inputs: unknown[] };
 }

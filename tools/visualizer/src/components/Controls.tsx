@@ -4,7 +4,6 @@ import { RUN_SHORTCUT } from '../platform.js';
 import { actions, isStale, useStore } from '../store.js';
 import { passLabel } from '../catalog/naming.js';
 import { TARGETS, targetNote } from '../catalog/targets.js';
-import { LessonBar, LessonPicker } from './LessonBar.js';
 import type { BackwardMode, CompileOptions, TargetName } from '../protocol.js';
 
 const STRATEGIES: { id: CompileOptions['fusionStrategy']; note: string }[] = [
@@ -55,8 +54,6 @@ export function Controls() {
 
   return (
     <div className="controls">
-      <LessonBar />
-
       <div className="control-row">
         <label className="control">
           <span>Example</span>
@@ -96,10 +93,6 @@ export function Controls() {
             ? 'Your own code. End it with run(model, inputs) and press Run.'
             : (example as (typeof EXAMPLES)[number]).blurb}
         </p>
-
-        <div className="control-row">
-          <LessonPicker />
-        </div>
 
         <div className="control-row">
           <label className="control">

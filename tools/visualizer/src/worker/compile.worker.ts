@@ -3,7 +3,7 @@ import { PassContext } from 'mlfw/compiler/passes/pass.js';
 import { CompileRecorder } from './recorder.js';
 import { executeCompiled } from './execute.js';
 import { evaluateModelSource, frameworkGlobals } from './evaluate.js';
-import { recordSourceLocations } from './source_map.js';
+import { attributeLayerSites } from './layer_sites.js';
 import { collectDagLines } from './snapshot.js';
 import { targetNote } from '../catalog/targets.js';
 import { TARGET_FACTORIES } from './targets.js';
@@ -95,13 +95,14 @@ async function runCompile(id: number, source: string, options: CompileOptions): 
   let kernels: Kernel[] = [];
   let run: RunResult = NOT_RUN;
   let stopRecordingLines = (): void => {};
-  const recorder = new CompileRecorder(() => { stopRecordingLines(); });
+  let stopLayerSites = (): void => {};
+  const recorder = new CompileRecorder(() => { stopLayerSites(); stopRecordingLines(); });
 
   try {
     manual_seed(SEED);
-    const { model, inputs, baseLine } = evaluateModelSource(source);
-    stopRecordingLines = recordSourceLocations(baseLine);
+    const { model, inputs } = evaluateModelSource(source, stop => { stopRecordingLines = stop; });
     const compilable = asCompilable(model);
+    stopLayerSites = attributeLayerSites(model);
     const settings = {
       ...compilerOptions(options),
       instruments: [recorder],
@@ -122,6 +123,7 @@ async function runCompile(id: number, source: string, options: CompileOptions): 
     errorPhase = recorder.currentOpenPass();
     recorder.closeOpenSteps();
   } finally {
+    stopLayerSites();
     stopRecordingLines();
   }
 

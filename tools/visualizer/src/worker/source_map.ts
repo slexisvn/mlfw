@@ -1,5 +1,6 @@
-import { installStackLocations } from 'mlfw/compiler/ir/loc_source.js';
+import { installLocationSource, stackLocationSource } from 'mlfw/compiler/ir/loc_source.js';
 import { locationSites } from 'mlfw/compiler/ir/location.js';
+import { openedSite } from './layer_sites.js';
 import type { Location } from 'mlfw/compiler/ir/location.js';
 
 export const MODEL_SOURCE_URL = 'mlfw-model.js';
@@ -29,5 +30,6 @@ export function modelLines(loc: Location | null): number[] {
 }
 
 export function recordSourceLocations(baseLine: number): () => void {
-  return installStackLocations({ match: isModelFile, lineOffset: baseLine, frameLimit: STACK_DEPTH });
+  const fromStack = stackLocationSource({ match: isModelFile, lineOffset: baseLine });
+  return installLocationSource(() => fromStack() ?? openedSite(), STACK_DEPTH);
 }

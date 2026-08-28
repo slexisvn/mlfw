@@ -2,8 +2,6 @@ import { useEffect, useRef } from 'react';
 import { EDITOR_THEME, editor, installFrameworkGlobals, KeyCode, KeyMod, Range, setupMonaco } from '../monaco/setup.js';
 import { actions, getState, sourceLines, useStore } from '../store.js';
 
-const FOCUS_CLEAR_MS = 1800;
-
 export function SourceEditor() {
   const host = useRef<HTMLDivElement>(null);
   const instance = useRef<editor.IStandaloneCodeEditor | null>(null);
@@ -75,20 +73,18 @@ export function SourceEditor() {
   useEffect(() => {
     const editorInstance = instance.current;
     const collection = focused.current;
-    if (!editorInstance || !collection || focusLine === null) return;
+    if (!editorInstance || !collection) return;
+
+    if (focusLine === null) {
+      collection.clear();
+      return;
+    }
 
     editorInstance.revealLineInCenterIfOutsideViewport(focusLine);
     collection.set([{
       range: new Range(focusLine, 1, focusLine, 1),
       options: { isWholeLine: true, className: 'focused-line' },
     }]);
-
-    const timer = setTimeout(() => {
-      collection.clear();
-      actions.focusSource(null);
-    }, FOCUS_CLEAR_MS);
-
-    return () => clearTimeout(timer);
   }, [focusLine]);
 
   return <div className="editor" ref={host} />;

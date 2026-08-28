@@ -35,7 +35,7 @@ export {
   formatLocation, parseLocation, locationSites, locationNames, primarySite,
 } from './compiler/ir/location.js';
 export type { Location } from './compiler/ir/location.js';
-export { installStackLocations, setDefaultLocationSource, stackLocationSource } from './compiler/ir/loc_source.js';
+export { installLocationSource, installStackLocations, setDefaultLocationSource, stackLocationSource } from './compiler/ir/loc_source.js';
 export type { LocationSource } from './compiler/ir/loc_source.js';
 export { preloadWebGPU, preloadCudaRuntime, releaseCudaMemory } from './runtime/backend_registry.js';
 export { flushWebGPUEager } from './runtime/webgpu.js';

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ReactElement } from 'react';
+import type { PointerEvent as ReactPointerEvent, ReactElement } from 'react';
 import { layoutDag } from '../ir/dag.js';
 import { layoutNest } from '../ir/nest.js';
 import { driftScore, frameAt, linkLowering, linkRewrites, linkSourceLines, planTransition } from '../ir/transition.js';
@@ -7,9 +7,7 @@ import { actions, useStore } from '../store.js';
 import { opLabel } from '../catalog/naming.js';
 import { usePanZoom } from './pan_zoom.js';
 import { useElementSize } from './use_element_size.js';
-import { lineNote } from '../ir/source_note.js';
-import type { Box, Layout, NoteLookup } from '../ir/dag.js';
-import type { DagNode } from '../protocol.js';
+import type { Box, Layout } from '../ir/dag.js';
 import type { Change, Frame, Placement, Plan } from '../ir/transition.js';
 import type { CompileStep, Dag, NestNode, Snapshot } from '../protocol.js';
 
@@ -21,8 +19,8 @@ function sideOf(snapshot: Snapshot, index: number): Side {
   return { dag: snapshot.dags[index] ?? null, nest: snapshot.nests[index] ?? snapshot.nests[0] ?? null };
 }
 
-async function layoutSide(side: Side, note: NoteLookup): Promise<Layout> {
-  if (side.dag) return layoutDag(side.dag, note);
+async function layoutSide(side: Side): Promise<Layout> {
+  if (side.dag) return layoutDag(side.dag);
   if (side.nest) return layoutNest(side.nest);
   return EMPTY_LAYOUT;
 }
@@ -76,8 +74,6 @@ export function GraphView({ step }: { step: CompileStep }) {
   const played = useRef<string | null>(null);
   const { view, panning, reset, zoomBy, dragged, ref: attachSvg, surface } = usePanZoom();
 
-  const note = useMemo<NoteLookup>(() => (node: DagNode) => lineNote(node.lines), []);
-
   const dags = step.after.dags.length > 0 ? step.after.dags : step.before.dags;
   const index = Math.min(dagIndex, Math.max(dags.length - 1, 0));
   const before = sideOf(step.before, index);
@@ -95,8 +91,8 @@ export function GraphView({ step }: { step: CompileStep }) {
     setFailure(null);
 
     void (async () => {
-      const b = await layoutSide(before, note);
-      const a = await layoutSide(after, note);
+      const b = await layoutSide(before);
+      const a = await layoutSide(after);
       if (cancelled) return;
       const { links, change } = linksBetween(before, after);
       setPrepared({
@@ -111,7 +107,7 @@ export function GraphView({ step }: { step: CompileStep }) {
     });
 
     return () => { cancelled = true; };
-  }, [step.index, index, empty, note]);
+  }, [step, index, empty]);
 
   useEffect(() => {
     if (!prepared) return;
@@ -165,7 +161,7 @@ export function GraphView({ step }: { step: CompileStep }) {
 
   const edges = collectEdges(prepared, frame);
   const zoom = Math.round(view.k * 100);
-  const linked = prepared.after.boxes.some(box => box.note !== '');
+  const linked = prepared.after.boxes.some(box => box.line !== null);
 
   const ordered = [...frame.placements.values()]
     .sort((a, b) => a.box.depth - b.box.depth || rank(a.box.kind) - rank(b.box.kind));
@@ -174,6 +170,9 @@ export function GraphView({ step }: { step: CompileStep }) {
 
   const drawNode = (placement: Placement): ReactElement => {
     const line = placement.box.line;
+    const hover = (event: ReactPointerEvent<SVGGElement>, shown: number | null): void => {
+      if (line !== null && event.pointerType === 'mouse') actions.focusSource(shown);
+    };
     return (
       <g
         key={placement.box.id}
@@ -185,6 +184,8 @@ export function GraphView({ step }: { step: CompileStep }) {
         ].filter(Boolean).join(' ')}
         style={{ opacity: placement.opacity }}
         transform={transformFor(placement)}
+        onPointerEnter={event => hover(event, line)}
+        onPointerLeave={event => hover(event, null)}
         onClick={() => { if (line !== null && !dragged()) actions.focusSource(line); }}
       >
         <rect
@@ -196,11 +197,6 @@ export function GraphView({ step }: { step: CompileStep }) {
         {showsDetail(placement) && (
           <text className="detail" x={placement.width - 10} y={headerY(placement)} textAnchor="end">
             {placement.box.detail}
-          </text>
-        )}
-        {placement.box.note !== '' && !showsDetail(placement) && (
-          <text className="note" x={placement.width - 10} y={headerY(placement)} textAnchor="end">
-            {placement.box.note}
           </text>
         )}
         <title>{tooltipFor(placement.box, line)}</title>
@@ -219,7 +215,7 @@ export function GraphView({ step }: { step: CompileStep }) {
         )}
         {prepared.drift > DRIFT_LIMIT && <span className="drift">layout moved too far to animate</span>}
         <div className="graph-tools">
-          {linked && <span className="graph-hint">click a box to find its line</span>}
+          {linked && <span className="graph-hint">point at a box to light up its line</span>}
           <button onClick={() => zoomBy(1 / ZOOM_STEP)} aria-label="zoom out" title="zoom out">−</button>
           <span className="zoom">{zoom}%</span>
           <button onClick={() => zoomBy(ZOOM_STEP)} aria-label="zoom in" title="zoom in">+</button>
