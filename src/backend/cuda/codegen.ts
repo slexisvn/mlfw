@@ -1,4 +1,5 @@
 import { GpuCodegenBase } from '../codegen_base.js';
+import type { SourceHelper } from '../codegen_base.js';
 import { ForKind } from '../../compiler/ir/tensor/nodes.js';
 import { cType, cPtrType, cLiteralSuffix, cMathFunc, isDtypeInt, dtypeBytes, cCompareOp } from '../../util/dtype_map.js';
 import { flattenRowMajorIndex } from '../index_emit.js';
@@ -19,6 +20,34 @@ import type { CudaIntrinInfo } from './tensor_intrin.js';
 import type { TargetFeatures } from '../target.js';
 
 const LOCAL_MEMORY_BUDGET_BYTES = 256 * 1024;
+
+const FLOORMOD_HELPER: SourceHelper = {
+  name: 'floormod',
+  deps: [],
+  code: '__device__ __forceinline__ int floormod(int a, int b) { return ((a % b) + b) % b; }',
+};
+
+const FLOORDIV_HELPER: SourceHelper = {
+  name: 'floordiv',
+  deps: [FLOORMOD_HELPER],
+  code: '__device__ __forceinline__ int floordiv(int a, int b) { return (a - floormod(a, b)) / b; }',
+};
+
+const MATHOP_HELPERS: Readonly<Record<string, SourceHelper | undefined>> = { '//': FLOORDIV_HELPER, '%': FLOORMOD_HELPER };
+
+function selectHelper(kind: 'min' | 'max', dtype: string): SourceHelper {
+  const name = `_${kind}_${dtype}`;
+  const ct = cType(dtype);
+  const cmp = kind === 'min' ? '<' : '>';
+  return { name, deps: [], code: `__device__ __forceinline__ ${ct} ${name}(${ct} a, ${ct} b) { return a ${cmp} b ? a : b; }` };
+}
+
+function signHelper(dtype: string): SourceHelper {
+  const name = `_sign_${dtype}`;
+  const ct = cType(dtype);
+  const zero = `0.0${cLiteralSuffix(dtype)}`;
+  return { name, deps: [], code: `__device__ __forceinline__ ${ct} ${name}(${ct} v) { return (${ct})((v > ${zero}) - (v < ${zero})); }` };
+}
 
 type ReductionLoop = { extC: string; extVal: number; varName: string };
 type FullReduction = { loops: ReductionLoop[]; block: BlockNode; store: BufferStoreNode; valExpr: TirNode | null; total: number };
@@ -110,6 +139,7 @@ export class CUDACodegen extends GpuCodegenBase {
     this._scratchNames = new Set();
     this._serializeThreads = false;
     this._launchDiagnosis = null;
+    this._resetSourceScope();
 
     const isLIR = func.type === 'LIRFunc';
 
@@ -213,7 +243,7 @@ export class CUDACodegen extends GpuCodegenBase {
 
     return new CUDAKernel({
       name: func.name,
-      source: this._lines.join('\n'),
+      source: [...this._helperPreamble(), ...this._lines].join('\n'),
       blockDim,
       gridDim,
       sharedMemBytes: sharedBytes,
@@ -252,6 +282,15 @@ export class CUDACodegen extends GpuCodegenBase {
   }
 
   _matchFullReduction(node: ForNode): FullReduction | null {
+    const top = this._beginExpr(null);
+    try {
+      return this._probeFullReduction(node);
+    } finally {
+      this._endExpr(top);
+    }
+  }
+
+  _probeFullReduction(node: ForNode): FullReduction | null {
     const loops: ReductionLoop[] = [];
     let cur: IRStmtNode = node;
     while (cur && cur.type === 'ForNode') {
@@ -449,12 +488,9 @@ export class CUDACodegen extends GpuCodegenBase {
     const accOp = node.op || '+';
     let accRhs: string;
     if (accOp === 'max' || accOp === 'min') {
-      if (isDtypeInt(node.dtype)) {
-        const cmp = accOp === 'max' ? '>' : '<';
-        accRhs = `((${accVar}) ${cmp} (${accBody}) ? (${accVar}) : (${accBody}))`;
-      } else {
-        accRhs = `${accOp === 'max' ? 'fmaxf' : 'fminf'}(${accVar}, ${accBody})`;
-      }
+      accRhs = isDtypeInt(dtype)
+        ? `${this._useHelper(selectHelper(accOp, dtype))}(${accVar}, ${accBody})`
+        : `${accOp === 'max' ? 'fmaxf' : 'fminf'}(${accVar}, ${accBody})`;
     } else {
       accRhs = `(${accVar} ${accOp} ${accBody})`;
     }
@@ -465,7 +501,25 @@ export class CUDACodegen extends GpuCodegenBase {
     this._emit(`${node.flushStore.buffer.name}[${this._exprToC(node.flushStore.offsetExpr)}] = ${accVar};`);
   }
 
+  _emitCseBinding(name: string, text: string): void {
+    this._emit(`const int ${name} = ${text};`);
+  }
+
+  _emitExprText(node: IRStmtNode): string {
+    return this._exprToC(node);
+  }
+
   _exprToC(node: IRStmtNode | null): string {
+    const top = this._beginExpr(node);
+    try {
+      const bound = this._cseNameFor(node);
+      return bound !== null ? bound : this._printExpr(node);
+    } finally {
+      this._endExpr(top);
+    }
+  }
+
+  _printExpr(node: IRStmtNode | null): string {
     if (!node) return '0';
     switch (node.type) {
       case 'IntImmNode': return String(node.value);
@@ -477,8 +531,8 @@ export class CUDACodegen extends GpuCodegenBase {
         const a = this._exprToC(node.a);
         if (!node.b) return `(${node.op}${a})`;
         const b = this._exprToC(node.b);
-        if (node.op === '//') return `(((${a}) - ((((${a}) % (${b})) + (${b})) % (${b}))) / (${b}))`;
-        if (node.op === '%') return `((((${a}) % (${b})) + (${b})) % (${b}))`;
+        const helper = MATHOP_HELPERS[node.op];
+        if (helper) return `${this._useHelper(helper)}(${a}, ${b})`;
         if (node.op === 'tdiv') return `(${a} / ${b})`;
         if (node.op === 'tmod') return `(${a} % ${b})`;
         return `(${a} ${node.op} ${b})`;
@@ -507,16 +561,9 @@ export class CUDACodegen extends GpuCodegenBase {
     const joined = args.join(', ');
     const dtype = node.dtype || this._defaultDtype;
     if (node.externName === 'rsqrt') return `${cMathFunc('rsqrt', dtype)}(${joined})`;
-    if (node.externName === 'sign') {
-      const v = args[0];
-      const zero = `0.0${cLiteralSuffix(dtype)}`;
-      return `((${v} > ${zero}) - (${v} < ${zero}))`;
-    }
+    if (node.externName === 'sign') return `${this._useHelper(signHelper(dtype))}(${args[0]})`;
     if (node.externName === 'min' || node.externName === 'max') {
-      if (isDtypeInt(dtype)) {
-        const op = node.externName === 'min' ? '<' : '>';
-        return `((${args[0]}) ${op} (${args[1]}) ? (${args[0]}) : (${args[1]}))`;
-      }
+      if (isDtypeInt(dtype)) return `${this._useHelper(selectHelper(node.externName, dtype))}(${joined})`;
       return `${cMathFunc(node.externName, dtype)}(${joined})`;
     }
     const fn = cMathFunc(node.externName, dtype);

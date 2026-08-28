@@ -15,11 +15,32 @@ type SymBinaryName = 'add' | 'sub' | 'mul' | 'div' | 'mod' | 'max' | 'min';
 type BoundPredicate = (d: IntBound) => boolean;
 type ComparePredicates = Readonly<Record<string, BoundPredicate | undefined>>;
 
-export type DivModSplit = { quotient: TirNode; remainder: TirNode };
+export type SymNode = { node: TirNode; sym: SymExpr | null };
+export type DivModSplit = { quotient: SymNode; remainder: SymNode };
 
 const NO_ASSUMPTION = (): void => {};
 
 const MATHOP_TO_SYM: Readonly<Record<string, SymBinaryName | undefined>> = { '+': 'add', '-': 'sub', '*': 'mul', '//': 'div', '%': 'mod', 'tdiv': 'div', 'tmod': 'mod' };
+const EXTERN_TO_SYM: Readonly<Record<string, SymBinaryName | undefined>> = { max: 'max', min: 'min' };
+
+const intVar = (name: string): TirNode => new VariableNode(name, 'int32');
+
+function constNode(value: number): SymNode {
+  return { node: new IntImmNode(value), sym: value };
+}
+
+function symOfMathOp(op: string, a: SymExpr | null, b: SymExpr | null): SymExpr | null {
+  const sym = MATHOP_TO_SYM[op];
+  if (!sym || a === null || b === null) return null;
+  if (DIVMOD_MATH_OPS.has(op) && (typeof b !== 'number' || b <= 0)) return null;
+  return SymInt[sym](a, b);
+}
+
+export function symOfExtern(name: string, args: readonly (SymExpr | null)[]): SymExpr | null {
+  const sym = EXTERN_TO_SYM[name];
+  if (!sym || args.length !== 2 || args[0] === null || args[1] === null) return null;
+  return SymInt[sym](args[0], args[1]);
+}
 
 export function irToSymInt(node: TirNode | number | null | undefined): SymExpr | null {
   if (node === null || node === undefined) return null;
@@ -32,32 +53,19 @@ export function irToSymInt(node: TirNode | number | null | undefined): SymExpr |
     case 'MathOpNode': {
       const math = node as MathOpNode;
       if (math.b === null || math.b === undefined) {
-        if (math.op === '-') {
-          const a = irToSymInt(math.a);
-          return a === null ? null : SymInt.neg(a);
-        }
-        return null;
+        if (math.op !== '-') return null;
+        const a = irToSymInt(math.a);
+        return a === null ? null : SymInt.neg(a);
       }
-      const sym = MATHOP_TO_SYM[math.op];
-      if (!sym) return null;
+      if (!MATHOP_TO_SYM[math.op]) return null;
       const a = irToSymInt(math.a);
       if (a === null) return null;
-      const b = irToSymInt(math.b);
-      if (b === null) return null;
-      if (DIVMOD_MATH_OPS.has(math.op)) {
-        if (typeof b !== 'number' || b <= 0) return null;
-      }
-      return SymInt[sym](a, b);
+      return symOfMathOp(math.op, a, irToSymInt(math.b));
     }
     case 'CallExternNode': {
       const call = node as CallExternNode;
-      if (call.args.length !== 2) return null;
-      if (call.externName !== 'max' && call.externName !== 'min') return null;
-      const a = irToSymInt(call.args[0]);
-      if (a === null) return null;
-      const b = irToSymInt(call.args[1]);
-      if (b === null) return null;
-      return call.externName === 'max' ? SymInt.max(a, b) : SymInt.min(a, b);
+      if (!EXTERN_TO_SYM[call.externName] || call.args.length !== 2) return null;
+      return symOfExtern(call.externName, call.args.map(irToSymInt));
     }
     default:
       return null;
@@ -96,12 +104,15 @@ const CMP_FALSE: ComparePredicates = {
   ne: (d) => d.min === 0 && d.max === 0,
 };
 
-function proveCompare(analyzer: Analyzer, direction: string, a: TirNode, b: TirNode, table: ComparePredicates): boolean {
+function decideCompare(bound: IntBound | null, direction: string, table: ComparePredicates): boolean {
   const test = table[direction];
-  if (!test) return false;
-  const d = diffBound(analyzer, a, b);
-  if (d === null) return false;
-  return test(d);
+  if (!test || bound === null) return false;
+  return test(bound);
+}
+
+function proveCompare(analyzer: Analyzer, direction: string, a: TirNode, b: TirNode, table: ComparePredicates): boolean {
+  if (!table[direction]) return false;
+  return decideCompare(diffBound(analyzer, a, b), direction, table);
 }
 
 export function proveTrue(analyzer: Analyzer, node: TirNode | null | undefined): boolean {
@@ -136,32 +147,38 @@ export function analyzerForLoops(loopExtents: Iterable<[string, unknown]>): Anal
   return analyzer;
 }
 
-function formToNode(form: LinearForm): TirNode {
-  return linearFormToNode<TirNode>(
-    form,
-    (name) => new VariableNode(name, 'int32'),
-    (value) => new IntImmNode(value),
-    (op, a, b) => mathOp(op, a, b),
-  );
+function formToSymNode(form: LinearForm): SymNode {
+  return {
+    node: linearFormToNode<TirNode>(form, intVar, (value) => new IntImmNode(value), mathOp),
+    sym: linearFormToNode<SymExpr | null>(form, SymInt.var, (value) => value, symOfMathOp),
+  };
 }
 
-function affineDivMod(analyzer: Analyzer, node: TirNode, divisor: number): DivModSplit | null {
-  const form = toLinearForm(node);
+function withinBound(bound: IntBound | null, lo: number, hi: number): boolean {
+  return bound !== null && bound.min >= lo && bound.max <= hi;
+}
+
+function boundOfSym(analyzer: Analyzer, sym: SymExpr | null): IntBound | null {
+  return sym === null ? null : analyzer.constIntBound(sym);
+}
+
+function affineDivMod(analyzer: Analyzer, dividend: SymNode, divisor: number): DivModSplit | null {
+  const form = toLinearForm(dividend.node);
   if (!form) return null;
   const parts = splitByDivisor(form, divisor);
   if (!parts) return null;
 
-  const quotient = () => formToNode(parts.divisible.scale(1 / divisor));
+  const quotient = (): SymNode => formToSymNode(parts.divisible.scale(1 / divisor));
 
   if (parts.remainder.isConstant && parts.remainder.offset === 0) {
-    return { quotient: quotient(), remainder: new IntImmNode(0) };
+    return { quotient: quotient(), remainder: constNode(0) };
   }
 
-  const remainderNode = formToNode(parts.remainder);
-  if (!boundWithin(analyzer, remainderNode, 0, divisor - 1)) return null;
-  if (!boundWithin(analyzer, node, 0, Infinity)) return null;
+  const remainder = formToSymNode(parts.remainder);
+  if (!withinBound(boundOfSym(analyzer, remainder.sym), 0, divisor - 1)) return null;
+  if (!withinBound(boundOfSym(analyzer, dividend.sym), 0, Infinity)) return null;
 
-  return { quotient: quotient(), remainder: remainderNode };
+  return { quotient: quotient(), remainder };
 }
 
 const NEGATED_DIRECTION: Readonly<Record<string, string | undefined>> = {
@@ -215,25 +232,18 @@ export function assumeLoopVar(analyzer: Analyzer, name: string, extent: TirNode 
   return () => { for (const release of releases) release(); };
 }
 
-function exactDivMod(analyzer: Analyzer, op: string, dividend: SymExpr, divisor: number): TirNode | null {
+function exactDivMod(analyzer: Analyzer, op: string, dividend: SymExpr, divisor: number): SymNode | null {
   if (!analyzer.modularSet(dividend).divisibleBy(divisor)) return null;
-  if (op === '%') return new IntImmNode(0);
+  if (op === '%') return constNode(0);
   const quotient = analyzer.exactQuotient(dividend, divisor);
-  return quotient === null ? null : symIntToNode(quotient, (name) => new VariableNode(name, 'int32'));
+  if (quotient === null) return null;
+  const node = symIntToNode(quotient, intVar);
+  return { node, sym: irToSymInt(node) };
 }
 
-function nonNegativeDivMod(analyzer: Analyzer, node: MathOpNode): MathOpNode | null {
-  if (node.op !== '//' && node.op !== '%') return null;
-  const divisor = node.b as IntImmNode | null;
-  if (!divisor || divisor.type !== 'IntImmNode' || divisor.value <= 0) return null;
-  if (!boundWithin(analyzer, node.a, 0, Infinity)) return null;
-  return new MathOpNode(node.op === '//' ? 'tdiv' : 'tmod', node.a, node.b as TirNode);
-}
-
-function boundWithin(analyzer: Analyzer, node: TirNode, lo: number, hi: number): boolean {
-  const b = irBound(analyzer, node);
-  if (b === null) return false;
-  return b.min >= lo && b.max <= hi;
+function truncatedDivMod(op: string, dividend: SymNode, divisor: IntImmNode): SymNode {
+  const truncated = op === '//' ? 'tdiv' : 'tmod';
+  return { node: new MathOpNode(truncated, dividend.node, divisor), sym: symOfMathOp(truncated, dividend.sym, divisor.value) };
 }
 
 export class RewriteSimplify {
@@ -245,59 +255,77 @@ export class RewriteSimplify {
 
   simplify(node: TirNode | null | undefined): TirNode | null | undefined {
     if (node === null || node === undefined || typeof node !== 'object') return node;
+    return this.rewrite(node).node;
+  }
+
+  rewrite(node: TirNode): SymNode {
     switch (node.type) {
       case 'IntImmNode':
+        return { node, sym: (node as IntImmNode).value };
       case 'VariableNode':
-        return node;
-      case 'MathOpNode':
-        return this._simplifyMathOp(node as MathOpNode);
-      case 'CompareNode':
-        return this._simplifyCompare(node as CompareNode);
-      default:
-        return node;
-    }
-  }
-
-  _simplifyCompare(node: CompareNode): TirNode {
-    const a = this.simplify(node.a) as TirNode;
-    const b = this.simplify(node.b) as TirNode;
-    if (proveTrue(this.analyzer, new CompareNode(node.direction, a, b))) return new IntImmNode(1);
-    if (proveFalse(this.analyzer, new CompareNode(node.direction, a, b))) return new IntImmNode(0);
-    if (a === node.a && b === node.b) return node;
-    return new CompareNode(node.direction, a, b);
-  }
-
-  _simplifyMathOp(node: MathOpNode): TirNode {
-    if (node.b === null || node.b === undefined) {
-      const a = this.simplify(node.a) as TirNode;
-      return a === node.a ? node : new MathOpNode(node.op, a);
-    }
-    const a = this.simplify(node.a) as TirNode;
-    const b = this.simplify(node.b) as TirNode;
-    const raw = mathOp(node.op, a, b);
-    if (!raw || raw.type !== 'MathOpNode') return raw;
-    const folded = raw as MathOpNode;
-
-    if ((folded.op === '//' || folded.op === '%') && (folded.b as TirNode).type === 'IntImmNode' && (folded.b as IntImmNode).value > 0) {
-      const c = (folded.b as IntImmNode).value;
-      const dividend = irToSymInt(folded.a);
-      if (dividend !== null) {
-        const bound = this.analyzer.constIntBound(dividend);
-        if (bound.min >= 0 && bound.max <= c - 1) {
-          return folded.op === '//' ? new IntImmNode(0) : folded.a;
-        }
-        const exact = exactDivMod(this.analyzer, folded.op, dividend, c);
-        if (exact) return exact;
+        return { node, sym: SymInt.var((node as VariableNode).name) };
+      case 'MathOpNode': {
+        const math = node as MathOpNode;
+        const b = math.b === null || math.b === undefined ? null : this.rewrite(math.b);
+        return this.mathOp(math.op, this.rewrite(math.a), b);
       }
-      const split = affineDivMod(this.analyzer, folded.a, c);
-      if (split) return folded.op === '//' ? split.quotient : split.remainder;
-      const truncated = nonNegativeDivMod(this.analyzer, folded);
-      if (truncated) return truncated;
+      case 'CompareNode': {
+        const cmp = node as CompareNode;
+        return this.compare(cmp.direction, this.rewrite(cmp.a), this.rewrite(cmp.b));
+      }
+      default:
+        return { node, sym: null };
     }
-    if (COMPARE_MATH_OPS.has(folded.op)) {
-      if (proveTrue(this.analyzer, folded)) return new IntImmNode(1);
-      if (proveFalse(this.analyzer, folded)) return new IntImmNode(0);
+  }
+
+  mathOp(op: string, a: SymNode, b: SymNode | null): SymNode {
+    if (b === null) {
+      return { node: new MathOpNode(op, a.node), sym: op === '-' && a.sym !== null ? SymInt.neg(a.sym) : null };
     }
-    return folded;
+    return this._fold(op, a, b) ?? this._rewriteBinary(op, a, b);
+  }
+
+  compare(direction: string, a: SymNode, b: SymNode): SymNode {
+    return this._decide(direction, a, b) ?? { node: new CompareNode(direction, a.node, b.node), sym: null };
+  }
+
+  _fold(op: string, a: SymNode, b: SymNode): SymNode | null {
+    const node = mathOp(op, a.node, b.node);
+    if (node === a.node) return a;
+    if (node === b.node) return b;
+    return node.type === 'IntImmNode' ? { node, sym: (node as IntImmNode).value } : null;
+  }
+
+  _rewriteBinary(op: string, a: SymNode, b: SymNode): SymNode {
+    const divisor = b.node as IntImmNode;
+    if ((op === '//' || op === '%') && divisor.type === 'IntImmNode' && divisor.value > 0) {
+      const divided = this._divMod(op, a, divisor);
+      if (divided) return divided;
+    }
+    if (COMPARE_MATH_OPS.has(op)) {
+      const decided = this._decide(compareDirectionOf(op), a, b);
+      if (decided) return decided;
+    }
+    return { node: new MathOpNode(op, a.node, b.node), sym: symOfMathOp(op, a.sym, b.sym) };
+  }
+
+  _decide(direction: string, a: SymNode, b: SymNode): SymNode | null {
+    if (a.sym === null || b.sym === null || !CMP_TRUE[direction]) return null;
+    const bound = this.analyzer.boundOfDifference(a.sym, b.sym);
+    if (decideCompare(bound, direction, CMP_TRUE)) return constNode(1);
+    if (decideCompare(bound, direction, CMP_FALSE)) return constNode(0);
+    return null;
+  }
+
+  _divMod(op: string, dividend: SymNode, divisor: IntImmNode): SymNode | null {
+    if (dividend.sym !== null) {
+      const bound = this.analyzer.constIntBound(dividend.sym);
+      if (bound.min >= 0 && bound.max <= divisor.value - 1) return op === '//' ? constNode(0) : dividend;
+      const exact = exactDivMod(this.analyzer, op, dividend.sym, divisor.value);
+      if (exact) return exact;
+    }
+    const split = affineDivMod(this.analyzer, dividend, divisor.value);
+    if (split) return op === '//' ? split.quotient : split.remainder;
+    return withinBound(boundOfSym(this.analyzer, dividend.sym), 0, Infinity) ? truncatedDivMod(op, dividend, divisor) : null;
   }
 }

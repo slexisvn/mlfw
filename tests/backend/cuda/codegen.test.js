@@ -27,6 +27,8 @@ function makePrimFunc(name, params, body, bufferMap, shapeParams = [], shapePara
   return new PrimFunc(name, params, body, bufferMap, shapeParams, shapeParamMap);
 }
 
+const occurrencesOf = (src, needle) => src.split(needle).length - 1;
+
 function threadFor(loopVar, extent, tag, body) {
   return new ForNode(loopVar, new IntImmNode(0), new IntImmNode(extent), ForKind.THREAD_BINDING, body, tag);
 }
@@ -76,11 +78,15 @@ describe('CUDACodegen._exprToC', () => {
     expect(exprToC(neg)).toBe('(-x)');
   });
 
-  it('renders tdiv as C division and // with the floor correction', () => {
+  it('renders tdiv/tmod inline and //, % as floor helper calls', () => {
     const trunc = new MathOpNode('tdiv', new VariableNode('x', 'index'), new IntImmNode(4));
-    const floor = new MathOpNode('//', new VariableNode('x', 'index'), new IntImmNode(4));
+    const truncMod = new MathOpNode('tmod', new VariableNode('x', 'index'), new IntImmNode(4));
     expect(exprToC(trunc)).toBe('(x / 4)');
-    expect(exprToC(floor)).toContain('%');
+    expect(exprToC(truncMod)).toBe('(x % 4)');
+
+    const dividend = new MathOpNode('+', new VariableNode('x', 'index'), new IntImmNode(7));
+    expect(exprToC(new MathOpNode('//', dividend, new IntImmNode(4)))).toBe('floordiv((x + 7), 4)');
+    expect(exprToC(new MathOpNode('%', dividend, new IntImmNode(4)))).toBe('floormod((x + 7), 4)');
   });
 
   it('renders nested expressions', () => {
@@ -166,12 +172,15 @@ describe('CUDACodegen._emitExternCall', () => {
     expect(result).toMatch(/rsqrt.*\(x\)/);
   });
 
-  it('emits sign as comparison expression', () => {
-    const x = new VariableNode('x', 'f32');
-    const result = externCall('sign', [x]);
-    expect(result).toContain('(x > 0.0f)');
-    expect(result).toContain('(x < 0.0f)');
-    expect(result).toMatch(/\(x > 0\.0f\) - \(x < 0\.0f\)/);
+  it('emits sign as a helper call so the operand appears once', () => {
+    const cg = makeCodegen();
+    cg._defaultDtype = 'f32';
+    const operand = new MathOpNode('*', new VariableNode('wide', 'f32'), new FloatImmNode(2));
+    const text = cg._emitExternCall(new CallExternNode('sign', [operand], 'f32'));
+
+    expect(text).toBe('_sign_f32((wide * 2.0f))');
+    expect(occurrencesOf(text, 'wide')).toBe(1);
+    expect(cg._helperPreamble().join('')).toContain('(v > 0.0f) - (v < 0.0f)');
   });
 
   it('handles two-argument functions (max, min, pow)', () => {
@@ -182,11 +191,19 @@ describe('CUDACodegen._emitExternCall', () => {
     expect(externCall('pow', [a, b])).toBe('powf(a, b)');
   });
 
-  it('integer min/max emit a ternary (CUDA fmin/fmax reject int args)', () => {
-    const a = new VariableNode('a', 'i32');
-    const b = new VariableNode('b', 'i32');
-    expect(externCall('max', [a, b], 'i32')).toBe('((a) > (b) ? (a) : (b))');
-    expect(externCall('min', [a, b], 'i32')).toBe('((a) < (b) ? (a) : (b))');
+  it('integer min/max emit helper calls, not operand-duplicating ternaries', () => {
+    const cg = makeCodegen();
+    cg._defaultDtype = 'i32';
+    const wide = new MathOpNode('*', new VariableNode('wide', 'i32'), new IntImmNode(7));
+    const text = cg._emitExternCall(new CallExternNode('max', [wide, new IntImmNode(0)], 'i32'));
+
+    expect(text).toBe('_max_i32((wide * 7), 0)');
+    expect(occurrencesOf(text, 'wide')).toBe(1);
+    expect(cg._emitExternCall(new CallExternNode('min', [wide, new IntImmNode(0)], 'i32'))).toBe('_min_i32((wide * 7), 0)');
+
+    const preamble = cg._helperPreamble().join('\n');
+    expect(preamble).toContain('__device__ __forceinline__ int _max_i32(int a, int b) { return a > b ? a : b; }');
+    expect(preamble).toContain('__device__ __forceinline__ int _min_i32(int a, int b) { return a < b ? a : b; }');
   });
 });
 
@@ -981,5 +998,76 @@ describe('CUDACodegen — state reset between generate calls', () => {
     expect(k2.sharedMemBytes).toBe(0);
     expect(k1.source).toMatch(/__shared__/);
     expect(k2.source).not.toMatch(/__shared__/);
+  });
+});
+
+describe('CUDACodegen.generate — floor division helpers', () => {
+  function floorChainKernel(depth) {
+    const inBuf = buf('src', [4096], 'f32');
+    const outBuf = buf('dst', [4096], 'f32');
+    const loopVar = idx('deep_idx');
+    let index = loopVar;
+    for (let d = 0; d < depth; d++) {
+      index = new MathOpNode('//', new MathOpNode('%', index, new IntImmNode(d + 3)), new IntImmNode(d + 2));
+    }
+    const store = new BufferStoreNode(outBuf, [loopVar], new BufferLoadNode(inBuf, [index]));
+    const body = new ForNode(loopVar, new IntImmNode(0), new IntImmNode(4096), ForKind.SERIAL, store);
+    const bufferMap = new Map([['p0', inBuf], ['p1', outBuf]]);
+    return makeCodegen().generate(makePrimFunc('floor_chain', ['p0', 'p1'], body, bufferMap)).source;
+  }
+
+  it('emits the dividend once no matter how deeply floor ops nest', () => {
+    const counts = [1, 3, 6].map(d => occurrencesOf(floorChainKernel(d), 'deep_idx'));
+    expect(counts[0]).toBe(counts[1]);
+    expect(counts[1]).toBe(counts[2]);
+  });
+
+  it('grows the source linearly in nesting depth', () => {
+    const shallow = floorChainKernel(3).length;
+    const deep = floorChainKernel(12).length;
+    expect(deep - shallow).toBeLessThan(shallow);
+  });
+
+  it('declares floormod before floordiv, ahead of the kernel that calls them', () => {
+    const src = floorChainKernel(1);
+    const modAt = src.indexOf('__device__ __forceinline__ int floormod(');
+    const divAt = src.indexOf('__device__ __forceinline__ int floordiv(');
+    expect(modAt).toBeGreaterThanOrEqual(0);
+    expect(modAt).toBeLessThan(divAt);
+    expect(divAt).toBeLessThan(src.indexOf('__global__'));
+  });
+
+  it('omits the helpers from kernels that never floor-divide', () => {
+    const inBuf = buf('src', [64], 'f32');
+    const outBuf = buf('dst', [64], 'f32');
+    const i = idx('i');
+    const index = new MathOpNode('tdiv', i, new IntImmNode(4));
+    const store = new BufferStoreNode(outBuf, [i], new BufferLoadNode(inBuf, [index]));
+    const body = new ForNode(i, new IntImmNode(0), new IntImmNode(64), ForKind.SERIAL, store);
+    const bufferMap = new Map([['p0', inBuf], ['p1', outBuf]]);
+    const src = makeCodegen().generate(makePrimFunc('trunc_only', ['p0', 'p1'], body, bufferMap)).source;
+
+    expect(src).not.toContain('floordiv');
+    expect(src).not.toContain('floormod');
+    expect(src.startsWith('__global__')).toBe(true);
+  });
+
+  it('does not carry helper declarations over to a later helper-free kernel', () => {
+    const cg = makeCodegen();
+
+    const aIn = buf('a_in', [64], 'f32'), aOut = buf('a_out', [64], 'f32');
+    const ai = idx('ai');
+    const aBody = new ForNode(ai, new IntImmNode(0), new IntImmNode(64), ForKind.SERIAL,
+      new BufferStoreNode(aOut, [ai], new BufferLoadNode(aIn, [new MathOpNode('//', ai, new IntImmNode(3))])));
+    const withHelper = cg.generate(makePrimFunc('k_floor', ['p0', 'p1'], aBody, new Map([['p0', aIn], ['p1', aOut]]))).source;
+
+    const bIn = buf('b_in', [64], 'f32'), bOut = buf('b_out', [64], 'f32');
+    const bi = idx('bi');
+    const bBody = new ForNode(bi, new IntImmNode(0), new IntImmNode(64), ForKind.SERIAL,
+      new BufferStoreNode(bOut, [bi], new BufferLoadNode(bIn, [bi])));
+    const withoutHelper = cg.generate(makePrimFunc('k_plain', ['p0', 'p1'], bBody, new Map([['p0', bIn], ['p1', bOut]]))).source;
+
+    expect(withHelper).toContain('int floordiv(');
+    expect(withoutHelper).not.toContain('floordiv');
   });
 });

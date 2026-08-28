@@ -3,12 +3,14 @@ import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
 import { CUDATarget, CPUTarget } from '../../../src/backend/target.js';
-import { countLoops as countForLoops } from '../../_utils/kernel_source.js';
+import { countLoops as countForLoops, kernelBody, findUndeclaredVars } from '../../_utils/kernel_source.js';
 import {
   tensor, Linear, Sequential, ReLU, Sigmoid, Tanh,
-  GELU, SiLU, LeakyReLU,
+  GELU, SiLU, LeakyReLU, ConvTranspose2d,
   compile as modelCompile,
 } from '../../../src/index.js';
+import { mulberry32 } from '../../_utils/rng.js';
+import { randomNested } from '../../_utils/tensor_data.js';
 
 function compile(func, opts = {}) {
   return compileGraph(func, CUDATarget(), { scheduling: { enabled: true }, ...opts });
@@ -27,65 +29,14 @@ function hasThreadBinding(src, tag) {
   return src.includes(`= ${tag};`) || src.includes(`= ${tag}`);
 }
 
-function extractDeclaredVars(src) {
-  const declared = new Set();
-  const paramMatch = src.match(/__global__\s+void\s+\w+\(([^)]*)\)/);
-  if (paramMatch) {
-    for (const p of paramMatch[1].split(',')) {
-      const name = p.trim().split(/\s+/).pop().replace('*', '');
-      if (name) declared.add(name);
-    }
-  }
-  for (const m of src.matchAll(/(?:const\s+int|int|float|double|__half)\s+(\w+)\s*(?:=|\[)/g)) {
-    declared.add(m[1]);
-  }
-  for (const m of src.matchAll(/for\s*\(\s*int\s+(\w+)/g)) {
-    declared.add(m[1]);
-  }
-  declared.add('blockIdx');
-  declared.add('threadIdx');
-  declared.add('INFINITY');
-  return declared;
-}
-
-function findUndeclaredVars(src) {
-  const declared = extractDeclaredVars(src);
-  const bodyMatch = src.match(/\{([\s\S]*)\}\s*$/);
-  if (!bodyMatch) return [];
-  const body = bodyMatch[1];
-
-  const dotMembers = new Set();
-  for (const m of body.matchAll(/(\w+)\.(\w+)/g)) {
-    dotMembers.add(`${m.index + m[1].length}`);
-  }
-
-  const used = new Set();
-  for (const m of body.matchAll(/\b([a-zA-Z_]\w*)\b/g)) {
-    const name = m[1];
-    if (/^(const|int|float|double|void|for|if|else|while|return|__global__|__shared__|__half|__syncthreads|pragma|unroll|INFINITY|alloca|sizeof)$/.test(name)) continue;
-    if (/^(expf|logf|sqrtf|tanhf|fabsf|sinf|cosf|ceilf|floorf|fmaxf|fminf|powf|roundf|fmodf|rsqrtf|rsqrt|exp|log|sqrt|tanh|fabs|sin|cos|ceil|floor|fmax|fmin|pow|round|fmod)$/.test(name)) continue;
-    if (name.length <= 1 && /^[xyzw]$/.test(name)) {
-      const before = m.index > 0 ? body[m.index - 1] : '';
-      if (before === '.') continue;
-    }
-    used.add(name);
-  }
-
-  const undeclared = [];
-  for (const v of used) {
-    if (!declared.has(v)) undeclared.push(v);
-  }
-  return undeclared;
-}
-
 function countStoreStatements(src) {
   return (src.match(/\w+\[.*\]\s*=/g) || []).length;
 }
 
 function hasNoopStore(src) {
-  const bodyMatch = src.match(/\{([\s\S]*)\}\s*$/);
-  if (!bodyMatch) return false;
-  const lines = bodyMatch[1].split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  const body = kernelBody(src);
+  if (body === null) return false;
+  const lines = body.split('\n').map(l => l.trim()).filter(l => l.length > 0);
   for (const line of lines) {
     const m = line.match(/^(\w+\[[^\]]+\])\s*=\s*(.+);$/);
     if (m) {
@@ -1474,5 +1425,28 @@ describe('GPU kernel quality — scheduled shared memory + barriers', () => {
 
     expect(s.count).toBeGreaterThan(1);
     expect(s.allSrc).not.toContain('__shared__');
+  });
+});
+
+describe('CUDA index emission stays compact for chained shape ops', () => {
+  const transposeConvSource = (stride) => {
+    const model = new ConvTranspose2d(2, 3, 3, { stride, padding: 1 });
+    const x = tensor(randomNested(mulberry32(7), [1, 2, 4, 4]));
+    return compileGPU(model, [x], { scheduling: { enabled: false } }).source();
+  };
+
+  it('ConvTranspose2d fuses to a flat thread index without duplicating it per floor op', () => {
+    const src = transposeConvSource(2);
+
+    expect(src).toContain('int floordiv(');
+    expect(src).toContain('const int _cse0 =');
+    expect(src.length).toBeLessThan(50000);
+  });
+
+  it('source size is insensitive to the stride that deepens the index decomposition', () => {
+    const sizes = [2, 3, 4].map(transposeConvSource).map(s => s.length);
+    const spread = Math.max(...sizes) / Math.min(...sizes);
+
+    expect(spread).toBeLessThan(10);
   });
 });

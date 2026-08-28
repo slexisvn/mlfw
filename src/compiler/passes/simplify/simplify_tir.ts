@@ -1,5 +1,6 @@
 import { Analyzer } from '../../analysis/analyzer.js';
-import { RewriteSimplify, proveTrue, proveFalse, irBound, assumeCondition, assumeLoopVar } from '../../analysis/ir_arith.js';
+import { RewriteSimplify, proveTrue, proveFalse, irBound, assumeCondition, assumeLoopVar, symOfExtern } from '../../analysis/ir_arith.js';
+import { SymInt } from '../../analysis/sym_int.js';
 import {
   ForNode, BlockNode, SeqNode, BufferStoreNode, BufferLoadNode,
   IfThenElseNode, LetStmtNode, AllocateNode, WhileNode, EvaluateNode,
@@ -8,7 +9,8 @@ import {
 import { LIRFlatLoadNode, LIRFlatStoreNode, LIRAccumulatorNode, LIRBindingsNode } from '../../ir/lir/nodes.js';
 import { walk } from '../../ir/ir_visitor.js';
 import { TraceLevel } from '../../pipeline/trace.js';
-import type { IntImmNode, PrimFunc, TirNode } from '../../ir/tensor/nodes.js';
+import type { IntImmNode, PrimFunc, TirNode, VariableNode } from '../../ir/tensor/nodes.js';
+import type { SymNode } from '../../analysis/ir_arith.js';
 import type { IRNode } from '../../ir/ir_visitor.js';
 import type { LIRFunc } from '../../ir/lir/nodes.js';
 import type { TraceLog } from '../../pipeline/trace.js';
@@ -215,41 +217,53 @@ function simplifyIterVar(ctx: SimplifyCtx): (r: BlockRealizeNode) => BlockRealiz
 }
 
 function simplifyExpr(node: TirNode, ctx: SimplifyCtx): TirNode {
-  if (!node || typeof node !== 'object' || !node.type) return node;
+  return simplifySym(node, ctx).node;
+}
+
+function opaque(node: TirNode): SymNode {
+  return { node, sym: null };
+}
+
+function simplifySym(node: TirNode, ctx: SimplifyCtx): SymNode {
+  if (!node || typeof node !== 'object' || !node.type) return opaque(node);
   switch (node.type as string) {
     case 'IntImmNode':
-    case 'FloatImmNode':
+      return { node, sym: (node as IntImmNode).value };
     case 'VariableNode':
-      return node;
+      return { node, sym: SymInt.var((node as VariableNode).name) };
+    case 'FloatImmNode':
+      return opaque(node);
     case 'BufferLoadNode': {
       const ld = node as BufferLoadNode;
-      return new BufferLoadNode(ld.buffer, ld.indices.map((i: TirNode) => simplifyExpr(i, ctx)));
+      return opaque(new BufferLoadNode(ld.buffer, ld.indices.map((i: TirNode) => simplifyExpr(i, ctx))));
     }
     case 'MathOpNode': {
       const m = node as MathOpNode;
-      const a = simplifyExpr(m.a, ctx);
-      const b = m.b ? simplifyExpr(m.b, ctx) : null;
-      return ctx.simp.simplify(new MathOpNode(m.op, a, b)) as TirNode;
+      const a = simplifySym(m.a, ctx);
+      const b = m.b ? simplifySym(m.b, ctx) : null;
+      return ctx.simp.mathOp(m.op, a, b);
     }
     case 'CompareNode': {
       const c = node as CompareNode;
-      const a = simplifyExpr(c.a, ctx);
-      const b = simplifyExpr(c.b, ctx);
-      return ctx.simp.simplify(new CompareNode(c.direction, a, b)) as TirNode;
+      return ctx.simp.compare(c.direction, simplifySym(c.a, ctx), simplifySym(c.b, ctx));
     }
     case 'CastNode': {
       const cast = node as CastNode;
-      return new CastNode(simplifyExpr(cast.expr, ctx), cast.fromDtype, cast.toDtype);
+      return opaque(new CastNode(simplifyExpr(cast.expr, ctx), cast.fromDtype, cast.toDtype));
     }
     case 'CallExternNode': {
       const call = node as CallExternNode;
-      return new CallExternNode(call.externName, call.args.map((a: TirNode) => simplifyExpr(a, ctx)), call.dtype);
+      const args = call.args.map((a: TirNode) => simplifySym(a, ctx));
+      return {
+        node: new CallExternNode(call.externName, args.map(a => a.node), call.dtype),
+        sym: symOfExtern(call.externName, args.map(a => a.sym)),
+      };
     }
     case 'IfThenElseNode': {
       const ite = node as IfThenElseNode;
       const cond = simplifyExpr(ite.condition, ctx);
-      const thenE = simplifyExpr(ite.thenBody, ctx);
-      const elseE = ite.elseBody ? simplifyExpr(ite.elseBody, ctx) : null;
+      const thenE = simplifySym(ite.thenBody, ctx);
+      const elseE = ite.elseBody ? simplifySym(ite.elseBody, ctx) : null;
       if (proveTrue(ctx.analyzer, cond)) {
         ctx.stats.branchesFolded++;
         return thenE;
@@ -258,13 +272,13 @@ function simplifyExpr(node: TirNode, ctx: SimplifyCtx): TirNode {
         ctx.stats.branchesFolded++;
         return elseE;
       }
-      return new IfThenElseNode(cond, thenE, elseE);
+      return opaque(new IfThenElseNode(cond, thenE.node, elseE === null ? null : elseE.node));
     }
     case 'LIRFlatLoadNode': {
       const ld = node as unknown as LIRFlatLoadNode;
-      return new LIRFlatLoadNode(ld.buffer, simplifyExpr(ld.offsetExpr as TirNode, ctx), ld.dtype) as unknown as TirNode;
+      return opaque(new LIRFlatLoadNode(ld.buffer, simplifyExpr(ld.offsetExpr as TirNode, ctx), ld.dtype) as unknown as TirNode);
     }
     default:
-      return node;
+      return opaque(node);
   }
 }

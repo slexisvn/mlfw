@@ -1,4 +1,5 @@
 import { GpuCodegenBase } from '../codegen_base.js';
+import type { SourceHelper } from '../codegen_base.js';
 import { ACCESS_NODE_TYPES, LOOP_NODE_TYPES } from '../../compiler/ir/node_kinds.js';
 import { COMPARE_MATH_OPS } from '../../util/dtype_map.js';
 import { ForKind } from '../../compiler/ir/tensor/nodes.js';
@@ -69,15 +70,53 @@ function _wgslLanczosCore(u: string): string {
 
 const _WGSL_PI = _wgslFloat(Math.PI);
 
+const WGSL_LANCZOS_HELPER: SourceHelper = {
+  name: '_lanczos',
+  deps: [],
+  code: `fn _lanczos(u: f32) -> f32 { return ${_wgslLanczosCore('u')}; }`,
+};
+
 function _wgslLgamma(x: string): string {
-  const reflected = `(log(${_WGSL_PI} / abs(sin(${_WGSL_PI} * ${x}))) - ${_wgslLanczosCore(`(1.0 - ${x})`)})`;
-  return `(select(${_wgslLanczosCore(x)}, ${reflected}, ${x} < 0.5))`;
+  const reflected = `(log(${_WGSL_PI} / abs(sin(${_WGSL_PI} * ${x}))) - _lanczos(1.0 - ${x}))`;
+  return `(select(_lanczos(${x}), ${reflected}, ${x} < 0.5))`;
 }
 
 function _wgslGamma(x: string): string {
-  const reflected = `(${_WGSL_PI} / (sin(${_WGSL_PI} * ${x}) * exp(${_wgslLanczosCore(`(1.0 - ${x})`)})))`;
-  return `(select(exp(${_wgslLanczosCore(x)}), ${reflected}, ${x} < 0.5))`;
+  const reflected = `(${_WGSL_PI} / (sin(${_WGSL_PI} * ${x}) * exp(_lanczos(1.0 - ${x}))))`;
+  return `(select(exp(_lanczos(${x})), ${reflected}, ${x} < 0.5))`;
 }
+
+const WGSL_ERF_HELPER: SourceHelper = {
+  name: '_erf',
+  deps: [],
+  code: `fn _erf(x: f32) -> f32 { return ${_wgslErf('x')}; }`,
+};
+
+const WGSL_LGAMMA_HELPER: SourceHelper = {
+  name: '_lgamma',
+  deps: [WGSL_LANCZOS_HELPER],
+  code: `fn _lgamma(x: f32) -> f32 { return ${_wgslLgamma('x')}; }`,
+};
+
+const WGSL_GAMMA_HELPER: SourceHelper = {
+  name: '_gamma',
+  deps: [WGSL_LANCZOS_HELPER],
+  code: `fn _gamma(x: f32) -> f32 { return ${_wgslGamma('x')}; }`,
+};
+
+const WGSL_FLOORMOD_HELPER: SourceHelper = {
+  name: 'floormod',
+  deps: [],
+  code: 'fn floormod(a: i32, b: i32) -> i32 { return ((a % b) + b) % b; }',
+};
+
+const WGSL_FLOORDIV_HELPER: SourceHelper = {
+  name: 'floordiv',
+  deps: [WGSL_FLOORMOD_HELPER],
+  code: 'fn floordiv(a: i32, b: i32) -> i32 { return (a - floormod(a, b)) / b; }',
+};
+
+const WGSL_MATHOP_HELPERS: Readonly<Record<string, SourceHelper | undefined>> = { '//': WGSL_FLOORDIV_HELPER, '%': WGSL_FLOORMOD_HELPER };
 
 const WGSL_THREAD_TAG_MAP: WgslNameTable = {
   'threadIdx.x': 'local_invocation_id.x',
@@ -169,6 +208,7 @@ export class WebGPUCodegen extends GpuCodegenBase {
     this._scalarSlotNames = new Set();
     this._crossThread = null;
     this._crossExtent = null;
+    this._resetSourceScope();
 
     const isLIR = func.type === 'LIRFunc';
 
@@ -332,7 +372,7 @@ export class WebGPUCodegen extends GpuCodegenBase {
 
     return new WebGPUKernel({
       name: func.name,
-      source: this._lines.join('\n'),
+      source: [...this._helperPreamble(), ...this._lines].join('\n'),
       workgroupSize,
       dispatchSize,
       sharedMemBytes: this._sharedBuffers.reduce((sum, b) => sum + Math.max(b.sizeInBytes(), 0), 0),
@@ -868,7 +908,25 @@ export class WebGPUCodegen extends GpuCodegenBase {
     return `(${this._exprToWGSL(node)} != 0)`;
   }
 
+  _emitCseBinding(name: string, text: string): void {
+    this._emit(`let ${name}: i32 = ${text};`);
+  }
+
+  _emitExprText(node: IRStmtNode): string {
+    return this._exprToWGSL(node);
+  }
+
   _exprToWGSL(node: IRStmtNode | null): string {
+    const top = this._beginExpr(node);
+    try {
+      const bound = this._cseNameFor(node);
+      return bound !== null ? bound : this._printExpr(node);
+    } finally {
+      this._endExpr(top);
+    }
+  }
+
+  _printExpr(node: IRStmtNode | null): string {
     if (!node) return '0';
     switch (node.type) {
       case 'IntImmNode': return String(node.value);
@@ -885,8 +943,8 @@ export class WebGPUCodegen extends GpuCodegenBase {
         if (node.op === '||') return `(${this._boolExpr(node.a)} || ${this._boolExpr(node.b)})`;
         const a = this._numericExpr(node.a);
         const b = this._numericExpr(node.b);
-        if (node.op === '//') return `(((${a}) - ((((${a}) % (${b})) + (${b})) % (${b}))) / (${b}))`;
-        if (node.op === '%') return `((((${a}) % (${b})) + (${b})) % (${b}))`;
+        const helper = WGSL_MATHOP_HELPERS[node.op];
+        if (helper) return `${this._useHelper(helper)}(${a}, ${b})`;
         if (node.op === 'tdiv') return `(${a} / ${b})`;
         if (node.op === 'tmod') return `(${a} % ${b})`;
         return `(${a} ${node.op} ${b})`;
@@ -923,18 +981,10 @@ export class WebGPUCodegen extends GpuCodegenBase {
     if (node.externName === 'fmod') {
       return `(${args[0]} % ${args[1]})`;
     }
-    if (node.externName === 'erf') {
-      return _wgslErf(args[0]);
-    }
-    if (node.externName === 'erfc') {
-      return `(1.0 - ${_wgslErf(args[0])})`;
-    }
-    if (node.externName === 'lgamma') {
-      return _wgslLgamma(args[0]);
-    }
-    if (node.externName === 'gamma') {
-      return _wgslGamma(args[0]);
-    }
+    if (node.externName === 'erf') return `${this._useHelper(WGSL_ERF_HELPER)}(${args[0]})`;
+    if (node.externName === 'erfc') return `(1.0 - ${this._useHelper(WGSL_ERF_HELPER)}(${args[0]}))`;
+    if (node.externName === 'lgamma') return `${this._useHelper(WGSL_LGAMMA_HELPER)}(${args[0]})`;
+    if (node.externName === 'gamma') return `${this._useHelper(WGSL_GAMMA_HELPER)}(${args[0]})`;
     if (node.externName === 'log10') {
       return `(log(${args[0]}) * ${1 / Math.LN10})`;
     }

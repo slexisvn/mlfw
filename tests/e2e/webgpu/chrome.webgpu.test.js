@@ -514,6 +514,25 @@ describe.skipIf(!deps)('webgpu via Chrome (differential vs CPU)', () => {
   const AUTOTUNE = { scheduling: { enabled: true, autotune: true } };
   const grid = (rows, cols, seed) => Array.from({ length: rows }, (_, i) => Array.from({ length: cols }, (_, j) => Math.sin((i * cols + j + seed) * 0.7)));
 
+  it('erf / erfc / lgamma / gamma match CPU (WGSL helper-function lowering)', async () => {
+    const pos = { data: Array.from({ length: 24 }, (_, i) => 0.15 + i * 0.19) };
+    const signed = { data: Array.from({ length: 24 }, (_, i) => -2.2 + i * 0.19) };
+
+    await caseClose("(M,x)=>M.erf(x)", [signed]);
+    await caseClose("(M,x)=>M.erfc(x)", [signed]);
+    await caseClose("(M,x)=>M.lgamma(x)", [pos]);
+    await caseClose("(M,x)=>M.gamma(x)", [pos]);
+
+    const nested = await caseClose("(M,x)=>M.erf(M.erf(M.lgamma(x)))", [pos]);
+    expect(nested.cpu.every(Number.isFinite)).toBe(true);
+  });
+
+  it('negative-argument lgamma takes the reflection branch on GPU too', async () => {
+    const neg = { data: [-0.3, -1.4, -2.6, -3.7, -4.2, -0.75] };
+    const res = await caseClose("(M,x)=>M.lgamma(x)", [neg]);
+    expect(res.cpu.every(Number.isFinite)).toBe(true);
+  });
+
   it('max_pool2d / avg_pool2d match CPU (bundled node-type tag regression)', async () => {
     const x = { data: [[grid(8, 8, 1), grid(8, 8, 2)]] };
     const mp = await caseClose("(M,x)=>M.max_pool2d(x,[2,2],[2,2])", [x]);

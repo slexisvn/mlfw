@@ -3,6 +3,7 @@ import { Analyzer } from '../../../src/compiler/analysis/analyzer.js';
 import {
   irToSymInt, irBound, proveTrue, proveFalse, analyzerForLoops, RewriteSimplify,
 } from '../../../src/compiler/analysis/ir_arith.js';
+import { SymInt } from '../../../src/compiler/analysis/sym_int.js';
 import { IntImmNode, VariableNode, MathOpNode, CompareNode, CallExternNode } from '../../../src/compiler/ir/tensor/nodes.js';
 
 const v = (n) => new VariableNode(n, 'index');
@@ -112,6 +113,26 @@ describe('RewriteSimplify', () => {
     const out = s.simplify(expr);
     expect(out.type).toBe('MathOpNode');
     expect(out.op).toBe('+');
+  });
+});
+
+describe('RewriteSimplify keeps the operand it reasons about', () => {
+  const evalAt = (node, name, value) => SymInt.evaluate(irToSymInt(node), new Map([[name, value]]));
+
+  it('leaves a divmod untouched when an identity fold hands the child straight through', () => {
+    const s = new RewriteSimplify();
+    const quotient = s.simplify(add(c(0), fdiv(v('n'), c(4))));
+    const remainder = s.simplify(mul(c(1), fmod(v('n'), c(4))));
+    for (const n of [0, 3, 4, 9, 17, 40]) {
+      expect(evalAt(quotient, 'n', n)).toBe(Math.floor(n / 4));
+      expect(evalAt(remainder, 'n', n)).toBe(n % 4);
+    }
+  });
+
+  it('still folds the divmod when the dividend really is the small one', () => {
+    const s = new RewriteSimplify(analyzerForLoops(new Map([['i', 4]])));
+    expect(s.simplify(fdiv(v('i'), c(4)))).toMatchObject({ type: 'IntImmNode', value: 0 });
+    expect(s.simplify(add(c(0), fdiv(v('i'), c(4))))).toMatchObject({ type: 'IntImmNode', value: 0 });
   });
 });
 

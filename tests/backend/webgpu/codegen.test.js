@@ -82,11 +82,10 @@ describe('WebGPUCodegen._exprToWGSL', () => {
     expect(exprToWGSL(mod)).toBe('(x % 4)');
   });
 
-  it('renders // and % with the floor correction', () => {
-    const div = new MathOpNode('//', new VariableNode('x', 'index'), new IntImmNode(4));
-    const mod = new MathOpNode('%', new VariableNode('x', 'index'), new IntImmNode(4));
-    expect(exprToWGSL(div)).toContain('%');
-    expect(exprToWGSL(mod)).toContain('+ (4)');
+  it('renders // and % as floor helper calls that name the dividend once', () => {
+    const dividend = new MathOpNode('+', new VariableNode('x', 'index'), new IntImmNode(7));
+    expect(exprToWGSL(new MathOpNode('//', dividend, new IntImmNode(4)))).toBe('floordiv((x + 7), 4)');
+    expect(exprToWGSL(new MathOpNode('%', dividend, new IntImmNode(4)))).toBe('floormod((x + 7), 4)');
   });
 
   it('renders nested expressions', () => {
@@ -955,5 +954,98 @@ describe('WebGPUCodegen._analyzeSharing — shared memory budget', () => {
     const wgsl = cg._lines.join('\n');
     expect(wgsl).toContain('< 100');
     expect(wgsl).not.toMatch(/< 100\).*!= 0/);
+  });
+});
+
+describe('WebGPUCodegen.generate — floor division helpers', () => {
+  function floorChainKernel(depth) {
+    const inBuf = buf('src', [4096], 'f32');
+    const outBuf = buf('dst', [4096], 'f32');
+    const loopVar = idx('deep_idx');
+    let index = loopVar;
+    for (let d = 0; d < depth; d++) {
+      index = new MathOpNode('//', new MathOpNode('%', index, new IntImmNode(d + 3)), new IntImmNode(d + 2));
+    }
+    const store = new BufferStoreNode(outBuf, [loopVar], new BufferLoadNode(inBuf, [index]));
+    const body = new ForNode(loopVar, new IntImmNode(0), new IntImmNode(4096), ForKind.SERIAL, store);
+    const bufferMap = new Map([['p0', inBuf], ['p1', outBuf]]);
+    return makeCodegen().generate(makePrimFunc('floor_chain', ['p0', 'p1'], body, bufferMap)).source;
+  }
+
+  const occurrencesOf = (src, needle) => src.split(needle).length - 1;
+
+  it('emits the dividend once no matter how deeply floor ops nest', () => {
+    const counts = [1, 3, 6].map(d => occurrencesOf(floorChainKernel(d), 'deep_idx'));
+    expect(counts[0]).toBe(counts[1]);
+    expect(counts[1]).toBe(counts[2]);
+  });
+
+  it('grows the source linearly in nesting depth', () => {
+    const shallow = floorChainKernel(3).length;
+    const deep = floorChainKernel(12).length;
+    expect(deep - shallow).toBeLessThan(shallow);
+  });
+
+  it('declares floormod before floordiv, ahead of the entry point', () => {
+    const src = floorChainKernel(1);
+    const modAt = src.indexOf('fn floormod(a: i32, b: i32)');
+    const divAt = src.indexOf('fn floordiv(a: i32, b: i32)');
+    expect(modAt).toBeGreaterThanOrEqual(0);
+    expect(modAt).toBeLessThan(divAt);
+    expect(divAt).toBeLessThan(src.indexOf('@compute'));
+  });
+
+  it('omits the helpers from kernels that never floor-divide', () => {
+    const inBuf = buf('src', [64], 'f32');
+    const outBuf = buf('dst', [64], 'f32');
+    const i = idx('i');
+    const store = new BufferStoreNode(outBuf, [i], new BufferLoadNode(inBuf, [new MathOpNode('tdiv', i, new IntImmNode(4))]));
+    const body = new ForNode(i, new IntImmNode(0), new IntImmNode(64), ForKind.SERIAL, store);
+    const src = makeCodegen().generate(makePrimFunc('trunc_only', ['p0', 'p1'], body, new Map([['p0', inBuf], ['p1', outBuf]]))).source;
+
+    expect(src).not.toContain('floordiv');
+    expect(src).not.toContain('floormod');
+  });
+});
+
+describe('WebGPUCodegen — transcendental helper functions', () => {
+  function externText(name, depth) {
+    const cg = makeCodegen();
+    cg._defaultDtype = 'f32';
+    let node = new VariableNode('wide', 'f32');
+    for (let d = 0; d < depth; d++) node = new CallExternNode(name, [node], 'f32');
+    return { text: cg._exprToWGSL(node), preamble: cg._helperPreamble().join('\n') };
+  }
+
+  for (const name of ['erf', 'erfc', 'lgamma', 'gamma']) {
+    it(`${name} nests at constant cost per level instead of expanding its argument`, () => {
+      const lengths = [1, 2, 3, 4].map(d => externText(name, d).text.length);
+      const deltas = lengths.slice(1).map((len, i) => len - lengths[i]);
+
+      expect(externText(name, 4).text.split('wide').length - 1).toBe(1);
+      expect(new Set(deltas).size).toBe(1);
+    });
+  }
+
+  it('declares the lanczos core once and ahead of the gamma functions that call it', () => {
+    const cg = makeCodegen();
+    cg._defaultDtype = 'f32';
+    const x = new VariableNode('x', 'f32');
+    cg._exprToWGSL(new CallExternNode('lgamma', [x], 'f32'));
+    cg._exprToWGSL(new CallExternNode('gamma', [x], 'f32'));
+    const preamble = cg._helperPreamble().join('\n');
+
+    expect(preamble.split('fn _lanczos(').length - 1).toBe(1);
+    expect(preamble.indexOf('fn _lanczos(')).toBeLessThan(preamble.indexOf('fn _lgamma('));
+    expect(preamble.indexOf('fn _lanczos(')).toBeLessThan(preamble.indexOf('fn _gamma('));
+  });
+
+  it('shares one erf definition between erf and erfc', () => {
+    const cg = makeCodegen();
+    cg._defaultDtype = 'f32';
+    const x = new VariableNode('x', 'f32');
+    expect(cg._exprToWGSL(new CallExternNode('erf', [x], 'f32'))).toBe('_erf(x)');
+    expect(cg._exprToWGSL(new CallExternNode('erfc', [x], 'f32'))).toBe('(1.0 - _erf(x))');
+    expect(cg._helperPreamble().join('\n').split('fn _erf(').length - 1).toBe(1);
   });
 });

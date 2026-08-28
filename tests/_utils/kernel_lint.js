@@ -62,7 +62,7 @@ const C_KEYWORDS = new Set([
   'const', 'int', 'float', 'double', 'void', 'for', 'if', 'else', 'while', 'return',
   'unsigned', 'long', 'short', 'char', 'bool', 'true', 'false', 'sizeof', 'struct',
   'static', 'extern', 'volatile', 'restrict', 'inline',
-  '__global__', '__shared__', '__device__', '__host__', '__restrict__', '__half',
+  '__global__', '__shared__', '__device__', '__host__', '__restrict__', '__half', '__forceinline__',
   '__syncthreads', 'blockIdx', 'threadIdx', 'blockDim', 'gridDim', 'INFINITY', 'NAN',
   'pragma', 'unroll', 'alloca',
 ]);

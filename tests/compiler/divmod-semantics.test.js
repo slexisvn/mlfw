@@ -53,9 +53,14 @@ function runOnWasm(divisor) {
   };
 }
 
-function evaluateEmittedExpr(source) {
-  const fn = new Function('a', 'b', 'return ' + source);
+function evaluateEmittedExpr(source, declarations = '') {
+  const fn = new Function('a', 'b', declarations + 'return ' + source);
   return (a, b) => fn(a, b) | 0;
+}
+
+function floorHelpersAsJs(kernelSource) {
+  const decls = [...kernelSource.matchAll(/(\w+)\((?:int a, int b|a: i32, b: i32)\)[^{]*\{ return (.+?); \}/g)];
+  return decls.map(([, name, body]) => `function ${name}(a, b) { return (${body}) | 0; }`).join('');
 }
 
 const symbolicOperands = (op) => new MathOpNode(op, new VariableNode('a', 'index'), new VariableNode('b', 'index'));
@@ -105,14 +110,20 @@ describe('integer // and % mean floor division and floor modulo in every layer',
   it('the CUDA and WebGPU backends emit expressions that evaluate to the same floor results', () => {
     const cuda = new CUDACodegen(CUDATarget());
     const webgpu = new WebGPUCodegen(WebGPUTarget());
+    const cudaHelpers = floorHelpersAsJs(new CUDACodegen(CUDATarget()).generate(divModKernel('i32', 3)).source);
+    const wgslHelpers = floorHelpersAsJs(new WebGPUCodegen(WebGPUTarget()).generate(divModKernel('i32', 3)).source);
+    for (const helpers of [cudaHelpers, wgslHelpers]) {
+      expect(helpers).toContain('function floordiv');
+      expect(helpers).toContain('function floormod');
+    }
     const emitters = {
       cuda: {
-        div: evaluateEmittedExpr(cuda._exprToC(symbolicOperands('//'))),
-        mod: evaluateEmittedExpr(cuda._exprToC(symbolicOperands('%'))),
+        div: evaluateEmittedExpr(cuda._exprToC(symbolicOperands('//')), cudaHelpers),
+        mod: evaluateEmittedExpr(cuda._exprToC(symbolicOperands('%')), cudaHelpers),
       },
       webgpu: {
-        div: evaluateEmittedExpr(webgpu._exprToWGSL(symbolicOperands('//'))),
-        mod: evaluateEmittedExpr(webgpu._exprToWGSL(symbolicOperands('%'))),
+        div: evaluateEmittedExpr(webgpu._exprToWGSL(symbolicOperands('//')), wgslHelpers),
+        mod: evaluateEmittedExpr(webgpu._exprToWGSL(symbolicOperands('%')), wgslHelpers),
       },
     };
 
