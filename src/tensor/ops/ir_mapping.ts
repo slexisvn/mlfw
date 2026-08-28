@@ -1,4 +1,5 @@
-import { indexSelectGatherOpts } from '../../compiler/ir/graph/builder.js';
+import { indexSelectGatherOpts, IRBuilder } from '../../compiler/ir/graph/builder.js';
+import { registry } from '../../compiler/ir/graph/ops.js';
 import { ScalarType } from '../../compiler/ir/graph/types.js';
 import type { TensorType } from '../../compiler/ir/graph/types.js';
 import type { DType } from '../types/dtype.js';
@@ -46,6 +47,14 @@ export function buildMappedOp(builder: BuilderLike, opName: string, args: readon
   if (fn) return fn(builder, args, attrs || {});
   if (typeof builder[opName] === 'function') return callBuilder(builder, opName, args, attrs);
   return builder._inferAndBuild(opName, args, attrs || null);
+}
+
+export function canBuildMappedOp(opName: string): boolean {
+  if (REDUCTION_OPS[opName]) return true;
+  if (IR_BUILDERS[opName]) return true;
+  if (typeof (IRBuilder.prototype as unknown as Record<string, unknown>)[opName] === 'function') return true;
+  const opDef = registry.get(opName);
+  return opDef !== null && opDef.inferResultTypes !== undefined;
 }
 
 function buildReduce(builder: BuilderLike, opName: string, args: readonly GraphValue[], attrs?: Attrs | null): GraphOperation {

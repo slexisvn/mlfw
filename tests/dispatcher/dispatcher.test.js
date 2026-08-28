@@ -37,7 +37,7 @@ describe('dispatch routes to correct kernel by key priority', () => {
     const handle = dispatcher.registerOp(schema);
     const ks = DispatchKeySet.fromKey(DispatchKey.WASM);
 
-    expect(() => dispatcher.dispatch(handle, ks, tensor([1]))).toThrow(/No kernel/);
+    expect(() => dispatcher.dispatch(handle, ks, tensor([1]))).toThrow(/has no wasm kernel/);
   });
 });
 

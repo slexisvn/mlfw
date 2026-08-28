@@ -46,7 +46,14 @@ describe('transpose', () => {
   it('shares storage', () => {
     const t = tensor([[1, 2], [3, 4]]);
     const tr = t.transpose(0, 1);
-    expect(tr.data).toBe(t.data);
+    expect(tr.storage.data).toBe(t.storage.data);
+  });
+
+  it('does not expose the parent buffer through .data', () => {
+    const t = tensor([[1, 2], [3, 4]]);
+    const tr = t.transpose(0, 1);
+    expect(() => tr.data).toThrow(/not contiguous/);
+    expect([...tr.contiguous().data]).toEqual([1, 3, 2, 4]);
   });
 
   it('double transpose returns to original order', () => {

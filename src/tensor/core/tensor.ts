@@ -74,11 +74,14 @@ export class Tensor {
     const s = this._impl.storage;
     if (!s || s.isMeta) return null;
     const raw = s.data;
-    const offset = this._impl.storageOffset;
-    if (raw && offset === 0 && this._impl.isContiguous() && raw.length === this.numel) {
-      return raw;
+    if (!raw) return raw;
+    if (!this._impl.isContiguous()) {
+      throw new Error(`Tensor.data: shape [${this.shape}] with strides [${this.strides}] is not contiguous, so its elements are not a window of the storage; use .contiguous().data or .toArray()`);
     }
-    return raw;
+    const offset = this._impl.storageOffset;
+    const numel = this.numel;
+    if (offset === 0 && raw.length === numel) return raw;
+    return raw.subarray(offset, offset + numel) as NumericTypedArray;
   }
 
   get requiresGrad(): boolean {

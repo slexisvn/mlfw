@@ -86,12 +86,12 @@ describe('zeroGrad', () => {
     expect(paramsWithGrad.length).toBeGreaterThan(0);
 
     for (const p of paramsWithGrad) {
-      expect([...p.grad.data].some(v => v !== 0)).toBe(true);
+      expect([...p.grad.contiguous().data].some(v => v !== 0)).toBe(true);
     }
 
     net.zeroGrad();
     for (const p of paramsWithGrad) {
-      expect([...p.grad.data].every(v => v === 0)).toBe(true);
+      expect([...p.grad.contiguous().data].every(v => v === 0)).toBe(true);
     }
   });
 });

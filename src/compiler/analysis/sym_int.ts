@@ -65,6 +65,10 @@ function cancelProductDiv(a: SymExpr, b: SymExpr): SymExpr {
   return new SymInt('div', null, [numerator, rebuildProduct(den.constant, den.symbols)]);
 }
 
+export function unboundSymbolError(name: string): Error {
+  return new Error(`Unbound symbolic variable: ${name}`);
+}
+
 export class SymInt {
   type: SymIntOp;
   name: string | null;
@@ -187,7 +191,7 @@ export class SymInt {
     if (!(expr instanceof SymInt)) return expr;
     if (expr.type === 'var') {
       if (env.has(expr.name as string)) return env.get(expr.name as string) as number;
-      throw new Error(`Unbound symbolic variable: ${expr.name}`);
+      throw unboundSymbolError(expr.name as string);
     }
     const args = expr.args.map(a => SymInt.evaluate(a, env));
     switch (expr.type) {

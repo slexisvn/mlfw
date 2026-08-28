@@ -1,7 +1,5 @@
 import { DispatchKey } from './dispatch_key.js';
 import type { DispatchKeyValue } from './dispatch_key.js';
-import { KernelFunction } from './boxing.js';
-import { dispatcher } from './dispatcher.js';
 import { jitCompile } from './jit_cache.js';
 import type { TargetLike } from './jit_cache.js';
 import { isEagerDeferred } from './eager_mode.js';
@@ -16,6 +14,7 @@ import type { DType, NumericTypedArray } from '../tensor/types/dtype.js';
 import type { Device } from '../tensor/types/device.js';
 import type { MutableNumericArray, NumericSettable } from '../tensor/types/options.js';
 import { scalarArgNames } from '../tensor/ops/metadata.js';
+import { canBuildMappedOp } from '../tensor/ops/ir_mapping.js';
 
 type ScalarMap = Record<string, unknown>;
 type TargetFactory = () => TargetLike;
@@ -216,7 +215,7 @@ export function tensorToContiguousCopy(t: Tensor): NumericTypedArray {
   const srcOff = t._impl.storageOffset;
   const n = t.numel;
   if (t.isContiguous && srcOff === 0 && srcData.length === n) {
-    return (t.data || srcData).slice() as NumericTypedArray;
+    return srcData.slice() as NumericTypedArray;
   }
   return tensorToContiguous(t);
 }
@@ -225,7 +224,7 @@ export function tensorToContiguous(t: Tensor): NumericTypedArray {
   const srcData = t._impl.storage.data!;
   const srcOff = t._impl.storageOffset;
   const n = t.numel;
-  if (t.isContiguous && srcOff === 0 && srcData.length === n) return t.data || srcData;
+  if (t.isContiguous && srcOff === 0 && srcData.length === n) return srcData;
   const shape = t.shape;
   const strides = t.strides;
   const Ctor = srcData.constructor as { new(length: number): NumericTypedArray };
@@ -339,9 +338,10 @@ function _gpuInputArray(t: Tensor): NumericTypedArray {
 }
 export function gpuContiguousArray(t: Tensor): NumericTypedArray { return _gpuInputArray(t); }
 
-function _wrapOpForJIT(opName: string, dispatchKey: DispatchKeyValue): ((keySet: unknown, ...args: unknown[]) => Tensor) | null {
+export function jitKernelFor(opName: string, dispatchKey: DispatchKeyValue): ((keySet: unknown, ...args: unknown[]) => Tensor) | null {
   const getTarget = _TARGET_FOR_KEY[dispatchKey];
   if (!getTarget) return null;
+  if (!canBuildMappedOp(opName)) return null;
 
   const isGPU = dispatchKey === DispatchKey.GPU;
   const isWebGPU = dispatchKey === DispatchKey.CUSTOM_0;
@@ -375,23 +375,4 @@ function _wrapOpForJIT(opName: string, dispatchKey: DispatchKeyValue): ((keySet:
 
     return wrapResult(outData, outShape, outDtype, tensors[0].device);
   };
-}
-
-export function registerJITKernels() {
-  const ops = dispatcher.listOps();
-  const backendKeys = [DispatchKey.CPU, DispatchKey.GPU, DispatchKey.WASM, DispatchKey.CUSTOM_0];
-
-  for (const opKey of ops) {
-    const handle = dispatcher.findOp(opKey);
-    if (!handle) continue;
-    const opName = handle.name;
-
-    for (const key of backendKeys) {
-      if (handle.entry.hasKernel(key)) continue;
-      const kernel = _wrapOpForJIT(opName, key);
-      if (kernel) {
-        handle.entry.registerKernel(key, KernelFunction.fromUnboxed(kernel));
-      }
-    }
-  }
 }

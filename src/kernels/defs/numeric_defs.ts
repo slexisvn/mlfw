@@ -1,4 +1,4 @@
-import { Library } from '../../dispatcher/library.js';
+import { defineHostOps } from './host_ops.js';
 
 export const NUMERIC_SCHEMAS = [
   'qr(Tensor input) -> (Tensor, Tensor)',
@@ -6,11 +6,7 @@ export const NUMERIC_SCHEMAS = [
   'ifft(Tensor input) -> Tensor',
 ];
 
-let _defined = false;
-
-export function ensureNumericSchemas(): void {
-  if (_defined) return;
-  _defined = true;
-  const defLib = new Library('mlc', 'DEF');
-  for (const schema of NUMERIC_SCHEMAS) defLib.def(schema);
-}
+export const ensureNumericSchemas = defineHostOps({
+  devices: ['cpu', 'wasm'],
+  schemas: NUMERIC_SCHEMAS,
+});

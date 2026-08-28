@@ -154,6 +154,62 @@ describe('LR scheduler integration', () => {
   });
 });
 
+describe('inference loops keep gradients off for their whole extent', () => {
+  class RecordingModel extends SimpleModel {
+    constructor() {
+      super();
+      this.seen = [];
+    }
+
+    async validationStep(batch) {
+      const [x, y] = batch;
+      this.seen.push(this.lossFn.forward(this.forward(x), y).requiresGrad);
+      await Promise.resolve();
+      const loss = this.lossFn.forward(this.forward(x), y);
+      this.seen.push(loss.requiresGrad);
+      this.log('val_loss', loss);
+    }
+
+    async testStep(batch) {
+      const [x, y] = batch;
+      await Promise.resolve();
+      this.seen.push(this.lossFn.forward(this.forward(x), y).requiresGrad);
+    }
+  }
+
+  it('builds no graph across an await inside validationStep', async () => {
+    const model = new RecordingModel();
+    const data = makeData(30, 10);
+    await new Trainer(quietTrainerOpts).validate(model, data);
+
+    expect(model.seen).toHaveLength(6);
+    expect(model.seen).not.toContain(true);
+
+    const [x, y] = [...data][0];
+    expect(model.lossFn.forward(model.forward(x), y).requiresGrad).toBe(true);
+  });
+
+  it('builds no graph across an await inside testStep', async () => {
+    const model = new RecordingModel();
+    await new Trainer(quietTrainerOpts).test(model, makeData(30, 10));
+
+    expect(model.seen).toEqual([false, false, false]);
+  });
+
+  it('returns detached predictions for every batch, not just the first', async () => {
+    const model = new SimpleModel();
+    const data = makeData(30, 10);
+    const preds = await new Trainer(quietTrainerOpts).predict(model, data);
+
+    expect(preds).toHaveLength(3);
+    expect(preds.map(p => p.requiresGrad)).toEqual([false, false, false]);
+    expect(preds.map(p => p.gradFn)).toEqual([null, null, null]);
+
+    const [x] = [...data][0];
+    expect(model.forward(x).requiresGrad).toBe(true);
+  });
+});
+
 describe('Trainer.validate and predict', () => {
   it('validate returns the aggregated epoch metrics', async () => {
     const model = new SimpleModel();

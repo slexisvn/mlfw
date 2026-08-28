@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { ShapeEnv } from '../../src/tracing/shape_env.js';
 import { DYNAMIC } from '../../src/compiler/ir/graph/types.js';
+import { SymInt } from '../../src/compiler/analysis/sym_int.js';
 
 describe('ShapeEnv.allocate', () => {
   it('returns incrementing symbol names', () => {
@@ -127,5 +128,41 @@ describe('ShapeEnv.resolveSymbolicShape', () => {
   it('passes through concrete values unchanged', () => {
     const env = new ShapeEnv();
     expect(env.resolveSymbolicShape([3, 5, 7])).toEqual([3, 5, 7]);
+  });
+});
+
+describe('ShapeEnv unbound symbols', () => {
+  it('reports an unbound symbol by name instead of comparing undefined', () => {
+    const env = new ShapeEnv();
+    env.produceShapeSpec(0, [4, 8], new Set([0]));
+    expect(() => env.evaluateGuards()).toThrow('Unbound symbolic variable: s1');
+
+    env.bindInputShapes([{ shape: [4, 8] }]);
+    expect(env.evaluateGuards().passed).toBe(true);
+  });
+
+  it('fails the same way for a string symbol and for the equivalent SymInt', () => {
+    const env = new ShapeEnv();
+    env.produceShapeSpec(0, [4], new Set([0]));
+    expect(() => env.resolveSymbolicShape(['s0'])).toThrow('Unbound symbolic variable: s0');
+    expect(() => env.resolveSymbolicShape([SymInt.var('s0')])).toThrow('Unbound symbolic variable: s0');
+
+    env.bindInputShapes([{ shape: [16] }]);
+    expect(env.resolveSymbolicShape(['s0'])).toEqual([16]);
+    expect(env.resolveSymbolicShape([SymInt.var('s0')])).toEqual([16]);
+  });
+
+  it('names the missing input when fewer arguments are given than symbols', () => {
+    const env = new ShapeEnv();
+    env.produceShapeSpec(1, [4, 8], new Set([0]));
+    expect(() => env.bindInputShapes([{ shape: [4, 8] }]))
+      .toThrow(/symbol 's0' tracks input 1, but only 1 input\(s\) were given/);
+  });
+
+  it('names the missing dimension when an input has too low a rank', () => {
+    const env = new ShapeEnv();
+    env.produceShapeSpec(0, [4, 8], new Set([0]));
+    expect(() => env.bindInputShapes([{ shape: [4] }]))
+      .toThrow(/symbol 's1' tracks dimension 1 of input 0, which has rank 1/);
   });
 });

@@ -19,10 +19,9 @@ function stackTensors(tensors: readonly Tensor[], dim = 0): Tensor {
 
   for (let i = 0; i < n; i++) {
     const src = tensors[i];
-    const srcData = src.data!;
     const srcOffset = src._impl ? src._impl.storageOffset : 0;
     if (src.isContiguous) {
-      writable.set(srcData.subarray(srcOffset, srcOffset + elemNumel), i * elemNumel);
+      writable.set(src.data!, i * elemNumel);
     } else {
       const shape = src.shape;
       const strides = src.strides;

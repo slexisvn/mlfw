@@ -1,6 +1,7 @@
 
 import { Stage } from '../state.js';
-import { resolveLimit, noGradAsync } from './utils.js';
+import { resolveLimit } from './utils.js';
+import { noGrad } from '../../../autograd/grad_mode.js';
 import type { DataLoaderLike, LightningModuleLike, NumericMetricRecord, TrainerCoreLike } from '../../types.js';
 import type { SchedulerConfig } from '../module.js';
 
@@ -26,7 +27,7 @@ export class ValidationLoop {
     state.numValBatches = limit;
     let batchIdx = 0;
 
-    await noGradAsync(async () => {
+    await noGrad(async () => {
       for (const batch of dataLoader) {
         if (batchIdx >= limit) break;
         callbacks.dispatch('onValidationBatchStart', trainer, model, batch, batchIdx);

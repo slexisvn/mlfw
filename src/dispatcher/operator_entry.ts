@@ -12,15 +12,25 @@ export class OperatorEntry {
   private readonly _schema: OperatorSchema;
   private readonly _kernels: KernelTable;
   private _catchAll: KernelFunction | null;
+  private _devices: ReadonlySet<string> | null;
 
   constructor(schema: OperatorSchema) {
     this._schema = schema;
     this._kernels = new KernelTable();
     this._catchAll = null;
+    this._devices = null;
   }
 
   get schema(): OperatorSchema {
     return this._schema;
+  }
+
+  get devices(): ReadonlySet<string> | null {
+    return this._devices;
+  }
+
+  declareDevices(devices: readonly string[]): void {
+    this._devices = new Set(devices);
   }
 
   registerKernel(key: DispatchKeyValue, kernelFn: KernelFunction): void {

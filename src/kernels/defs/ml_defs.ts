@@ -1,4 +1,4 @@
-import { Library } from '../../dispatcher/library.js';
+import { defineHostOps } from './host_ops.js';
 
 export const ML_SCHEMAS = [
   'kmeans(Tensor x, int n_clusters, int max_iter, int n_init, int seed) -> (Tensor, Tensor, Tensor)',
@@ -11,11 +11,7 @@ export const ML_SCHEMAS = [
   'decision_tree_predict(Tensor x, Tensor feature, Tensor threshold, Tensor left, Tensor right, Tensor value) -> Tensor',
 ];
 
-let _defined = false;
-
-export function ensureMlSchemas(): void {
-  if (_defined) return;
-  _defined = true;
-  const defLib = new Library('mlc', 'DEF');
-  for (const schema of ML_SCHEMAS) defLib.def(schema);
-}
+export const ensureMlSchemas = defineHostOps({
+  devices: ['cpu', 'wasm'],
+  schemas: ML_SCHEMAS,
+});

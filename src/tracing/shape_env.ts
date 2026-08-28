@@ -1,5 +1,5 @@
 import { DYNAMIC } from '../compiler/ir/graph/types.js';
-import { SymInt } from '../compiler/analysis/sym_int.js';
+import { SymInt, unboundSymbolError } from '../compiler/analysis/sym_int.js';
 import type { TensorInput } from './types.js';
 import type { SymbolicDim, MutableSymbolicShape, SymbolicShape } from './types.js';
 
@@ -94,7 +94,15 @@ export class ShapeEnv {
   bindInputShapes(inputs: readonly TensorInput[]): void {
     this._bindings.clear();
     for (const [name, info] of this._symbols) {
-      this._bindings.set(name, inputs[info.inputIdx].shape[info.dimIdx]);
+      const input = inputs[info.inputIdx];
+      if (!input) {
+        throw new Error(`ShapeEnv: symbol '${name}' tracks input ${info.inputIdx}, but only ${inputs.length} input(s) were given`);
+      }
+      const extent = input.shape[info.dimIdx];
+      if (extent === undefined) {
+        throw new Error(`ShapeEnv: symbol '${name}' tracks dimension ${info.dimIdx} of input ${info.inputIdx}, which has rank ${input.shape.length}`);
+      }
+      this._bindings.set(name, extent);
     }
   }
 
@@ -126,7 +134,11 @@ export class ShapeEnv {
 
   _resolve(expr: SymbolicDim): number {
     if (typeof expr === 'number') return expr;
-    if (typeof expr === 'string') return this._bindings.get(expr)!;
+    if (typeof expr === 'string') {
+      const bound = this._bindings.get(expr);
+      if (bound === undefined) throw unboundSymbolError(expr);
+      return bound;
+    }
     if (expr instanceof SymInt) return SymInt.evaluate(expr, this._bindings);
     return expr;
   }

@@ -1,4 +1,4 @@
-import { Library } from '../../dispatcher/library.js';
+import { defineHostOps } from './host_ops.js';
 
 export const LINALG_SCHEMAS = [
   'svd(Tensor input) -> (Tensor, Tensor, Tensor)',
@@ -12,11 +12,7 @@ export const LINALG_SCHEMAS = [
   'lstsq(Tensor a, Tensor b) -> Tensor',
 ];
 
-let _defined = false;
-
-export function ensureLinalgSchemas(): void {
-  if (_defined) return;
-  _defined = true;
-  const defLib = new Library('mlc', 'DEF');
-  for (const schema of LINALG_SCHEMAS) defLib.def(schema);
-}
+export const ensureLinalgSchemas = defineHostOps({
+  devices: ['cpu', 'wasm', 'gpu'],
+  schemas: LINALG_SCHEMAS,
+});

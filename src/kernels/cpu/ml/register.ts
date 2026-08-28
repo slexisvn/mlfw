@@ -19,13 +19,6 @@ const _CPU_KERNELS = {
 };
 
 const _HOST_KEYS = [DispatchKey.CPU, DispatchKey.WASM];
-const _GPU_KEYS = [DispatchKey.GPU, DispatchKey.CUSTOM_0];
-
-function unsupported(name: string): () => never {
-  return () => {
-    throw new Error(`ml.${name}: scalar-iterative algorithm runs on CPU/WASM only; GPU/WebGPU not supported (no performance benefit)`);
-  };
-}
 
 let _registered = false;
 
@@ -36,6 +29,5 @@ export function registerCpuMl(): void {
   const implLib = new Library('mlc', 'IMPL');
   for (const [name, fn] of Object.entries(_CPU_KERNELS)) {
     for (const key of _HOST_KEYS) implLib.impl(name, key, fn);
-    for (const key of _GPU_KEYS) implLib.impl(name, key, unsupported(name));
   }
 }

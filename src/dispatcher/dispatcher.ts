@@ -19,26 +19,49 @@ function hasDispatchKeySet(value: unknown): value is Dispatchable {
   return typeof value === 'object' && value !== null && 'dispatchKeySet' in value;
 }
 
+type OpDefinedListener = (handle: OperatorHandle) => void;
+type MissingKernelExplainer = (handle: OperatorHandle, key: DispatchKeyValue) => string | null;
+
 class Dispatcher {
   private readonly _entries: Map<string, OperatorEntry>;
   private readonly _handles: Map<string, OperatorHandle>;
   private readonly _fallbacks: KernelTable;
+  private readonly _defListeners: OpDefinedListener[];
+  private _explainMissingKernel: MissingKernelExplainer | null;
 
   constructor() {
     this._entries = new Map();
     this._handles = new Map();
     this._fallbacks = new KernelTable();
+    this._defListeners = [];
+    this._explainMissingKernel = null;
   }
 
-  registerOp(schema: OperatorSchema): OperatorHandle {
+  registerOp(schema: OperatorSchema, devices?: readonly string[]): OperatorHandle {
     const key = schema.key();
     const existing = this._handles.get(key);
-    if (existing) return existing;
-    const entry = new OperatorEntry(schema);
-    this._entries.set(key, entry);
-    const handle = new OperatorHandle(entry, schema);
-    this._handles.set(key, handle);
+    const handle = existing || new OperatorHandle(new OperatorEntry(schema), schema);
+    if (!existing) {
+      this._entries.set(key, handle.entry);
+      this._handles.set(key, handle);
+    }
+    const redeclared = devices !== undefined && handle.entry.devices === null;
+    if (redeclared) handle.entry.declareDevices(devices);
+    if (!existing || redeclared) this._notifyDefined(handle);
     return handle;
+  }
+
+  onOpDefined(listener: OpDefinedListener): void {
+    this._defListeners.push(listener);
+    for (const handle of this._handles.values()) listener(handle);
+  }
+
+  _notifyDefined(handle: OperatorHandle): void {
+    for (let i = 0; i < this._defListeners.length; i++) this._defListeners[i](handle);
+  }
+
+  setMissingKernelExplainer(explainer: MissingKernelExplainer): void {
+    this._explainMissingKernel = explainer;
   }
 
   findOp(name: string): OperatorHandle | null {
@@ -92,8 +115,11 @@ class Dispatcher {
       }
     }
     if (!kernel) {
+      const explained = this._explainMissingKernel
+        ? this._explainMissingKernel(handle, key as DispatchKeyValue)
+        : null;
       throw new Error(
-        `No kernel registered for op '${handle.name}' with dispatch key ${key}`
+        explained || `No kernel registered for op '${handle.name}' with dispatch key ${key}`
       );
     }
 

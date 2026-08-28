@@ -8,13 +8,13 @@ type OperatorSchemaLike = {
 };
 
 type DispatcherLike = {
-  registerOp(schema: OperatorSchemaLike): unknown;
+  registerOp(schema: OperatorSchemaLike, devices?: readonly string[]): unknown;
   registerKernel(name: string, key: DispatchKeyValue, kernelFn: KernelFunction): void;
   registerFallback(key: DispatchKeyValue, kernelFn: KernelFunction): void;
 };
 
 type Registration =
-  | { type: 'def'; schema: OperatorSchemaLike }
+  | { type: 'def'; schema: OperatorSchemaLike; devices?: readonly string[] }
   | { type: 'impl'; name: string; key: DispatchKeyValue; kernelFn: KernelFunction }
   | { type: 'fallback'; key: DispatchKeyValue; kernelFn: KernelFunction };
 
@@ -36,12 +36,12 @@ export class Library {
     this._registrations = [];
   }
 
-  def(schemaStr: string): this {
+  def(schemaStr: string, devices?: readonly string[]): this {
     const schema = parseSchema(schemaStr, this._namespace) as OperatorSchemaLike;
     if (_dispatcher) {
-      _dispatcher.registerOp(schema);
+      _dispatcher.registerOp(schema, devices);
     }
-    this._registrations.push({ type: 'def', schema });
+    this._registrations.push({ type: 'def', schema, devices });
     return this;
   }
 
@@ -83,7 +83,7 @@ export class Library {
   replay(dispatcher: DispatcherLike): void {
     for (const reg of this._registrations) {
       if (reg.type === 'def') {
-        dispatcher.registerOp(reg.schema);
+        dispatcher.registerOp(reg.schema, reg.devices);
       } else if (reg.type === 'impl') {
         dispatcher.registerKernel(
           `${this._namespace}::${reg.name}`,

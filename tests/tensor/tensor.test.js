@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { tensor, scalar, zeros, ones } from '../../src/index.js';
+import { tensor, scalar, zeros, ones, arange, empty } from '../../src/index.js';
+import { META_DEVICE } from '../../src/tensor/types/device.js';
 
 describe('item', () => {
   it('returns value of scalar tensor', () => {
@@ -63,5 +64,52 @@ describe('_select', () => {
   it('selects correct column', () => {
     const t = tensor([[1, 2, 3], [4, 5, 6]]);
     expect(t._select(1, 2).toArray()).toEqual([3, 6]);
+  });
+});
+
+describe('data', () => {
+  it('returns the whole buffer for a tensor that owns its storage', () => {
+    const t = tensor([1, 2, 3, 4]);
+    expect(t.data).toBe(t.storage.data);
+    expect([...t.data]).toEqual([1, 2, 3, 4]);
+  });
+
+  it('returns only the elements of an offset view', () => {
+    const v = arange(0, 8, 1).narrow(0, 4, 4);
+    expect(v.data.length).toBe(v.numel);
+    expect([...v.data]).toEqual(v.toArray());
+    expect([...v.data]).toEqual([4, 5, 6, 7]);
+  });
+
+  it('returns only the elements of a truncated view', () => {
+    const v = arange(0, 8, 1).narrow(0, 0, 3);
+    expect([...v.data]).toEqual([0, 1, 2]);
+  });
+
+  it('sizes a multi-dimensional view by its element count, not its first axis', () => {
+    const v = arange(0, 12, 1).reshape([3, 4]).narrow(0, 1, 2);
+    expect(v.shape).toEqual([2, 4]);
+    expect(v.data.length).toBe(8);
+    expect([...v.data]).toEqual([4, 5, 6, 7, 8, 9, 10, 11]);
+    expect(v.toArray()).toEqual([[4, 5, 6, 7], [8, 9, 10, 11]]);
+  });
+
+  it('aliases the parent storage so writes are visible through both', () => {
+    const base = arange(0, 8, 1);
+    const v = base.narrow(0, 4, 4);
+    v.data[0] = 99;
+    expect(base.toArray()[4]).toBe(99);
+    expect(base.data.buffer).toBe(v.data.buffer);
+  });
+
+  it('refuses a non-contiguous tensor rather than returning the parent buffer', () => {
+    const t = arange(0, 6, 1).reshape([2, 3]).transpose(0, 1);
+    expect(t.isContiguous).toBe(false);
+    expect(() => t.data).toThrow(/not contiguous/);
+    expect([...t.contiguous().data]).toEqual([0, 3, 1, 4, 2, 5]);
+  });
+
+  it('returns null for a meta tensor', () => {
+    expect(empty([2, 2], { device: META_DEVICE }).data).toBeNull();
   });
 });

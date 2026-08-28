@@ -48,6 +48,17 @@ const _AUTOGRAD_KEY_FOR_BACKEND: Readonly<Partial<Record<DispatchKeyValue, Dispa
   [DispatchKey.WASM]: DispatchKey.AUTOGRAD_WASM,
 });
 
+const _DEVICE_FOR_BACKEND_KEY: Array<string | null> = new Array(DispatchKey.NUM_KEYS).fill(null);
+for (const [device, key] of Object.entries(_BACKEND_KEY_FOR_DEVICE)) {
+  _DEVICE_FOR_BACKEND_KEY[key] = device;
+}
+
+export function deviceForBackendKey(key: DispatchKeyValue): string {
+  const device = _DEVICE_FOR_BACKEND_KEY[key];
+  if (device === null) throw new Error(`No device for backend key: ${key}`);
+  return device;
+}
+
 export function backendKeyForDevice(deviceType: string): DispatchKeyValue {
   const k = _BACKEND_KEY_FOR_DEVICE[deviceType];
   if (k === undefined) throw new Error(`No backend key for device: ${deviceType}`);

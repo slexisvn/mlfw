@@ -8,14 +8,3 @@ export function resolveLimit(limitConfig: number | null | undefined, totalBatche
   }
   return totalBatches;
 }
-
-export async function noGradAsync(fn: () => Promise<void>): Promise<void> {
-  const { GradMode } = await import('../../../autograd/grad_mode.js');
-  const prev = GradMode.isEnabled();
-  GradMode.setEnabled(false);
-  try {
-    await fn();
-  } finally {
-    GradMode.setEnabled(prev);
-  }
-}

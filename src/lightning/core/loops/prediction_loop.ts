@@ -1,5 +1,6 @@
 import { Stage } from '../state.js';
-import { resolveLimit, noGradAsync } from './utils.js';
+import { resolveLimit } from './utils.js';
+import { noGrad } from '../../../autograd/grad_mode.js';
 import type { DataLoaderLike, LightningModuleLike, TrainerCoreLike } from '../../types.js';
 
 export class PredictionLoop {
@@ -17,7 +18,7 @@ export class PredictionLoop {
     const limit = resolveLimit(trainer.limitTestBatches, dataLoader.length);
     let batchIdx = 0;
 
-    await noGradAsync(async () => {
+    await noGrad(async () => {
       for (const rawBatch of dataLoader) {
         if (batchIdx >= limit) break;
         const batch = strategy.toDevice(rawBatch);

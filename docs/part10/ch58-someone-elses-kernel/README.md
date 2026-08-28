@@ -229,4 +229,4 @@ They are not the same kind of difference, and a differential test has to know wh
 
 ---
 
-**Part X ends here.** [Part XI](../../OUTLINE.md) takes the `CompiledKernel` this part produces and makes it a framework: a runtime that loads and launches it, a dispatcher that routes an eager call to it, a tracer that produced the graph in the first place, and a training loop that runs all of it end to end.
+**Part X ends here.** [Part XI](../../part11/README.md) takes the `CompiledKernel` this part produces and makes it a framework: a runtime that loads and launches it, a dispatcher that routes an eager call to it, a tracer that produced the graph in the first place, and a training loop that runs all of it end to end.

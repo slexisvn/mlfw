@@ -1,7 +1,7 @@
 import { Library } from '../../dispatcher/library.js';
 import { DispatchKey } from '../../dispatcher/dispatch_key.js';
 import type { DispatchKeyValue } from '../../dispatcher/dispatch_key.js';
-import { registerJITKernels } from '../../dispatcher/jit_dispatch.js';
+import { installBackendCoverage } from '../../dispatcher/backend_coverage.js';
 import { tensorOpSchemas } from '../ops/metadata.js';
 import { META_KERNELS } from './meta/meta_ops.js';
 import { VIEW_KERNELS } from './view/view_ops.js';
@@ -38,5 +38,5 @@ export function registerNativeOps(): void {
     }
   }
 
-  registerJITKernels();
+  installBackendCoverage();
 }

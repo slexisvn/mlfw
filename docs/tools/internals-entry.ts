@@ -95,3 +95,35 @@ export {
   activeExternalCodegenProviders,
 } from '../../src/compiler/pipeline/external_codegen.js';
 export { FuncAttr } from '../../src/compiler/ir/func_attrs.js';
+
+export { CompiledKernel } from '../../src/backend/pipeline.js';
+export { RuntimeModule, RuntimeTensor, KernelRegistry, constBuffersOf } from '../../src/runtime/runtime.js';
+export { registerBackend, getBackend, hasBackend } from '../../src/runtime/backend_registry.js';
+export {
+  assignPlanBuffers, computePlanDonations, planMemoryReport,
+} from '../../src/compiler/passes/memory/plan_buffer_assignment.js';
+
+export {
+  DispatchKey, DispatchKeySet, EMPTY_KEY_SET, BACKEND_KEY_SET, AUTOGRAD_KEY_SET,
+  FUNCTIONALITY_KEY_SET, backendKeyForDevice, autogradKeyForBackend,
+} from '../../src/dispatcher/dispatch_key.js';
+export { computeKeySet } from '../../src/dispatcher/dispatcher.js';
+export { KernelFunction, IValue, IValueTag } from '../../src/dispatcher/boxing.js';
+export { KernelTable } from '../../src/dispatcher/kernel_table.js';
+export { OperatorEntry } from '../../src/dispatcher/operator_entry.js';
+export { OperatorHandle } from '../../src/dispatcher/operator_handle.js';
+export { Library } from '../../src/dispatcher/library.js';
+export { guardStack, withExcludedKeys, withIncludedKeys, withGuard } from '../../src/dispatcher/guard.js';
+export { parseSchema, OperatorSchema, SchemaArg, ArgKind } from '../../src/dispatcher/operator_schema.js';
+export { jitCompile, jitCacheClear } from '../../src/dispatcher/jit_cache.js';
+
+export { Tracer, getActiveTracer } from '../../src/tracing/tracer.js';
+export { registerTracingDispatch } from '../../src/tracing/dispatch.js';
+export { ShapeEnv } from '../../src/tracing/shape_env.js';
+export { _traceCore } from '../../src/tracing/compile.js';
+export { foldWeightParams, weightPredicate, MAX_FOLDABLE_ELEMENTS } from '../../src/tracing/fold_params.js';
+export { SymInt } from '../../src/compiler/analysis/sym_int.js';
+export {
+  BASELINE, DEFAULT_MIN_GAIN, optimizationCandidates, selectWinner,
+  candidateByName, gateCacheKey, graphSignature,
+} from '../../src/compiler/pipeline/opt_gate.js';

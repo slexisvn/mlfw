@@ -330,10 +330,10 @@ Two things about this are worth keeping. The first is that the worst case is the
 
 Deferring the kernel bought 15%, and it puts a question that a non-deferred design never has to answer: **when does a compiled call read its arguments?**
 
-Follow the storage. `_executeJointForward` captures its arguments as typed arrays, and `tensorToContiguous` returns the tensor's *live* buffer whenever the tensor is already contiguous and owns its storage ([`jit_dispatch.ts:220`](../../../src/dispatcher/jit_dispatch.ts)):
+Follow the storage. `_executeJointForward` captures its arguments as typed arrays, and `tensorToContiguous` returns the tensor's *live* buffer whenever the tensor is already contiguous and owns its storage ([`jit_dispatch.ts:223`](../../../src/dispatcher/jit_dispatch.ts)):
 
 ```ts
-  if (t.isContiguous && srcOff === 0 && srcData.length === n) return t.data || srcData;
+  if (t.isContiguous && srcOff === 0 && srcData.length === n) return srcData;
 ```
 
 No copy — an alias, which is the right decision for a hot path and the wrong one to combine with deferral. The kernel runs later, and `backward` runs it again with the real cotangent, so an aliased buffer is read at least once *after* the call that supplied it.
