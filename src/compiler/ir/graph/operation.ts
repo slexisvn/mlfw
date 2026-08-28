@@ -3,6 +3,7 @@ import { Region } from './block.js';
 import { registry } from './ops.js';
 import { topoSortByOperands } from './graph_algorithms.js';
 import type { AttrInit, AttrValue, HashableAttr, IRType } from './types.js';
+import type { Location } from '../location.js';
 import type { Block } from './block.js';
 import type { GraphFunction } from './function.js';
 
@@ -23,6 +24,7 @@ export class Operation {
   _operandLinks: UseLink[];
   results: Value[];
   regions: Region[];
+  loc: Location | null;
 
   constructor(
     opName: string,
@@ -36,6 +38,7 @@ export class Operation {
     this.parentBlock = null;
     this._prev = null;
     this._next = null;
+    this.loc = null;
 
     this.attributes = new Map();
     if (attributes) {
@@ -169,6 +172,7 @@ export class Operation {
     for (let i = 0; i < this.results.length; i++) {
       valueMap.set(this.results[i], op.results[i]);
     }
+    op.loc = this.loc;
     return op;
   }
 

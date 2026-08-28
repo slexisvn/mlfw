@@ -1,5 +1,6 @@
 import { FunctionPass, PassResult } from '../pass.js';
 import { Operation } from '../../ir/graph/operation.js';
+import { derivedFrom } from '../../ir/graph/op_location.js';
 import { TensorType, ScalarType, isFloatType } from '../../ir/graph/types.js';
 import { registry } from '../../ir/graph/ops.js';
 import { redundantConvertPairSource } from '../../ir/graph/patterns.js';
@@ -83,7 +84,7 @@ function castOpToLowPrecision(op: Operation, lowDtype: string): boolean {
     const v = op.getOperand(i);
     if (isCastableFloat(v.type, lowDtype)) {
       const lowType = new TensorType((v.type as TensorType).shape, lowDtype as ScalarDType);
-      const down = new Operation('convert', [v], [lowType], { target_dtype: lowDtype });
+      const down = derivedFrom(new Operation('convert', [v], [lowType], { target_dtype: lowDtype }), op);
       block.insertBefore(down, op);
       newOperands.push(down.getResult(0));
       castedAny = true;
@@ -102,14 +103,14 @@ function castOpToLowPrecision(op: Operation, lowDtype: string): boolean {
 
   const attributes = new Map<string, AttrValue>(op.attributes);
   if (accumulates && resultTypes[0] instanceof TensorType) attributes.set('out_dtype', (resultTypes[0] as TensorType).dtype);
-  const lowered = new Operation(op.opName, newOperands, resultTypes, attributes);
+  const lowered = derivedFrom(new Operation(op.opName, newOperands, resultTypes, attributes), op);
   block.insertBefore(lowered, op);
 
   for (let r = 0; r < op.numResults; r++) {
     const oldRes = op.getResult(r);
     const newRes = lowered.getResult(r);
     if (newRes.type instanceof TensorType && newRes.type.dtype !== (oldRes.type as TensorType).dtype) {
-      const up = new Operation('convert', [newRes], [oldRes.type], { target_dtype: (oldRes.type as TensorType).dtype });
+      const up = derivedFrom(new Operation('convert', [newRes], [oldRes.type], { target_dtype: (oldRes.type as TensorType).dtype }), op);
       block.insertBefore(up, op);
       oldRes.replaceAllUsesWith(up.getResult(0));
     } else {

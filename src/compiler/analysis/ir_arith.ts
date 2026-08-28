@@ -5,6 +5,7 @@ import { SymInt } from './sym_int.js';
 import { IntImmNode, MathOpNode, CompareNode, VariableNode, mathOp } from '../ir/tensor/nodes.js';
 import type { CallExternNode } from '../ir/tensor/nodes.js';
 import { toLinearForm, splitByDivisor, linearFormToNode } from './iter_map.js';
+import { symIntToNode } from '../ir/tensor/sym_lower.js';
 import type { SymExpr } from './sym_int.js';
 import type { IntBound } from './analyzer.js';
 import type { LinearForm } from './iter_map.js';
@@ -15,6 +16,8 @@ type BoundPredicate = (d: IntBound) => boolean;
 type ComparePredicates = Readonly<Record<string, BoundPredicate | undefined>>;
 
 export type DivModSplit = { quotient: TirNode; remainder: TirNode };
+
+const NO_ASSUMPTION = (): void => {};
 
 const MATHOP_TO_SYM: Readonly<Record<string, SymBinaryName | undefined>> = { '+': 'add', '-': 'sub', '*': 'mul', '//': 'div', '%': 'mod', 'tdiv': 'div', 'tmod': 'mod' };
 
@@ -72,7 +75,7 @@ function diffBound(analyzer: Analyzer, a: TirNode | null | undefined, b: TirNode
   if (sa === null) return null;
   const sb = irToSymInt(b);
   if (sb === null) return null;
-  return analyzer.constIntBound(SymInt.sub(sa, sb));
+  return analyzer.boundOfDifference(sa, sb);
 }
 
 const CMP_TRUE: ComparePredicates = {
@@ -161,6 +164,64 @@ function affineDivMod(analyzer: Analyzer, node: TirNode, divisor: number): DivMo
   return { quotient: quotient(), remainder: remainderNode };
 }
 
+const NEGATED_DIRECTION: Readonly<Record<string, string | undefined>> = {
+  lt: 'ge', le: 'gt', gt: 'le', ge: 'lt', eq: 'ne', ne: 'eq',
+};
+
+const DIRECTION_FACTS: Readonly<Record<string, ((a: SymExpr, b: SymExpr) => SymExpr[]) | undefined>> = {
+  lt: (a, b) => [SymInt.sub(SymInt.sub(b, a), 1)],
+  le: (a, b) => [SymInt.sub(b, a)],
+  gt: (a, b) => [SymInt.sub(SymInt.sub(a, b), 1)],
+  ge: (a, b) => [SymInt.sub(a, b)],
+  eq: (a, b) => [SymInt.sub(a, b), SymInt.sub(b, a)],
+  ne: () => [],
+};
+
+function comparisonOf(node: TirNode): { direction: string; a: TirNode; b: TirNode } | null {
+  if (node.type === 'CompareNode') {
+    const cmp = node as CompareNode;
+    return { direction: cmp.direction, a: cmp.a, b: cmp.b };
+  }
+  if (node.type !== 'MathOpNode') return null;
+  const math = node as MathOpNode;
+  if (!math.b || !COMPARE_MATH_OPS.has(math.op)) return null;
+  return { direction: compareDirectionOf(math.op), a: math.a, b: math.b };
+}
+
+export function assumeCondition(analyzer: Analyzer, node: TirNode | null | undefined, truth: boolean): () => void {
+  if (!node) return NO_ASSUMPTION;
+  const comparison = comparisonOf(node);
+  if (!comparison) return NO_ASSUMPTION;
+
+  const direction = truth ? comparison.direction : NEGATED_DIRECTION[comparison.direction];
+  const facts = direction ? DIRECTION_FACTS[direction] : undefined;
+  if (!facts) return NO_ASSUMPTION;
+
+  const a = irToSymInt(comparison.a);
+  if (a === null) return NO_ASSUMPTION;
+  const b = irToSymInt(comparison.b);
+  if (b === null) return NO_ASSUMPTION;
+
+  const releases = facts(a, b).map(fact => analyzer.assumeNonNegative(fact));
+  if (releases.length === 0) return NO_ASSUMPTION;
+  return () => { for (const release of releases) release(); };
+}
+
+export function assumeLoopVar(analyzer: Analyzer, name: string, extent: TirNode | null | undefined): () => void {
+  const limit = irToSymInt(extent);
+  if (limit === null || typeof limit === 'number') return NO_ASSUMPTION;
+  const variable = SymInt.var(name);
+  const releases = [analyzer.assumeNonNegative(variable), analyzer.assumeLess(variable, limit)];
+  return () => { for (const release of releases) release(); };
+}
+
+function exactDivMod(analyzer: Analyzer, op: string, dividend: SymExpr, divisor: number): TirNode | null {
+  if (!analyzer.modularSet(dividend).divisibleBy(divisor)) return null;
+  if (op === '%') return new IntImmNode(0);
+  const quotient = analyzer.exactQuotient(dividend, divisor);
+  return quotient === null ? null : symIntToNode(quotient, (name) => new VariableNode(name, 'int32'));
+}
+
 function nonNegativeDivMod(analyzer: Analyzer, node: MathOpNode): MathOpNode | null {
   if (node.op !== '//' && node.op !== '%') return null;
   const divisor = node.b as IntImmNode | null;
@@ -219,8 +280,14 @@ export class RewriteSimplify {
 
     if ((folded.op === '//' || folded.op === '%') && (folded.b as TirNode).type === 'IntImmNode' && (folded.b as IntImmNode).value > 0) {
       const c = (folded.b as IntImmNode).value;
-      if (boundWithin(this.analyzer, folded.a, 0, c - 1)) {
-        return folded.op === '//' ? new IntImmNode(0) : folded.a;
+      const dividend = irToSymInt(folded.a);
+      if (dividend !== null) {
+        const bound = this.analyzer.constIntBound(dividend);
+        if (bound.min >= 0 && bound.max <= c - 1) {
+          return folded.op === '//' ? new IntImmNode(0) : folded.a;
+        }
+        const exact = exactDivMod(this.analyzer, folded.op, dividend, c);
+        if (exact) return exact;
       }
       const split = affineDivMod(this.analyzer, folded.a, c);
       if (split) return folded.op === '//' ? split.quotient : split.remainder;

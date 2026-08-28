@@ -1,5 +1,6 @@
 import { withFuncAttrs } from '../func_attrs.js';
 import { floorDiv, floorMod } from '../../../util/divmod.js';
+import type { Location } from '../location.js';
 import type { Buffer, BufferRegionLike } from './buffer.js';
 
 export const ForKind = Object.freeze({
@@ -123,7 +124,7 @@ export class ForNode extends TensorNode {
   }
 }
 
-export type BlockSourceOp = { name: string; id: number };
+export type BlockSourceOp = { name: string; id: number; loc: Location | null };
 
 export class BlockNode extends TensorNode {
   declare type: 'BlockNode';

@@ -214,16 +214,10 @@ export function isStale(s: State): boolean {
   return keys.some(key => JSON.stringify(s.options[key]) !== JSON.stringify((s.ranOptions as CompileOptions)[key]));
 }
 
-const sourceLineCache = new WeakMap<CompileResponse, Map<number, number>>();
-const NO_LINES: Map<number, number> = new Map();
+const NO_LINES: readonly number[] = [];
 
-export function sourceLines(s: State): Map<number, number> {
-  if (!s.result) return NO_LINES;
-  const cached = sourceLineCache.get(s.result);
-  if (cached) return cached;
-  const map = new Map(s.result.sourceLinks);
-  sourceLineCache.set(s.result, map);
-  return map;
+export function sourceLines(s: State): readonly number[] {
+  return s.result ? s.result.sourceLines : NO_LINES;
 }
 
 export type DisabledPass = { name: string; phase: string };

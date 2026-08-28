@@ -3,11 +3,12 @@ import { PassContext } from 'mlfw/compiler/passes/pass.js';
 import { CompileRecorder } from './recorder.js';
 import { executeCompiled } from './execute.js';
 import { evaluateModelSource, frameworkGlobals } from './evaluate.js';
-import { recordSourceLines } from './source_map.js';
+import { recordSourceLocations } from './source_map.js';
+import { collectDagLines } from './snapshot.js';
 import { targetNote } from '../catalog/targets.js';
 import { TARGET_FACTORIES } from './targets.js';
 import { SEARCH_BUDGET } from '../catalog/tuning.js';
-import type { BackwardMode, CompileOptions, CompileResponse, Kernel, RunResult, SourceLink, TargetName, WorkerRequest } from '../protocol.js';
+import type { BackwardMode, CompileOptions, CompileResponse, CompileStep, Kernel, RunResult, TargetName, WorkerRequest } from '../protocol.js';
 
 const NOT_RUN: RunResult = {
   ran: false, skipped: null, error: null,
@@ -77,21 +78,29 @@ function collectKernels(handle: InferenceHandle | TrainingHandle, target: Target
   return units.flatMap(unit => kernelsOf(unit.result as KernelSource, language, unit.name));
 }
 
+function tracedLines(steps: readonly CompileStep[]): number[] {
+  const lines = new Set<number>();
+  for (const step of steps) {
+    for (const side of [step.before, step.after]) {
+      for (const dag of side.dags) collectDagLines(dag.nodes, lines);
+    }
+  }
+  return [...lines].sort((a, b) => a - b);
+}
+
 async function runCompile(id: number, source: string, options: CompileOptions): Promise<CompileResponse> {
   const startedAt = performance.now();
   let error: string | null = null;
   let errorPhase: string | null = null;
   let kernels: Kernel[] = [];
   let run: RunResult = NOT_RUN;
-  let sourceLinks: SourceLink[] = [];
   let stopRecordingLines = (): void => {};
   const recorder = new CompileRecorder(() => { stopRecordingLines(); });
 
   try {
     manual_seed(SEED);
     const { model, inputs, baseLine } = evaluateModelSource(source);
-    const lineRecorder = recordSourceLines(baseLine);
-    stopRecordingLines = lineRecorder.stop;
+    stopRecordingLines = recordSourceLocations(baseLine);
     const compilable = asCompilable(model);
     const settings = {
       ...compilerOptions(options),
@@ -108,7 +117,6 @@ async function runCompile(id: number, source: string, options: CompileOptions): 
     kernels = collectKernels(handle, options.target, options.backward);
     manual_seed(SEED);
     run = await executeCompiled(handle, compilable, inputs, options.target, options.backward);
-    sourceLinks = [...lineRecorder.lines];
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
     errorPhase = recorder.currentOpenPass();
@@ -117,16 +125,18 @@ async function runCompile(id: number, source: string, options: CompileOptions): 
     stopRecordingLines();
   }
 
+  const steps = recorder.timeline(kernels);
+
   return {
     kind: 'compile',
     id,
     ok: error === null,
     error,
     errorPhase,
-    steps: recorder.timeline(kernels),
+    steps,
     kernels,
     events: recorder.events,
-    sourceLinks,
+    sourceLines: tracedLines(steps),
     memoryPlans: recorder.memoryPlans(),
     tuningRounds: recorder.tuningRounds(),
     totalMs: performance.now() - startedAt,

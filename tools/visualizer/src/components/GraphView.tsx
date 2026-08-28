@@ -3,11 +3,13 @@ import type { ReactElement } from 'react';
 import { layoutDag } from '../ir/dag.js';
 import { layoutNest } from '../ir/nest.js';
 import { driftScore, frameAt, linkLowering, linkRewrites, linkSourceLines, planTransition } from '../ir/transition.js';
-import { actions, sourceLines, useStore } from '../store.js';
+import { actions, useStore } from '../store.js';
 import { opLabel } from '../catalog/naming.js';
 import { usePanZoom } from './pan_zoom.js';
 import { useElementSize } from './use_element_size.js';
+import { lineNote } from '../ir/source_note.js';
 import type { Box, Layout, NoteLookup } from '../ir/dag.js';
+import type { DagNode } from '../protocol.js';
 import type { Change, Frame, Placement, Plan } from '../ir/transition.js';
 import type { CompileStep, Dag, NestNode, Snapshot } from '../protocol.js';
 
@@ -63,7 +65,6 @@ function shapeOf(layout: Layout, fallback: number): string {
 
 export function GraphView({ step }: { step: CompileStep }) {
   const speed = useStore(s => s.speed);
-  const lines = useStore(sourceLines);
   const [dagIndex, setDagIndex] = useState(0);
   const [prepared, setPrepared] = useState<Prepared | null>(null);
   const [frame, setFrame] = useState<Frame | null>(null);
@@ -75,10 +76,7 @@ export function GraphView({ step }: { step: CompileStep }) {
   const played = useRef<string | null>(null);
   const { view, panning, reset, zoomBy, dragged, ref: attachSvg, surface } = usePanZoom();
 
-  const note = useMemo<NoteLookup>(
-    () => (opId: number) => (lines.has(opId) ? `line ${lines.get(opId) as number}` : ''),
-    [lines],
-  );
+  const note = useMemo<NoteLookup>(() => (node: DagNode) => lineNote(node.lines), []);
 
   const dags = step.after.dags.length > 0 ? step.after.dags : step.before.dags;
   const index = Math.min(dagIndex, Math.max(dags.length - 1, 0));
@@ -175,7 +173,7 @@ export function GraphView({ step }: { step: CompileStep }) {
   const leaves = ordered.filter(placement => !CONTAINER_KINDS.has(placement.box.kind));
 
   const drawNode = (placement: Placement): ReactElement => {
-    const line = placement.box.opId === null ? undefined : lines.get(placement.box.opId);
+    const line = placement.box.line;
     return (
       <g
         key={placement.box.id}
@@ -183,11 +181,11 @@ export function GraphView({ step }: { step: CompileStep }) {
           'node',
           placement.box.kind,
           placement.change,
-          line === undefined ? '' : 'traceable',
+          line === null ? '' : 'traceable',
         ].filter(Boolean).join(' ')}
         style={{ opacity: placement.opacity }}
         transform={transformFor(placement)}
-        onClick={() => { if (line !== undefined && !dragged()) actions.focusSource(line); }}
+        onClick={() => { if (line !== null && !dragged()) actions.focusSource(line); }}
       >
         <rect
           width={placement.width}
@@ -272,10 +270,10 @@ export function GraphView({ step }: { step: CompileStep }) {
   );
 }
 
-function tooltipFor(box: Box, line: number | undefined): string {
+function tooltipFor(box: Box, line: number | null): string {
   const parts: string[] = [box.kind === 'op' ? `${box.label} — ${opLabel(box.label)}` : box.label];
   if (box.detail) parts.push(box.detail);
-  if (line !== undefined) parts.push(`from line ${line} of your code`);
+  if (line !== null) parts.push(`from line ${line} of your code`);
   return parts.join('\n');
 }
 

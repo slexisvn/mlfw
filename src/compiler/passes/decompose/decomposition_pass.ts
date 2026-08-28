@@ -59,7 +59,7 @@ export class DecompositionPass extends FunctionPass {
       builder.setInsertionPoint(op);
       decomposed.push(op.opName);
       const sizeBefore = (op.parentBlock as Block).size;
-      rule(op, builder);
+      builder.withLocation(op.loc, () => rule(op, builder));
       if (explain) {
         explain(op.opName, 'rewritten into primitives',
           'no lowering rule exists for this op, so it is re-expressed with ops every target can lower',

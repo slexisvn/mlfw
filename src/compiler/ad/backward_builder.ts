@@ -1,5 +1,7 @@
 import { GraphFunction } from '../ir/graph/function.js';
 import { IRBuilder } from '../ir/graph/builder.js';
+import { nameLocation } from '../ir/location.js';
+import type { Location } from '../ir/location.js';
 
 import { UseDefAnalysis } from '../analysis/use_def.js';
 import { readValues } from '../ir/graph/graph_algorithms.js';
@@ -54,7 +56,13 @@ export type BackwardBuildResult = {
 
 type SavedValueInfo = { savedValues: Value[]; savedValueIndices: Map<number, number> };
 
+const GRADIENT_TAG = 'grad';
+
 const FALLBACK_REMAT_OPS = new Set(['neg', 'abs', 'sign', 'floor', 'ceil']);
+
+export function gradientLocation(loc: Location | null): Location | null {
+  return loc === null ? null : nameLocation(GRADIENT_TAG, loc);
+}
 
 export function backpropOps(orderedOps: readonly Operation[], { accumulator, builder, needsGrad, resolveValue, handleRegionOp = null, explain = null }: BackpropOptions): void {
   for (let i = orderedOps.length - 1; i >= 0; i--) {
@@ -89,15 +97,17 @@ export function backpropOps(orderedOps: readonly Operation[], { accumulator, bui
     for (let r = 0; r < op.numResults; r++) resultValues[r] = resolveValue(op.getResult(r));
 
     const full = (value: number, type: TensorType) => builder.broadcast(builder.scalarConstant(value, type.dtype).getResult(0), type.shape, []).getResult(0) as TensorValue;
-    const gradInputs = rule({ builder, op, operands: operandValues as TensorValue[], results: resultValues as TensorValue[], gradOutputs: gradOuts as (TensorValue | null)[], attrs: op.attributes, full });
-    if (!gradInputs) continue;
+    builder.withLocation(gradientLocation(op.loc), () => {
+      const gradInputs = rule({ builder, op, operands: operandValues as TensorValue[], results: resultValues as TensorValue[], gradOutputs: gradOuts as (TensorValue | null)[], attrs: op.attributes, full });
+      if (!gradInputs) return;
 
-    for (let o = 0; o < op.numOperands; o++) {
-      if (o >= gradInputs.length || !gradInputs[o]) continue;
-      const operandVal = op.getOperand(o);
-      if (!needsGrad.has(operandVal.id)) continue;
-      accumulator.accumulate(operandVal.id, reduceGradToOperandShape(builder, gradInputs[o] as Value, (operandVal.type as TensorType).shape));
-    }
+      for (let o = 0; o < op.numOperands; o++) {
+        if (o >= gradInputs.length || !gradInputs[o]) continue;
+        const operandVal = op.getOperand(o);
+        if (!needsGrad.has(operandVal.id)) continue;
+        accumulator.accumulate(operandVal.id, reduceGradToOperandShape(builder, gradInputs[o] as Value, (operandVal.type as TensorType).shape));
+      }
+    });
   }
 }
 

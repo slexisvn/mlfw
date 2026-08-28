@@ -1,5 +1,5 @@
 import { SymInt } from '../../analysis/sym_int.js';
-import { IntImmNode, MathOpNode } from './nodes.js';
+import { IntImmNode, MathOpNode, CallExternNode } from './nodes.js';
 import type { TirNode } from './nodes.js';
 import type { Dim } from '../graph/types.js';
 
@@ -15,6 +15,9 @@ function symOpToNode(type: string, a: TirNode, b: TirNode | null): TirNode {
     case 'neg': return new MathOpNode('-', a);
     case 'ceildiv':
       return new MathOpNode('//', new MathOpNode('-', new MathOpNode('+', a, b), new IntImmNode(1)), b);
+    case 'max':
+    case 'min':
+      return new CallExternNode(type, [a, b as TirNode], 'int32');
     default:
       throw new Error(`symIntToNode: unsupported op '${type}' in extent/index context`);
   }

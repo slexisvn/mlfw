@@ -1,5 +1,8 @@
 import type { NestNode } from '../protocol.js';
 import type { Box, Layout } from './dag.js';
+import { lineNote } from './source_note.js';
+
+const EMPTY_LINES: readonly number[] = [];
 
 const BOX_KIND: Partial<Record<NestNode['kind'], Box['kind']>> = {
   block: 'nest-block',
@@ -62,7 +65,8 @@ function place(node: NestNode, x: number, y: number, width: number, depth: numbe
     kind: BOX_KIND[node.kind] ?? 'nest',
     label: node.label,
     detail: node.detail,
-    note: '',
+    note: lineNote(node.line === null ? EMPTY_LINES : [node.line]),
+    line: node.line,
     x,
     y,
     width,

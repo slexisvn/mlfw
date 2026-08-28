@@ -1,4 +1,5 @@
 import { TensorType, typeToString } from './types.js';
+import { formatLocation } from '../location.js';
 import { dtypeKeys, jsTypedArray } from '../../../util/dtype_map.js';
 import type { Block as BlockType } from './block.js';
 import type { AttrValue } from './types.js';
@@ -8,18 +9,20 @@ import type { Operation } from './operation.js';
 import type { GraphFunction } from './function.js';
 import type { GraphModule } from './module.js';
 
-export type IRPrinterOptions = Readonly<{ indentStr?: string }>;
+export type IRPrinterOptions = Readonly<{ indentStr?: string; locations?: boolean }>;
 
 
 export class IRPrinter {
   indent: number;
   indentStr: string;
+  locations: boolean;
   valueNames: Map<Value, string>;
   private _nextValueId: number;
 
   constructor(options: IRPrinterOptions = {}) {
     this.indent = 0;
     this.indentStr = options.indentStr || '  ';
+    this.locations = options.locations === true;
     this.valueNames = new Map();
     this._nextValueId = 0;
   }
@@ -122,6 +125,8 @@ export class IRPrinter {
       line += ' : ' + types.join(', ');
     }
 
+    if (this.locations && op.loc !== null) line += ` loc(${formatLocation(op.loc)})`;
+
     out.push(line);
 
     for (let i = 0; i < op.regions.length; i++) {
@@ -221,19 +226,19 @@ export function formatAttrValue(val: AttrValue | undefined): string {
   return String(val);
 }
 
-export function printModule(module: GraphModule): string {
-  return new IRPrinter().printModule(module);
+export function printModule(module: GraphModule, options: IRPrinterOptions = {}): string {
+  return new IRPrinter(options).printModule(module);
 }
 
-export function printFunction(func: GraphFunction): string {
-  const printer = new IRPrinter();
+export function printFunction(func: GraphFunction, options: IRPrinterOptions = {}): string {
+  const printer = new IRPrinter(options);
   const lines: string[] = [];
   printer.printFunction(func, lines);
   return lines.join('\n');
 }
 
-export function printOperation(op: Operation): string {
-  const printer = new IRPrinter();
+export function printOperation(op: Operation, options: IRPrinterOptions = {}): string {
+  const printer = new IRPrinter(options);
   const lines: string[] = [];
   printer.printOperation(op, lines);
   return lines.join('\n');

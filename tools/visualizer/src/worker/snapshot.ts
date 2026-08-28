@@ -4,12 +4,15 @@ import { printLIR, LIRPrinter } from 'mlfw/compiler/ir/lir/printer.js';
 import { opOfBlockName } from 'mlfw/compiler/ir/tensor/block_name.js';
 import { ForKind, IterVarKind } from 'mlfw/compiler/ir/tensor/nodes.js';
 import { walk } from 'mlfw/compiler/ir/ir_visitor.js';
+import { formatLocation } from 'mlfw/compiler/ir/location.js';
 import { functionCost, sumCosts } from './cost.js';
+import { modelLines } from './source_map.js';
 import type { Block } from 'mlfw/compiler/ir/graph/block.js';
 import type { GraphFunction } from 'mlfw/compiler/ir/graph/function.js';
 import type { GraphModule } from 'mlfw/compiler/ir/graph/module.js';
 import type { Value } from 'mlfw/compiler/ir/graph/value.js';
 import type { Cost } from './cost.js';
+import type { BlockSourceOp } from 'mlfw/compiler/ir/tensor/nodes.js';
 import type { Dag, DagNode, DagValue, IRLevelName, NestKind, NestNode, Snapshot } from '../protocol.js';
 
 const ATTR_TEXT_LIMIT = 96;
@@ -72,6 +75,8 @@ function dagForFunction(func: GraphFunction, names: ReadonlyMap<Value, string>):
         attrs: [...op.attributes].map(([key, value]) => [key, attrText(value)] as [string, string]),
         regions,
         regionArgs,
+        loc: op.loc === null ? null : formatLocation(op.loc),
+        lines: modelLines(op.loc),
       });
     }
     return blockArgs;
@@ -138,7 +143,7 @@ const STORE_LABEL_LIMIT = 88;
 function store(target: string, value: string, path: string): NestNode[] {
   const full = value === '' ? target : `${target} = ${value}`;
   const label = full.length > STORE_LABEL_LIMIT ? `${full.slice(0, STORE_LABEL_LIMIT)}…` : full;
-  return [{ id: `store:${path}`, kind: 'store', label, detail: label === full ? '' : full, op: null, opId: null, children: [] }];
+  return [{ id: `store:${path}`, kind: 'store', label, detail: label === full ? '' : full, op: null, opId: null, line: null, children: [] }];
 }
 
 function nestFor(node: unknown, path: string): NestNode[] {
@@ -147,8 +152,8 @@ function nestFor(node: unknown, path: string): NestNode[] {
 
   const wrap = (
     kind: NestKind, label: string, detail: string, children: NestNode[] = [],
-    id?: string, op: string | null = null, opId: number | null = null,
-  ): NestNode[] => [{ id: id ?? `${kind}:${path}`, kind, label, detail, op, opId, children }];
+    id?: string, op: string | null = null, opId: number | null = null, line: number | null = null,
+  ): NestNode[] => [{ id: id ?? `${kind}:${path}`, kind, label, detail, op, opId, line, children }];
 
   switch (n.type) {
     case 'SeqNode':
@@ -164,14 +169,16 @@ function nestFor(node: unknown, path: string): NestNode[] {
 
     case 'BlockNode': {
       const name = String(n.name);
-      const source = n.sourceOp as { name: string; id: number } | undefined;
+      const source = n.sourceOp as BlockSourceOp | undefined;
       const iterVars = (n.iterVars as { kind: string }[]) ?? [];
       const reduce = iterVars.filter(iv => iv.kind !== IterVarKind.DATA_PAR).length;
       const detail = `${iterVars.length} iter var${iterVars.length === 1 ? '' : 's'}`
         + (reduce > 0 ? `, ${reduce} reduction` : '');
       const children = [...nestFor(n.initBody, `${path}.i`), ...nestFor(n.body, `${path}.b`)];
+      const sourceLines = source ? modelLines(source.loc) : [];
       return wrap('block', name, detail, children, `block:${name}`,
-        source ? source.name : opOfBlockName(name), source ? source.id : null);
+        source ? source.name : opOfBlockName(name), source ? source.id : null,
+        sourceLines.length > 0 ? sourceLines[0] : null);
     }
 
     case 'AllocateNode': {
@@ -230,6 +237,7 @@ function nestForFunc(func: { name: string; body?: unknown }): NestNode {
     detail: '',
     op: null,
     opId: null,
+    line: null,
     children: nestFor(func.body, 'r'),
   };
 }
@@ -253,4 +261,11 @@ export function takeSnapshot(target: unknown, level: IRLevelName): Snapshot {
   if (level === 'graph-module') return graphSnapshot(target as GraphModule);
   if (level === 'graph-func') return functionSnapshot(target as GraphFunction);
   return nestedSnapshot(target as Iterable<{ name: string }>);
+}
+
+export function collectDagLines(nodes: readonly DagNode[], into: Set<number>): void {
+  for (const node of nodes) {
+    for (const line of node.lines) into.add(line);
+    for (const region of node.regions) collectDagLines(region, into);
+  }
 }

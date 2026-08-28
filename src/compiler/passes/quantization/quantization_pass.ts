@@ -1,5 +1,6 @@
 import { FunctionPass, PassResult } from '../pass.js';
 import { Operation } from '../../ir/graph/operation.js';
+import { derivedFrom } from '../../ir/graph/op_location.js';
 import { TensorType, ScalarType, isFloatType, scalarBytes } from '../../ir/graph/types.js';
 import { registry } from '../../ir/graph/ops.js';
 import { UseDefAnalysis } from '../../analysis/use_def.js';
@@ -210,6 +211,7 @@ export class QuantizationPass extends FunctionPass {
       ...(qp.axis !== null ? { axis: qp.axis } : {})
     });
 
+    derivedFrom(quantOp, op);
     if (op.parentBlock) {
       op.parentBlock.insertAfter(quantOp, op);
     }
@@ -232,6 +234,7 @@ export class QuantizationPass extends FunctionPass {
       target_dtype: outputDtype
     });
 
+    derivedFrom(dequantOp, val.definingOp || consumer);
     if (consumer.parentBlock) {
       consumer.parentBlock.insertBefore(dequantOp, consumer);
       consumer.replaceOperand(operandIdx, dequantOp.getResult(0));

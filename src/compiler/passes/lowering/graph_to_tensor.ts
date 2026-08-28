@@ -31,6 +31,7 @@ import type { TensorType } from '../../ir/graph/types.js';
 import type { CompilerContext } from '../../pipeline/compiler_context.js';
 import type { CompileTarget } from '../../pipeline/pipeline_types.js';
 import type { TraceLog } from '../../pipeline/trace.js';
+import { formatLocation } from '../../ir/location.js';
 
 const BROADCAST_VIEW_SAFE_EXTRA = ['compare', 'select', 'clamp', 'convert', 'copy_to_device', 'dot', 'fusion'];
 
@@ -99,7 +100,7 @@ function stampSourceOp(stmt: TirNode, op: Operation): void {
   walk(stmt as unknown as IRNode, (node) => {
     const block = node as BlockNode;
     if (block.type !== 'BlockNode' || block.sourceOp) return;
-    block.sourceOp = { name: op.opName, id: op.id };
+    block.sourceOp = { name: op.opName, id: op.id, loc: op.loc };
   });
 }
 
@@ -181,7 +182,7 @@ export function lowerGraphToPrimFunc(graphFunc: GraphFunction, target: CompileTa
     }
 
     const rule = getLoweringRule(op.opName, target, context);
-    if (!rule) throw new Error(`No lowering rule defined for op: ${op.opName}`);
+    if (!rule) throw new Error(`No lowering rule defined for op: ${op.opName} at ${formatLocation(op.loc)}`);
 
     const inputs: Buffer[] = new Array(op.numOperands);
     for (let i = 0; i < op.numOperands; i++) inputs[i] = ctx.getOrAllocBuffer(op.getOperand(i));

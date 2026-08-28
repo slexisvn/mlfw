@@ -1,21 +1,31 @@
 import { PrimFunc } from './nodes.js';
+import { formatLocation } from '../location.js';
+import type { Location } from '../location.js';
 import type { TirNode, TensorNode } from './nodes.js';
 
 type UnbindMarker = { type: '_unbind'; name: string };
-type VerifyStackItem = TirNode | UnbindMarker;
+type RestoreLocationMarker = { type: '_restoreLocation'; location: Location | null };
+type VerifyStackItem = TirNode | UnbindMarker | RestoreLocationMarker;
 
 export class TensorVerifier {
   errors: string[];
   boundVars: Set<string>;
+  location: Location | null;
 
   constructor() {
     this.errors = [];
     this.boundVars = new Set();
+    this.location = null;
+  }
+
+  fail(message: string): void {
+    this.errors.push(this.location === null ? message : `${message} at ${formatLocation(this.location)}`);
   }
 
   verify(func: unknown): string[] {
     this.errors = [];
     this.boundVars.clear();
+    this.location = null;
 
     if (!(func instanceof PrimFunc)) {
       this.errors.push('Expected PrimFunc at root');
@@ -46,17 +56,19 @@ export class TensorVerifier {
           break;
         case 'ForNode':
           if (this.boundVars.has(node.loopVar.name)) {
-            this.errors.push(`Loop variable ${node.loopVar.name} already bound`);
+            this.fail(`Loop variable ${node.loopVar.name} already bound`);
           }
           this.boundVars.add(node.loopVar.name);
           stack.push({ type: '_unbind', name: node.loopVar.name });
           stack.push(node.body);
           break;
         case 'BlockNode':
+          stack.push({ type: '_restoreLocation', location: this.location });
+          if (node.sourceOp) this.location = node.sourceOp.loc;
           for (const r of node.iterVars) {
             if (r.iterVar) {
               if (this.boundVars.has(r.iterVar.name)) {
-                this.errors.push(`Block variable ${r.iterVar.name} already bound`);
+                this.fail(`Block variable ${r.iterVar.name} already bound`);
               }
               this.boundVars.add(r.iterVar.name);
             }
@@ -68,7 +80,7 @@ export class TensorVerifier {
           if (node.initBody) stack.push(node.initBody);
           break;
         case 'AllocateNode':
-          if (!node.buffer) this.errors.push('Allocate missing buffer');
+          if (!node.buffer) this.fail('Allocate missing buffer');
           stack.push(node.body);
           break;
         case 'LetStmtNode':
@@ -83,14 +95,14 @@ export class TensorVerifier {
           stack.push(node.thenBody);
           break;
         case 'WhileNode':
-          if (!node.condVar) this.errors.push('WhileNode missing condition variable');
+          if (!node.condVar) this.fail('WhileNode missing condition variable');
           stack.push(node.loopBody);
           stack.push(node.condBody);
           break;
         case 'BufferStoreNode':
-          if (!node.buffer) this.errors.push('BufferStore missing buffer');
+          if (!node.buffer) this.fail('BufferStore missing buffer');
           if (!node.indices || node.indices.length !== node.buffer.shape.length) {
-            this.errors.push(`BufferStore rank mismatch for ${node.buffer ? node.buffer.name : 'unknown'}`);
+            this.fail(`BufferStore rank mismatch for ${node.buffer ? node.buffer.name : 'unknown'}`);
           }
           if (node.indices) for (const idx of node.indices) this._visitExpr(idx);
           this._visitExpr(node.value);
@@ -100,6 +112,9 @@ export class TensorVerifier {
           break;
         case '_unbind':
           this.boundVars.delete(node.name);
+          break;
+        case '_restoreLocation':
+          this.location = node.location;
           break;
         default:
           this._visitExpr(node);
@@ -112,9 +127,9 @@ export class TensorVerifier {
     if (!node) return;
     switch (node.type) {
       case 'BufferLoadNode':
-        if (!node.buffer) this.errors.push('BufferLoad missing buffer');
+        if (!node.buffer) this.fail('BufferLoad missing buffer');
         if (!node.indices || node.indices.length !== node.buffer.shape.length) {
-          this.errors.push(`BufferLoad rank mismatch for ${node.buffer ? node.buffer.name : 'unknown'}`);
+          this.fail(`BufferLoad rank mismatch for ${node.buffer ? node.buffer.name : 'unknown'}`);
         }
         if (node.indices) for (const idx of node.indices) this._visitExpr(idx);
         break;
@@ -130,7 +145,7 @@ export class TensorVerifier {
         this._visitExpr(node.expr);
         break;
       case 'CallExternNode':
-        if (!node.externName) this.errors.push('CallExtern missing function name');
+        if (!node.externName) this.fail('CallExtern missing function name');
         for (const arg of node.args) this._visitExpr(arg);
         break;
       case 'IfThenElseNode':
@@ -140,7 +155,7 @@ export class TensorVerifier {
         break;
       case 'VariableNode':
         if (!this.boundVars.has(node.name)) {
-          this.errors.push(`Unbound variable used: ${node.name}`);
+          this.fail(`Unbound variable used: ${node.name}`);
         }
         break;
       case 'BlockRealizeNode':

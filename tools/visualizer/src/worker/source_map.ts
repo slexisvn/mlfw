@@ -1,4 +1,6 @@
-import { IRBuilder } from 'mlfw/compiler/ir/graph/builder.js';
+import { installStackLocations } from 'mlfw/compiler/ir/loc_source.js';
+import { locationSites } from 'mlfw/compiler/ir/location.js';
+import type { Location } from 'mlfw/compiler/ir/location.js';
 
 export const MODEL_SOURCE_URL = 'mlfw-model.js';
 
@@ -6,9 +8,9 @@ const FRAME = new RegExp(`${MODEL_SOURCE_URL.replace(/[.]/g, '[.]')}:([0-9]+):`)
 
 const STACK_DEPTH = 80;
 
-type Inserted = { id: number };
-type Insertion = (op: Inserted) => Inserted;
-type Patchable = { _insert: Insertion };
+function isModelFile(file: string): boolean {
+  return file.endsWith(MODEL_SOURCE_URL);
+}
 
 export function lineFromStack(stack: string | undefined, baseLine: number): number | null {
   if (!stack) return null;
@@ -18,35 +20,14 @@ export function lineFromStack(stack: string | undefined, baseLine: number): numb
   return line > 0 ? line : null;
 }
 
-export type SourceLineRecorder = {
-  lines: Map<number, number>;
-  stop: () => void;
-};
+export function modelLines(loc: Location | null): number[] {
+  const lines: number[] = [];
+  for (const site of locationSites(loc)) {
+    if (isModelFile(site.file) && !lines.includes(site.line)) lines.push(site.line);
+  }
+  return lines;
+}
 
-export function recordSourceLines(baseLine: number): SourceLineRecorder {
-  const lines = new Map<number, number>();
-  const proto = IRBuilder.prototype as unknown as Patchable;
-  const original = proto._insert;
-  const limits = Error as unknown as { stackTraceLimit?: number };
-  const originalLimit = limits.stackTraceLimit;
-  limits.stackTraceLimit = STACK_DEPTH;
-  let active = true;
-
-  proto._insert = function patched(this: unknown, op: Inserted): Inserted {
-    if (active && !lines.has(op.id)) {
-      const line = lineFromStack(new Error().stack, baseLine);
-      if (line !== null) lines.set(op.id, line);
-    }
-    return original.call(this, op);
-  };
-
-  return {
-    lines,
-    stop: () => {
-      if (!active) return;
-      active = false;
-      proto._insert = original;
-      limits.stackTraceLimit = originalLimit;
-    },
-  };
+export function recordSourceLocations(baseLine: number): () => void {
+  return installStackLocations({ match: isModelFile, lineOffset: baseLine, frameLimit: STACK_DEPTH });
 }

@@ -1,5 +1,6 @@
 import { FunctionPass, PassResult } from '../pass.js';
 import { Operation } from '../../ir/graph/operation.js';
+import { opsLocation } from '../../ir/graph/op_location.js';
 import { Block, Region } from '../../ir/graph/block.js';
 import { TensorType, DYNAMIC } from '../../ir/graph/types.js';
 import { classifyFusionKind } from './fusion_analysis.js';
@@ -323,6 +324,8 @@ export class MultiOutputFusionPass extends FunctionPass {
       { fusion_kind: mergedKind },
       [mergedRegion]
     );
+
+    mergedFusionOp.loc = opsLocation([left, right]);
 
     const block = left.parentBlock;
     if (!block) return;

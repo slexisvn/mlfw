@@ -3,6 +3,7 @@ import { canInlineFuse } from '../lowering/graph_to_tensor.js';
 import { Operation } from '../../ir/graph/operation.js';
 import { Block, Region } from '../../ir/graph/block.js';
 import { topoSortByOperands } from '../../ir/graph/graph_algorithms.js';
+import { fuseLocations } from '../../ir/location.js';
 import type { Value } from '../../ir/graph/value.js';
 import type { FusionGroup } from './fusion_groups.js';
 
@@ -121,6 +122,7 @@ export function materializeFusionGroup(group: FusionGroup, fallbackKind: string)
     { fusion_kind: group.kind || fallbackKind },
     [bodyRegion]
   );
+  fusionOp.loc = fuseLocations(sortedOps.map(op => op.loc));
 
   const block = sortedOps[0].parentBlock;
   if (!block) return null;

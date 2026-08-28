@@ -21,6 +21,7 @@ export function nestForSource(kernel: Kernel): NestNode {
     detail: kernel.language,
     op: null,
     opId: null,
+    line: null,
     children: [],
   };
 
@@ -41,6 +42,7 @@ export function nestForSource(kernel: Kernel): NestNode {
       detail: '',
       op: null,
       opId: null,
+      line: null,
       children: [],
     };
 

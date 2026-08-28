@@ -65,12 +65,6 @@ export function classifyBufferIndex(analyzer: AnalyzerType, indexExpr: TirNode, 
   return 'unknown';
 }
 
-export function proveDivisible(extent: SymExpr, factor: number): boolean {
-  if (!Number.isInteger(factor) || factor <= 0) return false;
-  const b = new Analyzer().constIntBound(SymInt.mod(extent, factor));
-  return b.min === 0 && b.max === 0;
-}
-
 export function collectVarsUsed(node: TirNode | null | undefined, out: Set<string>): void {
   if (!node || typeof node !== 'object') return;
   switch (node.type) {

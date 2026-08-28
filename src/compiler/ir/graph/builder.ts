@@ -6,6 +6,8 @@ import { GraphModule } from './module.js';
 import { registry } from './ops.js';
 import { unifiedOperandIndices } from './op_traits.js';
 import { resultDtype } from '../../../tensor/types/dtype.js';
+import { currentLocation } from '../loc_source.js';
+import type { Location } from '../location.js';
 import type { AttrValue, Dim, IRType, ScalarDType, Shape } from './types.js';
 import type { Value, BlockArgument } from './value.js';
 
@@ -124,12 +126,24 @@ function bcastBatchDims(a: Shape, b: Shape): Dim[] {
 export class IRBuilder {
   func: GraphFunction;
   block: Block;
+  location: Location | null;
   private _insertionPoint: Operation | null;
 
   constructor(func: GraphFunction) {
     this.func = func;
     this.block = func.entryBlock;
+    this.location = null;
     this._insertionPoint = null;
+  }
+
+  withLocation<T>(location: Location | null, body: () => T): T {
+    const previous = this.location;
+    this.location = location;
+    try {
+      return body();
+    } finally {
+      this.location = previous;
+    }
   }
 
   setInsertionPoint(op: Operation | null): void {
@@ -141,6 +155,7 @@ export class IRBuilder {
   }
 
   _insert(op: Operation): Operation {
+    if (op.loc === null) op.loc = this.location === null ? currentLocation() : this.location;
     if (this._insertionPoint) {
       this.block.insertBefore(op, this._insertionPoint);
     } else {

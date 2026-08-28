@@ -65,7 +65,7 @@ export class PatternApplicator {
         builder.block = block;
         builder.setInsertionPoint(op);
         const rewritten = op.opName;
-        if (!pattern.rewrite(op, builder)) continue;
+        if (!builder.withLocation(op.loc, () => pattern.rewrite(op, builder))) continue;
 
         totalRewrites++;
         if (explain) explain(rewritten, `matched ${pattern.name}`, pattern.why);

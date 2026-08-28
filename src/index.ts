@@ -29,6 +29,14 @@ export { SymbolicTensor } from './tracing/symbolic_tensor.js';
 export { TraceLevel } from './compiler/pipeline/trace.js';
 export { printModule, printFunction } from './compiler/ir/graph/printer.js';
 export { parseModule, parseFunction, IRParseError } from './compiler/ir/graph/parser.js';
+export {
+  LocationKind, FileLocation, NameLocation, CallSiteLocation, FusedLocation,
+  fileLocation, nameLocation, callSiteLocation, fuseLocations,
+  formatLocation, parseLocation, locationSites, locationNames, primarySite,
+} from './compiler/ir/location.js';
+export type { Location } from './compiler/ir/location.js';
+export { installStackLocations, setDefaultLocationSource, stackLocationSource } from './compiler/ir/loc_source.js';
+export type { LocationSource } from './compiler/ir/loc_source.js';
 export { preloadWebGPU, preloadCudaRuntime, releaseCudaMemory } from './runtime/backend_registry.js';
 export { flushWebGPUEager } from './runtime/webgpu.js';
 export { dispatcher } from './dispatcher/dispatcher.js';

@@ -113,7 +113,7 @@ export class ConstantFoldPass extends FunctionPass {
 
         builder.block = op.parentBlock as Block;
         builder.setInsertionPoint(op);
-        const newConst = builder.constant(resultVal, op.getResult(0).type as TensorType);
+        const newConst = builder.withLocation(op.loc, () => builder.constant(resultVal, op.getResult(0).type as TensorType));
         if (explain) {
           explain(op.opName, 'folded to a constant',
             'every operand was already known at compile time, so the op can run now instead of at every call');

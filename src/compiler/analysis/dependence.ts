@@ -1,5 +1,6 @@
 import { AccessKind, isStaticLevel } from './buffer_access.js';
 import { mixedRadixDecomposition } from './iter_map.js';
+import { gcd } from '../../util/integer.js';
 import type { LinearForm, VarRange } from './iter_map.js';
 import type { BufferAccess, IterLevel } from './buffer_access.js';
 import type { Buffer } from '../ir/tensor/buffer.js';
@@ -39,17 +40,6 @@ export class Dependence {
   get isLoopIndependent(): boolean {
     return this.masks.every((m) => m === Direction.EQ);
   }
-}
-
-function gcd(a: number, b: number): number {
-  a = Math.abs(a);
-  b = Math.abs(b);
-  while (b !== 0) {
-    const t = a % b;
-    a = b;
-    b = t;
-  }
-  return a;
 }
 
 function commonNest(srcSpace: readonly IterLevel[], dstSpace: readonly IterLevel[]): IterLevel[] {

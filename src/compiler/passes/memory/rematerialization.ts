@@ -1,5 +1,6 @@
 import { FunctionPass, PassResult } from '../pass.js';
 import { Operation } from '../../ir/graph/operation.js';
+import { derivedFrom } from '../../ir/graph/op_location.js';
 import { TensorType, DYNAMIC } from '../../ir/graph/types.js';
 import { registry } from '../../ir/graph/ops.js';
 
@@ -228,12 +229,12 @@ export class RematerializationPass extends FunctionPass {
       const user = use.user;
       if (!user.parentBlock) continue;
 
-      const clonedOp = new Operation(
+      const clonedOp = derivedFrom(new Operation(
         definingOp.opName,
         [...definingOp.operands],
         definingOp.results.map(r => r.type),
         new Map<string, AttrValue>(definingOp.attributes)
-      );
+      ), definingOp);
 
       (user.parentBlock as Block).insertBefore(clonedOp, user);
       user.replaceOperand(use.operandIndex, clonedOp.getResult(value.resultIndex));

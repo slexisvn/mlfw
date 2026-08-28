@@ -65,6 +65,14 @@ function cancelProductDiv(a: SymExpr, b: SymExpr): SymExpr {
   return new SymInt('div', null, [numerator, rebuildProduct(den.constant, den.symbols)]);
 }
 
+export function rebuildSym(type: SymIntOp, args: readonly SymExpr[]): SymExpr {
+  const ops = SymInt as unknown as Record<string, BinarySymOp | UnarySymOp | undefined>;
+  const op = ops[SYM_INT_METHOD_NAMES[type] || type];
+  if (op && args.length === 2) return (op as BinarySymOp)(args[0], args[1]);
+  if (op && args.length === 1) return (op as UnarySymOp)(args[0]);
+  return new SymInt(type, null, [...args]);
+}
+
 export function unboundSymbolError(name: string): Error {
   return new Error(`Unbound symbolic variable: ${name}`);
 }
@@ -178,12 +186,7 @@ export class SymInt {
     if (expr.type === 'var') {
       return expr.name === varName ? value : expr;
     }
-    const newArgs = expr.args.map(a => SymInt.substitute(a, varName, value));
-    const ops = SymInt as unknown as Record<string, BinarySymOp | UnarySymOp | undefined>;
-    const op = ops[SYM_INT_METHOD_NAMES[expr.type] || expr.type];
-    if (op && newArgs.length === 2) return (op as BinarySymOp)(newArgs[0], newArgs[1]);
-    if (op && newArgs.length === 1) return (op as UnarySymOp)(newArgs[0]);
-    return new SymInt(expr.type, expr.name, newArgs);
+    return rebuildSym(expr.type, expr.args.map(a => SymInt.substitute(a, varName, value)));
   }
 
   static evaluate(expr: SymExpr, env: ReadonlyMap<string, number>): number {

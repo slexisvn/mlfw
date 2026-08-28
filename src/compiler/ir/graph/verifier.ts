@@ -1,4 +1,5 @@
 import { TensorType, DYNAMIC, typeToString } from './types.js';
+import { formatLocation } from '../location.js';
 import { Value } from './value.js';
 import { registry } from './ops.js';
 import { verifyTraits } from './trait_verifier.js';
@@ -20,10 +21,11 @@ export class VerificationError {
   }
 
   toString(): string {
-    let loc = '';
-    if (this.func) loc += `[${this.func.name}] `;
-    if (this.op) loc += `op '${this.op.opName}' (id=${this.op.id}): `;
-    return loc + this.message;
+    let prefix = '';
+    if (this.func) prefix += `[${this.func.name}] `;
+    if (this.op) prefix += `op '${this.op.opName}' (id=${this.op.id}): `;
+    const site = this.op && this.op.loc ? ` at ${formatLocation(this.op.loc)}` : '';
+    return prefix + this.message + site;
   }
 }
 

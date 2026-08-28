@@ -1,5 +1,6 @@
 import { FunctionPass, PassResult } from '../pass.js';
 import { Operation } from '../../ir/graph/operation.js';
+import { producerLocation } from '../../ir/graph/op_location.js';
 
 import { GraphFunction } from '../../ir/graph/function.js';
 import { GraphPartitioner, PartitionerConfig } from '../../analysis/partitioner.js';
@@ -80,6 +81,7 @@ export class GraphPartitionPass extends FunctionPass {
         [value.type],
         { src_device: srcDevice, dst_device: dstDevice }
       );
+      copyOp.loc = producerLocation([value]);
       copyOp.setAttr('partition_id', edge.dst.id);
       copyOp.setAttr('partition_target', dstDevice);
 

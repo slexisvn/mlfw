@@ -1,5 +1,5 @@
 import { Analyzer } from '../../analysis/analyzer.js';
-import { RewriteSimplify, proveTrue, proveFalse, irBound } from '../../analysis/ir_arith.js';
+import { RewriteSimplify, proveTrue, proveFalse, irBound, assumeCondition, assumeLoopVar } from '../../analysis/ir_arith.js';
 import {
   ForNode, BlockNode, SeqNode, BufferStoreNode, BufferLoadNode,
   IfThenElseNode, LetStmtNode, AllocateNode, WhileNode, EvaluateNode,
@@ -81,15 +81,25 @@ export function simplifyLirFunc(lirFunc: LIRFunc, stats: SimplifyStats = { branc
   return lirFunc;
 }
 
-function bindLoopVar(ctx: SimplifyCtx, name: string, extentNode: TirNode): VarBound {
+function bindLoopVar(ctx: SimplifyCtx, name: string, extentNode: TirNode): () => void {
   const prev = ctx.analyzer.getVarBound(name);
   const imm = extentNode as IntImmNode;
   if (extentNode && extentNode.type === 'IntImmNode' && imm.value > 0) {
     ctx.analyzer.bind(name, 0, imm.value - 1);
-  } else {
-    ctx.analyzer.setVarBound(name, null);
+    return () => ctx.analyzer.setVarBound(name, prev);
   }
-  return prev;
+  ctx.analyzer.setVarBound(name, null);
+  const release = assumeLoopVar(ctx.analyzer, name, extentNode);
+  return () => { release(); ctx.analyzer.setVarBound(name, prev); };
+}
+
+function withAssumption<T>(ctx: SimplifyCtx, condition: TirNode, truth: boolean, body: () => T): T {
+  const release = assumeCondition(ctx.analyzer, condition, truth);
+  try {
+    return body();
+  } finally {
+    release();
+  }
 }
 
 function simplifyStmt(node: TirNode, ctx: SimplifyCtx): TirNode {
@@ -97,9 +107,9 @@ function simplifyStmt(node: TirNode, ctx: SimplifyCtx): TirNode {
   switch (node.type as string) {
     case 'ForNode': {
       const f = node as ForNode;
-      const prev = bindLoopVar(ctx, f.loopVar.name, f.extent);
+      const release = bindLoopVar(ctx, f.loopVar.name, f.extent);
       const body = simplifyStmt(f.body, ctx);
-      ctx.analyzer.setVarBound(f.loopVar.name, prev);
+      release();
       const out = new ForNode(f.loopVar, f.min, f.extent, f.kind, body, f.threadTag);
       if (f.annotations) out.annotations = f.annotations;
       return out;
@@ -132,7 +142,9 @@ function simplifyStmt(node: TirNode, ctx: SimplifyCtx): TirNode {
         ctx.stats.branchesFolded++;
         return ite.elseBody ? simplifyStmt(ite.elseBody, ctx) : new SeqNode([]);
       }
-      return new IfThenElseNode(cond, simplifyStmt(ite.thenBody, ctx), ite.elseBody ? simplifyStmt(ite.elseBody, ctx) : null);
+      const thenBody = withAssumption(ctx, cond, true, () => simplifyStmt(ite.thenBody, ctx));
+      const elseBody = ite.elseBody ? withAssumption(ctx, cond, false, () => simplifyStmt(ite.elseBody as TirNode, ctx)) : null;
+      return new IfThenElseNode(cond, thenBody, elseBody);
     }
     case 'BufferStoreNode': {
       const st = node as BufferStoreNode;
@@ -168,13 +180,13 @@ function simplifyStmt(node: TirNode, ctx: SimplifyCtx): TirNode {
     }
     case 'LIRAccumulatorNode': {
       const acc = node as unknown as LIRAccumulatorNode;
-      const prev = bindLoopVar(ctx, acc.loopVar.name, acc.extent as TirNode);
+      const release = bindLoopVar(ctx, acc.loopVar.name, acc.extent as TirNode);
       const body = simplifyExpr(acc.body as TirNode, ctx);
       const initBody = acc.initBody ? simplifyStmt(acc.initBody as TirNode, ctx) : null;
       const prologue = acc.prologue ? simplifyStmt(acc.prologue as TirNode, ctx) : null;
       const initLoad = simplifyExpr(acc.initLoad as unknown as TirNode, ctx);
       const flushStore = simplifyStmt(acc.flushStore as unknown as TirNode, ctx);
-      ctx.analyzer.setVarBound(acc.loopVar.name, prev);
+      release();
       return new LIRAccumulatorNode({
         localName: acc.localName,
         dtype: acc.dtype,

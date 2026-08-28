@@ -7,6 +7,8 @@ import { SymInt } from '../../analysis/sym_int.js';
 import { jsTypedArray } from '../../../util/dtype_map.js';
 import type { AttrValue, Dim, IRType, ScalarDType } from './types.js';
 import type { Value } from './value.js';
+import { parseLocation } from '../location.js';
+import type { Location } from '../location.js';
 
 const SCALAR_TYPES = new Set<string>(Object.values(ScalarType));
 
@@ -294,7 +296,30 @@ type OpRecord = {
   operandNames: string[];
   regions: BlockRecord[][];
   deps: Set<string>;
+  loc: Location | null;
 };
+
+const LOCATION_MARKER = ' loc(';
+
+export function splitTrailingLocation(text: string): { body: string; loc: string | null } {
+  let depth = 0;
+  let quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (quoted) {
+      if (ch === '\\') i++;
+      else if (ch === '"') quoted = false;
+      continue;
+    }
+    if (ch === '"') { quoted = true; continue; }
+    if (ch === '(' || ch === '[' || ch === '{') { depth++; continue; }
+    if (ch === ')' || ch === ']' || ch === '}') { depth--; continue; }
+    if (depth !== 0 || !text.startsWith(LOCATION_MARKER, i)) continue;
+    if (!text.endsWith(')')) break;
+    return { body: text.slice(0, i), loc: text.slice(i + LOCATION_MARKER.length, -1) };
+  }
+  return { body: text, loc: null };
+}
 
 function readBlockArgs(sc: Scanner, line: number): { names: string[]; types: IRType[] } {
   const inner = sc.readGroup('(', ')');
@@ -344,8 +369,11 @@ class RecordReader {
   }
 
   readOp(indent: number): OpRecord {
-    const line = this.current as Line;
+    const source = this.current as Line;
     this.index++;
+    const { body, loc: locText } = splitTrailingLocation(source.text);
+    const line: Line = body === source.text ? source : { text: body, indent: source.indent, no: source.no };
+    const loc = locText === null ? null : parseLocation(locText);
     const sc = new Scanner(line.text, line.no);
 
     const resultNames: string[] = [];
@@ -388,7 +416,7 @@ class RecordReader {
 
     const deps = new Set<string>(operandNames);
     for (const region of regions) collectRegionDeps(region, deps);
-    return { line, opName, resultNames, resultTypes, attrs, operandNames, regions, deps };
+    return { line, opName, resultNames, resultTypes, attrs, operandNames, regions, deps, loc };
   }
 }
 
@@ -464,6 +492,7 @@ class Materializer {
       return region;
     });
     const op = new Operation(record.opName, operands, record.resultTypes, record.attrs, regions);
+    op.loc = record.loc;
     for (let i = 0; i < record.resultNames.length; i++) {
       this.bind(record.resultNames[i], op.getResult(i), record.line.no);
     }

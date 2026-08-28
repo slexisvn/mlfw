@@ -16,6 +16,8 @@ export type DagNode = {
   attrs: [string, string][];
   regions: DagNode[][];
   regionArgs: number[][];
+  loc: string | null;
+  lines: number[];
 };
 
 export type DagValue = {
@@ -45,6 +47,7 @@ export type NestNode = {
   detail: string;
   op: string | null;
   opId: number | null;
+  line: number | null;
   children: NestNode[];
 };
 
@@ -110,7 +113,6 @@ export type CompileStep = {
   events: TraceEventLite[];
 };
 
-export type SourceLink = [opId: number, line: number];
 
 export type Kernel = {
   name: string;
@@ -182,7 +184,7 @@ export type CompileResponse = {
   steps: CompileStep[];
   kernels: Kernel[];
   events: TraceEventLite[];
-  sourceLinks: SourceLink[];
+  sourceLines: number[];
   memoryPlans: MemoryPlan[];
   tuningRounds: TuningRound[];
   totalMs: number;

@@ -61,8 +61,7 @@ export function SourceEditor() {
   useEffect(() => {
     const collection = traced.current;
     if (!collection) return;
-    const unique = [...new Set(lines.values())].sort((a, b) => a - b);
-    collection.set(unique.map(line => ({
+    collection.set(lines.map(line => ({
       range: new Range(line, 1, line, 1),
       options: {
         isWholeLine: true,

@@ -1,5 +1,6 @@
 import { FunctionPass, PassResult } from '../pass.js';
 import { Operation } from '../../ir/graph/operation.js';
+import { opsLocation } from '../../ir/graph/op_location.js';
 import { registry } from '../../ir/graph/ops.js';
 import { isBroadcastOp, isConstantOp } from '../../ir/graph/op_traits.js';
 
@@ -258,6 +259,7 @@ export class EpilogueFusionPass extends FunctionPass {
       const removedSet = new Set(chain);
       removedSet.add(dotOp);
       for (const r of prologue.removed) removedSet.add(r);
+      fusedOp.loc = opsLocation(removedSet);
 
       if (hasEscapingUse(removedSet, lastOp)) {
         if (explain) {

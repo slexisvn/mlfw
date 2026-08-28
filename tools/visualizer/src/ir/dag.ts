@@ -10,6 +10,7 @@ export type Box = {
   label: string;
   detail: string;
   note: string;
+  line: number | null;
   x: number;
   y: number;
   width: number;
@@ -97,7 +98,7 @@ function widthFor(label: string, min = MIN_NODE_WIDTH): number {
   return Math.max(min, Math.round(label.length * CHAR_WIDTH) + NODE_PADDING);
 }
 
-export type NoteLookup = (opId: number) => string;
+export type NoteLookup = (node: DagNode) => string;
 
 const NO_NOTE: NoteLookup = () => '';
 
@@ -148,7 +149,7 @@ export function buildLayoutRequest(
     if (existing) existing.push(port);
     else portsOf.set(owner, [port]);
     meta.set(portId, {
-      id: portId, opId: null, kind: 'port', label: nameOf(valueId), detail: typeOf(valueId), note: '',
+      id: portId, opId: null, kind: 'port', label: nameOf(valueId), detail: typeOf(valueId), note: '', line: null,
       x: 0, y: 0, width: PORT_SIZE, height: PORT_SIZE, depth,
     });
   };
@@ -198,7 +199,7 @@ export function buildLayoutRequest(
   const argNodes: ElkNode[] = dag.args.map(arg => {
     const label = `${arg.name}: ${shortType(arg.type)}`;
     meta.set(argId(arg.id), {
-      id: argId(arg.id), opId: null, kind: 'arg', label, detail: arg.type, note: '',
+      id: argId(arg.id), opId: null, kind: 'arg', label, detail: arg.type, note: '', line: null,
       x: 0, y: 0, width: widthFor(label, 60), height: PILL_HEIGHT, depth: 0,
     });
     return { id: argId(arg.id), width: widthFor(label, 60), height: PILL_HEIGHT };
@@ -209,7 +210,8 @@ export function buildLayoutRequest(
     const hasRegions = node.regions.some(region => region.length > 0);
     const detail = node.resultTypes.map(shortType).join(', ');
     const label = node.opName;
-    const badge = note(node.id);
+    const badge = note(node);
+    const line = node.lines.length > 0 ? node.lines[0] : null;
     const boxWidth = widthFor(badge ? `${label}  ${badge}` : label);
 
     const blockArgs = node.regionArgs.flat();
@@ -225,7 +227,7 @@ export function buildLayoutRequest(
 
     if (!hasRegions) {
       meta.set(id, {
-        id, opId: node.id, kind: 'op', label, detail, note: badge,
+        id, opId: node.id, kind: 'op', label, detail, note: badge, line,
         x: 0, y: 0, width: boxWidth, height: NODE_HEIGHT, depth,
       });
       return { id, width: boxWidth, height: NODE_HEIGHT };
@@ -247,7 +249,7 @@ export function buildLayoutRequest(
     }
 
     meta.set(id, {
-      id, opId: node.id, kind: 'region', label, detail, note: badge,
+      id, opId: node.id, kind: 'region', label, detail, note: badge, line,
       x: 0, y: 0, width: 0, height: 0, depth,
     });
 
@@ -264,7 +266,7 @@ export function buildLayoutRequest(
     const label = value ? `return ${value.name}` : 'return';
     const id = `out${index}`;
     meta.set(id, {
-      id, opId: null, kind: 'output', label, detail: value ? value.type : '', note: '',
+      id, opId: null, kind: 'output', label, detail: value ? value.type : '', note: '', line: null,
       x: 0, y: 0, width: widthFor(label, 70), height: PILL_HEIGHT, depth: 0,
     });
     outputs.push({ id, width: widthFor(label, 70), height: PILL_HEIGHT });

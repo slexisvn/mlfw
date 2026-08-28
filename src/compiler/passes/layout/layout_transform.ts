@@ -1,5 +1,6 @@
 import { FunctionPass, PassResult } from '../pass.js';
 import { Operation } from '../../ir/graph/operation.js';
+import { producerLocation } from '../../ir/graph/op_location.js';
 import { TensorType, Layout } from '../../ir/graph/types.js';
 import { LayoutPolicy } from './layout_policy.js';
 import { LayoutAnalysis } from '../../analysis/layout_analysis.js';
@@ -95,6 +96,7 @@ export class LayoutTransformPass extends FunctionPass {
         src_layout: [...srcOrder],
         dst_layout: [...dstOrder]
       });
+      transformOp.loc = producerLocation([g.value]);
       const defOp = g.value.definingOp;
       if (defOp && defOp.parentBlock) {
         defOp.parentBlock.insertAfter(transformOp, defOp);
