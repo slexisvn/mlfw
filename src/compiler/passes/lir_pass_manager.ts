@@ -4,7 +4,7 @@ import { PassResult } from './pass.js';
 import { IRLevel } from '../ir/verify.js';
 import type { LIRFunc } from '../ir/lir/nodes.js';
 import type { LirFuncPass, LirPassCtx } from './lir_pass.js';
-import type { PassResultValue } from './pass.js';
+import type { PassContext, PassResultValue } from './pass.js';
 import type { TraceLog } from '../pipeline/trace.js';
 
 export type LirRunCtx = LirPassCtx & {
@@ -12,6 +12,7 @@ export type LirRunCtx = LirPassCtx & {
   errors: CompilationError[];
   failed: Set<string>;
   resilient: boolean;
+  passContext?: PassContext | null;
 };
 
 export class LirPassManager extends PassManagerBase<LirFuncPass> {
@@ -19,6 +20,7 @@ export class LirPassManager extends PassManagerBase<LirFuncPass> {
 
   run(funcs: LIRFunc[], ctx: LirRunCtx): LIRFunc[] {
     for (const pass of this.passes) {
+      if (this._skipped(pass, ctx)) continue;
       this._runPass(pass, funcs, ctx);
     }
     return funcs;

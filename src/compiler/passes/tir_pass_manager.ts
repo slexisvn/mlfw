@@ -5,7 +5,7 @@ import { PassResult } from './pass.js';
 import { IRLevel } from '../ir/verify.js';
 import type { TirModule } from '../ir/tensor/module.js';
 import type { PrimFuncPass, TirModulePass, TirPassCtx } from './tir_pass.js';
-import type { PassResultValue } from './pass.js';
+import type { PassContext, PassResultValue } from './pass.js';
 import type { TraceLog } from '../pipeline/trace.js';
 
 export type TirPassAny = PrimFuncPass | TirModulePass;
@@ -14,6 +14,7 @@ export type TirRunCtx = TirPassCtx & {
   errors: CompilationError[];
   failed: Set<string>;
   resilient: boolean;
+  passContext?: PassContext | null;
 };
 
 export class TirPassManager extends PassManagerBase<TirPassAny> {
@@ -21,6 +22,7 @@ export class TirPassManager extends PassManagerBase<TirPassAny> {
 
   run(module: TirModule, ctx: TirRunCtx): TirModule {
     for (const pass of this.passes) {
+      if (this._skipped(pass, ctx)) continue;
       this._runPass(pass, module, ctx);
     }
     return module;

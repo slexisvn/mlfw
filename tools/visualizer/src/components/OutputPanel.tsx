@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { EDITOR_THEME, editor, setupMonaco } from '../monaco/setup.js';
-import type { Kernel } from '../protocol.js';
+import { plural } from '../catalog/naming.js';
+import { KERNEL_METRICS } from '../catalog/diagnostics.js';
+import type { Kernel, KernelReport } from '../protocol.js';
 
 const GRAMMAR: Record<string, string> = {
   javascript: 'javascript',
@@ -11,7 +13,7 @@ const GRAMMAR: Record<string, string> = {
 
 const COPY_RESET_MS = 1600;
 
-export function OutputPanel({ kernels }: { kernels: readonly Kernel[] }) {
+export function OutputPanel({ kernels, reports }: { kernels: readonly Kernel[]; reports: readonly KernelReport[] }) {
   const [active, setActive] = useState(0);
   const [copied, setCopied] = useState(false);
 
@@ -42,7 +44,50 @@ export function OutputPanel({ kernels }: { kernels: readonly Kernel[] }) {
           {copied ? 'copied' : 'copy'}
         </button>
       </div>
+      <Report report={reports.find(entry => entry.name === kernel.name) ?? null} kernel={kernel} />
       <KernelSource kernel={kernel} />
+    </div>
+  );
+}
+
+function Report({ report, kernel }: { report: KernelReport | null; kernel: Kernel }) {
+  if (!report) return null;
+
+  const notes: string[] = [];
+  if (report.extent1Loops > 0) notes.push(`${plural(report.extent1Loops, 'loop')} that run once`);
+  if (report.zeroInits > 0) notes.push(plural(report.zeroInits, 'zero fill'));
+  if (report.arithmeticNoise.length > 0) notes.push(`arithmetic left in: ${report.arithmeticNoise.join(', ')}`);
+
+  return (
+    <div className={report.blownUp || report.issues.length > 0 || kernel.diagnosis ? 'kernel-report alarming' : 'kernel-report'}>
+      <dl className="extras kernel-metrics">
+        {KERNEL_METRICS.map(metric => (
+          <div key={metric.key} className={metric.notable(report) ? 'notable' : ''} title={metric.meaning}>
+            <dt>{metric.label}</dt>
+            <dd>{report[metric.key].toLocaleString()}</dd>
+          </div>
+        ))}
+      </dl>
+      {kernel.diagnosis && (
+        <p className="kernel-alarm">
+          The compiler refused to launch this kernel in parallel: {kernel.diagnosis.reason}
+          {kernel.diagnosis.buffers.length > 0 && ` — ${kernel.diagnosis.buffers.join(', ')}`}.
+          It runs correctly and serially, which is the compiler choosing to be right rather than fast.
+        </p>
+      )}
+      {report.blownUp && (
+        <p className="kernel-alarm">
+          One line is {report.longestLine.toLocaleString()} characters long. That is the shape of an
+          expression duplicated by codegen rather than named once — the failure mode that has produced
+          multi-megabyte kernels here before.
+        </p>
+      )}
+      {report.issues.length > 0 && (
+        <ul className="invariant-list">
+          {report.issues.map((issue, i) => <li key={i}>{issue.kind}: {issue.detail}</li>)}
+        </ul>
+      )}
+      {notes.length > 0 && <p className="kernel-notes">{notes.join(' · ')}</p>}
     </div>
   );
 }

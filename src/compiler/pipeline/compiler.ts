@@ -439,6 +439,8 @@ export class Compiler {
     }
     trace.phaseEnd('graphPasses', performance.now() - t0);
 
+    if (!resilient && result.errors) throw new Error((result.errors as CompilationError[])[0].toString());
+
     if (trace.shouldSnapshot('afterGraphPasses')) {
       const printer = new IRPrinter();
       trace.irDump('afterGraphPasses', printer.printModule(graphModule));
@@ -506,6 +508,7 @@ export class Compiler {
       errors: ctx.errors,
       failed: ctx.failed,
       resilient: ctx.resilient,
+      passContext: this.config.passContext as PassContext | null,
     });
   }
 
@@ -587,6 +590,7 @@ export class Compiler {
       errors: ctx.errors,
       failed: ctx.failed,
       resilient: ctx.resilient,
+      passContext: this.config.passContext as PassContext | null,
     });
   }
 

@@ -141,6 +141,23 @@ describe('Compiler attributes corruption to the pass that caused it', () => {
     expect(err.message).toContain("pass 'GraphBreaker' produced invalid IR");
   });
 
+  it('names the graph pass in the thrown error under the default strict mode', () => {
+    registerGraphPass(() => new GraphCorruptingPass(), { phase: 'pre' });
+    const compiler = new Compiler({ target: CPUTarget() });
+
+    let thrown = null;
+    try {
+      compiler.compile(addModule());
+    } catch (e) {
+      thrown = e;
+    }
+
+    expect(thrown).toBeTruthy();
+    expect(thrown.message).toContain('GraphBreaker');
+    expect(thrown.message).toContain("pass 'GraphBreaker' produced invalid IR");
+    expect(thrown.message).toContain(UNREGISTERED_OP);
+  });
+
   it('surfaces the same corruption without a pass name at boundaries level', () => {
     registerGraphPass(() => new GraphCorruptingPass(), { phase: 'pre' });
     const compiler = new Compiler({

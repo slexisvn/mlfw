@@ -6,6 +6,7 @@ import type { TraceLog } from '../pipeline/trace.js';
 
 export type PassResultValue = (typeof PassResult)[keyof typeof PassResult];
 export type PassTarget = GraphModule | GraphFunction;
+export type PassLike = { name: string; optLevel?: number };
 export type AnalysisRef = AnalysisCtor | string;
 export type PassContextOpts = Readonly<{
   optLevel?: number;
@@ -67,7 +68,7 @@ export class PassContext {
     this.config = config instanceof Map ? config : new Map(Object.entries(config as Record<string, unknown>));
   }
 
-  shouldRun(pass: Pass): boolean {
+  shouldRun(pass: PassLike): boolean {
     if (this.disabledPasses.has(pass.name)) return false;
     if (this.requiredPasses.has(pass.name)) return true;
     if ((pass.optLevel || 0) > this.optLevel) return false;

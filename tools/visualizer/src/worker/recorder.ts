@@ -1,11 +1,13 @@
 import { PassResult } from 'mlfw/compiler/passes/pass.js';
+import { cloneTensorIR } from 'mlfw/compiler/autotune/tune_ir.js';
 import { takeSnapshot } from './snapshot.js';
+import { invariantsOf, verifyReport } from './verify.js';
 import { sourceSnapshot } from './source_nest.js';
 import { captureBaselines, primitiveSteps } from './schedule_steps.js';
 import { levelLabel } from '../catalog/naming.js';
 import { REPLAYABLE_PASSES } from '../catalog/passes.js';
 import type { PrimFunc } from 'mlfw/compiler/ir/tensor/nodes.js';
-import type { BufferLifetime, CompileStep, IRLevelName, Kernel, MemoryPlan, PassOutcome, Snapshot, TraceEventLite, TuningCandidate, TuningParams, TuningRound } from '../protocol.js';
+import type { BufferLifetime, CompileStep, IRLevelName, Kernel, MemoryPlan, PassOutcome, SkippedPass, Snapshot, TraceEventLite, TuningCandidate, TuningParams, TuningRound } from '../protocol.js';
 
 const OUTCOMES: Record<number, PassOutcome> = {
   [PassResult.UNCHANGED]: 'unchanged',
@@ -14,6 +16,19 @@ const OUTCOMES: Record<number, PassOutcome> = {
 };
 
 const GRAPH_PHASE_FALLBACK = 'graphPasses';
+const NESTED_LEVELS: ReadonlySet<string> = new Set(['tir', 'lir']);
+const CAPTURE_NODE_CAP = 20000;
+
+export type CapturedIR = { level: IRLevelName; before: NestedFunc[]; after: NestedFunc[] };
+
+type NestedFunc = { name: string; body?: unknown };
+
+function captureFuncs(target: unknown): NestedFunc[] {
+  if (!target || typeof (target as Iterable<unknown>)[Symbol.iterator] !== 'function') return [];
+  const funcs: NestedFunc[] = [];
+  for (const func of target as Iterable<NestedFunc>) funcs.push(cloneTensorIR(func as never) as unknown as NestedFunc);
+  return funcs;
+}
 
 type OpenStep = {
   pass: string;
@@ -22,6 +37,8 @@ type OpenStep = {
   startedAt: number;
   eventMark: number;
   before: Snapshot;
+  invariants: string[] | null;
+  captured: NestedFunc[] | null;
   unit: string | null;
   baselines: Map<string, PrimFunc> | null;
 };
@@ -29,12 +46,17 @@ type OpenStep = {
 export class CompileRecorder {
   readonly steps: CompileStep[] = [];
   readonly events: TraceEventLite[] = [];
+  readonly bodies = new Map<number, CapturedIR>();
+
+  private readonly captures = new Map<number, CapturedIR>();
 
   private readonly phases: string[] = [];
   private readonly open: OpenStep[] = [];
+  private readonly verifying: boolean;
   private onTracingDone: (() => void) | null;
 
-  constructor(onTracingDone: () => void = () => {}) {
+  constructor(verifying: boolean, onTracingDone: () => void = () => {}) {
+    this.verifying = verifying;
     this.onTracingDone = onTracingDone;
   }
 
@@ -57,6 +79,8 @@ export class CompileRecorder {
       startedAt: performance.now(),
       eventMark: this.events.length,
       before: takeSnapshot(target, level),
+      invariants: this.verifying ? invariantsOf(level, target) : null,
+      captured: NESTED_LEVELS.has(level) ? captureFuncs(target) : null,
       unit: unitOf(target),
       baselines: REPLAYABLE_PASSES.has(pass.name) ? captureBaselines(target) : null,
     });
@@ -67,6 +91,10 @@ export class CompileRecorder {
     if (!open) return;
     const after = takeSnapshot(target, level);
     const events = this.events.slice(open.eventMark);
+
+    if (open.captured && open.before.ops <= CAPTURE_NODE_CAP && after.ops <= CAPTURE_NODE_CAP) {
+      this.captures.set(this.steps.length, { level, before: open.captured, after: captureFuncs(target) });
+    }
 
     this.steps.push({
       index: this.steps.length,
@@ -81,6 +109,8 @@ export class CompileRecorder {
       before: open.before,
       after,
       events,
+      verify: open.invariants === null ? null : verifyReport(open.invariants, invariantsOf(level, target)),
+      interpretable: false,
     });
 
     if (open.baselines) {
@@ -113,6 +143,8 @@ export class CompileRecorder {
       before: first.before,
       after: first.before,
       events: [],
+      verify: null,
+      interpretable: false,
     }];
 
     for (const step of this.steps) {
@@ -131,6 +163,8 @@ export class CompileRecorder {
           before: previous.after,
           after: step.before,
           events: [],
+          verify: null,
+          interpretable: false,
         });
       } else if (previous.level !== step.level) {
         timeline.push({
@@ -146,8 +180,12 @@ export class CompileRecorder {
           before: previous.after,
           after: step.before,
           events: [],
+          verify: null,
+          interpretable: false,
         });
       }
+      const captured = this.captures.get(step.index);
+      if (captured) this.bodies.set(timeline.length, captured);
       timeline.push(step);
     }
 
@@ -166,10 +204,12 @@ export class CompileRecorder {
         before: last.after,
         after: sourceSnapshot(kernels),
         events: [],
+        verify: null,
+        interpretable: false,
       });
     }
 
-    return timeline.map((step, index) => ({ ...step, index }));
+    return timeline.map((step, index) => ({ ...step, index, interpretable: this.bodies.has(index) }));
   }
 
   memoryPlans(): MemoryPlan[] {
@@ -208,6 +248,21 @@ export class CompileRecorder {
     return rounds;
   }
 
+  skippedPasses(): SkippedPass[] {
+    const skipped: SkippedPass[] = [];
+    const seen = new Set<string>();
+
+    for (const event of this.events) {
+      if (event.type !== 'pass_skipped') continue;
+      const pass = String(event.passName);
+      if (seen.has(pass)) continue;
+      seen.add(pass);
+      skipped.push({ pass, level: event.irLevel as IRLevelName });
+    }
+
+    return skipped;
+  }
+
   currentOpenPass(): string | null {
     const open = this.open[this.open.length - 1];
     return open ? open.pass : null;
@@ -229,6 +284,8 @@ export class CompileRecorder {
         before: open.before,
         after: open.before,
         events: this.events.slice(open.eventMark),
+        verify: open.invariants === null ? null : verifyReport(open.invariants, open.invariants),
+        interpretable: false,
       });
     }
   }

@@ -4,7 +4,7 @@ import { layoutDag } from '../ir/dag.js';
 import { layoutNest } from '../ir/nest.js';
 import { driftScore, frameAt, linkLowering, linkRewrites, linkSourceLines, planTransition } from '../ir/transition.js';
 import { actions, useStore } from '../store.js';
-import { opLabel } from '../catalog/naming.js';
+import { opLabel, plural } from '../catalog/naming.js';
 import { usePanZoom } from './pan_zoom.js';
 import { useElementSize } from './use_element_size.js';
 import type { Box, Layout } from '../ir/dag.js';
@@ -45,10 +45,6 @@ const DEFAULT_VIEWPORT = { width: 800, height: 600 };
 type Prepared = { key: string; before: Layout; after: Layout; plan: Plan; drift: number };
 
 const OP_KINDS = new Set(['op', 'region', 'output']);
-
-function plural(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? '' : 's'}`;
-}
 
 function shapeOf(layout: Layout, fallback: number): string {
   let ops = 0;

@@ -13,6 +13,7 @@ export default defineConfig({
     alias: [
       { find: /^mlfw\//, replacement: `${repoRoot}/src/` },
       { find: /^mlfw-dist\//, replacement: `${repoRoot}/dist/` },
+      { find: /^mlfw-tests\//, replacement: `${repoRoot}/tests/` },
     ],
   },
   server: {

@@ -8,11 +8,13 @@
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
+    "allowJs": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
     "types": ["vite/client"],
     "paths": {
-      "mlfw/*": ["../../src/*"]
+      "mlfw/*": ["../../src/*"],
+      "mlfw-tests/*": ["../../tests/*"]
     }
   },
   "include": ["src", "tests", "scripts", "vite.config.ts"]

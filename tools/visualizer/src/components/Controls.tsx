@@ -2,9 +2,11 @@ import { useState } from 'react';
 import { EXAMPLES } from '../examples/index.js';
 import { RUN_SHORTCUT } from '../platform.js';
 import { actions, isStale, useStore } from '../store.js';
-import { passLabel } from '../catalog/naming.js';
+import { passLabel, plural } from '../catalog/naming.js';
 import { TARGETS, targetNote } from '../catalog/targets.js';
-import type { BackwardMode, CompileOptions, TargetName } from '../protocol.js';
+import { VERIFY_LEVELS, verifyNote } from '../catalog/diagnostics.js';
+import { download, reproScript } from '../repro.js';
+import type { BackwardMode, CompileOptions, TargetName, VerifyLevelName } from '../protocol.js';
 
 const STRATEGIES: { id: CompileOptions['fusionStrategy']; note: string }[] = [
   { id: 'priority', note: 'merge the most profitable pair first' },
@@ -35,6 +37,7 @@ const BACKWARD_MODES: { id: BackwardMode; label: string; note: string }[] = [
 
 export function Controls() {
   const options = useStore(s => s.options);
+  const source = useStore(s => s.source);
   const exampleId = useStore(s => s.exampleId);
   const status = useStore(s => s.status);
   const stale = useStore(isStale);
@@ -49,7 +52,8 @@ export function Controls() {
     target.label,
     options.backward === 'off' ? null : backwardMode.label,
     ...TOGGLES.filter(toggle => options[toggle.key] as boolean).map(toggle => toggle.label),
-    off > 0 ? `${off} ${off === 1 ? 'pass' : 'passes'} off` : null,
+    options.verify === 'each-pass' ? null : `verify ${options.verify}`,
+    off > 0 ? `${plural(off, 'pass', 'es')} off` : null,
   ].filter(part => part !== null).join(' · ');
 
   return (
@@ -123,14 +127,30 @@ export function Controls() {
               {STRATEGIES.map(s => <option key={s.id} value={s.id}>{s.id}</option>)}
             </select>
           </label>
+          <label className="control">
+            <span>Verify</span>
+            <select
+              value={options.verify}
+              onChange={e => actions.setOptions({ verify: e.target.value as VerifyLevelName })}
+            >
+              {VERIFY_LEVELS.map(level => <option key={level.id} value={level.id}>{level.label}</option>)}
+            </select>
+          </label>
         </div>
 
-        <p className="control-note">
-          {target.note}
-          {options.fusion ? ` · ${strategy.note}` : ' · fusion is off'}
-        </p>
-
-        <p className="control-note">{backwardMode.note}</p>
+        <dl className="control-notes">
+          {[
+            { term: 'target', note: target.note },
+            { term: 'direction', note: backwardMode.note },
+            { term: 'fusion', note: options.fusion ? strategy.note : 'fusion is off' },
+            { term: 'verify', note: verifyNote(options.verify) },
+          ].map(entry => (
+            <div key={entry.term}>
+              <dt>{entry.term}</dt>
+              <dd>{entry.note}</dd>
+            </div>
+          ))}
+        </dl>
 
         <div className="toggles">
           {TOGGLES.map(toggle => (
@@ -142,6 +162,18 @@ export function Controls() {
               onChange={value => actions.setOptions({ [toggle.key]: value } as Partial<CompileOptions>)}
             />
           ))}
+        </div>
+
+        <div className="export-row">
+          <button
+            className="export"
+            onClick={() => download('repro.mjs', reproScript(source, options))}
+          >
+            export repro.mjs
+          </button>
+          <span>
+            a standalone node script that compiles exactly this — the way a bug found here gets re-run where CUDA lives
+          </span>
         </div>
 
         {options.disabledPasses.length > 0 && (

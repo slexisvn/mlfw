@@ -95,7 +95,9 @@ async function layerActivations(model: Model, inputs: readonly TensorLike[]): Pr
   }));
 }
 
-async function timed(call: () => unknown): Promise<{ output: unknown; ms: number; iterations: number }> {
+async function timed(call: () => unknown, measure: boolean): Promise<{ output: unknown; ms: number | null; iterations: number }> {
+  if (!measure) return { output: await call(), ms: null, iterations: 0 };
+
   for (let i = 0; i < WARMUP; i++) await call();
 
   const deadline = performance.now() + MAX_TOTAL_MS;
@@ -135,9 +137,10 @@ async function runInference(
   compiled: (...inputs: unknown[]) => unknown,
   model: Model,
   inputs: readonly TensorLike[],
+  deep: boolean,
 ): Promise<RunResult> {
-  const run = await timed(() => compiled(...inputs));
-  const eager = await timed(() => noGrad(() => model.forward(...(inputs as never[]))));
+  const run = await timed(() => compiled(...inputs), deep);
+  const eager = await timed(() => noGrad(() => model.forward(...(inputs as never[]))), deep);
 
   const compiledOut = previewsOf(asTensors(run.output), outputName);
   const eagerOut = previewsOf(asTensors(eager.output), outputName);
@@ -148,7 +151,7 @@ async function runInference(
     inputs: previewsOf(inputs, inputName).previews,
     outputs: compiledOut.previews,
     eagerOutputs: eagerOut.previews,
-    layers: await layerActivations(model, inputs),
+    layers: deep ? await layerActivations(model, inputs) : [],
     maxAbsDiff: maxAbsDiff(compiledOut.values, eagerOut.values),
     compiledMs: run.ms,
     eagerMs: eager.ms,
@@ -160,6 +163,7 @@ async function runTraining(
   handle: Trainable,
   model: Model,
   inputs: readonly TensorLike[],
+  deep: boolean,
 ): Promise<RunResult> {
   const seeds = await seededOnes(handle, inputs);
   const params = handle.capturedParams();
@@ -168,9 +172,9 @@ async function runTraining(
     const outputs = asTensors(await handle(...inputs));
     const grads = asTensors(await handle.backward(...seeds));
     return { outputs, grads };
-  });
+  }, deep);
 
-  const eager = await timed(eagerStep(model, inputs, params, seeds));
+  const eager = await timed(eagerStep(model, inputs, params, seeds), deep);
 
   const compiledStep = run.output as { outputs: TensorLike[]; grads: TensorLike[] };
   const eagerStepOut = eager.output as { outputs: TensorLike[]; grads: TensorLike[] };
@@ -194,7 +198,7 @@ async function runTraining(
     gradients: compiledGrads.previews,
     eagerGradients: eagerGrads.previews,
     parameters: previewsOf(params, i => names[i]).previews,
-    layers: await layerActivations(model, inputs),
+    layers: deep ? await layerActivations(model, inputs) : [],
     maxAbsDiff: maxAbsDiff(compiledOut.values, eagerOut.values),
     maxAbsGradDiff: maxAbsDiff(compiledGrads.values, eagerGrads.values),
     compiledMs: run.ms,
@@ -203,20 +207,23 @@ async function runTraining(
   };
 }
 
+export type ExecuteOptions = { quick?: boolean };
+
 export async function executeCompiled(
   compiled: (...inputs: unknown[]) => unknown,
   model: Model,
   inputs: readonly unknown[],
   target: TargetName,
   backward: BackwardMode,
+  { quick = false }: ExecuteOptions = {},
 ): Promise<RunResult> {
   const skipped = targetNote(target).skipReason;
   if (skipped) return { ...EMPTY, skipped };
 
   try {
     return backward === 'off'
-      ? await runInference(compiled, model, inputs as TensorLike[])
-      : await runTraining(compiled as Trainable, model, inputs as TensorLike[]);
+      ? await runInference(compiled, model, inputs as TensorLike[], !quick)
+      : await runTraining(compiled as Trainable, model, inputs as TensorLike[], !quick);
   } catch (error) {
     return { ...EMPTY, error: error instanceof Error ? error.message : String(error) };
   }

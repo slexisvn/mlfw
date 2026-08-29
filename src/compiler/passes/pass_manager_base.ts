@@ -3,9 +3,10 @@ import type { CompilationError } from '../pipeline/trace.js';
 import type { IRLevelValue } from '../ir/verify.js';
 import type { TraceLog } from '../pipeline/trace.js';
 import type { InstrumentedPass, PassInstrument } from './pass_instrument.js';
-import type { PassResultValue } from './pass.js';
+import type { PassContext, PassLike, PassResultValue } from './pass.js';
 
 export type NamedFunc = { name: string };
+export type SkipCtx = { passContext?: PassContext | null; trace?: TraceLog | null };
 export type VerifyCtx = {
   trace: TraceLog;
   errors: CompilationError[];
@@ -42,6 +43,14 @@ export abstract class PassManagerBase<P> {
 
   addInstrument(instrument: PassInstrument): void {
     this.instruments.push(instrument);
+  }
+
+  protected _skipped(pass: PassLike, ctx: SkipCtx): boolean {
+    const passContext = ctx.passContext;
+    if (!passContext || passContext.shouldRun(pass)) return false;
+    const trace = ctx.trace || this.trace;
+    if (trace) trace.passSkipped(pass.name, this.irLevel);
+    return true;
   }
 
   protected _notifyBefore(pass: InstrumentedPass, target: unknown): void {

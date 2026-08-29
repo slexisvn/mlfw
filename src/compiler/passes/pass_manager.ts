@@ -187,7 +187,7 @@ export class PassManager extends PassManagerBase<PassManagerEntry> {
     for (let iter = 0; iter < maxIter; iter++) {
       let iterChanged = false;
       for (const pass of group.passes) {
-        if (!ctx.passContext.shouldRun(pass)) continue;
+        if (this._skipped(pass, ctx)) continue;
         const { changed, fatal } = this._applyPass(pass, module, ctx, results);
         if (fatal) return true;
         if (changed) iterChanged = true;
@@ -210,7 +210,7 @@ export class PassManager extends PassManagerBase<PassManagerEntry> {
     const results: PassResultValue[] = [];
 
     for (const item of this.passes) {
-      if (!(item instanceof FixedPointGroup) && !ctx.passContext.shouldRun(item)) continue;
+      if (!(item instanceof FixedPointGroup) && this._skipped(item, ctx)) continue;
       const fatal = item instanceof FixedPointGroup
         ? this._runGroup(item, module, ctx, results)
         : this._applyPass(item, module, ctx, results).fatal;

@@ -98,6 +98,12 @@ export type MemoryPlan = {
 
 export type StepKind = 'input' | 'pass' | 'lowering' | 'primitive';
 
+export type VerifyLevelName = 'off' | 'boundaries' | 'each-pass';
+
+export type VerifyReport = { introduced: string[]; carried: string[] };
+
+export type SkippedPass = { pass: string; level: IRLevelName };
+
 export type CompileStep = {
   index: number;
   kind: StepKind;
@@ -111,13 +117,19 @@ export type CompileStep = {
   before: Snapshot;
   after: Snapshot;
   events: TraceEventLite[];
+  verify: VerifyReport | null;
+  interpretable: boolean;
 };
 
+
+export type LaunchDiagnosis = { reason: string; buffers: string[] };
 
 export type Kernel = {
   name: string;
   source: string;
   language: string;
+  metadata: Record<string, unknown> | null;
+  diagnosis: LaunchDiagnosis | null;
 };
 
 export type TensorStats = {
@@ -177,6 +189,7 @@ export type BackwardMode = 'off' | 'separate' | 'joint';
 export type CompileOptions = {
   target: TargetName;
   backward: BackwardMode;
+  verify: VerifyLevelName;
   fusionStrategy: 'priority' | 'dominator' | 'greedy';
   fusion: boolean;
   scheduling: boolean;
@@ -187,9 +200,21 @@ export type CompileOptions = {
 
 export type InitRequest = { kind: 'init'; id: number };
 
-export type WorkerRequest = CompileRequest | InitRequest;
+export type BisectRequest = {
+  kind: 'bisect';
+  id: number;
+  source: string;
+  options: CompileOptions;
+  tolerance: number;
+};
 
-export type WorkerRequestDraft = Omit<CompileRequest, 'id'> | Omit<InitRequest, 'id'>;
+export type WorkerRequest = CompileRequest | InitRequest | BisectRequest | SemanticsRequest;
+
+export type WorkerRequestDraft =
+  | Omit<CompileRequest, 'id'>
+  | Omit<InitRequest, 'id'>
+  | Omit<BisectRequest, 'id'>
+  | Omit<SemanticsRequest, 'id'>;
 
 export type InitResponse = {
   kind: 'init';
@@ -209,15 +234,109 @@ export type CompileResponse = {
   sourceLines: number[];
   memoryPlans: MemoryPlan[];
   tuningRounds: TuningRound[];
+  skipped: SkippedPass[];
+  kernelReports: KernelReport[];
   totalMs: number;
   run: RunResult;
 };
 
-export type WorkerResponse = InitResponse | CompileResponse;
+export type KernelIssue = { kind: string; detail: string };
+
+export type KernelReport = {
+  name: string;
+  language: string;
+  bytes: number;
+  lines: number;
+  longestLine: number;
+  loops: number;
+  tempBuffers: number;
+  boundsChecks: number;
+  modulos: number;
+  arithmeticNoise: string[];
+  extent1Loops: number;
+  zeroInits: number;
+  issues: KernelIssue[];
+  blownUp: boolean;
+};
+
+export type CellDiff = { cell: string; before: number; after: number };
+
+export type SemanticReport = {
+  ran: boolean;
+  reason: string | null;
+  truncated: boolean;
+  storesBefore: number;
+  storesAfter: number;
+  compared: number;
+  changed: CellDiff[];
+  dropped: string[];
+  added: string[];
+  changedCount: number;
+  droppedCount: number;
+  addedCount: number;
+  vanishedBuffers: string[];
+  newBuffers: string[];
+  storageReused: boolean;
+  reordered: boolean;
+  verdict: string;
+};
+
+export type SemanticsRequest = { kind: 'semantics'; id: number; step: number };
+
+export type SemanticsResponse = {
+  kind: 'semantics';
+  id: number;
+  step: number;
+  report: SemanticReport | null;
+  unavailable: string | null;
+  ms: number;
+};
+
+export type BisectMode = 'compile' | 'numeric';
+
+export type BisectProbe = {
+  index: number;
+  disabled: string[];
+  ok: boolean;
+  ran: boolean;
+  error: string | null;
+  diff: number | null;
+  good: boolean;
+  ms: number;
+};
+
+export type BisectProgress = {
+  kind: 'bisect-progress';
+  id: number;
+  probe: BisectProbe;
+  note: string;
+};
+
+export type BisectResponse = {
+  kind: 'bisect';
+  id: number;
+  mode: BisectMode | null;
+  tolerance: number;
+  baseline: BisectProbe | null;
+  allOff: BisectProbe | null;
+  candidates: string[];
+  culprits: string[];
+  probes: BisectProbe[];
+  conclusion: string;
+  error: string | null;
+  totalMs: number;
+};
+
+export type WorkerResponse = InitResponse | CompileResponse | BisectResponse | SemanticsResponse;
+
+export type WorkerProgress = BisectProgress;
+
+export type WorkerMessage = WorkerResponse | WorkerProgress;
 
 export const DEFAULT_OPTIONS: CompileOptions = {
   target: 'cpu',
   backward: 'off',
+  verify: 'each-pass',
   fusionStrategy: 'priority',
   fusion: true,
   scheduling: true,

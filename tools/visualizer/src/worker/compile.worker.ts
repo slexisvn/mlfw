@@ -1,14 +1,15 @@
 import { compile, compileWithBackward, manual_seed, TraceLevel } from 'mlfw/index.js';
-import { PassContext } from 'mlfw/compiler/passes/pass.js';
 import { CompileRecorder } from './recorder.js';
+import { asCompilable, compilerOptions } from './settings.js';
 import { executeCompiled } from './execute.js';
 import { evaluateModelSource, frameworkGlobals } from './evaluate.js';
 import { attributeLayerSites } from './layer_sites.js';
 import { collectDagLines } from './snapshot.js';
+import { bisect } from './bisect.js';
+import { semanticReport } from './semantics.js';
+import { kernelReports } from './kernel_report.js';
 import { targetNote } from '../catalog/targets.js';
-import { TARGET_FACTORIES } from './targets.js';
-import { SEARCH_BUDGET } from '../catalog/tuning.js';
-import type { BackwardMode, CompileOptions, CompileResponse, CompileStep, Kernel, RunResult, TargetName, WorkerRequest } from '../protocol.js';
+import type { BackwardMode, CompileOptions, CompileResponse, CompileStep, Kernel, LaunchDiagnosis, RunResult, SemanticsResponse, TargetName, WorkerRequest } from '../protocol.js';
 
 const NOT_RUN: RunResult = {
   ran: false, skipped: null, error: null,
@@ -20,44 +21,23 @@ const NOT_RUN: RunResult = {
 };
 
 const SEED = 0;
-const NON_IDENTIFIER = /[^A-Za-z0-9_$]/g;
-const FALLBACK_NAME = 'model';
 
-type Compilable = Parameters<typeof compile>[0];
-type ForwardFn = (...args: unknown[]) => unknown;
+let lastRecorder: CompileRecorder | null = null;
 
-function identifier(name: string): string {
-  const cleaned = name.replace(NON_IDENTIFIER, '');
-  return /^[A-Za-z_$]/.test(cleaned) ? cleaned : FALLBACK_NAME;
-}
-
-function wrap(forward: ForwardFn): Compilable {
-  const wrapper = class { forward = forward; };
-  Object.defineProperty(wrapper, 'name', { value: identifier(forward.name) });
-  return new wrapper() as unknown as Compilable;
-}
-
-function asCompilable(model: unknown): Compilable {
-  if (model && typeof (model as { forward?: unknown }).forward === 'function') return model as Compilable;
-  if (typeof model === 'function') return wrap(model as ForwardFn);
-  throw new Error('run(model, inputs): model must be an nn.Module or a function');
-}
-
-function compilerOptions(options: CompileOptions): Record<string, unknown> {
-  return {
-    target: TARGET_FACTORIES[options.target](),
-    fusion: { enabled: options.fusion, strategy: options.fusionStrategy },
-    scheduling: { enabled: options.scheduling, autotune: options.autotune, ...SEARCH_BUDGET },
-    optimization: { layout: options.layout },
-    passContext: options.disabledPasses.length > 0
-      ? new PassContext({ disabledPasses: options.disabledPasses })
-      : null,
-  };
-}
-
-type KernelSource = { listKernels(): string[]; getSource(name: string): string | null };
+type KernelSource = {
+  listKernels(): string[];
+  getSource(name: string): string | null;
+  getMetadata?(name: string): Record<string, unknown> | null;
+  module?: { getKernelMetadata(name: string): Record<string, unknown> | null };
+};
 type InferenceHandle = ((...args: unknown[]) => unknown) & { _ready: Promise<void> | null; result(): unknown };
 type TrainingHandle = ((...args: unknown[]) => unknown) & { compiledUnits(): { name: string; result: unknown }[] };
+
+function metadataOf(result: KernelSource, name: string): Record<string, unknown> | null {
+  if (typeof result.getMetadata === 'function') return result.getMetadata(name);
+  if (result.module) return result.module.getKernelMetadata(name);
+  return null;
+}
 
 function kernelsOf(result: KernelSource | null, language: string, prefix: string): Kernel[] {
   if (!result) return [];
@@ -65,7 +45,14 @@ function kernelsOf(result: KernelSource | null, language: string, prefix: string
   for (const name of result.listKernels()) {
     const source = result.getSource(name);
     if (source === null) continue;
-    kernels.push({ name: prefix ? `${prefix} · ${name}` : name, source, language });
+    const metadata = metadataOf(result, name);
+    kernels.push({
+      name: prefix ? `${prefix} · ${name}` : name,
+      source,
+      language,
+      metadata,
+      diagnosis: (metadata?.launchDiagnosis ?? null) as LaunchDiagnosis | null,
+    });
   }
   return kernels;
 }
@@ -97,7 +84,7 @@ async function runCompile(id: number, source: string, options: CompileOptions): 
   let run: RunResult = NOT_RUN;
   let stopRecordingLines = (): void => {};
   let stopLayerSites = (): void => {};
-  const recorder = new CompileRecorder(() => { stopLayerSites(); stopRecordingLines(); });
+  const recorder = new CompileRecorder(options.verify !== 'off', () => { stopLayerSites(); stopRecordingLines(); });
 
   try {
     manual_seed(SEED);
@@ -129,6 +116,7 @@ async function runCompile(id: number, source: string, options: CompileOptions): 
   }
 
   const steps = recorder.timeline(kernels);
+  lastRecorder = recorder;
 
   return {
     kind: 'compile',
@@ -142,8 +130,35 @@ async function runCompile(id: number, source: string, options: CompileOptions): 
     sourceLines: tracedLines(steps),
     memoryPlans: recorder.memoryPlans(),
     tuningRounds: recorder.tuningRounds(),
+    skipped: recorder.skippedPasses(),
+    kernelReports: kernelReports(kernels),
     totalMs: performance.now() - startedAt,
     run,
+  };
+}
+
+function semantics(id: number, step: number): SemanticsResponse {
+  const startedAt = performance.now();
+  const captured = lastRecorder ? lastRecorder.bodies.get(step) : undefined;
+
+  if (!captured) {
+    return {
+      kind: 'semantics',
+      id,
+      step,
+      report: null,
+      unavailable: 'Only a pass over the tensor or low-level IR can be interpreted — a graph pass has no loop nest to run, and a very large function is not kept.',
+      ms: performance.now() - startedAt,
+    };
+  }
+
+  return {
+    kind: 'semantics',
+    id,
+    step,
+    report: semanticReport(captured.before, captured.after),
+    unavailable: null,
+    ms: performance.now() - startedAt,
   };
 }
 
@@ -152,6 +167,18 @@ self.onmessage = async (message: MessageEvent<WorkerRequest>) => {
 
   if (request.kind === 'init') {
     self.postMessage({ kind: 'init', id: request.id, globals: frameworkGlobals() });
+    return;
+  }
+
+  if (request.kind === 'semantics') {
+    self.postMessage(semantics(request.id, request.step));
+    return;
+  }
+
+  if (request.kind === 'bisect') {
+    self.postMessage(await bisect(request, (probe, note) => {
+      self.postMessage({ kind: 'bisect-progress', id: request.id, probe, note });
+    }));
     return;
   }
 

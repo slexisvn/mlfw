@@ -73,6 +73,8 @@ export function primitiveSteps(
           before,
           after,
           events: [note(step.primitive)],
+          verify: null,
+          interpretable: false,
         });
         before = after;
       });
@@ -94,6 +96,8 @@ export function primitiveSteps(
           phase,
           message: error instanceof Error ? error.message : String(error),
         }],
+        verify: null,
+        interpretable: false,
       });
     }
   }

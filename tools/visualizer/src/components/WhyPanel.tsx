@@ -1,7 +1,7 @@
 import { chapterUrl, passNote } from '../catalog/passes.js';
 import { formatMetric } from '../catalog/metrics.js';
-import { isHiddenMetric, levelLabel, metricLabel, metricValue, passLabel, phaseLabel } from '../catalog/naming.js';
-import type { CompileStep, TraceEventLite } from '../protocol.js';
+import { agree, isHiddenMetric, levelLabel, metricLabel, metricValue, passLabel, phaseLabel, plural } from '../catalog/naming.js';
+import type { CompileStep, TraceEventLite, VerifyReport } from '../protocol.js';
 
 const INTERESTING = new Set(['explain', 'pass_detail', 'warning', 'memory', 'codegen', 'error']);
 const BASE_KEYS = ['type', 'level', 'timestamp'];
@@ -40,10 +40,39 @@ export function WhyPanel({ step }: { step: CompileStep }) {
   return (
     <div className="why">
       <PassCard step={step} />
+      <VerifyCard report={step.verify} pass={step.pass} />
       {groups.length === 0
         ? (explains ? null : <QuietNote step={step} />)
         : groups.map((group, i) => <EventCard key={i} group={group} />)}
     </div>
+  );
+}
+
+function VerifyCard({ report, pass }: { report: VerifyReport | null; pass: string }) {
+  if (report === null) return null;
+  const broke = report.introduced.length > 0;
+  if (!broke && report.carried.length === 0) return null;
+
+  return (
+    <article className={broke ? 'why-card invalid' : 'why-card warning'}>
+      <header>
+        <span className="tag">verifier</span>
+        <span className="subject">{broke ? `${pass} produced invalid IR` : 'the IR was already invalid'}</span>
+      </header>
+      <p className="decision">
+        {broke
+          ? `The IR passed these checks going in and fails them coming out, so this pass is where the invariant
+             broke — not wherever the compiler happened to notice.`
+          : `These checks were already failing before this pass ran; it inherited the damage rather than
+             causing it.`}
+      </p>
+      <ul className="invariant-list">
+        {(broke ? report.introduced : report.carried).map((message, i) => <li key={i}>{message}</li>)}
+      </ul>
+      {broke && report.carried.length > 0 && (
+        <p className="reason">{plural(report.carried.length, 'more check')} {agree(report.carried.length, 'was')} already failing before this pass.</p>
+      )}
+    </article>
   );
 }
 

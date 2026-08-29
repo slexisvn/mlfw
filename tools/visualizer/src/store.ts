@@ -2,7 +2,9 @@ import { useSyncExternalStore } from 'react';
 import { DEFAULT_OPTIONS } from './protocol.js';
 import { EXAMPLES } from './examples/index.js';
 import { readSession, writeSession } from './session.js';
-import type { CompileOptions, CompileResponse, CompileStep, WorkerRequest, WorkerRequestDraft, WorkerResponse } from './protocol.js';
+import { provenanceOf } from './catalog/provenance.js';
+import type { Ledger } from './catalog/ledger.js';
+import type { BisectProbe, BisectResponse, CompileOptions, CompileResponse, CompileStep, SemanticsResponse, WorkerMessage, WorkerProgress, WorkerRequest, WorkerRequestDraft, WorkerResponse } from './protocol.js';
 import type { StageTab } from './catalog/glossary.js';
 
 const REDUCED_MOTION = typeof matchMedia === 'function'
@@ -37,24 +39,44 @@ export type State = {
   collapsed: ReadonlySet<number>;
   pane: Pane;
   focusLine: number | null;
+  bisecting: boolean;
+  bisect: BisectResponse | null;
+  bisectProbes: BisectProbe[];
+  bisectNote: string;
+  semantics: Record<number, SemanticsResponse>;
+  semanticsPending: number | null;
+  find: string;
+  ledger: Ledger | null;
 };
 
 const worker = new Worker(new URL('./worker/compile.worker.ts', import.meta.url), { type: 'module' });
 
-let nextRequestId = 1;
-const pending = new Map<number, (response: WorkerResponse) => void>();
-
-worker.onmessage = (message: MessageEvent<WorkerResponse>) => {
-  const resolve = pending.get(message.data.id);
-  if (!resolve) return;
-  pending.delete(message.data.id);
-  resolve(message.data);
+type Pending = {
+  resolve: (response: WorkerResponse) => void;
+  onProgress: ((progress: WorkerProgress) => void) | null;
 };
 
-function ask(request: WorkerRequestDraft): Promise<WorkerResponse> {
+let nextRequestId = 1;
+const pending = new Map<number, Pending>();
+
+worker.onmessage = (message: MessageEvent<WorkerMessage>) => {
+  const data = message.data;
+  const entry = pending.get(data.id);
+  if (!entry) return;
+
+  if (data.kind === 'bisect-progress') {
+    if (entry.onProgress) entry.onProgress(data);
+    return;
+  }
+
+  pending.delete(data.id);
+  entry.resolve(data);
+};
+
+function ask(request: WorkerRequestDraft, onProgress: ((progress: WorkerProgress) => void) | null = null): Promise<WorkerResponse> {
   const id = nextRequestId++;
   return new Promise(resolve => {
-    pending.set(id, resolve);
+    pending.set(id, { resolve, onProgress });
     worker.postMessage({ ...request, id } as WorkerRequest);
   });
 }
@@ -81,6 +103,14 @@ let state: State = {
   collapsed: new Set(),
   pane: 'source',
   focusLine: null,
+  bisecting: false,
+  bisect: null,
+  bisectProbes: [],
+  bisectNote: '',
+  semantics: {},
+  semanticsPending: null,
+  find: '',
+  ledger: null,
 };
 
 const listeners = new Set<() => void>();
@@ -222,11 +252,37 @@ export function sourceLines(s: State): readonly number[] {
   return s.result ? s.result.sourceLines : NO_LINES;
 }
 
-export type DisabledPass = { name: string; phase: string };
+export const provenance = derived(
+  s => [s.result, s.find],
+  s => (s.result ? provenanceOf(s.result, s.find) : null),
+);
+
+const NO_STEPS: readonly CompileStep[] = [];
+
+export const interpretableSteps = derived(
+  s => [s.result],
+  (s): readonly CompileStep[] => (s.result ? s.result.steps.filter(step => step.interpretable) : NO_STEPS),
+);
+
+export type DisabledStatus = 'off' | 'ignored' | 'pending';
+
+export type DisabledPass = { name: string; phase: string; status: DisabledStatus };
+
+function disabledStatus(s: State, name: string, skipped: ReadonlySet<string>): DisabledStatus {
+  if (s.result === null || isStale(s)) return 'pending';
+  return skipped.has(name) ? 'off' : 'ignored';
+}
 
 export const disabledPasses = derived(
-  s => [s.options.disabledPasses, s.passPhases],
-  (s): DisabledPass[] => s.options.disabledPasses.map(name => ({ name, phase: s.passPhases[name] ?? 'turned off' })),
+  s => [s.options, s.passPhases, s.result, s.ranOptions, s.ranSource, s.source],
+  (s): DisabledPass[] => {
+    const skipped = new Set((s.result ? s.result.skipped : []).map(entry => entry.pass));
+    return s.options.disabledPasses.map(name => ({
+      name,
+      phase: s.passPhases[name] ?? 'turned off',
+      status: disabledStatus(s, name, skipped),
+    }));
+  },
 );
 
 function nearestVisible(s: State, index: number): number {
@@ -237,6 +293,13 @@ function nearestVisible(s: State, index: number): number {
     if (Math.abs(step.index - index) < Math.abs(best.index - index)) best = step;
   }
   return best.index;
+}
+
+function firstSuspect(response: CompileResponse): number | null {
+  const broke = response.steps.find(step => step.verify !== null && step.verify.introduced.length > 0);
+  if (broke) return broke.index;
+  const failed = response.steps.find(step => step.outcome === 'failed');
+  return failed ? failed.index : null;
 }
 
 function phasesOf(response: CompileResponse, previous: Record<string, string>): Record<string, string> {
@@ -320,6 +383,33 @@ export const actions = {
     set({ tab, pane: 'stage' });
   },
 
+  reveal(index: number, tab: StageTab): void {
+    const step = state.result ? state.result.steps[index] : undefined;
+    if (!step) return;
+
+    const owner = state.result ? family(state.result).ownerOf.get(index) : undefined;
+    const collapsed = owner !== undefined && state.collapsed.has(owner)
+      ? new Set([...state.collapsed].filter(entry => entry !== owner))
+      : state.collapsed;
+
+    set({
+      selected: index,
+      onlyChanged: quiet(state, step) ? false : state.onlyChanged,
+      collapsed,
+      tab,
+      pane: 'stage',
+      playing: false,
+    });
+  },
+
+  setLedger(ledger: Ledger | null): void {
+    set({ ledger });
+  },
+
+  setFind(find: string): void {
+    if (state.find !== find) set({ find });
+  },
+
   setPane(pane: Pane): void {
     set({ pane });
   },
@@ -336,6 +426,32 @@ export const actions = {
 
   stopPlay(): void {
     if (state.playing) set({ playing: false });
+  },
+
+  async runBisect(tolerance: number): Promise<void> {
+    if (state.bisecting) return;
+    set({ bisecting: true, bisect: null, bisectProbes: [], bisectNote: 'compiling once with everything on…', tab: 'bisect', pane: 'stage' });
+
+    const response = await ask(
+      { kind: 'bisect', source: state.source, options: state.options, tolerance },
+      progress => set({ bisectProbes: [...state.bisectProbes, progress.probe], bisectNote: progress.note }),
+    ) as BisectResponse;
+
+    set({ bisecting: false, bisect: response, bisectProbes: response.probes, bisectNote: '' });
+  },
+
+  async proveStep(index: number): Promise<void> {
+    if (state.semanticsPending !== null || state.semantics[index]) return;
+    set({ semanticsPending: index });
+    const response = await ask({ kind: 'semantics', step: index }) as SemanticsResponse;
+    set({ semantics: { ...state.semantics, [response.step]: response }, semanticsPending: null });
+  },
+
+  turnOffCulprits(): void {
+    const found = state.bisect ? state.bisect.culprits : [];
+    if (found.length === 0) return;
+    actions.setOptions({ disabledPasses: [...new Set([...state.options.disabledPasses, ...found])] });
+    void actions.run();
   },
 
   focusSource(line: number | null): void {
@@ -360,7 +476,7 @@ export const actions = {
 
     const response = await ask({ kind: 'compile', source, options }) as CompileResponse;
 
-    if (!response.ok) {
+    if (!response.ok && response.steps.length === 0) {
       set({
         status: 'failed',
         failure: { error: response.error ?? 'compile failed', errorPhase: response.errorPhase },
@@ -372,18 +488,22 @@ export const actions = {
 
     const collapsed = collapsedByDefault(response);
     const next = { ...state, result: response, collapsed };
-    const first = visibleSteps(next)[0];
+    const fallback = visibleSteps(next)[0];
+    const suspect = response.ok ? null : firstSuspect(response);
+
     set({
       result: response,
       collapsed,
-      failure: null,
-      status: 'ready',
+      failure: response.ok ? null : { error: response.error ?? 'compile failed', errorPhase: response.errorPhase },
+      status: response.ok ? 'ready' : 'failed',
       ranSource: source,
       ranOptions: options,
       passPhases: phasesOf(response, state.passPhases),
-      selected: first ? first.index : 0,
+      selected: suspect ?? (fallback ? fallback.index : 0),
       playing: false,
       pane: 'timeline',
+      semantics: {},
+      semanticsPending: null,
     });
   },
 };

@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef } from 'react';
-import { actions, childCount, disabledPasses, isCollapsed, passRunCount, useStore, visibleSteps } from '../store.js';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { actions, childCount, disabledPasses, isCollapsed, passRunCount, provenance, useStore, visibleSteps } from '../store.js';
 import { markFor } from '../catalog/glossary.js';
-import { levelBadge, levelLabel, passLabel, phaseLabel } from '../catalog/naming.js';
+import { PRESENCE_MARKS } from '../catalog/provenance.js';
+import { levelBadge, levelLabel, passLabel, phaseLabel, plural } from '../catalog/naming.js';
 import { OpCountChart } from './OpCountChart.js';
 import type { DisabledPass } from '../store.js';
+import type { Presence, Provenance } from '../catalog/provenance.js';
 import type { CompileStep, IRLevelName } from '../protocol.js';
 
 type Group = { phase: string; unit: string | null; level: IRLevelName | null; steps: CompileStep[]; disabled: DisabledPass[] };
@@ -15,6 +17,7 @@ export function PassTimeline() {
   const steps = useStore(visibleSteps);
   const runs = useStore(passRunCount);
   const disabled = useStore(disabledPasses);
+  const found = useStore(provenance);
   const activeRow = useRef<HTMLButtonElement>(null);
 
   const ordinals = useMemo(() => runOrdinals(result ? result.steps : []), [result]);
@@ -37,6 +40,7 @@ export function PassTimeline() {
   return (
     <aside className="timeline">
       <OpCountChart steps={steps} selected={selected} />
+      <FindBar />
       <div className="timeline-scroll">
         {groups.map(group => (
           <section key={`${group.phase}-${group.steps[0]?.index ?? group.phase}`}>
@@ -59,10 +63,11 @@ export function PassTimeline() {
                 step={step}
                 ordinal={ordinals.get(step.index) ?? null}
                 active={step.index === selected}
+                presence={found && found.hits > 0 ? found.marks.get(step.index) ?? 'absent' : null}
                 rowRef={step.index === selected ? activeRow : undefined}
               />
             ))}
-            {group.disabled.map(entry => <OffRow key={entry.name} name={entry.name} />)}
+            {group.disabled.map(entry => <OffRow key={entry.name} entry={entry} />)}
           </section>
         ))}
       </div>
@@ -83,11 +88,61 @@ export function PassTimeline() {
   );
 }
 
+const FIND_DEBOUNCE_MS = 140;
+
+function findNote(found: Provenance): string {
+  if (found.hits === 0) {
+    return found.insideLonger > 0
+      ? `never a name on its own — only inside longer ones, in ${plural(found.insideLonger, 'step')}`
+      : 'never in the IR';
+  }
+  return `${found.bornAt === null ? 'there from the start' : `born at ${found.bornAt}`}`
+    + `${found.diedAt === null ? ', still there at the end' : `, gone after ${found.diedAt}`}`;
+}
+
+function FindBar() {
+  const find = useStore(s => s.find);
+  const found = useStore(provenance);
+  const [draft, setDraft] = useState(find);
+
+  useEffect(() => setDraft(find), [find]);
+
+  useEffect(() => {
+    if (draft === find) return;
+    const timer = setTimeout(() => actions.setFind(draft), FIND_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [draft, find]);
+
+  return (
+    <div className="find-bar">
+      <input
+        type="search"
+        value={draft}
+        placeholder="track an op, a value or a buffer — %13, dot, compute_1"
+        aria-label="track a name through the pipeline"
+        title="Matches a whole name as printed, and falls back to matching inside longer names. Op and buffer names are stable; %n is the printer's numbering and a pass is free to reuse it, so a value can look reborn."
+        onChange={event => setDraft(event.target.value)}
+      />
+      {draft !== '' && (
+        <button className="find-clear" aria-label="stop tracking this name" title="clear" onClick={() => setDraft('')}>
+          ×
+        </button>
+      )}
+      {found && (
+        <span className={found.hits === 0 ? 'find-note empty' : 'find-note'} role="status">
+          {findNote(found)}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function Row(
-  { step, ordinal, active, rowRef }: {
+  { step, ordinal, active, presence, rowRef }: {
     step: CompileStep;
     ordinal: string | null;
     active: boolean;
+    presence: Presence | null;
     rowRef?: React.RefObject<HTMLButtonElement | null>;
   },
 ) {
@@ -96,9 +151,14 @@ function Row(
   const delta = step.after.ops - step.before.ops;
   const mark = markFor(step);
   const isPass = step.kind === 'pass';
+  const broke = step.verify !== null && step.verify.introduced.length > 0;
+  const inherited = step.verify !== null && step.verify.introduced.length === 0 && step.verify.carried.length > 0;
 
   return (
-    <div className={['step-row', active ? 'active' : '', step.outcome, step.kind].filter(Boolean).join(' ')}>
+    <div className={[
+      'step-row', active ? 'active' : '', step.outcome, step.kind,
+      broke ? 'invalid' : '', presence ? `seen-${presence}` : '',
+    ].filter(Boolean).join(' ')}>
       {kids > 0 ? (
         <button
           className="twist"
@@ -124,8 +184,21 @@ function Row(
         onClick={() => actions.select(step.index)}
       >
         <span className="mark" aria-hidden="true">{mark.glyph}</span>
+        <span className="seen" title={presence ? PRESENCE_MARKS[presence].label : undefined}>
+          {presence ? PRESENCE_MARKS[presence].glyph : ''}
+        </span>
         <span className="pass-name">
           {step.pass}
+          {broke && (
+            <em className="invalid-badge" title={`the IR fails ${plural(step.verify?.introduced.length ?? 0, 'invariant check')} after this pass that it passed before`}>
+              invalid
+            </em>
+          )}
+          {inherited && (
+            <em className="carried-badge" title="the IR was already failing a verifier check before this pass ran">
+              was invalid
+            </em>
+          )}
           {ordinal && <em className="ordinal">{ordinal}</em>}
           {kids > 0 && folded && <em className="kids">+{kids}</em>}
         </span>
@@ -149,21 +222,33 @@ function Row(
   );
 }
 
-function OffRow({ name }: { name: string }) {
+const OFF_STATUS: Record<DisabledPass['status'], { label: string; title: string }> = {
+  off: { label: 'off', title: 'the compiler confirmed it skipped this pass' },
+
+  ignored: {
+    label: 'ignored',
+    title: 'you turned this pass off but the compiler ran it anyway — the request never reached the pass manager for this IR level',
+  },
+  pending: { label: 'pending', title: 'this compile does not reflect the switch yet — press Run' },
+};
+
+function OffRow({ entry }: { entry: DisabledPass }) {
+  const status = OFF_STATUS[entry.status];
+
   return (
-    <div className="step-row off">
+    <div className={`step-row off off-${entry.status}`}>
       <span className="twist" />
       <span className="step">
         <span className="mark" aria-hidden="true">⊘</span>
-        <span className="pass-name">{name}</span>
-        <span className="ops">off</span>
+        <span className="pass-name">{entry.name}</span>
+        <span className="ops" title={status.title}>{status.label}</span>
         <span className="ms" />
       </span>
       <button
         className="skip restore"
-        aria-label={`put ${name} back and recompile`}
-        title={`put ${passLabel(name)} back and recompile`}
-        onClick={() => actions.togglePass(name)}
+        aria-label={`put ${entry.name} back and recompile`}
+        title={`put ${passLabel(entry.name)} back and recompile`}
+        onClick={() => actions.togglePass(entry.name)}
       >
         ↺
       </button>

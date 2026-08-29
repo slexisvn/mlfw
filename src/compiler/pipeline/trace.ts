@@ -81,6 +81,10 @@ export class TraceLog {
     });
   }
 
+  passSkipped(passName: string, irLevel: string): void {
+    this.emit({ type: 'pass_skipped', passName, irLevel, level: TraceLevel.INFO });
+  }
+
   functionEvent(phase: string, funcName: string, data: Record<string, unknown>): void {
     this.emit({
       type: 'function',

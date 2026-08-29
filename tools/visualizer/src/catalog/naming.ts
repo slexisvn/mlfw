@@ -69,6 +69,17 @@ const BYTE_STEPS = [
   { limit: 1024, suffix: 'KB' },
 ];
 
+const IRREGULAR_VERBS: Record<string, string> = { is: 'are', was: 'were', has: 'have', does: 'do' };
+
+export function plural(count: number, noun: string, suffix = 's'): string {
+  return `${count} ${count === 1 ? noun : `${noun}${suffix}`}`;
+}
+
+export function agree(count: number, verb: string): string {
+  if (count === 1) return verb;
+  return IRREGULAR_VERBS[verb] ?? verb.replace(/s$/, '');
+}
+
 export function humanize(identifier: string): string {
   return identifier
     .replace(CAMEL_BOUNDARY, '$1 $2')
