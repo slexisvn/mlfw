@@ -120,11 +120,31 @@ export type Kernel = {
   language: string;
 };
 
+export type TensorStats = {
+  min: number | null;
+  max: number | null;
+  mean: number | null;
+  std: number | null;
+  norm: number;
+  zeros: number;
+  nan: number;
+  inf: number;
+};
+
 export type TensorPreview = {
+  name: string;
   shape: number[];
   dtype: string;
   numel: number;
   preview: number[];
+  stats: TensorStats;
+};
+
+export type LayerActivation = {
+  name: string;
+  kind: string;
+  line: number | null;
+  outputs: TensorPreview[];
 };
 
 export type RunResult = {
@@ -136,6 +156,8 @@ export type RunResult = {
   eagerOutputs: TensorPreview[];
   gradients: TensorPreview[];
   eagerGradients: TensorPreview[];
+  parameters: TensorPreview[];
+  layers: LayerActivation[];
   maxAbsDiff: number | null;
   maxAbsGradDiff: number | null;
   compiledMs: number | null;

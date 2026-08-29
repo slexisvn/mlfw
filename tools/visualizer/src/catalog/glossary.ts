@@ -28,6 +28,7 @@ export const TAB_NOTES = [
   { id: 'compare', label: 'Compare', meaning: 'This run against one you pinned earlier, measure by measure.' },
   { id: 'output', label: 'Output', meaning: 'The kernel source that falls out of the far end of the pipeline.' },
   { id: 'result', label: 'Result', meaning: 'That kernel actually executed, checked against the same model run eagerly.' },
+  { id: 'health', label: 'Health', meaning: 'What every layer and gradient actually contained — ranges, norms, and anything that is not a number.' },
 ] as const;
 
 export type TabNote = (typeof TAB_NOTES)[number];

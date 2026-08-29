@@ -265,9 +265,9 @@ module @traced {
   func @traced(%0: tensor<2x2xi32>) -> (tensor<2x2xi32>) {
     %1 = transpose(%0) {permutation = [1, 0]} : tensor<2x2xi32>
     %2 = transpose(%1) {permutation = [1, 0]} : tensor<2x2xi32>
-    %3 = constant() {tensor_type = tensor<xi32>, value = 0} : tensor<xi32>
+    %3 = constant() {tensor_type = tensor<i32>, value = 0} : tensor<i32>
     %4 = add(%2, %3) : tensor<2x2xi32>
-    %5 = constant() {tensor_type = tensor<xi32>, value = 1} : tensor<xi32>
+    %5 = constant() {tensor_type = tensor<i32>, value = 1} : tensor<i32>
     %6 = mul(%4, %5) : tensor<2x2xi32>
     return(%6)
   }

@@ -179,7 +179,7 @@ The extreme case is worth reading in full, because it shows what "recompute" act
 
 ```
 === what "recompute everything" put in the backward function ===
-  func @backward_Object(%0: tensor<xf32>, %1: tensor<1x4xf32>) -> (tensor<1x4xf32>) {
+  func @backward_Object(%0: tensor<f32>, %1: tensor<1x4xf32>) -> (tensor<1x4xf32>) {
   %2 = exp(%1) : tensor<1x4xf32>
   %3 = tanh(%2) : tensor<1x4xf32>
   %4 = mul(%3, %1) : tensor<1x4xf32>

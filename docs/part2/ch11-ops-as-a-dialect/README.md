@@ -285,9 +285,9 @@ node docs/part2/ch11-ops-as-a-dialect/labs/02-fold-and-canonicalize.mjs
 
 ```
 traced:
-    %1 = constant() {tensor_type = tensor<xf32>, value = 0} : tensor<xf32>
+    %1 = constant() {tensor_type = tensor<f32>, value = 0} : tensor<f32>
     %2 = add(%0, %1) : tensor<2x2xf32>
-    %3 = constant() {tensor_type = tensor<xf32>, value = 1} : tensor<xf32>
+    %3 = constant() {tensor_type = tensor<f32>, value = 1} : tensor<f32>
     %4 = mul(%2, %3) : tensor<2x2xf32>
     return(%4)
 
@@ -295,7 +295,7 @@ passes: canonicalize: 5 -> 4, dce: 4 -> 3
 after graph passes:
 module @Identity {
   func @Identity(%0: tensor<2x2xf32>) -> (tensor<2x2xf32>) {
-    %1 = constant() {tensor_type = tensor<xf32>, value = 0} : tensor<xf32>
+    %1 = constant() {tensor_type = tensor<f32>, value = 0} : tensor<f32>
     %2 = add(%0, %1) : tensor<2x2xf32>
     return(%2)
   }
@@ -330,9 +330,9 @@ This is the concrete answer to a question Chapter 2 raised and deferred: *why is
 
 ```
 traced:
-    %1 = constant() {tensor_type = tensor<xf32>, value = 6} : tensor<xf32>
+    %1 = constant() {tensor_type = tensor<f32>, value = 6} : tensor<f32>
     %2 = mul(%0, %1) : tensor<2x2xf32>
-    %3 = constant() {tensor_type = tensor<xf32>, value = 6} : tensor<xf32>
+    %3 = constant() {tensor_type = tensor<f32>, value = 6} : tensor<f32>
     %4 = add(%2, %3) : tensor<2x2xf32>
 
 passes: cse: 5 -> 4, PriorityFusionPass: 4 -> 3

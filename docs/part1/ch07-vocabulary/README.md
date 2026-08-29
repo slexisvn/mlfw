@@ -17,7 +17,7 @@ Terms are grouped by what they describe: data, programs, transformations, execut
 
 **Shape.** The size of a tensor along each dimension, as a list. `[2, 8]` is a 2 × 8 matrix. Written in IR as part of the type: `tensor<2x8xf32>`.
 
-**Rank.** The number of dimensions — the length of the shape. `[2, 8]` has rank 2; a scalar has rank 0, written `tensor<xf32>`.
+**Rank.** The number of dimensions — the length of the shape. `[2, 8]` has rank 2; a scalar has rank 0, written `tensor<f32>` — no dimensions to list, so nothing precedes the dtype.
 
 **Element count** (`numel`). The product of the shape. A `[2, 8]` tensor has 16 elements.
 

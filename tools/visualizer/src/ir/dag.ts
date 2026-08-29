@@ -97,6 +97,10 @@ function widthFor(label: string, min = MIN_NODE_WIDTH): number {
   return Math.max(min, Math.round(label.length * CHAR_WIDTH) + NODE_PADDING);
 }
 
+function widthWith(label: string, detail: string, min = MIN_NODE_WIDTH): number {
+  return widthFor(detail === '' ? label : `${label}  ${detail}`, min);
+}
+
 function shortType(type: string): string {
   return type.replace(/^tensor</, '').replace(/>$/, '');
 }
@@ -203,7 +207,7 @@ export function buildLayoutRequest(dag: Dag): { graph: ElkNode; meta: Map<string
     const detail = node.resultTypes.map(shortType).join(', ');
     const label = node.opName;
     const line = node.lines.length > 0 ? node.lines[0] : null;
-    const boxWidth = widthFor(label);
+    const boxWidth = widthWith(label, detail);
 
     const blockArgs = node.regionArgs.flat();
     const feedsPorts = hasRegions
@@ -255,12 +259,14 @@ export function buildLayoutRequest(dag: Dag): { graph: ElkNode; meta: Map<string
   dag.returns.forEach((valueId, index) => {
     const value = valueById.get(valueId);
     const label = value ? `return ${value.name}` : 'return';
+    const detail = value ? shortType(value.type) : '';
     const id = `out${index}`;
+    const width = widthWith(label, detail, 70);
     meta.set(id, {
-      id, opId: null, kind: 'output', label, detail: value ? value.type : '', line: null,
-      x: 0, y: 0, width: widthFor(label, 70), height: PILL_HEIGHT, depth: 0,
+      id, opId: null, kind: 'output', label, detail, line: null,
+      x: 0, y: 0, width, height: PILL_HEIGHT, depth: 0,
     });
-    outputs.push({ id, width: widthFor(label, 70), height: PILL_HEIGHT });
+    outputs.push({ id, width, height: PILL_HEIGHT });
     const from = sourceOf(valueId);
     if (from !== null) addEdge(ROOT_ID, from, id, '');
   });

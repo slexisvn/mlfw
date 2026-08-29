@@ -259,7 +259,7 @@ describe('a parsed module is real IR, not a transcript', () => {
   it('parses a scalar (rank 0) tensor type', () => {
     const text = [
       'module @scalar {',
-      '  func @f(%0: tensor<xf32>) -> (tensor<xf32>) {',
+      '  func @f(%0: tensor<f32>) -> (tensor<f32>) {',
       '    return(%0)',
       '  }',
       '}',
@@ -268,6 +268,32 @@ describe('a parsed module is real IR, not a transcript', () => {
     const module = parseModule(text);
     expect(module.getFunction('f').inputTypes[0].rank).toBe(0);
     expect(printModule(module)).toBe(text);
+  });
+
+  it('normalizes the legacy rank-0 spelling to the canonical one', () => {
+    const module = parseModule([
+      'module @scalar {',
+      '  func @f(%0: tensor<xf32>) -> (tensor<xf32>) {',
+      '    return(%0)',
+      '  }',
+      '}',
+    ].join('\n'));
+
+    expect(module.getFunction('f').inputTypes[0].rank).toBe(0);
+    expect(printModule(module)).toContain('tensor<f32>');
+    expect(printModule(module)).not.toContain('tensor<xf32>');
+  });
+
+  it('rejects an empty dimension in a ranked tensor type', () => {
+    const text = [
+      'module @bad {',
+      '  func @f(%0: tensor<x4xf32>) -> (tensor<x4xf32>) {',
+      '    return(%0)',
+      '  }',
+      '}',
+    ].join('\n');
+
+    expect(() => parseModule(text)).toThrowError(/invalid dimension/);
   });
 });
 

@@ -5,6 +5,7 @@ import { IRDiff } from './IRDiff.js';
 import { GraphView } from './GraphView.js';
 import { OutputPanel } from './OutputPanel.js';
 import { ResultPanel } from './ResultPanel.js';
+import { HealthPanel } from './HealthPanel.js';
 import { ComparePanel } from './ComparePanel.js';
 import { TuningPanel } from './TuningPanel.js';
 import { MemoryPanel } from './MemoryPanel.js';
@@ -50,6 +51,7 @@ export function StageTabs() {
           : tab === 'memory' ? <MemoryPanel plans={result ? result.memoryPlans : []} />
           : tab === 'output' ? <OutputPanel kernels={result ? result.kernels : []} />
           : tab === 'result' ? <ResultPanel run={result ? result.run : null} />
+          : tab === 'health' ? <HealthPanel run={result ? result.run : null} />
           : !step ? <div className="pane-empty">Run a compile and every step becomes inspectable here.</div>
           : tab === 'ir' ? <IRDiff step={step} />
           : tab === 'graph' ? <GraphView step={step} />

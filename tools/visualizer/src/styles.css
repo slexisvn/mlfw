@@ -571,6 +571,38 @@ kbd {
 .tensor-values { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .output-pair { margin-bottom: 8px; }
 
+.flag {
+  border-radius: 3px;
+  padding: 0 5px;
+  font-size: 10px;
+  white-space: nowrap;
+  border: 1px solid currentColor;
+}
+.flag.bad { color: var(--removed); }
+.flag.warn { color: var(--warn); }
+
+.health-table { display: flex; flex-direction: column; gap: 2px; }
+.health-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.1fr) minmax(90px, 0.8fr) minmax(200px, 1.8fr) auto;
+  gap: 10px;
+  align-items: baseline;
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  min-width: 0;
+}
+.health-row.traceable { cursor: pointer; }
+.health-row.traceable:hover { background: var(--panel-2); }
+.health-name { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.health-name em { color: var(--ink-dim); font-style: normal; margin-left: 6px; }
+.health-shape { color: var(--accent); white-space: nowrap; }
+.health-stats { color: var(--ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.health-stats em { font-style: normal; opacity: 0.65; margin-left: 8px; }
+.health-stats em:first-child { margin-left: 0; }
+.health-flags { display: flex; gap: 4px; justify-content: flex-end; }
+
 
 @media (max-width: 1179px) {
   .tagline { display: none; }
@@ -634,6 +666,16 @@ kbd {
   .timings { flex-direction: column; }
   .speedup { padding: 2px 0; }
   .graph-tools { margin-left: 0; }
+
+  .health-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: 'name flags' 'shape shape' 'stats stats';
+    row-gap: 2px;
+  }
+  .health-name { grid-area: name; }
+  .health-flags { grid-area: flags; }
+  .health-shape { grid-area: shape; }
+  .health-stats { grid-area: stats; white-space: normal; }
 }
 
 :focus-visible {
@@ -898,3 +940,4 @@ kbd {
   color: var(--ink-dim);
 }
 .tuning-tied-row code { font-family: var(--mono); color: var(--ink); }
+

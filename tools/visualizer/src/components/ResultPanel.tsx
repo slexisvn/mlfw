@@ -5,6 +5,23 @@ import type { RunResult, TensorPreview } from '../protocol.js';
 
 const CLOSE_ENOUGH = 1e-4;
 
+function countBad(groups: readonly (readonly TensorPreview[])[]): { nan: number; inf: number } {
+  let nan = 0;
+  let inf = 0;
+  for (const group of groups) {
+    for (const tensor of group) {
+      nan += tensor.stats.nan;
+      inf += tensor.stats.inf;
+    }
+  }
+  return { nan, inf };
+}
+
+function listBad(bad: { nan: number; inf: number }): string {
+  return [bad.nan > 0 ? `${bad.nan} NaN` : '', bad.inf > 0 ? `${bad.inf} Inf` : '']
+    .filter(Boolean).join(' and ');
+}
+
 export function ResultPanel({ run }: { run: RunResult | null }) {
   const target = useStore(s => (s.ranOptions ? s.ranOptions.target : null));
   const result = useStore(s => s.result);
@@ -40,26 +57,36 @@ export function ResultPanel({ run }: { run: RunResult | null }) {
   const speedup = run.eagerMs && run.compiledMs ? run.eagerMs / run.compiledMs : null;
   const faster = speedup !== null && speedup >= 1;
 
+  const bad = countBad([run.outputs, run.gradients]);
+  const eagerBad = countBad([run.eagerOutputs, run.eagerGradients]);
+  const sick = bad.nan + bad.inf > 0;
+
   return (
     <div className="result">
       <Verdict
-        tone={worst === null ? 'skipped' : exact ? 'exact' : close ? 'close' : 'off'}
+        tone={sick ? 'off' : worst === null ? 'skipped' : exact ? 'exact' : close ? 'close' : 'off'}
         ranOn={ranOn}
         headline={
-          worst === null
-            ? `ran, but the ${trained ? 'gradients' : 'outputs'} could not be compared`
-            : exact
-              ? `bit-exact against eager${trained ? ', gradients included' : ''}`
-              : `matches eager to ${worst.toExponential(1)}`
+          sick
+            ? `${listBad(bad)} came out of the ${trained ? 'training step' : 'model'}`
+            : worst === null
+              ? `ran, but the ${trained ? 'gradients' : 'outputs'} could not be compared`
+              : exact
+                ? `bit-exact against eager${trained ? ', gradients included' : ''}`
+                : `matches eager to ${worst.toExponential(1)}`
         }
         note={
-          worst === null || exact
-            ? trained
-              ? 'The compiled training step and the same step run op by op through autograd produced the same values and the same gradients.'
-              : 'The compiled kernel and the same model run op by op produced the same values.'
-            : close
-              ? 'Within float32 rounding — the passes reordered arithmetic, they did not change the answer.'
-              : 'Larger than float32 rounding explains. An optimization changed the result.'
+          sick
+            ? eagerBad.nan + eagerBad.inf > 0
+              ? 'Eager autograd produced them too, so the model itself is doing this — an optimization is not to blame. The Health tab says which layer they start at.'
+              : 'Eager autograd stayed finite on the same inputs, so a pass introduced them. Turn passes off one at a time to find which.'
+            : worst === null || exact
+              ? trained
+                ? 'The compiled training step and the same step run op by op through autograd produced the same values and the same gradients.'
+                : 'The compiled kernel and the same model run op by op produced the same values.'
+              : close
+                ? 'Within float32 rounding — the passes reordered arithmetic, they did not change the answer.'
+                : 'Larger than float32 rounding explains. An optimization changed the result.'
         }
       />
 
@@ -185,6 +212,7 @@ function Timing(
 }
 
 function TensorRow({ tensor, tag, muted }: { tensor: TensorPreview; tag?: string; muted?: boolean }) {
+  const { stats } = tensor;
   return (
     <div className={muted ? 'tensor-row muted' : 'tensor-row'}>
       {tag && <span className="tensor-tag">{tag}</span>}
@@ -193,6 +221,8 @@ function TensorRow({ tensor, tag, muted }: { tensor: TensorPreview; tag?: string
         {tensor.preview.map(v => Number(v.toFixed(4))).join(', ')}
         {tensor.numel > tensor.preview.length && ` … ${tensor.numel} values`}
       </span>
+      {stats.nan > 0 && <span className="flag bad">{stats.nan} NaN</span>}
+      {stats.inf > 0 && <span className="flag bad">{stats.inf} Inf</span>}
     </div>
   );
 }

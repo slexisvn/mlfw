@@ -173,7 +173,7 @@ function parseDim(text: string, line: number): Dim {
     return sym as Dim;
   }
   const value = Number(trimmed);
-  if (!Number.isFinite(value)) throw new IRParseError(`invalid dimension '${trimmed}'`, line);
+  if (trimmed === '' || !Number.isFinite(value)) throw new IRParseError(`invalid dimension '${trimmed}'`, line);
   return value;
 }
 
@@ -185,9 +185,8 @@ function parseTensorBody(inner: string, line: number): TensorType {
     throw new IRParseError(`'tensor<${inner}>' does not end in a known dtype (got '${dtype}')`, line);
   }
   const dimParts = segments.slice(0, -1);
-  const shape: Dim[] = dimParts.length === 1 && dimParts[0].trim() === ''
-    ? []
-    : dimParts.map((d) => parseDim(d, line));
+  if (dimParts.length === 1 && dimParts[0].trim() === '') dimParts.pop();
+  const shape: Dim[] = dimParts.map((d) => parseDim(d, line));
   let layout: Layout | null = null;
   if (parts.length > 1) {
     const order = parts[1].trim();

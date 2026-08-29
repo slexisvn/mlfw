@@ -281,7 +281,7 @@ function rank(kind: string): number {
   return 2;
 }
 
-const DETAIL_KINDS = new Set(['region', 'nest', 'nest-block', 'nest-func', 'source']);
+const DETAIL_KINDS = new Set(['op', 'output', 'region', 'nest', 'nest-block', 'nest-func', 'source']);
 const LABEL_CHAR = 6.7;
 const DETAIL_CHAR = 6.1;
 const TEXT_GAP = 18;

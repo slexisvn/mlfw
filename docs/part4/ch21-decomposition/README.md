@@ -147,21 +147,21 @@ And here is what the *rest of Part IV* does with those ten:
 ```
 module @Softmax {
   func @Softmax(%0: tensor<2x3xf32>) -> (tensor<2x3xf32>) {
-    %1 = constant() {tensor_type = tensor<xf32>, value = -inf} : tensor<xf32>
+    %1 = constant() {tensor_type = tensor<f32>, value = -inf} : tensor<f32>
     %2 = reduce(%0, %1) {dimensions = [1], reduce_type = "max"} : tensor<2xf32>
     {
-      ^bb(%3: tensor<xf32>, %4: tensor<xf32>):
+      ^bb(%3: tensor<f32>, %4: tensor<f32>):
     }
-    %5 = constant() {tensor_type = tensor<xf32>, value = 0} : tensor<xf32>
+    %5 = constant() {tensor_type = tensor<f32>, value = 0} : tensor<f32>
     %6 = fusion(%2, %0, %5) {fusion_kind = "kReduction"} : tensor<2x3xf32>
     {
-      ^bb(%7: tensor<2xf32>, %8: tensor<2x3xf32>, %9: tensor<xf32>):
+      ^bb(%7: tensor<2xf32>, %8: tensor<2x3xf32>, %9: tensor<f32>):
       %10 = broadcast_in_dim(%7) {broadcast_dimensions = [0], result_shape = [2, 3]} : tensor<2x3xf32>
       %11 = sub(%8, %10) : tensor<2x3xf32>
       %12 = exp(%11) : tensor<2x3xf32>
       %13 = reduce(%12, %9) {dimensions = [1], reduce_type = "sum"} : tensor<2xf32>
       {
-        ^bb(%14: tensor<xf32>, %15: tensor<xf32>):
+        ^bb(%14: tensor<f32>, %15: tensor<f32>):
       }
       %16 = broadcast_in_dim(%13) {broadcast_dimensions = [0], result_shape = [2, 3]} : tensor<2x3xf32>
       %17 = div(%12, %16) : tensor<2x3xf32>

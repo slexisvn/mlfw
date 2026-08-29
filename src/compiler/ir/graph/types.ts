@@ -433,9 +433,9 @@ export function dimToString(dim: Dim): string {
 
 export function typeToString(type: IRType): string {
   if (type instanceof TensorType) {
-    const dims = type.shape.map(dimToString);
+    const dims = type.shape.map((dim) => `${dimToString(dim)}x`).join('');
     const layout = type.layout.isIdentity() ? '' : `, [${type.layout.order.join(', ')}]`;
-    return `tensor<${dims.join('x')}x${type.dtype}${layout}>`;
+    return `tensor<${dims}${type.dtype}${layout}>`;
   }
   if (type instanceof TupleType) {
     return `tuple<${type.elements.map(typeToString).join(', ')}>`;

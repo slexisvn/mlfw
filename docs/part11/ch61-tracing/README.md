@@ -211,7 +211,7 @@ The running example, traced:
   func @mlp(%0: tensor<2x8xf32>, %1: tensor<8x16xf32>, %2: tensor<16xf32>, %3: tensor<16x4xf32>, %4: tensor<4xf32>) -> (tensor<2x4xf32>) {
     %5 = dot(%0, %1) {lhs_batch = [], lhs_contracting = [1], rhs_batch = [], rhs_contracting = [0]} : tensor<2x16xf32>
     %6 = add(%5, %2) : tensor<2x16xf32>
-    %7 = constant() {tensor_type = tensor<xf32>, value = 0} : tensor<xf32>
+    %7 = constant() {tensor_type = tensor<f32>, value = 0} : tensor<f32>
     %8 = broadcast_in_dim(%7) {broadcast_dimensions = [], result_shape = [2, 16]} : tensor<2x16xf32>
     %9 = maximum(%6, %8) : tensor<2x16xf32>
     %10 = dot(%9, %3) {lhs_batch = [], lhs_contracting = [1], rhs_batch = [], rhs_contracting = [0]} : tensor<2x4xf32>

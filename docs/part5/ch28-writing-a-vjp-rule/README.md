@@ -195,8 +195,8 @@ Six operations, each differentiated on its own with fusion switched off so the e
 
 ```
 === d/dx  exp ===
-  forward  @Object(%0: tensor<1x2xf32>) -> (tensor<xf32>) {
-  backward @backward_Object(%0: tensor<xf32>, %1: tensor<1x2xf32>, %2: tensor<xf32>) -> (tensor<1x2xf32>) {
+  forward  @Object(%0: tensor<1x2xf32>) -> (tensor<f32>) {
+  backward @backward_Object(%0: tensor<f32>, %1: tensor<1x2xf32>, %2: tensor<f32>) -> (tensor<1x2xf32>) {
     %3 = exp(%1) : tensor<1x2xf32>
     %4 = reshape(%0) {new_shape = [1, 1]} : tensor<1x1xf32>
     %5 = broadcast_in_dim(%4) {broadcast_dimensions = [0, 1], result_shape = [1, 2]} : tensor<1x2xf32>
@@ -205,7 +205,7 @@ Six operations, each differentiated on its own with fusion switched off so the e
   grad at x = [0.5, 2.0]: [1.6487212181091309,7.389056205749512]
 
 === d/dx  log ===
-  backward @backward_Object(%0: tensor<xf32>, %1: tensor<1x2xf32>, %2: tensor<xf32>) -> (tensor<1x2xf32>) {
+  backward @backward_Object(%0: tensor<f32>, %1: tensor<1x2xf32>, %2: tensor<f32>) -> (tensor<1x2xf32>) {
     %3 = reshape(%0) {new_shape = [1, 1]} : tensor<1x1xf32>
     %4 = broadcast_in_dim(%3) {broadcast_dimensions = [0, 1], result_shape = [1, 2]} : tensor<1x2xf32>
     %5 = div(%4, %1) : tensor<1x2xf32>
@@ -255,8 +255,8 @@ Two more are worth reading carefully.
 
 ```
 === d/dx  relu  (traces to maximum) ===
-  forward  @Object(%0: tensor<1x2xf32>) -> (tensor<xf32>, tensor<1x2xf32>) {
-  backward @backward_Object(%0: tensor<xf32>, %1: tensor<1x2xf32>, %2: tensor<1x2xf32>, %3: tensor<xf32>) -> (tensor<1x2xf32>) {
+  forward  @Object(%0: tensor<1x2xf32>) -> (tensor<f32>, tensor<1x2xf32>) {
+  backward @backward_Object(%0: tensor<f32>, %1: tensor<1x2xf32>, %2: tensor<1x2xf32>, %3: tensor<f32>) -> (tensor<1x2xf32>) {
     ...
     %7 = compare(%2, %1) {direction = "ge"} : tensor<1x2xbool>
     %8 = select(%7, %5, %6) : tensor<1x2xf32>
@@ -264,7 +264,7 @@ Two more are worth reading carefully.
 
 **The rule that fired is not the one named `relu`.** `x.relu()` traces to `maximum(x, zeros)` (Part II), so the differentiator reached `maximum`'s rule ([`arithmetic.ts:26`](../../../src/compiler/ad/vjp_rules/arithmetic.ts)) — a comparison and a `select`, routing the gradient to whichever operand won. `relu` has a rule of its own ([`unary.ts:41`](../../../src/compiler/ad/vjp_rules/unary.ts)) and it never fires on this path. This is Chapter 21's lesson arriving from the other side: **a rule is keyed to the operation in the graph, not to the method the user called**, and the set of rules that ever run is decided by what tracing and decomposition leave behind.
 
-Note also the forward signature: `-> (tensor<xf32>, tensor<1x2xf32>)`. The forward function grew a second output. That is the zero tensor the `maximum` needed, promoted to a forward result so the backward can be handed it — Chapter 29's plumbing, visible here as a shape.
+Note also the forward signature: `-> (tensor<f32>, tensor<1x2xf32>)`. The forward function grew a second output. That is the zero tensor the `maximum` needed, promoted to a forward result so the backward can be handed it — Chapter 29's plumbing, visible here as a shape.
 
 ```
 === d/dx  mul(x, x) ===
@@ -287,8 +287,8 @@ node docs/part5/ch28-writing-a-vjp-rule/labs/02-the-shape-fix-up.mjs
 
 ```
 === backward ===
-  func @backward_Object(%0: tensor<xf32>, %1: tensor<2x3xf32>, %2: tensor<3xf32>, %3: tensor<2x3xf32>, %4: tensor<xf32>) -> (tensor<2x3xf32>, tensor<3xf32>) {
-  %5 = constant() {tensor_type = tensor<xf32>, value = 0} : tensor<xf32>
+  func @backward_Object(%0: tensor<f32>, %1: tensor<2x3xf32>, %2: tensor<3xf32>, %3: tensor<2x3xf32>, %4: tensor<f32>) -> (tensor<2x3xf32>, tensor<3xf32>) {
+  %5 = constant() {tensor_type = tensor<f32>, value = 0} : tensor<f32>
   %6 = reshape(%0) {new_shape = [1, 1]} : tensor<1x1xf32>
   %7 = broadcast_in_dim(%6) {broadcast_dimensions = [0, 1], result_shape = [2, 3]} : tensor<2x3xf32>
   %8 = reduce(%7, %5) {dimensions = [0], reduce_type = "sum"} : tensor<3xf32>

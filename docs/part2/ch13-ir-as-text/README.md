@@ -214,7 +214,7 @@ The lab takes the traced running example, changes one line with an ordinary stri
 ```
 === after changing the activation, in a text editor ===
     %7 = add(%6, %2) : tensor<2x8xf32>
-    %8 = constant() {tensor_type = tensor<xf32>, value = 0} : tensor<xf32>
+    %8 = constant() {tensor_type = tensor<f32>, value = 0} : tensor<f32>
     %9 = broadcast_in_dim(%8) {broadcast_dimensions = [], result_shape = [2, 8]} : tensor<2x8xf32>
     %10 = tanh(%7) : tensor<2x8xf32>
 ```

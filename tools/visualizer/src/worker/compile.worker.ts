@@ -14,6 +14,7 @@ const NOT_RUN: RunResult = {
   ran: false, skipped: null, error: null,
   inputs: [], outputs: [], eagerOutputs: [],
   gradients: [], eagerGradients: [],
+  parameters: [], layers: [],
   maxAbsDiff: null, maxAbsGradDiff: null,
   compiledMs: null, eagerMs: null, iterations: 0,
 };

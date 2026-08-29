@@ -288,7 +288,7 @@ With every simplification off, the transposes are not even dead — the `dot` st
     %6 = dot(%0, %5) {lhs_batch = [], lhs_contracting = [1], rhs_batch = [], rhs_contracting = [0]} : tensor<2x8xf32>
     %8 = fusion(%6, %2, %7) {fusion_kind = "kBroadcast"} : tensor<2x8xf32>
     {
-      ^bb(%9: tensor<2x8xf32>, %10: tensor<8xf32>, %11: tensor<xf32>):
+      ^bb(%9: tensor<2x8xf32>, %10: tensor<8xf32>, %11: tensor<f32>):
       %12 = add(%9, %10) : tensor<2x8xf32>
       %13 = broadcast_in_dim(%11) {broadcast_dimensions = [], result_shape = [2, 8]} : tensor<2x8xf32>
       %14 = maximum(%12, %13) : tensor<2x8xf32>

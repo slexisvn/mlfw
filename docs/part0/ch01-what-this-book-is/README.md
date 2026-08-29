@@ -19,7 +19,7 @@ module @traced {
     %5 = transpose(%1) {permutation = [1, 0]} : tensor<2x8xf32>
     %6 = dot(%0, %5) {lhs_batch = [], lhs_contracting = [1], rhs_batch = [], rhs_contracting = [0]} : tensor<2x8xf32>
     %7 = add(%6, %2) : tensor<2x8xf32>
-    %8 = constant() {tensor_type = tensor<xf32>, value = 0} : tensor<xf32>
+    %8 = constant() {tensor_type = tensor<f32>, value = 0} : tensor<f32>
     %9 = broadcast_in_dim(%8) {broadcast_dimensions = [], result_shape = [2, 8]} : tensor<2x8xf32>
     %10 = maximum(%7, %9) : tensor<2x8xf32>
     %11 = transpose(%3) {permutation = [1, 0]} : tensor<8x1xf32>

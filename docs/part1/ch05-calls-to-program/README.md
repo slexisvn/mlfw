@@ -96,7 +96,7 @@ Tracing records all of it — the wasted matmul, the wasted bias, the wasted `re
     %5 = transpose(%1) {permutation = [1, 0]} : tensor<2x8xf32>
     %6 = dot(%0, %5) ... : tensor<2x8xf32>
     %7 = add(%6, %2) : tensor<2x8xf32>
-    %8 = constant() {tensor_type = tensor<xf32>, value = 0} : tensor<xf32>
+    %8 = constant() {tensor_type = tensor<f32>, value = 0} : tensor<f32>
     %9 = broadcast_in_dim(%8) ... : tensor<2x8xf32>
     %10 = maximum(%7, %9) : tensor<2x8xf32>
     %11 = tanh(%10) : tensor<2x8xf32>
@@ -314,7 +314,7 @@ module @traced {
     %2, %3 = scan(%0, %1) {num_carry = 1, num_xs = 1} : tensor<3xf32>, tensor<4x3xf32>
     {
       ^bb(%4: tensor<3xf32>, %5: tensor<3xf32>):
-      %6 = constant() {tensor_type = tensor<xf32>, value = 0.8999999761581421} : tensor<xf32>
+      %6 = constant() {tensor_type = tensor<f32>, value = 0.8999999761581421} : tensor<f32>
       %7 = mul(%5, %6) : tensor<3xf32>
       %8 = add(%7, %4) : tensor<3xf32>
       %9 = tanh(%8) : tensor<3xf32>

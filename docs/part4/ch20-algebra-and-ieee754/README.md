@@ -159,13 +159,13 @@ The two identities that used to break had different causes, and the lab separate
 ```
 === x + 0 ===
 traced:      constant -> add -> return
-after passes: %1 = constant() {tensor_type = tensor<xf32>, value = 0} : tensor<xf32> | %2 = add(%0, %1) : tensor<1x2xf32> | return(%2)
+after passes: %1 = constant() {tensor_type = tensor<f32>, value = 0} : tensor<f32> | %2 = add(%0, %1) : tensor<1x2xf32> | return(%2)
 kernel:
    buf_3[i1_6] = (buf_1[i1_6] + 0);
 
 === x * 0 ===
 traced:      constant -> mul -> return
-after passes: %1 = constant() {tensor_type = tensor<xf32>, value = 0} : tensor<xf32> | %2 = mul(%0, %1) : tensor<1x2xf32> | return(%2)
+after passes: %1 = constant() {tensor_type = tensor<f32>, value = 0} : tensor<f32> | %2 = mul(%0, %1) : tensor<1x2xf32> | return(%2)
 kernel:
    buf_3[i1_6] = (buf_1[i1_6] * 0);
 ```

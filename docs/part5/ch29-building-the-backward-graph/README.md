@@ -197,7 +197,7 @@ Three programs chosen so the driver, not the rules, is what changes.
 
 ```
 === one value, two consumers:  (x * x) + x ===
-  func @backward_Object(%0: tensor<xf32>, %1: tensor<1x2xf32>, %2: tensor<xf32>) -> (tensor<1x2xf32>) {
+  func @backward_Object(%0: tensor<f32>, %1: tensor<1x2xf32>, %2: tensor<f32>) -> (tensor<1x2xf32>) {
   %3 = reshape(%0) {new_shape = [1, 1]} : tensor<1x1xf32>
   %4 = broadcast_in_dim(%3) {broadcast_dimensions = [0, 1], result_shape = [1, 2]} : tensor<1x2xf32>
   %5 = mul(%4, %1) : tensor<1x2xf32>
@@ -229,7 +229,7 @@ The middle case is Definition 29.1:
 
 ```
 === an input the output does not depend on ===
-  func @backward_Object(%0: tensor<xf32>, %1: tensor<1x2xf32>, %2: tensor<xf32>) -> (tensor<1x2xf32>) {
+  func @backward_Object(%0: tensor<f32>, %1: tensor<1x2xf32>, %2: tensor<f32>) -> (tensor<1x2xf32>) {
   %3 = reshape(%0) {new_shape = [1, 1]} : tensor<1x1xf32>
   %4 = broadcast_in_dim(%3) {broadcast_dimensions = [0, 1], result_shape = [1, 2]} : tensor<1x2xf32>
   return(%4)
@@ -356,7 +356,7 @@ which is exactly the split a caller would want, and is worth stating because not
 ## 29.7 Traps and limits
 
 - **A folded scalar is a tensor, not a scalar.** Where the rules need a constant — the `2` in `d(x²)/dx`, the `1` cotangent seeding the sweep, a zero for a non-differentiable branch — the builder materializes it with `builder.broadcast(builder.scalarConstant(...))` ([`backward_builder.ts:77`](../../../src/compiler/ad/backward_builder.ts)), which produces a rank-0 `constant` and a `broadcast_in_dim` to the operand's shape. Two points follow, and they pull in opposite directions. The graph does *not* contain a dense array of the broadcast shape: `broadcast_in_dim` of a scalar is a view, and the artifact carries one number. But Chapter 19's constant folder will happily fold that broadcast into a materialized constant of the full shape when both inputs are constant — §19.6's warning about folding a broadcast on a transformer activation is this same mechanism seen from the other end. So "the constant is dense in the artifact" and "the constant is one number" are both reachable states, decided by whether folding fires, and neither is a property of the AD rules.
-- **The backward function receives saved values it never reads.** In §29.5's first case, `%2: tensor<xf32>` is an argument and appears nowhere in the body. `_identifySavedValues` saves an operation's results whenever they are gradient-reachable and the remat policy says not to recompute them ([`backward_builder.ts:306`](../../../src/compiler/ad/backward_builder.ts)) — it does not ask whether any rule will actually read them. For a `sum` reduction, whose rule needs only the cotangent and a shape, the saved output is dead weight that survives to the compiled signature.
+- **The backward function receives saved values it never reads.** In §29.5's first case, `%2: tensor<f32>` is an argument and appears nowhere in the body. `_identifySavedValues` saves an operation's results whenever they are gradient-reachable and the remat policy says not to recompute them ([`backward_builder.ts:306`](../../../src/compiler/ad/backward_builder.ts)) — it does not ask whether any rule will actually read them. For a `sum` reduction, whose rule needs only the cotangent and a shape, the saved output is dead weight that survives to the compiled signature.
 - **Joint mode's single run is deferred, so *when* it happens depends on what the caller touches.** §29.6. Reading a forward output before calling `backward` forces the kernel early with a zero cotangent and costs the second run back. Nothing reports which of the two paths a given training loop is taking.
 - **The deferral applies only to synchronous runtimes.** A pending fill is resolved from a property getter, which cannot await, so joint mode on an async (GPU) target runs eagerly at `cf(x)` and pays for the forward twice as before ([`compile_backward.ts:393`](../../../src/tracing/compile_backward.ts)).
 - **`computeGradReachability` treats "has a VJP rule" as "propagates gradient".** An operation with a rule that returns all-`null` — `floor`, say — still pulls its operands into the reachable set, so the backward graph contains work for values whose gradient is provably zero. The zero is then computed and accumulated. Chapter 31 measures it.
