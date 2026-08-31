@@ -3,7 +3,7 @@ import { planCommonSubexprs } from './expr_cse.js';
 import { maxBindingExtent } from '../compiler/analysis/thread_binding.js';
 import { storedBufferNames } from '../compiler/analysis/tir_queries.js';
 import type { CodegenFunc, StatementVisitor } from './codegen_utils.js';
-import type { TargetFeatures } from './target.js';
+import type { TargetFeatures } from '../compiler/support/target.js';
 import type { Buffer } from '../compiler/ir/tensor/buffer.js';
 import type { IRStmtNode, LIRThreadBinding } from '../compiler/ir/lir/nodes.js';
 

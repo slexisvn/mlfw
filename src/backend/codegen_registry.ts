@@ -1,19 +1,18 @@
-import { TargetKind } from './target.js';
+import { TargetKind } from '../compiler/support/target.js';
 import { CPUCodegen } from './cpu/codegen.js';
 import { CUDACodegen } from './cuda/codegen.js';
 import { WasmCodegen } from './wasm/codegen.js';
 import { WebGPUCodegen } from './webgpu/codegen.js';
-import { CUBLAS_PROVIDER } from '../compiler/pipeline/external_codegen.js';
-import type { ExternalKernelInfo } from '../compiler/pipeline/external_codegen.js';
+import { CUBLAS_PROVIDER } from '../compiler/ir/func_attrs.js';
+import type { ExternalKernelInfo } from '../compiler/ir/func_attrs.js';
 import type { PrimFunc } from '../compiler/ir/tensor/nodes.js';
-import type { TargetFeatures } from './target.js';
-import type { BackendPipeline } from './pipeline.js';
+import type { TargetFeatures } from '../compiler/support/target.js';
 
 export type CodegenMetadata = Record<string, unknown> & { kind: string };
 export type CodegenOutput = { source: string; metadata: CodegenMetadata };
 export type CodegenEntry = {
   runtimeKind: string;
-  compile(primFunc: PrimFunc, target: TargetFeatures, pipeline?: BackendPipeline): CodegenOutput;
+  compile(primFunc: PrimFunc, target: TargetFeatures, pipeline?: unknown): CodegenOutput;
 };
 export type ExternalCodegenEntry = {
   targetKind: string;

@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { GraphModule } from '../../../src/compiler/ir/graph/module.js';
-import { CPUTarget, CUDATarget, TargetKind } from '../../../src/backend/target.js';
+import { CPUTarget, CUDATarget, TargetKind } from '../../../src/compiler/support/target.js';
 import { Compiler, CompilerConfig } from '../../../src/compiler/pipeline/compiler.js';
 import { BackendPipeline } from '../../../src/backend/pipeline.js';
 import { FuncAttr } from '../../../src/compiler/ir/func_attrs.js';

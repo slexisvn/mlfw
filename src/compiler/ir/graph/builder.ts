@@ -1,11 +1,10 @@
-import { TensorType, ScalarType, TupleType, DYNAMIC } from './types.js';
+import { TensorType, ScalarType, TupleType, DYNAMIC, resultDtype } from './types.js';
 import { Operation } from './operation.js';
 import { Block, Region } from './block.js';
 import { GraphFunction } from './function.js';
 import { GraphModule } from './module.js';
 import { registry } from './ops.js';
 import { unifiedOperandIndices } from './op_traits.js';
-import { resultDtype } from '../../../tensor/types/dtype.js';
 import { currentLocation } from '../loc_source.js';
 import type { Location } from '../location.js';
 import type { AttrValue, Dim, IRType, ScalarDType, Shape } from './types.js';

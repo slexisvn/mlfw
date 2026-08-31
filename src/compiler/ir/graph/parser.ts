@@ -3,7 +3,7 @@ import { Operation } from './operation.js';
 import { GraphFunction } from './function.js';
 import { GraphModule } from './module.js';
 import { TensorType, TupleType, TokenType, FunctionType, Layout, ScalarType, DYNAMIC } from './types.js';
-import { SymInt } from '../../analysis/sym_int.js';
+import { SymInt } from '../sym_int.js';
 import { jsTypedArray } from '../../../util/dtype_map.js';
 import type { AttrValue, Dim, IRType, ScalarDType } from './types.js';
 import type { Value } from './value.js';

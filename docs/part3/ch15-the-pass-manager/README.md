@@ -237,7 +237,7 @@ The manager holds one boolean and one method ([`pass_manager.ts:101`](../../../s
   }
 ```
 
-The last argument is the whole point. `checkIRInvariants` ([`invariant_check.ts:23`](../../../src/compiler/pipeline/invariant_check.ts)) uses it to build the message:
+The last argument is the whole point. `checkIRInvariants` ([`invariant_check.ts:23`](../../../src/compiler/support/invariant_check.ts)) uses it to build the message:
 
 ```ts
 export function checkIRInvariants(irLevel: IRLevelValue, target: unknown, name: string, passName: string | null = null): CompilationError | null {
@@ -250,7 +250,7 @@ export function checkIRInvariants(irLevel: IRLevelValue, target: unknown, name: 
 
 The same verifier, the same errors, and one difference: at a phase boundary nobody knows which pass to blame, so the prefix is empty. When the check runs immediately after a pass, the prefix names it.
 
-How often it runs is a three-valued setting ([`invariant_check.ts:7`](../../../src/compiler/pipeline/invariant_check.ts)):
+How often it runs is a three-valued setting ([`invariant_check.ts:7`](../../../src/compiler/support/invariant_check.ts)):
 
 ```ts
 export const VerifyLevel = Object.freeze({
@@ -260,7 +260,7 @@ export const VerifyLevel = Object.freeze({
 });
 ```
 
-**The default is `EACH_PASS`** ([`invariant_check.ts:16`](../../../src/compiler/pipeline/invariant_check.ts): `value ?? VerifyLevel.EACH_PASS`). That is an unusual choice and a deliberate one — most compilers make per-pass verification a debug build or a flag. Enabling it by default means the first report of a miscompile arrives with a pass name attached. The price is measured next.
+**The default is `EACH_PASS`** ([`invariant_check.ts:16`](../../../src/compiler/support/invariant_check.ts): `value ?? VerifyLevel.EACH_PASS`). That is an unusual choice and a deliberate one — most compilers make per-pass verification a debug build or a flag. Enabling it by default means the first report of a miscompile arrives with a pass name attached. The price is measured next.
 
 > **Read the name as `EACH_CHANGING_PASS`.** **(invariant)** The setting is narrower than its name. It does not verify after every pass, and the guard is not in `_verifyAfter` at all — it is at the call site ([`pass_manager.ts:134`](../../../src/compiler/passes/pass_manager.ts)):
 >
@@ -350,7 +350,7 @@ The pass manager runs graph passes. It is not the top of the pipeline. [`Compile
 
 Fourteen phases, in order: `verify:pre`, `graphPasses`, `partition`, `split`, `verify:post`, `lowering`, `tirPasses`, `verify:tensor`, `lirLowering`, `lirPasses`, `verify:lir`, `codegen`, `relaunchOnSerialization`, `planBufferAssignment`. Four of them are verifications, at the four IR boundaries. Two of them — `tirPasses` and `lirPasses` — are entire other pass managers ([`TirPassManager`](../../../src/compiler/passes/tir_pass_manager.ts), Chapter 32) driving the passes of the next IR down.
 
-The phase list is data, and one field explains why. `ctx.restartFrom` ([`compiler.ts:291`](../../../src/compiler/pipeline/compiler.ts)) lets a phase ask the driver to jump back to an earlier phase and re-run from there:
+The phase list is data, and one field explains why. `ctx.restartFrom` ([`compiler.ts:284`](../../../src/compiler/pipeline/compiler.ts)) lets a phase ask the driver to jump back to an earlier phase and re-run from there:
 
 ```ts
       const target = phases.findIndex(p => p.name === ctx.restartFrom);

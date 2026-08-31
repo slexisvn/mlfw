@@ -1,11 +1,11 @@
 import { CublasRewritePass } from '../passes/rewrite/cublas_rewrite.js';
-import { FuncAttr } from '../ir/func_attrs.js';
+import { FuncAttr, CUBLAS_PROVIDER } from '../ir/func_attrs.js';
+import type { ExternalKernelInfo } from '../ir/func_attrs.js';
 import type { BlockNode, NodeSlots, PrimFunc, TirNode } from '../ir/tensor/nodes.js';
 import type { TirModule } from '../ir/tensor/module.js';
 import type { CompileTarget, CompilerConfig, GraphPass } from './pipeline_types.js';
 
-export type ExternalKernelInfo = { M: number; N: number; K: number; transB?: boolean; aIdx: number; bIdx: number; cIdx: number };
-export type ExternalCodegenAttr = Readonly<{ name: string; info: ExternalKernelInfo }>;
+export type { ExternalKernelInfo, ExternalCodegenAttr } from '../ir/func_attrs.js';
 export type SplitKernelInfos = { cublasInfos?: ReadonlyMap<string, ExternalKernelInfo> } | null | undefined;
 
 export type ExternalCodegenProvider = Readonly<{
@@ -70,7 +70,7 @@ export function detectPureMatmul(primFunc: PrimFunc): ExternalKernelInfo | null 
   return { M, N, K, aIdx, bIdx, cIdx };
 }
 
-export const CUBLAS_PROVIDER = 'cublas';
+export { CUBLAS_PROVIDER } from '../ir/func_attrs.js';
 
 registerExternalCodegenProvider({
   name: CUBLAS_PROVIDER,

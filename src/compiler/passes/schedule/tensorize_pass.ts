@@ -4,7 +4,7 @@ import { Schedule } from '../../schedule/schedule.js';
 import { FuncAttr } from '../../ir/func_attrs.js';
 import type { BlockNode, NodeSlots, PrimFunc, TirNode } from '../../ir/tensor/nodes.js';
 import type { TirPassCtx } from '../tir_pass.js';
-import type { CompilerConfig, CompileTarget } from '../../pipeline/pipeline_types.js';
+import type { CompilerConfig, CompileTarget } from '../../support/config_types.js';
 
 export type WmmaMatmulInfo = { M: number; N: number; K: number; a: string; b: string; c: string };
 

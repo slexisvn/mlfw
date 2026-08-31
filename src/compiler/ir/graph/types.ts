@@ -1,4 +1,4 @@
-import { SymInt } from '../../analysis/sym_int.js';
+import { SymInt } from '../sym_int.js';
 
 export type SymIntValue = InstanceType<typeof SymInt>;
 export type Dim = number | SymIntValue;
@@ -131,6 +131,22 @@ export function isFloatType(dtype: ScalarDType): boolean { return FLOAT_TYPES.ha
 export function isIntType(dtype: ScalarDType): boolean { return INT_TYPES.has(dtype); }
 export function isNumericType(dtype: ScalarDType): boolean { return FLOAT_TYPES.has(dtype) || INT_TYPES.has(dtype); }
 export function isBoolType(dtype: ScalarDType): boolean { return dtype === ScalarType.BOOL; }
+
+const _FLOAT_PRECEDENCE = [ScalarType.F16, ScalarType.BF16, ScalarType.F32, ScalarType.F64];
+const _INT_PRECEDENCE = [ScalarType.UI8, ScalarType.I8, ScalarType.I16, ScalarType.I32, ScalarType.I64];
+
+const _PRECEDENCE_MAP = new Map<ScalarDType, number>();
+for (let i = 0; i < _FLOAT_PRECEDENCE.length; i++) _PRECEDENCE_MAP.set(_FLOAT_PRECEDENCE[i], 100 + i);
+for (let i = 0; i < _INT_PRECEDENCE.length; i++) _PRECEDENCE_MAP.set(_INT_PRECEDENCE[i], i);
+_PRECEDENCE_MAP.set(ScalarType.BOOL, -1);
+_PRECEDENCE_MAP.set(ScalarType.INDEX, 50);
+
+export function resultDtype(a: ScalarDType, b: ScalarDType): ScalarDType {
+  if (a === b) return a;
+  const pa = _PRECEDENCE_MAP.get(a) ?? 0;
+  const pb = _PRECEDENCE_MAP.get(b) ?? 0;
+  return pa >= pb ? a : b;
+}
 
 const VALUE_PRESERVING_WIDENINGS: Readonly<Partial<Record<ScalarDType, readonly ScalarDType[]>>> = {
   [ScalarType.BOOL]: [ScalarType.I8, ScalarType.I16, ScalarType.I32, ScalarType.I64, ScalarType.F16, ScalarType.BF16, ScalarType.F32, ScalarType.F64],

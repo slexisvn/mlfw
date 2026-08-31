@@ -3,7 +3,7 @@ import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { GraphModule } from '../../../src/compiler/ir/graph/module.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { Compiler } from '../../../src/compiler/pipeline/compiler.js';
-import { CPUTarget } from '../../../src/backend/target.js';
+import { CPUTarget } from '../../../src/compiler/support/target.js';
 import { lowerPointwise } from '../../../src/compiler/passes/lowering/lowering_registry.js';
 import { MathOpNode, FloatImmNode } from '../../../src/compiler/ir/tensor/nodes.js';
 import { registerGraphPass, clearGraphPasses } from '../../../src/compiler/pipeline/graph_pass_registry.js';

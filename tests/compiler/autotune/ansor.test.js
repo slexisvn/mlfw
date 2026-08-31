@@ -12,7 +12,7 @@ import {
   PrimFunc, BlockNode, BufferStoreNode, BufferLoadNode, ForNode,
   VariableNode, IntImmNode, MathOpNode, ForKind,
 } from '../../../src/compiler/ir/tensor/nodes.js';
-import { CPUTarget } from '../../../src/backend/target.js';
+import { CPUTarget } from '../../../src/compiler/support/target.js';
 
 function matmulPrimFunc(name, M = 8, N = 8, K = 8) {
   const A = new Buffer('A', [M, K], 'f32', 'global');

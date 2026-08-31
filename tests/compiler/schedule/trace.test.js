@@ -6,11 +6,11 @@ import { Schedule, resetVarCounter } from '../../../src/compiler/schedule/schedu
 import { SchedulePolicy } from '../../../src/compiler/schedule/rules.js';
 import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
-import { CPUTarget } from '../../../src/backend/target.js';
+import { CPUTarget } from '../../../src/compiler/support/target.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
-import { TraceLevel } from '../../../src/compiler/pipeline/trace.js';
+import { TraceLevel } from '../../../src/compiler/support/trace.js';
 import { lowerGraphToPrimFunc } from '../../../src/compiler/passes/lowering/graph_to_tensor.js';
-import { clonePrimFunc } from '../../../src/compiler/autotune/tune_ir.js';
+import { clonePrimFunc } from '../../../src/compiler/ir/tensor/clone_tir.js';
 import { printTensorIR } from '../../../src/compiler/ir/tensor/printer.js';
 
 function buildSplittable() {

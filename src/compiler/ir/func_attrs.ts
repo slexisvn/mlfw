@@ -9,6 +9,11 @@ export const FuncAttr = Object.freeze({
 
 export type FuncAttrKey = (typeof FuncAttr)[keyof typeof FuncAttr];
 
+export type ExternalKernelInfo = { M: number; N: number; K: number; transB?: boolean; aIdx: number; bIdx: number; cIdx: number };
+export type ExternalCodegenAttr = Readonly<{ name: string; info: ExternalKernelInfo }>;
+
+export const CUBLAS_PROVIDER = 'cublas';
+
 export type FuncAttrSource = { attrs?: ReadonlyMap<string, unknown> } | null | undefined;
 
 export interface FuncAttrs {

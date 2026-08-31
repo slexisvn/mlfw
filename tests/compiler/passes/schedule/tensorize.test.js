@@ -4,7 +4,7 @@ import {
   PrimFunc, BlockNode, BufferStoreNode, ForNode, VariableNode, IntImmNode, ForKind
 } from '../../../../src/compiler/ir/tensor/nodes.js';
 import { BackendPipeline } from '../../../../src/backend/pipeline.js';
-import { CPUTarget, CUDATarget } from '../../../../src/backend/target.js';
+import { CPUTarget, CUDATarget } from '../../../../src/compiler/support/target.js';
 import { AutoTensorizePass, detectWmmaMatmul } from '../../../../src/compiler/passes/schedule/tensorize_pass.js';
 import { FuncAttr } from '../../../../src/compiler/ir/func_attrs.js';
 

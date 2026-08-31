@@ -5,11 +5,11 @@ import {
   PrimFunc, BlockNode, SeqNode, BufferStoreNode, BufferLoadNode, ForNode,
   VariableNode, IntImmNode, MathOpNode, ForKind, IfThenElseNode,
 } from '../../../src/compiler/ir/tensor/nodes.js';
-import { collectAllBlockNames } from '../../../src/compiler/autotune/block_analysis.js';
+import { collectAllBlockNames } from '../../../src/compiler/schedule/block_analysis.js';
 import { Schedule } from '../../../src/compiler/schedule/schedule.js';
 import { ScheduleValidator } from '../../../src/compiler/schedule/validator.js';
 import { BackendPipeline } from '../../../src/backend/pipeline.js';
-import { CPUTarget } from '../../../src/backend/target.js';
+import { CPUTarget } from '../../../src/compiler/support/target.js';
 import { classifyBlock } from '../../../src/compiler/schedule/rules.js';
 import { createSSRSRSTilingSketch } from '../../../src/compiler/autotune/tiling.js';
 import { CPU_TILING_SSRSRS } from '../../../src/compiler/autotune/tile_structure.js';

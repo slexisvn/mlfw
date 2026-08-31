@@ -51,7 +51,7 @@ The cost of the first clause is a copy of the module before any pass runs, and i
 
 ## 18.4 In mlfw: one log, eleven event types
 
-[`pipeline/trace.ts`](../../../src/compiler/pipeline/trace.ts) — 127 lines. The levels ([`trace.ts:8`](../../../src/compiler/pipeline/trace.ts)):
+[`support/trace.ts`](../../../src/compiler/support/trace.ts) — 159 lines, of which the first twenty are the payload types the log carries. The levels ([`trace.ts:29`](../../../src/compiler/support/trace.ts)):
 
 ```ts
 export const TraceLevel = Object.freeze({
@@ -62,7 +62,7 @@ export const TraceLevel = Object.freeze({
 });
 ```
 
-and the filter, which is the entire delivery mechanism ([`trace.ts:57`](../../../src/compiler/pipeline/trace.ts)):
+and the filter, which is the entire delivery mechanism ([`trace.ts:76`](../../../src/compiler/support/trace.ts)):
 
 ```ts
   emit(event: TraceEvent): void {
@@ -72,7 +72,7 @@ and the filter, which is the entire delivery mechanism ([`trace.ts:57`](../../..
   }
 ```
 
-Everything else in the file is a typed constructor on top of it. `phaseStart`, `phaseEnd`, `passRun`, `functionEvent`, `irDump`, `memoryStats`, `autotuneStats`, `codegenStats`, `errorEvent`, `warn`, `explain` — eleven methods, each producing a fixed event type at a fixed level, plus `pass_detail`, which passes emit through `emit` directly with whatever fields they have. The default sink is `() => {}` ([`trace.ts:37`](../../../src/compiler/pipeline/trace.ts)), so a compile with no trace configured pays one comparison per event and nothing else.
+Everything else in the file is a typed constructor on top of it. `phaseStart`, `phaseEnd`, `passRun`, `functionEvent`, `irDump`, `memoryStats`, `autotuneStats`, `codegenStats`, `errorEvent`, `warn`, `explain` — eleven methods, each producing a fixed event type at a fixed level, plus `pass_detail`, which passes emit through `emit` directly with whatever fields they have. The default sink is `() => {}` ([`trace.ts:67`](../../../src/compiler/support/trace.ts)), so a compile with no trace configured pays one comparison per event and nothing else.
 
 The level assignment is the design decision worth arguing about, and it lines up with what a reader at each level is trying to learn:
 
@@ -84,7 +84,7 @@ The level assignment is the design decision worth arguing about, and it lines up
 
 ### Two gates, not one
 
-IR snapshots are the expensive case: printing a module is a full traversal producing kilobytes of text, and a compile has four points where it could do it. So they are gated twice ([`trace.ts:123`](../../../src/compiler/pipeline/trace.ts)):
+IR snapshots are the expensive case: printing a module is a full traversal producing kilobytes of text, and a compile has four points where it could do it. So they are gated twice ([`trace.ts:155`](../../../src/compiler/support/trace.ts)):
 
 ```ts
   shouldSnapshot(point: keyof IRSnapshotFlags): boolean {
@@ -94,7 +94,7 @@ IR snapshots are the expensive case: printing a module is a full traversal produ
 
 DEBUG *and* an explicit opt-in per point. Turning on DEBUG to see explanations does not flood you with three copies of the IR; you ask for `afterGraphPasses` and get exactly that. Every lab in this book that prints IR does so through this flag.
 
-Explanations get the cheaper version of the same idea ([`trace.ts:121`](../../../src/compiler/pipeline/trace.ts)):
+Explanations get the cheaper version of the same idea ([`trace.ts:153`](../../../src/compiler/support/trace.ts)):
 
 ```ts
   get explainsEnabled(): boolean { return this.level >= TraceLevel.DEBUG; }
@@ -114,7 +114,7 @@ The guard is not saving the `emit` call — `emit` would have dropped it anyway.
 
 ### The error record
 
-A failure is a value ([`trace.ts:15`](../../../src/compiler/pipeline/trace.ts)):
+A failure is a value ([`trace.ts:36`](../../../src/compiler/support/trace.ts)):
 
 ```ts
 export class CompilationError {
@@ -128,7 +128,7 @@ Four fields, which is three more than an exception carries. `toString` assembles
 
 ### Resilient mode
 
-One line makes the compile transactional. `Compiler.compile` reads the mode ([`compiler.ts:264`](../../../src/compiler/pipeline/compiler.ts): `const resilient = this.config.errorMode === 'resilient';`) and then builds the context every phase will work through ([`compiler.ts:270`](../../../src/compiler/pipeline/compiler.ts)):
+One line makes the compile transactional. `Compiler.compile` reads the mode ([`compiler.ts:261`](../../../src/compiler/pipeline/compiler.ts): `const resilient = this.config.errorMode === 'resilient';`) and then builds the context every phase will work through ([`compiler.ts:261`](../../../src/compiler/pipeline/compiler.ts)):
 
 ```ts
     const ctx: CompileContext = {
@@ -143,7 +143,7 @@ One line makes the compile transactional. `Compiler.compile` reads the mode ([`c
 
 In strict mode the compiler edits the caller's module in place, which is fast and which is why a strict-mode failure can leave that module wrecked. In resilient mode it works on a clone, and the caller's module is untouched no matter what happens — Definition 18.3's first clause, bought with one copy.
 
-The second clause is the pass manager's ([`pass_manager.ts:157`](../../../src/compiler/passes/pass_manager.ts)), which wraps each function's pass run in a `try` and, on a throw, records a `CompilationError` and adds the function to `ctx.failedFunctions`. Every later pass skips it ([`pass_manager.ts:152`](../../../src/compiler/passes/pass_manager.ts): `if (ctx.failedFunctions.has(func.name)) continue;`), and so does every later *phase* ([`compiler.ts:454`](../../../src/compiler/pipeline/compiler.ts)). And the half-rewritten function is replaced with a fresh copy of the original ([`compiler.ts:424`](../../../src/compiler/pipeline/compiler.ts)):
+The second clause is the pass manager's ([`pass_manager.ts:157`](../../../src/compiler/passes/pass_manager.ts)), which wraps each function's pass run in a `try` and, on a throw, records a `CompilationError` and adds the function to `ctx.failedFunctions`. Every later pass skips it ([`pass_manager.ts:152`](../../../src/compiler/passes/pass_manager.ts): `if (ctx.failedFunctions.has(func.name)) continue;`), and so does every later *phase* ([`compiler.ts:421`](../../../src/compiler/pipeline/compiler.ts)). And the half-rewritten function is replaced with a fresh copy of the original ([`compiler.ts:421`](../../../src/compiler/pipeline/compiler.ts)):
 
 ```ts
           if (resilient && original && original !== graphModule) {
@@ -306,7 +306,7 @@ So Definition 18.3 holds at all three levels: **the caller's IR is safe, the wor
 - **`explain` has seven call sites.** Fusion (three strategies), scheduling (two), tensorization, and the serialization relaunch. Lowering, memory planning, layout and code generation make decisions and explain none of them. The mechanism is good; the coverage is a fraction of the decisions a wrong number could come from.
 - **The priority fusion engine explains only its successes.** `explain('fusion', ops, 'fused', null, …)` — the reason is always `null`, and a pair the engine *declined* to fuse produces no event at all. The dominator strategy reports both outcomes with reasons ([`dominator_fusion.ts:96`](../../../src/compiler/passes/fusion/dominator_fusion.ts)). Since priority is the default, the default configuration is the least explicable one.
 - **A `pass` event's `durationMs` measures more than the pass, and less than the pass costs.** The clock starts before the manager fetches the pass's required analyses ([`pass_manager.ts:155`](../../../src/compiler/passes/pass_manager.ts)) and stops as soon as `run` returns ([`pass_manager.ts:181`](../../../src/compiler/passes/pass_manager.ts)), so the figure includes any analysis computed on this pass's behalf — which may be a cache hit for one pass and a full traversal for the next — and excludes the invalidation and the per-pass verification that follow. Two passes' durations are not comparable quantities.
-- **Warnings are `INFO`-level and easy to miss.** `TraceLog.warn` ([`trace.ts:113`](../../../src/compiler/pipeline/trace.ts)) has five call sites, and two of them report something you would very much want to know: *kernel serialized to a single thread* ([`compiler.ts:661`](../../../src/compiler/pipeline/compiler.ts)) and *the graph cannot be split any further* ([`compiler.ts:545`](../../../src/compiler/pipeline/compiler.ts)). Both are performance cliffs of an order of magnitude, both are delivered as events into a sink that is `() => {}` by default, and neither is surfaced anywhere else. If you compile with no trace configured, a compiler that has decided to run your GPU kernel on one thread will not mention it.
+- **Warnings are `INFO`-level and easy to miss.** `TraceLog.warn` ([`trace.ts:145`](../../../src/compiler/support/trace.ts)) has five call sites, and two of them report something you would very much want to know: *kernel serialized to a single thread* ([`compiler.ts:661`](../../../src/compiler/pipeline/compiler.ts)) and *the graph cannot be split any further* ([`compiler.ts:545`](../../../src/compiler/pipeline/compiler.ts)). Both are performance cliffs of an order of magnitude, both are delivered as events into a sink that is `() => {}` by default, and neither is surfaced anywhere else. If you compile with no trace configured, a compiler that has decided to run your GPU kernel on one thread will not mention it.
 - **Resilient mode costs a full module clone even when nothing fails.** `cloneGraphModule` runs before the first pass, unconditionally, whenever `errorMode` is `resilient`. It also means analyses cached against the original module's functions are useless, because the clone's functions are different objects (Chapter 16).
 - **A failed function is skipped, not compiled unoptimized.** The restore in `_runGraphPasses` puts the original IR back into the module so the module stays valid, but `failedFunctions` still contains the name, and lowering skips it. There is no "fall back to the unoptimized version" path — a failure removes the function from the output, it does not degrade it.
 

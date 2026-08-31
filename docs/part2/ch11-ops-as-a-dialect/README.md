@@ -159,7 +159,7 @@ export function buildRegistry(dialects: readonly DialectRegistrar[] = DIALECTS):
 
 Follow `COMMUTATIVE` from declaration to use. It lands in three methods on `Operation`, and CSE uses all three.
 
-[`operation.ts:167`](../../../src/compiler/ir/graph/operation.ts):
+[`operation.ts:184`](../../../src/compiler/ir/graph/operation.ts):
 
 ```ts
   hasInterchangeableOperands(): boolean {

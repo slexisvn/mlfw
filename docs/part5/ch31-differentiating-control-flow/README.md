@@ -65,14 +65,14 @@ That corollary is why the third option earns its keep. A zero gradient is indist
 
 ### The region hook
 
-[`ad/vjp_registry.ts`](../../../src/compiler/ad/vjp_registry.ts) holds a second map alongside the first, and [`ad/scan_backward.ts`](../../../src/compiler/ad/scan_backward.ts) fills it with exactly two entries ([`scan_backward.ts:33`](../../../src/compiler/ad/scan_backward.ts)):
+[`ad/vjp_registry.ts`](../../../src/compiler/ad/vjp_registry.ts) holds a second map alongside the first, and [`ad/scan_backward.ts`](../../../src/compiler/ad/scan_backward.ts) fills it with exactly two entries ([`scan_backward.ts:36`](../../../src/compiler/ad/scan_backward.ts)):
 
 ```ts
 registerRegionVJP('scan', ((op: Operation, ctx: RegionVJPCtx) => buildScanBackward(op, ctx.accumulator, ctx.builder, ctx.materialize, ctx.needsGrad, ctx.scanCheckpoint)) as never);
 registerRegionVJP('if', ((op: Operation, ctx: RegionVJPCtx) => buildCondBackward(op, ctx.accumulator, ctx.builder, ctx.materialize, ctx.needsGrad)) as never);
 ```
 
-The sweep reaches them through the callback Chapter 29 left open ([`backward_builder.ts:68`](../../../src/compiler/ad/backward_builder.ts)):
+The sweep reaches them through the callback Chapter 29 left open ([`backward_builder.ts:79`](../../../src/compiler/ad/backward_builder.ts)):
 
 ```ts
     if (handleRegionOp && handleRegionOp(op)) continue;
@@ -92,7 +92,7 @@ Both operands *and* region free variables enter the reachable set — Definition
 
 ### What `buildScanBackward` actually does
 
-[`scan_backward.ts:232`](../../../src/compiler/ad/scan_backward.ts), and the honest summary is in the shape of its main loop ([`scan_backward.ts:285`](../../../src/compiler/ad/scan_backward.ts)):
+[`scan_backward.ts:254`](../../../src/compiler/ad/scan_backward.ts), and the honest summary is in the shape of its main loop ([`scan_backward.ts:254`](../../../src/compiler/ad/scan_backward.ts)):
 
 ```ts
   if (!segLen) {
@@ -111,7 +111,7 @@ Both operands *and* region free variables enter the reachable set — Definition
 
 **This is a loop in the compiler, not in the emitted program.** `T` is read from the input tensor's leading dimension at build time, the forward body is replayed into the graph `T` times to recover every `(x_t, c_t)`, and then the backward body is emitted `T` times. Theorem 31.2 is satisfied by unrolling it.
 
-`backwardStep` is where the theorem's cotangent pair is assembled ([`scan_backward.ts:265`](../../../src/compiler/ad/scan_backward.ts)):
+`backwardStep` is where the theorem's cotangent pair is assembled ([`scan_backward.ts:236`](../../../src/compiler/ad/scan_backward.ts)):
 
 ```ts
     const gY_t = gYs.map(g => (g === null ? null : sliceStep(builder, g, t)));
@@ -124,7 +124,7 @@ The consequence is that the backward graph is `Θ(T)` operations where the forwa
 
 ### What `buildCondBackward` does
 
-[`scan_backward.ts:189`](../../../src/compiler/ad/scan_backward.ts) differentiates **both branches** and then selects ([`scan_backward.ts:211`](../../../src/compiler/ad/scan_backward.ts)):
+[`scan_backward.ts:180`](../../../src/compiler/ad/scan_backward.ts) differentiates **both branches** and then selects ([`scan_backward.ts:180`](../../../src/compiler/ad/scan_backward.ts)):
 
 ```ts
   for (const [id, val] of allVars) {

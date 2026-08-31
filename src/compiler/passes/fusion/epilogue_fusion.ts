@@ -4,14 +4,14 @@ import { opsLocation } from '../../ir/graph/op_location.js';
 import { registry } from '../../ir/graph/ops.js';
 import { isBroadcastOp, isConstantOp } from '../../ir/graph/op_traits.js';
 
-import { TraceLevel } from '../../pipeline/trace.js';
+import { TraceLevel } from '../../support/trace.js';
 import { explainer } from '../explain.js';
 import type { GraphFunction } from '../../ir/graph/function.js';
 import type { Block } from '../../ir/graph/block.js';
 import type { Value } from '../../ir/graph/value.js';
 import type { AttrValue, TensorType } from '../../ir/graph/types.js';
 import type { PassResultValue, PassTarget } from '../pass.js';
-import type { FusionAwareTarget } from '../../pipeline/pipeline_types.js';
+import type { FusionAwareTarget } from '../../support/config_types.js';
 
 export type EpilogueFusionConfig = { maxEpilogueOps?: number; target?: Partial<FusionAwareTarget> | null };
 type EpilogueTagFn = (op: Operation, chainSet: ReadonlySet<Operation>) => string;

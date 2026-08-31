@@ -1,7 +1,7 @@
 import {
   analyzeMatmulEpilogue, pickFixedConfig, buildRegisterBlockedMatmul,
-} from '../autotune/gpu_matmul_sketch.js';
-import { collectAllBlockNames } from '../autotune/block_analysis.js';
+} from './matmul_tiling.js';
+import { collectAllBlockNames } from './block_analysis.js';
 import { applyImplicitGemmConv } from './conv_implicit_gemm.js';
 import type { ConvScheduleConfig } from './conv_implicit_gemm.js';
 import { SchedulePolicy } from './rules.js';
@@ -14,7 +14,7 @@ import { Buffer } from '../ir/tensor/buffer.js';
 import { FuncAttr } from '../ir/func_attrs.js';
 import type { TirNode } from '../ir/tensor/nodes.js';
 import type { Schedule } from './schedule.js';
-import type { TargetFeatures as ScheduleTarget } from '../../backend/target.js';
+import type { TargetFeatures as ScheduleTarget } from '../support/target.js';
 export type { ScheduleTarget };
 
 export type MatmulDims = {

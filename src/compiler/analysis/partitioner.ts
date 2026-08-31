@@ -1,20 +1,14 @@
 import { registry } from '../ir/graph/ops.js';
 import { TensorType } from '../ir/graph/types.js';
-import { buildPartitions } from '../passes/partition/partition_core.js';
-import { OpGroup } from '../passes/partition/op_group.js';
+import { buildPartitions } from './partition_core.js';
+import { OpGroup } from './op_group.js';
 import type { GraphFunction } from '../ir/graph/function.js';
 import type { Operation } from '../ir/graph/operation.js';
 import type { Value } from '../ir/graph/value.js';
+import { hasLibraryOp } from '../ir/graph/op_traits.js';
+import type { PartitionTarget } from '../support/config_types.js';
 
-export type PartitionTarget = {
-  name: string;
-  kind?: string;
-  computeTFLOPs: number;
-  hasLibraryOp(opName: string): boolean;
-  isGPU(): boolean;
-  isCPU(): boolean;
-  isWasm(): boolean;
-};
+export type { PartitionTarget } from '../support/config_types.js';
 
 export type CostWeights = { transferCost: number; loadBalance: number };
 
@@ -157,7 +151,7 @@ export class GraphPartitioner {
   }
 
   _targetSupportsOp(target: PartitionTarget, opName: string): boolean {
-    if (target.hasLibraryOp(opName)) return true;
+    if (hasLibraryOp(target, opName)) return true;
 
     const def = registry.get(opName);
     if (!def) return false;
@@ -245,7 +239,7 @@ export class GraphPartitioner {
 
     let score = 0;
 
-    if (target.hasLibraryOp(op.opName)) {
+    if (hasLibraryOp(target, op.opName)) {
       score += 100;
     }
 

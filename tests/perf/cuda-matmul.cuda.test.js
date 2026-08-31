@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { buildFunction } from '../../src/compiler/ir/graph/builder.js';
 import { TensorType } from '../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../src/compiler/pipeline/compiler.js';
-import { CUDATarget } from '../../src/backend/target.js';
+import { CUDATarget } from '../../src/compiler/support/target.js';
 import { cudaDeps } from '../_utils/cuda.js';
 import { F32 } from '../_utils/ir_fixture.js';
 

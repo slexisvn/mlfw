@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType } from '../../../src/compiler/ir/graph/types.js';
-import { SymInt } from '../../../src/compiler/analysis/sym_int.js';
+import { SymInt } from '../../../src/compiler/ir/sym_int.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
-import { CPUTarget, CUDATarget } from '../../../src/backend/target.js';
+import { CPUTarget, CUDATarget } from '../../../src/compiler/support/target.js';
 import { RuntimeTensor } from '../../../src/runtime/runtime.js';
 import { cudaDeps } from '../../_utils/cuda.js';
 import { F32 } from '../../_utils/ir_fixture.js';

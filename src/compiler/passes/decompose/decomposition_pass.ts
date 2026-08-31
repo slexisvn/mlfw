@@ -1,7 +1,7 @@
 import { FunctionPass, PassResult } from '../pass.js';
 import { IRBuilder, broadcastDimsExcluding } from '../../ir/graph/builder.js';
 import { ScalarType, TensorType } from '../../ir/graph/types.js';
-import { TraceLevel } from '../../pipeline/trace.js';
+import { TraceLevel } from '../../support/trace.js';
 import { explainer } from '../explain.js';
 import type { GraphFunction } from '../../ir/graph/function.js';
 import type { Operation } from '../../ir/graph/operation.js';
@@ -9,7 +9,7 @@ import type { Value } from '../../ir/graph/value.js';
 import type { Block } from '../../ir/graph/block.js';
 import type { ScalarDType, Shape } from '../../ir/graph/types.js';
 import type { PassResultValue, PassTarget } from '../pass.js';
-import type { CompileTarget } from '../../pipeline/pipeline_types.js';
+import type { CompileTarget } from '../../support/config_types.js';
 
 export type DecompositionRule = (op: Operation, b: IRBuilder) => void;
 

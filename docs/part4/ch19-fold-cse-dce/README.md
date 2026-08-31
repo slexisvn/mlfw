@@ -174,7 +174,7 @@ export const SideEffectKind = Object.freeze({
 
 Across all 96 operations, **four declare a non-zero mask**: `call` (`CONTROL`), `custom_call` (`WRITE`), `scatter` (`WRITE`), and `transfer` (`READ | WRITE`). Everything else is pure, which is what a functional tensor IR should look like.
 
-The fifth case is not declared at all but computed ([`memory_effect.ts:74`](../../../src/compiler/analysis/memory_effect.ts)):
+The fifth case is not declared at all but computed ([`memory_effect.ts:67`](../../../src/compiler/analysis/memory_effect.ts)):
 
 ```ts
   static _foldRecursiveEffects(opKinds: Map<Operation, SideEffectMask>): void {
@@ -281,10 +281,10 @@ module @DeadPureChain {
 
 Four operations and two constants, gone in one pass — the worklist walking backwards from `add` to `mul` to `log` to `exp`, each becoming dead only after its consumer was removed.
 
-Now the same shape with one operation swapped:
+Now the same shape with an operation that *writes*:
 
 ```js
-class DeadSideEffect extends Module {
+class DeadFunctionalWrite extends Module {
   forward(a, i) {
     const dead = ops.scatter_add(a, 0, i, a);
     return a.add(1);
@@ -293,30 +293,43 @@ class DeadSideEffect extends Module {
 ```
 
 ```
-=== a dead operation that writes ===
+=== a dead operation that writes only its own output ===
 traced: convert, reshape, iota, reshape, concat, scatter, constant, add, return
+dce erased 6 operation(s)
+```
+
+Six again — the `scatter` and its whole index-computation subgraph. "Writes" was the wrong word for it: a graph `scatter` writes only the buffer it produces, which is what every operation does. §19.7 is the argument for why, and it is worth reading before the next case, because the same lab's third module looks identical and behaves the opposite way.
+
+```js
+  const func = buildFunction('DeadCustomCall', [t], [t], (b, args) => {
+    b.customCall('write_somewhere', [args[0]], [t]);
+    b.returnOp([b.neg(args[0]).getResult(0)]);
+  });
+```
+
+```
+=== a dead operation the compiler cannot see into ===
+custom_call declares an effect: true
 dce erased 0 operation(s)
 ```
 
-**Zero.** Not only does the `scatter` survive — its entire index-computation subgraph survives with it, because `scatter` still uses those values and they are therefore not dead. Six operations and a kernel, computing a result the program never reads.
+**Zero**, and correctly so. A `custom_call` is an opaque external kernel: nothing in the IR describes what it touches, so nothing licenses deleting it. This is Theorem 19.4's dependency made visible. DCE is not reasoning about what the call does; it is looking at `hasSideEffect` ([`dce.ts:98`](../../../src/compiler/passes/simplify/dce.ts)) and finding `true`, which is the end of the conversation. The call is opaque to constant folding for the same reason and to CSE for the same reason: all three ask the same registry field.
 
-This is Theorem 19.4's dependency made visible. DCE is not looking at the `scatter` and concluding that its write matters; it is looking at `hasSideEffect` and finding `true`, which is the end of the conversation. The scatter is opaque to constant folding for the same reason and to CSE for the same reason: all three ask the same registry field.
-
-**Try this.** Replace `scatter_add` with `gather` — an indexing operation with no declared effect — and watch all six operations disappear.
+**Try this.** Give `custom_call` no `sideEffects` in the registry and re-run: the `custom_call` disappears, and so does any write it was there to perform. That is the direction of Theorem 19.4's asymmetry, seen from the unsafe side.
 
 ## 19.7 What a conservative declaration costs
 
-It is worth asking whether the `scatter` in §19.6 *is* effectful, because the answer decides whether that output is a demonstration or a bug report.
+`scatter` used to carry `sideEffects: 2` — the numeric literal for `WRITE`, written without the enum — and the second case in §19.6 used to print `dce erased 0`. Deciding whether that was a demonstration or a bug report is the exercise, and it is decided by reading the lowering rule rather than the name.
 
-The graph operation is functional. Its type inference returns a fresh tensor of the input's shape ([`ops/shape.ts:369`](../../../src/compiler/ir/graph/ops/shape.ts)), and its lowering rule copies the operand into a *new* output buffer and then writes the updates into that same output buffer ([`lowering/rules/linalg.ts:147`](../../../src/compiler/passes/lowering/rules/linalg.ts)):
+The graph operation is functional. Its type inference returns a fresh tensor of the input's shape ([`ops/shape.ts:368`](../../../src/compiler/ir/graph/ops/shape.ts)), and its lowering rule copies the operand into a *new* output buffer and then writes the updates into that same output buffer ([`lowering/rules/linalg.ts:140`](../../../src/compiler/passes/lowering/rules/linalg.ts)):
 
 ```ts
     const copyBlock = new BlockNode(ctx.blockName('scatter_copy'), copyNest.loopBinds, [{ buffer: operandBuf }], [{ buffer: outBuf }], copyStore);
 ```
 
-Writing to your own output buffer is what every operation in the IR does. On the evidence of the lowering rule, `scatter` mutates nothing its consumers can observe, and the `sideEffects: 2` on its registration ([`ops/shape.ts:368`](../../../src/compiler/ir/graph/ops/shape.ts)) is conservative rather than required.
+Writing to your own output buffer is what every operation in the IR does. On the evidence of the lowering rule, `scatter` mutates nothing its consumers can observe, so the declaration was conservative rather than required, and it has been removed. `custom_call` keeps its `WRITE` because the argument runs the other way: there is no lowering rule to read, and an opaque kernel that touches nothing observable is a claim nobody can check.
 
-Being conservative here is the *safe* direction — Theorem 19.4's asymmetry — and it is not free: a dead scatter survives, a duplicated scatter is never merged, and a scatter over constant indices is never folded. Whether the declaration is deliberate is not recorded anywhere, which is the actual lesson. A trait or an effect mask is a claim with a cost, and a claim nobody wrote down the reason for is a claim nobody can safely revisit.
+Being conservative was the *safe* direction — Theorem 19.4's asymmetry — and it was not free: a dead scatter survived, a duplicated scatter was never merged, a scatter over constant indices was never folded. The transferable part is not that this particular mask was wrong. It is that the mask was a numeric literal with no recorded reason, in a codebase whose other three effect declarations use the enum. **A trait or an effect mask is a claim with a cost, and a claim nobody wrote down the reason for is a claim nobody can safely revisit** — which is why the way to settle one is to find the code that would have to be true for it to hold, not to reason from the operation's name.
 
 ## 19.8 Traps and limits
 

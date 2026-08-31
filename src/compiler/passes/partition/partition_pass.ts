@@ -4,8 +4,8 @@ import { producerLocation } from '../../ir/graph/op_location.js';
 
 import { GraphFunction } from '../../ir/graph/function.js';
 import { GraphPartitioner, PartitionerConfig } from '../../analysis/partitioner.js';
-import { topoSortOps, computePartitionIO } from './partition_core.js';
-import { TraceLevel } from '../../pipeline/trace.js';
+import { topoSortOps, computePartitionIO } from '../../analysis/partition_core.js';
+import { TraceLevel } from '../../support/trace.js';
 import type { GraphModule } from '../../ir/graph/module.js';
 import type { Block } from '../../ir/graph/block.js';
 import type { Value } from '../../ir/graph/value.js';

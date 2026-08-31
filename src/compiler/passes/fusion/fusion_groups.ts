@@ -2,7 +2,7 @@ import { TensorType } from '../../ir/graph/types.js';
 import { registry } from '../../ir/graph/ops.js';
 import { classifyFusionKind, FusionKind } from './fusion_analysis.js';
 import { canInlineFuse } from '../lowering/graph_to_tensor.js';
-import { OpGroup } from '../partition/op_group.js';
+import { OpGroup } from '../../analysis/op_group.js';
 import type { Operation } from '../../ir/graph/operation.js';
 import type { Value } from '../../ir/graph/value.js';
 import type { GraphFunction } from '../../ir/graph/function.js';

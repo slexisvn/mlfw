@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { BenchmarkRunner, BenchmarkResult, robustStats } from '../../../src/compiler/autotune/benchmark.js';
 import { Buffer } from '../../../src/compiler/ir/tensor/buffer.js';
-import { CPUTarget } from '../../../src/backend/target.js';
+import { CPUTarget } from '../../../src/compiler/support/target.js';
 
 describe('robustStats noise handling', () => {
   it('trimmed mean ignores an outlier spike that drags the raw mean', () => {

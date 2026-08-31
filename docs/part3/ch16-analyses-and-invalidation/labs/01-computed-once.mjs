@@ -48,6 +48,7 @@ async function run(label, preserved) {
     target: CPUTarget(),
     passContext: {
       shouldRun(pass) {
+        if (!(pass.preservedAnalyses instanceof Set)) return true;
         if (!instrumented.has(pass)) {
           instrumented.add(pass);
           for (const a of preserved) pass.preservedAnalyses.add(a);

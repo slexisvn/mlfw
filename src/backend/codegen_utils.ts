@@ -1,5 +1,5 @@
-import { SymInt, symVarName } from '../compiler/analysis/sym_int.js';
-import type { SymExpr, SymIntOp } from '../compiler/analysis/sym_int.js';
+import { SymInt, symVarName } from '../compiler/ir/sym_int.js';
+import type { SymExpr, SymIntOp } from '../compiler/ir/sym_int.js';
 import type { Buffer } from '../compiler/ir/tensor/buffer.js';
 import type { AllocateNode, BlockNode, BufferStoreNode, ForNode, IfThenElseNode, LetStmtNode, PrimFunc, VecCopyNode, WhileNode } from '../compiler/ir/tensor/nodes.js';
 import type { IRStmtNode, LIRAccumulatorNode, LIRBindingsNode, LIRFlatStoreNode, LIRFunc } from '../compiler/ir/lir/nodes.js';

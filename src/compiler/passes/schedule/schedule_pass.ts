@@ -6,7 +6,7 @@ import { applyDeterministicGpuSchedule } from '../../schedule/gpu_matmul_schedul
 import { FuncAttr } from '../../ir/func_attrs.js';
 import type { PrimFunc } from '../../ir/tensor/nodes.js';
 import type { TirPassCtx } from '../tir_pass.js';
-import type { CompilerConfig, CompileTarget } from '../../pipeline/pipeline_types.js';
+import type { CompilerConfig, CompileTarget } from '../../support/config_types.js';
 
 export class SchedulePass extends PrimFuncPass {
   config: CompilerConfig;

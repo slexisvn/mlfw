@@ -1,11 +1,11 @@
-import { CompilationError } from '../pipeline/trace.js';
+import { CompilationError } from '../support/trace.js';
 import { PassManagerBase } from './pass_manager_base.js';
 import { PassResult } from './pass.js';
 import { IRLevel } from '../ir/verify.js';
 import type { LIRFunc } from '../ir/lir/nodes.js';
 import type { LirFuncPass, LirPassCtx } from './lir_pass.js';
 import type { PassContext, PassResultValue } from './pass.js';
-import type { TraceLog } from '../pipeline/trace.js';
+import type { TraceLog } from '../support/trace.js';
 
 export type LirRunCtx = LirPassCtx & {
   trace: TraceLog;

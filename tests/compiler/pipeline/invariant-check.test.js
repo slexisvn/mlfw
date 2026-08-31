@@ -1,11 +1,11 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { Compiler, CompilerConfig } from '../../../src/compiler/pipeline/compiler.js';
-import { VerifyLevel, normalizeVerifyLevel, checkIRInvariants } from '../../../src/compiler/pipeline/invariant_check.js';
+import { VerifyLevel, normalizeVerifyLevel, checkIRInvariants } from '../../../src/compiler/support/invariant_check.js';
 import { IRLevel, verifyIR, irLevels, registerIRVerifier, getIRVerifier, unregisterIRVerifier } from '../../../src/compiler/ir/verify.js';
 import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { GraphModule } from '../../../src/compiler/ir/graph/module.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
-import { CPUTarget } from '../../../src/backend/target.js';
+import { CPUTarget } from '../../../src/compiler/support/target.js';
 import { FunctionPass, PassResult } from '../../../src/compiler/passes/pass.js';
 import { PrimFuncPass } from '../../../src/compiler/passes/tir_pass.js';
 import { buildLirPipeline } from '../../../src/compiler/pipeline/lir_pipeline.js';

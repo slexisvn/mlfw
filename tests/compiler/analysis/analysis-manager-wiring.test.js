@@ -11,7 +11,7 @@ import { PassManager } from '../../../src/compiler/passes/pass_manager.js';
 import { FunctionPass, PassResult } from '../../../src/compiler/passes/pass.js';
 import { DCEPass } from '../../../src/compiler/passes/simplify/dce.js';
 import { PriorityFusionPass } from '../../../src/compiler/passes/fusion/priority_fusion.js';
-import { CPUTarget } from '../../../src/backend/target.js';
+import { CPUTarget } from '../../../src/compiler/support/target.js';
 
 const t = new TensorType([4], ScalarType.F32);
 

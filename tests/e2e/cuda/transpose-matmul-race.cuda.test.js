@@ -3,7 +3,7 @@ import { tensor } from '../../../src/index.js';
 import * as ops from '../../../src/tensor/ops/ops.js';
 import * as nn from '../../../src/nn/index.js';
 import { compile } from '../../../src/tracing/compile.js';
-import { CPUTarget, CUDATarget } from '../../../src/backend/target.js';
+import { CPUTarget, CUDATarget } from '../../../src/compiler/support/target.js';
 import { buildGpt2 } from '../../_utils/gpt2_model.js';
 import { cudaDeps } from '../../_utils/cuda.js';
 

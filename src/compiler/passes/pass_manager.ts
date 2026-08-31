@@ -1,15 +1,15 @@
 import { AnalysisManager } from '../analysis/analysis_manager.js';
 import { PassManagerBase } from './pass_manager_base.js';
 import { FunctionPass, ModulePass, PassResult, PassContext } from './pass.js';
-import { TraceLevel } from '../pipeline/trace.js';
-import { CompilationError } from '../pipeline/trace.js';
-import { checkIRInvariants } from '../pipeline/invariant_check.js';
+import { TraceLevel } from '../support/trace.js';
+import { CompilationError } from '../support/trace.js';
+import { checkIRInvariants } from '../support/invariant_check.js';
 import { IRLevel } from '../ir/verify.js';
 import { cloneGraphModule } from '../ir/graph/module.js';
 import type { GraphModule } from '../ir/graph/module.js';
 import type { GraphFunction } from '../ir/graph/function.js';
 import type { Pass, PassResultValue, PassTarget } from './pass.js';
-import type { TraceLog } from '../pipeline/trace.js';
+import type { TraceLog } from '../support/trace.js';
 
 export type PassManagerEntry = Pass | FixedPointGroup;
 

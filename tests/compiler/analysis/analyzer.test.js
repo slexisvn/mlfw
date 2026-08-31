@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { Analyzer } from '../../../src/compiler/analysis/analyzer.js';
-import { SymInt } from '../../../src/compiler/analysis/sym_int.js';
+import { SymInt } from '../../../src/compiler/ir/sym_int.js';
 
 describe('arith Analyzer: ConstIntBound', () => {
   it('bounds a constant exactly', () => {
@@ -200,5 +200,43 @@ describe('arith Analyzer: assumptions', () => {
     const a = new Analyzer();
     a.assumeNonNegative(5);
     expect(a.constIntBound(SymInt.var('n')).min).toBe(-Infinity);
+  });
+});
+
+describe('arith Analyzer: Fourier-Motzkin elimination over stated facts', () => {
+  const x = SymInt.var('x');
+  const y = SymInt.var('y');
+
+  it('eliminates a variable whose coefficients differ in magnitude', () => {
+    const a = new Analyzer();
+    a.assumeNonNegative(SymInt.sub(SymInt.mul(x, 3), SymInt.mul(y, 2)));
+    a.assumeNonNegative(SymInt.sub(SymInt.mul(y, 5), 30));
+
+    expect(a.constIntBound(x).min).toBe(4);
+  });
+
+  it('still derives the bound when a plain sum happens to cancel the variable', () => {
+    const a = new Analyzer();
+    a.assumeNonNegative(SymInt.sub(SymInt.mul(x, 2), y));
+    a.assumeNonNegative(SymInt.sub(y, 6));
+
+    expect(a.constIntBound(x).min).toBe(3);
+  });
+
+  it('does not invent a bound when the facts leave the variable free', () => {
+    const a = new Analyzer();
+    a.assumeNonNegative(SymInt.sub(SymInt.mul(y, 5), 30));
+
+    expect(a.constIntBound(x).min).toBe(-Infinity);
+  });
+
+  it('drops derived facts once the assumption is released', () => {
+    const a = new Analyzer();
+    const release = a.assumeNonNegative(SymInt.sub(SymInt.mul(x, 3), SymInt.mul(y, 2)));
+    a.assumeNonNegative(SymInt.sub(SymInt.mul(y, 5), 30));
+    expect(a.constIntBound(x).min).toBe(4);
+
+    release();
+    expect(a.constIntBound(x).min).toBe(-Infinity);
   });
 });

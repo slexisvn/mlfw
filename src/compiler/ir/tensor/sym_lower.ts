@@ -1,4 +1,4 @@
-import { SymInt } from '../../analysis/sym_int.js';
+import { SymInt } from '../sym_int.js';
 import { IntImmNode, MathOpNode, CallExternNode } from './nodes.js';
 import type { TirNode } from './nodes.js';
 import type { Dim } from '../graph/types.js';

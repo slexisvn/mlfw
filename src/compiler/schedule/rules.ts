@@ -1,5 +1,5 @@
 
-import { TargetKind } from '../../backend/target.js';
+import { TargetKind } from '../support/target.js';
 import { ForKind } from '../ir/tensor/nodes.js';
 import { some as irSome, collect as irCollect } from '../ir/ir_visitor.js';
 import { reductionLoopVars } from './legality.js';
@@ -21,11 +21,19 @@ export type BlockClassification = {
 type ClassifyCache = Map<string, BlockClassification>;
 type CollectFrame = { node: TirNode | null | undefined; loops: ForNode[] };
 
+const GPU_KINDS = [TargetKind.CUDA, TargetKind.WEBGPU];
+
 export class ScheduleRule {
   name: string;
+  targetKinds: ReadonlySet<string> | null;
 
-  constructor(name: string) {
+  constructor(name: string, targetKinds: Iterable<string> | null = null) {
     this.name = name;
+    this.targetKinds = targetKinds === null ? null : new Set(targetKinds);
+  }
+
+  appliesTo(target: ScheduleTarget): boolean {
+    return this.targetKinds === null || this.targetKinds.has(target.kind);
   }
 
   matches(primFunc: PrimFunc, blockName: string, target: ScheduleTarget): boolean {
@@ -122,11 +130,10 @@ function hasMultipleBlocks(loop: ForNode): boolean {
 
 export class ElementwiseCPURule extends ScheduleRule {
   constructor() {
-    super('elementwise_cpu');
+    super('elementwise_cpu', [TargetKind.CPU]);
   }
 
   override matches(primFunc: PrimFunc, blockName: string, target: ScheduleTarget): boolean {
-    if (target.kind !== TargetKind.CPU) return false;
     const info = classifyBlock(primFunc, blockName);
     if (!info) return false;
     if (info.hasReduction || info.loopCount < 1) return false;
@@ -190,11 +197,10 @@ function bindFusedSpatialGPU(schedule: Schedule, fused: ForNode, target: Schedul
 
 export class ElementwiseGPURule extends ScheduleRule {
   constructor() {
-    super('elementwise_gpu');
+    super('elementwise_gpu', GPU_KINDS);
   }
 
   override matches(primFunc: PrimFunc, blockName: string, target: ScheduleTarget): boolean {
-    if (!target.isGPU()) return false;
     const info = classifyBlock(primFunc, blockName);
     if (!info) return false;
     return !info.hasReduction && info.loopCount >= 1;
@@ -232,11 +238,10 @@ export class ElementwiseGPURule extends ScheduleRule {
 
 export class ReductionCPURule extends ScheduleRule {
   constructor() {
-    super('reduction_cpu');
+    super('reduction_cpu', [TargetKind.CPU]);
   }
 
   override matches(primFunc: PrimFunc, blockName: string, target: ScheduleTarget): boolean {
-    if (target.kind !== TargetKind.CPU) return false;
     const info = classifyBlock(primFunc, blockName);
     if (!info) return false;
     return info.hasReduction;
@@ -266,11 +271,10 @@ export class ReductionCPURule extends ScheduleRule {
 
 export class ReductionGPURule extends ScheduleRule {
   constructor() {
-    super('reduction_gpu');
+    super('reduction_gpu', GPU_KINDS);
   }
 
   override matches(primFunc: PrimFunc, blockName: string, target: ScheduleTarget): boolean {
-    if (!target.isGPU()) return false;
     const info = classifyBlock(primFunc, blockName);
     if (!info) return false;
     return info.hasReduction;
@@ -305,11 +309,10 @@ export class ReductionGPURule extends ScheduleRule {
 
 export class MatmulTiledCPURule extends ScheduleRule {
   constructor() {
-    super('matmul_tiled_cpu');
+    super('matmul_tiled_cpu', [TargetKind.CPU]);
   }
 
   override matches(primFunc: PrimFunc, blockName: string, target: ScheduleTarget): boolean {
-    if (target.kind !== TargetKind.CPU) return false;
     const info = classifyBlock(primFunc, blockName);
     if (!info) return false;
     if (!isMatmulShape(info)) return false;
@@ -348,11 +351,10 @@ export class MatmulTiledCPURule extends ScheduleRule {
 
 export class MatmulTiledGPURule extends ScheduleRule {
   constructor() {
-    super('matmul_tiled_gpu');
+    super('matmul_tiled_gpu', GPU_KINDS);
   }
 
   override matches(primFunc: PrimFunc, blockName: string, target: ScheduleTarget): boolean {
-    if (!target.isGPU()) return false;
     const info = classifyBlock(primFunc, blockName);
     if (!info) return false;
     if (!isMatmulShape(info)) return false;
@@ -387,11 +389,10 @@ export class MatmulTiledGPURule extends ScheduleRule {
 
 export class ElementwiseWasmRule extends ScheduleRule {
   constructor() {
-    super('elementwise_wasm');
+    super('elementwise_wasm', [TargetKind.WASM]);
   }
 
   override matches(primFunc: PrimFunc, blockName: string, target: ScheduleTarget): boolean {
-    if (target.kind !== TargetKind.WASM) return false;
     const info = classifyBlock(primFunc, blockName);
     if (!info) return false;
     if (info.hasReduction || info.loopCount < 1) return false;
@@ -449,11 +450,10 @@ export class ElementwiseWasmRule extends ScheduleRule {
 
 export class ReductionWasmRule extends ScheduleRule {
   constructor() {
-    super('reduction_wasm');
+    super('reduction_wasm', [TargetKind.WASM]);
   }
 
   override matches(primFunc: PrimFunc, blockName: string, target: ScheduleTarget): boolean {
-    if (target.kind !== TargetKind.WASM) return false;
     const hasParallel = target.numCores > 1;
     const hasSimd = target.supportsSimd && target.supportsSimd();
     if (!hasParallel && !hasSimd) return false;
@@ -522,6 +522,16 @@ function findDirectChild(parent: ForNode, child: ForNode): boolean {
   return parent.body === child;
 }
 
+const _registeredRules: ScheduleRule[] = [];
+
+export function registerScheduleRule(rule: ScheduleRule): void {
+  _registeredRules.push(rule);
+}
+
+export function resetScheduleRules(): void {
+  _registeredRules.length = 0;
+}
+
 export class SchedulePolicy {
   target: ScheduleTarget;
   rules: ScheduleRule[];
@@ -529,11 +539,15 @@ export class SchedulePolicy {
 
   constructor(target: ScheduleTarget, rules: ScheduleRule[] | null = null, trace: ScheduleExplainTrace | null = null) {
     this.target = target;
-    this.rules = rules || SchedulePolicy.defaultRules();
+    this.rules = rules || SchedulePolicy.rulesFor(target);
     this.trace = trace;
   }
 
-  static defaultRules(): ScheduleRule[] {
+  static rulesFor(target: ScheduleTarget): ScheduleRule[] {
+    return [..._registeredRules, ...SchedulePolicy.builtinRules()].filter(rule => rule.appliesTo(target));
+  }
+
+  static builtinRules(): ScheduleRule[] {
     return [
       new MatmulTiledCPURule(),
       new MatmulTiledGPURule(),

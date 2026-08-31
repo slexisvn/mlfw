@@ -1,5 +1,5 @@
 import { Analyzer } from '../analysis/analyzer.js';
-import { SymInt } from '../analysis/sym_int.js';
+import { SymInt } from '../ir/sym_int.js';
 import { irBound, analyzerForLoops } from '../analysis/ir_arith.js';
 import { carriesDependence, permutationPreservesDependences } from '../analysis/dependence.js';
 import { IterVarKind } from '../ir/tensor/nodes.js';
@@ -8,7 +8,7 @@ import type { Analyzer as AnalyzerType } from '../analysis/analyzer.js';
 import type { ScheduleState } from './schedule_state.js';
 import { isPrivateToLoop } from '../analysis/buffer_access.js';
 import type { BlockAccessInfo } from '../analysis/buffer_access.js';
-import type { SymExpr } from '../analysis/sym_int.js';
+import type { SymExpr } from '../ir/sym_int.js';
 
 export type IndexClassification = 'in' | 'oob' | 'unknown';
 

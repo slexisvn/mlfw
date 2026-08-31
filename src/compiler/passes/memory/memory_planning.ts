@@ -8,26 +8,13 @@ import { walk } from '../../ir/ir_visitor.js';
 import type { IRNode } from '../../ir/ir_visitor.js';
 import type { Buffer } from '../../ir/tensor/buffer.js';
 import type { PrimFunc, TirNode } from '../../ir/tensor/nodes.js';
+import type { BufferLifetime, MemoryPlanTrace } from '../../support/trace.js';
 import type { BufferInterval, BufferLivenessResult } from './buffer_liveness.js';
 import type { InplaceCandidate } from './inplace_analysis.js';
 import type { BufferAssignmentEntry } from './buffer_assignment.js';
 
 export type ScopeUsage = { peakUsage: number; numBuffers: number; numReused: number };
-export type BufferLifetime = {
-  name: string;
-  scope: string;
-  bytes: number;
-  slot: number;
-  firstUse: number;
-  lastUse: number;
-  sharesWith: string | null;
-};
-export type MemoryPlanTrace = {
-  peakMemory: number;
-  totalBytesIfNeverShared: number;
-  steps: number;
-  buffers: readonly BufferLifetime[];
-};
+export type { BufferLifetime, MemoryPlanTrace } from '../../support/trace.js';
 export type MemoryPlanReport = {
   peakMemory: number;
   scopeBreakdown: Map<string, ScopeUsage>;

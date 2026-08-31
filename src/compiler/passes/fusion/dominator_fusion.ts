@@ -4,7 +4,7 @@ import { FusionKind, classifyOpPattern, canFusePatterns } from './fusion_analysi
 import { FusionGroup } from './fusion_groups.js';
 import { FusionCostModel } from './fusion_cost.js';
 import { PostDominanceAnalysis } from '../../analysis/dominance.js';
-import { TraceLevel } from '../../pipeline/trace.js';
+import { TraceLevel } from '../../support/trace.js';
 import { UseDefAnalysis } from '../../analysis/use_def.js';
 import { materializeFusionGroup } from './fusion_utils.js';
 import { isConstantOp, isTerminatorOp } from '../../ir/graph/op_traits.js';
@@ -13,7 +13,9 @@ import type { Operation } from '../../ir/graph/operation.js';
 import type { AnalysisManager } from '../../analysis/analysis_manager.js';
 import type { PassResultValue, PassTarget } from '../pass.js';
 import type { FusionCostConfig } from './fusion_cost.js';
-import type { FusionAwareTarget } from '../../pipeline/pipeline_types.js';
+import type { FusionAwareTarget } from '../../support/config_types.js';
+import { hasLibraryOp } from '../../ir/graph/op_traits.js';
+import type { LibraryTarget } from '../../ir/graph/op_traits.js';
 
 type PostDominance = ReturnType<typeof PostDominanceAnalysis.compute>;
 
@@ -41,13 +43,13 @@ export class DominatorFusionPass extends FunctionPass {
     const target = config.target || {};
     this.maxFusionSize = target.maxFusionSize ?? config.maxFusionSize ?? 512;
     this.maxReductions = config.maxReductions || 1;
-    this.hasLibraryOp = target.hasLibraryOp ? (opName: string) => (target.hasLibraryOp as (n: string) => boolean)(opName) : (config.hasLibraryOp || (() => false));
+    this.hasLibraryOp = target.hasLibraryClass ? (opName: string) => hasLibraryOp(target as LibraryTarget, opName) : (config.hasLibraryOp || (() => false));
     this.costModel = new FusionCostModel({
       memoryBandwidthGBs: target.memoryBandwidthGBs,
       computeTFLOPs: target.computeTFLOPs,
       maxRegistersPerThread: target.registersPerThread,
       maxSharedMemory: target.sharedMemoryBytes,
-      hasLibraryOp: target.hasLibraryOp ? (opName: string) => (target.hasLibraryOp as (n: string) => boolean)(opName) : undefined,
+      hasLibraryOp: target.hasLibraryClass ? (opName: string) => hasLibraryOp(target as LibraryTarget, opName) : undefined,
       ...config.cost,
     });
   }

@@ -3,7 +3,7 @@ import { tensor, matmul, relu, tanh } from '../../../src/index.js';
 import { ones } from '../../../src/tensor/factory/creation_ops.js';
 import { compile } from '../../../src/tracing/compile.js';
 import { compileWithBackward } from '../../../src/tracing/compile_backward.js';
-import { CUDATarget } from '../../../src/backend/target.js';
+import { CUDATarget } from '../../../src/compiler/support/target.js';
 import { liveBytes, peakLiveBytes, resetPeakLiveBytes, drainPool } from '../../../src/runtime/node/cuda/memory.js';
 import { cudaDeps } from '../../_utils/cuda.js';
 import { mulberry32 } from '../../_utils/rng.js';

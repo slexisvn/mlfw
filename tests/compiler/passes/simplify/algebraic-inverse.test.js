@@ -4,7 +4,7 @@ import { TensorType, ScalarType } from '../../../../src/compiler/ir/graph/types.
 import { AlgebraicSimplificationPass } from '../../../../src/compiler/passes/simplify/algebraic.js';
 import { PassResult } from '../../../../src/compiler/passes/pass.js';
 import { compileGraph } from '../../../../src/compiler/pipeline/compiler.js';
-import { CPUTarget } from '../../../../src/backend/target.js';
+import { CPUTarget } from '../../../../src/compiler/support/target.js';
 import { roundToDtype } from '../../../../src/tensor/utils/half.js';
 
 function run(func) {

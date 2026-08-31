@@ -1,6 +1,6 @@
-import { readValues, topoSortOpSet } from '../../ir/graph/graph_algorithms.js';
-import type { Operation } from '../../ir/graph/operation.js';
-import type { Value } from '../../ir/graph/value.js';
+import { readValues, topoSortOpSet } from '../ir/graph/graph_algorithms.js';
+import type { Operation } from '../ir/graph/operation.js';
+import type { Value } from '../ir/graph/value.js';
 
 export type PartitionLabel = unknown;
 export type Partition = { id: number; label: PartitionLabel; ops: Operation[]; opSet: Set<Operation> };

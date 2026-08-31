@@ -1,6 +1,9 @@
 import {
   tensor, Module, ops, compile, trace, printModule, CPUTarget, TraceLevel, manual_seed,
 } from '../../../../dist/index.node.js';
+import {
+  buildFunction, TensorType, ScalarType, DCEPass, IRPrinter, opHasSideEffects,
+} from '../../../../dist/internals.node.js';
 
 manual_seed(0);
 
@@ -14,7 +17,7 @@ class DeadPureChain extends Module {
   }
 }
 
-class DeadSideEffect extends Module {
+class DeadFunctionalWrite extends Module {
   forward(a, i) {
     const dead = ops.scatter_add(a, 0, i, a);
     return a.add(1);
@@ -45,5 +48,24 @@ async function run(label, Klass, inputs) {
   console.log(ir);
 }
 
+function runOpaque() {
+  console.log('=== a dead operation the compiler cannot see into ===');
+  const t = new TensorType([2, 2], ScalarType.F32);
+  const func = buildFunction('DeadCustomCall', [t], [t], (b, args) => {
+    b.customCall('write_somewhere', [args[0]], [t]);
+    b.returnOp([b.neg(args[0]).getResult(0)]);
+  });
+
+  const call = [...func.ops()].find((op) => op.opName === 'custom_call');
+  console.log(`custom_call declares an effect: ${opHasSideEffects(call)}`);
+
+  const before = [...func.ops()].length;
+  new DCEPass().run(func);
+  const after = [...func.ops()].length;
+  console.log(`dce erased ${before - after} operation(s)`);
+  console.log(new IRPrinter().printFunction(func));
+}
+
 await run('a dead chain of pure operations', DeadPureChain, [x]);
-await run('a dead operation that writes', DeadSideEffect, [x, index]);
+await run('a dead operation that writes only its own output', DeadFunctionalWrite, [x, index]);
+runOpaque();

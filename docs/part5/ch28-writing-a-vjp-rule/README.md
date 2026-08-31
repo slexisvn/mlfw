@@ -105,7 +105,7 @@ export type VJPContext = {
 };
 ```
 
-Six of the seven are the theory. The seventh, `full`, is a convenience that exists because almost every rule needs a constant of the operand's shape and writing it out is three builder calls ([`backward_builder.ts:78`](../../../src/compiler/ad/backward_builder.ts)):
+Six of the seven are the theory. The seventh, `full`, is a convenience that exists because almost every rule needs a constant of the operand's shape and writing it out is three builder calls ([`backward_builder.ts:99`](../../../src/compiler/ad/backward_builder.ts)):
 
 ```ts
     const full = (value: number, type: TensorType) => builder.broadcast(builder.scalarConstant(value, type.dtype).getResult(0), type.shape, []).getResult(0) as TensorValue;
@@ -166,13 +166,13 @@ registerVJPRule('exp', (ctx) => {
 
 ### The step no rule performs
 
-`add`'s rule returns the incoming gradient unchanged for both operands. When the operands had different shapes — a bias broadcast across a batch — that gradient is the wrong shape for the smaller one. Fixing it in each rule would mean sixty-seven copies of the same code, so the driver does it once, on every gradient every rule returns ([`backward_builder.ts:86`](../../../src/compiler/ad/backward_builder.ts)):
+`add`'s rule returns the incoming gradient unchanged for both operands. When the operands had different shapes — a bias broadcast across a batch — that gradient is the wrong shape for the smaller one. Fixing it in each rule would mean sixty-seven copies of the same code, so the driver does it once, on every gradient every rule returns ([`backward_builder.ts:108`](../../../src/compiler/ad/backward_builder.ts)):
 
 ```ts
       accumulator.accumulate(operandVal.id, reduceGradToOperandShape(builder, gradInputs[o] as Value, (operandVal.type as TensorType).shape));
 ```
 
-and `reduceGradToOperandShape` ([`backward_builder.ts:131`](../../../src/compiler/ad/backward_builder.ts)) is the sum:
+and `reduceGradToOperandShape` ([`backward_builder.ts:154`](../../../src/compiler/ad/backward_builder.ts)) is the sum:
 
 ```ts
 export function reduceGradToOperandShape(builder: IRBuilder, grad: Value, targetShape: Shape): Value {

@@ -1,5 +1,5 @@
-import { SymInt, rebuildSym } from './sym_int.js';
-import type { SymExpr } from './sym_int.js';
+import { SymInt, rebuildSym } from '../ir/sym_int.js';
+import type { SymExpr } from '../ir/sym_int.js';
 
 const COMMUTATIVE: ReadonlySet<string> = new Set(['add', 'mul', 'max', 'min']);
 

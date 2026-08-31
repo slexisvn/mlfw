@@ -8,7 +8,7 @@ import {
   BufferStoreNode,
   BufferLoadNode,
 } from '../../../src/compiler/ir/tensor/nodes.js';
-import { CPUTarget } from '../../../src/backend/target.js';
+import { CPUTarget } from '../../../src/compiler/support/target.js';
 
 function buf(name, shape = [16]) {
   return new Buffer(name, shape, 'f32', 'global');

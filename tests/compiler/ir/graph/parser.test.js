@@ -5,7 +5,7 @@ import { printModule, printFunction } from '../../../../src/compiler/ir/graph/pr
 import { parseModule, parseFunction, IRParseError } from '../../../../src/compiler/ir/graph/parser.js';
 import { verifyModule, verifyFunction } from '../../../../src/compiler/ir/graph/verifier.js';
 import { TensorType, ScalarType, Layout, DYNAMIC } from '../../../../src/compiler/ir/graph/types.js';
-import { SymInt } from '../../../../src/compiler/analysis/sym_int.js';
+import { SymInt } from '../../../../src/compiler/ir/sym_int.js';
 import { tensor } from '../../../../src/index.js';
 import { trace } from '../../../../src/tracing/compile.js';
 import * as nn from '../../../../src/nn/index.js';
@@ -15,7 +15,7 @@ import { randomNested } from '../../../_utils/tensor_data.js';
 import { PassManager } from '../../../../src/compiler/passes/pass_manager.js';
 import { buildGraphPipeline } from '../../../../src/compiler/pipeline/graph_pipeline.js';
 import { CompilerConfig } from '../../../../src/compiler/pipeline/compiler.js';
-import { CPUTarget } from '../../../../src/backend/target.js';
+import { CPUTarget } from '../../../../src/compiler/support/target.js';
 
 const rng = mulberry32(9091);
 const grid = (shape) => randomNested(rng, shape);

@@ -5,7 +5,7 @@ import { parseSchema } from '../../src/dispatcher/operator_schema.js';
 import { dispatcher, computeKeySet } from '../../src/dispatcher/dispatcher.js';
 import { tensor } from '../../src/index.js';
 import { jitCompile, jitCacheClear } from '../../src/dispatcher/jit_cache.js';
-import { CPUTarget, WasmTarget } from '../../src/backend/target.js';
+import { CPUTarget, WasmTarget } from '../../src/compiler/support/target.js';
 import { ScalarType } from '../../src/compiler/ir/graph/types.js';
 
 describe('dispatch routes to correct kernel by key priority', () => {

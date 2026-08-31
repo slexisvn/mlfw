@@ -3,7 +3,7 @@ import {
   BASELINE, DEFAULT_MIN_GAIN, optimizationCandidates, selectWinner, candidateByName,
   gateCacheKey, graphSignature,
 } from '../../../src/compiler/pipeline/opt_gate.js';
-import { CPUTarget, CUDATarget, WasmTarget, archSupportsTensorCore, archMajor } from '../../../src/backend/target.js';
+import { CPUTarget, CUDATarget, WasmTarget, archSupportsTensorCore, archMajor } from '../../../src/compiler/support/target.js';
 
 describe('tensor-core support is derived from the compute capability', () => {
   it('reads the major version out of an sm_XY string', () => {

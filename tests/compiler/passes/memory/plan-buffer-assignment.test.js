@@ -7,7 +7,7 @@ import { assignPlanBuffers, computePlanDonations, planMemoryReport } from '../..
 import { compileGraph } from '../../../../src/compiler/pipeline/compiler.js';
 import { FusionPass } from '../../../../src/compiler/passes/fusion/fusion_pass.js';
 import { PassResult } from '../../../../src/compiler/passes/pass.js';
-import { CPUTarget } from '../../../../src/backend/target.js';
+import { CPUTarget } from '../../../../src/compiler/support/target.js';
 
 const F32 = ScalarType.F32;
 const t2 = (r, c) => new TensorType([r, c], F32);

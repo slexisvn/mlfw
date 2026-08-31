@@ -1,7 +1,7 @@
 import type { PrimFunc } from '../ir/tensor/nodes.js';
 import type { TirModule } from '../ir/tensor/module.js';
-import type { TraceLog } from '../pipeline/trace.js';
-import type { CompilerConfig } from '../pipeline/pipeline_types.js';
+import type { TraceLog } from '../support/trace.js';
+import type { CompilerConfig } from '../support/config_types.js';
 
 export type TirPassCtx = {
   trace: TraceLog;

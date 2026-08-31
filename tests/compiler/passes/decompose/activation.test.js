@@ -4,7 +4,7 @@ import { TensorType, ScalarType } from '../../../../src/compiler/ir/graph/types.
 import { DecompositionPass } from '../../../../src/compiler/passes/decompose/decomposition_pass.js';
 import { PassResult } from '../../../../src/compiler/passes/pass.js';
 import { compileGraph } from '../../../../src/compiler/pipeline/compiler.js';
-import { CPUTarget, WasmTarget } from '../../../../src/backend/target.js';
+import { CPUTarget, WasmTarget } from '../../../../src/compiler/support/target.js';
 
 function run(func) {
   return new DecompositionPass().run(func);

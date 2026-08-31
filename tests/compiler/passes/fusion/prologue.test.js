@@ -4,7 +4,7 @@ import { TensorType } from '../../../../src/compiler/ir/graph/types.js';
 import { EpilogueFusionPass } from '../../../../src/compiler/passes/fusion/epilogue_fusion.js';
 import { PassResult } from '../../../../src/compiler/passes/pass.js';
 import { compileGraph } from '../../../../src/compiler/pipeline/compiler.js';
-import { CPUTarget } from '../../../../src/backend/target.js';
+import { CPUTarget } from '../../../../src/compiler/support/target.js';
 import { F32, I32 } from '../../../_utils/ir_fixture.js';
 
 

@@ -2,12 +2,13 @@ import { getCodegenEntry, getExternalCodegen } from './codegen_registry.js';
 import { FuncAttr } from '../compiler/ir/func_attrs.js';
 import type { CodegenEntry, CodegenMetadata } from './codegen_registry.js';
 import type { PrimFunc } from '../compiler/ir/tensor/nodes.js';
-import type { CompilerContext } from '../compiler/pipeline/compiler_context.js';
-import type { ExternalCodegenAttr } from '../compiler/pipeline/external_codegen.js';
-import type { ConstBuffer } from '../compiler/passes/lowering/lowering_registry.js';
-import type { TargetFeatures } from './target.js';
 
-export type BackendPipelineOptions = { context?: CompilerContext | null };
+import type { ExternalCodegenAttr } from '../compiler/ir/func_attrs.js';
+import type { ConstBuffer } from '../compiler/passes/lowering/lowering_registry.js';
+import type { TargetFeatures } from '../compiler/support/target.js';
+
+export type CodegenEntryLookup = { getCodegenEntry(targetKind: string): unknown };
+export type BackendPipelineOptions = { context?: CodegenEntryLookup | null };
 export type KernelConstBuffer = { name: string; dtype: string; data: ArrayLike<number> };
 
 export class CompiledKernel {
@@ -26,7 +27,7 @@ export class CompiledKernel {
 
 export class BackendPipeline {
   target: TargetFeatures;
-  context: CompilerContext | null;
+  context: CodegenEntryLookup | null;
 
   constructor(target: TargetFeatures, options: BackendPipelineOptions = {}) {
     this.target = target;

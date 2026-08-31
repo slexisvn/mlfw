@@ -202,7 +202,7 @@ Four sketches for the accumulation block, one for the zeroing block, and 92,190 
 
 `ssrsrs_cpu` offers `r0[7]` — the seven ordered pairs with product 64 — and 16,128 points in total, which is 87% of the block's advertised space. Chapter 45 shows that every point of it throws, on its own smaller example.
 
-`reads=0` on `matmul_init_0` is Chapter 33's unverified read set arriving here: the init block's declared read set is empty, because `bufRefs` builds it from the operation's operands and a zeroing block has none. `analyzeBlockStructure` reads that declaration ([`block_analysis.ts:47`](../../../src/compiler/autotune/block_analysis.ts)), and the derivation rule at priority 10 tests `reads >= 2`. Here the declaration is right and nothing turns on it, but it is another of the small handful of places where the unverified read set is load-bearing.
+`reads=0` on `matmul_init_0` is Chapter 33's unverified read set arriving here: the init block's declared read set is empty, because `bufRefs` builds it from the operation's operands and a zeroing block has none. `analyzeBlockStructure` reads that declaration ([`block_analysis.ts:47`](../../../src/compiler/schedule/block_analysis.ts)), and the derivation rule at priority 10 tests `reads >= 2`. Here the declaration is right and nothing turns on it, but it is another of the small handful of places where the unverified read set is load-bearing.
 
 Finally the truncation:
 

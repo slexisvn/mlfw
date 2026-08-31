@@ -13,7 +13,7 @@ import type { Buffer } from '../../compiler/ir/tensor/buffer.js';
 import type { BlockNode, BufferLoadNode, BufferStoreNode, CallExternNode, CastNode, CompareNode, ForNode, IfThenElseNode, MathOpNode, SeqNode, TirNode, WhileNode } from '../../compiler/ir/tensor/nodes.js';
 import type { IRStmtNode, LIRAccumulatorNode, LIRBindingsNode, LIRFlatStoreNode, LIRFunc } from '../../compiler/ir/lir/nodes.js';
 import type { CodegenFunc } from '../codegen_utils.js';
-import type { TargetFeatures } from '../target.js';
+import type { TargetFeatures } from '../../compiler/support/target.js';
 
 
 type SimdOpKey = keyof SimdInfo;

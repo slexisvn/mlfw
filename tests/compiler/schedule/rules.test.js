@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType } from '../../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
-import { CPUTarget } from '../../../src/backend/target.js';
-import { ElementwiseCPURule } from '../../../src/compiler/schedule/rules.js';
+import { CPUTarget, CUDATarget, WasmTarget, TargetKind } from '../../../src/compiler/support/target.js';
+import { ElementwiseCPURule, ScheduleRule, SchedulePolicy, registerScheduleRule, resetScheduleRules } from '../../../src/compiler/schedule/rules.js';
 import { ForNode, IntImmNode, VariableNode, ForKind } from '../../../src/compiler/ir/tensor/nodes.js';
 import { countLoops as countForLoops } from '../../_utils/kernel_source.js';
 import { F32 } from '../../_utils/ir_fixture.js';
@@ -173,5 +173,30 @@ describe('ElementwiseCPURule.apply — vectorize only when divisible', () => {
 
     expect(sch.calls).toContainEqual(['split', 'j', 4]);
     expect(sch.calls).toContainEqual(['vectorize', 'j_i']);
+  });
+});
+
+describe('schedule rules declare the targets they apply to', () => {
+  it('selects only the rules whose declared target kinds contain the target', () => {
+    const names = (target) => SchedulePolicy.rulesFor(target).map(r => r.name);
+
+    expect(names(CPUTarget())).toEqual(['matmul_tiled_cpu', 'reduction_cpu', 'elementwise_cpu', 'fallback']);
+    expect(names(CUDATarget())).toEqual(['matmul_tiled_gpu', 'reduction_gpu', 'elementwise_gpu', 'fallback']);
+    expect(names(WasmTarget())).toEqual(['reduction_wasm', 'elementwise_wasm', 'fallback']);
+  });
+
+  it('lets a backend contribute a rule without editing the builtin list', () => {
+    class ProbeRule extends ScheduleRule {
+      constructor() { super('probe', [TargetKind.WASM]); }
+      matches() { return false; }
+    }
+    registerScheduleRule(new ProbeRule());
+    try {
+      expect(SchedulePolicy.rulesFor(WasmTarget())[0].name).toBe('probe');
+      expect(SchedulePolicy.rulesFor(CPUTarget()).map(r => r.name)).not.toContain('probe');
+    } finally {
+      resetScheduleRules();
+    }
+    expect(SchedulePolicy.rulesFor(WasmTarget()).map(r => r.name)).not.toContain('probe');
   });
 });

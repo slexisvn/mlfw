@@ -1,7 +1,7 @@
 import { Schedule } from '../schedule/schedule.js';
 import { ScheduleValidator } from '../schedule/validator.js';
 import { FeatureExtractor } from './features.js';
-import { clonePrimFunc, extractBlockMini } from './tune_ir.js';
+import { clonePrimFunc, extractBlockMini } from '../ir/tensor/clone_tir.js';
 import { createSearchStrategy } from './search.js';
 import { LearnedCostModel, GuidedCostModel } from './cost_model.js';
 import type { AnalyticalCostModel } from './cost_model.js';

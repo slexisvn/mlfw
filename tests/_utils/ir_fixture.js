@@ -1,6 +1,6 @@
 import { ScalarType, TensorType } from '../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../src/compiler/pipeline/compiler.js';
-import { CPUTarget } from '../../src/backend/target.js';
+import { CPUTarget } from '../../src/compiler/support/target.js';
 import { BlockRealizeNode, IterVarKind } from '../../src/compiler/ir/tensor/nodes.js';
 
 export const F32 = ScalarType.F32;

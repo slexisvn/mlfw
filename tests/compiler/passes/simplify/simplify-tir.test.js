@@ -6,7 +6,7 @@ import {
 import { Buffer } from '../../../../src/compiler/ir/tensor/buffer.js';
 import { simplifyPrimFunc } from '../../../../src/compiler/passes/simplify/simplify_tir.js';
 import { SimplifyPass } from '../../../../src/compiler/passes/simplify/simplify_pass.js';
-import { TraceLog, TraceLevel } from '../../../../src/compiler/pipeline/trace.js';
+import { TraceLog, TraceLevel } from '../../../../src/compiler/support/trace.js';
 
 const iv = (n) => new VariableNode(n, 'int32');
 const c = (x) => new IntImmNode(x);

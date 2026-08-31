@@ -3,7 +3,7 @@ import { buildFunction } from '../../../../src/compiler/ir/graph/builder.js';
 import { verifyFunction } from '../../../../src/compiler/ir/graph/verifier.js';
 import { TensorType, ScalarType, DYNAMIC, dimEquals } from '../../../../src/compiler/ir/graph/types.js';
 import { registry } from '../../../../src/compiler/ir/graph/ops.js';
-import { SymInt } from '../../../../src/compiler/analysis/sym_int.js';
+import { SymInt } from '../../../../src/compiler/ir/sym_int.js';
 
 const reshape = registry.get('reshape');
 

@@ -1,4 +1,4 @@
-import { CompilationError } from '../pipeline/trace.js';
+import { CompilationError } from '../support/trace.js';
 import { printTensorIR } from '../ir/tensor/printer.js';
 import { PassManagerBase } from './pass_manager_base.js';
 import { PassResult } from './pass.js';
@@ -6,7 +6,7 @@ import { IRLevel } from '../ir/verify.js';
 import type { TirModule } from '../ir/tensor/module.js';
 import type { PrimFuncPass, TirModulePass, TirPassCtx } from './tir_pass.js';
 import type { PassContext, PassResultValue } from './pass.js';
-import type { TraceLog } from '../pipeline/trace.js';
+import type { TraceLog } from '../support/trace.js';
 
 export type TirPassAny = PrimFuncPass | TirModulePass;
 export type TirRunCtx = TirPassCtx & {

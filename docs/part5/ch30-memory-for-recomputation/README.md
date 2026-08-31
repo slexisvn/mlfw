@@ -97,7 +97,7 @@ Read those as a claim about arithmetic intensity (Chapter 4). Everything in the 
 
 Note the size cap runs *before* the elementwise fallback but *after* the name lists, so a `tanh` on a 100-million-element tensor is still recomputed. That is deliberate for `tanh` and is the direction you want, since a large tensor is exactly the one you cannot afford to keep.
 
-The builder consults it once per candidate result ([`backward_builder.ts:354`](../../../src/compiler/ad/backward_builder.ts)):
+The builder consults it once per candidate result ([`backward_builder.ts:385`](../../../src/compiler/ad/backward_builder.ts)):
 
 ```ts
   _shouldSaveResult(op: Operation): boolean {
@@ -125,7 +125,7 @@ Then `_materialize` (Chapter 29) does the actual rebuilding: a value that was no
 
 All four end by calling the same `computeBoundaries` ([`checkpoint_policy.ts:19`](../../../src/compiler/ad/checkpoint_policy.ts)), which walks every segment and records the values crossing in or out — Definition 30.2's boundary set computed rather than assumed, which is what makes the machinery correct on graphs that are not chains.
 
-The consuming half is a second `build` path ([`backward_builder.ts:371`](../../../src/compiler/ad/backward_builder.ts)), and its loop is the theorem ([`backward_builder.ts:479`](../../../src/compiler/ad/backward_builder.ts)):
+The consuming half is a second `build` path ([`backward_builder.ts:518`](../../../src/compiler/ad/backward_builder.ts)), and its loop is the theorem ([`backward_builder.ts:518`](../../../src/compiler/ad/backward_builder.ts)):
 
 ```ts
     for (let s = segments.length - 1; s >= 0; s--) {

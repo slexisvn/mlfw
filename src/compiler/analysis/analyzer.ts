@@ -1,8 +1,9 @@
-import { SymInt } from './sym_int.js';
+import { SymInt } from '../ir/sym_int.js';
 import { CanonicalSum, proportionalTo, symKey } from './canonical.js';
+import { gcd } from '../../util/integer.js';
 import { ModularSet, modularSetOf } from './modular_set.js';
 import type { CanonicalTerm } from './canonical.js';
-import type { SymExpr } from './sym_int.js';
+import type { SymExpr } from '../ir/sym_int.js';
 
 const NEG_INF = -Infinity;
 const POS_INF = Infinity;
@@ -107,9 +108,22 @@ export class Analyzer {
     if (this._derived !== null) return this._derived;
     const facts = [...this._stated];
     for (let i = 0; i < this._stated.length && facts.length < MAX_DERIVED_FACTS; i++) {
+      const a = this._stated[i];
       for (let j = i + 1; j < this._stated.length && facts.length < MAX_DERIVED_FACTS; j++) {
-        const combined = this._stated[i].plus(this._stated[j]);
-        if (!combined.isConstant) facts.push(combined);
+        const b = this._stated[j];
+        for (const [key, ta] of a.terms) {
+          if (facts.length >= MAX_DERIVED_FACTS) break;
+          const tb = b.terms.get(key);
+          if (!tb || ta.coeff * tb.coeff >= 0) continue;
+          const g = gcd(Math.abs(ta.coeff), Math.abs(tb.coeff));
+          const combined = new CanonicalSum()
+            .addSum(a, Math.abs(tb.coeff) / g)
+            .addSum(b, Math.abs(ta.coeff) / g);
+          if (!combined.isConstant) facts.push(combined);
+        }
+        if (facts.length >= MAX_DERIVED_FACTS) break;
+        const summed = a.plus(b);
+        if (!summed.isConstant) facts.push(summed);
       }
     }
     this._derived = facts;

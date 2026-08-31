@@ -1,3 +1,4 @@
+import { effectPredecessors } from '../ir/graph/op_traits.js';
 import type { GraphFunction } from '../ir/graph/function.js';
 import type { Operation } from '../ir/graph/operation.js';
 import type { Value } from '../ir/graph/value.js';
@@ -31,6 +32,7 @@ export class UseDefAnalysis {
 
     const visitedOps = new Set<Operation>();
     const visitingOps = new Set<Operation>();
+    const effectPred = effectPredecessors(func.ops());
 
     const visit = (root: Operation): void => {
       if (visitedOps.has(root)) return;
@@ -39,8 +41,11 @@ export class UseDefAnalysis {
       while (stack.length > 0) {
         const frame = stack[stack.length - 1];
         const op = frame.op;
-        if (frame.i < op.numOperands) {
-          const defOp = op.getOperand(frame.i).definingOp;
+        const numDeps = op.numOperands + (effectPred.has(op) ? 1 : 0);
+        if (frame.i < numDeps) {
+          const defOp = frame.i < op.numOperands
+            ? op.getOperand(frame.i).definingOp
+            : effectPred.get(op) as Operation;
           frame.i++;
           if (defOp && !visitedOps.has(defOp)) {
             if (visitingOps.has(defOp)) {

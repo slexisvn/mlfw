@@ -7,7 +7,7 @@ import { Buffer } from '../../../src/compiler/ir/tensor/buffer.js';
 import { Schedule } from '../../../src/compiler/schedule/schedule.js';
 import { LoopPartitionPass } from '../../../src/compiler/passes/loop_partition/loop_partition.js';
 import { BackendPipeline } from '../../../src/backend/pipeline.js';
-import { CPUTarget } from '../../../src/backend/target.js';
+import { CPUTarget } from '../../../src/compiler/support/target.js';
 import { collect } from '../../../src/compiler/ir/ir_visitor.js';
 import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';

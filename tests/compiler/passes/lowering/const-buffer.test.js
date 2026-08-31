@@ -3,7 +3,7 @@ import { tensor, manual_seed, Linear, Sequential, ReLU } from '../../../../src/i
 import { compile, _traceCore } from '../../../../src/tracing/compile.js';
 import { foldWeightParams, weightPredicate } from '../../../../src/tracing/fold_params.js';
 import { tensorToContiguous } from '../../../../src/dispatcher/jit_dispatch.js';
-import { CPUTarget, WasmTarget, CUDATarget, WebGPUTarget } from '../../../../src/backend/target.js';
+import { CPUTarget, WasmTarget, CUDATarget, WebGPUTarget } from '../../../../src/compiler/support/target.js';
 import { QuantizationScheme } from '../../../../src/compiler/ir/graph/quantization_types.js';
 import { FuncAttr } from '../../../../src/compiler/ir/func_attrs.js';
 import { BufferStoreNode } from '../../../../src/compiler/ir/tensor/nodes.js';

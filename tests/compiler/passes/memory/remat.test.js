@@ -4,8 +4,8 @@ import { TensorType, ScalarType } from '../../../../src/compiler/ir/graph/types.
 import { RematerializationPass, RematerializationConfig } from '../../../../src/compiler/passes/memory/rematerialization.js';
 import { PassResult } from '../../../../src/compiler/passes/pass.js';
 import { compileGraph } from '../../../../src/compiler/pipeline/compiler.js';
-import { CPUTarget } from '../../../../src/backend/target.js';
-import { TraceLevel } from '../../../../src/compiler/pipeline/trace.js';
+import { CPUTarget } from '../../../../src/compiler/support/target.js';
+import { TraceLevel } from '../../../../src/compiler/support/trace.js';
 import { UseDefAnalysis } from '../../../../src/compiler/analysis/use_def.js';
 import { LivenessAnalysis } from '../../../../src/compiler/analysis/liveness.js';
 

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { tensor } from '../../src/index.js';
 import * as nn from '../../src/nn/index.js';
 import { compile } from '../../src/tracing/compile.js';
-import { CUDATarget } from '../../src/backend/target.js';
+import { CUDATarget } from '../../src/compiler/support/target.js';
 import { cudaDeps } from '../_utils/cuda.js';
 
 const CHANNELS = 32;

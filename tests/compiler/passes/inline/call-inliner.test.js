@@ -7,7 +7,7 @@ import { CallInlinerPass } from '../../../../src/compiler/passes/inline/call_inl
 import { PassResult } from '../../../../src/compiler/passes/pass.js';
 import { verifyFunction } from '../../../../src/compiler/ir/graph/verifier.js';
 import { Compiler } from '../../../../src/compiler/pipeline/compiler.js';
-import { CPUTarget } from '../../../../src/backend/target.js';
+import { CPUTarget } from '../../../../src/compiler/support/target.js';
 
 const t = (shape) => new TensorType(shape, ScalarType.F32);
 

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { CanonicalSum, symKey, proportionalTo } from '../../../src/compiler/analysis/canonical.js';
-import { SymInt } from '../../../src/compiler/analysis/sym_int.js';
+import { SymInt } from '../../../src/compiler/ir/sym_int.js';
 
 const i = () => SymInt.var('i');
 const j = () => SymInt.var('j');

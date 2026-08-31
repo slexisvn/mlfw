@@ -189,7 +189,7 @@ Three findings, in increasing order of interest.
 
 **The pass is off by default.** `optimization.layout` is `false` in the config ([`compiler.ts:147`](../../../src/compiler/pipeline/compiler.ts)), so the pass is never constructed.
 
-**Turning it on changes nothing.** The second row is the surprising one: the pass runs, `dotLayout` proposes column-major for both weight operands, `LayoutAnalysis` records two conversions — and every one is discarded. The reason is the `capable` line above: benefit is added only when the consumer is in `target.layoutAwareOps`, and **no target in this repository populates that set** ([`target.ts:129`](../../../src/backend/target.ts) constructs it from a config field nobody sets). Benefit is therefore zero, `g.benefit < g.cost` for every group, and the pass returns UNCHANGED without emitting its `pass_detail` event.
+**Turning it on changes nothing.** The second row is the surprising one: the pass runs, `dotLayout` proposes column-major for both weight operands, `LayoutAnalysis` records two conversions — and every one is discarded. The reason is the `capable` line above: benefit is added only when the consumer is in `target.layoutAwareOps`, and **no target in this repository populates that set** ([`target.ts:129`](../../../src/compiler/support/target.ts) constructs it from a config field nobody sets). Benefit is therefore zero, `g.benefit < g.cost` for every group, and the pass returns UNCHANGED without emitting its `pass_detail` event.
 
 So layout is switched off twice: once by a config flag, and once by an empty set that no configuration in the repository fills. Turning on the flag alone is a no-op, which is a bad failure mode for an optimization — it looks enabled and is not.
 

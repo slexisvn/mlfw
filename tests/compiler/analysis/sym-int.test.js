@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { SymInt } from '../../../src/compiler/analysis/sym_int.js';
+import { SymInt } from '../../../src/compiler/ir/sym_int.js';
 
 describe('SymInt — division/modulo zero guards', () => {
   it('div(numeric, 0) throws', () => {

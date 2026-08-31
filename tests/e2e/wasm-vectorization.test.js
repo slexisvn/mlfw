@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { tensor, one_hot, scatter_add, index_select, gather, log_softmax, mul, sum, mean, neg, reshape, sort, argsort, topk, exp, pad, add, silu } from '../../src/index.js';
 import * as nn from '../../src/nn/index.js';
 import { compile } from '../../src/tracing/compile.js';
-import { WasmTarget, CPUTarget } from '../../src/backend/target.js';
+import { WasmTarget, CPUTarget } from '../../src/compiler/support/target.js';
 import { mulberry32 } from '../_utils/rng.js';
 import { randomTensor, flat } from '../_utils/tensor_data.js';
 

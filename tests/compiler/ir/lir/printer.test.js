@@ -3,7 +3,7 @@ import { printLIR, LIRPrinter } from '../../../../src/compiler/ir/lir/printer.js
 import { lowerToLIR } from '../../../../src/compiler/passes/lowering/tensor_to_lir.js';
 import { schemaNodeTypes } from '../../../../src/compiler/ir/ir_visitor.js';
 import { Buffer } from '../../../../src/compiler/ir/tensor/buffer.js';
-import { CPUTarget } from '../../../../src/backend/target.js';
+import { CPUTarget } from '../../../../src/compiler/support/target.js';
 import {
   LIRFunc, LIRFlatLoadNode, LIRFlatStoreNode, LIRAccumulatorNode, LIRBindingsNode, LIRMetadata,
 } from '../../../../src/compiler/ir/lir/nodes.js';

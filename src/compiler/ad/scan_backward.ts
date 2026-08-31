@@ -1,6 +1,9 @@
 import { GradAccumulator } from './grad_accumulator.js';
 import { requireVJPRuleOrBarrier, registerRegionVJP, getRegionVJP } from './vjp_registry.js';
 import { reduceGradToOperandShape } from './backward_builder.js';
+import { regionFreeVars } from '../ir/graph/graph_algorithms.js';
+
+export { regionFreeVars };
 import { REGION_CONTROL_FLOW } from './control_flow_ops.js';
 import { TensorType } from '../ir/graph/types.js';
 import type { Shape } from '../ir/graph/types.js';
@@ -32,40 +35,6 @@ const ALWAYS_NEEDS_GRAD: NeedsGradSet = { has: () => true };
 
 registerRegionVJP('scan', ((op: Operation, ctx: RegionVJPCtx) => buildScanBackward(op, ctx.accumulator, ctx.builder, ctx.materialize, ctx.needsGrad, ctx.scanCheckpoint)) as never);
 registerRegionVJP('if', ((op: Operation, ctx: RegionVJPCtx) => buildCondBackward(op, ctx.accumulator, ctx.builder, ctx.materialize, ctx.needsGrad)) as never);
-
-export function regionFreeVars(bodyBlock: Block): Value[] {
-  const local = new Set<number>(bodyBlock.arguments.map(a => a.id));
-  const addLocals = (block: Block): void => {
-    for (const op of block.ops()) {
-      for (const r of op.results) local.add(r.id);
-      for (const region of (op.regions || [])) {
-        for (const b of region.blocks) {
-          for (const a of b.arguments) local.add(a.id);
-          addLocals(b);
-        }
-      }
-    }
-  };
-  addLocals(bodyBlock);
-
-  const seen = new Set<number>();
-  const free: Value[] = [];
-  const scan = (block: Block): void => {
-    for (const op of block.ops()) {
-      for (const o of op.operands) {
-        if (local.has(o.id) || seen.has(o.id)) continue;
-        if (o.definingOp && o.definingOp.opName === 'constant') continue;
-        seen.add(o.id);
-        free.push(o);
-      }
-      for (const region of (op.regions || [])) {
-        for (const b of region.blocks) scan(b);
-      }
-    }
-  };
-  scan(bodyBlock);
-  return free;
-}
 
 function zeroLike(builder: IRBuilder, val: Value): Value {
   const z = builder.scalarConstant(0, (val.type as TensorType).dtype).getResult(0);

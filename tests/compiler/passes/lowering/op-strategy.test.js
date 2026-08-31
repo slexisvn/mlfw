@@ -13,7 +13,7 @@ import {
   getLoweringRule,
   hasLoweringRule,
 } from '../../../../src/compiler/passes/lowering/lowering_registry.js';
-import { TargetKind } from '../../../../src/backend/target.js';
+import { TargetKind } from '../../../../src/compiler/support/target.js';
 import '../../../../src/compiler/passes/lowering/graph_to_tensor.js';
 
 const TEST_OPS = ['__strat_test__', '__lr_generic__', '__lr_target__', '__lr_plevel__', '__lr_replace__', '__target_only__'];

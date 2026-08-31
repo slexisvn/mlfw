@@ -26,7 +26,7 @@ export {
 
 export { GradMode, noGrad, enableGrad } from './autograd/grad_mode.js';
 export { SymbolicTensor } from './tracing/symbolic_tensor.js';
-export { TraceLevel } from './compiler/pipeline/trace.js';
+export { TraceLevel } from './compiler/support/trace.js';
 export { printModule, printFunction } from './compiler/ir/graph/printer.js';
 export { parseModule, parseFunction, IRParseError } from './compiler/ir/graph/parser.js';
 export {
@@ -112,7 +112,7 @@ export * as optim from './optim/index.js';
 export { trace, compile } from './tracing/compile.js';
 export { scan } from './tracing/scan.js';
 export { compileWithBackward } from './tracing/compile_backward.js';
-export { CPUTarget, CUDATarget, WasmTarget, WebGPUTarget } from './backend/target.js';
+export { CPUTarget, CUDATarget, WasmTarget, WebGPUTarget } from './compiler/support/target.js';
 
 export {
   LightningModule, Trainer, Callback,

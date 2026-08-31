@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { buildFunction } from '../../../../src/compiler/ir/graph/builder.js';
 import { ScalarType } from '../../../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../../../src/compiler/pipeline/compiler.js';
-import { CPUTarget } from '../../../../src/backend/target.js';
+import { CPUTarget } from '../../../../src/compiler/support/target.js';
 import { applyAutocast } from '../../../../src/compiler/passes/precision/mixed_precision.js';
 import { T } from '../../../_utils/ir_fixture.js';
 

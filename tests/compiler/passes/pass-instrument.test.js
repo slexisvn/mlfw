@@ -3,7 +3,7 @@ import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { GraphModule } from '../../../src/compiler/ir/graph/module.js';
 import { Compiler } from '../../../src/compiler/pipeline/compiler.js';
-import { CPUTarget } from '../../../src/backend/target.js';
+import { CPUTarget } from '../../../src/compiler/support/target.js';
 import { PassResult } from '../../../src/compiler/passes/pass.js';
 import { IRLevel } from '../../../src/compiler/ir/verify.js';
 

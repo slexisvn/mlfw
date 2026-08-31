@@ -4,7 +4,7 @@ import { TensorType } from '../../../../src/compiler/ir/graph/types.js';
 import { PriorityFusionPass } from '../../../../src/compiler/passes/fusion/priority_fusion.js';
 import { PassResult } from '../../../../src/compiler/passes/pass.js';
 import { compileGraph } from '../../../../src/compiler/pipeline/compiler.js';
-import { CPUTarget, WasmTarget } from '../../../../src/backend/target.js';
+import { CPUTarget, WasmTarget } from '../../../../src/compiler/support/target.js';
 import { F32 } from '../../../_utils/ir_fixture.js';
 
 

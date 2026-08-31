@@ -4,7 +4,7 @@ import { opsLocation } from '../../ir/graph/op_location.js';
 import { Block, Region } from '../../ir/graph/block.js';
 import { TensorType, DYNAMIC } from '../../ir/graph/types.js';
 import { registry } from '../../ir/graph/ops.js';
-import { TraceLevel } from '../../pipeline/trace.js';
+import { TraceLevel } from '../../support/trace.js';
 import { fusionSubject } from './fusion_utils.js';
 import { explainer } from '../explain.js';
 import { classifyFusionKind } from './fusion_analysis.js';

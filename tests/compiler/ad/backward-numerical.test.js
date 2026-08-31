@@ -3,7 +3,7 @@ import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { BackwardGraphBuilder } from '../../../src/compiler/ad/backward_builder.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
-import { CPUTarget } from '../../../src/backend/target.js';
+import { CPUTarget } from '../../../src/compiler/support/target.js';
 import '../../../src/compiler/ad/index.js';
 import { F32 } from '../../_utils/ir_fixture.js';
 

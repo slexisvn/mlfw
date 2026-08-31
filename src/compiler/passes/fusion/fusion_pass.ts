@@ -3,14 +3,16 @@ import { FusionLegality, FusionKind } from './fusion_analysis.js';
 import { FusionGroupBuilder } from './fusion_groups.js';
 import { FusionCostModel } from './fusion_cost.js';
 import { materializeFusionGroup } from './fusion_utils.js';
-import { TraceLevel } from '../../pipeline/trace.js';
+import { TraceLevel } from '../../support/trace.js';
 import type { GraphFunction } from '../../ir/graph/function.js';
 import type { Operation } from '../../ir/graph/operation.js';
 import type { AnalysisManager } from '../../analysis/analysis_manager.js';
 import type { PassResultValue, PassTarget } from '../pass.js';
 import type { FusionGroup } from './fusion_groups.js';
 import type { FusionCostConfig } from './fusion_cost.js';
-import type { FusionAwareTarget } from '../../pipeline/pipeline_types.js';
+import type { FusionAwareTarget } from '../../support/config_types.js';
+import { hasLibraryOp } from '../../ir/graph/op_traits.js';
+import type { LibraryTarget } from '../../ir/graph/op_traits.js';
 
 export type FusionPassConfig = {
   target?: Partial<FusionAwareTarget> | null;
@@ -37,7 +39,7 @@ export class FusionPass extends FunctionPass {
       computeTFLOPs: target.computeTFLOPs,
       maxRegistersPerThread: target.registersPerThread,
       maxSharedMemory: target.sharedMemoryBytes,
-      hasLibraryOp: target.hasLibraryOp ? (opName: string) => (target.hasLibraryOp as (n: string) => boolean)(opName) : undefined,
+      hasLibraryOp: target.hasLibraryClass ? (opName: string) => hasLibraryOp(target as LibraryTarget, opName) : undefined,
       policy: target.getAttr ? target.getAttr<FusionCostConfig['policy']>('fusionPolicy') ?? null : null,
       ...config.cost,
     });

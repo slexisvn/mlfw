@@ -1,9 +1,9 @@
 import { splitGraphForCublas, splitGraphForNative, hasDependentBoundaries } from '../passes/partition/cublas_split.js';
 import { splitGraphForScan } from '../passes/partition/scan_split.js';
 import { countLaunchBoundaries } from '../ir/graph/op_traits.js';
-import { TargetAttr, targetAttr } from './target_attrs.js';
+import { TargetAttr, targetAttr } from '../support/target_attrs.js';
 import { CUBLAS_PROVIDER, isExternalCodegenEnabled } from './external_codegen.js';
-import type { GraphSplitThresholds } from './target_attrs.js';
+import type { GraphSplitThresholds } from '../support/target_attrs.js';
 import type { GraphModule } from '../ir/graph/module.js';
 import type { CompileTarget, CompilerConfig } from './pipeline_types.js';
 

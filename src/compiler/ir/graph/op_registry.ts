@@ -2,7 +2,7 @@ import type { AttrValue, Dim, IRType } from './types.js';
 import type { Operation } from './operation.js';
 import type { Value } from './value.js';
 import type { Pattern } from '../rewrite/pattern.js';
-import type { MemoryEffect } from '../../analysis/memory_effect.js';
+import type { MemoryEffect } from './memory_effect.js';
 
 export const SideEffectKind = Object.freeze({
   NONE: 0,

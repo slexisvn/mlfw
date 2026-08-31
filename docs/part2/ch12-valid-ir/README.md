@@ -79,25 +79,27 @@ That is the whole of it: entry block arity, a return exists, return arity. Invar
 
 ### `verifyModule` — everything, at phase boundaries
 
-The real verifier is a free function in [`verifier.ts:30`](../../../src/compiler/ir/graph/verifier.ts), and it is what the pipeline runs at `verify:pre`, `verify:post`, and — in its TIR and LIR equivalents — `verify:tensor` and `verify:lir`. It descends: module → function → block → operation.
+The real verifier is a free function in [`verifier.ts:43`](../../../src/compiler/ir/graph/verifier.ts), and it is what the pipeline runs at `verify:pre`, `verify:post`, and — in its TIR and LIR equivalents — `verify:tensor` and `verify:lir`. It descends: module → function → block → operation.
 
-At the function level it establishes the **scope set** ([`verifier.ts:68`](../../../src/compiler/ir/graph/verifier.ts)):
+At the function level it establishes the **scope set** ([`verifier.ts:81`](../../../src/compiler/ir/graph/verifier.ts)):
 
 ```ts
-  const definedValues = new Set<Value>();
+  const scope: Scope = { defs: new Set<Value>(), parent: null };
   for (const arg of func.entryBlock.arguments) {
-    definedValues.add(arg);
+    scope.defs.add(arg);
   }
   for (const block of func.body) {
-    collectScopeDefs(block, definedValues);
+    collectScopeDefs(block, scope.defs);
   }
 ```
 
+A `Scope` is a set plus a link to its enclosing scope ([`verifier.ts:32`](../../../src/compiler/ir/graph/verifier.ts)), and membership walks the chain ([`verifier.ts:36`](../../../src/compiler/ir/graph/verifier.ts)). A region opens a child scope holding only its own definitions, so the outer set is never copied — a function with `r` region operations and `v` values costs `O(v)` rather than `O(r·v)`.
+
 Read that carefully, because the order matters: **the entire scope set is collected before any operand is checked.** So "used before definition" here means "used without any definition anywhere in this scope", not "used before its definition textually". That is exactly right for a DAG — Theorem 8.4 says textual position carries no meaning among the non-terminator operations, so a verifier that insisted on textual precedence would reject a module whose only sin was being printed in an unusual order. Note the limit of that licence, though: Chapter 8's Lab 2 reverses the *whole* block, terminator included, and the verifier does reject that — not for operand order, which it ignores, but for the terminator rule checked one level up at the block. Dataflow order is free; block structure is not.
 
-At the block level it checks acyclicity, with an explicit iterative depth-first search rather than recursion ([`verifier.ts:136`](../../../src/compiler/ir/graph/verifier.ts)), reporting `participates in a value dependency cycle` on the offending operation — and it checks that a region's block ends in a terminator ([`verifier.ts:182`](../../../src/compiler/ir/graph/verifier.ts)).
+At the block level it checks acyclicity, with an explicit iterative depth-first search rather than recursion ([`verifier.ts:149`](../../../src/compiler/ir/graph/verifier.ts)), reporting `participates in a value dependency cycle` on the offending operation — and it checks that a region's block ends in a terminator ([`verifier.ts:203`](../../../src/compiler/ir/graph/verifier.ts)).
 
-At the operation level ([`verifier.ts:199`](../../../src/compiler/ir/graph/verifier.ts)) it walks the `OpDef` from Chapter 11 field by field: operands in scope, results whose `definingOp` points back, every result shape free of a negative extent that is not `DYNAMIC`, the operation is registered, arity matches `numOperands` / `numResults`, required attributes present, `numRegions` matches — and then two delegations that are the interesting part:
+At the operation level ([`verifier.ts:212`](../../../src/compiler/ir/graph/verifier.ts)) it walks the `OpDef` from Chapter 11 field by field: operands in scope, results whose `definingOp` points back, every result shape free of a negative extent that is not `DYNAMIC`, the operation is registered, arity matches `numOperands` / `numResults`, required attributes present, `numRegions` matches — and then two delegations that are the interesting part:
 
 ```ts
   for (const message of verifyTraits(op)) {
@@ -110,7 +112,7 @@ At the operation level ([`verifier.ts:199`](../../../src/compiler/ir/graph/verif
 
 The verifier does not know what `ELEMENTWISE` means or what makes a `dot` well-formed. It asks. Chapter 11's registry is the answer, and the verifier is a driver over it.
 
-Finally it re-runs type inference and compares ([`verifier.ts:280`](../../../src/compiler/ir/graph/verifier.ts)):
+Finally it re-runs type inference and compares ([`verifier.ts:298`](../../../src/compiler/ir/graph/verifier.ts)):
 
 ```ts
     const inferred = opDef.inferResultTypes(operandTypes, op.attributes, op.results.map((r: Value) => r.type));
@@ -229,7 +231,7 @@ That is worth stating plainly rather than glossing: **if you build a module by h
 
 ## 12.5 Errors carry their location
 
-One small thing separates a verifier you can use from one you cannot ([`verifier.ts:11`](../../../src/compiler/ir/graph/verifier.ts)):
+One small thing separates a verifier you can use from one you cannot ([`verifier.ts:12`](../../../src/compiler/ir/graph/verifier.ts)):
 
 ```ts
 export class VerificationError {

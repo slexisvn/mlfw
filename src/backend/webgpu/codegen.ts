@@ -20,7 +20,7 @@ import { Buffer } from '../../compiler/ir/tensor/buffer.js';
 import type { AllocateNode, BlockNode, BufferStoreNode, CallExternNode, ForNode, IfThenElseNode, LetStmtNode, VecCopyNode, WhileNode } from '../../compiler/ir/tensor/nodes.js';
 import type { IRStmtNode, LIRAccumulatorNode, LIRBindingsNode, LIRFlatStoreNode } from '../../compiler/ir/lir/nodes.js';
 import type { BufferDecl, CodegenFunc } from '../codegen_utils.js';
-import type { TargetFeatures } from '../target.js';
+import type { TargetFeatures } from '../../compiler/support/target.js';
 
 const BOOL_OPS = new Set(['!', '&&', '||']);
 

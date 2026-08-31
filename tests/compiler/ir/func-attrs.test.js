@@ -4,8 +4,8 @@ import { LIRFunc } from '../../../src/compiler/ir/lir/nodes.js';
 import { FuncAttr } from '../../../src/compiler/ir/func_attrs.js';
 import { Buffer } from '../../../src/compiler/ir/tensor/buffer.js';
 import { lowerToLIR } from '../../../src/compiler/passes/lowering/tensor_to_lir.js';
-import { clonePrimFunc } from '../../../src/compiler/autotune/tune_ir.js';
-import { CUDATarget } from '../../../src/backend/target.js';
+import { clonePrimFunc } from '../../../src/compiler/ir/tensor/clone_tir.js';
+import { CUDATarget } from '../../../src/compiler/support/target.js';
 import { BackendPipeline } from '../../../src/backend/pipeline.js';
 import { AutoTensorizePass } from '../../../src/compiler/passes/schedule/tensorize_pass.js';
 

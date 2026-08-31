@@ -1,5 +1,8 @@
 import { registry } from '../ir/graph/ops.js';
 import { SideEffectKind } from '../ir/graph/op_registry.js';
+import { MemoryEffect } from '../ir/graph/memory_effect.js';
+
+export { MemoryEffect };
 import type { SideEffectMask } from '../ir/graph/op_registry.js';
 import type { GraphFunction } from '../ir/graph/function.js';
 import type { Operation } from '../ir/graph/operation.js';
@@ -7,16 +10,6 @@ import type { Value } from '../ir/graph/value.js';
 import type { AnalysisCtor } from './analysis_manager.js';
 
 export type ValueEffectEntry = { op: Operation; effect: MemoryEffect };
-
-export class MemoryEffect {
-  kind: SideEffectMask;
-  value: Value;
-
-  constructor(kind: SideEffectMask, value: Value) {
-    this.kind = kind;
-    this.value = value;
-  }
-}
 
 export class MemoryEffectResult {
   opEffects: Map<Operation, MemoryEffect[]>;

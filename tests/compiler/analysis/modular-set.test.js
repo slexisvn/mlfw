@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { ModularSet, modularSetOf } from '../../../src/compiler/analysis/modular_set.js';
-import { SymInt } from '../../../src/compiler/analysis/sym_int.js';
+import { SymInt } from '../../../src/compiler/ir/sym_int.js';
 
 const NOTHING_KNOWN = () => null;
 

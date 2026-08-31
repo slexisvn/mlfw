@@ -1,5 +1,5 @@
 import { DYNAMIC } from '../../ir/graph/types.js';
-import { SymInt, symVarName } from '../../analysis/sym_int.js';
+import { SymInt, symVarName } from '../../ir/sym_int.js';
 import { MemoryScope } from '../../ir/tensor/tensor_types.js';
 import { Buffer } from '../../ir/tensor/buffer.js';
 import { isDtypeInt } from '../../../util/dtype_map.js';
@@ -14,8 +14,8 @@ import type { Operation } from '../../ir/graph/operation.js';
 import type { TirNode } from '../../ir/tensor/nodes.js';
 import type { BufferRegionLike } from '../../ir/tensor/buffer.js';
 import type { OpStrategyTarget } from './op_strategy.js';
-import type { CompilerContext } from '../../pipeline/compiler_context.js';
-import type { CompileTarget } from '../../pipeline/pipeline_types.js';
+
+import type { CompileTarget } from '../../support/config_types.js';
 
 export type LoweringRuleFn = (ctx: LoweringContext, op: Operation, inputs: Buffer[], outputs: Buffer[]) => TirNode;
 export type BufferOwner = { type: IRType; symbolicShape?: Shape };
@@ -87,7 +87,9 @@ export function registerTargetLoweringRule(opName: string, targetKind: string, r
   registerOpStrategy(opName, { name: `${opName}.${targetKind}`, compute: ruleFunc, plevel, targetKind });
 }
 
-export function getLoweringRule(opName: string, target?: OpStrategyTarget, context: CompilerContext | null = null): LoweringRuleFn | undefined {
+export type LoweringRuleLookup = { getLoweringRule(opName: string): LoweringRuleFn | null };
+
+export function getLoweringRule(opName: string, target?: OpStrategyTarget, context: LoweringRuleLookup | null = null): LoweringRuleFn | undefined {
   if (context) {
     const override = context.getLoweringRule(opName);
     if (override) return override;

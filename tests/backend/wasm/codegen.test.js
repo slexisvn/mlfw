@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { WasmCodegen } from '../../../src/backend/wasm/codegen.js';
-import { WasmTarget } from '../../../src/backend/target.js';
+import { WasmTarget } from '../../../src/compiler/support/target.js';
 import { inferDtype } from '../../../src/compiler/ir/lir/nodes.js';
 import { Buffer } from '../../../src/compiler/ir/tensor/buffer.js';
 import {

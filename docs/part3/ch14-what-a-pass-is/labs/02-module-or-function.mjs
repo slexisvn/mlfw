@@ -16,6 +16,7 @@ const compiled = compile(model, [x], {
   target: CPUTarget(),
   passContext: {
     shouldRun(pass) {
+      if (!Array.isArray(pass.requiredAnalyses)) return true;
       if (!instrumented.has(pass)) {
         instrumented.add(pass);
         declared.set(pass.name, {

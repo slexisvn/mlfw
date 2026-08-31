@@ -5,7 +5,7 @@ import { CanonicalizePass } from '../../../../src/compiler/passes/canonicalize/c
 import { PassResult } from '../../../../src/compiler/passes/pass.js';
 import { DCEPass } from '../../../../src/compiler/passes/simplify/dce.js';
 import { compile } from '../../../../src/index.js';
-import { CPUTarget } from '../../../../src/backend/target.js';
+import { CPUTarget } from '../../../../src/compiler/support/target.js';
 import * as nn from '../../../../src/nn/index.js';
 import { randn } from '../../../../src/tensor/factory/creation_ops.js';
 import { manualSeed, unseed } from '../../../../src/util/random.js';

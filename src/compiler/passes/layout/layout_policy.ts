@@ -6,7 +6,7 @@ import { LayoutPreference } from '../../ir/graph/layout_pref.js';
 import type { Layout, IRType } from '../../ir/graph/types.js';
 import type { InferLayoutFn } from '../../ir/graph/layout_pref.js';
 import type { Operation } from '../../ir/graph/operation.js';
-import type { CompileTarget } from '../../pipeline/pipeline_types.js';
+import type { CompileTarget } from '../../support/config_types.js';
 
 export { LayoutPreference } from '../../ir/graph/layout_pref.js';
 

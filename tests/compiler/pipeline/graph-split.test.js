@@ -2,10 +2,10 @@ import { describe, it, expect } from 'vitest';
 import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { GraphModule } from '../../../src/compiler/ir/graph/module.js';
-import { CPUTarget, CUDATarget, WebGPUTarget } from '../../../src/backend/target.js';
+import { CPUTarget, CUDATarget, WebGPUTarget } from '../../../src/compiler/support/target.js';
 import { CompilerConfig } from '../../../src/compiler/pipeline/compiler.js';
 import { countBoundaryClasses, selectGraphSplitStrategy } from '../../../src/compiler/pipeline/graph_split.js';
-import { TargetAttr } from '../../../src/compiler/pipeline/target_attrs.js';
+import { TargetAttr } from '../../../src/compiler/support/target_attrs.js';
 import { launchBoundaryClass, countLaunchBoundaries } from '../../../src/compiler/ir/graph/op_traits.js';
 
 const f32 = (shape) => new TensorType(shape, ScalarType.F32);

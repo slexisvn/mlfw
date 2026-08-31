@@ -1,4 +1,4 @@
-import { classifyBlock } from '../schedule/rules.js';
+import { classifyBlock } from './rules.js';
 import type { NodeSlots } from '../ir/tensor/nodes.js';
 import type { TirNode, PrimFunc, BlockNode } from '../ir/tensor/nodes.js';
 

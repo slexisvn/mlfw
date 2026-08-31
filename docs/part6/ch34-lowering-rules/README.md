@@ -58,7 +58,7 @@ The consequence is the practical one: **turning off a pass can make lowering fai
 
 ### Registration
 
-[`op_strategy.ts`](../../../src/compiler/passes/lowering/op_strategy.ts), 93 lines, is Definitions 34.1 and 34.2 verbatim. `registerLoweringRule` and `registerTargetLoweringRule` are thin wrappers that pick the priority ([`lowering_registry.ts:73`](../../../src/compiler/passes/lowering/lowering_registry.ts)):
+[`op_strategy.ts`](../../../src/compiler/passes/lowering/op_strategy.ts), 93 lines, is Definitions 34.1 and 34.2 verbatim. `registerLoweringRule` and `registerTargetLoweringRule` are thin wrappers that pick the priority ([`lowering_registry.ts:82`](../../../src/compiler/passes/lowering/lowering_registry.ts)):
 
 ```ts
 export function registerLoweringRule(opName: string, ruleFunc: LoweringRuleFn, plevel = GENERIC_PLEVEL): void {
@@ -118,7 +118,7 @@ Five shared constructors carry most of those rules.
 | `buildDotGeometry` + `emitMatmulInitAcc` | [`lowering_registry.ts:529`](../../../src/compiler/passes/lowering/lowering_registry.ts) | `dot`, `fused_dot_epilogue`, `quantized_dot` |
 | `buildConvNest` | [`lowering_registry.ts:280`](../../../src/compiler/passes/lowering/lowering_registry.ts) | `conv`, `quantized_conv` |
 
-`lowerPointwise` is Definition 34.5 at its purest ([`lowering_registry.ts:445`](../../../src/compiler/passes/lowering/lowering_registry.ts)):
+`lowerPointwise` is Definition 34.5 at its purest ([`lowering_registry.ts:508`](../../../src/compiler/passes/lowering/lowering_registry.ts)):
 
 ```ts
 export function lowerPointwise(ctx: LoweringContext, op: Operation, inputs: readonly Buffer[], outputs: readonly Buffer[], exprBuilder: PointwiseExprBuilder): TirNode {

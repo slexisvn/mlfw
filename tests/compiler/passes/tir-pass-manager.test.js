@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { TirPassManager } from '../../../src/compiler/passes/tir_pass_manager.js';
 import { PrimFuncPass, TirModulePass } from '../../../src/compiler/passes/tir_pass.js';
 import { TirModule } from '../../../src/compiler/ir/tensor/module.js';
-import { TraceLog, TraceLevel } from '../../../src/compiler/pipeline/trace.js';
+import { TraceLog, TraceLevel } from '../../../src/compiler/support/trace.js';
 import { PrimFunc, SeqNode, EvaluateNode, VariableNode } from '../../../src/compiler/ir/tensor/nodes.js';
 
 function pf(name) {

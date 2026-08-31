@@ -172,7 +172,7 @@ kernel:
 
 Both operations survive every layer, and the kernel performs both. Read that as the target state, then read what each row used to say.
 
-**`x + 0` was a graph-level rewrite.** The graph after the passes read `return(%0)` — the add was gone, and the kernel was a copy. The pattern responsible is `AddZero` ([`patterns.ts:167`](../../../src/compiler/ir/graph/patterns.ts)), which took no `fastMath` argument and consulted no dtype, while `SubZero` immediately below it and `SubSelf` and `MulZero` below that all did. By Theorem 20.2 it needs one: `(−0) + (+0) = +0` and the rewrite yields `−0`. It now carries the same check its three neighbours already had:
+**`x + 0` was a graph-level rewrite.** The graph after the passes read `return(%0)` — the add was gone, and the kernel was a copy. The pattern responsible is `AddZero` ([`patterns.ts:190`](../../../src/compiler/ir/graph/patterns.ts)), which took no `fastMath` argument and consulted no dtype, while `SubZero` immediately below it and `SubSelf` and `MulZero` below that all did. By Theorem 20.2 it needs one: `(−0) + (+0) = +0` and the rewrite yields `−0`. It now carries the same check its three neighbours already had:
 
 ```ts
 export class AddZero extends Pattern {

@@ -7,7 +7,7 @@ import { Buffer } from '../../../src/compiler/ir/tensor/buffer.js';
 import { Schedule, resetVarCounter } from '../../../src/compiler/schedule/schedule.js';
 import { ScheduleValidator } from '../../../src/compiler/schedule/validator.js';
 import { BackendPipeline } from '../../../src/backend/pipeline.js';
-import { CPUTarget } from '../../../src/backend/target.js';
+import { CPUTarget } from '../../../src/compiler/support/target.js';
 import { spatialIter } from '../../_utils/ir_fixture.js';
 
 function countLoads(node, name) {

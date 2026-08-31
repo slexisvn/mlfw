@@ -138,7 +138,7 @@ The module is the least interesting container and the shortest file, which is as
 
 That counter is the foundation of Chapter 16's analysis caching: an analysis result computed at version 7 is known to be stale at version 8, without comparing anything.
 
-**Attributes count as edits.** An attribute is not decoration: a `dot`'s `lhs_contracting` decides which axes are summed, and a comparison's `direction` decides whether the test is `<` or `>`. Changing one changes what the program computes, and passes do change them in place — [`patterns.ts:162`](../../../src/compiler/ir/graph/patterns.ts) inverts a comparison's `direction` during canonicalization, [`partition_pass.ts:59`](../../../src/compiler/passes/partition/partition_pass.ts) stamps `partition_id` onto existing operations. So the attribute mutators notify too ([`operation.ts:84`](../../../src/compiler/ir/graph/operation.ts)):
+**Attributes count as edits.** An attribute is not decoration: a `dot`'s `lhs_contracting` decides which axes are summed, and a comparison's `direction` decides whether the test is `<` or `>`. Changing one changes what the program computes, and passes do change them in place — [`patterns.ts:162`](../../../src/compiler/ir/graph/patterns.ts) inverts a comparison's `direction` during canonicalization, [`partition_pass.ts:59`](../../../src/compiler/passes/partition/partition_pass.ts) stamps `partition_id` onto existing operations. So the attribute mutators notify too ([`operation.ts:88`](../../../src/compiler/ir/graph/operation.ts)):
 
 ```ts
   setAttr(name: string, value: AttrValue): void {
@@ -276,7 +276,7 @@ The lab computes the capture set the hard way — every value used inside, minus
 
 ## 9.8 Cloning, and why it is harder than it looks
 
-One operation on this structure is worth reading in full, because it is where all six nouns interact: cloning a region ([`operation.ts:283`](../../../src/compiler/ir/graph/operation.ts)):
+One operation on this structure is worth reading in full, because it is where all six nouns interact: cloning a region ([`operation.ts:300`](../../../src/compiler/ir/graph/operation.ts)):
 
 ```ts
 export function cloneRegion(region: Region, valueMap: Map<Value, Value> = new Map()): Region {

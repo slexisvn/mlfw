@@ -1,12 +1,12 @@
 import { GraphFunction } from '../../ir/graph/function.js';
 import { Operation } from '../../ir/graph/operation.js';
-import { topoSortOps, buildPartitions, topoSortPartitions, computePartitionIO } from './partition_core.js';
+import { topoSortOps, buildPartitions, topoSortPartitions, computePartitionIO } from '../../analysis/partition_core.js';
 import { isConstantOp as isConstantOpName, isTerminatorOp, containsLaunchBoundary } from '../../ir/graph/op_traits.js';
 import type { GraphModule } from '../../ir/graph/module.js';
 import type { Block } from '../../ir/graph/block.js';
 import type { Value } from '../../ir/graph/value.js';
 import type { TensorType } from '../../ir/graph/types.js';
-import type { BuildPartitionsOpts, Partition } from './partition_core.js';
+import type { BuildPartitionsOpts, Partition } from '../../analysis/partition_core.js';
 
 export type CublasDotInfo = { M: number; N: number; K: number; transB: boolean };
 type BufferedPartition = Partition & { maxBuf?: number };

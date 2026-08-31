@@ -14,6 +14,7 @@ const i32 = (n) => new IntImmNode(n);
 const add = (a, b) => new MathOpNode('+', a, b);
 const mul = (a, b) => new MathOpNode('*', a, b);
 const shift = (name, k) => (k === 0 ? v(name) : add(v(name), i32(k)));
+const gcdOf = (a, b) => (b === 0 ? a : gcdOf(b, a % b));
 
 function loopNest(names, extents, body) {
   let node = body;
@@ -231,5 +232,134 @@ describe('Allen-Kennedy permutation legality from direction vectors', () => {
     const dep = deps.find((d) => d.buffer === A && d.masks.some((m) => m === ANY_DIRECTION));
     expect(dep).toBeDefined();
     expect(permutationPreservesDependences(deps, loops, [loops[1], loops[0]])).not.toBeNull();
+  });
+});
+
+function linearIndex(names, terms, konst) {
+  let expr = i32(konst);
+  for (const [level, coeff] of terms) {
+    expr = add(expr, coeff === 1 ? v(names[level]) : mul(v(names[level]), i32(coeff)));
+  }
+  return expr;
+}
+
+function flatSelfUpdateFunc(names, extents, size, write, read) {
+  const A = new Buffer('A', [size], 'float32', 'global');
+  const store = new BufferStoreNode(A, [linearIndex(names, write.terms, write.konst)],
+    add(new BufferLoadNode(A, [linearIndex(names, read.terms, read.konst)]), i32(1)));
+  return new PrimFunc('f', [], loopNest(names, extents, store), new Map([['A', A]]));
+}
+
+function flatBruteForceMasks(extents, size, write, read) {
+  const n = extents.length;
+  const masks = new Array(n).fill(0);
+  const points = [];
+  const walkPoints = (prefix) => {
+    if (prefix.length === n) { points.push([...prefix]); return; }
+    for (let x = 0; x < extents[prefix.length]; x++) walkPoints([...prefix, x]);
+  };
+  walkPoints([]);
+  const evaluate = (spec, point) => spec.terms.reduce((acc, [level, coeff]) => acc + coeff * point[level], spec.konst);
+  const lexCompare = (a, b) => {
+    for (let d = 0; d < a.length; d++) {
+      if (a[d] !== b[d]) return a[d] < b[d] ? -1 : 1;
+    }
+    return 0;
+  };
+
+  for (const I of points) {
+    const w = evaluate(write, I);
+    if (w < 0 || w >= size) continue;
+    for (const J of points) {
+      const r = evaluate(read, J);
+      if (r < 0 || r >= size) continue;
+      if (w !== r) continue;
+      const writeFirst = lexCompare(I, J) <= 0;
+      const earlier = writeFirst ? I : J;
+      const later = writeFirst ? J : I;
+      for (let d = 0; d < n; d++) {
+        const delta = later[d] - earlier[d];
+        masks[d] |= delta > 0 ? Direction.LT : (delta === 0 ? Direction.EQ : Direction.GT);
+      }
+    }
+  }
+  return masks;
+}
+
+describe('Banerjee bounds prune multi-index subscripts the GCD test cannot', () => {
+  const cases = [
+    {
+      name: 'A[2i+4j] vs A[2i+4j+100] on a 128-wide buffer',
+      names: ['i', 'j'], extents: [4, 4], size: 128,
+      write: { terms: [[0, 2], [1, 4]], konst: 0 },
+      read: { terms: [[0, 2], [1, 4]], konst: 100 },
+    },
+    {
+      name: 'A[8i+j] vs A[8i+j-40] on a 64-wide buffer',
+      names: ['i', 'j'], extents: [4, 4], size: 64,
+      write: { terms: [[0, 8], [1, 1]], konst: 0 },
+      read: { terms: [[0, 8], [1, 1]], konst: -40 },
+    },
+  ];
+
+  for (const c of cases) {
+    it(`${c.name}: GCD admits it, Banerjee proves independence`, () => {
+      const expected = flatBruteForceMasks(c.extents, c.size, c.write, c.read);
+      expect(expected.every((m) => m === 0)).toBe(true);
+
+      const g = c.write.terms.reduce((acc, [, coeff]) => (acc === 0 ? Math.abs(coeff) : gcdOf(acc, Math.abs(coeff))), 0);
+      expect(Math.abs((c.read.konst - c.write.konst) % g)).toBe(0);
+
+      const func = flatSelfUpdateFunc(c.names, c.extents, c.size, c.write, c.read);
+      const { write, read } = writeReadPair(func);
+      expect(accessDependence(write, read)).toBeNull();
+    });
+  }
+
+  const refined = [
+    {
+      name: 'A[4i+j] vs A[4i+j-1]',
+      names: ['i', 'j'], extents: [4, 4], size: 16,
+      write: { terms: [[0, 4], [1, 1]], konst: 0 },
+      read: { terms: [[0, 4], [1, 1]], konst: -1 },
+    },
+    {
+      name: 'A[i+2j] vs A[i+2j+3]',
+      names: ['i', 'j'], extents: [4, 4], size: 16,
+      write: { terms: [[0, 1], [1, 2]], konst: 0 },
+      read: { terms: [[0, 1], [1, 2]], konst: 3 },
+    },
+  ];
+
+  for (const c of refined) {
+    it(`${c.name}: reported directions stay a sound superset of the enumerated ones`, () => {
+      const expected = flatBruteForceMasks(c.extents, c.size, c.write, c.read);
+      expect(expected.some((m) => m !== 0)).toBe(true);
+
+      const func = flatSelfUpdateFunc(c.names, c.extents, c.size, c.write, c.read);
+      const { write, read } = writeReadPair(func);
+      const dep = accessDependence(write, read);
+      expect(dep).not.toBeNull();
+      for (let d = 0; d < expected.length; d++) {
+        expect(dep.masks[d] & expected[d]).toBe(expected[d]);
+      }
+    });
+  }
+
+  it('narrows a direction the GCD test would have left wide open', () => {
+    const names = ['i', 'j'];
+    const extents = [4, 4];
+    const write = { terms: [[0, 8], [1, 1]], konst: 0 };
+    const read = { terms: [[0, 8], [1, 1]], konst: -8 };
+    const func = flatSelfUpdateFunc(names, extents, 64, write, read);
+    const { write: w, read: r } = writeReadPair(func);
+    const dep = accessDependence(w, r);
+    expect(dep).not.toBeNull();
+    expect(dep.masks.some((m) => m !== ANY_DIRECTION)).toBe(true);
+
+    const expected = flatBruteForceMasks(extents, 64, write, read);
+    for (let d = 0; d < expected.length; d++) {
+      expect(dep.masks[d] & expected[d]).toBe(expected[d]);
+    }
   });
 });

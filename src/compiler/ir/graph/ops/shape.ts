@@ -1,7 +1,7 @@
 import { OpDef, OpTrait } from '../op_registry.js';
 import type { OpAttrRecord, OpRegistry, SymbolicDim } from '../op_registry.js';
 import { TensorType, DYNAMIC, resolveInferredDims, shapeProduct } from '../types.js';
-import { SymInt } from '../../../analysis/sym_int.js';
+import { SymInt } from '../../sym_int.js';
 import type { AttrValue, Dim, Shape } from '../types.js';
 import * as pat from '../patterns.js';
 
@@ -365,7 +365,6 @@ export function register(registry: OpRegistry) {
     ],
     hasRegions: true,
     numRegions: 1,
-    sideEffects: 2,
     inferResultTypes(operandTypes) {
       if (operandTypes.length < 1) return null;
       const inp = operandTypes[0];

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { tensor, matmul, relu, tanh, sum, mean } from '../../src/index.js';
 import * as nn from '../../src/nn/index.js';
 import { compileWithBackward } from '../../src/tracing/compile_backward.js';
-import { CPUTarget } from '../../src/backend/target.js';
+import { CPUTarget } from '../../src/compiler/support/target.js';
 import { ones, zeros } from '../../src/tensor/factory/creation_ops.js';
 import { mulberry32 } from '../_utils/rng.js';
 import { randomTensor, flat, nest, numel } from '../_utils/tensor_data.js';

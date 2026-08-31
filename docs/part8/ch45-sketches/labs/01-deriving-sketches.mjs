@@ -169,7 +169,7 @@ console.log(`  after applying config 0: ${bsch.trace.length} trace steps recorde
 console.log('  the body it produced:');
 console.log(printTensorIR(built).split('\n').slice(4, 14).map((l) => '   ' + l).join('\n'));
 console.log('\n  This is not a schedule. `createMatmulRegisterBlockGPUSketch` assigns');
-console.log('  `schedule.func.body = body` (gpu_matmul_sketch.ts:393) with a nest built');
+console.log('  `schedule.func.body = body` (gpu_matmul_sketch.ts:20) with a nest built');
 console.log('  from scratch by `buildRegisterBlockedMatmul`. It is Chapter 43\'s finding');
 console.log('  reached from the other side — the compiler\'s best GPU kernel is written,');
 console.log('  not scheduled — and the consequence visible here is the one Chapter 48');

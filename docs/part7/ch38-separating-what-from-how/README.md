@@ -94,7 +94,7 @@ An advisory annotation is sound for free: a backend that ignores it cannot be br
 
 Three modes, in increasing order of cost: a hand-written GPU template (`applyDeterministicGpuSchedule`, Chapter 43), a rule per block (`SchedulePolicy`, below), and a search (`Autotuner`, Part VIII). A function that already has an external kernel or a tensor intrinsic is skipped entirely — someone else has decided how it runs.
 
-The defaults are worth reading against that code. `CompilerConfig` starts from `{ enabled: false, autotune: false, gpuTiling: false }` ([`compiler.ts:143`](../../../src/compiler/pipeline/compiler.ts)) and overlays the target's declaration. Only two targets declare anything: CUDA says `{ gpuTiling: true }` ([`target.ts:225`](../../../src/backend/target.ts)) and WebGPU says `{ enabled: true }` ([`target.ts:261`](../../../src/backend/target.ts)). **So scheduling is off by default on CPU and on WASM, and on CUDA only the template path is on.** §38.6 shows what that costs.
+The defaults are worth reading against that code. `CompilerConfig` starts from `{ enabled: false, autotune: false, gpuTiling: false }` ([`compiler.ts:143`](../../../src/compiler/pipeline/compiler.ts)) and overlays the target's declaration. Only two targets declare anything: CUDA says `{ gpuTiling: true }` ([`target.ts:225`](../../../src/compiler/support/target.ts)) and WebGPU says `{ enabled: true }` ([`target.ts:261`](../../../src/compiler/support/target.ts)). **So scheduling is off by default on CPU and on WASM, and on CUDA only the template path is on.** §38.6 shows what that costs.
 
 ### The primitives
 
@@ -132,29 +132,21 @@ Resolve the argument; **check legality and throw before mutating anything**; mut
 
 ### The rules
 
-`SchedulePolicy` ([`rules.ts:525`](../../../src/compiler/schedule/rules.ts)) is a list of nine `ScheduleRule`s tried in order, first match wins ([`rules.ts:536`](../../../src/compiler/schedule/rules.ts)):
+`SchedulePolicy` ([`rules.ts:535`](../../../src/compiler/schedule/rules.ts)) holds nine `ScheduleRule`s, filtered by target and then tried in order, first match wins ([`rules.ts:546`](../../../src/compiler/schedule/rules.ts)):
 
 ```ts
-  static defaultRules(): ScheduleRule[] {
-    return [
-      new MatmulTiledCPURule(),
-      new MatmulTiledGPURule(),
-      new ReductionCPURule(),
-      new ReductionGPURule(),
-      new ReductionWasmRule(),
-      new ElementwiseCPURule(),
-      new ElementwiseGPURule(),
-      new ElementwiseWasmRule(),
-      new FallbackRule()
-    ];
+  static rulesFor(target: ScheduleTarget): ScheduleRule[] {
+    return [..._registeredRules, ...SchedulePolicy.builtinRules()].filter(rule => rule.appliesTo(target));
   }
 ```
 
-A rule is a pair of methods, `matches(primFunc, blockName, target)` and `apply(schedule, blockName, target)`. Both consult `classifyBlock` ([`rules.ts:42`](../../../src/compiler/schedule/rules.ts)), which caches per function a five-field summary: how many loops enclose the block, whether it reduces, which loop variables are the reduction axes, and the read and write buffer names. That is the whole of what a rule sees; a rule never looks at the block body.
+A rule is a declaration plus a pair of methods. The declaration is `targetKinds`, a set of target kinds the rule is written for, or `null` for "any"; `appliesTo` is the only thing that reads it, and `rulesFor` applies it once when the policy is constructed rather than on every block. The methods are `matches(primFunc, blockName, target)` and `apply(schedule, blockName, target)`. Both consult `classifyBlock` ([`rules.ts:50`](../../../src/compiler/schedule/rules.ts)), which caches per function a five-field summary: how many loops enclose the block, whether it reduces, which loop variables are the reduction axes, and the read and write buffer names. That is the whole of what a rule sees; a rule never looks at the block body.
 
-The ordering is a priority scheme and reads as one: the most specific shape (a matmul) before a general one (a reduction) before the most general (elementwise), each group split by target, with `FallbackRule` matching unconditionally at the end. Every rule name carries its target and `matches` opens by checking it, so the nine are eight shape-and-target pairs plus a default — and the grid has a hole in it. Reduction and elementwise each have a CPU, a GPU and a WASM rule; matmul has only CPU and GPU. A WASM matmul falls past `MatmulTiledCPURule` and `MatmulTiledGPURule` on their target checks and is picked up by `ReductionWasmRule`, which parallelises the outer spatial loop and, if SIMD is available, vectorises the contraction axis. That is not a bad schedule for a GEMM; it is just not a tiled one.
+Splitting the target test out of `matches` is what makes the set extensible: `registerScheduleRule` lets a backend contribute a rule for its own kind, and registered rules are consulted before the builtin ones, exactly as `registerCodegen` and the graph pass registry work. A rule whose `matches` opened with `if (target.kind !== …) return false` would still work, but adding a target would mean editing this file, and the same identity test would be spread across eight `matches` bodies instead of appearing once per rule as data.
 
-`applyToBlock` wraps `apply` in a `try` ([`rules.ts:559`](../../../src/compiler/schedule/rules.ts)):
+The remaining ordering is a priority scheme and reads as one: the most specific shape (a matmul) before a general one (a reduction) before the most general (elementwise), with `FallbackRule` — the one rule with no `targetKinds` — matching unconditionally at the end. So the nine are eight shape-and-target pairs plus a default, and the grid has a hole in it. Reduction and elementwise each have a CPU, a GPU and a WASM rule; matmul has only CPU and GPU. On a WASM target `rulesFor` returns three rules — `ReductionWasmRule`, `ElementwiseWasmRule`, `FallbackRule` — so a WASM matmul is picked up by `ReductionWasmRule`, which parallelises the outer spatial loop and, if SIMD is available, vectorises the contraction axis. That is not a bad schedule for a GEMM; it is just not a tiled one, and the hole is now visible in the rule list rather than buried in eight target tests.
+
+`applyToBlock` wraps `apply` in a `try` ([`rules.ts:573`](../../../src/compiler/schedule/rules.ts)):
 
 ```ts
     const rule = this.selectRule(schedule.func, blockName);
@@ -290,12 +282,12 @@ A `__global__` function containing a serial loop over 4096 elements is a GPU ker
 - **Seven primitives are reachable from the default rule set:** `split`, `fuseLoops`, `tile`, `vectorize`, `parallelize` and `bindThread` are called by a rule directly, and `reorder` only from inside `tile`. `unroll`, `rfactor`, `decomposeReduction` and `fuseConsumer` need the autotuner (Part VIII); `computeInlineBlock` runs in `InlineReindexPass` on GPU targets only; `tensorize` needs `optimization.tensorize`.
 - **`tensorize` records nothing in the trace.** Every other mutating primitive calls `this.trace.record(...)`; `tensorize` ([`schedule.ts:1093`](../../../src/compiler/schedule/schedule.ts)) sets a function attribute and returns. A trace replayed onto a fresh `PrimFunc` therefore reproduces every step except that one. `tile` also records nothing, which is correct — it is defined as a sequence of `split`s and a `reorder`, and those record themselves.
 - **A rule sees a five-field summary, never the body.** `classifyBlock` is what `matches` gets, so `isMatmulShape` ([`rules.ts:99`](../../../src/compiler/schedule/rules.ts)) is "has a reduction, reads two buffers, writes one, at least three loops" — a description that a batched attention score, a bilinear form and a genuine GEMM all satisfy.
-- **The classification cache is keyed on the `PrimFunc` and cleared by hand.** `_classifyCacheByFunc` is a `WeakMap` ([`rules.ts:40`](../../../src/compiler/schedule/rules.ts)) invalidated by explicit calls to `invalidateClassifyBlock` after each `apply` and `invalidateClassifyCache` at the start of `applyToAllBlocks`. This is the manual version of Chapter 16's invalidation problem, in a subsystem that does not use the analysis manager.
+- **The classification cache is keyed on the `PrimFunc` and cleared by hand.** `_classifyCacheByFunc` is a `WeakMap` ([`rules.ts:48`](../../../src/compiler/schedule/rules.ts)) invalidated by explicit calls to `invalidateClassifyBlock` after each `apply` and `invalidateClassifyCache` at the start of `applyToAllBlocks`. This is the manual version of Chapter 16's invalidation problem, in a subsystem that does not use the analysis manager.
 - **`FallbackRule` parallelises the outermost loop of anything, on CPU only.** It matches unconditionally and its `apply` is five lines ([`rules.ts:507`](../../../src/compiler/schedule/rules.ts)), of which the operative one runs for `target.isCPU()`. On WASM a block that no rule matched gets nothing at all — including the parallel annotation that WASM, unlike the CPU, would have spent.
 
 ## 38.8 Read the tests
 
-- [`tests/compiler/schedule/rules.test.js`](../../../tests/compiler/schedule/rules.test.js) — which rule matches which block shape on which target, and the fallback.
+- [`tests/compiler/schedule/rules.test.js`](../../../tests/compiler/schedule/rules.test.js) — which rule matches which block shape on which target, and the fallback; plus the target filter as its own test, which asserts the exact rule list each shipped target sees and that a rule registered for one kind is invisible to the others.
 - [`tests/compiler/schedule/primitives.test.js`](../../../tests/compiler/schedule/primitives.test.js) — the primitives one at a time, each against the IR it should produce.
 - [`tests/compiler/schedule/trace.test.js`](../../../tests/compiler/schedule/trace.test.js) — that a recorded schedule replays to the same program, which is Proposition 38.4 made executable.
 

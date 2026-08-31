@@ -3,7 +3,7 @@ import type { DispatchKeyValue } from './dispatch_key.js';
 import { jitCompile } from './jit_cache.js';
 import type { TargetLike } from './jit_cache.js';
 import { isEagerDeferred } from './eager_mode.js';
-import { CPUTarget, CUDATarget, WasmTarget, WebGPUTarget } from '../backend/target.js';
+import { CPUTarget, CUDATarget, WasmTarget, WebGPUTarget } from '../compiler/support/target.js';
 import { Tensor } from '../tensor/core/tensor.js';
 import { isTensor } from '../tensor/core/is_tensor.js';
 import { TensorImpl } from '../tensor/core/tensor_impl.js';

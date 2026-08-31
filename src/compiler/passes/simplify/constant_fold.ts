@@ -2,7 +2,7 @@ import { FunctionPass, PassResult } from '../pass.js';
 import { IRBuilder } from '../../ir/graph/builder.js';
 import { registry } from '../../ir/graph/ops.js';
 import { explainer } from '../explain.js';
-import { TraceLevel } from '../../pipeline/trace.js';
+import { TraceLevel } from '../../support/trace.js';
 import { isIntType } from '../../ir/graph/types.js';
 import { roundToDtype } from '../../../tensor/utils/half.js';
 import type { AttrValue, ScalarDType, TensorType } from '../../ir/graph/types.js';

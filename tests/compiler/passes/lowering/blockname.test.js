@@ -5,9 +5,9 @@ import { lowerGraphToPrimFunc } from '../../../../src/compiler/passes/lowering/g
 import { BlockNode } from '../../../../src/compiler/ir/tensor/nodes.js';
 import { Schedule } from '../../../../src/compiler/schedule/schedule.js';
 import { SchedulePolicy } from '../../../../src/compiler/schedule/rules.js';
-import { CUDATarget } from '../../../../src/backend/target.js';
+import { CUDATarget } from '../../../../src/compiler/support/target.js';
 import { BlockRole, numberedBlockName, opOfBlockName } from '../../../../src/compiler/ir/tensor/block_name.js';
-import { clonePrimFunc } from '../../../../src/compiler/autotune/tune_ir.js';
+import { clonePrimFunc } from '../../../../src/compiler/ir/tensor/clone_tir.js';
 
 function lower(name, inTypes, outTypes, bodyFn) {
   const func = buildFunction(name, inTypes, outTypes, bodyFn);

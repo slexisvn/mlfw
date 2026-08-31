@@ -36,9 +36,9 @@ The definition deliberately does not require totality, because one of the sketch
 
 First-match, not best-match: the rules are a decision list, so their order is part of their meaning and adding a rule at a lower priority number can silently take work away from an existing one.
 
-> **Proposition 45.3 (Derivation is total, given a supported target and `richGpu` off).** **(invariant)** For a CPU or GPU target with `opts.richGpu` unset, `deriveSketches` returns a non-empty list for every block. It returns the empty list for a target that is neither CPU nor GPU ([`derivation.ts:78`](../../../src/compiler/autotune/derivation.ts)), and for a GPU target with `richGpu` set it returns the empty list for every block of a recognised pure matmul except the reduction block ([`gpu_matmul_sketch.ts:539`](../../../src/compiler/autotune/gpu_matmul_sketch.ts)).
+> **Proposition 45.3 (Derivation is total, given a supported target and `richGpu` off).** **(invariant)** For a CPU or GPU target with `opts.richGpu` unset, `deriveSketches` returns a non-empty list for every block. It returns the empty list for a target whose kind is not in the declared `SKETCH_TARGET_KINDS` ([`derivation.ts:98`](../../../src/compiler/autotune/derivation.ts)), and for a GPU target with `richGpu` set it returns the empty list for every block of a recognised pure matmul except the reduction block ([`gpu_matmul_sketch.ts:43`](../../../src/compiler/autotune/gpu_matmul_sketch.ts)).
 
-*Proof.* The rule registered at priority 30 has `matches: () => true` ([`derivation.ts:69`](../../../src/compiler/autotune/derivation.ts)) and its `derive` returns a one-element list, so the scan in `deriveSketches` always terminates on a rule that produces a sketch. The two exceptions are the two early returns above the scan. ∎
+*Proof.* The rule registered at priority 30 has `matches: () => true` ([`derivation.ts:89`](../../../src/compiler/autotune/derivation.ts)) and its `derive` returns a one-element list, so the scan in `deriveSketches` always terminates on a rule that produces a sketch. The two exceptions are the two early returns above the scan. ∎
 
 The exceptions are not idle: on WASM the autotuner derives no sketches at all, and §45.7 says what that costs.
 
@@ -64,15 +64,20 @@ This is the load-bearing correctness argument for the whole of Part VIII: it is 
 
 *Proof.* Proposition 38.4: a composition of sound partial functions is sound. A point on which `apply` throws contributes no program at all, because `BlockTuningSession` clones the function before every attempt ([`session.ts:183`](../../../src/compiler/autotune/session.ts)) and discards the clone — which is what the search needs, since `tile` is known to leave the IR modified after failing (Chapter 40). ∎
 
-> **Counterexample 45.8 (Two ways the hypothesis fails).** `createRfactorSketch` calls `rfactor`, which is sound only under a relaxed floating-point semantics (Theorem 41.2 and Counterexample 41.3), so the `rfactor` sketch's space contains points that change the answer. And `createMatmulRegisterBlockGPUSketch` calls no primitive at all: it assigns `schedule.func.body` a nest built from scratch ([`gpu_matmul_sketch.ts:393`](../../../src/compiler/autotune/gpu_matmul_sketch.ts)), so Theorem 45.7 says nothing whatever about it. Its correctness rests on `buildRegisterBlockedMatmul` being right, which is a 115-line hand-written kernel generator and a different kind of obligation.
+> **Counterexample 45.8 (Two ways the hypothesis fails).** `createRfactorSketch` calls `rfactor`, which is sound only under a relaxed floating-point semantics (Theorem 41.2 and Counterexample 41.3), so the `rfactor` sketch's space contains points that change the answer. And `createMatmulRegisterBlockGPUSketch` calls no primitive at all: it assigns `schedule.func.body` a nest built from scratch ([`gpu_matmul_sketch.ts:20`](../../../src/compiler/autotune/gpu_matmul_sketch.ts)), so Theorem 45.7 says nothing whatever about it. Its correctness rests on `buildRegisterBlockedMatmul` being right, which is a 115-line hand-written kernel generator and a different kind of obligation.
 
 ## 45.4 In mlfw
 
-### The three rules
+### The four rules
 
-[`derivation.ts:60`](../../../src/compiler/autotune/derivation.ts), and the whole classifier is twelve lines:
+[`derivation.ts:75`](../../../src/compiler/autotune/derivation.ts), and the whole classifier is seventeen lines:
 
 ```ts
+registerSketchRule({
+  matches: (s: BlockStructure) => s.hasReduction && s.spatial >= 1 && s.reads >= 2,
+  derive: deriveMultiLevelCPU,
+  targetKinds: [TargetKind.CPU],
+}, { priority: 5 });
 registerSketchRule({
   matches: (s: BlockStructure) => s.hasReduction && s.spatial >= 1 && s.reads >= 2,
   derive: deriveMultiLevel,
@@ -87,27 +92,29 @@ registerSketchRule({
 }, { priority: 30 });
 ```
 
-`BlockStructure` is four numbers ([`block_analysis.ts:38`](../../../src/compiler/autotune/block_analysis.ts)): the count of spatial loops, the count of reduction loops, the size of the *declared* read set, and whether the block has a reduction at all. Nothing else about the block is consulted, and in particular the operator is not — `matches` cannot tell a matmul from a convolution from a hand-written contraction, and does not need to.
+The first two share a `matches`; what separates them is `targetKinds`, which the scan consults before `matches`. A rule with no `targetKinds` is offered to every supported target, so the priority-10 rule is the general case and the priority-5 rule is the CPU specialisation that shadows it. This is Definition 45.2's decision list doing exactly what the definition warns about, on purpose: a lower priority number takes work away from an existing rule.
+
+`BlockStructure` is four numbers ([`block_analysis.ts:38`](../../../src/compiler/schedule/block_analysis.ts)): the count of spatial loops, the count of reduction loops, the size of the *declared* read set, and whether the block has a reduction at all. Nothing else about the block is consulted, and in particular the operator is not — `matches` cannot tell a matmul from a convolution from a hand-written contraction, and does not need to.
 
 `reads >= 2` is the compute-intensity proxy, and it is the one clause that leans on a declaration rather than on the body. A block reading one buffer twice at different subscripts declares one read and is classified as a plain reduction; a block whose declaration is stale in the other direction would be classified as a contraction and offered a tiling sketch it does not deserve. The lowering rules make the declaration accurate today (Chapter 34), and the tiling sketch would still be sound if it were not — only wasteful.
 
-### `deriveMultiLevel`
+### `deriveMultiLevelCPU`
 
-[`derivation.ts:34`](../../../src/compiler/autotune/derivation.ts), seventeen lines, and the shape of a CPU block's whole offer:
+[`derivation.ts:47`](../../../src/compiler/autotune/derivation.ts), sixteen lines, and the shape of a CPU block's whole offer:
 
 ```ts
   const tiling = createMultiLevelTilingSketch(info, getTileStructure(target));
   if (tiling) sketches.push(tiling);
-  if (target.kind === TargetKind.CPU) {
-    const ssrsrs = createSSRSRSTilingSketch(info, CPU_TILING_SSRSRS);
-    if (ssrsrs) sketches.push(ssrsrs);
-    const rf = createRfactorSketch(info);
-    if (rf) sketches.push(rf);
-    const consumer = dag ? findFusibleConsumer(primFunc, dag, blockName, classifyBlock) : null;
-    if (consumer) sketches.push(createFusedTilingSketch(consumer));
-  }
+  const ssrsrs = createSSRSRSTilingSketch(info, CPU_TILING_SSRSRS);
+  if (ssrsrs) sketches.push(ssrsrs);
+  const rf = createRfactorSketch(info);
+  if (rf) sketches.push(rf);
+  const consumer = dag ? findFusibleConsumer(primFunc, dag, blockName, classifyBlock) : null;
+  if (consumer) sketches.push(createFusedTilingSketch(consumer));
   sketches.push(reductionSketch(target));
 ```
+
+The GPU sibling `deriveMultiLevel` ([`derivation.ts:37`](../../../src/compiler/autotune/derivation.ts)) keeps only the first and last of these: a multi-level tiling and the reduction fallback. The three CPU-only skeletons are a property of the *rule*, declared in its `targetKinds`, not a branch inside the derivation.
 
 Four candidate skeletons plus a fallback, and the `if (…)` guards are all *constructor-time* checks: whether the sketch can be built, not whether it can be applied. `createSSRSRSTilingSketch` builds successfully — it has spatial loops, reduction loops and constant extents — and throws on every parameter. That gap between "was constructed" and "can run" is where the chapter's two findings live.
 
@@ -318,7 +325,7 @@ Finally the escape hatch:
                for rb_tx in 0..16 @thread_binding [threadIdx.x] {
 ```
 
-Counterexample 45.8's second half. `richMatmulSketches` recognises a pure matrix multiply, enumerates register-blocking configurations against the target's shared memory and register budgets ([`gpu_matmul_sketch.ts:187`](../../../src/compiler/autotune/gpu_matmul_sketch.ts)), and returns a single sketch whose `apply` throws the schedule away. It also carries an `enumerate()` method that no other sketch has, which `BlockTuningSession` detects and uses to replace the search with exhaustive evaluation ([`session.ts:111`](../../../src/compiler/autotune/session.ts)) — 32 configurations is small enough to try all of them.
+Counterexample 45.8's second half. `richMatmulSketches` recognises a pure matrix multiply, enumerates register-blocking configurations against the target's shared memory and register budgets ([`matmul_tiling.ts:185`](../../../src/compiler/schedule/matmul_tiling.ts)), and returns a single sketch whose `apply` throws the schedule away. It also carries an `enumerate()` method that no other sketch has, which `BlockTuningSession` detects and uses to replace the search with exhaustive evaluation ([`session.ts:111`](../../../src/compiler/autotune/session.ts)) — 32 configurations is small enough to try all of them.
 
 This is the compiler's fastest GPU matmul and it is not a schedule. Chapter 43 reached the same conclusion from the code-generation side; the version visible here is that Theorem 45.7 does not apply to it, and Chapter 48's version is that it records nothing.
 
@@ -386,7 +393,7 @@ The init block of a 16×16 matmul has 256 elements, and the function it belongs 
 - **`rfactor` does not check that the axis it is factoring is a reduction axis.** [`schedule.ts:633`](../../../src/compiler/schedule/schedule.ts) onwards tests the loop, the extent, the factor and the body's operator, and never the axis's `IterVarKind`, so `rfactor('matmul_1', 'ls0_6', 2)` is accepted and produces a nest whose combine loop references two out-of-scope variables. Definition 41.1's requirement that the accumulator subscript not involve the factored axis is the missing hypothesis. Two things keep it latent: `createRfactorSketch` only ever names an axis from `blockInfo.reductionLoopVars` ([`sketch_generators.ts:34`](../../../src/compiler/autotune/sketch_generators.ts)), and `ScheduleValidator` rejects the result on the searched path ([`session.ts:186`](../../../src/compiler/autotune/session.ts)) — which is the validator earning its place, since a rule-produced schedule would not be checked.
 - **`ssrsrs_cpu` is derived, counted, sampled and always refused.** [`tiling.ts:131`](../../../src/compiler/autotune/tiling.ts) calls `decomposeReduction`, which needs an `initBody` no lowering rule sets (Chapter 33). It advertises 6,125 of a matmul block's 7,354 points on a 16×16×16 problem — 83% of the block's space is unreachable, and the reachable part contains no schedule that tiles the reduction axis.
 - **The `fused` sketch is never derived.** `findFusibleConsumer` compares store-subscript variable names against enclosing loop variable names ([`block_dag.ts:119`](../../../src/compiler/autotune/block_dag.ts), and again at `:124` and `:130` for the consumer). Those namespaces are disjoint for every block a lowering rule emits, so the comparison always fails, `createFusedTilingSketch` has no reachable caller, and `BlockTuningSession`'s `needsWholeFunc` branch ([`session.ts:96`](../../../src/compiler/autotune/session.ts)) — which exists to give the fused sketch a whole-function evaluation context — is dead with it.
-- **The autotuner derives nothing for a WASM target.** `deriveSketches` returns `[]` unless the target is `TargetKind.CPU` or `isGPU()` ([`derivation.ts:78`](../../../src/compiler/autotune/derivation.ts)), and `WasmTarget` is neither. Every block becomes an `empty` task, `tune` returns no results, and `tuneAndApply` falls back to the rule policy — which is the correct output, silently obtained without tuning. WASM is the one shipped backend that acts on both `@parallel` and `@vectorized`, so it is also the target where a schedule search would have most to gain.
+- **The autotuner derives nothing for a WASM target.** `deriveSketches` returns `[]` unless the target's kind is listed in `SKETCH_TARGET_KINDS` ([`derivation.ts:26`](../../../src/compiler/autotune/derivation.ts)), which holds CPU, CUDA and WebGPU, and `WasmTarget` is none of them. Every block becomes an `empty` task, `tune` returns no results, and `tuneAndApply` falls back to the rule policy — which is the correct output, silently obtained without tuning. WASM is the one shipped backend that acts on both `@parallel` and `@vectorized`, so it is also the target where a schedule search would have most to gain.
 - **`gpuThreadCap` caps the menu at 256.** [`sketch_generators.ts:10`](../../../src/compiler/autotune/sketch_generators.ts). Two of the six `BLOCK_SIZE_CANDIDATES` are unreachable on every device and three are aliases on a 256-thread device. Same constant, same consequence as the ceiling in Chapter 43, in a different file.
 - **A degenerate factorisation is a first-class point.** `[1,1,1,n]` parallelises a one-iteration loop and leaves the nest as it was. The sketch cannot avoid offering degenerate tuples: for a prime extent *every* tuple is one, since `F(p, 4) = 4` is exactly the four placements of `p` among four slots with 1s elsewhere. Nothing down-weights them, so a search that samples uniformly spends a constant fraction of its budget on schedules that do nothing.
 - **`applyRoles` picks the axis by position, not by extent.** `parallelize` always goes to `axes[0]` and `vectorize` always to `axes[axes.length − 1]` ([`tiling.ts:39`](../../../src/compiler/autotune/tiling.ts), [`tiling.ts:43`](../../../src/compiler/autotune/tiling.ts)). For a nest whose first spatial axis is short and second is long, the parallel loop is the short one and the search has no parameter that can swap them.

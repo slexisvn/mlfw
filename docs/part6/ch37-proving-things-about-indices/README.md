@@ -85,7 +85,7 @@ const EVERYTHING = new IntBound(NEG_INF, POS_INF);
 
 `EVERYTHING` is the interval `[−∞, +∞]`: the answer that excludes nothing and therefore proves nothing. Every abstract domain has one — the *top* of its lattice, the value meaning "could be anything" — and returning it is how this analysis says "I don't know" without ever saying something false. It is returned from six places in this file. Reading those six is the fastest way to know what this compiler cannot prove: a non-symbolic expression, an unbound variable, an unrecognised operator, a multiplication with an infinite endpoint, and a division or modulo whose divisor is not a positive constant.
 
-`bind` is how facts get in ([`analyzer.ts:41`](../../../src/compiler/analysis/analyzer.ts)), and there are four call sites in the whole compiler. All four say the same thing: a loop `for i in 0..e` with a literal `e` binds `i` to `[0, e−1]` ([`simplify_tir.ts:33`](../../../src/compiler/passes/simplify/simplify_tir.ts)):
+`bind` is how facts get in ([`analyzer.ts:61`](../../../src/compiler/analysis/analyzer.ts)), and there are four call sites in the whole compiler. All four say the same thing: a loop `for i in 0..e` with a literal `e` binds `i` to `[0, e−1]` ([`simplify_tir.ts:33`](../../../src/compiler/passes/simplify/simplify_tir.ts)):
 
 ```ts
 function bindLoopVar(ctx: SimplifyCtx, name: string, extentNode: TirNode): VarBound {
@@ -104,11 +104,11 @@ Note the `else`: a non-literal extent *unbinds* the variable rather than leaving
 
 Block iteration variables get bounds too, but derived rather than asserted: `setVarBound(name, irBound(analyzer, binding))` ([`simplify_tir.ts:62`](../../../src/compiler/passes/simplify/simplify_tir.ts)) evaluates the binding in the current environment, which is Chapter 33's iteration map feeding Chapter 37. So every bound in the system traces back to a literal loop extent.
 
-There is a fifth entry point, `bindShape` ([`analyzer.ts:56`](../../../src/compiler/analysis/analyzer.ts)), which would bind a whole shape environment at once. It has one caller and it is a test.
+There is a fifth entry point, `bindShape` ([`analyzer.ts:81`](../../../src/compiler/analysis/analyzer.ts)), which would bind a whole shape environment at once. It has one caller and it is a test.
 
 ### The transfer functions
 
-`constIntBound` ([`analyzer.ts:63`](../../../src/compiler/analysis/analyzer.ts)) is Theorem 37.3:
+`constIntBound` ([`analyzer.ts:160`](../../../src/compiler/analysis/analyzer.ts)) is Theorem 37.3:
 
 ```ts
       case 'add':
@@ -152,7 +152,7 @@ Three operations refuse rather than approximate:
 
 ### From a bound to a decision
 
-The three `canProve` methods reduce everything to a subtraction ([`analyzer.ts:122`](../../../src/compiler/analysis/analyzer.ts)):
+The three `canProve` methods reduce everything to a subtraction ([`analyzer.ts:278`](../../../src/compiler/analysis/analyzer.ts)):
 
 ```ts
   canProveGreaterEqual(expr: SymExpr, value: SymExpr): boolean {
@@ -355,10 +355,10 @@ The last row is what remains, and it is the irreducible part: when the index is 
 ## 37.7 Traps and limits
 
 - **The domain is non-relational, and that is the ceiling.** Definition 37.5. Two loop variables of extent 8 give `i − j ∈ [−7,7]`, so nothing that depends on `i ≤ j` is provable: no triangular iteration space, no "the tail of this tile is shorter than the head". The compiler never builds such nests today, which is why the ceiling has not been hit — and it is exactly what a relational domain would be for.
-- **A symbolic divisor loses the modulo bound entirely.** `_modBound` requires a constant positive divisor ([`analyzer.ts:115`](../../../src/compiler/analysis/analyzer.ts)), so `x % n` with `n` a shape parameter gets `EVERYTHING`, even though `0 ≤ x % n < n` holds for every positive `n` under floor semantics. The fact is expressible in this domain — the upper bound would be symbolic, which `IntBound` cannot hold, since its fields are `number`. The consequence is that dynamic shapes lose guard elision on every subscript involving a modulo.
-- **Multiplication refuses when any endpoint is infinite.** `_mulBound` returns `EVERYTHING` ([`analyzer.ts:98`](../../../src/compiler/analysis/analyzer.ts)) rather than case-splitting, so `0 · unknown` is `unknown` where it could be `[0,0]`. Sound, and coarser than necessary.
+- **A symbolic divisor loses the modulo bound entirely.** `_modBound` requires a constant positive divisor ([`analyzer.ts:271`](../../../src/compiler/analysis/analyzer.ts)), so `x % n` with `n` a shape parameter gets `EVERYTHING`, even though `0 ≤ x % n < n` holds for every positive `n` under floor semantics. The fact is expressible in this domain — the upper bound would be symbolic, which `IntBound` cannot hold, since its fields are `number`. The consequence is that dynamic shapes lose guard elision on every subscript involving a modulo.
+- **Multiplication refuses when any endpoint is infinite.** `_mulBound` returns `EVERYTHING` ([`analyzer.ts:88`](../../../src/compiler/analysis/analyzer.ts)) rather than case-splitting, so `0 · unknown` is `unknown` where it could be `[0,0]`. Sound, and coarser than necessary.
 - **Only loop extents are ever bound.** Nothing binds a variable from a surrounding `if`. A body under `if (i < 4)` does not know `i < 4`; the condition is tested and discarded. Path-sensitive bounds would make loop partitioning largely unnecessary, and there is no mechanism for them.
-- **`canProveEqual` gets its strength from structural equality, not from the domain.** It first tries `SymInt.equals` ([`analyzer.ts:136`](../../../src/compiler/analysis/analyzer.ts)), and `SymInt.sub` already folds `a − a` to `0`. So `i − i = 0` is decided before an interval is ever computed, and the credit belongs to the symbolic layer.
+- **`canProveEqual` gets its strength from structural equality, not from the domain.** It first tries `SymInt.equals` ([`analyzer.ts:143`](../../../src/compiler/analysis/analyzer.ts)), and `SymInt.sub` already folds `a − a` to `0`. So `i − i = 0` is decided before an interval is ever computed, and the credit belongs to the symbolic layer.
 - **`boundWithin(analyzer, node, 0, Infinity)` is a one-sided test wearing a two-sided signature.** `b.max <= Infinity` is vacuously true, so both call sites in `affineDivMod` and `nonNegativeDivMod` are really "is the minimum non-negative". Harmless, and it reads as if an upper bound were being checked.
 - **The bridge is narrower than the domain.** `irToSymInt` handles `IntImmNode`, `VariableNode`, seven `MathOpNode` operators and two extern calls. A `CastNode` is `null`, so an index that is an integer by construction but reached through a cast has no bound — which is why a gather's subscript is unbounded twice over, once for the buffer load and once for the `cast<i32>` around it.
 - **Nothing checks the analysis against reality.** There is no assertion mode that evaluates a guard the analyser deleted and compares. The protection is [`tests/compiler/passes/lowering/guard-elision.test.js`](../../../tests/compiler/passes/lowering/guard-elision.test.js) plus the differential tests of Chapter 65, which would catch an unsound elision as a wrong number rather than as a bad proof.

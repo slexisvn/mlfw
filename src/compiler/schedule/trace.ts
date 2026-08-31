@@ -1,5 +1,6 @@
-export type ScheduleArgs = readonly unknown[];
-export type SerializedStep = { primitive: string; args: ScheduleArgs; produced?: readonly string[] };
+import type { ScheduleArgs, SerializedStep } from '../support/trace.js';
+
+export type { ScheduleArgs, SerializedStep };
 export type ReplayTarget = Record<string, unknown> & { _replaying?: boolean; _minted?: string[] };
 export type ReplayObserver = (step: ScheduleStep, index: number) => void;
 

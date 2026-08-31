@@ -3,7 +3,7 @@ import { tensor } from '../../src/index.js';
 import * as nn from '../../src/nn/index.js';
 import * as ops from '../../src/tensor/ops/ops.js';
 import { compile, _traceCore } from '../../src/tracing/compile.js';
-import { CPUTarget, WasmTarget } from '../../src/backend/target.js';
+import { CPUTarget, WasmTarget } from '../../src/compiler/support/target.js';
 import { mulberry32 } from '../_utils/rng.js';
 import { randomTensor, flat } from '../_utils/tensor_data.js';
 

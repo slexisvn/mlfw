@@ -13,7 +13,7 @@ import { detectAccumulator } from './accumulator.js';
 import type { AccumulatorInfo } from './accumulator.js';
 import type { PrimFunc, TirNode, BufferLoadNode, BufferStoreNode, CallExternNode, CastNode, CompareNode, MathOpNode, VariableNode } from '../../ir/tensor/nodes.js';
 import type { LIRMetadata as LIRMetadataType } from '../../ir/lir/nodes.js';
-import type { CompileTarget } from '../../pipeline/pipeline_types.js';
+import type { CompileTarget } from '../../support/config_types.js';
 
 type LowerCtx = {
   shapeParamMap: PrimFunc['shapeParamMap'];

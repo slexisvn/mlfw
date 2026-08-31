@@ -65,7 +65,13 @@ The GCD test is cheap, always applicable, and weak: it ignores the loop bounds e
 
 "SIV" is *single index variable*. Theorem 36.5 is exact — it gives the distance, not merely existence — and it covers the overwhelming majority of subscripts in real code, because a subscript like `A[i]` versus `A[i+1]` is precisely this case.
 
-> **Definition 36.6 (MIV).** **(classical)** A subscript pair is *multiple index variable* if more than one loop level appears in it. No exact test for the general MIV case is used here; the fallback is Theorem 36.4 applied to the gcd of all involved coefficients.
+> **Definition 36.6 (MIV).** **(classical)** A subscript pair is *multiple index variable* if more than one loop level appears in it. The MIV path here is Theorem 36.4 applied to the gcd of all involved coefficients, followed by Theorem 36.6b, which is the part that reads the loop bounds.
+
+> **Theorem 36.6b (Banerjee bounds, one direction at a time).** **(classical)** Write the dependence equation as `Σ_k (a_k i_k − b_k j_k) = δ`. Fix a level `k` and a direction `d ∈ {<, =, >}` for it, leaving every other level unconstrained. The left-hand side then ranges over a product of one triangular region (level `k`) and rectangles (the rest); each factor is an integer polytope with a linear objective, so its extremes are attained at vertices. If `δ` falls outside `[min, max]`, direction `d` is impossible at level `k`. If no direction survives at some level, the accesses are independent.
+
+*Proof.* The regions are, in `(p, q) = (i_k − lo, j_k − lo)` coordinates with `span = e − 1`: `{(0,0), (span,span)}` for `=`, `{(0,1), (0,span), (span−1,span)}` for `<`, `{(1,0), (span,0), (span,span−1)}` for `>`, and the four corners for an unconstrained level ([`dependence.ts:72`](../../../src/compiler/analysis/dependence.ts)). Each is the vertex set of the corresponding polytope, and `a_k p − b_k q` is linear, so its extremes over the polytope are attained there. Summing the per-level extremes gives the extremes of the sum, because the levels are independent. Leaving the other levels free only widens the interval, so a `δ` outside it is outside every narrower one too — the test is sound, and weaker than a full direction-vector hierarchy. ∎
+
+Two caveats on how the result is reported. Every involved level must have a literal `min` and `extent`, or the refinement is skipped entirely — an unbounded level makes the sum unbounded. And because `accessDependence` normalises a direction vector to lexicographic order by negating the whole vector, a per-level mask is widened to `d | negate(d)` before it is returned ([`dependence.ts:93`](../../../src/compiler/analysis/dependence.ts)): the analysis knows the direction in source-to-destination terms, but what it reports must survive that flip.
 
 There is one MIV case the compiler does decide exactly, and it comes straight out of Chapter 35:
 
@@ -103,7 +109,7 @@ Note what a loop whose `min` or `extent` is not an integer literal contributes (
 
 ### The common nest
 
-Two accesses can only be compared at the loop levels they share ([`dependence.ts:55`](../../../src/compiler/analysis/dependence.ts)):
+Two accesses can only be compared at the loop levels they share ([`dependence.ts:45`](../../../src/compiler/analysis/dependence.ts)):
 
 ```ts
 function commonNest(srcSpace: readonly IterLevel[], dstSpace: readonly IterLevel[]): IterLevel[] {
@@ -123,13 +129,13 @@ It is also precisely why a level with unknown bounds must not stop this loop. Dr
 
 ### The tests
 
-`subscriptDirections` ([`dependence.ts:78`](../../../src/compiler/analysis/dependence.ts)) is Theorems 36.4 to 36.7, in the order of decreasing precision. Zero involved levels:
+`subscriptDirections` ([`dependence.ts:144`](../../../src/compiler/analysis/dependence.ts)) is Theorems 36.4 to 36.7, in the order of decreasing precision. Zero involved levels:
 
 ```ts
   if (involved.length === 0) return delta === 0 ? new Array<DirectionMask>(n).fill(ANY_DIRECTION) : INDEPENDENT;
 ```
 
-Two constants: they collide iff they are equal. Then the SIV cases ([`dependence.ts:97`](../../../src/compiler/analysis/dependence.ts)):
+Two constants: they collide iff they are equal. Then the SIV cases ([`dependence.ts:148`](../../../src/compiler/analysis/dependence.ts)):
 
 ```ts
   if (involved.length === 1) {
@@ -155,7 +161,7 @@ Theorem 36.5, line for line: divisibility, then the bound, then the exact direct
     return masks;
 ```
 
-The MIV branch is Theorem 36.7 and then Theorem 36.4 ([`dependence.ts:130`](../../../src/compiler/analysis/dependence.ts)):
+The MIV branch is Theorem 36.7, then Theorem 36.4, then Theorem 36.6b ([`dependence.ts:181`](../../../src/compiler/analysis/dependence.ts)):
 
 ```ts
   const uniform = involved.every((k) => src.coeffs[k] === dst.coeffs[k]);
@@ -167,12 +173,15 @@ The MIV branch is Theorem 36.7 and then Theorem 36.4 ([`dependence.ts:130`](../.
   let g = 0;
   for (const k of involved) g = gcd(g, gcd(src.coeffs[k], dst.coeffs[k]));
   if (g !== 0 && delta % g !== 0) return INDEPENDENT;
+  if (!banerjeeRefine(src, dst, delta, loops, involved, masks)) return INDEPENDENT;
   return masks;
 ```
 
+The order matters for cost, not for strength: gcd is a handful of divisions and rejects the arithmetically impossible cases before the bounds test allocates anything.
+
 Every path that cannot decide returns a mask of `ANY_DIRECTION`, which is `LT | EQ | GT` — the "assume the worst" of §36.2, encoded as a bitmask so that intersecting across subscripts is an `&`.
 
-That intersection is `accessDependence` ([`dependence.ts:149`](../../../src/compiler/analysis/dependence.ts)):
+That intersection is `accessDependence` ([`dependence.ts:230`](../../../src/compiler/analysis/dependence.ts)):
 
 ```ts
   for (let d = 0; d < rank; d++) {
@@ -189,7 +198,7 @@ One subscript proving independence is enough — `A[i][j]` and `A[i][j+1]` colli
 
 ### Using the answer
 
-`carriesDependence` ([`dependence.ts:198`](../../../src/compiler/analysis/dependence.ts)) is Definition 36.2's "carried by level `ℓ`" and Theorem 36.3's test:
+`carriesDependence` ([`dependence.ts:272`](../../../src/compiler/analysis/dependence.ts)) is Definition 36.2's "carried by level `ℓ`" and Theorem 36.3's test:
 
 ```ts
     const level = dep.loops.findIndex((l) => l.node === loopNode);
@@ -202,7 +211,7 @@ One subscript proving independence is enough — `A[i][j]` and `A[i][j+1]` colli
     if (dep.masks[level] & (Direction.LT | Direction.GT)) return dep;
 ```
 
-and `permutationPreservesDependences` ([`dependence.ts:236`](../../../src/compiler/analysis/dependence.ts)) is Theorem 36.8, with `windowViolation` ([`dependence.ts:213`](../../../src/compiler/analysis/dependence.ts)) checking for a lexicographically negative permuted vector over the window of loops being permuted.
+and `permutationPreservesDependences` ([`dependence.ts:307`](../../../src/compiler/analysis/dependence.ts)) is Theorem 36.8, with `windowViolation` ([`dependence.ts:284`](../../../src/compiler/analysis/dependence.ts)) checking for a lexicographically negative permuted vector over the window of loops being permuted.
 
 Both are called from [`schedule/legality.ts`](../../../src/compiler/schedule/legality.ts) — and Chapter 33 has already shown the twist: when the block's iteration-variable kinds are available and permit the movement, the computed dependence is **overruled**. Dependence analysis is the fallback, not the primary mechanism. It runs when the declaration does not apply: a non-affine binding, an untyped iteration variable, or a loop variable used directly in a block body.
 
@@ -256,7 +265,7 @@ Four programs, three answers.
 
 **The contraction is the same shape one dimension up.** `ls0_6` and `rs0_7` appear in the write subscript; `c0_8` does not. Only `c0_8` is left alone.
 
-**The recurrence is never asked.** `scan` lowers its time loop with `ForKind.RECURRENCE` ([`rules/control_flow.ts:202`](../../../src/compiler/passes/lowering/rules/control_flow.ts)), and the scheduler's rule set excludes such a nest from parallelisation by inspection ([`schedule/rules.ts:176`](../../../src/compiler/schedule/rules.ts)) rather than by analysing it. That is the same trade as Chapter 33's iteration-variable kinds: a declaration that costs nothing to make and saves an analysis that would have had to look through a carried buffer copy to reach the same conclusion.
+**The recurrence is never asked.** `scan` lowers its time loop with `ForKind.RECURRENCE` ([`rules/control_flow.ts:202`](../../../src/compiler/passes/lowering/rules/control_flow.ts)), and the scheduler's rule set excludes such a nest from parallelisation by inspection ([`schedule/rules.ts:183`](../../../src/compiler/schedule/rules.ts)) rather than by analysing it. That is the same trade as Chapter 33's iteration-variable kinds: a declaration that costs nothing to make and saves an analysis that would have had to look through a carried buffer copy to reach the same conclusion.
 
 ## 36.6 Lab — reading the dependence off the IR
 
@@ -290,7 +299,7 @@ The hand version is weaker than the real one in exactly one way, and it is the w
 
 ## 36.7 Normalising the direction vectors
 
-Definition 36.2 closed with a claim that needs establishing rather than assuming: a direction vector is lexicographically positive, because the two access instances were named in execution order. Nothing in the computation so far guarantees it. Look at how the two ends of a pair are chosen ([`dependence.ts:175`](../../../src/compiler/analysis/dependence.ts)):
+Definition 36.2 closed with a claim that needs establishing rather than assuming: a direction vector is lexicographically positive, because the two access instances were named in execution order. Nothing in the computation so far guarantees it. Look at how the two ends of a pair are chosen ([`dependence.ts:252`](../../../src/compiler/analysis/dependence.ts)):
 
 ```ts
       const src = write.position <= other.position ? write : other;
@@ -347,19 +356,19 @@ Two details make this sound rather than merely plausible. It flips **only when t
 ## 36.8 Traps and limits
 
 - **The declaration usually wins before the analysis is consulted.** [`legality.ts:40`](../../../src/compiler/schedule/legality.ts) computes the dependence, finds one, and returns "legal anyway" if the block's iteration-variable kinds permit. On well-formed lowered IR the two always agree; nothing checks that they do, and Chapter 33's Corollary 33.7 is the exposure.
-- **MIV is decided by gcd, and gcd ignores the bounds.** `A[i + 64j]` against `A[i + 64j + 32]` in a nest with `i` of extent 32: gcd is 1, which divides 32, so the test reports a possible dependence. There is none — the two families of offsets are disjoint because `i` cannot reach 32. Banerjee's inequalities or an exact integer-programming test would decide it; neither is implemented.
+- **MIV bounds are tested one level at a time, not as a vector.** `A[i + 64j]` against `A[i + 64j + 32]` in a nest with `i` of extent 32 is decided: gcd is 1 and divides 32, so Theorem 36.4 passes it through, and Theorem 36.6b then finds no surviving direction at the `j` level and returns independence. What is *not* implemented is the direction-vector hierarchy — Theorem 36.6b constrains one level and leaves the rest free, so a dependence that is impossible only for a *combination* of directions across two levels is still reported. An exact integer-programming test (Omega) would decide those; that is the remaining gap, and it is a smaller one than it was.
 - **A dynamic extent costs the bound-dependent refinements, and only those.** A loop with a non-literal extent contributes a level with `null` bounds ([`buffer_access.ts:180`](../../../src/compiler/analysis/buffer_access.ts)), and `subscriptDirections` skips the three refinements that need a bound: `|δ/a| < e`, the in-range check on the single colliding iteration of a weak-zero SIV pair, and — because `mixedRadixDecomposition` needs a range per variable — the exact-coincidence case of Theorem 36.7. Divisibility still runs and the sign of the distance is still exact. The residual cost is precision: `A[i] = A[i+8]` in a loop of extent 8 is provably independent with a literal extent and reads as a dependence with a symbolic one, so a model compiled with symbolic shapes gets less parallelism than the same model with static ones, silently.
 - **That trap used to say something stronger, and the stronger version was a bug.** The level was dropped from the common nest outright, so `carriesDependence` found no level to attribute the dependence to and returned `null` — and `parallelize` accepted a reduction loop it refuses when the same extent is a literal, which is a race, not a lost optimisation. The lesson generalises past this chapter: an analysis that expresses "I could not look" by returning nothing is, at the call site, indistinguishable from one returning "I looked and there is nothing there". The fix was to keep the level and lose only the bound.
 - **Conditional accesses are recorded and not used.** `BufferAccess.conditional` marks an access under an `if` or a `while` ([`buffer_access.ts:162`](../../../src/compiler/analysis/buffer_access.ts)). `accessDependence` ignores it, which is the conservative direction — a dependence that only exists on one branch is reported unconditionally. `buffer_dataflow.ts` uses the flag; the dependence tester does not.
 - **`selfReferential` is likewise informational here.** It marks an access whose own subscript or stored value loads from the same buffer — an indirect access such as `A[B[i]]` where `A` is `B`. The dependence tester does not consult it; the scheduler does, separately ([`schedule.ts:858`](../../../src/compiler/schedule/schedule.ts)).
-- **Direction is computed, distance is discarded.** Theorem 36.5 produces an exact distance and `subscriptDirections` immediately reduces it to a three-valued sign ([`dependence.ts:108`](../../../src/compiler/analysis/dependence.ts)). Distance is what a legality test for *skewing* and for software pipelining needs, and neither exists here, so nothing has yet wanted it. A `Dependence` carries `masks` and no distances.
-- **The pairing is quadratic in accesses per buffer.** `bufferDependences` ([`dependence.ts:175`](../../../src/compiler/analysis/dependence.ts)) is a double loop over the accesses to one buffer. For the nests this compiler produces — a handful of accesses each — that is nothing; for a heavily unrolled nest it is the dominant cost of a legality query, and the caching in `schedule_state` is what keeps it off the critical path.
+- **Direction is computed, distance is discarded.** Theorem 36.5 produces an exact distance and `subscriptDirections` immediately reduces it to a three-valued sign ([`dependence.ts:159`](../../../src/compiler/analysis/dependence.ts)). Distance is what a legality test for *skewing* and for software pipelining needs, and neither exists here, so nothing has yet wanted it. A `Dependence` carries `masks` and no distances.
+- **The pairing is quadratic in accesses per buffer.** `bufferDependences` ([`dependence.ts:246`](../../../src/compiler/analysis/dependence.ts)) is a double loop over the accesses to one buffer. For the nests this compiler produces — a handful of accesses each — that is nothing; for a heavily unrolled nest it is the dominant cost of a legality query, and the caching in `schedule_state` is what keeps it off the critical path.
 - **An oracle can share an assumption with the code it checks.** §36.7 is the worked example: the analyser and its brute-force oracle must derive direction orientation by independent routes, or the test confirms the implementation against itself. When you write an oracle for an analysis, the question to ask is which of the analysis's assumptions the oracle also makes.
 - **Non-affine subscripts are `null`, and `null` means "any".** `subscriptDirections` opens with `if (!srcForm || !dstForm) return ... ANY_DIRECTION`. A gather's data-dependent subscript therefore blocks every reordering of every loop around it — correct, and the reason a gather-heavy kernel schedules badly.
 
 ## 36.9 Read the tests
 
-- [`tests/compiler/analysis/dependence.test.js`](../../../tests/compiler/analysis/dependence.test.js) — the three kinds, the direction vectors, the SIV distance cases including the out-of-range one, the gcd rejection, and the symbolic-extent levels of §36.7 in both directions: still in the direction vector, minus the range refinements.
+- [`tests/compiler/analysis/dependence.test.js`](../../../tests/compiler/analysis/dependence.test.js) — the three kinds, the direction vectors, the SIV distance cases including the out-of-range one, the gcd rejection, and the symbolic-extent levels of §36.7 in both directions: still in the direction vector, minus the range refinements. The Banerjee cases are the interesting ones to read: each first asserts that the gcd test *would* have let the pair through, then that the analysis returns independence anyway, and the refinement cases assert only that the reported mask is a **superset** of the brute-force one — the soundness direction, which is the only direction a widened mask can be checked in.
 - [`tests/compiler/schedule/legality.test.js`](../../../tests/compiler/schedule/legality.test.js) — the same question asked through `parallelize` and `reorder`, which is where a level going missing turns into a race.
 - [`tests/compiler/analysis/buffer-dataflow.test.js`](../../../tests/compiler/analysis/buffer-dataflow.test.js) — the collection side, and what the `conditional` and `selfReferential` flags are for.
 - [`tests/compiler/analysis/gpu-race.test.js`](../../../tests/compiler/analysis/gpu-race.test.js) — the same question asked about threads rather than iterations, which is Chapter 43.

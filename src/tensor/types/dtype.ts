@@ -54,21 +54,7 @@ export function dtypeNames(): string[] {
   return [..._VALID_DTYPES];
 }
 
-const _FLOAT_PRECEDENCE = [ScalarType.F16, ScalarType.BF16, ScalarType.F32, ScalarType.F64];
-const _INT_PRECEDENCE = [ScalarType.UI8, ScalarType.I8, ScalarType.I16, ScalarType.I32, ScalarType.I64];
-
-const _PRECEDENCE_MAP = new Map<DType, number>();
-for (let i = 0; i < _FLOAT_PRECEDENCE.length; i++) _PRECEDENCE_MAP.set(_FLOAT_PRECEDENCE[i], 100 + i);
-for (let i = 0; i < _INT_PRECEDENCE.length; i++) _PRECEDENCE_MAP.set(_INT_PRECEDENCE[i], i);
-_PRECEDENCE_MAP.set(ScalarType.BOOL, -1);
-_PRECEDENCE_MAP.set(ScalarType.INDEX, 50);
-
-export function resultDtype(a: DType, b: DType): DType {
-  if (a === b) return a;
-  const pa = _PRECEDENCE_MAP.get(a) ?? 0;
-  const pb = _PRECEDENCE_MAP.get(b) ?? 0;
-  return pa >= pb ? a : b;
-}
+export { resultDtype } from '../../compiler/ir/graph/types.js';
 
 export function dtypeSize(dtype: DType): number {
   return scalarBytes(dtype);

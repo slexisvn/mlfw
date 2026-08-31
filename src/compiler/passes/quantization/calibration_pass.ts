@@ -1,6 +1,6 @@
 import { ModulePass, PassResult } from '../pass.js';
 import { collectCalibration } from '../../analysis/calibrate_exec.js';
-import { TraceLevel } from '../../pipeline/trace.js';
+import { TraceLevel } from '../../support/trace.js';
 import type { CalibrationTarget, CompileFn } from '../../analysis/calibrate_exec.js';
 import type { QuantizationConfig } from './quantization_pass.js';
 import type { GraphModule } from '../../ir/graph/module.js';

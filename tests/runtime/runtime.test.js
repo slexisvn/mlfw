@@ -4,7 +4,7 @@ import { registerBackend } from '../../src/runtime/backend_registry.js';
 import { buildFunction } from '../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../src/compiler/pipeline/compiler.js';
-import { CPUTarget } from '../../src/backend/target.js';
+import { CPUTarget } from '../../src/compiler/support/target.js';
 
 describe('RuntimeModule AOT serialize/deserialize (no recompile)', () => {
   it('reconstructs a runnable module from serialized kernels and runs identically', () => {

@@ -23,43 +23,31 @@ import { splitGraphForNative } from '../passes/partition/cublas_split.js';
 import { assignPlanBuffers, computePlanDonations, planMemoryReport } from '../passes/memory/plan_buffer_assignment.js';
 import type { AssignablePlan } from '../passes/memory/plan_buffer_assignment.js';
 import { containsSequentialRegion } from '../ir/graph/op_traits.js';
-import { TargetAttr, targetAttr } from './target_attrs.js';
-import type { SchedulingDefaults } from './target_attrs.js';
+import { TargetAttr, targetAttr } from '../support/target_attrs.js';
+import type { SchedulingDefaults } from '../support/target_attrs.js';
 import { detectPureConv } from '../schedule/conv_implicit_gemm.js';
 
-import { TraceLog, TraceLevel, CompilationError } from './trace.js';
+import { TraceLog, TraceLevel, CompilationError } from '../support/trace.js';
 import { IRPrinter } from '../ir/graph/printer.js';
 import { printTensorIR } from '../ir/tensor/printer.js';
 import { lowerToLIR } from '../passes/lowering/tensor_to_lir.js';
-import { VerifyLevel, normalizeVerifyLevel, checkIRInvariants } from './invariant_check.js';
+import { VerifyLevel, normalizeVerifyLevel, checkIRInvariants } from '../support/invariant_check.js';
 import { IRLevel } from '../ir/verify.js';
 import { FuncAttr } from '../ir/func_attrs.js';
 
-export { CompilationError } from './trace.js';
-export { VerifyLevel } from './invariant_check.js';
+export { CompilationError } from '../support/trace.js';
+export { VerifyLevel } from '../support/invariant_check.js';
 
 import type { GraphFunction } from '../ir/graph/function.js';
 import type { PrimFunc } from '../ir/tensor/nodes.js';
 import type { LIRFunc } from '../ir/lir/nodes.js';
-import type { CompileTarget, FusionConfig, MemoryConfig, OptimizationConfig, QuantizationConfig } from './pipeline_types.js';
-import type { VerifyLevelValue } from './invariant_check.js';
-import type { TraceLogConfig, TraceSink, IRSnapshotFlags } from './trace.js';
+import type { CompileTarget, FusionConfig, MemoryConfig, OptimizationConfig, PartitionConfig, QuantizationConfig, SchedulingConfig, TraceConfig } from '../support/config_types.js';
+import type { CompilerConfig as CompilerConfigShape } from '../support/config_types.js';
+import type { VerifyLevelValue } from '../support/invariant_check.js';
+import type { TraceLogConfig, TraceSink, IRSnapshotFlags } from '../support/trace.js';
 import type { GpuLaunchDiagnosis } from '../analysis/gpu_race.js';
 import type { IRLevelValue } from '../ir/verify.js';
-import type { PassInstrument } from '../passes/pass_instrument.js';
-
-export type SchedulingConfig = { enabled?: boolean; autotune?: boolean; gpuTiling?: boolean; [key: string]: unknown };
-export type PartitionConfig = {
-  enabled: boolean;
-  targets: readonly PartitionTarget[];
-  defaultTarget: PartitionTarget | null;
-  opTargetOverrides: Map<string, PartitionTarget>;
-  memoryLimits: Map<string, number>;
-  minPartitionSize: number;
-  costWeights: Record<string, number>;
-  [key: string]: unknown;
-};
-export type TraceConfig = { level: number; sink: TraceSink | null; irSnapshot: IRSnapshotFlags };
+import type { PassInstrument } from '../support/pass_instrument.js';
 
 export type CompilerConfigOpts = Readonly<{
   target?: CompileTarget;
@@ -117,7 +105,7 @@ export type RuntimeModuleLike = {
   executionPlan?: unknown;
 };
 
-export class CompilerConfig {
+export class CompilerConfig implements CompilerConfigShape {
   target: CompileTarget;
   verify: VerifyLevelValue;
   errorMode: string;

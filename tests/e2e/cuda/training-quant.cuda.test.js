@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { tensor, matmul, relu, tanh, sigmoid, sum } from '../../../src/index.js';
 import { ones } from '../../../src/tensor/factory/creation_ops.js';
 import { compileWithBackward } from '../../../src/tracing/compile_backward.js';
-import { CUDATarget, CPUTarget } from '../../../src/backend/target.js';
+import { CUDATarget, CPUTarget } from '../../../src/compiler/support/target.js';
 import { cudaDeps } from '../../_utils/cuda.js';
 import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';

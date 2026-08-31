@@ -1,5 +1,4 @@
-import { TargetAttr } from '../compiler/pipeline/target_attrs.js';
-import { launchBoundaryClass } from '../compiler/ir/graph/op_traits.js';
+import { TargetAttr } from './target_attrs.js';
 
 export const TargetKind = Object.freeze({
   CPU: 'cpu',
@@ -175,8 +174,7 @@ export class TargetFeatures {
     return this.simd && this.vectorWidth > 1;
   }
 
-  hasLibraryOp(opName: string): boolean {
-    const cls = launchBoundaryClass(opName);
+  hasLibraryClass(cls: string | null): boolean {
     return cls !== null && this.libraryClasses.has(cls);
   }
 }

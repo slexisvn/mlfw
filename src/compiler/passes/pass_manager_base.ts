@@ -1,8 +1,8 @@
-import { checkIRInvariants } from '../pipeline/invariant_check.js';
-import type { CompilationError } from '../pipeline/trace.js';
+import { checkIRInvariants } from '../support/invariant_check.js';
+import type { CompilationError } from '../support/trace.js';
 import type { IRLevelValue } from '../ir/verify.js';
-import type { TraceLog } from '../pipeline/trace.js';
-import type { InstrumentedPass, PassInstrument } from './pass_instrument.js';
+import type { TraceLog } from '../support/trace.js';
+import type { InstrumentedPass, PassInstrument } from '../support/pass_instrument.js';
 import type { PassContext, PassLike, PassResultValue } from './pass.js';
 
 export type NamedFunc = { name: string };

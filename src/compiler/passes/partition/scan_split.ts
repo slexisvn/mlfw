@@ -8,8 +8,8 @@ import { shapeProduct } from '../../ir/graph/types.js';
 import type { Shape, TensorType } from '../../ir/graph/types.js';
 import type { Block, Region } from '../../ir/graph/block.js';
 import type { Value } from '../../ir/graph/value.js';
-import type { CompileTarget } from '../../pipeline/pipeline_types.js';
-import type { Partition } from './partition_core.js';
+import type { CompileTarget } from '../../support/config_types.js';
+import type { Partition } from '../../analysis/partition_core.js';
 
 type PlanStep = { name: string; inputSlots: number[]; outputSlots: number[] };
 type PlanIntermediate = { slot: number; shape: number[]; dtype: string };

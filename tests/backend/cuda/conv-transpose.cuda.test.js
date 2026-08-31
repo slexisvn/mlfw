@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { tensor, ConvTranspose2d, ConvTranspose1d, compile } from '../../../src/index.js';
-import { CUDATarget } from '../../../src/backend/target.js';
+import { CUDATarget } from '../../../src/compiler/support/target.js';
 import { cudaDeps } from '../../_utils/cuda.js';
 import { mulberry32 } from '../../_utils/rng.js';
 import { randomNested, flat } from '../../_utils/tensor_data.js';

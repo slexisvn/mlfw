@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { GraphModule } from '../../../src/compiler/ir/graph/module.js';
-import { CPUTarget } from '../../../src/backend/target.js';
+import { CPUTarget } from '../../../src/compiler/support/target.js';
 import { Compiler, CompilerConfig } from '../../../src/compiler/pipeline/compiler.js';
 import { lowerGraphToPrimFunc } from '../../../src/compiler/passes/lowering/graph_to_tensor.js';
 import { lowerToLIR } from '../../../src/compiler/passes/lowering/tensor_to_lir.js';
@@ -11,7 +11,7 @@ import { registerLirPass, clearLirPasses, snapshotLirPasses } from '../../../src
 import { LirFuncPass } from '../../../src/compiler/passes/lir_pass.js';
 import { LirPassManager } from '../../../src/compiler/passes/lir_pass_manager.js';
 import { FlatIndexSimplifyPass } from '../../../src/compiler/passes/simplify/flat_index_simplify.js';
-import { TraceLog } from '../../../src/compiler/pipeline/trace.js';
+import { TraceLog } from '../../../src/compiler/support/trace.js';
 import { collect } from '../../../src/compiler/ir/ir_visitor.js';
 import {
   LIRFunc, LIRFlatStoreNode, LIRMetadata,

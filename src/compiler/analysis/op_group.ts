@@ -1,6 +1,6 @@
 import { computePartitionIO } from './partition_core.js';
-import type { Operation } from '../../ir/graph/operation.js';
-import type { Value } from '../../ir/graph/value.js';
+import type { Operation } from '../ir/graph/operation.js';
+import type { Value } from '../ir/graph/value.js';
 
 export abstract class OpGroup {
   id: number;

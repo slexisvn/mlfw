@@ -4,7 +4,7 @@ import { derivedFrom } from '../../ir/graph/op_location.js';
 import { TensorType, DYNAMIC } from '../../ir/graph/types.js';
 import { registry } from '../../ir/graph/ops.js';
 
-import { TraceLevel } from '../../pipeline/trace.js';
+import { TraceLevel } from '../../support/trace.js';
 import { explainer } from '../explain.js';
 import { LivenessAnalysis } from '../../analysis/liveness.js';
 import { isConstantOp, isTerminatorOp } from '../../ir/graph/op_traits.js';

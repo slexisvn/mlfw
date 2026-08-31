@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { floorDiv, floorMod, truncDiv, truncMod } from '../../src/util/divmod.js';
-import { SymInt } from '../../src/compiler/analysis/sym_int.js';
+import { SymInt } from '../../src/compiler/ir/sym_int.js';
 import { CPUCodegen } from '../../src/backend/cpu/codegen.js';
 import { WasmCodegen } from '../../src/backend/wasm/codegen.js';
 import { CUDACodegen } from '../../src/backend/cuda/codegen.js';
 import { WebGPUCodegen } from '../../src/backend/webgpu/codegen.js';
-import { CPUTarget, WasmTarget, CUDATarget, WebGPUTarget } from '../../src/backend/target.js';
+import { CPUTarget, WasmTarget, CUDATarget, WebGPUTarget } from '../../src/compiler/support/target.js';
 import { encodeWat } from '../../src/backend/wasm/wat_encoder.js';
 import { Buffer } from '../../src/compiler/ir/tensor/buffer.js';
 import {

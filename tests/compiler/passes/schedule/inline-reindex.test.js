@@ -4,9 +4,9 @@ import { TensorType, ScalarType } from '../../../../src/compiler/ir/graph/types.
 import { lowerGraphToPrimFunc } from '../../../../src/compiler/passes/lowering/graph_to_tensor.js';
 import { InlineReindexPass } from '../../../../src/compiler/passes/schedule/inline_reindex_pass.js';
 import { CompilerConfig } from '../../../../src/compiler/pipeline/compiler.js';
-import { TraceLog, TraceLevel } from '../../../../src/compiler/pipeline/trace.js';
+import { TraceLog, TraceLevel } from '../../../../src/compiler/support/trace.js';
 import { FuncAttr } from '../../../../src/compiler/ir/func_attrs.js';
-import { CPUTarget, CUDATarget } from '../../../../src/backend/target.js';
+import { CPUTarget, CUDATarget } from '../../../../src/compiler/support/target.js';
 import { walk } from '../../../../src/compiler/ir/ir_visitor.js';
 
 const t = (shape) => new TensorType(shape, ScalarType.F32);

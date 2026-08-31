@@ -227,7 +227,7 @@ Three implementations sit side by side in [`passes/partition/`](../../../src/com
 
 and the generic mechanism they feed is [`pipeline/external_codegen.ts`](../../../src/compiler/pipeline/external_codegen.ts), a registry of providers that can claim operations, contribute their own graph passes, and annotate the TIR module (Chapter 58).
 
-Partitioning is enabled only when at least two targets are configured ([`compiler.ts:196`](../../../src/compiler/pipeline/compiler.ts)):
+Partitioning is enabled only when at least two targets are configured ([`compiler.ts:187`](../../../src/compiler/pipeline/compiler.ts)):
 
 ```ts
   get usePartition(): boolean {

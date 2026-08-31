@@ -29,6 +29,17 @@ export class VerificationError {
   }
 }
 
+type Scope = { defs: Set<Value>; parent: Scope | null };
+
+const IMPLICIT_OPS = new Set(['return', 'yield']);
+
+function scopeHas(scope: Scope, value: Value): boolean {
+  for (let s: Scope | null = scope; s !== null; s = s.parent) {
+    if (s.defs.has(value)) return true;
+  }
+  return false;
+}
+
 export function verifyModule(module: GraphModule): VerificationError[] {
   const errors: VerificationError[] = [];
   if (module.functionCount === 0) {
@@ -67,16 +78,16 @@ export function verifyFunction(func: GraphFunction, errors: VerificationError[] 
   for (let i = 0; i < func.inputTypes.length; i++) verifyShape(func.inputTypes[i], `Input ${i}`, null, func, errors);
   for (let i = 0; i < func.outputTypes.length; i++) verifyShape(func.outputTypes[i], `Output ${i}`, null, func, errors);
 
-  const definedValues = new Set<Value>();
+  const scope: Scope = { defs: new Set<Value>(), parent: null };
   for (const arg of func.entryBlock.arguments) {
-    definedValues.add(arg);
+    scope.defs.add(arg);
   }
   for (const block of func.body) {
-    collectScopeDefs(block, definedValues);
+    collectScopeDefs(block, scope.defs);
   }
 
   for (const block of func.body) {
-    verifyBlock(block, func, definedValues, errors);
+    verifyBlock(block, func, scope, errors);
   }
 
   const ret = func.getReturnOp();
@@ -174,11 +185,11 @@ function detectCycles(block: Block, func: GraphFunction, errors: VerificationErr
   }
 }
 
-function verifyBlock(block: Block, func: GraphFunction, definedValues: Set<Value>, errors: VerificationError[]): void {
+function verifyBlock(block: Block, func: GraphFunction, scope: Scope, errors: VerificationError[]): void {
   detectCycles(block, func, errors);
 
   for (const op of block) {
-    verifyOperation(op, func, definedValues, errors);
+    verifyOperation(op, func, scope, errors);
   }
 
   if (block.size > 0) {
@@ -198,7 +209,7 @@ function verifyBlock(block: Block, func: GraphFunction, definedValues: Set<Value
   }
 }
 
-function verifyOperation(op: Operation, func: GraphFunction, definedValues: Set<Value>, errors: VerificationError[]): void {
+function verifyOperation(op: Operation, func: GraphFunction, scope: Scope, errors: VerificationError[]): void {
   for (let i = 0; i < op.numOperands; i++) {
     const operand = op.getOperand(i);
     if (!operand) {
@@ -209,7 +220,7 @@ function verifyOperation(op: Operation, func: GraphFunction, definedValues: Set<
       errors.push(new VerificationError(`Operand ${i} is not a Value`, op, func));
       continue;
     }
-    if (!definedValues.has(operand)) {
+    if (!scopeHas(scope, operand)) {
       errors.push(new VerificationError(`Operand ${i} used before definition`, op, func));
     }
   }
@@ -228,7 +239,7 @@ function verifyOperation(op: Operation, func: GraphFunction, definedValues: Set<
 
   const opDef = registry.get(op.opName);
   if (!opDef) {
-    if (!['return', 'yield'].includes(op.opName) && !registry.has(op.opName)) {
+    if (!IMPLICIT_OPS.has(op.opName) && !registry.has(op.opName)) {
       errors.push(new VerificationError(`Unknown op '${op.opName}'`, op, func));
     }
     return;
@@ -308,12 +319,12 @@ function verifyOperation(op: Operation, func: GraphFunction, definedValues: Set<
   }
 
   for (const region of op.regions) {
-    const regionDefinedValues = new Set(definedValues);
+    const regionScope: Scope = { defs: new Set<Value>(), parent: scope };
     for (const block of region) {
-      collectScopeDefs(block, regionDefinedValues);
+      collectScopeDefs(block, regionScope.defs);
     }
     for (const block of region) {
-      verifyBlock(block, func, regionDefinedValues, errors);
+      verifyBlock(block, func, regionScope, errors);
     }
   }
 }

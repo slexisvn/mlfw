@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
-import { WasmTarget, CPUTarget } from '../../../src/backend/target.js';
+import { WasmTarget, CPUTarget } from '../../../src/compiler/support/target.js';
 
 const F32 = ScalarType.F32;
 const I32 = ScalarType.I32;

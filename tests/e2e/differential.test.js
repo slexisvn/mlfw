@@ -4,8 +4,8 @@ import {
   relu, gelu, silu, sum, mean, max, min, prod, matmul, softmax, log_softmax,
 } from '../../src/index.js';
 import { compile } from '../../src/tracing/compile.js';
-import { CPUTarget, WasmTarget } from '../../src/backend/target.js';
-import { VerifyLevel } from '../../src/compiler/pipeline/invariant_check.js';
+import { CPUTarget, WasmTarget } from '../../src/compiler/support/target.js';
+import { VerifyLevel } from '../../src/compiler/support/invariant_check.js';
 import { mulberry32 } from '../_utils/rng.js';
 import { numel, nest, randomTensor, flat } from '../_utils/tensor_data.js';
 

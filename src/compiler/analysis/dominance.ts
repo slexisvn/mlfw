@@ -9,18 +9,55 @@ type PDomNode = Operation | { opName: string };
 
 export class DominanceResult {
   idom: Map<PDomNode, PDomNode>;
+  private _tin: Map<PDomNode, number>;
+  private _tout: Map<PDomNode, number>;
 
   constructor(idom: Map<PDomNode, PDomNode>, topo?: readonly Operation[]) {
     this.idom = idom;
+    this._tin = new Map();
+    this._tout = new Map();
+    this._buildEulerTour();
+  }
+
+  _buildEulerTour(): void {
+    const children = new Map<PDomNode, PDomNode[]>();
+    const roots: PDomNode[] = [];
+    for (const [node, parent] of this.idom) {
+      let bucket = children.get(parent);
+      if (!bucket) { bucket = []; children.set(parent, bucket); }
+      bucket.push(node);
+    }
+    for (const parent of children.keys()) {
+      if (!this.idom.has(parent)) roots.push(parent);
+    }
+
+    let clock = 0;
+    for (const root of roots) {
+      const stack: { node: PDomNode; i: number }[] = [{ node: root, i: 0 }];
+      this._tin.set(root, clock++);
+      while (stack.length > 0) {
+        const frame = stack[stack.length - 1];
+        const kids = children.get(frame.node);
+        if (kids && frame.i < kids.length) {
+          const child = kids[frame.i];
+          frame.i++;
+          if (this._tin.has(child)) continue;
+          this._tin.set(child, clock++);
+          stack.push({ node: child, i: 0 });
+          continue;
+        }
+        this._tout.set(frame.node, clock++);
+        stack.pop();
+      }
+    }
   }
 
   postDominates(a: PDomNode, b: PDomNode): boolean {
-    let cur: PDomNode | undefined = b;
-    while (cur) {
-      if (cur === a) return true;
-      cur = this.idom.get(cur);
-    }
-    return false;
+    if (a === b) return true;
+    const aIn = this._tin.get(a);
+    const bIn = this._tin.get(b);
+    if (aIn === undefined || bIn === undefined) return false;
+    return aIn <= bIn && (this._tout.get(b) as number) <= (this._tout.get(a) as number);
   }
 
   immediatePDom(op: PDomNode): PDomNode | null {

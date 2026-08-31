@@ -4,7 +4,7 @@ import { FuncAttr } from '../../ir/func_attrs.js';
 import { explainer } from '../explain.js';
 import type { PrimFunc } from '../../ir/tensor/nodes.js';
 import type { TirPassCtx } from '../tir_pass.js';
-import type { CompilerConfig, CompileTarget } from '../../pipeline/pipeline_types.js';
+import type { CompilerConfig, CompileTarget } from '../../support/config_types.js';
 
 type MemoryPlanConfig = CompilerConfig & { target?: CompileTarget & { cacheLineSizeBytes?: number } };
 

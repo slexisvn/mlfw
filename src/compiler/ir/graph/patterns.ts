@@ -2,7 +2,6 @@ import { Pattern } from '../rewrite/pattern.js';
 import { TensorType, isValuePreservingCast } from './types.js';
 import { isDtypeInt, isDtypeFloat } from '../../../util/dtype_map.js';
 import { isOp, wildcard, matchPattern } from '../rewrite/dfpattern.js';
-import { registry } from './ops.js';
 import type { AttrValue, ScalarDType } from './types.js';
 import type { Value } from './value.js';
 import type { Operation } from './operation.js';
@@ -20,7 +19,7 @@ function isDense(value: unknown): value is ArrayLike<number | bigint> {
 
 function constantValueOf(op: Operation | null): AttrValue | undefined {
   if (!op) return undefined;
-  const def = registry.get(op.opName);
+  const def = op.def;
   if (!def) return undefined;
   if (def.isConstant) return op.getAttr<AttrValue>('value');
   if (def.isBroadcast && op.numOperands === 1) return constantValueOf(op.getOperand(0).definingOp);
@@ -563,7 +562,7 @@ export class AssociativeConstantReassoc extends Pattern {
     return { inner, x: inner.getOperand(0), outerConst, innerConst };
   }
   _folded(op: Operation, parts: { outerConst: Operation; innerConst: Operation }): AttrValue | undefined {
-    const def = registry.get(op.opName);
+    const def = op.def;
     if (!def || !def.fold) return undefined;
     const a = parts.innerConst.getAttr<AttrValue>('value');
     const b = parts.outerConst.getAttr<AttrValue>('value');

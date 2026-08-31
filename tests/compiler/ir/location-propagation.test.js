@@ -14,7 +14,7 @@ import { FusionPass } from '../../../src/compiler/passes/fusion/fusion_pass.js';
 import { BackwardGraphBuilder } from '../../../src/compiler/ad/index.js';
 import { lowerGraphToPrimFunc } from '../../../src/compiler/passes/lowering/graph_to_tensor.js';
 import { walk } from '../../../src/compiler/ir/ir_visitor.js';
-import { CPUTarget } from '../../../src/backend/target.js';
+import { CPUTarget } from '../../../src/compiler/support/target.js';
 
 const f32 = (shape) => new TensorType(shape, ScalarType.F32);
 

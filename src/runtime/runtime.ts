@@ -1,7 +1,7 @@
 import { getBackend } from './backend_registry.js';
 import { typedArrayCtor as dtypeTypedArrayCtor } from '../util/dtype_map.js';
 import { CompiledKernel } from '../backend/pipeline.js';
-import type { TargetFeatures } from '../backend/target.js';
+import type { TargetFeatures } from '../compiler/support/target.js';
 import type { NumericTypedArray } from '../tensor/types/dtype.js';
 
 type RuntimeDType = string;

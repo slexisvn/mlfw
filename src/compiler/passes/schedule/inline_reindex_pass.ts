@@ -6,7 +6,7 @@ import { FuncAttr } from '../../ir/func_attrs.js';
 import type { BlockNode, BufferLoadNode, BufferStoreNode, PrimFunc, TirNode } from '../../ir/tensor/nodes.js';
 import type { IRNode } from '../../ir/ir_visitor.js';
 import type { TirPassCtx } from '../tir_pass.js';
-import type { CompilerConfig, CompileTarget } from '../../pipeline/pipeline_types.js';
+import type { CompilerConfig, CompileTarget } from '../../support/config_types.js';
 
 type BlockSummary = { name: string; writes: Set<string>; reads: Set<string>; hasInit: boolean; stores: number; pureReindex: boolean };
 type FuncAnalysis = { blocks: BlockSummary[]; loadCount: Map<string, number>; storeWriters: Map<string, Set<string>> };

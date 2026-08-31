@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { buildFunction } from '../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../src/compiler/pipeline/compiler.js';
-import { CPUTarget, CUDATarget } from '../../src/backend/target.js';
+import { CPUTarget, CUDATarget } from '../../src/compiler/support/target.js';
 import { countLoops, countTempBuffers } from '../_utils/kernel_source.js';
 import { compileCPU as compile } from '../_utils/ir_fixture.js';
 import { audit, arithmeticNoise, extent1Loops, redundantZeroInits, boundsChecks, modulos, truncs } from '../_utils/kernel_audit.js';

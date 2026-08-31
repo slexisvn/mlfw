@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { ShapeEnv } from '../../src/tracing/shape_env.js';
 import { DYNAMIC } from '../../src/compiler/ir/graph/types.js';
-import { SymInt } from '../../src/compiler/analysis/sym_int.js';
+import { SymInt } from '../../src/compiler/ir/sym_int.js';
 
 describe('ShapeEnv.allocate', () => {
   it('returns incrementing symbol names', () => {

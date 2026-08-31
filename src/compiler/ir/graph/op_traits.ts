@@ -59,6 +59,31 @@ export function countLaunchBoundaries(ops: Iterable<Operation>): Map<string, num
   return counts;
 }
 
+export function opHasSideEffects(op: Operation): boolean {
+  const def = registry.get(op.opName);
+  if (def !== null && def.hasSideEffects) return true;
+  if (def === null || !def.hasRecursiveMemoryEffects || !op.regions) return false;
+  for (const region of op.regions) {
+    const block = region.entryBlock;
+    if (!block) continue;
+    for (const inner of block.ops()) {
+      if (opHasSideEffects(inner)) return true;
+    }
+  }
+  return false;
+}
+
+export function effectPredecessors(ops: Iterable<Operation>): Map<Operation, Operation> {
+  const chain = new Map<Operation, Operation>();
+  let previous: Operation | null = null;
+  for (const op of ops) {
+    if (!opHasSideEffects(op)) continue;
+    if (previous !== null) chain.set(op, previous);
+    previous = op;
+  }
+  return chain;
+}
+
 export function isConstantOp(opName: string): boolean {
   const def = registry.get(opName);
   return def !== null && def.isConstant;
@@ -82,4 +107,10 @@ export function isBroadcastOp(opName: string): boolean {
 export function isReductionOp(opName: string): boolean {
   const def = registry.get(opName);
   return def !== null && def.isReduction;
+}
+
+export type LibraryTarget = { hasLibraryClass(cls: string | null): boolean };
+
+export function hasLibraryOp(target: LibraryTarget, opName: string): boolean {
+  return target.hasLibraryClass(launchBoundaryClass(opName));
 }

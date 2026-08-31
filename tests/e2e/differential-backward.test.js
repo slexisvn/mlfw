@@ -3,7 +3,7 @@ import * as M from '../../src/index.js';
 import { tensor, add, sub, mul, div, neg, sqrt, exp, tanh, sigmoid, relu, gelu, silu, matmul, sum } from '../../src/index.js';
 import { ones } from '../../src/tensor/factory/creation_ops.js';
 import { compileWithBackward } from '../../src/tracing/compile_backward.js';
-import { CPUTarget, WasmTarget } from '../../src/backend/target.js';
+import { CPUTarget, WasmTarget } from '../../src/compiler/support/target.js';
 import { mulberry32 } from '../_utils/rng.js';
 import { numel, nest, randomNested, flat } from '../_utils/tensor_data.js';
 

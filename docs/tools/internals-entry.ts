@@ -36,7 +36,7 @@ export { createMultiLevelTilingSketch, createSSRSRSTilingSketch } from '../../sr
 export { ScheduleSketch, SearchVariable } from '../../src/compiler/autotune/sketch.js';
 export { deriveSketches } from '../../src/compiler/autotune/derivation.js';
 export { getSketchesForBlock } from '../../src/compiler/autotune/search_space.js';
-export { analyzeBlockStructure, collectAllBlockNames, findBlock } from '../../src/compiler/autotune/block_analysis.js';
+export { analyzeBlockStructure, collectAllBlockNames, findBlock } from '../../src/compiler/schedule/block_analysis.js';
 export { buildBlockDAG, findFusibleConsumer } from '../../src/compiler/autotune/block_dag.js';
 export {
   createElementwiseCPUSketch, createReductionCPUSketch, createRfactorSketch, createFusedTilingSketch,
@@ -54,12 +54,15 @@ export { TuningDatabase, TuningRecord, CODEGEN_VERSION } from '../../src/compile
 export { computeWorkloadKey, buildBlockMap } from '../../src/compiler/autotune/workload_key.js';
 export { Autotuner } from '../../src/compiler/autotune/autotuner.js';
 export { BlockTuningSession, gpuThreadBlockSize } from '../../src/compiler/autotune/session.js';
-export { clonePrimFunc, extractBlockMini } from '../../src/compiler/autotune/tune_ir.js';
-export { matmulTileDims, analyzePureMatmul, pickFixedConfig } from '../../src/compiler/autotune/gpu_matmul_sketch.js';
+export { clonePrimFunc, extractBlockMini } from '../../src/compiler/ir/tensor/clone_tir.js';
+export { matmulTileDims, analyzePureMatmul, pickFixedConfig } from '../../src/compiler/schedule/matmul_tiling.js';
 
 export { ScheduleStep } from '../../src/compiler/schedule/trace.js';
 export { compileGraph } from '../../src/compiler/pipeline/compiler.js';
 export { buildFunction } from '../../src/compiler/ir/graph/builder.js';
+export { DCEPass } from '../../src/compiler/passes/simplify/dce.js';
+export { IRPrinter } from '../../src/compiler/ir/graph/printer.js';
+export { opHasSideEffects } from '../../src/compiler/ir/graph/op_traits.js';
 export { TensorType, ScalarType } from '../../src/compiler/ir/graph/types.js';
 
 export { lowerToLIR } from '../../src/compiler/passes/lowering/tensor_to_lir.js';
@@ -82,7 +85,7 @@ export { WebGPUCodegen } from '../../src/backend/webgpu/codegen.js';
 export { encodeWat } from '../../src/backend/wasm/wat_encoder.js';
 export { flattenRowMajorIndex } from '../../src/backend/index_emit.js';
 export { emitSymInt } from '../../src/backend/codegen_utils.js';
-export { TargetKind } from '../../src/backend/target.js';
+export { TargetKind } from '../../src/compiler/support/target.js';
 export {
   registerCodegen, getCodegenEntry,
   registerExternalCodegen, getExternalCodegen, unregisterExternalCodegen,
@@ -122,7 +125,7 @@ export { registerTracingDispatch } from '../../src/tracing/dispatch.js';
 export { ShapeEnv } from '../../src/tracing/shape_env.js';
 export { _traceCore } from '../../src/tracing/compile.js';
 export { foldWeightParams, weightPredicate, MAX_FOLDABLE_ELEMENTS } from '../../src/tracing/fold_params.js';
-export { SymInt } from '../../src/compiler/analysis/sym_int.js';
+export { SymInt } from '../../src/compiler/ir/sym_int.js';
 export {
   BASELINE, DEFAULT_MIN_GAIN, optimizationCandidates, selectWinner,
   candidateByName, gateCacheKey, graphSignature,

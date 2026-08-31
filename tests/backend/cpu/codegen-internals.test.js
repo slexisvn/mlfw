@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { CPUCodegen } from '../../../src/backend/cpu/codegen.js';
-import { CPUTarget } from '../../../src/backend/target.js';
+import { CPUTarget } from '../../../src/compiler/support/target.js';
 import { Buffer } from '../../../src/compiler/ir/tensor/buffer.js';
 import {
   PrimFunc, ForNode, BlockNode, SeqNode,

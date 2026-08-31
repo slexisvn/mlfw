@@ -108,7 +108,7 @@ Notice what this function is not: it is not a method. `backpropOps` is a free fu
 
 ### Reachability
 
-[`backward_builder.ts:91`](../../../src/compiler/ad/backward_builder.ts) is Definition 29.1, seeded from the return operation:
+[`backward_builder.ts:114`](../../../src/compiler/ad/backward_builder.ts) is Definition 29.1, seeded from the return operation:
 
 ```ts
 export function computeGradReachability(func: GraphFunction, topoOrder: readonly Operation[]): Set<number> {

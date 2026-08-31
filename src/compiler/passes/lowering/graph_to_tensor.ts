@@ -28,9 +28,9 @@ import type { Buffer } from '../../ir/tensor/buffer.js';
 import type { ConstBuffer } from './lowering_registry.js';
 import type { TirNode, VariableNode } from '../../ir/tensor/nodes.js';
 import type { TensorType } from '../../ir/graph/types.js';
-import type { CompilerContext } from '../../pipeline/compiler_context.js';
-import type { CompileTarget } from '../../pipeline/pipeline_types.js';
-import type { TraceLog } from '../../pipeline/trace.js';
+import type { LoweringRuleLookup } from './lowering_registry.js';
+import type { CompileTarget } from '../../support/config_types.js';
+import type { TraceLog } from '../../support/trace.js';
 import { formatLocation } from '../../ir/location.js';
 
 const BROADCAST_VIEW_SAFE_EXTRA = ['compare', 'select', 'clamp', 'convert', 'copy_to_device', 'dot', 'fusion'];
@@ -104,7 +104,7 @@ function stampSourceOp(stmt: TirNode, op: Operation): void {
   });
 }
 
-export function lowerGraphToPrimFunc(graphFunc: GraphFunction, target: CompileTarget | null = null, context: CompilerContext | null = null, trace: TraceLog | null = null): PrimFunc {
+export function lowerGraphToPrimFunc(graphFunc: GraphFunction, target: CompileTarget | null = null, context: LoweringRuleLookup | null = null, trace: TraceLog | null = null): PrimFunc {
   const ctx = new LoweringContext();
   ctx.target = target;
   const params: VariableNode[] = [];

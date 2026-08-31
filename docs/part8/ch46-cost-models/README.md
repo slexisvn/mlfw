@@ -331,7 +331,7 @@ Then Proposition 46.7, and the reason it does not bite:
 
 On the whole function, all five schedules give the identical aggregated row: the block being tuned has innermost extent 1 through 16, the `mul` block beside it has 64, and the max erases the difference. Every sample the learned model would receive has the same features and a different label, so it would fit their mean and rank them all equal.
 
-The session escapes that by evaluating a *mini* function — `extractBlockMini` ([`tune_ir.ts:68`](../../../src/compiler/autotune/tune_ir.ts)) rebuilds the block and its enclosing loops as a standalone `PrimFunc` — which has one statement, so the max is over one element and is the identity. It is a genuine fix and it was made for a different reason: the mini function is what lets the search score a block without the rest of the program's noise.
+The session escapes that by evaluating a *mini* function — `extractBlockMini` ([`tune_ir.ts:68`](../../../src/compiler/ir/tensor/clone_tir.ts)) rebuilds the block and its enclosing loops as a standalone `PrimFunc` — which has one statement, so the max is over one element and is the identity. It is a genuine fix and it was made for a different reason: the mini function is what lets the search score a block without the rest of the program's noise.
 
 The label is not given the same treatment. `_measure` benchmarks the *whole* scheduled function and pairs its median with the *mini* function's features ([`session.ts:229`](../../../src/compiler/autotune/session.ts), [`session.ts:231`](../../../src/compiler/autotune/session.ts)):
 

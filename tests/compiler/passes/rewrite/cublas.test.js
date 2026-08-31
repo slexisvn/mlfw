@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildFunction } from '../../../../src/compiler/ir/graph/builder.js';
 import { compileGraph } from '../../../../src/compiler/pipeline/compiler.js';
-import { CPUTarget } from '../../../../src/backend/target.js';
+import { CPUTarget } from '../../../../src/compiler/support/target.js';
 import { CublasRewritePass } from '../../../../src/compiler/passes/rewrite/cublas_rewrite.js';
 import { PassResult } from '../../../../src/compiler/passes/pass.js';
 import { T as t } from '../../../_utils/ir_fixture.js';

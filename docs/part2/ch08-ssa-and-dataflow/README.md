@@ -73,7 +73,7 @@ export class UseLink {
 }
 ```
 
-The list is kept current by the operation constructor, which is where an edge in the use-def graph is actually born ([`operation.ts:50`](../../../src/compiler/ir/graph/operation.ts)):
+The list is kept current by the operation constructor, which is where an edge in the use-def graph is actually born ([`operation.ts:54`](../../../src/compiler/ir/graph/operation.ts)):
 
 ```ts
     this.operands = new Array(operands.length);

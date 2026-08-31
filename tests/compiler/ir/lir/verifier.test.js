@@ -10,7 +10,7 @@ import { GraphFunction } from '../../../../src/compiler/ir/graph/function.js';
 import { TensorType, ScalarType } from '../../../../src/compiler/ir/graph/types.js';
 import { lowerGraphToPrimFunc } from '../../../../src/compiler/passes/lowering/graph_to_tensor.js';
 import { lowerToLIR } from '../../../../src/compiler/passes/lowering/tensor_to_lir.js';
-import { WasmTarget } from '../../../../src/backend/target.js';
+import { WasmTarget } from '../../../../src/compiler/support/target.js';
 
 function idx(name) { return new VariableNode(name, 'index'); }
 

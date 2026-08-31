@@ -1,8 +1,8 @@
-import { PrimFunc, ForNode } from '../ir/tensor/nodes.js';
-import { cloneIRShared } from '../ir/clone_ir.js';
-import type { CloneableIRNode, CloneRecurse } from '../ir/clone_ir.js';
-import type { TirNode, BlockNode, ForNode as ForNodeType } from '../ir/tensor/nodes.js';
-import type { Buffer } from '../ir/tensor/buffer.js';
+import { PrimFunc, ForNode } from './nodes.js';
+import { cloneIRShared } from '../clone_ir.js';
+import type { CloneableIRNode, CloneRecurse } from '../clone_ir.js';
+import type { TirNode, BlockNode, ForNode as ForNodeType } from './nodes.js';
+import type { Buffer } from './buffer.js';
 
 type CloneSlots = CloneableIRNode & { _setChild?: (k: string, c: unknown) => void };
 

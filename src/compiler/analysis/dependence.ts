@@ -65,6 +65,67 @@ function coefficients(form: LinearForm, levelIndex: ReadonlyMap<string, number>,
 
 const INDEPENDENT = Symbol('independent');
 
+type Bounds = { min: number; max: number };
+
+const DIRECTION_BITS: readonly DirectionMask[] = [Direction.LT, Direction.EQ, Direction.GT];
+
+function regionVertices(mask: DirectionMask, span: number): readonly (readonly [number, number])[] {
+  if (mask === Direction.EQ) return [[0, 0], [span, span]];
+  if (mask === Direction.LT) return span < 1 ? [] : [[0, 1], [0, span], [span - 1, span]];
+  if (mask === Direction.GT) return span < 1 ? [] : [[1, 0], [span, 0], [span, span - 1]];
+  return [[0, 0], [0, span], [span, 0], [span, span]];
+}
+
+function levelBounds(a: number, b: number, min: number, span: number, mask: DirectionMask): Bounds | null {
+  const vertices = regionVertices(mask, span);
+  if (vertices.length === 0) return null;
+  const base = (a - b) * min;
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const [p, q] of vertices) {
+    const v = base + a * p - b * q;
+    if (v < lo) lo = v;
+    if (v > hi) hi = v;
+  }
+  return { min: lo, max: hi };
+}
+
+function banerjeeRefine(src: Coefficients, dst: Coefficients, delta: number, loops: readonly IterLevel[], involved: readonly number[], masks: DirectionMask[]): boolean {
+  const spans: number[] = new Array(loops.length).fill(0);
+  const mins: number[] = new Array(loops.length).fill(0);
+  for (const k of involved) {
+    const { min, extent } = loops[k];
+    if (min === null || extent === null || extent <= 0) return true;
+    mins[k] = min;
+    spans[k] = extent - 1;
+  }
+
+  const free: Bounds[] = new Array(loops.length);
+  let freeMin = 0;
+  let freeMax = 0;
+  for (const k of involved) {
+    const b = levelBounds(src.coeffs[k], dst.coeffs[k], mins[k], spans[k], ANY_DIRECTION) as Bounds;
+    free[k] = b;
+    freeMin += b.min;
+    freeMax += b.max;
+  }
+
+  for (const k of involved) {
+    let refined = 0;
+    for (const bit of DIRECTION_BITS) {
+      if ((masks[k] & bit) === 0) continue;
+      const b = levelBounds(src.coeffs[k], dst.coeffs[k], mins[k], spans[k], bit);
+      if (b === null) continue;
+      const lo = freeMin - free[k].min + b.min;
+      const hi = freeMax - free[k].max + b.max;
+      if (delta >= lo && delta <= hi) refined |= bit;
+    }
+    if (refined === 0) return false;
+    masks[k] = refined | negateMask(refined);
+  }
+  return true;
+}
+
 function subscriptDirections(srcForm: LinearForm | null | undefined, dstForm: LinearForm | null | undefined, loops: readonly IterLevel[], levelIndex: ReadonlyMap<string, number>, varRanges: ReadonlyMap<string, VarRange>): DirectionMask[] | typeof INDEPENDENT {
   const n = loops.length;
   if (!srcForm || !dstForm) return new Array<DirectionMask>(n).fill(ANY_DIRECTION);
@@ -126,6 +187,7 @@ function subscriptDirections(srcForm: LinearForm | null | undefined, dstForm: Li
   let g = 0;
   for (const k of involved) g = gcd(g, gcd(src.coeffs[k], dst.coeffs[k]));
   if (g !== 0 && delta % g !== 0) return INDEPENDENT;
+  if (!banerjeeRefine(src, dst, delta, loops, involved, masks)) return INDEPENDENT;
   return masks;
 }
 

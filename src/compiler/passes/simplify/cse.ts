@@ -1,6 +1,6 @@
 import { FunctionPass, PassResult } from '../pass.js';
 import { registry } from '../../ir/graph/ops.js';
-import { TraceLevel } from '../../pipeline/trace.js';
+import { TraceLevel } from '../../support/trace.js';
 import { explainer } from '../explain.js';
 import type { GraphFunction } from '../../ir/graph/function.js';
 import type { Block } from '../../ir/graph/block.js';

@@ -7,7 +7,7 @@ import { Buffer } from '../../../../src/compiler/ir/tensor/buffer.js';
 import { AccumulatorDetectionPass } from '../../../../src/compiler/passes/lowering/accumulator_pass.js';
 import { detectAccumulator } from '../../../../src/compiler/passes/lowering/accumulator.js';
 import { lowerToLIR } from '../../../../src/compiler/passes/lowering/tensor_to_lir.js';
-import { WasmTarget, CPUTarget } from '../../../../src/backend/target.js';
+import { WasmTarget, CPUTarget } from '../../../../src/compiler/support/target.js';
 import { buildFunction } from '../../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../../../src/compiler/pipeline/compiler.js';

@@ -1,4 +1,4 @@
-import type { PassResultValue } from './pass.js';
+import type { PassResultValue } from './pass_result.js';
 import type { IRLevelValue } from '../ir/verify.js';
 
 export type InstrumentedPass = { name: string };

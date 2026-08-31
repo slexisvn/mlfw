@@ -1,6 +1,7 @@
 import { Value, UseLink } from './value.js';
 import { Region } from './block.js';
 import { registry } from './ops.js';
+import type { OpDef } from './op_registry.js';
 import { topoSortByOperands } from './graph_algorithms.js';
 import type { AttrInit, AttrValue, HashableAttr, IRType } from './types.js';
 import type { Location } from '../location.js';
@@ -141,6 +142,10 @@ export class Operation {
     for (let i = 0; i < this.results.length; i++) {
       this.results[i].replaceAllUsesWith(newValues[i]);
     }
+  }
+
+  get def(): OpDef | null {
+    return registry.get(this.opName);
   }
 
   isTerminator(): boolean {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { WebGPUCodegen, WebGPUKernel } from '../../../src/backend/webgpu/codegen.js';
-import { WebGPUTarget } from '../../../src/backend/target.js';
+import { WebGPUTarget } from '../../../src/compiler/support/target.js';
 import { Buffer } from '../../../src/compiler/ir/tensor/buffer.js';
 import {
   PrimFunc, ForNode, BlockNode, SeqNode,

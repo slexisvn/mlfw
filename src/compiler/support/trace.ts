@@ -1,6 +1,24 @@
-import { PassResult } from '../passes/pass.js';
-import type { MemoryPlanTrace } from '../passes/memory/memory_planning.js';
-import type { SerializedStep } from '../schedule/trace.js';
+import { PassResult } from './pass_result.js';
+
+export type ScheduleArgs = readonly unknown[];
+export type SerializedStep = { primitive: string; args: ScheduleArgs; produced?: readonly string[] };
+
+export type BufferLifetime = {
+  name: string;
+  scope: string;
+  bytes: number;
+  slot: number;
+  firstUse: number;
+  lastUse: number;
+  sharesWith: string | null;
+};
+
+export type MemoryPlanTrace = {
+  peakMemory: number;
+  totalBytesIfNeverShared: number;
+  steps: number;
+  buffers: readonly BufferLifetime[];
+};
 
 export type TraceEvent = Record<string, unknown> & { level: number; type: string; timestamp?: number };
 

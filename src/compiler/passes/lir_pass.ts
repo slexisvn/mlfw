@@ -1,6 +1,6 @@
 import type { LIRFunc } from '../ir/lir/nodes.js';
-import type { TraceLog } from '../pipeline/trace.js';
-import type { CompilerConfig } from '../pipeline/pipeline_types.js';
+import type { TraceLog } from '../support/trace.js';
+import type { CompilerConfig } from '../support/config_types.js';
 
 export type LirPassCtx = {
   trace: TraceLog;

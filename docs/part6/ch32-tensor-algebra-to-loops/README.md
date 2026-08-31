@@ -84,7 +84,7 @@ Note what Definition 32.6 does **not** take: the rest of the program. A rule see
   }
 ```
 
-**Two — results, and the aliasing problem.** A `PrimFunc` has no return value; outputs are parameters, written in place. So the returned values become parameters too — unless a returned value is also an input, or is returned twice, in which case writing it in place would corrupt it ([`graph_to_tensor.ts:99`](../../../src/compiler/passes/lowering/graph_to_tensor.ts)):
+**Two — results, and the aliasing problem.** A `PrimFunc` has no return value; outputs are parameters, written in place. So the returned values become parameters too — unless a returned value is also an input, or is returned twice, in which case writing it in place would corrupt it ([`graph_to_tensor.ts:130`](../../../src/compiler/passes/lowering/graph_to_tensor.ts)):
 
 ```ts
     const srcBuf = ctx.getOrAllocBuffer(retOp.getOperand(i));
@@ -98,7 +98,7 @@ A function that returns its own input compiles to a copy loop, emitted at the en
 
 **Three — constants first.** Constant operations are lowered ahead of everything else, in graph order, and skipped when the main loop reaches them. They are separated because `lowerConstant` ([`lowering_registry.ts:476`](../../../src/compiler/passes/lowering/lowering_registry.ts)) does not always emit a statement: a weight folded into the graph becomes a `constBuffer` attached to the function rather than a store, and a *scalar* constant is given a rank-matched size-1 buffer tagged for broadcast, which its consumers then read with a literal `0` in every axis. Both need the buffer registered before any rule asks for it.
 
-**Four — the main loop**, in topological order ([`graph_to_tensor.ts:122`](../../../src/compiler/passes/lowering/graph_to_tensor.ts)):
+**Four — the main loop**, in topological order ([`graph_to_tensor.ts:154`](../../../src/compiler/passes/lowering/graph_to_tensor.ts)):
 
 ```ts
   for (const op of topologicalOps(graphFunc)) {
@@ -132,7 +132,7 @@ then the broadcast special case below, then:
 
 `getOrAllocBuffer` is memoised on the `Value` ([`lowering_registry.ts:118`](../../../src/compiler/passes/lowering/lowering_registry.ts)), so the buffer an operation writes is the same object its consumer later reads. **The graph's dataflow edges become buffer identity.** That is where the use-def graph of Chapter 8 stops existing and a set of shared mutable buffers takes its place — and it is why Part IX has to reconstruct liveness from scratch instead of reading it off the IR.
 
-**Five — shape parameters.** Symbolic dimensions collected along the way become extra trailing parameters, and a symbol with no input dimension to bind it to is a hard error ([`graph_to_tensor.ts:195`](../../../src/compiler/passes/lowering/graph_to_tensor.ts)):
+**Five — shape parameters.** Symbolic dimensions collected along the way become extra trailing parameters, and a symbol with no input dimension to bind it to is a hard error ([`graph_to_tensor.ts:228`](../../../src/compiler/passes/lowering/graph_to_tensor.ts)):
 
 ```ts
   for (const [name, node] of ctx.symVars) {
@@ -144,7 +144,7 @@ then the broadcast special case below, then:
 
 ### The decision no rule could make
 
-Between the fusion case and the rule lookup sits the second driver-level decision ([`graph_to_tensor.ts:135`](../../../src/compiler/passes/lowering/graph_to_tensor.ts)):
+Between the fusion case and the rule lookup sits the second driver-level decision ([`graph_to_tensor.ts:165`](../../../src/compiler/passes/lowering/graph_to_tensor.ts)):
 
 ```ts
     if (isBroadcastOp(op.opName)
@@ -165,7 +165,7 @@ A broadcast whose every consumer can absorb it becomes **no statement at all**: 
 
 ### Where it is called from
 
-[`compiler.ts:467`](../../../src/compiler/pipeline/compiler.ts), one function at a time, into a fresh `TirModule`:
+[`compiler.ts:471`](../../../src/compiler/pipeline/compiler.ts), one function at a time, into a fresh `TirModule`:
 
 ```ts
     this._eachFunc(graphModule, 'lowering', trace, errors, failed, resilient, (func) => {

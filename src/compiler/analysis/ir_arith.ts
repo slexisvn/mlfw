@@ -1,12 +1,12 @@
 import { COMPARE_MATH_OPS, compareDirectionOf } from '../../util/dtype_map.js';
 import { DIVMOD_MATH_OPS } from '../../util/divmod.js';
 import { Analyzer } from './analyzer.js';
-import { SymInt } from './sym_int.js';
+import { SymInt } from '../ir/sym_int.js';
 import { IntImmNode, MathOpNode, CompareNode, VariableNode, mathOp } from '../ir/tensor/nodes.js';
 import type { CallExternNode } from '../ir/tensor/nodes.js';
 import { toLinearForm, splitByDivisor, linearFormToNode } from './iter_map.js';
 import { symIntToNode } from '../ir/tensor/sym_lower.js';
-import type { SymExpr } from './sym_int.js';
+import type { SymExpr } from '../ir/sym_int.js';
 import type { IntBound } from './analyzer.js';
 import type { LinearForm } from './iter_map.js';
 import type { TirNode } from '../ir/tensor/nodes.js';

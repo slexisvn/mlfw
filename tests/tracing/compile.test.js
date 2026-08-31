@@ -5,7 +5,7 @@ import {
 import { compile, trace, _traceCore } from '../../src/tracing/compile.js';
 import { foldWeightParams } from '../../src/tracing/fold_params.js';
 import { tensorToContiguous } from '../../src/dispatcher/jit_dispatch.js';
-import { WasmTarget, CPUTarget, CUDATarget } from '../../src/backend/target.js';
+import { WasmTarget, CPUTarget, CUDATarget } from '../../src/compiler/support/target.js';
 import { QuantizationScheme } from '../../src/compiler/ir/graph/quantization_types.js';
 import { Tensor } from '../../src/tensor/core/tensor.js';
 

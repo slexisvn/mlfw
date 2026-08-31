@@ -14,3 +14,4 @@ import './vjp_rules/reduction.js';
 import './vjp_rules/shape.js';
 import './vjp_rules/composite.js';
 import './vjp_rules/control.js';
+import './scan_backward.js';

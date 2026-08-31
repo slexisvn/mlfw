@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { tensor } from '../../../src/index.js';
 import * as nn from '../../../src/nn/index.js';
 import { compile } from '../../../src/tracing/compile.js';
-import { CPUTarget, CUDATarget } from '../../../src/backend/target.js';
+import { CPUTarget, CUDATarget } from '../../../src/compiler/support/target.js';
 import { cudaDeps } from '../../_utils/cuda.js';
 
 const flat = (v) => Array.from(v && typeof v.contiguous === 'function' ? v.contiguous().data : v.data);

@@ -24,7 +24,7 @@ And it has to have an answer for the case where the honest answer is "not yet" â
 export type IRType = TensorType | TupleType | TokenType | FunctionType;
 ```
 
-Three of those four are rare. `TupleType` groups results (`split` produces one); `TokenType` orders side effects without carrying data; `FunctionType` types a callee. Ninety-nine values in a hundred carry the remaining one, `TensorType` ([`types.ts:244`](../../../src/compiler/ir/graph/types.ts)):
+Three of those four are rare. `TupleType` groups results (`split` produces one); `TokenType` orders side effects without carrying data; `FunctionType` types a callee. Ninety-nine values in a hundred carry the remaining one, `TensorType` ([`types.ts:282`](../../../src/compiler/ir/graph/types.ts)):
 
 ```ts
 export class TensorType {
@@ -67,7 +67,7 @@ The distinction between the last two is the whole reason `SymInt` exists. If a f
 
 ### Dtype, and the promotion lattice
 
-[`types.ts:32`](../../../src/compiler/ir/graph/types.ts) declares eleven scalar types, and [`types.ts:135`](../../../src/compiler/ir/graph/types.ts) says what happens when two meet:
+[`types.ts:173`](../../../src/compiler/ir/graph/types.ts) declares eleven scalar types, and [`types.ts:173`](../../../src/compiler/ir/graph/types.ts) says what happens when two meet:
 
 ```ts
 export function promoteDtype(a: ScalarDType, b: ScalarDType): ScalarDType | null {
@@ -90,14 +90,14 @@ Read the rules: within a kind, wider wins; across kinds, float beats integer; an
 
 ### Layout is a permutation
 
-[`types.ts:150`](../../../src/compiler/ir/graph/types.ts):
+[`types.ts:188`](../../../src/compiler/ir/graph/types.ts):
 
 ```ts
 export class Layout {
   readonly order: readonly number[];
 ```
 
-`order` is the sequence in which dimensions vary from slowest to fastest. Row-major is `[0, 1, 2, ...]`; column-major is the reverse; NHWC against NCHW is a permutation of four. Its one job is [`types.ts:197`](../../../src/compiler/ir/graph/types.ts):
+`order` is the sequence in which dimensions vary from slowest to fastest. Row-major is `[0, 1, 2, ...]`; column-major is the reverse; NHWC against NCHW is a permutation of four. Its one job is [`types.ts:235`](../../../src/compiler/ir/graph/types.ts):
 
 ```ts
   computeStrides(shape: Shape): number[] {
@@ -155,7 +155,7 @@ Now the part that matters. There are three relations on types in this file, and 
   shapeCompatible(other: TensorType): boolean // types.ts:304
 ```
 
-`equals` compares dtype, every dimension, and layout. `shapeEquals` drops the layout requirement. `shapeCompatible` is the interesting one ([`types.ts:304`](../../../src/compiler/ir/graph/types.ts)):
+`equals` compares dtype, every dimension, and layout. `shapeEquals` drops the layout requirement. `shapeCompatible` is the interesting one ([`types.ts:342`](../../../src/compiler/ir/graph/types.ts)):
 
 ```ts
   shapeCompatible(other: TensorType): boolean {
@@ -207,7 +207,7 @@ The consequence is a rule for using the function, and it is worth stating flatly
 
 ## 10.5 Broadcasting is a different order
 
-Elementwise operations do not require compatible shapes; they require *broadcast-compatible* ones, and that is a second, independent relation ([`types.ts:234`](../../../src/compiler/ir/graph/types.ts)):
+Elementwise operations do not require compatible shapes; they require *broadcast-compatible* ones, and that is a second, independent relation ([`types.ts:272`](../../../src/compiler/ir/graph/types.ts)):
 
 ```ts
 export function broadcastDim(a: Dim, b: Dim): Dim | null {

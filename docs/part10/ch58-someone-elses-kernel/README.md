@@ -66,7 +66,7 @@ export function activeExternalCodegenProviders(config: CompilerConfig, target: C
 }
 ```
 
-([`external_codegen.ts:19`](../../../src/compiler/pipeline/external_codegen.ts) and [`:29`](../../../src/compiler/pipeline/external_codegen.ts).) The compiler calls this in two places: once when building the graph pipeline, to collect `graphPasses`, and once immediately after lowering, to run `annotate` ([`compiler.ts:341`](../../../src/compiler/pipeline/compiler.ts)):
+([`external_codegen.ts:19`](../../../src/compiler/pipeline/external_codegen.ts) and [`:29`](../../../src/compiler/pipeline/external_codegen.ts).) The compiler calls this in two places: once when building the graph pipeline, to collect `graphPasses`, and once immediately after lowering, to run `annotate` ([`compiler.ts:329`](../../../src/compiler/pipeline/compiler.ts)):
 
 ```ts
         name: 'lowering',
@@ -101,7 +101,7 @@ registerExternalCodegenProvider({
 
 ### The emitter
 
-The cuBLAS entry is the shortest codegen in the compiler ([`codegen_registry.ts:47`](../../../src/backend/codegen_registry.ts)):
+The cuBLAS entry is the shortest codegen in the compiler ([`codegen_registry.ts:46`](../../../src/backend/codegen_registry.ts)):
 
 ```ts
 registerExternalCodegen(CUBLAS_PROVIDER, {
@@ -117,7 +117,7 @@ An empty source and a descriptor. Everything a normal backend spends hundreds of
 
 ### The hand-off
 
-`BackendPipeline.compile` ([`pipeline.ts:36`](../../../src/backend/pipeline.ts)) is where the attribute is read:
+`BackendPipeline.compile` ([`pipeline.ts:38`](../../../src/backend/pipeline.ts)) is where the attribute is read:
 
 ```ts
     const external = primFunc.getAttr<ExternalCodegenAttr>(FuncAttr.EXTERNAL_CODEGEN);

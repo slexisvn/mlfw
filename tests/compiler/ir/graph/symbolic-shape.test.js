@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { TensorType, ScalarType, DYNAMIC, broadcastDim, dimEquals } from '../../../../src/compiler/ir/graph/types.js';
-import { SymInt } from '../../../../src/compiler/analysis/sym_int.js';
+import { SymInt } from '../../../../src/compiler/ir/sym_int.js';
 import { registry } from '../../../../src/compiler/ir/graph/ops.js';
 
 describe('symbolic dynamic shapes', () => {

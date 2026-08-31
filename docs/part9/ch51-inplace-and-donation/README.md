@@ -109,7 +109,7 @@ There is one deliberate escape hatch, at [`inplace_analysis.ts:188`](../../../sr
 
 An accepted candidate is a *claim* that two buffers may be one. Three things then have to agree, and they live in [`memory_planning.ts`](../../../src/compiler/passes/memory/memory_planning.ts).
 
-**The planner filters the analysis before anything acts on it** ([`memory_planning.ts:112`](../../../src/compiler/passes/memory/memory_planning.ts)):
+**The planner filters the analysis before anything acts on it** ([`memory_planning.ts:144`](../../../src/compiler/passes/memory/memory_planning.ts)):
 
 ```ts
       inplaceCandidates = InplaceAnalysis.analyze(primFunc, livenessResult)

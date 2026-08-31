@@ -69,7 +69,7 @@ export type AnalysisCtor<TResult = unknown> = {
 };
 ```
 
-Four static members. `UseDefAnalysis` implements them in four lines ([`use_def.ts:23`](../../../src/compiler/analysis/use_def.ts)):
+Four static members. `UseDefAnalysis` implements them in four lines ([`use_def.ts:24`](../../../src/compiler/analysis/use_def.ts)):
 
 ```ts
   static get name(): string { return 'use_def'; }

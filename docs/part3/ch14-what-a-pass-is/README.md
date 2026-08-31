@@ -64,7 +64,7 @@ So the driver needs to know which kind it is holding. In MLIR the same distincti
 
 ## 14.4 In mlfw: eighty-eight lines
 
-The entire pass contract is [`passes/pass.ts`](../../../src/compiler/passes/pass.ts) — 88 lines, and it is worth reading all of it. Start with the verdict ([`pass.ts:17`](../../../src/compiler/passes/pass.ts)):
+The entire pass contract is [`passes/pass.ts`](../../../src/compiler/passes/pass.ts) — 87 lines, and it is worth reading all of it. Start with the verdict, which lives one layer down in [`support/pass_result.ts`](../../../src/compiler/support/pass_result.ts) and is re-exported here:
 
 ```ts
 export const PassResult = Object.freeze({
@@ -74,7 +74,9 @@ export const PassResult = Object.freeze({
 });
 ```
 
-Then the base class ([`pass.ts:23`](../../../src/compiler/passes/pass.ts)):
+It sits in `support/` rather than in `pass.ts` because the trace log reports it, and `support/` is the layer below `passes/`: putting the enum with the passes would make the tracer import a pass module, which is the wrong direction.
+
+Then the base class ([`pass.ts:22`](../../../src/compiler/passes/pass.ts)):
 
 ```ts
 export class Pass {
@@ -100,7 +102,7 @@ Seven fields. Six of them are a question the driver will ask before or after run
 
 The seventh, `invalidatedAnalyses`, is not in the table because nothing asks it. It is declared on every pass and read by nothing in `src/`; §16.7 comes back to it.
 
-And the method that does the work ([`pass.ts:52`](../../../src/compiler/passes/pass.ts)):
+And the method that does the work ([`pass.ts:51`](../../../src/compiler/passes/pass.ts)):
 
 ```ts
   run(target: PassTarget, analysisManager?: AnalysisManager): PassResultValue {
@@ -108,7 +110,7 @@ And the method that does the work ([`pass.ts:52`](../../../src/compiler/passes/p
   }
 ```
 
-`PassTarget` is `GraphModule | GraphFunction` ([`pass.ts:8`](../../../src/compiler/passes/pass.ts)), which is the granularity distinction expressed in the type. The two subclasses at the bottom of the file carry no behaviour at all ([`pass.ts:78`](../../../src/compiler/passes/pass.ts)):
+`PassTarget` is `GraphModule | GraphFunction` ([`pass.ts:77`](../../../src/compiler/passes/pass.ts)), which is the granularity distinction expressed in the type. The two subclasses at the bottom of the file carry no behaviour at all ([`pass.ts:77`](../../../src/compiler/passes/pass.ts)):
 
 ```ts
 export class FunctionPass extends Pass {
@@ -142,7 +144,7 @@ Only 9 of the 21 graph passes are instantiated for a default CPU compile. Which 
 
 ### The switch that turns one off
 
-Pass selection is not a debugging afterthought bolted on later; it is a parameter to the run ([`pass.ts:57`](../../../src/compiler/passes/pass.ts)):
+Pass selection is not a debugging afterthought bolted on later; it is a parameter to the run ([`pass.ts:56`](../../../src/compiler/passes/pass.ts)):
 
 ```ts
 export class PassContext {

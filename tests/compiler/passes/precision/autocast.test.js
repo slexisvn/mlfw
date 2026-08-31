@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { buildFunction } from '../../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../../../src/compiler/pipeline/compiler.js';
-import { CPUTarget } from '../../../../src/backend/target.js';
+import { CPUTarget } from '../../../../src/compiler/support/target.js';
 import { applyAutocast, MixedPrecisionPass, PrecisionClass, DEFAULT_AUTOCAST_OPS } from '../../../../src/compiler/passes/precision/mixed_precision.js';
 import { registry } from '../../../../src/compiler/ir/graph/ops.js';
 import { PassResult } from '../../../../src/compiler/passes/pass.js';

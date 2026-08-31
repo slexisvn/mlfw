@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as nn from '../../../src/index.js';
 import { trace } from '../../../src/index.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
-import { WebGPUTarget } from '../../../src/backend/target.js';
+import { WebGPUTarget } from '../../../src/compiler/support/target.js';
 
 function lstmSource(E, H, T, B, kind = 'lstm') {
   const Mod = kind === 'gru' ? nn.GRU : nn.LSTM;

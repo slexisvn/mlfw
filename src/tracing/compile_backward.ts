@@ -1,14 +1,14 @@
-import { _traceCore, resolveDynamicShapes, inputSignatureOf, signatureMatches, isThenable } from './compile.js';
+import { _traceCore, resolveDynamicShapes, inputSignatureOf, signatureMatches, isThenable } from './trace_core.js';
 import { Compiler } from '../compiler/pipeline/compiler.js';
-import { CPUTarget } from '../backend/target.js';
+import { CPUTarget } from '../compiler/support/target.js';
 import { GraphModule } from '../compiler/ir/graph/module.js';
 import { BackwardGraphBuilder } from '../compiler/ad/backward_builder.js';
 import { IRBuilder } from '../compiler/ir/graph/builder.js';
 import { JointGraphBuilder } from '../compiler/ad/joint_builder.js';
 import { RematPolicy } from '../compiler/ad/remat_policy.js';
-import { TraceLog } from '../compiler/pipeline/trace.js';
+import { TraceLog } from '../compiler/support/trace.js';
 import { explainer } from '../compiler/passes/explain.js';
-import type { TraceLogConfig } from '../compiler/pipeline/trace.js';
+import type { TraceLogConfig } from '../compiler/support/trace.js';
 import type { InputSignature } from './types.js';
 import '../compiler/ad/index.js';
 import { tensorToContiguous, tensorToContiguousCopy, wrapResult } from '../dispatcher/jit_dispatch.js';

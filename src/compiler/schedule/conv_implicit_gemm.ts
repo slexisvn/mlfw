@@ -4,8 +4,8 @@ import {
   MathOpNode, CompareNode, SyncThreadsNode, VecCopyNode,
 } from '../ir/tensor/nodes.js';
 import { Buffer } from '../ir/tensor/buffer.js';
-import { findBlock, collectAllBlockNames } from '../autotune/block_analysis.js';
-import { pickFixedConfig } from '../autotune/gpu_matmul_sketch.js';
+import { findBlock, collectAllBlockNames } from './block_analysis.js';
+import { pickFixedConfig } from './matmul_tiling.js';
 import { FuncAttr } from '../ir/func_attrs.js';
 
 import type { TirNode } from '../ir/tensor/nodes.js';

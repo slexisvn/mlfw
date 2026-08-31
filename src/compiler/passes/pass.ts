@@ -1,10 +1,11 @@
 import type { GraphModule } from '../ir/graph/module.js';
 import type { GraphFunction } from '../ir/graph/function.js';
 import { AnalysisManager } from '../analysis/analysis_manager.js';
+import { PassResult } from '../support/pass_result.js';
+import type { PassResultValue } from '../support/pass_result.js';
 import type { AnalysisCtor } from '../analysis/analysis_manager.js';
-import type { TraceLog } from '../pipeline/trace.js';
+import type { TraceLog } from '../support/trace.js';
 
-export type PassResultValue = (typeof PassResult)[keyof typeof PassResult];
 export type PassTarget = GraphModule | GraphFunction;
 export type PassLike = { name: string; optLevel?: number };
 export type AnalysisRef = AnalysisCtor | string;
@@ -15,11 +16,8 @@ export type PassContextOpts = Readonly<{
   config?: ReadonlyMap<string, unknown> | Record<string, unknown>;
 }>;
 
-export const PassResult = Object.freeze({
-  UNCHANGED: 0,
-  CHANGED: 1,
-  FAILED: 2
-});
+export { PassResult };
+export type { PassResultValue };
 
 export class Pass {
   name: string;

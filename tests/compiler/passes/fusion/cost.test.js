@@ -3,7 +3,7 @@ import { buildFunction } from '../../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../../src/compiler/ir/graph/types.js';
 import { FusionCostModel } from '../../../../src/compiler/passes/fusion/fusion_cost.js';
 import { FusionGroup } from '../../../../src/compiler/passes/fusion/fusion_groups.js';
-import { CPUTarget, CUDATarget } from '../../../../src/backend/target.js';
+import { CPUTarget, CUDATarget } from '../../../../src/compiler/support/target.js';
 
 function ops(func) {
   const list = [];

@@ -1,12 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { buildFunction } from '../../../../src/compiler/ir/graph/builder.js';
 import { compileGraph, Compiler } from '../../../../src/compiler/pipeline/compiler.js';
-import { CPUTarget } from '../../../../src/backend/target.js';
+import { CPUTarget } from '../../../../src/compiler/support/target.js';
 import { QuantizationScheme } from '../../../../src/compiler/ir/graph/quantization_types.js';
 import { collectCalibration } from '../../../../src/compiler/analysis/calibrate_exec.js';
 import { tensor, Linear, ReLU, Sequential, manual_seed } from '../../../../src/index.js';
 import { compile } from '../../../../src/tracing/compile.js';
-import { TraceLevel } from '../../../../src/compiler/pipeline/trace.js';
+import { TraceLevel } from '../../../../src/compiler/support/trace.js';
 import { F32 as F, T } from '../../../_utils/ir_fixture.js';
 
 

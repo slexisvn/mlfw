@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { buildFunction } from '../../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType, Layout } from '../../../../src/compiler/ir/graph/types.js';
 import { LayoutPolicy, LayoutPreference } from '../../../../src/compiler/passes/layout/layout_policy.js';
-import { CPUTarget, CUDATarget, WasmTarget } from '../../../../src/backend/target.js';
+import { CPUTarget, CUDATarget, WasmTarget } from '../../../../src/compiler/support/target.js';
 
 function ops(func) {
   const list = [];

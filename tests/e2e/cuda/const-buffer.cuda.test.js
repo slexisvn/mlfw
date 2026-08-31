@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { tensor } from '../../../src/index.js';
 import * as nn from '../../../src/nn/index.js';
 import { compile } from '../../../src/tracing/compile.js';
-import { CPUTarget, CUDATarget } from '../../../src/backend/target.js';
+import { CPUTarget, CUDATarget } from '../../../src/compiler/support/target.js';
 import { setH2DObserver } from '../../../src/runtime/node/cuda/runtime_api.js';
 import { releaseCudaMemory } from '../../../src/runtime/backend_registry.js';
 import { buildGpt2 } from '../../_utils/gpt2_model.js';

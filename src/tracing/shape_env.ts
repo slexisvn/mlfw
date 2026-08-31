@@ -1,5 +1,5 @@
 import { DYNAMIC } from '../compiler/ir/graph/types.js';
-import { SymInt, unboundSymbolError } from '../compiler/analysis/sym_int.js';
+import { SymInt, unboundSymbolError } from '../compiler/ir/sym_int.js';
 import type { TensorInput } from './types.js';
 import type { SymbolicDim, MutableSymbolicShape, SymbolicShape } from './types.js';
 

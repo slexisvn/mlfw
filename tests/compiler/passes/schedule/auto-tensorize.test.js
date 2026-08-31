@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildFunction } from '../../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../../src/compiler/ir/graph/types.js';
-import { CUDATarget, CPUTarget } from '../../../../src/backend/target.js';
+import { CUDATarget, CPUTarget } from '../../../../src/compiler/support/target.js';
 import { Compiler } from '../../../../src/compiler/pipeline/compiler.js';
 import { GraphModule } from '../../../../src/compiler/ir/graph/module.js';
 

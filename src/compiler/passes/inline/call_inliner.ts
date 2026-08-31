@@ -1,5 +1,5 @@
 import { ModulePass, PassResult } from '../pass.js';
-import { TraceLevel } from '../../pipeline/trace.js';
+import { TraceLevel } from '../../support/trace.js';
 import { explainer } from '../explain.js';
 import type { GraphModule } from '../../ir/graph/module.js';
 import type { GraphFunction } from '../../ir/graph/function.js';

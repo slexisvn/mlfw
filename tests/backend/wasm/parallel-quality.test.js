@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType } from '../../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
-import { WasmTarget } from '../../../src/backend/target.js';
+import { WasmTarget } from '../../../src/compiler/support/target.js';
 import { F32 } from '../../_utils/ir_fixture.js';
 
 const PAR = WasmTarget({ numCores: 4 });

@@ -4,7 +4,7 @@ import { TensorType, ScalarType } from '../../../../src/compiler/ir/graph/types.
 import { lowerGraphToPrimFunc } from '../../../../src/compiler/passes/lowering/graph_to_tensor.js';
 import { BufferLoadNode, IntImmNode } from '../../../../src/compiler/ir/tensor/nodes.js';
 import { compileGraph } from '../../../../src/compiler/pipeline/compiler.js';
-import { CPUTarget, WasmTarget } from '../../../../src/backend/target.js';
+import { CPUTarget, WasmTarget } from '../../../../src/compiler/support/target.js';
 
 const SKIP_KEYS = new Set(['_parent', '_parentKey', '_parentIdx']);
 

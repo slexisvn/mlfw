@@ -98,7 +98,7 @@ The graph knows there is a `dot`. It does not know, and cannot say, in what orde
 
 The lab prints a third version, the generated JavaScript you already met in Chapter 2, and it continues the same slide. There, `buf_13[vls0_17, vrs0_18]` has become `buf_13[(ls0_14 * 8) + rs0_15]`: the two-dimensional index is gone, replaced by arithmetic on a flat array. TIR knew the buffer had a shape; the emitted code knows only offsets.
 
-> **What the lab does not show, and why.** The three artefacts printed above are Graph IR, TIR and **generated source** — not Graph IR, TIR and LIR. LIR is the level that performs the flattening you just watched, and it has no snapshot of its own: `IRSnapshotFlags` ([`trace.ts:5`](../../../src/compiler/pipeline/trace.ts)) offers exactly three points, `afterGraphPasses`, `afterLowering` and `afterScheduling`, and all three are above LIR. So in this chapter LIR is visible only through its output. Chapter 53 prints it directly; until then, read the flat index expressions in the generated code as LIR's handwriting.
+> **What the lab does not show, and why.** The three artefacts printed above are Graph IR, TIR and **generated source** — not Graph IR, TIR and LIR. LIR is the level that performs the flattening you just watched, and it has no snapshot of its own: `IRSnapshotFlags` ([`trace.ts:26`](../../../src/compiler/support/trace.ts)) offers exactly three points, `afterGraphPasses`, `afterLowering` and `afterScheduling`, and all three are above LIR. So in this chapter LIR is visible only through its output. Chapter 53 prints it directly; until then, read the flat index expressions in the generated code as LIR's handwriting.
 
 That trade — gaining detail by losing meaning, at every step — is what a level of a compiler is.
 

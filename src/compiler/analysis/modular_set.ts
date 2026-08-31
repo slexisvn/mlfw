@@ -1,7 +1,7 @@
 import { gcd } from '../../util/integer.js';
 import { floorMod } from '../../util/divmod.js';
-import { SymInt } from './sym_int.js';
-import type { SymExpr } from './sym_int.js';
+import { SymInt } from '../ir/sym_int.js';
+import type { SymExpr } from '../ir/sym_int.js';
 
 export type ModularLookup = (name: string) => ModularSet | null;
 

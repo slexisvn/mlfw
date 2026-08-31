@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { buildFunction } from '../../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../../src/compiler/ir/graph/types.js';
-import { CPUTarget } from '../../../../src/backend/target.js';
+import { CPUTarget } from '../../../../src/compiler/support/target.js';
 import { compileGraph } from '../../../../src/compiler/pipeline/compiler.js';
-import { TraceLevel } from '../../../../src/compiler/pipeline/trace.js';
+import { TraceLevel } from '../../../../src/compiler/support/trace.js';
 
 const BIG = 4096;
 const SMALL = 8;

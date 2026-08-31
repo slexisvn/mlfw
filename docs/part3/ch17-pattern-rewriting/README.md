@@ -96,7 +96,7 @@ export class Pattern {
 
 Three fields, two methods, and every one of the 27 pattern classes in [`patterns.ts`](../../../src/compiler/ir/graph/patterns.ts) is a subclass. `rootOpName` is an index key — a pattern that only ever matches `add` says so, and never gets asked about anything else. `benefit` is the priority when several match.
 
-The split between `match` and `rewrite` is not decoration, and `AddZero` shows why ([`patterns.ts:167`](../../../src/compiler/ir/graph/patterns.ts)):
+The split between `match` and `rewrite` is not decoration, and `AddZero` shows why ([`patterns.ts:190`](../../../src/compiler/ir/graph/patterns.ts)):
 
 ```ts
 export class AddZero extends Pattern {
@@ -242,7 +242,7 @@ export const alt = (...patterns: DFPattern[]): DFPattern => new AltPattern(patte
 export const capture = (name: string, inner: DFPattern = new AnyPattern()): DFPattern => new CapturePattern(name, inner);
 ```
 
-so `exp(log(x))` is `isOp('exp', isOp('log', wildcard()))`, and `matchPattern` returns a bindings object or `null`. `OpPattern.match` walks `op.getOperand(i).definingOp` ([`dfpattern.ts:23`](../../../src/compiler/ir/rewrite/dfpattern.ts)) — it matches *up the dataflow graph*, which is the direction Chapter 8's use-def edges point, and the reason this is a data-flow pattern rather than a tree pattern. Five patterns use it, and all five are the same two-deep shape ([`patterns.ts:11`](../../../src/compiler/ir/graph/patterns.ts)):
+so `exp(log(x))` is `isOp('exp', isOp('log', wildcard()))`, and `matchPattern` returns a bindings object or `null`. `OpPattern.match` walks `op.getOperand(i).definingOp` ([`dfpattern.ts:23`](../../../src/compiler/ir/rewrite/dfpattern.ts)) — it matches *up the dataflow graph*, which is the direction Chapter 8's use-def edges point, and the reason this is a data-flow pattern rather than a tree pattern. Five patterns use it, and all five are the same two-deep shape ([`patterns.ts:10`](../../../src/compiler/ir/graph/patterns.ts)):
 
 ```ts
 const TRANSPOSE_TRANSPOSE_PAT = isOp('transpose', isOp('transpose', wildcard()));

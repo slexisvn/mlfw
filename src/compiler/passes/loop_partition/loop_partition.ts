@@ -2,7 +2,7 @@ import { PrimFuncPass } from '../tir_pass.js';
 import { explainer } from '../explain.js';
 import { ForNode, SeqNode, IntImmNode, VariableNode, ForKind } from '../../ir/tensor/nodes.js';
 import { transform } from '../../ir/ir_visitor.js';
-import { cloneTensorIR } from '../../autotune/tune_ir.js';
+import { cloneTensorIR } from '../../ir/tensor/clone_tir.js';
 import { Analyzer } from '../../analysis/analyzer.js';
 import { proveTrue } from '../../analysis/ir_arith.js';
 import type { CompareNode, ForKindValue, IfThenElseNode, IntImmNode as IntImmNodeType, MathOpNode, PrimFunc, TirNode, VariableNode as VariableNodeType } from '../../ir/tensor/nodes.js';

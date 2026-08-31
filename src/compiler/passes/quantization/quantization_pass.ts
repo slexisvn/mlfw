@@ -6,7 +6,7 @@ import { registry } from '../../ir/graph/ops.js';
 import { UseDefAnalysis } from '../../analysis/use_def.js';
 import { QuantizationScheme, QuantizationParams, DEFAULT_EXCLUDE_OPS, DEFAULT_QUANTIZABLE_OPS } from '../../ir/graph/quantization_types.js';
 import type { QuantizationSchemeValue } from '../../ir/graph/quantization_types.js';
-import { TraceLevel } from '../../pipeline/trace.js';
+import { TraceLevel } from '../../support/trace.js';
 import { explainer } from '../explain.js';
 import { isTerminatorOp } from '../../ir/graph/op_traits.js';
 import type { GraphFunction } from '../../ir/graph/function.js';
@@ -14,7 +14,7 @@ import type { Value } from '../../ir/graph/value.js';
 import type { AttrValue, ScalarDType, TensorType as TensorTypeT } from '../../ir/graph/types.js';
 import type { AnalysisManager } from '../../analysis/analysis_manager.js';
 import type { PassResultValue, PassTarget } from '../pass.js';
-import type { CompileTarget } from '../../pipeline/pipeline_types.js';
+import type { CompileTarget } from '../../support/config_types.js';
 
 type QuantParams = InstanceType<typeof QuantizationParams>;
 export type CalibrationSource = {

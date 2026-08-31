@@ -133,7 +133,7 @@ with
 export const IterVarKind = Object.freeze({ DATA_PAR: 'DataPar', COMM_REDUCE: 'CommReduce' });
 ```
 
-The default is `DATA_PAR`, so a rule that says nothing declares every axis parallel. Rules that produce a reduction opt in by calling `markCommReduce` ([`lowering_registry.ts:217`](../../../src/compiler/passes/lowering/lowering_registry.ts)):
+The default is `DATA_PAR`, so a rule that says nothing declares every axis parallel. Rules that produce a reduction opt in by calling `markCommReduce` ([`lowering_registry.ts:228`](../../../src/compiler/passes/lowering/lowering_registry.ts)):
 
 ```ts
 export function markCommReduce(ivs: BlockRealizeNode[]): BlockRealizeNode[] {

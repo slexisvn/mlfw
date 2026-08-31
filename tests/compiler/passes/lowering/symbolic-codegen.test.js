@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { buildFunction } from '../../../../src/compiler/ir/graph/builder.js';
 import { TensorType, symbolicShapeProduct, DYNAMIC } from '../../../../src/compiler/ir/graph/types.js';
-import { SymInt, symVarName } from '../../../../src/compiler/analysis/sym_int.js';
+import { SymInt, symVarName } from '../../../../src/compiler/ir/sym_int.js';
 import { emitSymInt } from '../../../../src/backend/codegen_utils.js';
 import { compileGraph } from '../../../../src/compiler/pipeline/compiler.js';
-import { CPUTarget, CUDATarget, WebGPUTarget } from '../../../../src/backend/target.js';
+import { CPUTarget, CUDATarget, WebGPUTarget } from '../../../../src/compiler/support/target.js';
 import { RuntimeTensor } from '../../../../src/runtime/runtime.js';
 import { F32 } from '../../../_utils/ir_fixture.js';
 

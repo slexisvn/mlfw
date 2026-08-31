@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildFunction } from '../../../../src/compiler/ir/graph/builder.js';
 import { compileGraph } from '../../../../src/compiler/pipeline/compiler.js';
-import { CPUTarget } from '../../../../src/backend/target.js';
+import { CPUTarget } from '../../../../src/compiler/support/target.js';
 import { Buffer } from '../../../../src/compiler/ir/tensor/buffer.js';
 import {
   PrimFunc, BlockNode, BufferStoreNode, BufferLoadNode, ForNode, VariableNode, IntImmNode, MathOpNode, ForKind

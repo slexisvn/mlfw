@@ -5,7 +5,7 @@ import { QuantizationPass, QuantizationConfig } from '../../../../src/compiler/p
 import { PassResult } from '../../../../src/compiler/passes/pass.js';
 import { QuantizationScheme, QuantizationParams } from '../../../../src/compiler/ir/graph/quantization_types.js';
 import { compileGraph } from '../../../../src/compiler/pipeline/compiler.js';
-import { CPUTarget, WasmTarget } from '../../../../src/backend/target.js';
+import { CPUTarget, WasmTarget } from '../../../../src/compiler/support/target.js';
 
 function run(func, opts = {}) {
   return new QuantizationPass(opts).run(func);

@@ -3,7 +3,7 @@ import { MemoryEffectAnalysis } from '../../analysis/memory_effect.js';
 import { isTerminatorOp } from '../../ir/graph/op_traits.js';
 import { explainer } from '../explain.js';
 
-import { TraceLevel } from '../../pipeline/trace.js';
+import { TraceLevel } from '../../support/trace.js';
 import type { GraphFunction } from '../../ir/graph/function.js';
 import type { Operation } from '../../ir/graph/operation.js';
 import type { Value } from '../../ir/graph/value.js';

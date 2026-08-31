@@ -1,6 +1,6 @@
 import { Analyzer } from '../../analysis/analyzer.js';
 import { RewriteSimplify, proveTrue, proveFalse, irBound, assumeCondition, assumeLoopVar, symOfExtern } from '../../analysis/ir_arith.js';
-import { SymInt } from '../../analysis/sym_int.js';
+import { SymInt } from '../../ir/sym_int.js';
 import {
   ForNode, BlockNode, SeqNode, BufferStoreNode, BufferLoadNode,
   IfThenElseNode, LetStmtNode, AllocateNode, WhileNode, EvaluateNode,
@@ -8,12 +8,12 @@ import {
 } from '../../ir/tensor/nodes.js';
 import { LIRFlatLoadNode, LIRFlatStoreNode, LIRAccumulatorNode, LIRBindingsNode } from '../../ir/lir/nodes.js';
 import { walk } from '../../ir/ir_visitor.js';
-import { TraceLevel } from '../../pipeline/trace.js';
+import { TraceLevel } from '../../support/trace.js';
 import type { IntImmNode, PrimFunc, TirNode, VariableNode } from '../../ir/tensor/nodes.js';
 import type { SymNode } from '../../analysis/ir_arith.js';
 import type { IRNode } from '../../ir/ir_visitor.js';
 import type { LIRFunc } from '../../ir/lir/nodes.js';
-import type { TraceLog } from '../../pipeline/trace.js';
+import type { TraceLog } from '../../support/trace.js';
 
 export type SimplifyStats = { branchesFolded: number };
 export type SimplifyPassLike = { name: string; phase: string };

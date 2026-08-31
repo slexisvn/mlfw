@@ -4,7 +4,7 @@ import {
   PrimFunc, BlockNode, BufferStoreNode, ForNode, VariableNode, IntImmNode, ForKind
 } from '../../../src/compiler/ir/tensor/nodes.js';
 import { BackendPipeline } from '../../../src/backend/pipeline.js';
-import { CUDATarget } from '../../../src/backend/target.js';
+import { CUDATarget } from '../../../src/compiler/support/target.js';
 import { Schedule } from '../../../src/compiler/schedule/schedule.js';
 import { getCudaIntrin } from '../../../src/backend/cuda/tensor_intrin.js';
 import { FuncAttr } from '../../../src/compiler/ir/func_attrs.js';

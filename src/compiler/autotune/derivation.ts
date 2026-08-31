@@ -1,6 +1,6 @@
-import { TargetKind } from '../../backend/target.js';
+import { TargetKind } from '../support/target.js';
 import { classifyBlock } from '../schedule/rules.js';
-import { analyzeBlockStructure } from './block_analysis.js';
+import { analyzeBlockStructure } from '../schedule/block_analysis.js';
 import { getTileStructure, CPU_TILING_SSRSRS } from './tile_structure.js';
 import { createMultiLevelTilingSketch, createSSRSRSTilingSketch } from './tiling.js';
 import {
@@ -13,14 +13,17 @@ import { buildBlockDAG, findFusibleConsumer } from './block_dag.js';
 import type { PrimFunc } from '../ir/tensor/nodes.js';
 import type { ScheduleTarget } from '../schedule/gpu_matmul_schedule.js';
 import type { ScheduleSketch } from './sketch.js';
-import type { BlockStructure } from './block_analysis.js';
+import type { BlockStructure } from '../schedule/block_analysis.js';
 import type { BlockDAG } from './block_dag.js';
 
 export type SketchRule = {
   matches(struct: BlockStructure, target: ScheduleTarget): boolean;
   derive(primFunc: PrimFunc, blockName: string, target: ScheduleTarget, dag?: BlockDAG): ScheduleSketch[];
   priority?: number;
+  targetKinds?: Iterable<string> | null;
 };
+
+export const SKETCH_TARGET_KINDS = new Set<string>([TargetKind.CPU, TargetKind.CUDA, TargetKind.WEBGPU]);
 export type DeriveOpts = Readonly<{ richGpu?: boolean; dag?: BlockDAG }>;
 
 function reductionSketch(target: ScheduleTarget): ScheduleSketch {
@@ -37,26 +40,43 @@ function deriveMultiLevel(primFunc: PrimFunc, blockName: string, target: Schedul
   const sketches: ScheduleSketch[] = [];
   const tiling = createMultiLevelTilingSketch(info, getTileStructure(target));
   if (tiling) sketches.push(tiling);
-  if (target.kind === TargetKind.CPU) {
-    const ssrsrs = createSSRSRSTilingSketch(info, CPU_TILING_SSRSRS);
-    if (ssrsrs) sketches.push(ssrsrs);
-    const rf = createRfactorSketch(info);
-    if (rf) sketches.push(rf);
-    const consumer = dag ? findFusibleConsumer(primFunc, dag, blockName, classifyBlock) : null;
-    if (consumer) sketches.push(createFusedTilingSketch(consumer));
-  }
   sketches.push(reductionSketch(target));
   return sketches;
 }
 
-const _sketchRules: Required<SketchRule>[] = [];
+function deriveMultiLevelCPU(primFunc: PrimFunc, blockName: string, target: ScheduleTarget, dag?: BlockDAG): ScheduleSketch[] {
+  const info = classifyBlock(primFunc, blockName);
+  if (!info) return [reductionSketch(target)];
+  const sketches: ScheduleSketch[] = [];
+  const tiling = createMultiLevelTilingSketch(info, getTileStructure(target));
+  if (tiling) sketches.push(tiling);
+  const ssrsrs = createSSRSRSTilingSketch(info, CPU_TILING_SSRSRS);
+  if (ssrsrs) sketches.push(ssrsrs);
+  const rf = createRfactorSketch(info);
+  if (rf) sketches.push(rf);
+  const consumer = dag ? findFusibleConsumer(primFunc, dag, blockName, classifyBlock) : null;
+  if (consumer) sketches.push(createFusedTilingSketch(consumer));
+  sketches.push(reductionSketch(target));
+  return sketches;
+}
+
+type RegisteredSketchRule = { matches: SketchRule['matches']; derive: SketchRule['derive']; priority: number; targetKinds: ReadonlySet<string> | null };
+
+const _sketchRules: RegisteredSketchRule[] = [];
 
 export function registerSketchRule(rule: SketchRule, { priority = 100 }: { priority?: number } = {}): void {
   if (_sketchRules.some(r => r.derive === rule.derive && r.matches === rule.matches)) return;
-  _sketchRules.push({ matches: rule.matches, derive: rule.derive, priority });
+  const targetKinds = rule.targetKinds ? new Set(rule.targetKinds) : null;
+  if (targetKinds) for (const kind of targetKinds) SKETCH_TARGET_KINDS.add(kind);
+  _sketchRules.push({ matches: rule.matches, derive: rule.derive, priority, targetKinds });
   _sketchRules.sort((a, b) => a.priority - b.priority);
 }
 
+registerSketchRule({
+  matches: (s: BlockStructure) => s.hasReduction && s.spatial >= 1 && s.reads >= 2,
+  derive: deriveMultiLevelCPU,
+  targetKinds: [TargetKind.CPU],
+}, { priority: 5 });
 registerSketchRule({
   matches: (s: BlockStructure) => s.hasReduction && s.spatial >= 1 && s.reads >= 2,
   derive: deriveMultiLevel,
@@ -75,11 +95,12 @@ export function deriveSketches(primFunc: PrimFunc, blockName: string, target: Sc
     const rich = richMatmulSketches(primFunc, blockName, target);
     if (rich !== null) return rich;
   }
-  if (target.kind !== TargetKind.CPU && !target.isGPU()) return [];
+  if (!SKETCH_TARGET_KINDS.has(target.kind)) return [];
 
   const struct = analyzeBlockStructure(primFunc, blockName);
   const dag = opts.dag || buildBlockDAG(primFunc);
   for (const rule of _sketchRules) {
+    if (rule.targetKinds !== null && !rule.targetKinds.has(target.kind)) continue;
     if (rule.matches(struct, target)) return rule.derive(primFunc, blockName, target, dag);
   }
   return [];

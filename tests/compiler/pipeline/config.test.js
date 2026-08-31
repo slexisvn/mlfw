@@ -2,9 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { Compiler, compileGraph } from '../../../src/compiler/pipeline/compiler.js';
-import { CPUTarget, CUDATarget } from '../../../src/backend/target.js';
+import { CPUTarget, CUDATarget } from '../../../src/compiler/support/target.js';
 import { GraphModule } from '../../../src/compiler/ir/graph/module.js';
-import { TraceLevel } from '../../../src/compiler/pipeline/trace.js';
+import { TraceLevel } from '../../../src/compiler/support/trace.js';
 import { compileCPU as compile } from '../../_utils/ir_fixture.js';
 
 describe('multi-function module compilation', () => {
@@ -263,7 +263,7 @@ describe('layout optimization', () => {
 describe('hardwareMeasure resolves the measurer from the target kind', () => {
   it('throws a clear error when no measurer is registered for the target', async () => {
     const { Autotuner } = await import('../../../src/compiler/autotune/autotuner.js');
-    const { WebGPUTarget } = await import('../../../src/backend/target.js');
+    const { WebGPUTarget } = await import('../../../src/compiler/support/target.js');
     const { registerMeasurer } = await import('../../../src/runtime/measurer_registry.js');
     registerMeasurer('webgpu', null);
     expect(() => new Autotuner(WebGPUTarget(), { hardwareMeasure: true }))
@@ -272,7 +272,7 @@ describe('hardwareMeasure resolves the measurer from the target kind', () => {
 
   it('resolves the in-process WASM measurer so WASM tunes with hardware measurement', async () => {
     const { Autotuner } = await import('../../../src/compiler/autotune/autotuner.js');
-    const { WasmTarget } = await import('../../../src/backend/target.js');
+    const { WasmTarget } = await import('../../../src/compiler/support/target.js');
     await import('../../../src/runtime/backend_registry.js');
     const tuner = new Autotuner(WasmTarget(), { hardwareMeasure: true });
     expect(typeof tuner.config.measurer).toBe('function');
@@ -283,7 +283,7 @@ describe('hardwareMeasure resolves the measurer from the target kind', () => {
     const { buildFunction } = await import('../../../src/compiler/ir/graph/builder.js');
     const { TensorType, ScalarType } = await import('../../../src/compiler/ir/graph/types.js');
     const { compileGraph } = await import('../../../src/compiler/pipeline/compiler.js');
-    const { WasmTarget } = await import('../../../src/backend/target.js');
+    const { WasmTarget } = await import('../../../src/compiler/support/target.js');
     const F = ScalarType.F32, T = (s) => new TensorType(s, F);
     const mk = () => buildFunction('mm_hw', [T([6, 5]), T([5, 7])], [T([6, 7])],
       (b, a) => { b.returnOp([b.matmul(a[0], a[1]).getResult(0)]); });
@@ -307,7 +307,7 @@ describe('hardwareMeasure resolves the measurer from the target kind', () => {
 
   it('resolves the registered measurer for the matching target kind', async () => {
     const { Autotuner } = await import('../../../src/compiler/autotune/autotuner.js');
-    const { WebGPUTarget } = await import('../../../src/backend/target.js');
+    const { WebGPUTarget } = await import('../../../src/compiler/support/target.js');
     const { registerMeasurer } = await import('../../../src/runtime/measurer_registry.js');
     const probe = (compiled, byteSizes) => [byteSizes.length];
     registerMeasurer('webgpu', probe);

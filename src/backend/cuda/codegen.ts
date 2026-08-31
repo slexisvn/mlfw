@@ -17,7 +17,7 @@ import type { AllocateNode, BlockNode, BufferStoreNode, CallExternNode, ForNode,
 import type { IRStmtNode, LIRAccumulatorNode, LIRBindingsNode, LIRFlatStoreNode } from '../../compiler/ir/lir/nodes.js';
 import type { BufferDecl, CodegenFunc } from '../codegen_utils.js';
 import type { CudaIntrinInfo } from './tensor_intrin.js';
-import type { TargetFeatures } from '../target.js';
+import type { TargetFeatures } from '../../compiler/support/target.js';
 
 const LOCAL_MEMORY_BUDGET_BYTES = 256 * 1024;
 

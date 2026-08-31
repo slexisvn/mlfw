@@ -3,7 +3,7 @@ import { buildFunction } from '../../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../../src/compiler/ir/graph/types.js';
 import { CSEPass } from '../../../../src/compiler/passes/simplify/cse.js';
 import { PassResult } from '../../../../src/compiler/passes/pass.js';
-import { TraceLog, TraceLevel } from '../../../../src/compiler/pipeline/trace.js';
+import { TraceLog, TraceLevel } from '../../../../src/compiler/support/trace.js';
 
 function run(func) {
   return new CSEPass().run(func);

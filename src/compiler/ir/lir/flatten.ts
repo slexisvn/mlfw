@@ -1,5 +1,5 @@
 import { MathOpNode, IntImmNode, VariableNode } from '../tensor/nodes.js';
-import { SymInt, symVarName } from '../../analysis/sym_int.js';
+import { SymInt, symVarName } from '../sym_int.js';
 import { symIntToNode } from '../tensor/sym_lower.js';
 import type { TirNode } from '../tensor/nodes.js';
 import type { Buffer } from '../tensor/buffer.js';

@@ -1,4 +1,4 @@
-import type { TraceLog } from '../pipeline/trace.js';
+import type { TraceLog } from '../support/trace.js';
 
 export type ExplainData = Record<string, unknown>;
 

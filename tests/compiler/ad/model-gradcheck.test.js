@@ -4,7 +4,7 @@ import * as nn from '../../../src/nn/index.js';
 import * as T from '../../../src/tensor/ops/ops.js';
 import { ones } from '../../../src/tensor/factory/creation_ops.js';
 import { compileWithBackward } from '../../../src/tracing/compile_backward.js';
-import { CPUTarget } from '../../../src/backend/target.js';
+import { CPUTarget } from '../../../src/compiler/support/target.js';
 import { mulberry32 } from '../../_utils/rng.js';
 import { randomNested, flat, numel, nest } from '../../_utils/tensor_data.js';
 

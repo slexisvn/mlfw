@@ -3,7 +3,7 @@ import { buildFunction } from '../../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../../src/compiler/ir/graph/types.js';
 import { lowerGraphToPrimFunc } from '../../../../src/compiler/passes/lowering/graph_to_tensor.js';
 import { compileGraph } from '../../../../src/compiler/pipeline/compiler.js';
-import { CPUTarget, WasmTarget } from '../../../../src/backend/target.js';
+import { CPUTarget, WasmTarget } from '../../../../src/compiler/support/target.js';
 import {
   ForNode, BlockNode, BufferStoreNode, BufferLoadNode,
   MathOpNode, FloatImmNode, IntImmNode, CallExternNode, CompareNode,

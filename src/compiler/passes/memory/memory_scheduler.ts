@@ -8,7 +8,7 @@ import type { Buffer } from '../../ir/tensor/buffer.js';
 import type { PrimFunc, TirNode } from '../../ir/tensor/nodes.js';
 import type { IRNode } from '../../ir/ir_visitor.js';
 import type { TirPassCtx } from '../tir_pass.js';
-import type { CompilerConfig } from '../../pipeline/pipeline_types.js';
+import type { CompilerConfig } from '../../support/config_types.js';
 
 type BufferRegionHull = ReturnType<typeof regionHull>;
 type AccessInfo = ReturnType<typeof collectBufferAccesses>;

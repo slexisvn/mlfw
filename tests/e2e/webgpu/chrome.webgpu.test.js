@@ -238,7 +238,7 @@ describe.skipIf(!deps)('webgpu via Chrome (differential vs CPU)', () => {
       stdin: {
         contents: "export * from './src/index.js';\n"
           + "export { compile } from './src/tracing/compile.js';\n"
-          + "export { CPUTarget, WebGPUTarget } from './src/backend/target.js';\n"
+          + "export { CPUTarget, WebGPUTarget } from './src/compiler/support/target.js';\n"
           + "export { layer_norm } from './src/nn/functional/normalization.js';\n"
           + "export { conv2d } from './src/nn/functional/conv.js';\n"
           + "export { max_pool2d, avg_pool2d } from './src/nn/functional/pooling.js';\n"

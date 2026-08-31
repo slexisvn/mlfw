@@ -25,7 +25,7 @@ Terms are grouped by what they describe: data, programs, transformations, execut
 
 **Dynamic dimension.** A dimension whose size is not known at compile time, written `?` in the IR. A layer traced with a dynamic batch dimension has a result type like `tensor<?x2xf32>`, and one kernel serves every batch size — at the cost of the compiler not knowing the bound. Chapter 62.
 
-**Symbolic dimension.** A dynamic dimension that has a *name*, so that relationships between dimensions survive: if two tensors both have first dimension `n`, the compiler knows they match without knowing what `n` is. [`src/compiler/analysis/sym_int.ts`](../../../src/compiler/analysis/sym_int.ts).
+**Symbolic dimension.** A dynamic dimension that has a *name*, so that relationships between dimensions survive: if two tensors both have first dimension `n`, the compiler knows they match without knowing what `n` is. [`src/compiler/ir/sym_int.ts`](../../../src/compiler/ir/sym_int.ts).
 
 **Strides.** The distance in elements between consecutive positions along each dimension of the underlying flat storage. A contiguous `[2, 8]` tensor has strides `[8, 1]`. Strides are what let a transpose be free at the eager level — you change the strides and touch no data.
 
@@ -107,7 +107,7 @@ Beware of the snake_case names used in the TVM literature (`cache_read`, `comput
 
 **Kernel.** A compiled function that performs one unit of work on a device — in this framework, one graph function's worth of computation. What `compiled.source()` prints is a kernel.
 
-**Target.** A description of the machine being compiled for: its instruction set, memory hierarchy, thread model, and what it supports. `CPUTarget()`, `WasmTarget()`, `CUDATarget()`, `WebGPUTarget()`. [`src/backend/target.ts`](../../../src/backend/target.ts).
+**Target.** A description of the machine being compiled for: its instruction set, memory hierarchy, thread model, and what it supports. `CPUTarget()`, `WasmTarget()`, `CUDATarget()`, `WebGPUTarget()`. [`src/compiler/support/target.ts`](../../../src/compiler/support/target.ts).
 
 **Backend.** The code generator for a target, plus the runtime glue that loads and calls what it produced. [`src/backend/`](../../../src/backend/).
 

@@ -1,7 +1,7 @@
 import { buildFunction } from '../compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../compiler/ir/graph/types.js';
 import { compileGraph } from '../compiler/pipeline/compiler.js';
-import { CPUTarget } from '../backend/target.js';
+import { CPUTarget } from '../compiler/support/target.js';
 import { Optimizer } from './optimizer.js';
 import type { NumberTypedArray, NumberTypedArrayConstructor, OptimizerParams } from './types.js';
 

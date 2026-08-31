@@ -3,7 +3,7 @@ import { Analyzer } from '../../../src/compiler/analysis/analyzer.js';
 import {
   irToSymInt, irBound, proveTrue, proveFalse, analyzerForLoops, RewriteSimplify,
 } from '../../../src/compiler/analysis/ir_arith.js';
-import { SymInt } from '../../../src/compiler/analysis/sym_int.js';
+import { SymInt } from '../../../src/compiler/ir/sym_int.js';
 import { IntImmNode, VariableNode, MathOpNode, CompareNode, CallExternNode } from '../../../src/compiler/ir/tensor/nodes.js';
 
 const v = (n) => new VariableNode(n, 'index');

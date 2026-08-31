@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { tensor } from '../../../src/index.js';
 import * as nn from '../../../src/nn/index.js';
 import { compile } from '../../../src/tracing/compile.js';
-import { CPUTarget, CUDATarget } from '../../../src/backend/target.js';
-import { TraceLevel } from '../../../src/compiler/pipeline/trace.js';
+import { CPUTarget, CUDATarget } from '../../../src/compiler/support/target.js';
+import { TraceLevel } from '../../../src/compiler/support/trace.js';
 
 function rng(s) { let x = s >>> 0; return () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; }; }
 function data(r, sh) {

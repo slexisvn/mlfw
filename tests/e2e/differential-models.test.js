@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { tensor } from '../../src/index.js';
 import * as nn from '../../src/nn/index.js';
 import { compile } from '../../src/tracing/compile.js';
-import { CPUTarget, WasmTarget, CUDATarget } from '../../src/backend/target.js';
+import { CPUTarget, WasmTarget, CUDATarget } from '../../src/compiler/support/target.js';
 import { buildGpt2 } from '../_utils/gpt2_model.js';
 import { mulberry32 } from '../_utils/rng.js';
 import { numel, nest, randomTensor, flat } from '../_utils/tensor_data.js';

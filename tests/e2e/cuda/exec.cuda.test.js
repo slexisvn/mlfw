@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
-import { CPUTarget, CUDATarget } from '../../../src/backend/target.js';
+import { CPUTarget, CUDATarget } from '../../../src/compiler/support/target.js';
 import { f16ToF32, bf16ToF32, f32ToF16, f32ToBf16 } from '../../../src/tensor/utils/half.js';
 import { tensor, matmul, relu, tanh } from '../../../src/index.js';
 import * as nn from '../../../src/nn/index.js';

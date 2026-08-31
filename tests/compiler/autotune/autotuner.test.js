@@ -19,14 +19,14 @@ import {
 } from '../../../src/compiler/ir/tensor/nodes.js';
 import { Schedule } from '../../../src/compiler/schedule/schedule.js';
 import { ScheduleValidator } from '../../../src/compiler/schedule/validator.js';
-import { CPUTarget, WasmTarget, WebGPUTarget } from '../../../src/backend/target.js';
+import { CPUTarget, WasmTarget, WebGPUTarget } from '../../../src/compiler/support/target.js';
 import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
 import { TuningDatabase, TuningRecord, CODEGEN_VERSION, SCHEDULE_SEMANTICS_VERSION } from '../../../src/compiler/autotune/tuning_db.js';
 import { RandomSearch, EvolutionarySearch } from '../../../src/compiler/autotune/search.js';
 import { Deadline } from '../../../src/compiler/autotune/budget.js';
-import { TraceLevel } from '../../../src/compiler/pipeline/trace.js';
+import { TraceLevel } from '../../../src/compiler/support/trace.js';
 import { fs } from '../../../src/runtime/node/fs.js';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

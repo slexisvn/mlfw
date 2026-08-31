@@ -9,7 +9,7 @@ import {
   VariableNode, IntImmNode, FloatImmNode,
   ForKind,
 } from '../../../../src/compiler/ir/tensor/nodes.js';
-import { WasmTarget } from '../../../../src/backend/target.js';
+import { WasmTarget } from '../../../../src/compiler/support/target.js';
 
 function buf(name, shape, dtype = 'f32') {
   return new Buffer(name, shape, dtype, 'global');

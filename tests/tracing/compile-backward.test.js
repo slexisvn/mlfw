@@ -4,7 +4,7 @@ import * as nn from '../../src/nn/index.js';
 import { log_softmax, sigmoid } from '../../src/nn/functional/activation.js';
 import { mse_loss, nll_loss, cross_entropy, binary_cross_entropy } from '../../src/nn/functional/loss.js';
 import { compileWithBackward } from '../../src/tracing/compile_backward.js';
-import { CPUTarget } from '../../src/backend/target.js';
+import { CPUTarget } from '../../src/compiler/support/target.js';
 import { ones } from '../../src/tensor/factory/creation_ops.js';
 import { flat } from '../_utils/tensor_data.js';
 

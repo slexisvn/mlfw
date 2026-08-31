@@ -3,7 +3,7 @@ import { buildFunction, IRBuilder } from '../../../../src/compiler/ir/graph/buil
 import { TensorType, ScalarType, Layout } from '../../../../src/compiler/ir/graph/types.js';
 import { LayoutTransformPass } from '../../../../src/compiler/passes/layout/layout_transform.js';
 import { PassResult } from '../../../../src/compiler/passes/pass.js';
-import { CPUTarget, CUDATarget, WasmTarget } from '../../../../src/backend/target.js';
+import { CPUTarget, CUDATarget, WasmTarget } from '../../../../src/compiler/support/target.js';
 import { GraphFunction } from '../../../../src/compiler/ir/graph/function.js';
 import { compileGraph } from '../../../../src/compiler/pipeline/compiler.js';
 import { F32 as F } from '../../../_utils/ir_fixture.js';

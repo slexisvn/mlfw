@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
-import { CUDATarget, CPUTarget } from '../../../src/backend/target.js';
+import { CUDATarget, CPUTarget } from '../../../src/compiler/support/target.js';
 import { countLoops as countForLoops, kernelBody, findUndeclaredVars } from '../../_utils/kernel_source.js';
 import {
   tensor, Linear, Sequential, ReLU, Sigmoid, Tanh,

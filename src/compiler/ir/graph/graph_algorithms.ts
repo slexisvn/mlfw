@@ -1,3 +1,5 @@
+import { effectPredecessors } from './op_traits.js';
+import type { Block } from './block.js';
 import type { Operation } from './operation.js';
 import type { Value } from './value.js';
 
@@ -57,7 +59,9 @@ export function topoSortByOperands(ops: Iterable<Operation>, contains: (op: Oper
     if (r === undefined) { r = readValues(op); reads.set(op, r); }
     return r;
   };
-  for (const root of ops) {
+  const roots = Array.isArray(ops) ? ops as readonly Operation[] : [...ops];
+  const effectPred = effectPredecessors(roots);
+  for (const root of roots) {
     if (state.get(root) !== undefined) continue;
     state.set(root, 1);
     const stack: TopoFrame[] = [{ op: root, i: 0 }];
@@ -65,8 +69,9 @@ export function topoSortByOperands(ops: Iterable<Operation>, contains: (op: Oper
       const frame = stack[stack.length - 1];
       const op = frame.op;
       const opReads = readsOf(op);
-      if (frame.i < opReads.length) {
-        const def = opReads[frame.i].definingOp;
+      const pred = effectPred.get(op);
+      if (frame.i < opReads.length + (pred ? 1 : 0)) {
+        const def = frame.i < opReads.length ? opReads[frame.i].definingOp : (pred as Operation);
         frame.i++;
         if (def && contains(def)) {
           const ds = state.get(def);
@@ -95,4 +100,38 @@ export function topoSortOpSet(ops: Iterable<Operation>, onCycle: CyclePolicy = '
   const arr = Array.isArray(ops) ? ops : [...ops];
   const set = new Set(arr);
   return topoSortByOperands(arr, (op) => set.has(op), onCycle);
+}
+
+export function regionFreeVars(bodyBlock: Block): Value[] {
+  const local = new Set<number>(bodyBlock.arguments.map(a => a.id));
+  const addLocals = (block: Block): void => {
+    for (const op of block.ops()) {
+      for (const r of op.results) local.add(r.id);
+      for (const region of (op.regions || [])) {
+        for (const b of region.blocks) {
+          for (const a of b.arguments) local.add(a.id);
+          addLocals(b);
+        }
+      }
+    }
+  };
+  addLocals(bodyBlock);
+
+  const seen = new Set<number>();
+  const free: Value[] = [];
+  const scan = (block: Block): void => {
+    for (const op of block.ops()) {
+      for (const o of op.operands) {
+        if (local.has(o.id) || seen.has(o.id)) continue;
+        if (o.definingOp && o.definingOp.opName === 'constant') continue;
+        seen.add(o.id);
+        free.push(o);
+      }
+      for (const region of (op.regions || [])) {
+        for (const b of region.blocks) scan(b);
+      }
+    }
+  };
+  scan(bodyBlock);
+  return free;
 }

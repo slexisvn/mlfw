@@ -1,13 +1,13 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { registry } from '../../../../src/compiler/ir/graph/ops.js';
 import { OpDef } from '../../../../src/compiler/ir/graph/op_registry.js';
-import { OpAttrKey } from '../../../../src/compiler/ir/graph/op_traits.js';
+import { OpAttrKey, hasLibraryOp } from '../../../../src/compiler/ir/graph/op_traits.js';
 import { LayoutPreference } from '../../../../src/compiler/ir/graph/layout_pref.js';
 import { LayoutPolicy } from '../../../../src/compiler/passes/layout/layout_policy.js';
 import { Layout, TensorType, ScalarType } from '../../../../src/compiler/ir/graph/types.js';
 import { Operation } from '../../../../src/compiler/ir/graph/operation.js';
 import { buildFunction } from '../../../../src/compiler/ir/graph/builder.js';
-import { CPUTarget, CUDATarget } from '../../../../src/backend/target.js';
+import { CPUTarget, CUDATarget } from '../../../../src/compiler/support/target.js';
 
 const CUSTOM_OP = 'test_layout_sensitive_op';
 const f32 = (shape) => new TensorType(shape, ScalarType.F32);
@@ -93,17 +93,17 @@ describe('layout benefit weighting comes from op attributes', () => {
 describe('target library kernels are keyed by launch-boundary class', () => {
   it('matches every op in a class the target declares a library for', () => {
     const cuda = CUDATarget();
-    expect(cuda.hasLibraryOp('dot')).toBe(true);
-    expect(cuda.hasLibraryOp('cublas_gemm')).toBe(true);
-    expect(cuda.hasLibraryOp('conv')).toBe(true);
-    expect(cuda.hasLibraryOp('quantized_conv')).toBe(true);
-    expect(cuda.hasLibraryOp('reduce')).toBe(false);
-    expect(cuda.hasLibraryOp('add')).toBe(false);
+    expect(hasLibraryOp(cuda, 'dot')).toBe(true);
+    expect(hasLibraryOp(cuda, 'cublas_gemm')).toBe(true);
+    expect(hasLibraryOp(cuda, 'conv')).toBe(true);
+    expect(hasLibraryOp(cuda, 'quantized_conv')).toBe(true);
+    expect(hasLibraryOp(cuda, 'reduce')).toBe(false);
+    expect(hasLibraryOp(cuda, 'add')).toBe(false);
   });
 
   it('reports no library kernels on a target that declares none', () => {
     const cpu = CPUTarget();
-    expect(cpu.hasLibraryOp('dot')).toBe(false);
-    expect(CPUTarget({ libraryClasses: new Set(['matmul']) }).hasLibraryOp('dot')).toBe(true);
+    expect(hasLibraryOp(cpu, 'dot')).toBe(false);
+    expect(hasLibraryOp(CPUTarget({ libraryClasses: new Set(['matmul']) }), 'dot')).toBe(true);
   });
 });

@@ -1,11 +1,11 @@
 import { PassResult } from '../pass.js';
 import { IRBuilder } from '../../ir/graph/builder.js';
-import { TraceLevel } from '../../pipeline/trace.js';
+import { TraceLevel } from '../../support/trace.js';
 import { explainer } from '../explain.js';
 import type { GraphFunction } from '../../ir/graph/function.js';
 import type { Operation } from '../../ir/graph/operation.js';
 import type { PatternSet } from '../../ir/rewrite/pattern.js';
-import type { TraceLog } from '../../pipeline/trace.js';
+import type { TraceLog } from '../../support/trace.js';
 import type { PassResultValue } from '../pass.js';
 
 export type ApplyPatternsOpts = Readonly<{

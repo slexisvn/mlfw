@@ -5,7 +5,7 @@ import { TensorType, Layout } from '../../ir/graph/types.js';
 import { LayoutPolicy } from './layout_policy.js';
 import { LayoutAnalysis } from '../../analysis/layout_analysis.js';
 import { UseDefAnalysis } from '../../analysis/use_def.js';
-import { TraceLevel } from '../../pipeline/trace.js';
+import { TraceLevel } from '../../support/trace.js';
 import { explainer } from '../explain.js';
 import type { GraphFunction } from '../../ir/graph/function.js';
 import type { Block } from '../../ir/graph/block.js';

@@ -6,7 +6,7 @@ import {
   IfThenElseNode, WhileNode, BufferStoreNode, BufferLoadNode
 } from '../../../../src/compiler/ir/tensor/nodes.js';
 import { compileGraph } from '../../../../src/compiler/pipeline/compiler.js';
-import { CPUTarget, WasmTarget } from '../../../../src/backend/target.js';
+import { CPUTarget, WasmTarget } from '../../../../src/compiler/support/target.js';
 import { F32 } from '../../../_utils/ir_fixture.js';
 
 const SKIP_KEYS = new Set(['_parent', '_parentKey', '_parentIdx']);

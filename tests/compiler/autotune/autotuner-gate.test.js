@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { Autotuner } from '../../../src/compiler/autotune/autotuner.js';
-import { CPUTarget } from '../../../src/backend/target.js';
+import { CPUTarget } from '../../../src/compiler/support/target.js';
 import { PrimFunc, SeqNode } from '../../../src/compiler/ir/tensor/nodes.js';
 import { FuncAttr } from '../../../src/compiler/ir/func_attrs.js';
 

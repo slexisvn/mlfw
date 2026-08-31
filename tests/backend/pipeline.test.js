@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { BackendPipeline, CompiledKernel } from '../../src/backend/pipeline.js';
-import { CUDATarget } from '../../src/backend/target.js';
+import { CUDATarget } from '../../src/compiler/support/target.js';
 import { Buffer } from '../../src/compiler/ir/tensor/buffer.js';
 import {
   PrimFunc, ForNode, BlockNode, SeqNode,

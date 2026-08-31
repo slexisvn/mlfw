@@ -91,7 +91,7 @@ The compilation itself is lazy and happens on the first batch:
 ```ts
     if (!model.__compiledTrainStep) {
       const { compileWithBackward } = await import('../../../tracing/compile_backward.js');
-      const { CPUTarget, CUDATarget, WebGPUTarget } = await import('../../../backend/target.js');
+      const { CPUTarget, CUDATarget, WebGPUTarget } = await import('../../../compiler/support/target.js');
       const deviceType = model._device && model._device.type;
       const target = deviceType === 'webgpu' ? WebGPUTarget() : deviceType === 'gpu' ? CUDATarget() : CPUTarget();
       model.__compiledTrainStep = (compileWithBackward as unknown as (module: unknown, inputs: unknown[], options: unknown) => CompiledTrainStep)({ forward: callForward }, elems, { target, mode: trainer.compileMode });

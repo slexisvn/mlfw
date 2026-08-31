@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { LearnedCostModel, AnalyticalCostModel } from '../../../src/compiler/autotune/cost_model.js';
-import { CPUTarget } from '../../../src/backend/target.js';
+import { CPUTarget } from '../../../src/compiler/support/target.js';
 
 const feat = (...v) => [v];
 

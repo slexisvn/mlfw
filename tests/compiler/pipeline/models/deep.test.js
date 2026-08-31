@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildFunction } from '../../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../../src/compiler/ir/graph/types.js';
-import { CPUTarget } from '../../../../src/backend/target.js';
+import { CPUTarget } from '../../../../src/compiler/support/target.js';
 import { countLoops, countTempBuffers } from '../../../_utils/kernel_source.js';
 import { randomArray } from '../../../_utils/rng.js';
 import * as ref from '../../../_utils/reference_ops.js';
