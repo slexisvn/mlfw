@@ -20,6 +20,6 @@ namespace mlir::tera {
 
 #define GEN_PASS_REGISTRATION
 #include "Tera/Conversion/Passes.h.inc"
-} // namespace mlir::tera
+}
 
-#endif // TERA_CONVERSION_PASSES_H
+#endif

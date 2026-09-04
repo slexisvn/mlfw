@@ -5,11 +5,6 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-//
-// Ops with no tensor operands. Their result shape is given, not derived, so
-// they carry a verifier rather than shape inference.
-//
-//===----------------------------------------------------------------------===//
 
 #ifndef TERA_OPS_CONSTANT
 #define TERA_OPS_CONSTANT
@@ -53,4 +48,4 @@ def Tera_IotaOp : Tera_Op<"iota", [Pure, DeclareOpInterfaceMethods<Tera_VjpOpInt
   let hasVerifier = 1;
 }
 
-#endif // TERA_OPS_CONSTANT
+#endif

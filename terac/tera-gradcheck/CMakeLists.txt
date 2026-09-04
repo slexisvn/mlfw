@@ -16,6 +16,7 @@ mlir_target_link_libraries(tera-gradcheck PRIVATE
   MLIRParser
   MLIRPass
   MLIRRegisterAllDialects
+  MLIRRegisterAllExtensions
   MLIRSupport
   MLIRTargetLLVMIRExport
   MLIRToLLVMIRTranslationRegistration

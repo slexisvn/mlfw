@@ -21,10 +21,6 @@ using namespace mlir::tera;
 using namespace mlir::tera::detail;
 
 namespace {
-
-/// The iteration space of a contraction, in the order the result axes take:
-/// batch axes, then the free axes of the lhs, then those of the rhs, and
-/// finally the contracted axes, which the result does not carry.
 struct ContractionSpace {
   SmallVector<AffineExpr> lhs;
   SmallVector<AffineExpr> rhs;
@@ -272,7 +268,7 @@ struct ReduceOpLowering : public OpConversionPattern<ReduceOp> {
   }
 };
 
-} // namespace
+}
 
 void mlir::tera::detail::populateContractionPatterns(
     RewritePatternSet &patterns) {

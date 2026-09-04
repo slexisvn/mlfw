@@ -5,27 +5,19 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-//
-// Passes that take tera out to another dialect. Generated with
-// `-name TeraConversion`, so `registerTeraConversionPasses` sits beside
-// `registerTeraPasses` instead of colliding with it.
-//
-//===----------------------------------------------------------------------===//
 
 #ifndef TERA_CONVERSION_PASSES
 #define TERA_CONVERSION_PASSES
 
 include "mlir/Pass/PassBase.td"
 
-// Anchored on nothing: the conversion adds no symbol and reads no other
-// function, so it runs on whatever it is given and nests under `func.func`
-// when a pipeline wants the functions converted in parallel.
 def ConvertTeraToLinalg : Pass<"convert-tera-to-linalg"> {
   let summary = "Lower the tera dialect to linalg, tensor, arith and math.";
   let description = [{
     Replaces every tera op with its upstream equivalent. This is the floor of
-    the compiler that terac owns: below it, tiling, fusion, vectorization and
-    bufferization are all upstream passes.
+    the dialect that terac owns: below it the IR is linalg on tensors, which
+    `-tera-tile-and-fuse` and `-tera-vectorize-linalg` schedule and upstream
+    bufferizes.
 
     Destination tensors are materialised up front, so the conversion requires
     static shapes and rejects a dynamic extent rather than mislowering it.
@@ -73,62 +65,73 @@ def StageGpuBuffers
   ];
 }
 
-def LowerNestedLinalg
-    : Pass<"tera-lower-nested-linalg", "::mlir::func::FuncOp"> {
-  let summary = "Lower to scf loops the linalg ops affine cannot name the extents of.";
+def TileAndFuse
+    : Pass<"tera-tile-and-fuse", "::mlir::func::FuncOp"> {
+  let summary = "Cut every linalg op into tiles and fold its producers into them.";
   let description = [{
-    A dynamic extent reaches a loop nest as a value, and the affine dialect will
-    only take one it can read as a dim or a symbol: the result of a `dim` op on
-    a value that sits at the top level of the enclosing affine scope. A function
-    is such a scope and an `scf.for` is not, so a `linalg` op inside a scan's
-    body whose destination is dynamic asks `affine.for` for a bound it refuses,
-    and `convert-linalg-to-affine-loops` fails on the whole function.
+    Runs on tensors, above bufferization, because that is the only place a
+    producer and its consumer are still an SSA edge. Below it they are two
+    writes to a buffer and folding one into the other is an aliasing question.
 
-    This lowers exactly those ops to `scf` loops first, leaving the rest for the
-    affine conversion and the vectorizer that reads it. It is not a fallback for
-    dynamic shapes in general: an op at the top level of the function names its
-    extents perfectly well in affine terms, and a static op inside a body does
-    not name any.
-  }];
+    Two levels. The first cuts the parallel loops -- the innermost to one
+    vector, the rest to one element -- and folds into that tile every producer
+    it reaches which nothing else reads, and the destination whatever else
+    reads it. The second cuts every reduction loop to one element, so what is
+    left for the vectorizer is exactly one vector and a loop carrying the
+    accumulator. It is separate because a producer cannot be folded into a tile
+    holding a partial sum: fusion has to be finished before a reduction is cut.
 
-  let dependentDialects = [
-    "::mlir::memref::MemRefDialect",
-    "::mlir::scf::SCFDialect",
-  ];
-}
+    A tile shaped as a block instead of a vector is what a register-blocking
+    cost model would choose, and there is none here. A 2-D tile also unrolls,
+    once per row, into as many vector ops; measured on test/Integration/bench
+    that is slower than the loop it replaces, so the tile stays one vector.
 
-def VectorizeAffine
-    : Pass<"tera-vectorize-affine", "::mlir::func::FuncOp"> {
-  let summary = "Vectorize the affine loops whose accesses the vectorizer reads correctly.";
-  let description = [{
-    `affine-super-vectorize` decides whether a loop is worth vectorizing by
-    asking whether each access walks memory one element at a time along it, and
-    the question it actually answers is narrower: which index of the access
-    varies with the loop, not how fast. An access of `w * 2 + k` varies with `w`
-    at the fastest axis, so it is taken for contiguous, and the vector read that
-    comes out starts in the right place and then reads the wrong elements.
-
-    Every op in the dialect indexed by a permutation of its loops until two did
-    not. A window moves by its stride and an axis read from the far end moves
-    backwards, and both are wrong under that analysis rather than merely
-    unvectorized.
-
-    So the pass runs where the analysis is right and stands aside where it is
-    not, which is decided here rather than inside it. The grain is a function,
-    because that is what the pass takes; a function holding one strided window
-    keeps its scalar loops throughout, which is slower than it could be and
-    is the answer it should have had.
+    An op whose indexing maps carry a non-positive coefficient is left alone.
+    Slicing one means reasoning about an index that runs backwards, which the
+    upstream tiling utilities assert against rather than answer.
   }];
 
   let options = [
-    Option<"vectorSize", "vector-size", "int64_t", "16",
-           "How many lanes wide the vectorizer should aim for.">,
+    Option<"vectorWidth", "vector-width", "int64_t", "16",
+           "Lanes the innermost tiled loop is cut to.">,
   ];
 
   let dependentDialects = [
     "::mlir::affine::AffineDialect",
+    "::mlir::arith::ArithDialect",
+    "::mlir::linalg::LinalgDialect",
+    "::mlir::scf::SCFDialect",
+    "::mlir::tensor::TensorDialect",
+  ];
+}
+
+def VectorizeLinalg
+    : Pass<"tera-vectorize-linalg", "::mlir::func::FuncOp"> {
+  let summary = "Rewrite the linalg ops small enough to be one vector into vector ops.";
+  let description = [{
+    A linalg op carries an affine map per operand saying how it is indexed by
+    the loops beside it, so vectorizing here reads the access instead of
+    inferring it. `affine-super-vectorize`, which this replaces, had to recover
+    the access from loop bounds and subscripts and answered which loop an index
+    varies with as though that were how fast: a window moving by its stride and
+    an axis read from the far end were both reported contiguous and read the
+    wrong elements, which is why running it needed a gate. This needs none.
+
+    The vector shape is the op's whole iteration space, so this belongs after
+    `-tera-tile-and-fuse`. An op the tiling could not cut below
+    `max-vector-elements` keeps its loops and is lowered as a scalar nest.
+  }];
+
+  let options = [
+    Option<"maxVectorElements", "max-vector-elements", "int64_t", "1024",
+           "Iteration-space size above which an op keeps its loops.">,
+  ];
+
+  let dependentDialects = [
+    "::mlir::arith::ArithDialect",
+    "::mlir::tensor::TensorDialect",
     "::mlir::vector::VectorDialect",
   ];
 }
 
-#endif // TERA_CONVERSION_PASSES
+#endif

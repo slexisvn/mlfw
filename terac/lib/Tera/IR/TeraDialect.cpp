@@ -17,10 +17,6 @@ using namespace mlir::tera;
 
 #include "Tera/IR/TeraOpsDialect.cpp.inc"
 
-//===----------------------------------------------------------------------===//
-// Tera dialect.
-//===----------------------------------------------------------------------===//
-
 void TeraDialect::initialize() {
   addOperations<
 #define GET_OP_LIST
@@ -37,10 +33,6 @@ Operation *TeraDialect::materializeConstant(OpBuilder &builder, Attribute value,
     return nullptr;
   return ConstantOp::create(builder, loc, tensorType, elements);
 }
-
-//===----------------------------------------------------------------------===//
-// Discardable attributes.
-//===----------------------------------------------------------------------===//
 
 LogicalResult TeraDialect::verifyOperationAttribute(Operation *op,
                                                     NamedAttribute attribute) {

@@ -34,15 +34,8 @@ using namespace mlir;
 using namespace mlir::tera;
 
 namespace {
-
-/// Why the last call failed, per thread. A caller in another language has no
-/// stderr of ours to read, so every diagnostic MLIR emits during a call is
-/// collected here and handed back as one string.
 thread_local std::string lastError;
 
-/// What a function's arguments and results were before the lowering rewrote
-/// them into pointers and extents. Nothing downstream can be asked for this:
-/// by the time the engine exists the signature is a list of `!llvm.ptr`.
 struct Signature {
   SmallVector<RankedTensorType> inputs;
   SmallVector<RankedTensorType> results;
@@ -60,19 +53,15 @@ SmallVector<int64_t> extentsOf(ArrayRef<uint64_t> descriptor, int64_t rank) {
   return SmallVector<int64_t>(sizes.begin(), sizes.end());
 }
 
-/// Advances shapes by rank after returning the current tensor shape.
 ArrayRef<int64_t> takeShape(const int64_t *&shapes, int64_t rank) {
   ArrayRef<int64_t> shape(shapes, rank);
   shapes += rank;
   return shape;
 }
 
-} // namespace
+}
 
 struct TeraModule {
-  // Declared in the order they must outlive each other: the engine holds code
-  // translated out of the module, and the module holds operations owned by the
-  // context, so they are destroyed the other way around.
   std::unique_ptr<MLIRContext> context;
   OwningOpRef<ModuleOp> module;
   std::unique_ptr<JitInvoker> invoker;

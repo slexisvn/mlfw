@@ -1,0 +1,29 @@
+{
+  "clangd.arguments": [
+    "--background-index",
+    "--clang-tidy",
+    "--completion-style=detailed",
+    "--all-scopes-completion",
+    "--header-insertion=never",
+    "--pch-storage=memory"
+  ],
+  "clangd.onConfigChanged": "restart",
+  "files.associations": {
+    "*.inc": "cpp"
+  },
+  "[c]": {
+    "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd"
+  },
+  "[cpp]": {
+    "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd"
+  },
+  "files.watcherExclude": {
+    "**/terac/build/**": true,
+    "**/terac/build-*/**": true,
+    "**/node_modules/**": true
+  },
+  "search.exclude": {
+    "**/terac/build": true,
+    "**/terac/build-*": true
+  }
+}

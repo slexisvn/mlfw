@@ -96,4 +96,4 @@ def Tera_ConvertOp : Tera_Op<"convert", [Pure, Elementwise,
   let hasFolder = 1;
 }
 
-#endif // TERA_OPS_ELEMENTWISE
+#endif

@@ -135,7 +135,6 @@ void populateTeraToLinalgPatterns(RewritePatternSet &patterns) {
 }
 
 namespace {
-
 bool acceptsDynamicShapes(Operation *op) {
   if (auto scan = dyn_cast<ScanOp>(op))
     return !ShapedType::isDynamic(scan.getTripCount());
@@ -251,5 +250,5 @@ struct ConvertTeraToLinalg
   }
 };
 
-} // namespace
-} // namespace mlir::tera
+}
+}

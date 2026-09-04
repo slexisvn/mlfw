@@ -5,12 +5,6 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-//
-// Ops whose whole meaning is what the reverse pass does when it reaches them.
-// They are the identity on values, so the lowering below the tensor level
-// erases them.
-//
-//===----------------------------------------------------------------------===//
 
 #ifndef TERA_OPS_AUTODIFF
 #define TERA_OPS_AUTODIFF
@@ -43,4 +37,4 @@ def Tera_StopGradientOp : Tera_Op<"stop_gradient",
   let assemblyFormat = "$operand attr-dict `:` type($result)";
 }
 
-#endif // TERA_OPS_AUTODIFF
+#endif

@@ -5,20 +5,6 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-//
-// Both ops are one `linalg.generic` over a loop nest that has the output's
-// axes as parallel loops and the window's as reductions, and both reach their
-// operand through an indexing map that multiplies the window index by the
-// stride and the position within it by the dilation. What differs is the body:
-// a convolution multiplies and accumulates, a pool takes the larger of two or
-// sums to be divided.
-//
-// Padding is not part of that map. An index the map produces has to be inside
-// the operand, so anything that would read outside it is put there first, as a
-// destination filled with the identity of what the window does and the operand
-// written into the middle of it.
-//
-//===----------------------------------------------------------------------===//
 
 #include "Tera/IR/TeraOps.h"
 
@@ -35,10 +21,8 @@ using namespace mlir::tera;
 using namespace mlir::tera::detail;
 
 namespace {
-
 constexpr int64_t kLeadingAxes = 2;
 
-/// Returns the operand unchanged when no spatial padding is needed.
 Value bordered(OpBuilder &builder, Location loc, Value operand,
                ArrayRef<int64_t> low, ArrayRef<int64_t> high, TypedAttr fill) {
   auto operandType = cast<RankedTensorType>(operand.getType());
@@ -86,19 +70,6 @@ SmallVector<Value> destinationExtents(OpBuilder &builder, Location loc,
   });
 }
 
-/// A convolution is a contraction that happens to slide: the loop nest is the
-/// output's axes, plus the input channels and the kernel's own axes as
-/// reductions, and the only thing that makes it a convolution rather than a
-/// `dot` is that the input reads `window * stride + position * dilation`
-/// rather than a loop index.
-///
-/// Groups are the channel axes split in two, and only then. The input becomes
-/// `[batch, group, channel, spatial...]` and the kernel
-/// `[group, channel out, channel in, spatial...]`, which makes the group a
-/// loop of its own and leaves every map a permutation of it. One group needs
-/// none of that: an axis of extent one would be a view for the loops to be
-/// folded back through afterwards, and the same nest without the axis says the
-/// same thing.
 struct ConvOpLowering : public OpConversionPattern<ConvOp> {
   using OpConversionPattern<ConvOp>::OpConversionPattern;
 
@@ -226,10 +197,6 @@ struct ConvOpLowering : public OpConversionPattern<ConvOp> {
   }
 };
 
-/// The same traversal, reading a reduction out of each window. A maximum needs
-/// a destination filled with something no element can beat, and an average
-/// sums into zero and divides once at the end -- one rounding rather than one
-/// per element, which is what `tera.reduce mean` does for a whole axis.
 struct Pool2dOpLowering : public OpConversionPattern<Pool2dOp> {
   using OpConversionPattern<Pool2dOp>::OpConversionPattern;
 
@@ -332,7 +299,7 @@ struct Pool2dOpLowering : public OpConversionPattern<Pool2dOp> {
   }
 };
 
-} // namespace
+}
 
 void mlir::tera::detail::populateWindowPatterns(RewritePatternSet &patterns) {
   patterns.add<ConvOpLowering, Pool2dOpLowering>(patterns.getContext());

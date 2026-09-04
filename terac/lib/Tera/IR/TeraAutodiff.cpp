@@ -5,12 +5,6 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-//
-// The engine knows three things: how to walk a block backwards, how to add
-// gradient contributions together, and where to stop. What the derivative of a
-// particular op is, it asks the op, through `TeraVjpOpInterface`.
-//
-//===----------------------------------------------------------------------===//
 
 #include "Tera/IR/TeraAutodiff.h"
 
@@ -22,17 +16,12 @@ using namespace mlir;
 using namespace mlir::tera;
 
 namespace {
-
-/// The gradients flowing into each value, held unsummed until someone asks for
-/// them. A value used `n` times collects `n` contributions, and summing them as
-/// a balanced tree keeps the additions `log n` deep instead of chaining them.
 class AdjointMap {
 public:
   void addContribution(Value value, Value contribution) {
     contributions[value].push_back(contribution);
   }
 
-  /// Returns the accumulated adjoint, or null if no gradient reached the value.
   Value getAdjoint(OpBuilder &builder, Location loc, Value value) {
     auto entry = contributions.find(value);
     if (entry == contributions.end())
@@ -73,7 +62,7 @@ SmallVector<Operation *> cloneInto(OpBuilder &builder, Block &block,
   return cloned;
 }
 
-} // namespace
+}
 
 void mlir::tera::cloneBlock(OpBuilder &builder, Block &block,
                             ValueRange arguments,

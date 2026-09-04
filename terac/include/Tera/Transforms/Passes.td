@@ -5,12 +5,6 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-//
-// Passes that rewrite tera into tera. Reverse-mode AD lands here, above the
-// lowering in Tera/Conversion, because a closed VJP rule exists for `dot` and
-// `reduce` but not for the loop nest they become.
-//
-//===----------------------------------------------------------------------===//
 
 #ifndef TERA_TRANSFORMS_PASSES
 #define TERA_TRANSFORMS_PASSES
@@ -58,4 +52,4 @@ def TeraAutodiff : Pass<"tera-autodiff", "::mlir::ModuleOp"> {
   ];
 }
 
-#endif // TERA_TRANSFORMS_PASSES
+#endif

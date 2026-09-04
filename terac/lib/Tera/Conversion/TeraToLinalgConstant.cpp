@@ -21,7 +21,6 @@ using namespace mlir::tera;
 using namespace mlir::tera::detail;
 
 namespace {
-
 struct ConstantOpLowering : public OpConversionPattern<ConstantOp> {
   using OpConversionPattern<ConstantOp>::OpConversionPattern;
 
@@ -34,8 +33,6 @@ struct ConstantOpLowering : public OpConversionPattern<ConstantOp> {
   }
 };
 
-/// A counting tensor is a `linalg.generic` over its own result with an empty
-/// input list: every element is a function of the loop index alone.
 struct IotaOpLowering : public OpConversionPattern<IotaOp> {
   using OpConversionPattern<IotaOp>::OpConversionPattern;
 
@@ -78,7 +75,7 @@ struct IotaOpLowering : public OpConversionPattern<IotaOp> {
   }
 };
 
-} // namespace
+}
 
 void mlir::tera::detail::populateConstantPatterns(RewritePatternSet &patterns) {
   patterns.add<ConstantOpLowering, IotaOpLowering>(patterns.getContext());

@@ -12,19 +12,10 @@
 include "Tera/IR/TeraDialect.td"
 include "mlir/IR/EnumAttr.td"
 
-//===----------------------------------------------------------------------===//
-// Reduction kind
-//===----------------------------------------------------------------------===//
-
 def Tera_REDUCE_SUM : I32EnumCase<"Sum", 0, "sum">;
 def Tera_REDUCE_PRODUCT : I32EnumCase<"Product", 1, "product">;
 def Tera_REDUCE_MAXIMUM : I32EnumCase<"Maximum", 2, "maximum">;
 def Tera_REDUCE_MINIMUM : I32EnumCase<"Minimum", 3, "minimum">;
-// Not a monoid, and the only kind here that is not: it sums and then divides by
-// how many it summed. It is a kind rather than a rewrite because that is the
-// shape the op arrives in -- a mean is one pass over the data whichever way it
-// is written down, and splitting it here would only make the reduction fusion
-// downstream put it back together.
 def Tera_REDUCE_MEAN : I32EnumCase<"Mean", 4, "mean">;
 
 def Tera_ReduceKind : I32Enum<"ReduceKind",
@@ -37,14 +28,6 @@ def Tera_ReduceKind : I32Enum<"ReduceKind",
 def Tera_ReduceKindAttr
     : EnumAttr<Tera_Dialect, Tera_ReduceKind, "reduce_kind">;
 
-//===----------------------------------------------------------------------===//
-// Pooling kind
-//===----------------------------------------------------------------------===//
-
-// Separate from the reduction kinds even though two of the names coincide. A
-// reduction consumes whole axes and a pool consumes a window of them, and only
-// these two of the five are ever asked of a window -- an enum that offered the
-// other three would be offering a lowering that does not exist.
 def Tera_POOL_MAX : I32EnumCase<"Max", 0, "max">;
 def Tera_POOL_AVERAGE : I32EnumCase<"Average", 1, "average">;
 
@@ -55,10 +38,6 @@ def Tera_PoolKind : I32Enum<"PoolKind",
 }
 
 def Tera_PoolKindAttr : EnumAttr<Tera_Dialect, Tera_PoolKind, "pool_kind">;
-
-//===----------------------------------------------------------------------===//
-// Comparison direction
-//===----------------------------------------------------------------------===//
 
 def Tera_COMPARE_EQ : I32EnumCase<"Eq", 0, "eq">;
 def Tera_COMPARE_NE : I32EnumCase<"Ne", 1, "ne">;
@@ -77,4 +56,4 @@ def Tera_ComparisonDirection : I32Enum<"ComparisonDirection",
 def Tera_ComparisonDirectionAttr
     : EnumAttr<Tera_Dialect, Tera_ComparisonDirection, "comparison_direction">;
 
-#endif // TERA_ENUMS
+#endif

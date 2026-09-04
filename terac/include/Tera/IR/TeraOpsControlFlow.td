@@ -5,20 +5,6 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-//
-// Ops with a body. Both are `IsolatedFromAbove` on purpose: every value the
-// body reads is an operand, so the reverse pass has somewhere to put that
-// value's gradient. A region that captured its surroundings implicitly would
-// have gradients with no way out, which is where the previous compiler's
-// autodiff got stuck.
-//
-// Both describe their edges through `RegionBranchOpInterface`, which is how
-// anything upstream learns that a value entering a body is the operand it was
-// given. Without it a body is a wall to every analysis in MLIR, and the
-// terminator would be claiming an interface whose default implementation reads
-// a parent that does not answer.
-//
-//===----------------------------------------------------------------------===//
 
 #ifndef TERA_OPS_CONTROL_FLOW
 #define TERA_OPS_CONTROL_FLOW
@@ -26,10 +12,6 @@
 include "Tera/IR/TeraOpsBase.td"
 include "mlir/Interfaces/ControlFlowInterfaces.td"
 
-// `ReturnLike` spelt out, because its default `getMutableSuccessorOperands`
-// forwards every operand along the edge and a scan's does not: only the carry
-// travels to the next step, the rest is one slice of a stacked result that no
-// edge carries.
 def Tera_YieldOp : Tera_Op<"yield",
         [Pure, Terminator, NativeOpTrait<"ReturnLike">,
          DeclareOpInterfaceMethods<RegionBranchTerminatorOpInterface,
@@ -40,9 +22,6 @@ def Tera_YieldOp : Tera_Op<"yield",
   let arguments = (ins Variadic<Tera_Tensor>:$results);
   let assemblyFormat = "attr-dict ($results^ `:` type($results))?";
 
-  // What `SingleBlockImplicitTerminator` reaches for when a body is written
-  // without one. A variadic operand group has no builder that takes nothing
-  // unless it is asked for.
   let builders = [OpBuilder<(ins), [{ /* nothing to do */ }]>];
 }
 
@@ -180,4 +159,4 @@ def Tera_ScanOp : Tera_Op<"scan",
   }];
 }
 
-#endif // TERA_OPS_CONTROL_FLOW
+#endif

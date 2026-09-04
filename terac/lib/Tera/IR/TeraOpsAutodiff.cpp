@@ -11,10 +11,6 @@
 using namespace mlir;
 using namespace mlir::tera;
 
-//===----------------------------------------------------------------------===//
-// StopGradientOp
-//===----------------------------------------------------------------------===//
-
 LogicalResult StopGradientOp::buildVjp(OpBuilder &, ValueRange,
                                        SmallVectorImpl<Value> &operandAdjoints) {
   operandAdjoints.assign({Value()});

@@ -5,14 +5,6 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-//
-// The two ops that read and write a tensor at positions another tensor names.
-// They are their own family rather than part of the shape one because an index
-// is not a shape: a slice knows at compile time which elements it touches and
-// these do not, which is why neither lowers to a view and why each is the
-// other's derivative.
-//
-//===----------------------------------------------------------------------===//
 
 #ifndef TERA_OPS_INDEXING
 #define TERA_OPS_INDEXING
@@ -129,4 +121,4 @@ def Tera_ScatterOp
   }];
 }
 
-#endif // TERA_OPS_INDEXING
+#endif

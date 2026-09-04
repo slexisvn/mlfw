@@ -11,10 +11,6 @@
 
 include "mlir/IR/OpBase.td"
 
-//===----------------------------------------------------------------------===//
-// Tera dialect definition.
-//===----------------------------------------------------------------------===//
-
 def Tera_Dialect : Dialect {
     let name = "tera";
     let summary = "A tera out-of-tree MLIR dialect.";
@@ -28,16 +24,8 @@ def Tera_Dialect : Dialect {
 
     let useDefaultAttributePrinterParser = 1;
 
-    // A dialect that owns a `ConstantLike` op has to be able to build one from
-    // an attribute, or a fold that reaches a constant has nowhere to put it and
-    // is dropped without a word. `-sccp` proves a value constant through this
-    // hook and no other.
     let hasConstantMaterializer = 1;
 
-    // The three attributes below are discardable: they sit on `func.func`,
-    // which knows nothing about them. Nothing checks a discardable attribute
-    // unless its dialect does, so without this a misspelt `tera.differentiable`
-    // is not an error, it is a function that silently gets no derivative.
     let hasOperationAttrVerify = 1;
 
     let extraClassDeclaration = [{
@@ -60,11 +48,7 @@ def Tera_Dialect : Dialect {
     }];
 }
 
-//===----------------------------------------------------------------------===//
-// Base tera operation definition.
-//===----------------------------------------------------------------------===//
-
 class Tera_Op<string mnemonic, list<Trait> traits = []> :
         Op<Tera_Dialect, mnemonic, traits>;
 
-#endif // TERA_DIALECT
+#endif

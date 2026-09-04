@@ -5,11 +5,6 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-//
-// Holds the single expansion of the generated op classes. Op semantics live in
-// the per-family files beside this one, matching the TeraOps*.td split.
-//
-//===----------------------------------------------------------------------===//
 
 #include "Tera/IR/TeraOps.h"
 

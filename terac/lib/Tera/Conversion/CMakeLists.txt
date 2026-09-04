@@ -1,9 +1,9 @@
 add_mlir_dialect_library(MLIRTeraConversion
-        LowerNestedLinalg.cpp
         Pipelines.cpp
         StageGpuBuffers.cpp
         TeraToLinalg.cpp
-        VectorizeAffine.cpp
+        TileAndFuse.cpp
+        VectorizeLinalg.cpp
         TeraToLinalgConstant.cpp
         TeraToLinalgElementwise.cpp
         TeraToLinalgShape.cpp
@@ -35,6 +35,7 @@ add_mlir_dialect_library(MLIRTeraConversion
         MLIRGPUDialect
         MLIRGPUPipelines
         MLIRGPUTransforms
+        MLIRIndexingMapOpInterface
         MLIRLLVMIRTransforms
         MLIRLinalgDialect
         MLIRLinalgTransforms
@@ -50,8 +51,11 @@ add_mlir_dialect_library(MLIRTeraConversion
         MLIRSCFToControlFlow
         MLIRTensorDialect
         MLIRTera
+        MLIRTilingInterface
         MLIRTransforms
         MLIRUBToLLVM
+        MLIRVectorDialect
+        MLIRVectorTransforms
         MLIRVectorToLLVM
         MLIRVectorToSCF
         )

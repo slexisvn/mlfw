@@ -18,6 +18,7 @@ cmake -G Ninja ^
   -S "%TERAC%" ^
   -B "%TERAC%/build" ^
   -DCMAKE_BUILD_TYPE=Release ^
+  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON ^
   -DMLIR_DIR=%LLVM_BUILD%/lib/cmake/mlir ^
   -DMLIR_INCLUDE_TESTS=ON ^
   -DLLVM_EXTERNAL_LIT=%LLVM_BUILD%/bin/llvm-lit.py ^

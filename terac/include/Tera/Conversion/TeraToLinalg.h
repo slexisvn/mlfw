@@ -13,12 +13,9 @@ namespace mlir {
 class RewritePatternSet;
 
 namespace tera {
-
-/// Populates tera lowering patterns; the conversion pass checks supported
-/// shapes.
 void populateTeraToLinalgPatterns(RewritePatternSet &patterns);
 
-} // namespace tera
-} // namespace mlir
+}
+}
 
-#endif // TERA_CONVERSION_TERATOLINALG_H
+#endif

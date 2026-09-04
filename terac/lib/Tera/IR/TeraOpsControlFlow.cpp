@@ -18,8 +18,6 @@ using namespace mlir::tera;
 using namespace mlir::tera::detail;
 
 namespace {
-
-/// Defers non-tera.yield terminators to region verification.
 LogicalResult verifyBody(Operation *op, Block &body, TypeRange arguments,
                          TypeRange yielded, StringRef what) {
   if (body.getNumArguments() != arguments.size())
@@ -47,11 +45,7 @@ LogicalResult verifyBody(Operation *op, Block &body, TypeRange arguments,
   return success();
 }
 
-} // namespace
-
-//===----------------------------------------------------------------------===//
-// IfOp
-//===----------------------------------------------------------------------===//
+}
 
 LogicalResult IfOp::verify() {
   auto conditionType = dyn_cast<RankedTensorType>(getCondition().getType());
@@ -67,10 +61,6 @@ LogicalResult IfOp::verify() {
   return verifyBody(*this, getElseBody().front(), arguments, results,
                     "the else body");
 }
-
-//===----------------------------------------------------------------------===//
-// ScanOp
-//===----------------------------------------------------------------------===//
 
 RankedTensorType ScanOp::getSliceType(RankedTensorType type) {
   return RankedTensorType::get(type.getShape().drop_front(),
@@ -145,10 +135,6 @@ LogicalResult ScanOp::verify() {
   return verifyBody(*this, getBody().front(), arguments, yielded, "the body");
 }
 
-//===----------------------------------------------------------------------===//
-// Control flow edges
-//===----------------------------------------------------------------------===//
-
 MutableOperandRange
 YieldOp::getMutableSuccessorOperands(RegionSuccessor) {
   if (auto scan = dyn_cast<ScanOp>((*this)->getParentOp()))
@@ -208,20 +194,13 @@ void ScanOp::getRegionInvocationBounds(
   invocationBounds.push_back(InvocationBounds(count, count));
 }
 
-//===----------------------------------------------------------------------===//
-// Vector-Jacobian products
-//===----------------------------------------------------------------------===//
-
 namespace {
-
-/// Leaves builder inserting into the new region body.
 Block *openBody(OpBuilder &builder, Region &region, TypeRange types,
                 Location loc) {
   SmallVector<Location> locations(types.size(), loc);
   return builder.createBlock(&region, region.end(), types, locations);
 }
 
-/// Reads dynamic result extents from source axes offset by shift.
 SmallVector<Value>
 sizesLike(OpBuilder &builder, Location loc, TypeRange results,
           ArrayRef<std::pair<Value, int64_t>> sources) {
@@ -261,7 +240,6 @@ RankedTensorType stackedType(Type type, int64_t count) {
   return RankedTensorType::get(shape, tensor.getElementType());
 }
 
-/// Requires a step axis of length chunks * size.
 Value inChunks(OpBuilder &builder, Location loc, Value stacked, int64_t chunks,
                int64_t size) {
   auto type = cast<RankedTensorType>(stacked.getType());
@@ -298,7 +276,6 @@ ScanOp buildRun(OpBuilder &builder, Location loc, Block &body, ValueRange inits,
   return scan;
 }
 
-/// Stacks each step's entry carry for the reverse pass.
 ScanOp buildStash(OpBuilder &builder, Location loc, Block &body,
                   ValueRange inits, ValueRange inputs, ValueRange constants,
                   bool reverse, int64_t steps) {
@@ -324,9 +301,6 @@ ScanOp buildStash(OpBuilder &builder, Location loc, Block &body,
   return scan;
 }
 
-/// Seeds describe final carries, stacked outputs, and accumulated constants;
-/// residuals contain stacked entry carries. Returns entry-carry gradients,
-/// constant totals, then stacked input gradients.
 FailureOr<ScanOp> buildReverse(OpBuilder &builder, Location loc, Block &body,
                                ValueRange carrySeeds,
                                ValueRange outputSeeds, ValueRange residuals,
@@ -386,7 +360,7 @@ FailureOr<ScanOp> buildReverse(OpBuilder &builder, Location loc, Block &body,
   return scan;
 }
 
-} // namespace
+}
 
 LogicalResult IfOp::buildVjp(OpBuilder &builder, ValueRange adjoints,
                              SmallVectorImpl<Value> &operandAdjoints) {

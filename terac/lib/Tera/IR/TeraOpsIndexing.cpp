@@ -17,7 +17,6 @@ using namespace mlir::tera;
 using namespace mlir::tera::detail;
 
 namespace {
-
 int64_t indexVectorSize(RankedTensorType indices, int64_t indexVectorDim) {
   return indexVectorDim == indices.getRank()
              ? 1
@@ -55,11 +54,7 @@ LogicalResult verifyIndexing(std::optional<Location> location,
   return success();
 }
 
-} // namespace
-
-//===----------------------------------------------------------------------===//
-// GatherOp
-//===----------------------------------------------------------------------===//
+}
 
 SmallVector<int64_t> GatherOp::getBatchAxes() {
   return indexBatchAxes(cast<RankedTensorType>(getIndices().getType()),
@@ -141,10 +136,6 @@ GatherOp::inferReturnTypes(MLIRContext *, std::optional<Location> location,
   return success();
 }
 
-//===----------------------------------------------------------------------===//
-// ScatterOp
-//===----------------------------------------------------------------------===//
-
 SmallVector<int64_t> ScatterOp::getWindowSizes() {
   auto operandType = cast<RankedTensorType>(getOperand().getType());
   llvm::SmallBitVector inserted(operandType.getRank());
@@ -224,10 +215,6 @@ ScatterOp::inferReturnTypes(MLIRContext *, std::optional<Location> location,
   inferredReturnTypes.push_back(operandType);
   return success();
 }
-
-//===----------------------------------------------------------------------===//
-// Vector-Jacobian products
-//===----------------------------------------------------------------------===//
 
 LogicalResult GatherOp::buildVjp(OpBuilder &builder, ValueRange adjoints,
                                  SmallVectorImpl<Value> &operandAdjoints) {

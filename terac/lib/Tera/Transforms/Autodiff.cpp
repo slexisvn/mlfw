@@ -5,12 +5,6 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-//
-// The pass decides which functions get a derivative and what its signature is.
-// Emitting the derivative itself is `differentiateBlock`, which the bodies of
-// `tera.scan` and `tera.if` reach for too.
-//
-//===----------------------------------------------------------------------===//
 
 #include "Tera/Transforms/Passes.h"
 
@@ -24,7 +18,6 @@ namespace mlir::tera {
 #include "Tera/Transforms/Passes.h.inc"
 
 namespace {
-
 SmallVector<int64_t> differentiableArguments(func::FuncOp func) {
   SmallVector<int64_t> arguments;
   for (auto [position, type] : llvm::enumerate(func.getArgumentTypes())) {
@@ -35,7 +28,6 @@ SmallVector<int64_t> differentiableArguments(func::FuncOp func) {
   return arguments;
 }
 
-/// taken must contain existing module symbols and is updated with new names.
 LogicalResult differentiate(func::FuncOp func, llvm::StringSet<> &taken) {
   if (func.isExternal())
     return func.emitError() << "is marked differentiable but has no body";
@@ -127,5 +119,5 @@ struct TeraAutodiff : public impl::TeraAutodiffBase<TeraAutodiff> {
   }
 };
 
-} // namespace
-} // namespace mlir::tera
+}
+}

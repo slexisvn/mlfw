@@ -58,11 +58,6 @@ void TensorBuffer::adoptDescriptorShape() {
   type = RankedTensorType::get(shape, type.getElementType());
 }
 
-/// The element types a JIT-compiled function can be handed and read back.
-/// Written once: `checkElementType` reports the set by asking for a kind, and
-/// the accessors below switch over the closed enum rather than repeating the
-/// membership test, so adding a type is one case in each switch and no new
-/// list.
 enum class ElementKind { F32, F64, I32, I64 };
 
 static std::optional<ElementKind> classifyElementType(Type elementType) {
@@ -77,7 +72,6 @@ static std::optional<ElementKind> classifyElementType(Type elementType) {
   return std::nullopt;
 }
 
-/// Requires an element type previously accepted by checkElementType.
 static ElementKind checkedKind(Type elementType) {
   std::optional<ElementKind> kind = classifyElementType(elementType);
   assert(kind && "element type checked when the buffer was created");

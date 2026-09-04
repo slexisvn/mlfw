@@ -15,10 +15,6 @@ using namespace mlir;
 using namespace mlir::tera;
 using namespace mlir::tera::detail;
 
-//===----------------------------------------------------------------------===//
-// DotOp
-//===----------------------------------------------------------------------===//
-
 LogicalResult
 DotOp::inferReturnTypes(MLIRContext *, std::optional<Location> location,
                         Adaptor adaptor,
@@ -90,10 +86,6 @@ SmallVector<int64_t> DotOp::getRhsFreeAxes() {
   return freeAxes(claimedAxes(getRhsBatch(), getRhsContracting(), rank), rank);
 }
 
-//===----------------------------------------------------------------------===//
-// ReduceOp
-//===----------------------------------------------------------------------===//
-
 LogicalResult
 ReduceOp::inferReturnTypes(MLIRContext *, std::optional<Location> location,
                            Adaptor adaptor,
@@ -116,10 +108,6 @@ ReduceOp::inferReturnTypes(MLIRContext *, std::optional<Location> location,
       RankedTensorType::get(shape, operandType.getElementType()));
   return success();
 }
-
-//===----------------------------------------------------------------------===//
-// Vector-Jacobian products
-//===----------------------------------------------------------------------===//
 
 LogicalResult DotOp::buildVjp(OpBuilder &builder, ValueRange adjoints,
                               SmallVectorImpl<Value> &operandAdjoints) {
@@ -166,8 +154,6 @@ LogicalResult DotOp::buildVjp(OpBuilder &builder, ValueRange adjoints,
   return success();
 }
 
-/// Product gradients divide by the operand and may be non-finite at zero.
-/// Maximum and minimum route the full adjoint to every tied element.
 LogicalResult ReduceOp::buildVjp(OpBuilder &builder, ValueRange adjoints,
                                  SmallVectorImpl<Value> &operandAdjoints) {
   Location loc = getLoc();

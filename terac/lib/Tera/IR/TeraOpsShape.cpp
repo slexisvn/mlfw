@@ -29,10 +29,6 @@ SmallVector<Value> mlir::tera::detail::dynamicExtentsOf(OpBuilder &builder,
   return extents;
 }
 
-//===----------------------------------------------------------------------===//
-// DimOp
-//===----------------------------------------------------------------------===//
-
 LogicalResult DimOp::verify() {
   auto operandType = cast<RankedTensorType>(getOperand().getType());
   int64_t dimension = getDimension();
@@ -51,10 +47,6 @@ OpFoldResult DimOp::fold(FoldAdaptor) {
   return DenseElementsAttr::get(cast<ShapedType>(getResult().getType()),
                                 extent);
 }
-
-//===----------------------------------------------------------------------===//
-// BroadcastInDimOp
-//===----------------------------------------------------------------------===//
 
 LogicalResult BroadcastInDimOp::verify() {
   auto operandType = dyn_cast<RankedTensorType>(getOperand().getType());
@@ -96,10 +88,6 @@ LogicalResult BroadcastInDimOp::verify() {
   return success();
 }
 
-//===----------------------------------------------------------------------===//
-// TransposeOp
-//===----------------------------------------------------------------------===//
-
 LogicalResult TransposeOp::inferReturnTypes(
     MLIRContext *, std::optional<Location> location, Adaptor adaptor,
     SmallVectorImpl<Type> &inferredReturnTypes) {
@@ -135,7 +123,6 @@ OpFoldResult TransposeOp::fold(FoldAdaptor) {
 }
 
 namespace {
-/// transpose(transpose(x, inner), outer) -> transpose(x, inner o outer)
 struct ComposeTransposes : public OpRewritePattern<TransposeOp> {
   using OpRewritePattern<TransposeOp>::OpRewritePattern;
 
@@ -161,16 +148,12 @@ struct ComposeTransposes : public OpRewritePattern<TransposeOp> {
     return success();
   }
 };
-} // namespace
+}
 
 void TransposeOp::getCanonicalizationPatterns(RewritePatternSet &results,
                                               MLIRContext *context) {
   results.add<ComposeTransposes>(context);
 }
-
-//===----------------------------------------------------------------------===//
-// ReshapeOp
-//===----------------------------------------------------------------------===//
 
 LogicalResult ReshapeOp::verify() {
   if (failed(verifySizesClause(*this, getSizes())))
@@ -199,7 +182,6 @@ OpFoldResult ReshapeOp::fold(FoldAdaptor) {
 }
 
 namespace {
-/// reshape(reshape(x)) -> reshape(x)
 struct ComposeReshapes : public OpRewritePattern<ReshapeOp> {
   using OpRewritePattern<ReshapeOp>::OpRewritePattern;
 
@@ -213,16 +195,12 @@ struct ComposeReshapes : public OpRewritePattern<ReshapeOp> {
     return success();
   }
 };
-} // namespace
+}
 
 void ReshapeOp::getCanonicalizationPatterns(RewritePatternSet &results,
                                             MLIRContext *context) {
   results.add<ComposeReshapes>(context);
 }
-
-//===----------------------------------------------------------------------===//
-// SliceOp
-//===----------------------------------------------------------------------===//
 
 LogicalResult
 SliceOp::inferReturnTypes(MLIRContext *, std::optional<Location> location,
@@ -270,10 +248,6 @@ SliceOp::inferReturnTypes(MLIRContext *, std::optional<Location> location,
   return success();
 }
 
-//===----------------------------------------------------------------------===//
-// ReverseOp
-//===----------------------------------------------------------------------===//
-
 LogicalResult
 ReverseOp::inferReturnTypes(MLIRContext *, std::optional<Location> location,
                             Adaptor adaptor,
@@ -298,10 +272,6 @@ OpFoldResult ReverseOp::fold(FoldAdaptor) {
       return {};
   return getOperand();
 }
-
-//===----------------------------------------------------------------------===//
-// PadOp
-//===----------------------------------------------------------------------===//
 
 LogicalResult
 PadOp::inferReturnTypes(MLIRContext *, std::optional<Location> location,
@@ -365,10 +335,6 @@ OpFoldResult PadOp::fold(FoldAdaptor) {
   return {};
 }
 
-//===----------------------------------------------------------------------===//
-// ConcatOp
-//===----------------------------------------------------------------------===//
-
 LogicalResult
 ConcatOp::inferReturnTypes(MLIRContext *, std::optional<Location> location,
                            Adaptor adaptor,
@@ -424,10 +390,6 @@ ConcatOp::inferReturnTypes(MLIRContext *, std::optional<Location> location,
       RankedTensorType::get(shape, firstType.getElementType()));
   return success();
 }
-
-//===----------------------------------------------------------------------===//
-// Vector-Jacobian products
-//===----------------------------------------------------------------------===//
 
 LogicalResult
 BroadcastInDimOp::buildVjp(OpBuilder &builder, ValueRange adjoints,
@@ -504,7 +466,6 @@ LogicalResult ReverseOp::buildVjp(OpBuilder &builder, ValueRange adjoints,
   return success();
 }
 
-/// Computes the operand gradient only; the padding value receives no gradient.
 LogicalResult PadOp::buildVjp(OpBuilder &builder, ValueRange adjoints,
                               SmallVectorImpl<Value> &operandAdjoints) {
   auto operandType = cast<RankedTensorType>(getOperand().getType());

@@ -17,12 +17,8 @@ using namespace mlir::tera;
 using namespace mlir::tera::detail;
 
 namespace {
-
-/// The batch and channel axes every op in this file puts in front of the
-/// spatial ones.
 constexpr int64_t kLeadingAxes = 2;
 
-/// reach includes dilation; ceilMode includes a final partial window.
 int64_t windowCount(int64_t extent, int64_t low, int64_t high, int64_t reach,
                     int64_t stride, bool ceilMode) {
   if (ShapedType::isDynamic(extent))
@@ -70,11 +66,7 @@ LogicalResult verifyWindow(std::optional<Location> location,
   return success();
 }
 
-} // namespace
-
-//===----------------------------------------------------------------------===//
-// ConvOp
-//===----------------------------------------------------------------------===//
+}
 
 int64_t ConvOp::getSpatialRank() { return getStrides().size(); }
 
@@ -166,10 +158,6 @@ ConvOp::inferReturnTypes(MLIRContext *, std::optional<Location> location,
   return success();
 }
 
-//===----------------------------------------------------------------------===//
-// Pool2dOp
-//===----------------------------------------------------------------------===//
-
 SmallVector<int64_t> Pool2dOp::getPaddingLow() {
   return paddingSide(getPadding(), 0);
 }
@@ -218,13 +206,7 @@ Pool2dOp::inferReturnTypes(MLIRContext *, std::optional<Location> location,
   return success();
 }
 
-//===----------------------------------------------------------------------===//
-// Vector-Jacobian products
-//===----------------------------------------------------------------------===//
-
 namespace {
-
-/// The two adjoints one convolution sends back.
 struct ConvAdjoints {
   Value input;
   Value kernel;
@@ -338,7 +320,7 @@ FailureOr<ConvAdjoints> convGroupVjp(ConvOp op, OpBuilder &builder, Value grad,
   return ConvAdjoints{dInput, dKernel};
 }
 
-} // namespace
+}
 
 LogicalResult ConvOp::buildVjp(OpBuilder &builder, ValueRange adjoints,
                                SmallVectorImpl<Value> &operandAdjoints) {
@@ -379,7 +361,6 @@ LogicalResult ConvOp::buildVjp(OpBuilder &builder, ValueRange adjoints,
   return success();
 }
 
-/// Requires unpadded, non-overlapping windows that tile the input.
 LogicalResult Pool2dOp::buildVjp(OpBuilder &builder, ValueRange adjoints,
                                  SmallVectorImpl<Value> &operandAdjoints) {
   Location loc = getLoc();

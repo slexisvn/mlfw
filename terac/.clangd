@@ -1,0 +1,13 @@
+CompileFlags:
+  CompilationDatabase: build
+  Remove:
+    - /Zc:preprocessor
+    - /Gw
+    - /FS
+    - -w1*
+    - -we*
+    - -wo*
+
+Diagnostics:
+  UnusedIncludes: None
+  MissingIncludes: None

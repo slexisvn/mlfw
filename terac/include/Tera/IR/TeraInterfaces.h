@@ -13,4 +13,4 @@
 
 #include "Tera/IR/TeraInterfaces.h.inc"
 
-#endif // TERA_IR_TERAINTERFACES_H
+#endif

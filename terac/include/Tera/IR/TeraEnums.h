@@ -17,4 +17,4 @@
 #define GET_ATTRDEF_CLASSES
 #include "Tera/IR/TeraEnumAttrs.h.inc"
 
-#endif // TERA_IR_TERAENUMS_H
+#endif

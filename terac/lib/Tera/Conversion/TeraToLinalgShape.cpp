@@ -23,16 +23,12 @@ using namespace mlir::tera;
 using namespace mlir::tera::detail;
 
 namespace {
-
 Value extentAsIndex(OpBuilder &builder, Location loc, Value extent) {
   Value scalar = tensor::ExtractOp::create(builder, loc, extent, ValueRange{});
   return arith::IndexCastOp::create(builder, loc, builder.getIndexType(),
                                     scalar);
 }
 
-/// `tera.dim` is the only op that turns a shape into a value, and this is the
-/// whole of it: the extent, cast to i64, wrapped back into the rank-0 tensor
-/// the dialect passes it in.
 struct DimOpLowering : public OpConversionPattern<DimOp> {
   using OpConversionPattern<DimOp>::OpConversionPattern;
 
@@ -92,8 +88,6 @@ struct BroadcastInDimOpLowering
   }
 };
 
-/// `linalg.transpose` reads `dim(result, i) = dim(input, permutation[i])`,
-/// which is exactly what `tera.transpose` means by its permutation.
 struct TransposeOpLowering : public OpConversionPattern<TransposeOp> {
   using OpConversionPattern<TransposeOp>::OpConversionPattern;
 
@@ -114,12 +108,6 @@ struct TransposeOpLowering : public OpConversionPattern<TransposeOp> {
   }
 };
 
-/// A reshape that only folds adjacent axes together, or splits one apart,
-/// becomes `tensor.collapse_shape` or `tensor.expand_shape`: a view rather than
-/// a copy, and the only form the memref lowering can take a dynamic extent
-/// through -- `memref.reshape` over a dynamic result reaches the LLVM
-/// translation unlowered. Anything else keeps `tensor.reshape`, which is
-/// exactly the reshapes that move data between axes and are static anyway.
 struct ReshapeOpLowering : public OpConversionPattern<ReshapeOp> {
   using OpConversionPattern<ReshapeOp>::OpConversionPattern;
 
@@ -197,11 +185,6 @@ struct SliceOpLowering : public OpConversionPattern<SliceOp> {
   }
 };
 
-/// Reading an axis from the far end is an indexing map like any other: the
-/// reversed axes read `extent - 1 - d` and the rest read `d`. That needs the
-/// extent as a number, which is why a reversed axis has to be static -- an
-/// affine map has no room for a value, and an axis read backwards has to know
-/// where its far end is.
 struct ReverseOpLowering : public OpConversionPattern<ReverseOp> {
   using OpConversionPattern<ReverseOp>::OpConversionPattern;
 
@@ -245,8 +228,6 @@ struct ReverseOpLowering : public OpConversionPattern<ReverseOp> {
   }
 };
 
-/// The op is the helper: `low` before each axis, `interior` holes between the
-/// elements, and the padding value wherever the operand has nothing.
 struct PadOpLowering : public OpConversionPattern<PadOp> {
   using OpConversionPattern<PadOp>::OpConversionPattern;
 
@@ -282,9 +263,6 @@ struct PadOpLowering : public OpConversionPattern<PadOp> {
   }
 };
 
-/// Each input is written into its own band of a fresh destination. The bands
-/// are laid out by running offset, so the concatenated axis is the only one
-/// that moves.
 struct ConcatOpLowering : public OpConversionPattern<ConcatOp> {
   using OpConversionPattern<ConcatOp>::OpConversionPattern;
 
@@ -355,7 +333,7 @@ struct ConcatOpLowering : public OpConversionPattern<ConcatOp> {
   }
 };
 
-} // namespace
+}
 
 void mlir::tera::detail::populateShapePatterns(RewritePatternSet &patterns) {
   patterns.add<DimOpLowering, BroadcastInDimOpLowering, TransposeOpLowering,

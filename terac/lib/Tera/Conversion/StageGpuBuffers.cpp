@@ -19,34 +19,23 @@ namespace mlir::tera {
 #include "Tera/Conversion/Passes.h.inc"
 
 namespace {
-
 bool isStagingOp(Operation *op) {
   return isa<gpu::AllocOp, gpu::MemcpyOp, gpu::DeallocOp>(op);
 }
 
-/// The launches reading a buffer, and where they sit in the buffer's own
-/// block. A launch inside a `tera.if` body is not in that block, so what has
-/// to be ordered against a host reader -- and what the copies have to be
-/// placed against -- is the top-level op containing it. Emitting a copy back
-/// beside a launch nested in a branch would run it only when that branch is
-/// taken, and free the allocation only there too.
 struct StagedBuffer {
   Value device;
-  /// A contiguous host buffer standing in for a strided view, or null when
-  /// the buffer could be copied across as it is. See `contiguousType`.
   Value shadow;
   Operation *firstAnchor;
   Operation *lastAnchor;
 };
 
-/// Returns an identity-layout type, or null if the layout is already identity.
 MemRefType contiguousType(MemRefType type) {
   if (type.getLayout().isIdentity())
     return nullptr;
   return MemRefType::get(type.getShape(), type.getElementType());
 }
 
-/// Returns memref.dim values for dynamic dimensions in axis order.
 SmallVector<Value> dynamicExtentsOf(OpBuilder &builder, Location loc,
                                     Value buffer) {
   auto type = cast<MemRefType>(buffer.getType());
@@ -155,5 +144,5 @@ struct StageGpuBuffers : impl::StageGpuBuffersBase<StageGpuBuffers> {
   }
 };
 
-} // namespace
-} // namespace mlir::tera
+}
+}

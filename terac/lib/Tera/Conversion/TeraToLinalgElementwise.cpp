@@ -5,12 +5,6 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-//
-// Every op here becomes one `linalg.map` over the same iteration space; they
-// differ only in the scalar expression their body yields. That expression is
-// the pattern's one parameter, so there is a single lowering, not eleven.
-//
-//===----------------------------------------------------------------------===//
 
 #include "Tera/IR/TeraOps.h"
 
@@ -26,8 +20,6 @@ using namespace mlir::tera;
 using namespace mlir::tera::detail;
 
 namespace {
-
-/// Builds the scalar body of one elementwise op from its block arguments.
 using ScalarBuilder = Value (*)(OpBuilder &, Location, Operation *, ValueRange);
 
 template <typename SourceOp>
@@ -140,7 +132,7 @@ Value changeElementType(OpBuilder &builder, Location loc, Operation *source,
                               /*isUnsignedCast=*/false);
 }
 
-} // namespace
+}
 
 void mlir::tera::detail::populateElementwisePatterns(
     RewritePatternSet &patterns) {

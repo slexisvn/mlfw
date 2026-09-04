@@ -1,0 +1,28 @@
+{
+  "clangd.arguments": [
+    "--background-index",
+    "--clang-tidy",
+    "--completion-style=detailed",
+    "--all-scopes-completion",
+    "--header-insertion=never",
+    "--pch-storage=memory"
+  ],
+  "clangd.onConfigChanged": "restart",
+  "files.associations": {
+    "*.inc": "cpp"
+  },
+  "[c]": {
+    "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd"
+  },
+  "[cpp]": {
+    "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd"
+  },
+  "files.watcherExclude": {
+    "**/build/**": true,
+    "**/build-*/**": true
+  },
+  "search.exclude": {
+    "**/build": true,
+    "**/build-*": true
+  }
+}

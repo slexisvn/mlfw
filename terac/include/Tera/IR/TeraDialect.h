@@ -14,4 +14,4 @@
 
 #include "Tera/IR/TeraOpsDialect.h.inc"
 
-#endif // TERA_IR_TERADIALECT_H
+#endif

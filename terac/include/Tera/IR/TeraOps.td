@@ -5,16 +5,6 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-//
-// The tensor level of the tera compiler. Ops here keep whole-tensor semantics
-// because that is the level reverse-mode AD needs: a closed VJP rule exists for
-// `dot` and `reduce`, but not for the loop nest they lower to. Everything below
-// this level is upstream `linalg`.
-//
-// This file is the entry point tablegen reads. Op definitions live in the
-// per-family files it includes.
-//
-//===----------------------------------------------------------------------===//
 
 #ifndef TERA_OPS
 #define TERA_OPS
@@ -29,4 +19,4 @@ include "Tera/IR/TeraOpsContraction.td"
 include "Tera/IR/TeraOpsAutodiff.td"
 include "Tera/IR/TeraOpsControlFlow.td"
 
-#endif // TERA_OPS
+#endif

@@ -5,15 +5,6 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-//
-// Neither op has an indexing map, because neither knows at compile time which
-// element it touches. A gather is still one write per result element and so
-// stays a `linalg.generic`, with the read spelt as a `tensor.extract` the map
-// could not have expressed. A scatter is not: two updates may land on the same
-// element, so the writes have to happen in an order, and that order is a loop
-// nest carrying the tensor from step to step.
-//
-//===----------------------------------------------------------------------===//
 
 #include "Tera/IR/TeraOps.h"
 
@@ -32,10 +23,6 @@ using namespace mlir::tera;
 using namespace mlir::tera::detail;
 
 namespace {
-
-/// windowIndices follow operand-axis order; batchIndices follow index-tensor
-/// axis order. Coordinates are added to addressedAxes; other axes start at
-/// zero.
 SmallVector<Value> operandPosition(OpBuilder &builder, Location loc,
                                    Value indices, int64_t indexVectorDim,
                                    ArrayRef<int64_t> addressedAxes,
@@ -99,10 +86,6 @@ llvm::SmallBitVector axisMask(ArrayRef<int64_t> axes, int64_t rank) {
   return mask;
 }
 
-/// One write per result element, so the loop nest is the result's own shape
-/// and `linalg.generic` supplies it. What the map cannot say is where the read
-/// comes from, so the body says it: `linalg.index` recovers the position being
-/// written and `tensor.extract` reads the element it was gathered from.
 struct GatherOpLowering : public OpConversionPattern<GatherOp> {
   using OpConversionPattern<GatherOp>::OpConversionPattern;
 
@@ -159,26 +142,6 @@ struct GatherOpLowering : public OpConversionPattern<GatherOp> {
   }
 };
 
-/// The updates are walked in the order they are laid out and added into the
-/// tensor one at a time, which is the only order that gives the same answer as
-/// mlfw's own loop nest when two of them land on the same element. The tensor
-/// travels through the nest as an iteration argument: a scatter that writes
-/// nothing is a copy of the operand, and every write is one more
-/// `tensor.insert` on top of that.
-///
-/// The copy is not something bufferization can be left to insert. The operand
-/// is usually dead after the scatter, so writing into it in place is a legal
-/// conclusion within the function -- and wrong across calls, because the buffer
-/// belongs to the caller. The gradcheck is what finds that: it calls the same
-/// function twice with the same inputs, and a scatter that kept its answer in
-/// the caller's operand answers differently the second time.
-///
-/// `bufferization.alloc_tensor` is how the copy is asked for rather than a
-/// `linalg.copy`, and the difference is not stylistic. A `linalg.copy` is a
-/// parallel op and becomes a kernel on the GPU target, which would leave this
-/// loop nest -- which has no parallel axis and stays on the host -- reading a
-/// buffer between two launches that hold it on the device. An `alloc_tensor`
-/// is a buffer and a copy into it, and never a launch.
 struct ScatterOpLowering : public OpConversionPattern<ScatterOp> {
   using OpConversionPattern<ScatterOp>::OpConversionPattern;
 
@@ -247,7 +210,7 @@ struct ScatterOpLowering : public OpConversionPattern<ScatterOp> {
   }
 };
 
-} // namespace
+}
 
 void mlir::tera::detail::populateIndexingPatterns(RewritePatternSet &patterns) {
   patterns.add<GatherOpLowering, ScatterOpLowering>(patterns.getContext());

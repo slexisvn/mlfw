@@ -5,11 +5,6 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-//
-// Internal to lib/Tera/IR. Passes outside this directory reach an op's shape
-// semantics through `inferReturnTypes` on the op itself, never through these.
-//
-//===----------------------------------------------------------------------===//
 
 #ifndef TERA_LIB_IR_TERAOPSDETAIL_H
 #define TERA_LIB_IR_TERAOPSDETAIL_H
@@ -26,12 +21,10 @@
 #include <optional>
 
 namespace mlir::tera::detail {
-
 inline bool extentsAgree(int64_t lhs, int64_t rhs) {
   return ShapedType::isDynamic(lhs) || ShapedType::isDynamic(rhs) || lhs == rhs;
 }
 
-/// Rejects out-of-range or duplicate axes; what names the diagnostic attribute.
 inline LogicalResult markAxes(std::optional<Location> location,
                               ArrayRef<int64_t> axes, int64_t rank,
                               llvm::SmallBitVector &mask, StringRef what) {
@@ -46,7 +39,6 @@ inline LogicalResult markAxes(std::optional<Location> location,
   return success();
 }
 
-/// Requires validated axes; performs no range or duplicate checks.
 inline llvm::SmallBitVector claimedAxes(ArrayRef<int64_t> first,
                                        ArrayRef<int64_t> second, int64_t rank) {
   llvm::SmallBitVector mask(rank);
@@ -66,7 +58,6 @@ inline SmallVector<int64_t> freeAxes(const llvm::SmallBitVector &mask,
   return result;
 }
 
-/// Returns each original axis position in the sorted sequence.
 inline SmallVector<int64_t> sortedPositions(ArrayRef<int64_t> axes) {
   SmallVector<int64_t> order(axes.size());
   std::iota(order.begin(), order.end(), 0);
@@ -84,10 +75,9 @@ inline SmallVector<int64_t> axisRange(int64_t begin, int64_t end) {
   return axes;
 }
 
-/// Returns tera.dim values for dynamic dimensions in axis order.
 SmallVector<Value> dynamicExtentsOf(OpBuilder &builder, Location loc,
                                     Value source);
 
-} // namespace mlir::tera::detail
+}
 
-#endif // TERA_LIB_IR_TERAOPSDETAIL_H
+#endif

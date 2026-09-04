@@ -31,7 +31,9 @@ if not exist "%NINJA%" (
 exit /b 0
 
 :find_vcvars
-set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
-if not exist "%VSWHERE%" exit /b 0
-for /f "usebackq tokens=*" %%i in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VCVARS=%%i\VC\Auxiliary\Build\vcvars64.bat"
+set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer"
+if not exist "%VSWHERE%\vswhere.exe" exit /b 0
+pushd "%VSWHERE%"
+for /f "usebackq tokens=*" %%i in (`.\vswhere.exe -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VCVARS=%%i\VC\Auxiliary\Build\vcvars64.bat"
+popd
 exit /b 0

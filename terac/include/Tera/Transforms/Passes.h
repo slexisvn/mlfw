@@ -20,7 +20,7 @@ namespace tera {
 
 #define GEN_PASS_REGISTRATION
 #include "Tera/Transforms/Passes.h.inc"
-} // namespace tera
-} // namespace mlir
+}
+}
 
 #endif

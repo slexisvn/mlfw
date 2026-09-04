@@ -5,11 +5,6 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-//
-// Both ops become their `scf` counterpart. The bodies move across as they are:
-// what is inside them is still tera, and the conversion reaches it afterwards.
-//
-//===----------------------------------------------------------------------===//
 
 #include "Tera/IR/TeraOps.h"
 
@@ -24,8 +19,6 @@ using namespace mlir::tera;
 using namespace mlir::tera::detail;
 
 namespace {
-
-/// Resolves yielded block arguments before moving or erasing the body.
 SmallVector<Value> resolveYield(Block &body, ValueRange arguments) {
   SmallVector<Value> yielded;
   for (Value value : cast<YieldOp>(body.getTerminator()).getResults()) {
@@ -37,8 +30,6 @@ SmallVector<Value> resolveYield(Block &body, ValueRange arguments) {
   return yielded;
 }
 
-/// Moves \p from to \p into, substituting arguments, and returns mapped yields.
-/// Leaves into without a terminator.
 SmallVector<Value> moveBody(ConversionPatternRewriter &rewriter, Block &from,
                             Block &into, ValueRange arguments) {
   SmallVector<Value> yielded = resolveYield(from, arguments);
@@ -55,7 +46,6 @@ Value extentAsIndex(OpBuilder &builder, Location loc, Value extent) {
                                     scalar);
 }
 
-/// Partitions sizes by result, with one entry per dynamic dimension in order.
 SmallVector<SmallVector<Value>> sizesPerResult(OpBuilder &builder, Location loc,
                                                TypeRange results,
                                                ValueRange sizes) {
@@ -132,9 +122,6 @@ struct IfOpLowering : public OpConversionPattern<IfOp> {
   }
 };
 
-/// The carry becomes a loop-carried value and each stacked output becomes a
-/// tensor the loop writes one slice of per step. `reverse` only changes which
-/// step the induction variable names, so the data stays where it is.
 struct ScanOpLowering : public OpConversionPattern<ScanOp> {
   using OpConversionPattern<ScanOp>::OpConversionPattern;
 
@@ -192,7 +179,7 @@ struct ScanOpLowering : public OpConversionPattern<ScanOp> {
   }
 };
 
-} // namespace
+}
 
 void mlir::tera::detail::populateControlFlowPatterns(
     RewritePatternSet &patterns) {

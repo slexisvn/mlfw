@@ -14,10 +14,6 @@
 using namespace mlir;
 using namespace mlir::tera;
 
-//===----------------------------------------------------------------------===//
-// CompareOp
-//===----------------------------------------------------------------------===//
-
 LogicalResult CompareOp::inferReturnTypes(
     MLIRContext *context, std::optional<Location> location, Adaptor adaptor,
     SmallVectorImpl<Type> &inferredReturnTypes) {
@@ -29,19 +25,11 @@ LogicalResult CompareOp::inferReturnTypes(
   return success();
 }
 
-//===----------------------------------------------------------------------===//
-// ConvertOp
-//===----------------------------------------------------------------------===//
-
 OpFoldResult ConvertOp::fold(FoldAdaptor) {
   if (getOperand().getType() == getResult().getType())
     return getOperand();
   return {};
 }
-
-//===----------------------------------------------------------------------===//
-// Vector-Jacobian products
-//===----------------------------------------------------------------------===//
 
 LogicalResult AddOp::buildVjp(OpBuilder &, ValueRange adjoints,
                               SmallVectorImpl<Value> &operandAdjoints) {
@@ -72,7 +60,6 @@ LogicalResult DivOp::buildVjp(OpBuilder &builder, ValueRange adjoints,
   return success();
 }
 
-/// Routes the full adjoint to the lhs when operands tie.
 LogicalResult MaximumOp::buildVjp(OpBuilder &builder, ValueRange adjoints,
                                   SmallVectorImpl<Value> &operandAdjoints) {
   Location loc = getLoc();

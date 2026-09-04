@@ -5,13 +5,6 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-//
-// A convolution and a pool are the same traversal reading two different things
-// out of each window: one contracts it against a kernel, the other reduces it.
-// They share the arithmetic that says where a window sits and how many there
-// are, which is why they are one family.
-//
-//===----------------------------------------------------------------------===//
 
 #ifndef TERA_OPS_WINDOW
 #define TERA_OPS_WINDOW
@@ -119,4 +112,4 @@ def Tera_Pool2dOp
   }];
 }
 
-#endif // TERA_OPS_WINDOW
+#endif

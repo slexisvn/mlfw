@@ -5,18 +5,6 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-//
-// Runs `-tera-autodiff` over a module, compiles the original function and its
-// derivative together, and checks one against the other numerically.
-//
-// The derivative is asked for `J^T v` at a random cotangent `v`, which is the
-// gradient of the scalar `s(x) = <f(x), v>`. Central differences of `s`, one
-// input element at a time, give the same gradient a second way. Nothing here
-// inspects the IR, so a rule that is wrong cannot also be wrong in the check.
-//
-// A disagreement is an exit code, not a report: this is the gate for Phase 3.
-//
-//===----------------------------------------------------------------------===//
 
 #include "Tera/Execution/JitInvoker.h"
 #include "Tera/IR/TeraDialect.h"
@@ -26,6 +14,7 @@
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/InitAllDialects.h"
+#include "mlir/InitAllExtensions.h"
 #include "mlir/Parser/Parser.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Target/LLVMIR/Dialect/All.h"
@@ -43,7 +32,6 @@ using namespace mlir;
 using namespace mlir::tera;
 
 namespace {
-
 llvm::cl::opt<std::string> inputFilename(llvm::cl::Positional,
                                          llvm::cl::desc("<input .mlir file>"),
                                          llvm::cl::init("-"));
@@ -83,8 +71,6 @@ llvm::cl::list<std::string> sharedLibs(
                    "helpers a lowered memref program calls"),
     llvm::cl::MiscFlags::CommaSeparated);
 
-/// What the driver needs to know about one function, read before the lowering
-/// erases the tensor types it is written in.
 struct Model {
   std::string primal;
   std::string vjp;
@@ -132,7 +118,6 @@ FailureOr<Model> readModel(func::FuncOp func) {
   return model;
 }
 
-/// Returns the scalar inner product of f(x) and the cotangent.
 FailureOr<double> project(JitInvoker &invoker, const Model &model,
                           MutableArrayRef<TensorBuffer> inputs,
                           const TensorBuffer &cotangent) {
@@ -255,7 +240,7 @@ LogicalResult run(ModuleOp module) {
   return outcome;
 }
 
-} // namespace
+}
 
 int main(int argc, char **argv) {
   llvm::InitLLVM initialiser(argc, argv);
@@ -267,6 +252,7 @@ int main(int argc, char **argv) {
 
   DialectRegistry registry;
   registerAllDialects(registry);
+  registerAllExtensions(registry);
   registry.insert<TeraDialect>();
   registerAllGPUToLLVMIRTranslations(registry);
 

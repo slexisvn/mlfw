@@ -71,4 +71,4 @@ def Tera_ReduceOp : Tera_InferredOp<"reduce", [DeclareOpInterfaceMethods<Tera_Vj
       "$kind `,` $operand attr-dict `:` type($operand) `->` type($result)";
 }
 
-#endif // TERA_OPS_CONTRACTION
+#endif

@@ -5,18 +5,6 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-//
-// Lowers a tera module with `-tera-to-llvm`, JITs it, and calls one function
-// on tensors read from a JSON file. The same JSON carries the expected output,
-// so the mlfw oracle and this runner meet in one format and `--check` is the
-// whole differential harness.
-//
-// `--benchmark` turns the same machinery into the measurement Phase 4 is
-// gated on: compile once, call the entry many times, and report the timings.
-// Compiling and resolving the symbol both happen before the first timed call,
-// so what the numbers describe is the kernel rather than the JIT.
-//
-//===----------------------------------------------------------------------===//
 
 #include "Tera/Execution/JitInvoker.h"
 #include "Tera/IR/TeraDialect.h"
@@ -47,7 +35,6 @@ using namespace mlir;
 using namespace mlir::tera;
 
 namespace {
-
 llvm::cl::opt<std::string> inputFilename(llvm::cl::Positional,
                                          llvm::cl::desc("<input .mlir file>"),
                                          llvm::cl::init("-"));
@@ -74,9 +61,6 @@ llvm::cl::opt<double> tolerance(
 llvm::cl::opt<unsigned> optLevel("O", llvm::cl::desc("JIT optimisation level"),
                                  llvm::cl::init(3));
 
-// CPU is the default so that a command written before there was a choice still
-// means what it meant. Running for CUDA needs `mlir_cuda_runtime` passed to
-// --shared-libs, since that is where the kernel launches resolve to.
 llvm::cl::opt<Target> target(
     "target", llvm::cl::desc("Machine to lower the module for"),
     llvm::cl::values(
@@ -217,7 +201,6 @@ LogicalResult compareResults(MutableArrayRef<TensorBuffer> results,
   return success();
 }
 
-/// Accepts inline JSON or a file path; held owns any loaded file buffer.
 FailureOr<llvm::json::Value>
 loadData(std::unique_ptr<llvm::MemoryBuffer> &held) {
   if (dataSource.empty())
@@ -436,7 +419,7 @@ LogicalResult run(ModuleOp module) {
   return benchmarkEntry(**invoker, entryName, inputs, results);
 }
 
-} // namespace
+}
 
 int main(int argc, char **argv) {
   llvm::InitLLVM initialiser(argc, argv);

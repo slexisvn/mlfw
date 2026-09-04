@@ -13,15 +13,7 @@
 using namespace mlir;
 using namespace mlir::tera;
 
-//===----------------------------------------------------------------------===//
-// ConstantOp
-//===----------------------------------------------------------------------===//
-
 OpFoldResult ConstantOp::fold(FoldAdaptor) { return getValue(); }
-
-//===----------------------------------------------------------------------===//
-// IotaOp
-//===----------------------------------------------------------------------===//
 
 LogicalResult IotaOp::verify() {
   if (failed(verifySizesClause(*this, getSizes())))
@@ -36,10 +28,6 @@ LogicalResult IotaOp::verify() {
                          << resultType.getRank();
   return success();
 }
-
-//===----------------------------------------------------------------------===//
-// Vector-Jacobian products
-//===----------------------------------------------------------------------===//
 
 LogicalResult ConstantOp::buildVjp(OpBuilder &, ValueRange,
                                    SmallVectorImpl<Value> &) {

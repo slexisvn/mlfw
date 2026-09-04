@@ -20,16 +20,19 @@
 #include "mlir/Dialect/Linalg/Passes.h"
 #include "mlir/Dialect/MemRef/Transforms/Passes.h"
 #include "mlir/Dialect/SCF/Transforms/Passes.h"
+#include "mlir/Dialect/Vector/Transforms/Passes.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Pass/PassRegistry.h"
 #include "mlir/Transforms/Passes.h"
 
 using namespace mlir;
 
-static void buildTeraToBuffers(OpPassManager &pm) {
+static void buildTeraToLinalg(OpPassManager &pm) {
   pm.addPass(createCanonicalizerPass());
   pm.addPass(tera::createConvertTeraToLinalg());
+}
 
+static void buildBufferize(OpPassManager &pm) {
   bufferization::OneShotBufferizePassOptions bufferizeOptions;
   bufferizeOptions.bufferizeFunctionBoundaries = true;
   bufferizeOptions.allowReturnAllocsFromLoops = true;
@@ -41,17 +44,30 @@ static void buildTeraToBuffers(OpPassManager &pm) {
   pm.addPass(createConvertBufferizationToMemRefPass());
 }
 
+static void buildCleanup(OpPassManager &pm) {
+  pm.addPass(createCanonicalizerPass());
+  pm.addPass(createCSEPass());
+}
+
 void tera::buildTeraToLLVMPipeline(OpPassManager &pm) {
-  buildTeraToBuffers(pm);
+  buildTeraToLinalg(pm);
 
-  pm.nest<func::FuncOp>().addPass(tera::createLowerNestedLinalg());
-  pm.addPass(createConvertLinalgToAffineLoopsPass());
+  pm.addPass(createLinalgElementwiseOpFusionPass());
+  buildCleanup(pm);
 
+  pm.nest<func::FuncOp>().addPass(tera::createTileAndFuse());
+  buildCleanup(pm);
+
+  pm.nest<func::FuncOp>().addPass(tera::createVectorizeLinalg());
+  buildCleanup(pm);
+
+  buildBufferize(pm);
+
+  pm.addPass(createConvertLinalgToLoopsPass());
   pm.addPass(createCanonicalizerPass());
 
-  tera::VectorizeAffineOptions vectorizeOptions;
-  vectorizeOptions.vectorSize = 16;
-  pm.nest<func::FuncOp>().addPass(tera::createVectorizeAffine(vectorizeOptions));
+  pm.nest<func::FuncOp>().addPass(
+      vector::createLowerVectorMultiReductionPass());
   pm.addPass(createLowerAffinePass());
   pm.addPass(createConvertVectorToSCFPass());
   pm.addPass(createSCFToControlFlowPass());
@@ -69,10 +85,10 @@ void tera::buildTeraToLLVMPipeline(OpPassManager &pm) {
   pm.addPass(createReconcileUnrealizedCastsPass());
 }
 
-
 void tera::buildTeraToNVVMPipeline(OpPassManager &pm,
                                    const TeraToNVVMOptions &options) {
-  buildTeraToBuffers(pm);
+  buildTeraToLinalg(pm);
+  buildBufferize(pm);
 
   pm.addPass(createConvertLinalgToParallelLoopsPass());
 

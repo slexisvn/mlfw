@@ -24,15 +24,11 @@
 #include "Tera/IR/TeraOps.h.inc"
 
 namespace mlir::tera {
-
-/// Verifies that \p sizes contains one extent per dynamic result dimension.
 LogicalResult verifySizesClause(Operation *op, ValueRange sizes);
 
-/// Creates a tensor splat of \p value; dynamic types require a matching
-/// \p like value to supply runtime dimensions.
 Value createSplat(OpBuilder &builder, Location loc, RankedTensorType type,
                   double value, Value like = {});
 
-} // namespace mlir::tera
+}
 
-#endif // TERA_IR_TERAOPS_H
+#endif

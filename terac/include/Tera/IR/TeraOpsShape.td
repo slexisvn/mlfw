@@ -27,17 +27,12 @@ def Tera_DimOp : Tera_Op<"dim", [Pure, Tera_AcceptsDynamicShapes]> {
 
   let arguments = (ins Tera_Tensor:$operand, I64Attr:$dimension);
   let results = (outs Tera_ExtentTensor:$result);
-  // The result type is spelt out even though it is always the same, so the
-  // op reads like every other one that maps a tensor to a tensor.
   let assemblyFormat =
       "$operand attr-dict `:` type($operand) `->` type($result)";
   let hasVerifier = 1;
   let hasFolder = 1;
 }
 
-// Not `SameOperandsAndResultElementType`: the `sizes` operands are extents and
-// carry i64 whatever the tensor being broadcast holds. The verifier checks the
-// element type of the one operand the trait was there for.
 def Tera_BroadcastInDimOp
     : Tera_Op<"broadcast_in_dim",
               [Pure, DeclareOpInterfaceMethods<Tera_VjpOpInterface>, Tera_AcceptsDynamicShapes]> {
@@ -90,10 +85,6 @@ def Tera_TransposeOp : Tera_InferredOp<"transpose", [DeclareOpInterfaceMethods<T
   let hasCanonicalizer = 1;
 }
 
-// Not `SameOperandsAndResultElementType`, for the reason `broadcast_in_dim` is
-// not either: the `sizes` operands are extents and carry i64 whatever the
-// tensor being reshaped holds. The verifier checks the one operand the trait
-// was there for.
 def Tera_ReshapeOp : Tera_Op<"reshape",
                              [Pure,
                               DeclareOpInterfaceMethods<Tera_VjpOpInterface>, Tera_AcceptsDynamicShapes]> {
@@ -204,4 +195,4 @@ def Tera_ConcatOp : Tera_InferredOp<"concat", [DeclareOpInterfaceMethods<Tera_Vj
       "$inputs attr-dict `:` type($inputs) `->` type($result)";
 }
 
-#endif // TERA_OPS_SHAPE
+#endif

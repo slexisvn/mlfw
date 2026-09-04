@@ -15,10 +15,6 @@ using namespace mlir;
 using namespace mlir::tera;
 
 namespace {
-
-/// The op's whole meaning is spent by the time the lowering runs: it exists to
-/// stop `-tera-autodiff`, which has already been and gone. Forwards its
-/// operand, which is what it computed all along.
 struct StopGradientOpLowering : public OpConversionPattern<StopGradientOp> {
   using OpConversionPattern<StopGradientOp>::OpConversionPattern;
 
@@ -30,7 +26,7 @@ struct StopGradientOpLowering : public OpConversionPattern<StopGradientOp> {
   }
 };
 
-} // namespace
+}
 
 void mlir::tera::detail::populateAutodiffPatterns(RewritePatternSet &patterns) {
   patterns.add<StopGradientOpLowering>(patterns.getContext());
