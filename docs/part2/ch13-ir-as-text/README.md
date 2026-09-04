@@ -24,16 +24,15 @@ You have been reading it since Chapter 2; here is its structure, named. (Assembl
 
 ```
 module @traced {
-  func @traced(%0: tensor<2x2xf32>, %1: tensor<8x2xf32>, %2: tensor<8xf32>) -> (tensor<2x8xf32>) {
-    %3 = transpose(%1) {permutation = [1, 0]} : tensor<2x8xf32>
-    %4 = dot(%0, %3) {lhs_batch = [], lhs_contracting = [1], rhs_batch = [], rhs_contracting = [0]} : tensor<2x8xf32>
-    %5 = fusion(%4, %2) {fusion_kind = "kElementwise"} : tensor<2x8xf32>
-    {
-      ^bb(%6: tensor<2x8xf32>, %7: tensor<8xf32>):
-      %8 = add(%6, %7) : tensor<2x8xf32>
-      yield(%8)
-    }
-    return(%5)
+  func.func @traced(%0: tensor<2x2xf32>, %1: tensor<8x2xf32>, %2: tensor<8xf32>) -> (tensor<2x8xf32>) {
+    %3 = tera.transpose %1 {permutation = array<i64: 1, 0>} : tensor<8x2xf32> -> tensor<2x8xf32>
+    %4 = tera.dot %0, %3 {lhs_batch = array<i64>, lhs_contracting = array<i64: 1>, rhs_batch = array<i64>, rhs_contracting = array<i64: 0>} : (tensor<2x2xf32>, tensor<2x8xf32>) -> tensor<2x8xf32>
+    %5 = "tera.fusion"(%4, %2) ({
+      ^bb0(%6: tensor<2x8xf32>, %7: tensor<8xf32>):
+        %8 = "tera.add"(%6, %7) : (tensor<2x8xf32>, tensor<8xf32>) -> tensor<2x8xf32>
+        tera.yield %8 : tensor<2x8xf32>
+    }) {fusion_kind = "kElementwise"} : (tensor<2x8xf32>, tensor<8xf32>) -> tensor<2x8xf32>
+    return %5 : tensor<2x8xf32>
   }
 }
 ```
@@ -41,67 +40,64 @@ module @traced {
 | Piece | Syntax | Chapter |
 |---|---|---|
 | module | `module @name { ... }` | 9 |
-| function | `func @name(args) -> (types) { ... }` | 9 |
-| operation | `results = name(operands) {attrs} : types` | 9 |
+| function | `func.func @name(args) -> (types) { ... }` | 9 |
+| operation, custom form | `results = tera.name operands {attrs} : types` | 9 |
+| operation, generic form | `results = "tera.name"(operands) {attrs} : (types) -> types` | 9 |
 | value | `%n` | 8 |
 | type | `tensor<2x8xf32>` | 10 |
-| region | a braced block after the operation line | 9 |
-| block label | `^bb(args)` | 9 |
+| region | a `({ ... })` group inside the operation | 9 |
+| block label | `^bbN(args):` | 9 |
 
-Two design decisions are visible in that table.
+This is MLIR's syntax, and not by coincidence: it is the tera dialect, the same
+one the out-of-tree MLIR compiler in `terac/` defines. A module printed here can
+be handed to `tera-opt` and it parses — which is the strongest statement the
+format makes about itself, because a second implementation checks it.
 
-**Nesting is by indentation and braces, not by a flat encoding.** A region prints as a `{ ... }` block below its operation, and the parser reconstructs depth from the indent width. That makes the format readable at the cost of making it whitespace-sensitive — `parseModule` takes an `indentWidth` option defaulting to 2 ([`parser.ts:536`](../../../src/compiler/ir/graph/parser.ts)) because it has to.
+Three design decisions are visible in that table.
 
-**Types are on every result, not inferred on read.** `%5 = transpose(%1) {...} : tensor<2x8xf32>` states the result type even though Chapter 11's `inferResultTypes` could compute it. That redundancy is deliberate: it means the text is self-describing, it means a hand-written module does not depend on inference being correct to be readable, and — as Chapter 12 showed — it gives the verifier two independent sources to compare.
+**Nesting is by indentation and braces, not by a flat encoding.** A region prints as a `{ ... }` block below its operation, and the parser reconstructs depth from the indent width. That makes the format readable at the cost of making it whitespace-sensitive — `parseModule` takes an `indentWidth` option defaulting to 2 ([`parser.ts:753`](../../../src/compiler/ir/graph/parser.ts)) because it has to.
+
+**Every operation has two spellings, and the printer picks the narrower one it can justify.** The *custom form* is the one the dialect defines for that operation — `tera.add %0, %1 : tensor<2x2xf32>` prints one type because `tera.add`'s operands and result must share it. The *generic form* spells the operation name as a string and lists every type — `"tera.add"(%0, %1) : (tensor<2x8xf32>, tensor<8xf32>) -> tensor<2x8xf32>`. That second line is not a formatting choice: mlfw's `add` broadcasts its operands and `tera.add` does not, so the custom form would be claiming the bias has a shape it does not have. The rule is [`mlir_format.ts:236`](../../../src/compiler/ir/graph/mlir_format.ts): print the custom form only when it carries enough to reconstruct the operation, and fall back to the generic form — which is always lossless — when it does not. Anything the dialect does not define at all goes generic too, which is why `"tera.fusion"` appears that way above.
+
+**Types are on every result, not inferred on read.** `%3 = tera.transpose %1 {...} : tensor<8x2xf32> -> tensor<2x8xf32>` states the result type even though Chapter 11's `inferResultTypes` could compute it. That redundancy is deliberate: it means the text is self-describing, it means a hand-written module does not depend on inference being correct to be readable, and — as Chapter 12 showed — it gives the verifier two independent sources to compare.
 
 ## 13.3 In mlfw: printing
 
-[`printer.ts:82`](../../../src/compiler/ir/graph/printer.ts) is the whole of an operation's syntax, and it reads as the grammar row above:
+[`printer.ts:90`](../../../src/compiler/ir/graph/printer.ts) is where the choice of spelling is made, and it is two lines long:
 
 ```ts
-    if (op.numResults > 0) {
-      const resultNames = [];
-      for (let i = 0; i < op.numResults; i++) {
-        resultNames.push(this._nameValue(op.getResult(i)));
-      }
-      line += resultNames.join(', ') + ' = ';
-    }
-
-    line += op.opName;
-
-    if (op.numOperands > 0) {
+    const form = this._formOf(op);
+    if (form) this._printCustom(op, form, out);
+    else this._printGeneric(op, out);
 ```
 
-Three details in this file are what make Definition 13.1 hold, and each of them is a small decision that would silently break round-tripping if made the other way.
+`_formOf` consults the shared table in `mlir_format.ts` — the one file the printer and the parser both read, so that one description of the dialect's syntax serves both directions. A format described twice is a format that drifts.
 
-**Attributes print in sorted order** ([`printer.ts:179`](../../../src/compiler/ir/graph/printer.ts)):
+Three further details are what make Definition 13.1 hold, and each of them is a small decision that would silently break round-tripping if made the other way.
+
+**Attributes print in sorted order** ([`printer.ts:223`](../../../src/compiler/ir/graph/printer.ts)):
 
 ```ts
-function sortedEntries(map: ReadonlyMap<string, AttrValue>): [string, AttrValue][] {
-  const entries = [...map.entries()];
-  entries.sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
-  return entries;
-}
+    entries.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
 ```
 
 An operation's attributes live in a `Map`, which preserves insertion order. Two operations built by different routes can carry the same attributes inserted in different orders, and would print differently while being identical. Sorting makes the printed form a function of the operation's content alone — which is what lets a test compare two printouts, and what makes a diff between two compiler versions readable.
 
-**Values are numbered by the printer, from zero, per function** ([`printer.ts:160`](../../../src/compiler/ir/graph/printer.ts)) — Chapter 8 §8.6 covered why. The consequence for round-tripping is that `%n` is not data to be preserved; it is a label regenerated on each print, and the second print of a re-parsed module reproduces it exactly because the walk order is the same.
+**Values are numbered by the printer, from zero, per function** ([`printer.ts:271`](../../../src/compiler/ir/graph/printer.ts)) — Chapter 8 §8.6 covered why. The consequence for round-tripping is that `%n` is not data to be preserved; it is a label regenerated on each print, and the second print of a re-parsed module reproduces it exactly because the walk order is the same.
 
-**Non-finite floats print as words** ([`printer.ts:194`](../../../src/compiler/ir/graph/printer.ts)):
+**Non-finite floats print as their bit pattern** ([`mlir_format.ts:304`](../../../src/compiler/ir/graph/mlir_format.ts)):
 
 ```ts
-  if (typeof val === 'number') {
-    if (Number.isFinite(val)) return String(val);
-    if (val === Infinity) return 'inf';
-    if (val === -Infinity) return '-inf';
-    return 'nan';
+export function formatFloatLiteral(value: number, dtype: ScalarDType): string {
+  if (!Number.isFinite(value)) {
+    const [total] = floatLayout(dtype);
+    return `0x${nonFiniteBits(value, dtype).toString(16).toUpperCase().padStart(total / 4, '0')}`;
   }
 ```
 
-`String(Infinity)` is `"Infinity"`, which is not a number literal any parser would accept. A masked softmax is full of `-inf`, so this is not an edge case — it is the second-most-common constant in an attention model.
+`String(Infinity)` is `"Infinity"`, which is not a number literal any parser would accept, and MLIR has no `inf` keyword either — it spells a non-finite float as the hexadecimal contents of its bits. The width depends on the element type, which is why the function takes one: `-inf` is `0xFF800000` in `f32` and `0xFFF0000000000000` in `f64`. A masked softmax is full of `-inf`, so this is not an edge case — it is the second-most-common constant in an attention model.
 
-Dense tensor attributes get their own form, `dense<f32>[1, 2, 3]` ([`printer.ts:211`](../../../src/compiler/ir/graph/printer.ts)), carrying the element type so a `Float32Array` and an `Int32Array` of the same numbers survive as different things.
+Dense tensor attributes carry their type after the data, `dense<[1.0, 2.0]> : tensor<2xf32>` ([`printer.ts:319`](../../../src/compiler/ir/graph/printer.ts)), so a `Float32Array` and an `Int32Array` of the same numbers survive as different things.
 
 ## 13.4 In mlfw: parsing, and why it takes two passes
 
@@ -113,7 +109,7 @@ But an `Operation` cannot be constructed without its operands: look back at [`op
 
 So the parser cannot build in reading order, and it splits in two.
 
-**Phase one — read the text into records.** `RecordReader` ([`parser.ts:314`](../../../src/compiler/ir/graph/parser.ts)) turns each line into an `OpRecord`: the operation name, result names as *strings*, result types, attributes, operand names as *strings*, and nested region records. No `Operation` is constructed, and nothing is resolved. A record also carries its dependency set, gathered from its own operands and, recursively, from everything its regions reference ([`parser.ts:395`](../../../src/compiler/ir/graph/parser.ts)):
+**Phase one — read the text into records.** `RecordReader` ([`parser.ts:408`](../../../src/compiler/ir/graph/parser.ts)) turns each line into an `OpRecord`: the operation name, result names as *strings*, result types, attributes, operand names as *strings*, and nested region records. No `Operation` is constructed, and nothing is resolved. A record also carries its dependency set, gathered from its own operands and, recursively, from everything its regions reference ([`parser.ts:591`](../../../src/compiler/ir/graph/parser.ts)):
 
 ```ts
 function collectRegionDeps(blocks: readonly BlockRecord[], deps: Set<string>): void {
@@ -127,7 +123,7 @@ function collectRegionDeps(blocks: readonly BlockRecord[], deps: Set<string>): v
 
 That recursion matters: an operation with a region depends on everything the region's body reads, so a `fusion` must be built after the producers its body refers to — the same fact `capturedValues` computes for the topological sort in Chapter 9.
 
-**Phase two — order by dependency, then materialize.** [`parser.ts:403`](../../../src/compiler/ir/graph/parser.ts):
+**Phase two — order by dependency, then materialize.** [`parser.ts:599`](../../../src/compiler/ir/graph/parser.ts):
 
 ```ts
 function dependencyOrder(ops: readonly OpRecord[]): OpRecord[] {
@@ -213,10 +209,10 @@ The lab takes the traced running example, changes one line with an ordinary stri
 
 ```
 === after changing the activation, in a text editor ===
-    %7 = add(%6, %2) : tensor<2x8xf32>
-    %8 = constant() {tensor_type = tensor<f32>, value = 0} : tensor<f32>
-    %9 = broadcast_in_dim(%8) {broadcast_dimensions = [], result_shape = [2, 8]} : tensor<2x8xf32>
-    %10 = tanh(%7) : tensor<2x8xf32>
+    %7 = "tera.add"(%6, %2) : (tensor<2x8xf32>, tensor<8xf32>) -> tensor<2x8xf32>
+    %8 = tera.constant dense<0.0> : tensor<f32>
+    %9 = tera.broadcast_in_dim %8 {broadcast_dimensions = array<i64>} : tensor<f32> -> tensor<2x8xf32>
+    %10 = "tera.tanh"(%7) : (tensor<2x8xf32>) -> tensor<2x8xf32>
 ```
 
 ```
@@ -230,10 +226,10 @@ The lab then writes a module from scratch, with no model behind it at all:
 
 ```
 module @handwritten {
-  func @handwritten(%0: tensor<3x4xf32>, %1: tensor<4x2xf32>) -> (tensor<3x2xf32>) {
-    %2 = dot(%0, %1) {lhs_batch = [], lhs_contracting = [1], rhs_batch = [], rhs_contracting = [0]} : tensor<3x2xf32>
-    %3 = tanh(%2) : tensor<3x2xf32>
-    return(%3)
+  func.func @handwritten(%0: tensor<3x4xf32>, %1: tensor<4x2xf32>) -> (tensor<3x2xf32>) {
+    %2 = tera.dot %0, %1 {lhs_batch = array<i64>, lhs_contracting = array<i64: 1>, rhs_batch = array<i64>, rhs_contracting = array<i64: 0>} : (tensor<3x4xf32>, tensor<4x2xf32>) -> tensor<3x2xf32>
+    %3 = "tera.tanh"(%2) : (tensor<3x2xf32>) -> tensor<3x2xf32>
+    return %3 : tensor<3x2xf32>
   }
 }
 ```

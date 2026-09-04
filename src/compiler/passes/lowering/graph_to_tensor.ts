@@ -1,4 +1,5 @@
 import { PrimFunc, SeqNode, BufferStoreNode, BufferLoadNode, BlockNode } from '../../ir/tensor/nodes.js';
+import { unifyShapeSymbols } from '../../ir/graph/shape_symbols.js';
 import { topoSortOpSet } from '../../ir/graph/graph_algorithms.js';
 import { CONSTANT_BLOCK_HINT } from '../../ir/tensor/block_name.js';
 import { registry } from '../../ir/graph/ops.js';
@@ -105,6 +106,8 @@ function stampSourceOp(stmt: TirNode, op: Operation): void {
 }
 
 export function lowerGraphToPrimFunc(graphFunc: GraphFunction, target: CompileTarget | null = null, context: LoweringRuleLookup | null = null, trace: TraceLog | null = null): PrimFunc {
+  unifyShapeSymbols(graphFunc);
+
   const ctx = new LoweringContext();
   ctx.target = target;
   const params: VariableNode[] = [];

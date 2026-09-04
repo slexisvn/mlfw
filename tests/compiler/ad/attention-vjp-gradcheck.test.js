@@ -67,4 +67,29 @@ describe('scaled_dot_product_attention VJP matches finite differences', () => {
     const differs = causal[0].some((v, i) => Math.abs(v - full[0][i]) > 1e-4);
     expect(differs, 'causal and non-causal gradients should differ').toBe(true);
   }, 60000);
+
+  it('survives a target that expands the op in both directions', () => {
+    const rng = mulberry32(31337);
+    const shapes = [[1, 2, 4, 4], [1, 2, 4, 4], [1, 2, 4, 4]];
+    const datas = shapes.map((s) => randomNested(rng, s));
+    const gradsFor = (target) => {
+      const inputs = datas.map((d) => tensor(d));
+      const cf = compileWithBackward(
+        { forward: (q, k, v) => nn.F.scaled_dot_product_attention(q, k, v, null, 0, true) },
+        inputs, { target },
+      );
+      const out = cf(...inputs);
+      return cf.backward(ones(out.shape)).map(flat);
+    };
+
+    const fused = gradsFor(CPUTarget());
+    const expanded = gradsFor(CPUTarget({ attrs: {} }));
+    for (let argi = 0; argi < 3; argi++) {
+      expect(expanded[argi].length).toBe(fused[argi].length);
+      for (let i = 0; i < fused[argi].length; i++) {
+        const relErr = Math.abs(expanded[argi][i] - fused[argi][i]) / (1 + Math.abs(fused[argi][i]));
+        expect(relErr, `arg${argi}[${i}]`).toBeLessThan(1e-6);
+      }
+    }
+  }, 60000);
 });

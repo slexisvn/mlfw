@@ -1,6 +1,8 @@
 import { FunctionPass, PassResult } from '../pass.js';
 import { IRBuilder, broadcastDimsExcluding } from '../../ir/graph/builder.js';
 import { ScalarType, TensorType } from '../../ir/graph/types.js';
+import { reduceIdentity } from '../../ir/graph/ops/reduction.js';
+import { TargetAttr, targetAttr } from '../../support/target_attrs.js';
 import { TraceLevel } from '../../support/trace.js';
 import { explainer } from '../explain.js';
 import type { GraphFunction } from '../../ir/graph/function.js';
@@ -9,7 +11,7 @@ import type { Value } from '../../ir/graph/value.js';
 import type { Block } from '../../ir/graph/block.js';
 import type { ScalarDType, Shape } from '../../ir/graph/types.js';
 import type { PassResultValue, PassTarget } from '../pass.js';
-import type { CompileTarget } from '../../support/config_types.js';
+import type { AttributedTarget } from '../../support/target_attrs.js';
 
 export type DecompositionRule = (op: Operation, b: IRBuilder) => void;
 
@@ -28,44 +30,58 @@ export function hasDecomposition(opName: string): boolean {
 }
 
 export class DecompositionPass extends FunctionPass {
-  target: CompileTarget | null;
+  target: AttributedTarget | null;
 
-  constructor(target: CompileTarget | null = null) {
+  constructor(target: AttributedTarget | null = null) {
     super('DecompositionPass');
     this.target = target;
   }
 
   _shouldDecompose(op: Operation): boolean {
-    if (!this.target) return true;
-    const native = this.target.getAttr ? this.target.getAttr<ReadonlySet<string>>('nativeOps') : null;
+    const native = targetAttr<ReadonlySet<string>>(this.target, TargetAttr.NATIVE_OPS);
     return !(native && native.has(op.opName));
   }
 
-  override run(func: PassTarget): PassResultValue {
+  _worklist(ops: Iterable<Operation>): Operation[] {
     const worklist: Operation[] = [];
-    for (const op of (func as GraphFunction).opsRecursive()) {
-      if (decompositionRules.has(op.opName) && this._shouldDecompose(op)) worklist.push(op);
+    for (const op of ops) {
+      if (op.parentBlock && decompositionRules.has(op.opName) && this._shouldDecompose(op)) worklist.push(op);
     }
+    return worklist;
+  }
+
+  override run(func: PassTarget): PassResultValue {
+    let worklist = this._worklist((func as GraphFunction).opsRecursive());
     if (worklist.length === 0) return PassResult.UNCHANGED;
 
     const builder = new IRBuilder(func as GraphFunction);
     const explain = explainer(this.trace, this.name);
     const decomposed: string[] = [];
+    const created: Operation[] = [];
+    builder.listener = (op) => { created.push(op); };
 
-    for (const op of worklist) {
-      if (!op.parentBlock) continue;
-      const rule = decompositionRules.get(op.opName) as DecompositionRule;
-      builder.block = op.parentBlock as Block;
-      builder.setInsertionPoint(op);
-      decomposed.push(op.opName);
-      const sizeBefore = (op.parentBlock as Block).size;
-      builder.withLocation(op.loc, () => rule(op, builder));
-      if (explain) {
-        explain(op.opName, 'rewritten into primitives',
-          'no lowering rule exists for this op, so it is re-expressed with ops every target can lower',
-          { opsAdded: (op.parentBlock as Block | null) ? (op.parentBlock as Block).size - sizeBefore : 0 });
+    for (let round = 0; worklist.length > 0; round++) {
+      if (round > decompositionRules.size) {
+        throw new Error(`DecompositionPass: no fixed point after ${round} rounds; a rule expands an op into itself`);
       }
+      created.length = 0;
+      for (const op of worklist) {
+        if (!op.parentBlock) continue;
+        const rule = decompositionRules.get(op.opName) as DecompositionRule;
+        builder.block = op.parentBlock as Block;
+        builder.setInsertionPoint(op);
+        decomposed.push(op.opName);
+        const sizeBefore = (op.parentBlock as Block).size;
+        builder.withLocation(op.loc, () => rule(op, builder));
+        if (explain) {
+          explain(op.opName, 'rewritten into primitives',
+            'no lowering rule exists for this op, so it is re-expressed with ops every target can lower',
+            { opsAdded: (op.parentBlock as Block | null) ? (op.parentBlock as Block).size - sizeBefore : 0 });
+        }
+      }
+      worklist = this._worklist(created);
     }
+    builder.listener = null;
 
     if (this.trace && this.trace.level >= TraceLevel.DEBUG) {
       const counts: Record<string, number> = {};
@@ -92,10 +108,7 @@ registerDecomposition('all_reduce', (op, b) => {
   const reduceOp = op.getAttr<string>('reduce_op') || 'sum';
   const shape = (x.type as TensorType).shape;
   const dtype = (x.type as TensorType).dtype;
-  const init = reduceOp === 'max' ? -Infinity
-    : reduceOp === 'min' ? Infinity
-    : (reduceOp === 'prod' || reduceOp === 'and') ? 1
-    : 0;
+  const init = reduceIdentity(reduceOp) ?? 0;
   const red = b.reduce(x, b.scalarConstant(init, dtype).getResult(0), [axis], reduceOp).getResult(0);
   const bcastDims: number[] = [];
   for (let i = 0; i < shape.length; i++) if (i !== axis) bcastDims.push(i);
@@ -126,6 +139,17 @@ registerDecomposition('all_gather', (op, b) => {
   for (let i = 0; i < outShape.length; i++) if (i !== meshAxis) bcastDims.push(i);
   const out = b.broadcast(gathered, outShape, bcastDims).getResult(0);
   op.replaceAllResultsWith([out]);
+  op.erase();
+});
+
+registerDecomposition('scaled_dot_product_attention', (op, b) => {
+  const probs = b.attentionProbs(
+    op.getOperand(0), op.getOperand(1),
+    op.getAttr<number>('scale') as number,
+    !!op.getAttr<boolean>('causal'),
+  ).getResult(0);
+  const result = b.matmul(probs, op.getOperand(2));
+  op.replaceAllResultsWith([result.getResult(0)]);
   op.erase();
 });
 
@@ -315,7 +339,7 @@ registerDecomposition('one_hot', (op, b) => {
 });
 
 function bcast(b: IRBuilder, scalar: number, dtype: string, shape: Shape): Value {
-  return b.broadcast(b.scalarConstant(scalar, dtype as ScalarDType).getResult(0), shape, []).getResult(0);
+  return b.splat(scalar, new TensorType(shape, dtype as ScalarDType)).getResult(0);
 }
 
 registerDecomposition('elu', (op, b) => {

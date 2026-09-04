@@ -9,12 +9,11 @@ There is a second thing this chapter is about, and it is the more important one.
 A recurrent layer traces to one operation:
 
 ```
-%h = scan(%xs, %h0) {num_carry = 1, num_xs = 1} : ...
-{
-  ^bb(%x_t, %c):
+%h = "tera.scan"(%xs, %h0) ({
+  ^bb0(%x_t, %c):
     ... the cell, twenty operations ...
-    yield(%c_next)
-}
+    tera.yield %c_next
+}) {num_carry = 1, num_xs = 1} : ...
 ```
 
 One `scan`, whose region holds the loop body, and whose size on the page is independent of how many timesteps it will run. That independence is the whole point of having the operation (Chapter 9).
@@ -258,9 +257,9 @@ Switch the simplification passes off and the emitted form appears:
 Six and ten, against one and six. **Part IV cleans up after Part V**, and the two rows show how far it gets. In `sum(floor(x))` the zero is the *only* contribution, so constant folding (Chapter 19) turns the broadcast into a dense constant and DCE sweeps everything that fed it; six operations become one. In `sum(x·floor(x))` the zero is added to a real contribution, and there the cleanup stops:
 
 ```
-    %6 = mul(%5, %3) : tensor<1x4xf32>
-    %7 = constant() {tensor_type = tensor<1x4xf32>, value = 0} : tensor<1x4xf32>
-    %8 = add(%6, %7) : tensor<1x4xf32>
+    %6 = tera.mul %5, %3 : tensor<1x4xf32>
+    %7 = tera.constant dense<0.0> : tensor<1x4xf32>
+    %8 = tera.add %6, %7 : tensor<1x4xf32>
 ```
 
 `x + 0` is not an identity on floats — it maps `−0` to `+0` — so `AddZero` declines without a fast-math licence (Chapter 20), and a constant and an addition the compiler can prove are useless reach the backend anyway. This is the cost of Chapter 20's soundness gate stated as a number: two operations per zero-valued gradient contribution, on every program that has one.

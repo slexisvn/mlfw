@@ -8,6 +8,10 @@ import { clonePrimFunc } from '../../../src/compiler/ir/tensor/clone_tir.js';
 import { CUDATarget } from '../../../src/compiler/support/target.js';
 import { BackendPipeline } from '../../../src/backend/pipeline.js';
 import { AutoTensorizePass } from '../../../src/compiler/passes/schedule/tensorize_pass.js';
+import { buildFunction } from '../../../src/compiler/ir/graph/builder.js';
+import { cloneGraphFunction } from '../../../src/compiler/ir/graph/function.js';
+import { TensorType } from '../../../src/compiler/ir/graph/types.js';
+import { printFunction } from '../../../src/compiler/ir/graph/printer.js';
 
 function matmulFunc(M, N, K, aDt = 'f16', bDt = 'f16', cDt = 'f32') {
   const A = new Buffer('A', [M, K], aDt, 'global');
@@ -52,6 +56,19 @@ describe('func attrs are first-class on PrimFunc and LIRFunc', () => {
 });
 
 describe('attrs survive every IR boundary', () => {
+  it('retains graph entry attributes when cloning without sharing the attribute map', () => {
+    const t = new TensorType([2], 'f32');
+    const func = buildFunction('entry', [t], [t], (b, [x]) => b.returnOp(b.neg(x).results));
+    func.setAttr('llvm.emit_c_interface', true);
+    func.setAttr('sym_visibility', 'public');
+    const copy = cloneGraphFunction(func);
+    expect(printFunction(copy)).toBe(printFunction(func));
+    copy.setAttr('sym_visibility', 'private');
+    copy.attributes.delete('llvm.emit_c_interface');
+    expect(func.getAttr('sym_visibility')).toBe('public');
+    expect(func.hasAttr('llvm.emit_c_interface')).toBe(true);
+  });
+
   it('lowerToLIR carries attrs from PrimFunc to LIRFunc', () => {
     const pf = matmulFunc(32, 32, 32);
     pf.setAttr(FuncAttr.GPU_REGISTER_BLOCKED, true);

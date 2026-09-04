@@ -159,20 +159,20 @@ The two identities that used to break had different causes, and the lab separate
 ```
 === x + 0 ===
 traced:      constant -> add -> return
-after passes: %1 = constant() {tensor_type = tensor<f32>, value = 0} : tensor<f32> | %2 = add(%0, %1) : tensor<1x2xf32> | return(%2)
+after passes: %1 = tera.constant dense<0.0> : tensor<f32> | %2 = "tera.add"(%0, %1) : (tensor<1x2xf32>, tensor<f32>) -> tensor<1x2xf32> | return %2 : tensor<1x2xf32>
 kernel:
-   buf_3[i1_6] = (buf_1[i1_6] + 0);
+   buf_3[i1_6] = buf_1[i1_6] + 0;
 
 === x * 0 ===
 traced:      constant -> mul -> return
-after passes: %1 = constant() {tensor_type = tensor<f32>, value = 0} : tensor<f32> | %2 = mul(%0, %1) : tensor<1x2xf32> | return(%2)
+after passes: %1 = tera.constant dense<0.0> : tensor<f32> | %2 = "tera.mul"(%0, %1) : (tensor<1x2xf32>, tensor<f32>) -> tensor<1x2xf32> | return %2 : tensor<1x2xf32>
 kernel:
-   buf_3[i1_6] = (buf_1[i1_6] * 0);
+   buf_3[i1_6] = buf_1[i1_6] * 0;
 ```
 
 Both operations survive every layer, and the kernel performs both. Read that as the target state, then read what each row used to say.
 
-**`x + 0` was a graph-level rewrite.** The graph after the passes read `return(%0)` — the add was gone, and the kernel was a copy. The pattern responsible is `AddZero` ([`patterns.ts:190`](../../../src/compiler/ir/graph/patterns.ts)), which took no `fastMath` argument and consulted no dtype, while `SubZero` immediately below it and `SubSelf` and `MulZero` below that all did. By Theorem 20.2 it needs one: `(−0) + (+0) = +0` and the rewrite yields `−0`. It now carries the same check its three neighbours already had:
+**`x + 0` was a graph-level rewrite.** The graph after the passes read `return %0` — the add was gone, and the kernel was a copy. The pattern responsible is `AddZero` ([`patterns.ts:190`](../../../src/compiler/ir/graph/patterns.ts)), which took no `fastMath` argument and consulted no dtype, while `SubZero` immediately below it and `SubSelf` and `MulZero` below that all did. By Theorem 20.2 it needs one: `(−0) + (+0) = +0` and the rewrite yields `−0`. It now carries the same check its three neighbours already had:
 
 ```ts
 export class AddZero extends Pattern {

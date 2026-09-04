@@ -197,13 +197,12 @@ Three programs chosen so the driver, not the rules, is what changes.
 
 ```
 === one value, two consumers:  (x * x) + x ===
-  func @backward_Object(%0: tensor<f32>, %1: tensor<1x2xf32>, %2: tensor<f32>) -> (tensor<1x2xf32>) {
-  %3 = reshape(%0) {new_shape = [1, 1]} : tensor<1x1xf32>
-  %4 = broadcast_in_dim(%3) {broadcast_dimensions = [0, 1], result_shape = [1, 2]} : tensor<1x2xf32>
-  %5 = mul(%4, %1) : tensor<1x2xf32>
-  %6 = add(%4, %5) : tensor<1x2xf32>
-  %7 = add(%6, %5) : tensor<1x2xf32>
-  return(%7)
+  func.func @backward_Object(%0: tensor<f32>, %1: tensor<1x2xf32>, %2: tensor<f32>) -> (tensor<1x2xf32>) {
+  %3 = tera.reshape %0 : tensor<f32> -> tensor<1x1xf32>
+  %4 = tera.broadcast_in_dim %3 {broadcast_dimensions = array<i64: 0, 1>} : tensor<1x1xf32> -> tensor<1x2xf32>
+  %5 = tera.mul %4, %1 : tensor<1x2xf32>
+  %6 = tera.add %4, %5 : tensor<1x2xf32>
+  %7 = tera.add %6, %5 : tensor<1x2xf32>
     [0] shape [1,2] = [[3,5]]
 ```
 
@@ -215,11 +214,11 @@ Push it to five contributions and the tree is visible:
 
 ```
 === one value, three consumers:  x*x + x*x + x ===
-  %5 = mul(%4, %1) : tensor<1x2xf32>
-  %6 = add(%4, %5) : tensor<1x2xf32>
-  %7 = add(%5, %5) : tensor<1x2xf32>
-  %8 = add(%6, %7) : tensor<1x2xf32>
-  %9 = add(%8, %5) : tensor<1x2xf32>
+  %5 = tera.mul %4, %1 : tensor<1x2xf32>
+  %6 = tera.add %4, %5 : tensor<1x2xf32>
+  %7 = tera.add %5, %5 : tensor<1x2xf32>
+  %8 = tera.add %6, %7 : tensor<1x2xf32>
+  %9 = tera.add %8, %5 : tensor<1x2xf32>
     [0] shape [1,2] = [[5,9]]
 ```
 
@@ -229,10 +228,9 @@ The middle case is Definition 29.1:
 
 ```
 === an input the output does not depend on ===
-  func @backward_Object(%0: tensor<f32>, %1: tensor<1x2xf32>, %2: tensor<f32>) -> (tensor<1x2xf32>) {
-  %3 = reshape(%0) {new_shape = [1, 1]} : tensor<1x1xf32>
-  %4 = broadcast_in_dim(%3) {broadcast_dimensions = [0, 1], result_shape = [1, 2]} : tensor<1x2xf32>
-  return(%4)
+  func.func @backward_Object(%0: tensor<f32>, %1: tensor<1x2xf32>, %2: tensor<f32>) -> (tensor<1x2xf32>) {
+  %3 = tera.reshape %0 : tensor<f32> -> tensor<1x1xf32>
+  %4 = tera.broadcast_in_dim %3 {broadcast_dimensions = array<i64: 0, 1>} : tensor<1x1xf32> -> tensor<1x2xf32>
   gradients returned: 2
     [0] shape [1,2] = [[1,1]]
     [1] shape [1,2] = [[0,0]]

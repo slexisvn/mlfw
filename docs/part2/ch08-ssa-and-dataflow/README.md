@@ -88,7 +88,7 @@ The list is kept current by the operation constructor, which is where an edge in
 
 Constructing an operation registers it as a user of each of its operands. From that moment, `value.getUsers()` is a list traversal, not a graph search.
 
-Both directions, for the single value `%6 = dot(%0, %5)` that `add` then consumes:
+Both directions, for the single value `%6 = tera.dot %0, %5` that `add` then consumes:
 
 ```
                       the "single assignment": one field, one answer
@@ -149,7 +149,7 @@ export class BlockArgument extends Value {
     super(type, null, 0);
 ```
 
-`super(type, null, 0)` — defining operation `null`. A block argument is a value whose producer is the act of entering the block. Function parameters are the entry block's arguments; the `^bb(...)` line inside a `fusion` or `scan` region declares that region's. Chapter 9 takes them properly.
+`super(type, null, 0)` — defining operation `null`. A block argument is a value whose producer is the act of entering the block. Function parameters are the entry block's arguments; the `^bb0(...)` line inside a `fusion` or `scan` region declares that region's. Chapter 9 takes them properly.
 
 ## 8.4 Lab 1 — Reading the use-def graph
 
@@ -225,24 +225,24 @@ node docs/part2/ch08-ssa-and-dataflow/labs/02-order-carries-nothing.mjs
 ```
 === the same function, printed bottom to top ===
 module @traced {
-  func @traced(%0: tensor<2x2xf32>, %1: tensor<8x2xf32>, %2: tensor<8xf32>, %3: tensor<1x8xf32>, %4: tensor<1xf32>) -> (tensor<2x1xf32>) {
-    return(%13)
-    %13 = add(%12, %4) : tensor<2x1xf32>
-    %12 = dot(%10, %11) {lhs_batch = [], lhs_contracting = [1], rhs_batch = [], rhs_contracting = [0]} : tensor<2x1xf32>
-    %11 = transpose(%3) {permutation = [1, 0]} : tensor<8x1xf32>
-    %10 = maximum(%7, %9) : tensor<2x8xf32>
-    %9 = broadcast_in_dim(%8) {broadcast_dimensions = [], result_shape = [2, 8]} : tensor<2x8xf32>
-    %8 = constant() {tensor_type = tensor<f32>, value = 0} : tensor<f32>
-    %7 = add(%6, %2) : tensor<2x8xf32>
-    %6 = dot(%0, %5) {lhs_batch = [], lhs_contracting = [1], rhs_batch = [], rhs_contracting = [0]} : tensor<2x8xf32>
-    %5 = transpose(%1) {permutation = [1, 0]} : tensor<2x8xf32>
+  func.func @traced(%0: tensor<2x2xf32>, %1: tensor<8x2xf32>, %2: tensor<8xf32>, %3: tensor<1x8xf32>, %4: tensor<1xf32>) -> (tensor<2x1xf32>) {
+    return %13 : tensor<2x1xf32>
+    %13 = "tera.add"(%12, %4) : (tensor<2x1xf32>, tensor<1xf32>) -> tensor<2x1xf32>
+    %12 = tera.dot %10, %11 {lhs_batch = array<i64>, lhs_contracting = array<i64: 1>, rhs_batch = array<i64>, rhs_contracting = array<i64: 0>} : (tensor<2x8xf32>, tensor<8x1xf32>) -> tensor<2x1xf32>
+    %11 = tera.transpose %3 {permutation = array<i64: 1, 0>} : tensor<1x8xf32> -> tensor<8x1xf32>
+    %10 = tera.maximum %7, %9 : tensor<2x8xf32>
+    %9 = tera.broadcast_in_dim %8 {broadcast_dimensions = array<i64>} : tensor<f32> -> tensor<2x8xf32>
+    %8 = tera.constant dense<0.0> : tensor<f32>
+    %7 = "tera.add"(%6, %2) : (tensor<2x8xf32>, tensor<8xf32>) -> tensor<2x8xf32>
+    %6 = tera.dot %0, %5 {lhs_batch = array<i64>, lhs_contracting = array<i64: 1>, rhs_batch = array<i64>, rhs_contracting = array<i64: 0>} : (tensor<2x2xf32>, tensor<2x8xf32>) -> tensor<2x8xf32>
+    %5 = tera.transpose %1 {permutation = array<i64: 1, 0>} : tensor<8x2xf32> -> tensor<2x8xf32>
   }
 }
 
 the parser accepted it.
 ```
 
-Every single line now uses values that are defined *below* it. `return(%13)` comes first. Read as a sequence of instructions this is nonsense. Read as a set of edges it is the same graph, and the parser has no difficulty with it, because it builds operations in dependency order rather than in reading order — [`parser.ts:403`](../../../src/compiler/ir/graph/parser.ts), which Chapter 13 walks through.
+Every single line now uses values that are defined *below* it. `return %13` comes first. Read as a sequence of instructions this is nonsense. Read as a set of edges it is the same graph, and the parser has no difficulty with it, because it builds operations in dependency order rather than in reading order — [`parser.ts:403`](../../../src/compiler/ir/graph/parser.ts), which Chapter 13 walks through.
 
 > **This module is not valid IR, and that is Theorem 8.4's condition (b) showing its teeth.** Reversing the block moved the terminator to the top, and a terminator is required to be last. Run the result through the verifier and it says so:
 >
@@ -264,9 +264,9 @@ identical                : true
 Same program. And printing the reversed module back out shows what *did* change:
 
 ```
-    return(%5)
-    %5 = add(%6, %4) : tensor<2x1xf32>
-    %6 = dot(%8, %7) {lhs_batch = [], lhs_contracting = [1], rhs_batch = [], rhs_contracting = [0]} : tensor<2x1xf32>
+    return %5 : tensor<2x1xf32>
+    %5 = "tera.add"(%6, %4) : (tensor<2x1xf32>, tensor<1xf32>) -> tensor<2x1xf32>
+    %6 = tera.dot %8, %7 {lhs_batch = array<i64>, lhs_contracting = array<i64: 1>, rhs_batch = array<i64>, rhs_contracting = array<i64: 0>} : (tensor<2x8xf32>, tensor<8x1xf32>) -> tensor<2x1xf32>
     ...
 ```
 

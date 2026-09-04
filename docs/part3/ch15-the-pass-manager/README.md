@@ -189,8 +189,8 @@ Two transposes that cancel, and an add of zero. The integer dtype is load-bearin
   cse                  UNCHANGED 1 -> 1
   dce                  UNCHANGED 1 -> 1
 module @ThereAndBackAgain {
-  func @ThereAndBackAgain(%0: tensor<2x2xi32>) -> (tensor<2x2xi32>) {
-    return(%0)
+  func.func @ThereAndBackAgain(%0: tensor<2x2xi32>) -> (tensor<2x2xi32>) {
+    return %0 : tensor<2x2xi32>
   }
 }
 ```
@@ -211,9 +211,9 @@ Now the same program with the bound set to 1:
   dce                  CHANGED   4 -> 2
   canonicalize:max-iter UNCHANGED -1 -> -1
 module @ThereAndBackAgain {
-  func @ThereAndBackAgain(%0: tensor<2x2xi32>) -> (tensor<2x2xi32>) {
-    %1 = transpose(%0) {permutation = [0, 1]} : tensor<2x2xi32>
-    return(%1)
+  func.func @ThereAndBackAgain(%0: tensor<2x2xi32>) -> (tensor<2x2xi32>) {
+    %1 = tera.transpose %0 {permutation = array<i64: 0, 1>} : tensor<2x2xi32> -> tensor<2x2xi32>
+    return %1 : tensor<2x2xi32>
   }
 }
 ```

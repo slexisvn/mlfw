@@ -41,7 +41,7 @@ async function study(label, { layout, layoutAwareOps }) {
   await compiled(x);
   const ms = await best(() => compiled(x), 20);
 
-  const transforms = (ir.match(/layout_transform\(/g) || []).length;
+  const transforms = (ir.match(/tera\.layout_transform/g) || []).length;
   console.log(`=== ${label} ===`);
   console.log(`  target.layoutAwareOps = {${[...target.layoutAwareOps].join(', ')}}`);
   console.log(`  pass report: ${detail ? `${detail.conversions} conversion(s) proposed, ${detail.uniqueTransforms} kept` : 'the pass reported nothing'}`);

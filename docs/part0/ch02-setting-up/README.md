@@ -109,17 +109,17 @@ console.log(printModule(graph));
 
 ```
 module @traced {
-  func @traced(%0: tensor<2x2xf32>, %1: tensor<8x2xf32>, %2: tensor<8xf32>, %3: tensor<1x8xf32>, %4: tensor<1xf32>) -> (tensor<2x1xf32>) {
-    %5 = transpose(%1) {permutation = [1, 0]} : tensor<2x8xf32>
-    %6 = dot(%0, %5) {lhs_batch = [], lhs_contracting = [1], rhs_batch = [], rhs_contracting = [0]} : tensor<2x8xf32>
-    %7 = add(%6, %2) : tensor<2x8xf32>
-    %8 = constant() {tensor_type = tensor<f32>, value = 0} : tensor<f32>
-    %9 = broadcast_in_dim(%8) {broadcast_dimensions = [], result_shape = [2, 8]} : tensor<2x8xf32>
-    %10 = maximum(%7, %9) : tensor<2x8xf32>
-    %11 = transpose(%3) {permutation = [1, 0]} : tensor<8x1xf32>
-    %12 = dot(%10, %11) {lhs_batch = [], lhs_contracting = [1], rhs_batch = [], rhs_contracting = [0]} : tensor<2x1xf32>
-    %13 = add(%12, %4) : tensor<2x1xf32>
-    return(%13)
+  func.func @traced(%0: tensor<2x2xf32>, %1: tensor<8x2xf32>, %2: tensor<8xf32>, %3: tensor<1x8xf32>, %4: tensor<1xf32>) -> (tensor<2x1xf32>) {
+    %5 = tera.transpose %1 {permutation = array<i64: 1, 0>} : tensor<8x2xf32> -> tensor<2x8xf32>
+    %6 = tera.dot %0, %5 {lhs_batch = array<i64>, lhs_contracting = array<i64: 1>, rhs_batch = array<i64>, rhs_contracting = array<i64: 0>} : (tensor<2x2xf32>, tensor<2x8xf32>) -> tensor<2x8xf32>
+    %7 = "tera.add"(%6, %2) : (tensor<2x8xf32>, tensor<8xf32>) -> tensor<2x8xf32>
+    %8 = tera.constant dense<0.0> : tensor<f32>
+    %9 = tera.broadcast_in_dim %8 {broadcast_dimensions = array<i64>} : tensor<f32> -> tensor<2x8xf32>
+    %10 = tera.maximum %7, %9 : tensor<2x8xf32>
+    %11 = tera.transpose %3 {permutation = array<i64: 1, 0>} : tensor<1x8xf32> -> tensor<8x1xf32>
+    %12 = tera.dot %10, %11 {lhs_batch = array<i64>, lhs_contracting = array<i64: 1>, rhs_batch = array<i64>, rhs_contracting = array<i64: 0>} : (tensor<2x8xf32>, tensor<8x1xf32>) -> tensor<2x1xf32>
+    %13 = "tera.add"(%12, %4) : (tensor<2x1xf32>, tensor<1xf32>) -> tensor<2x1xf32>
+    return %13 : tensor<2x1xf32>
   }
 }
 ```

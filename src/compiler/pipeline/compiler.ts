@@ -24,7 +24,7 @@ import { assignPlanBuffers, computePlanDonations, planMemoryReport } from '../pa
 import type { AssignablePlan } from '../passes/memory/plan_buffer_assignment.js';
 import { containsSequentialRegion } from '../ir/graph/op_traits.js';
 import { TargetAttr, targetAttr } from '../support/target_attrs.js';
-import type { SchedulingDefaults } from '../support/target_attrs.js';
+import type { FusionDefaults, SchedulingDefaults } from '../support/target_attrs.js';
 import { detectPureConv } from '../schedule/conv_implicit_gemm.js';
 
 import { TraceLog, TraceLevel, CompilationError } from '../support/trace.js';
@@ -41,7 +41,7 @@ export { VerifyLevel } from '../support/invariant_check.js';
 import type { GraphFunction } from '../ir/graph/function.js';
 import type { PrimFunc } from '../ir/tensor/nodes.js';
 import type { LIRFunc } from '../ir/lir/nodes.js';
-import type { CompileTarget, FusionConfig, MemoryConfig, OptimizationConfig, PartitionConfig, QuantizationConfig, SchedulingConfig, TraceConfig } from '../support/config_types.js';
+import type { CompileTarget, ExternalCompiler as ExternalCompilerFn, FusionConfig, MemoryConfig, OptimizationConfig, PartitionConfig, QuantizationConfig, RuntimeModuleLike, SchedulingConfig, TraceConfig } from '../support/config_types.js';
 import type { CompilerConfig as CompilerConfigShape } from '../support/config_types.js';
 import type { VerifyLevelValue } from '../support/invariant_check.js';
 import type { TraceLogConfig, TraceSink, IRSnapshotFlags } from '../support/trace.js';
@@ -95,15 +95,7 @@ export type CompilePhase = {
   run: (ctx: CompileContext) => void;
 };
 
-export type RuntimeModuleLike = {
-  run(funcName: string, ...args: unknown[]): unknown;
-  runAsync(funcName: string, ...args: unknown[]): Promise<unknown>;
-  isAsync(funcName: string): boolean;
-  getKernelSource(funcName: string): string | null;
-  getKernelMetadata(funcName: string): Record<string, unknown> | null;
-  listKernels(): string[];
-  executionPlan?: unknown;
-};
+export type { RuntimeModuleLike, ExternalCompiler } from '../support/config_types.js';
 
 export class CompilerConfig implements CompilerConfigShape {
   target: CompileTarget;
@@ -129,7 +121,12 @@ export class CompilerConfig implements CompilerConfigShape {
 
     const schedulingDefaults = targetAttr<SchedulingDefaults>(this.target, TargetAttr.SCHEDULING) || {};
 
-    this.fusion = { enabled: true, strategy: 'priority', ...opts.fusion };
+    this.fusion = {
+      enabled: true,
+      strategy: 'priority',
+      ...(targetAttr<FusionDefaults>(this.target, TargetAttr.FUSION) || {}),
+      ...opts.fusion,
+    };
     this.scheduling = { enabled: false, autotune: false, gpuTiling: false, ...schedulingDefaults, ...opts.scheduling };
     this.matmulBackend = opts.matmulBackend || 'native';
     this.quantization = { enabled: false, ...opts.quantization };
@@ -297,7 +294,39 @@ export class Compiler {
     return new CompilationResult(ctx.runtimeModule as RuntimeModuleLike, trace, errors);
   }
 
+  _externalCompiler(): ExternalCompilerFn<GraphModule> | null {
+    return targetAttr<ExternalCompilerFn<GraphModule>>(this.config.target, TargetAttr.EXTERNAL_COMPILER);
+  }
+
   _compilePhases(): CompilePhase[] {
+    const external = this._externalCompiler();
+    if (external) {
+      return [
+        {
+          name: 'verify:pre',
+          when: (ctx: CompileContext) => ctx.compiler.config.verifyEnabled,
+          run: (ctx: CompileContext) => ctx.compiler._verifyGraph(ctx.working, 'before graph passes', ctx.trace, ctx.errors, ctx.failed, ctx.resilient),
+        },
+        {
+          name: 'graphPasses',
+          run: (ctx: CompileContext) => ctx.compiler._runGraphPasses(ctx.working, ctx.original, ctx.trace, ctx.errors, ctx.failed, ctx.resilient),
+        },
+        {
+          name: 'externalCompile',
+          run: (ctx: CompileContext) => {
+            const t0 = performance.now();
+            ctx.trace.phaseStart('externalCompile');
+            try {
+              ctx.runtimeModule = external(ctx.working, ctx.compiler.config);
+            } catch (error) {
+              ctx.errors.push(new CompilationError('externalCompile', ctx.working.name, (error as Error).message));
+              if (!ctx.resilient) throw error;
+            }
+            ctx.trace.phaseEnd('externalCompile', performance.now() - t0);
+          },
+        },
+      ];
+    }
     return [
       {
         name: 'verify:pre',

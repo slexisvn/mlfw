@@ -81,16 +81,14 @@ export function _traceCore(fn: TraceFunction, exampleInputs: readonly Tensor[], 
 
   tracer.activate();
   const TRACING_KEYS = DispatchKeySet.fromKey(DispatchKey.TRACING);
-  const result = withIncludedKeys(TRACING_KEYS, () => fn(...symbolicInputs)) as MaybePromise<TensorOutput | TensorOutput[]>;
-
-  if (isThenable(result)) {
-    return result.then(
-      (resolved: TensorOutput | TensorOutput[]) => _finalize(resolved),
-      (error: unknown) => { tracer.deactivate(); throw error; },
-    );
-  }
-
   try {
+    const result = withIncludedKeys(TRACING_KEYS, () => fn(...symbolicInputs)) as MaybePromise<TensorOutput | TensorOutput[]>;
+    if (isThenable(result)) {
+      return result.then(_finalize).catch((error: unknown) => {
+        tracer.deactivate();
+        throw error;
+      });
+    }
     return _finalize(result);
   } catch (error) {
     tracer.deactivate();

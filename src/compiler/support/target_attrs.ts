@@ -1,10 +1,14 @@
 export const TargetAttr = Object.freeze({
   GRAPH_SPLIT: 'graphSplit',
   SCHEDULING: 'scheduling',
+  FUSION: 'fusion',
+  EXTERNAL_COMPILER: 'externalCompiler',
+  NATIVE_OPS: 'nativeOps',
 });
 
 export type GraphSplitThresholds = Readonly<Record<string, number>>;
 export type SchedulingDefaults = Readonly<{ enabled?: boolean; autotune?: boolean; gpuTiling?: boolean }>;
+export type FusionDefaults = Readonly<{ enabled?: boolean; strategy?: string }>;
 
 export type AttributedTarget = { getAttr?<T>(key: string, fallback?: T | null): T | null };
 

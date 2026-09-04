@@ -171,7 +171,7 @@ export function layoutEquals(a: LayoutLike | null | undefined, b: LayoutLike | n
 function toPlainLayout(layout: LayoutLike | null | undefined): Layout | null {
   if (layout instanceof Layout) return layout;
   if (layout && typeof layout.toLayout === 'function') {
-    try { return layout.toLayout(); } catch { /* blocked layout */ }
+    try { return layout.toLayout(); } catch {}
   }
   if (layout && layout.baseOrder && !layout.isBlocked?.()) {
     return new Layout(layout.baseOrder as readonly number[]);

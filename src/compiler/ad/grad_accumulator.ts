@@ -6,7 +6,7 @@ export function gradOrZero(builder: IRBuilder, input: Value, accumulator: GradAc
   const grad = accumulator.get(input.id);
   if (grad) return grad;
   const zeroConst = builder.scalarConstant(0, (input.type as TensorType).dtype).getResult(0);
-  return builder.broadcast(zeroConst, (input.type as TensorType).shape, []).getResult(0);
+  return builder.broadcast(zeroConst, (input.type as TensorType).shape, [], [], input).getResult(0);
 }
 
 export class GradAccumulator {

@@ -17,7 +17,7 @@ Here is the whole pipeline, with what each level can say and what the step into 
       |
       |  trace (Chapter 5)          loses: host control flow, host state, everything
       v                                     that is not a tensor operation
-  Graph IR         %6 = dot(%0, %5)         ops, values, types, regions
+  Graph IR         %6 = tera.dot %0, %5     ops, values, types, regions
       |                                     says: WHAT is computed
       |  graph passes                       fuse, canonicalize, DCE, layout, autodiff
       |  lowering (Part VI)         loses: the names of the operations. There is no
@@ -47,14 +47,13 @@ node docs/part1/ch06-the-pipeline/labs/01-one-program-three-levels.mjs
 The two-layer network, after graph optimization:
 
 ```
-    %5 = dot(%0, %1) {lhs_contracting = [1], rhs_contracting = [1]} : tensor<2x8xf32>
-    %7 = fusion(%5, %2, %6) {fusion_kind = "kElementwise"} : tensor<2x8xf32>
-    {
-      ^bb(%8: tensor<2x8xf32>, %9: tensor<8xf32>, %10: tensor<2x8xf32>):
-      %11 = add(%8, %9) : tensor<2x8xf32>
-      %12 = maximum(%11, %10) : tensor<2x8xf32>
-      yield(%12)
-    }
+    %5 = tera.dot %0, %1 {lhs_contracting = array<i64: 1>, rhs_contracting = array<i64: 1>} : (tensor<2x2xf32>, tensor<8x2xf32>) -> tensor<2x8xf32>
+    %7 = "tera.fusion"(%5, %2, %6) ({
+      ^bb0(%8: tensor<2x8xf32>, %9: tensor<8xf32>, %10: tensor<2x8xf32>):
+        %11 = "tera.add"(%8, %9) : (tensor<2x8xf32>, tensor<8xf32>) -> tensor<2x8xf32>
+        %12 = tera.maximum %11, %10 : tensor<2x8xf32>
+        tera.yield %12 : tensor<2x8xf32>
+    }) {fusion_kind = "kElementwise"} : (tensor<2x8xf32>, tensor<8xf32>, tensor<2x8xf32>) -> tensor<2x8xf32>
 ```
 
 and the same program one level down, in TIR:

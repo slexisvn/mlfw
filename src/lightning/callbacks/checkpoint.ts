@@ -178,7 +178,7 @@ export class ModelCheckpoint extends Callback {
   }
 
   private _tryDelete(path: string): void {
-    try { fs.remove(path); } catch { /* noop */ }
+    try { fs.remove(path); } catch {}
   }
 }
 

@@ -13,6 +13,12 @@ export function unifiedOperandIndices(opName: string, numOperands: number): read
   return Array.from({ length: numOperands }, (_, i) => i);
 }
 
+export function sharesOperandAndResultShape(opName: string): boolean {
+  const def = registry.get(opName);
+  return def !== null
+    && (def.isElementwise || def.hasTrait(OpTrait.SAME_OPERAND_AND_RESULT_SHAPE));
+}
+
 export function launchBoundaryClass(opName: string): string | null {
   const def = registry.get(opName);
   return def === null ? null : def.getAttr<string>(OpAttrKey.LAUNCH_BOUNDARY);

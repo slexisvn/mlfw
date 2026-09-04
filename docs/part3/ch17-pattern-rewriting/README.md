@@ -262,14 +262,14 @@ Four identities stacked on one input — `transpose(transpose(a)) + 0) * 1` — 
 
 ```
 module @traced {
-  func @traced(%0: tensor<2x2xi32>) -> (tensor<2x2xi32>) {
-    %1 = transpose(%0) {permutation = [1, 0]} : tensor<2x2xi32>
-    %2 = transpose(%1) {permutation = [1, 0]} : tensor<2x2xi32>
-    %3 = constant() {tensor_type = tensor<i32>, value = 0} : tensor<i32>
-    %4 = add(%2, %3) : tensor<2x2xi32>
-    %5 = constant() {tensor_type = tensor<i32>, value = 1} : tensor<i32>
-    %6 = mul(%4, %5) : tensor<2x2xi32>
-    return(%6)
+  func.func @traced(%0: tensor<2x2xi32>) -> (tensor<2x2xi32>) {
+    %1 = tera.transpose %0 {permutation = array<i64: 1, 0>} : tensor<2x2xi32> -> tensor<2x2xi32>
+    %2 = tera.transpose %1 {permutation = array<i64: 1, 0>} : tensor<2x2xi32> -> tensor<2x2xi32>
+    %3 = tera.constant dense<0> : tensor<i32>
+    %4 = "tera.add"(%2, %3) : (tensor<2x2xi32>, tensor<i32>) -> tensor<2x2xi32>
+    %5 = tera.constant dense<1> : tensor<i32>
+    %6 = "tera.mul"(%4, %5) : (tensor<2x2xi32>, tensor<i32>) -> tensor<2x2xi32>
+    return %6 : tensor<2x2xi32>
   }
 }
 ```
@@ -279,14 +279,14 @@ At `DEBUG`, the applicator reports what it did:
 ```
 === what the pattern applicator did ===
   round 1  canonicalize         7 -> 5 ops   2 rewrite(s) from a set of 30 patterns
-  round 1  algebraic_simplify   5 -> 5 ops   1 rewrite(s) from a set of 13 patterns
+  round 1  algebraic_simplify   5 -> 5 ops   1 rewrite(s) from a set of 5 patterns
   round 1  dce                  5 -> 2 ops   dce reports erasedCount=3
   round 2  canonicalize         2 -> 1 ops   1 rewrite(s) from a set of 30 patterns
 
 === after graph passes ===
 module @LongWayRound {
-  func @LongWayRound(%0: tensor<2x2xi32>) -> (tensor<2x2xi32>) {
-    return(%0)
+  func.func @LongWayRound(%0: tensor<2x2xi32>) -> (tensor<2x2xi32>) {
+    return %0 : tensor<2x2xi32>
   }
 }
 ```
@@ -311,23 +311,23 @@ Definition 17.2, tested. Four different programs, all computing `a * a`, written
 === a * a ===
   traced:      2 operations
   canonical:
-    %1 = mul(%0, %0) : tensor<2x2xi32>
-    return(%1)
+    %1 = tera.mul %0, %0 : tensor<2x2xi32>
+    return %1 : tensor<2x2xi32>
 === transpose(transpose(a)) * a ===
   traced:      4 operations
   canonical:
-    %1 = mul(%0, %0) : tensor<2x2xi32>
-    return(%1)
+    %1 = tera.mul %0, %0 : tensor<2x2xi32>
+    return %1 : tensor<2x2xi32>
 === (a + 0) * (a * 1) ===
   traced:      6 operations
   canonical:
-    %1 = mul(%0, %0) : tensor<2x2xi32>
-    return(%1)
+    %1 = tera.mul %0, %0 : tensor<2x2xi32>
+    return %1 : tensor<2x2xi32>
 === reshape(reshape(a)) * (a - 0) ===
   traced:      6 operations
   canonical:
-    %1 = mul(%0, %0) : tensor<2x2xi32>
-    return(%1)
+    %1 = tera.mul %0, %0 : tensor<2x2xi32>
+    return %1 : tensor<2x2xi32>
 
 4 spellings collapsed to 1 canonical form(s).
 ```

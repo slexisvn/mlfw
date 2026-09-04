@@ -1,0 +1,57 @@
+add_mlir_dialect_library(MLIRTeraConversion
+        LowerNestedLinalg.cpp
+        Pipelines.cpp
+        StageGpuBuffers.cpp
+        TeraToLinalg.cpp
+        VectorizeAffine.cpp
+        TeraToLinalgConstant.cpp
+        TeraToLinalgElementwise.cpp
+        TeraToLinalgShape.cpp
+        TeraToLinalgIndexing.cpp
+        TeraToLinalgWindow.cpp
+        TeraToLinalgContraction.cpp
+        TeraToLinalgAutodiff.cpp
+        TeraToLinalgControlFlow.cpp
+
+        ADDITIONAL_HEADER_DIRS
+        ${PROJECT_SOURCE_DIR}/include/Tera/Conversion
+
+        DEPENDS
+        MLIRTeraConversionPassesIncGen
+
+        LINK_LIBS PUBLIC
+        MLIRAffineDialect
+        MLIRAffineTransforms
+        MLIRArithDialect
+        MLIRAffineToStandard
+        MLIRArithToLLVM
+        MLIRArithUtils
+        MLIRBufferizationDialect
+        MLIRBufferizationPipelines
+        MLIRBufferizationToMemRef
+        MLIRBufferizationTransforms
+        MLIRControlFlowToLLVM
+        MLIRFuncToLLVM
+        MLIRGPUDialect
+        MLIRGPUPipelines
+        MLIRGPUTransforms
+        MLIRLLVMIRTransforms
+        MLIRLinalgDialect
+        MLIRLinalgTransforms
+        MLIRMathDialect
+        MLIRMathToLLVM
+        MLIRMemRefToLLVM
+        MLIRMemRefTransforms
+        MLIRPass
+        MLIRSCFDialect
+        MLIRSCFToGPU
+        MLIRSCFTransforms
+        MLIRReconcileUnrealizedCasts
+        MLIRSCFToControlFlow
+        MLIRTensorDialect
+        MLIRTera
+        MLIRTransforms
+        MLIRUBToLLVM
+        MLIRVectorToLLVM
+        MLIRVectorToSCF
+        )

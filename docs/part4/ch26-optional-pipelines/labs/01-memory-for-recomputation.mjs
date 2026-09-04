@@ -48,7 +48,7 @@ async function study(label, budget) {
   await compiled(a);
   const ms = await best(() => compiled(a), 20);
 
-  const ops = (ir.match(/= (\w+)\(/g) || []).map(s => s.slice(2, -1));
+  const ops = [...ir.matchAll(/= "?tera\.(\w+)/g)].map(m => m[1]);
   console.log(`=== ${label} ===`);
   console.log(`  graph: ${ops.length} operations -- ${ops.join(', ')}`);
   if (report) console.log(`  pass: ${report.iterations} rematerialization(s), live pressure ${report.peakPressure} bytes against a budget of ${report.budget}`);

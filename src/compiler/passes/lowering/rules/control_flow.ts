@@ -3,6 +3,7 @@ import {
   IfThenElseNode, WhileNode, ForNode, ForKind, IntImmNode, SyncThreadsNode
 } from '../../../ir/tensor/nodes.js';
 import { Buffer } from '../../../ir/tensor/buffer.js';
+import { scanGroups } from '../../../ir/graph/ops/control_flow.js';
 import { MemoryScope } from '../../../ir/tensor/tensor_types.js';
 import {
   registerLoweringRule, getLoweringRule, lowerConstant, isConstantOp,
@@ -14,6 +15,10 @@ import type { Block, Region } from '../../../ir/graph/block.js';
 import type { Value } from '../../../ir/graph/value.js';
 
 type RegionLowering = { stmts: TirNode[]; yieldBuffers: Buffer[] };
+
+function bufferLike(value: Value): BufferOwner {
+  return { type: value.type, symbolicShape: value.symbolicShape };
+}
 
 function copyBuffer(ctx: LoweringContext, srcBuf: Buffer, dstBuf: Buffer): TirNode {
   const { loopVars, loopBinds, indices, extentNodes } = makeLoopNest(ctx, dstBuf.shape, dstBuf);
@@ -67,7 +72,7 @@ function lowerRegionBody(ctx: LoweringContext, region: Region, argBuffers: reado
     }
     const outputs: Buffer[] = new Array(innerOp.numResults);
     for (let i = 0; i < innerOp.numResults; i++) {
-      const proxy = { type: innerOp.getResult(i).type };
+      const proxy = bufferLike(innerOp.getResult(i));
       outputs[i] = ctx.getOrAllocBuffer(proxy);
       valueMap.set(innerOp.getResult(i), outputs[i]);
       ctx.bufferMap.set(innerOp.getResult(i), outputs[i]);
@@ -95,7 +100,8 @@ export function register(): void {
       ctx.bufferMap.set(op.getResult(i), resultBufs[i]);
     }
 
-    const thenResult = lowerRegionBody(ctx, thenRegion, []);
+    const bodyArgBufs = inputs.slice(1);
+    const thenResult = lowerRegionBody(ctx, thenRegion, bodyArgBufs);
     const thenStmts = thenResult.stmts.slice();
     for (let i = 0; i < resultBufs.length && i < thenResult.yieldBuffers.length; i++) {
       const src = thenResult.yieldBuffers[i];
@@ -105,7 +111,7 @@ export function register(): void {
 
     let elseBody: TirNode | null = null;
     if (elseRegion && elseRegion.entryBlock) {
-      const elseResult = lowerRegionBody(ctx, elseRegion, []);
+      const elseResult = lowerRegionBody(ctx, elseRegion, bodyArgBufs);
       const elseStmts = elseResult.stmts.slice();
       for (let i = 0; i < resultBufs.length && i < elseResult.yieldBuffers.length; i++) {
         const src = elseResult.yieldBuffers[i];
@@ -126,7 +132,7 @@ export function register(): void {
     const loopBufs: Buffer[] = new Array(inputs.length);
     const initStmts: TirNode[] = [];
     for (let i = 0; i < inputs.length; i++) {
-      const stateBuf = outputs[i] || ctx.getOrAllocBuffer({ type: op.getResult(i).type });
+      const stateBuf = outputs[i] || ctx.getOrAllocBuffer(bufferLike(op.getResult(i)));
       loopBufs[i] = stateBuf;
       initStmts.push(copyBuffer(ctx, inputs[i], stateBuf));
     }
@@ -157,13 +163,15 @@ export function register(): void {
   registerLoweringRule('scan', (ctx, op, inputs, outputs) => {
     const numXs = op.getAttr<number>('num_xs') as number;
     const numCarry = op.getAttr<number>('num_carry') as number;
-    const xsBufs = inputs.slice(0, numXs);
-    const carryInitBufs = inputs.slice(numXs);
+    const numConsts = scanGroups(op).consts.length;
+    const carryInitBufs = inputs.slice(0, numCarry);
+    const xsBufs = inputs.slice(numCarry, numCarry + numXs);
+    const constBufs = inputs.slice(numCarry + numXs, numCarry + numXs + numConsts);
 
     const carryBufs: Buffer[] = new Array(numCarry);
     const initStmts: TirNode[] = [];
     for (let i = 0; i < numCarry; i++) {
-      const stateBuf = outputs[i] || ctx.getOrAllocBuffer({ type: op.getResult(i).type });
+      const stateBuf = outputs[i] || ctx.getOrAllocBuffer(bufferLike(op.getResult(i)));
       carryBufs[i] = stateBuf;
       initStmts.push(copyBuffer(ctx, carryInitBufs[i], stateBuf));
       ctx.bufferMap.set(op.getResult(i), stateBuf);
@@ -171,7 +179,7 @@ export function register(): void {
     const numYs = outputs.length - numCarry;
     const ysBufs: Buffer[] = new Array(numYs);
     for (let i = 0; i < numYs; i++) {
-      const yBuf = outputs[numCarry + i] || ctx.getOrAllocBuffer({ type: op.getResult(numCarry + i).type });
+      const yBuf = outputs[numCarry + i] || ctx.getOrAllocBuffer(bufferLike(op.getResult(numCarry + i)));
       ysBufs[i] = yBuf;
       ctx.bufferMap.set(op.getResult(numCarry + i), yBuf);
     }
@@ -182,12 +190,16 @@ export function register(): void {
     const bodyStmts: TirNode[] = [];
     const xtBufs: Buffer[] = new Array(numXs);
     for (let i = 0; i < numXs; i++) {
-      const xt = ctx.getOrAllocBuffer({ type: { shape: xsBufs[i].shape.slice(1), dtype: xsBufs[i].dtype } } as unknown as BufferOwner);
+      const symbols = xsBufs[i].symbolicShape;
+      const xt = ctx.getOrAllocBuffer({
+        type: { shape: xsBufs[i].shape.slice(1), dtype: xsBufs[i].dtype },
+        symbolicShape: symbols ? symbols.slice(1) : undefined,
+      } as unknown as BufferOwner);
       xtBufs[i] = xt;
       bodyStmts.push(sliceCopyIn(ctx, xsBufs[i], xt, counter));
     }
 
-    const bodyResult = lowerRegionBody(ctx, op.regions[0], [...xtBufs, ...carryBufs]);
+    const bodyResult = lowerRegionBody(ctx, op.regions[0], [...carryBufs, ...xtBufs, ...constBufs]);
     for (const s of bodyResult.stmts) bodyStmts.push(s);
     for (let i = 0; i < numCarry; i++) {
       const src = bodyResult.yieldBuffers[i];

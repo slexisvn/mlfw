@@ -55,6 +55,19 @@ export type QuantizationConfig = {
   [key: string]: unknown;
 };
 
+export type RuntimeModuleLike = {
+  run(funcName: string, ...args: unknown[]): unknown;
+  runAsync(funcName: string, ...args: unknown[]): Promise<unknown>;
+  isAsync(funcName: string): boolean;
+  getKernelSource(funcName: string): string | null;
+  getKernelMetadata(funcName: string): Record<string, unknown> | null;
+  listKernels(): string[];
+  executionPlan?: unknown;
+};
+
+export type ExternalCompiler<Module = unknown> =
+  (module: Module, config: CompilerConfig) => RuntimeModuleLike;
+
 export type SchedulingConfig = {
   enabled?: boolean;
   autotune?: boolean;

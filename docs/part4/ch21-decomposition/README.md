@@ -125,9 +125,9 @@ The user writes one operation:
 ```
 === traced: what the user wrote ===
 module @traced {
-  func @traced(%0: tensor<2x3xf32>) -> (tensor<2x3xf32>) {
-    %1 = softmax(%0) {axis = 1} : tensor<2x3xf32>
-    return(%1)
+  func.func @traced(%0: tensor<2x3xf32>) -> (tensor<2x3xf32>) {
+    %1 = "tera.softmax"(%0) {axis = 1} : (tensor<2x3xf32>) -> tensor<2x3xf32>
+    return %1 : tensor<2x3xf32>
   }
 }
 ```
@@ -146,28 +146,22 @@ And here is what the *rest of Part IV* does with those ten:
 
 ```
 module @Softmax {
-  func @Softmax(%0: tensor<2x3xf32>) -> (tensor<2x3xf32>) {
-    %1 = constant() {tensor_type = tensor<f32>, value = -inf} : tensor<f32>
-    %2 = reduce(%0, %1) {dimensions = [1], reduce_type = "max"} : tensor<2xf32>
-    {
-      ^bb(%3: tensor<f32>, %4: tensor<f32>):
-    }
-    %5 = constant() {tensor_type = tensor<f32>, value = 0} : tensor<f32>
-    %6 = fusion(%2, %0, %5) {fusion_kind = "kReduction"} : tensor<2x3xf32>
-    {
-      ^bb(%7: tensor<2xf32>, %8: tensor<2x3xf32>, %9: tensor<f32>):
-      %10 = broadcast_in_dim(%7) {broadcast_dimensions = [0], result_shape = [2, 3]} : tensor<2x3xf32>
-      %11 = sub(%8, %10) : tensor<2x3xf32>
-      %12 = exp(%11) : tensor<2x3xf32>
-      %13 = reduce(%12, %9) {dimensions = [1], reduce_type = "sum"} : tensor<2xf32>
-      {
-        ^bb(%14: tensor<f32>, %15: tensor<f32>):
-      }
-      %16 = broadcast_in_dim(%13) {broadcast_dimensions = [0], result_shape = [2, 3]} : tensor<2x3xf32>
-      %17 = div(%12, %16) : tensor<2x3xf32>
-      yield(%17)
-    }
-    return(%6)
+  func.func @Softmax(%0: tensor<2x3xf32>) -> (tensor<2x3xf32>) {
+    %1 = tera.reduce maximum, %0 {dimensions = array<i64: 1>} : tensor<2x3xf32> -> tensor<2xf32>
+    %2 = tera.constant dense<0.0> : tensor<f32>
+    %3 = "tera.fusion"(%1, %0, %2) ({
+      ^bb0(%4: tensor<2xf32>, %5: tensor<2x3xf32>, %6: tensor<f32>):
+        %7 = tera.broadcast_in_dim %4 {broadcast_dimensions = array<i64: 0>} : tensor<2xf32> -> tensor<2x3xf32>
+        %8 = tera.sub %5, %7 : tensor<2x3xf32>
+        %9 = tera.exp %8 : tensor<2x3xf32>
+        %10 = "tera.reduce"(%9, %6) ({
+          ^bb0(%11: tensor<f32>, %12: tensor<f32>):
+        }) {dimensions = [1], reduce_type = "sum"} : (tensor<2x3xf32>, tensor<f32>) -> tensor<2xf32>
+        %13 = tera.broadcast_in_dim %10 {broadcast_dimensions = array<i64: 0>} : tensor<2xf32> -> tensor<2x3xf32>
+        %14 = tera.div %9, %13 : tensor<2x3xf32>
+        tera.yield %14 : tensor<2x3xf32>
+    }) {fusion_kind = "kReduction"} : (tensor<2xf32>, tensor<2x3xf32>, tensor<f32>) -> tensor<2x3xf32>
+    return %3 : tensor<2x3xf32>
   }
 }
 kernels emitted: 1

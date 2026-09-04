@@ -122,4 +122,22 @@ describe('RuntimeModule._extractShapeParams tensor identity', () => {
     const result = RuntimeModule._extractShapeParams(shapeParamMap, tensorShapes, [], null);
     expect(result).toEqual([9]);
   });
+
+  it('prefers a buffer that is an argument over the first one the variable names', () => {
+    const shapeParamMap = new Map([
+      ['tmp:0', { name: 'm' }],
+      ['A:0', { name: 'm' }],
+    ]);
+    const bufferMap = new Map([['A', {}], ['out', {}]]);
+    const tensorShapes = new Map([[0, [7, 4]], [1, [7, 2]]]);
+    const result = RuntimeModule._extractShapeParams(shapeParamMap, tensorShapes, [], bufferMap);
+    expect(result).toEqual([7]);
+  });
+
+  it('refuses to guess an extent no argument carries a shape for', () => {
+    const shapeParamMap = new Map([['A:0', { name: 'm' }]]);
+    const bufferMap = new Map([['A', {}]]);
+    expect(() => RuntimeModule._extractShapeParams(shapeParamMap, new Map(), [], bufferMap))
+      .toThrow(/dynamic extent 'm' cannot be resolved/);
+  });
 });

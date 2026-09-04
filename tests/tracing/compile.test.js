@@ -8,6 +8,16 @@ import { tensorToContiguous } from '../../src/dispatcher/jit_dispatch.js';
 import { WasmTarget, CPUTarget, CUDATarget } from '../../src/compiler/support/target.js';
 import { QuantizationScheme } from '../../src/compiler/ir/graph/quantization_types.js';
 import { Tensor } from '../../src/tensor/core/tensor.js';
+import { getActiveTracer } from '../../src/tracing/tracer.js';
+
+describe('trace failure cleanup', () => {
+  it('restores eager execution when finalizing an async trace throws', async () => {
+    const x = tensor([2, 3]);
+    await expect(trace(async () => [null], [x])).rejects.toThrow();
+    expect(getActiveTracer()).toBeNull();
+    expect([...x.mul(x).data]).toEqual([4, 9]);
+  });
+});
 
 describe('compile returns executable tensors', () => {
   it('returns a Tensor with correct shape and dtype', async () => {

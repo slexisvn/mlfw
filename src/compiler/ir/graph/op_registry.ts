@@ -19,6 +19,7 @@ export const OpAttrKey = Object.freeze({
   INFER_LAYOUT: 'inferLayout',
   LAYOUT_SENSITIVITY: 'layoutSensitivity',
   UNIFIED_OPERANDS: 'unifiedOperands',
+  ISOLATED_REGIONS: 'isolatedRegions',
 });
 
 export const OpTrait = Object.freeze({
@@ -72,6 +73,10 @@ export type PropagateSymbolicShapesFn = (
   shapes: ReadonlyMap<Value, PropagatedShape>,
 ) => PropagatedShape[] | null;
 
+export type InferRegionArgTypesFn = (op: Operation) => (readonly IRType[])[];
+
+export type InferResultTypesFromRegionsFn = (op: Operation) => readonly IRType[] | null;
+
 export type VerifyFn = (op: Operation) => string[];
 
 export type MemoryEffectsFn = (op: Operation) => MemoryEffect[];
@@ -94,6 +99,8 @@ export type OpDefConfig = Readonly<{
   sideEffects?: SideEffectMask;
   traits?: readonly OpTraitValue[];
   inferResultTypes?: InferResultTypesFn;
+  inferRegionArgTypes?: InferRegionArgTypesFn;
+  inferResultTypesFromRegions?: InferResultTypesFromRegionsFn;
   propagateSymbolicShapes?: PropagateSymbolicShapesFn;
   verify?: VerifyFn;
   getMemoryEffects?: MemoryEffectsFn;
@@ -114,6 +121,8 @@ export class OpDef {
   sideEffects: SideEffectMask;
   traits: Set<OpTraitValue>;
   inferResultTypes: InferResultTypesFn | null;
+  inferRegionArgTypes: InferRegionArgTypesFn | null;
+  inferResultTypesFromRegions: InferResultTypesFromRegionsFn | null;
   propagateSymbolicShapes: PropagateSymbolicShapesFn | null;
   verify: VerifyFn | null;
   getMemoryEffects: MemoryEffectsFn | null;
@@ -133,6 +142,8 @@ export class OpDef {
     this.sideEffects = config.sideEffects || SideEffectKind.NONE;
     this.traits = new Set(config.traits || []);
     this.inferResultTypes = config.inferResultTypes || null;
+    this.inferRegionArgTypes = config.inferRegionArgTypes || null;
+    this.inferResultTypesFromRegions = config.inferResultTypesFromRegions || null;
     this.propagateSymbolicShapes = config.propagateSymbolicShapes || null;
     this.verify = config.verify || null;
     this.getMemoryEffects = config.getMemoryEffects || null;

@@ -16,6 +16,10 @@ import { PassManager } from '../../../../src/compiler/passes/pass_manager.js';
 import { buildGraphPipeline } from '../../../../src/compiler/pipeline/graph_pipeline.js';
 import { CompilerConfig } from '../../../../src/compiler/pipeline/compiler.js';
 import { CPUTarget } from '../../../../src/compiler/support/target.js';
+import { registry } from '../../../../src/compiler/ir/graph/ops.js';
+import { Operation } from '../../../../src/compiler/ir/graph/operation.js';
+import { Block, Region } from '../../../../src/compiler/ir/graph/block.js';
+import { GraphFunction } from '../../../../src/compiler/ir/graph/function.js';
 
 const rng = mulberry32(9091);
 const grid = (shape) => randomNested(rng, shape);
@@ -111,8 +115,8 @@ describe('the harder parts of the grammar survive the trip', () => {
     const xs = f32([3, 4]);
     const carry = f32([4]);
     const func = buildFunction('scanner', [xs, carry], [carry], (b, args) => {
-      const scan = b.scanOp([args[0]], [args[1]], (bb, xt, c) => {
-        return [[bb.add(xt[0], c[0]).getResult(0)], []];
+      const scan = b.scanOp([args[1]], [args[0]], (bb, c, xt) => {
+        return [[bb.add(c[0], xt[0]).getResult(0)], []];
       });
       b.returnOp([scan.getResult(0)]);
     });
@@ -243,10 +247,10 @@ describe('a parsed module is real IR, not a transcript', () => {
   it('parses text written by hand and verifies it', () => {
     const text = [
       'module @hand {',
-      '  func @f(%0: tensor<4xf32>, %1: tensor<4xf32>) -> (tensor<4xf32>) {',
-      '    %2 = add(%0, %1) : tensor<4xf32>',
-      '    %3 = mul(%2, %0) : tensor<4xf32>',
-      '    return(%3)',
+      '  func.func @f(%0: tensor<4xf32>, %1: tensor<4xf32>) -> (tensor<4xf32>) {',
+      '    %2 = tera.add %0, %1 : tensor<4xf32>',
+      '    %3 = tera.mul %2, %0 : tensor<4xf32>',
+      '    return %3 : tensor<4xf32>',
       '  }',
       '}',
     ].join('\n');
@@ -259,8 +263,8 @@ describe('a parsed module is real IR, not a transcript', () => {
   it('parses a scalar (rank 0) tensor type', () => {
     const text = [
       'module @scalar {',
-      '  func @f(%0: tensor<f32>) -> (tensor<f32>) {',
-      '    return(%0)',
+      '  func.func @f(%0: tensor<f32>) -> (tensor<f32>) {',
+      '    return %0 : tensor<f32>',
       '  }',
       '}',
     ].join('\n');
@@ -273,8 +277,8 @@ describe('a parsed module is real IR, not a transcript', () => {
   it('normalizes the legacy rank-0 spelling to the canonical one', () => {
     const module = parseModule([
       'module @scalar {',
-      '  func @f(%0: tensor<xf32>) -> (tensor<xf32>) {',
-      '    return(%0)',
+      '  func.func @f(%0: tensor<xf32>) -> (tensor<xf32>) {',
+      '    return %0 : tensor<xf32>',
       '  }',
       '}',
     ].join('\n'));
@@ -287,8 +291,8 @@ describe('a parsed module is real IR, not a transcript', () => {
   it('rejects an empty dimension in a ranked tensor type', () => {
     const text = [
       'module @bad {',
-      '  func @f(%0: tensor<x4xf32>) -> (tensor<x4xf32>) {',
-      '    return(%0)',
+      '  func.func @f(%0: tensor<x4xf32>) -> (tensor<x4xf32>) {',
+      '    return %0 : tensor<x4xf32>',
       '  }',
       '}',
     ].join('\n');
@@ -301,9 +305,9 @@ describe('parse errors point at the offending line', () => {
   it('rejects a use of an undefined value', () => {
     const text = [
       'module @bad {',
-      '  func @f(%0: tensor<4xf32>) -> (tensor<4xf32>) {',
-      '    %1 = add(%0, %9) : tensor<4xf32>',
-      '    return(%1)',
+      '  func.func @f(%0: tensor<4xf32>) -> (tensor<4xf32>) {',
+      '    %1 = tera.add %0, %9 : tensor<4xf32>',
+      '    return %1 : tensor<4xf32>',
       '  }',
       '}',
     ].join('\n');
@@ -315,9 +319,9 @@ describe('parse errors point at the offending line', () => {
   it('rejects a result list that disagrees with the declared types', () => {
     const text = [
       'module @bad {',
-      '  func @f(%0: tensor<4xf32>) -> (tensor<4xf32>) {',
-      '    %1, %2 = add(%0, %0) : tensor<4xf32>',
-      '    return(%1)',
+      '  func.func @f(%0: tensor<4xf32>) -> (tensor<4xf32>) {',
+      '    %1, %2 = tera.add %0, %0 : tensor<4xf32>',
+      '    return %1 : tensor<4xf32>',
       '  }',
       '}',
     ].join('\n');
@@ -328,8 +332,8 @@ describe('parse errors point at the offending line', () => {
   it('rejects a tensor type that does not end in a known dtype', () => {
     const text = [
       'module @bad {',
-      '  func @f(%0: tensor<4xquux>) -> (tensor<4xquux>) {',
-      '    return(%0)',
+      '  func.func @f(%0: tensor<4xquux>) -> (tensor<4xquux>) {',
+      '    return %0 : tensor<4xquux>',
       '  }',
       '}',
     ].join('\n');
@@ -340,10 +344,9 @@ describe('parse errors point at the offending line', () => {
   it('rejects an unterminated region', () => {
     const text = [
       'module @bad {',
-      '  func @f(%0: tensor<xbool>) -> () {',
-      '    if(%0)',
-      '    {',
-      '      yield()',
+      '  func.func @f(%0: tensor<i1>) -> () {',
+      '    %1 = "tera.if"(%0) ({',
+      '      tera.yield %0 : tensor<i1>',
       '  }',
       '}',
     ].join('\n');
@@ -450,5 +453,280 @@ describe('IR after the graph pipeline has rewritten it round-trips', () => {
       expect(copy.arguments.length).toBe(original.arguments.length);
       expect(copy.opsArray().map(o => o.opName)).toEqual(original.opsArray().map(o => o.opName));
     }
+  });
+});
+
+describe('the printed form is the tera dialect', () => {
+  it('prints the ops the dialect defines in their own assembly format', () => {
+    const t = f32([2, 4]);
+    const w = f32([4, 2]);
+    const out = new TensorType([], ScalarType.F32);
+    const func = buildFunction('demo', [t, w], [out], (b, args) => {
+      const dot = b.dot(args[0], args[1], [1], [0]).getResult(0);
+      const relu = b.relu(dot).getResult(0);
+      const seed = b.scalarConstant(0, ScalarType.F32).getResult(0);
+      b.returnOp([b.reduce(relu, seed, [0, 1], 'sum').getResult(0)]);
+    });
+
+    const printed = printModule(moduleOf(func));
+    expect(printed.split('\n')).toEqual([
+      'module @m {',
+      '  func.func @demo(%0: tensor<2x4xf32>, %1: tensor<4x2xf32>) -> (tensor<f32>) {',
+      '    %2 = tera.dot %0, %1 {lhs_batch = array<i64>, lhs_contracting = array<i64: 1>, '
+        + 'rhs_batch = array<i64>, rhs_contracting = array<i64: 0>} : '
+        + '(tensor<2x4xf32>, tensor<4x2xf32>) -> tensor<2x2xf32>',
+      '    %3 = tera.constant dense<0.0> : tensor<f32>',
+      '    %4 = tera.broadcast_in_dim %3 {broadcast_dimensions = array<i64>} : tensor<f32> -> tensor<2x2xf32>',
+      '    %5 = tera.maximum %2, %4 : tensor<2x2xf32>',
+      '    %6 = tera.reduce sum, %5 {dimensions = array<i64: 0, 1>} : tensor<2x2xf32> -> tensor<f32>',
+      '    return %6 : tensor<f32>',
+      '  }',
+      '}',
+    ]);
+
+    const parsed = expectStable(moduleOf(func)).getFunction('demo');
+    const reduce = parsed.findOp(o => o.opName === 'reduce');
+    expect(reduce.numOperands).toBe(2);
+    expect(reduce.numRegions).toBe(1);
+    expect(reduce.getRegion(0).entryBlock.arguments.length).toBe(2);
+    expect(reduce.getOperand(1).definingOp.opName).toBe('constant');
+    expect(reduce.getOperand(1).definingOp.getAttr('value')).toBe(0);
+    expect(verifyFunction(parsed).map(e => e.message)).toEqual([]);
+  });
+
+  it('rebuilds the accumulator seed each reduce needs, in front of it', () => {
+    const t = f32([4]);
+    const out = new TensorType([], ScalarType.F32);
+    const func = buildFunction('twice', [t], [out], (b, args) => {
+      const first = b.reduce(args[0], b.scalarConstant(-Infinity, ScalarType.F32).getResult(0), [0], 'max');
+      const second = b.reduce(args[0], b.scalarConstant(0, ScalarType.F32).getResult(0), [0], 'sum');
+      b.returnOp([b.add(first.getResult(0), second.getResult(0)).getResult(0)]);
+    });
+
+    const printed = printFunction(func);
+    expect(printed).toContain('tera.reduce maximum, %0');
+    expect(printed).toContain('tera.reduce sum, %0');
+    expect(printed).not.toContain('tera.constant');
+
+    const parsed = parseFunction(printed);
+    expect(printFunction(parsed)).toBe(printed);
+    expect(parsed.opsArray().map(o => o.opName)).toEqual(func.opsArray().map(o => o.opName));
+    const seeds = parsed.findOps(o => o.opName === 'constant').map(o => o.getAttr('value'));
+    expect(seeds).toEqual([-Infinity, 0]);
+  });
+
+  it('keeps a seed the dialect cannot imply, and prints that reduce generically', () => {
+    const t = f32([4]);
+    const out = new TensorType([], ScalarType.F32);
+    const func = buildFunction('offset', [t], [out], (b, args) => {
+      const seed = b.scalarConstant(7, ScalarType.F32).getResult(0);
+      b.returnOp([b.reduce(args[0], seed, [0], 'sum').getResult(0)]);
+    });
+
+    const printed = printFunction(func);
+    expect(printed).toContain('"tera.reduce"(');
+    expect(printed).toContain('tera.constant dense<7.0> : tensor<f32>');
+
+    const parsed = parseFunction(printed);
+    expect(printFunction(parsed)).toBe(printed);
+    expect(parsed.findOp(o => o.opName === 'reduce').getOperand(1).definingOp.getAttr('value')).toBe(7);
+  });
+
+  it('spells a boolean tensor the way MLIR does', () => {
+    const t = f32([4]);
+    const pred = new TensorType([4], ScalarType.BOOL);
+    const func = buildFunction('picky', [t, t], [t], (b, args) => {
+      const mask = b.compare(args[0], args[1], 'lt').getResult(0);
+      b.returnOp([b.select(mask, args[0], args[1]).getResult(0)]);
+    });
+
+    const printed = printFunction(func);
+    expect(printed).toContain('tera.compare lt, %0, %1 : tensor<4xf32> -> tensor<4xi1>');
+    expect(printed).toContain('tera.select %2, %0, %1 : tensor<4xi1>, tensor<4xf32>');
+    expect(printed).not.toContain('bool');
+
+    const parsed = parseFunction(printed);
+    expect(printFunction(parsed)).toBe(printed);
+    expect(parsed.findOp(o => o.opName === 'compare').getResult(0).type.equals(pred)).toBe(true);
+  });
+
+  it('falls back to the MLIR generic form for an op the dialect does not define', () => {
+    const t = f32([2, 4]);
+    const func = buildFunction('outside', [t], [t], (b, args) => {
+      b.returnOp([b.softmax(args[0], 1).getResult(0)]);
+    });
+
+    const printed = printFunction(func);
+    expect(printed).toContain('"tera.softmax"(%0) {axis = 1} : (tensor<2x4xf32>) -> tensor<2x4xf32>');
+    expect(printFunction(parseFunction(printed))).toBe(printed);
+  });
+});
+
+describe('every registered op survives the round trip', () => {
+  const ATTR_SAMPLES = {
+    array: [0, 1],
+    number: 1,
+    boolean: true,
+    string: ScalarType.F32,
+    object: f32([2, 2]),
+    any: 0,
+  };
+
+  const usableType = (type) => type instanceof TensorType
+    && type.shape.every(d => Number.isInteger(d) && d >= 0);
+
+  const inferOrDefault = (def, operandTypes, attrs, arity) => {
+    try {
+      const inferred = def.inferResultTypes && def.inferResultTypes(operandTypes, attrs, null);
+      if (inferred && inferred.length === arity && inferred.every(usableType)) return inferred;
+    } catch {
+      return null;
+    }
+    return null;
+  };
+
+  const syntheticOp = (def, operands) => {
+    const attrs = new Map();
+    for (const spec of def.attrs) attrs.set(spec.name, ATTR_SAMPLES[spec.type]);
+    const regions = [];
+    for (let i = 0; i < def.numRegions; i++) {
+      const region = new Region();
+      region.addBlock(new Block([f32([2, 2])]));
+      regions.push(region);
+    }
+    const operandCount = def.numOperands < 0 ? 2 : def.numOperands;
+    const taken = operands.slice(0, operandCount);
+    const arity = def.numResults < 0 ? 1 : def.numResults;
+    const fallback = [];
+    for (let i = 0; i < arity; i++) fallback.push(f32([2, 2]));
+    const results = inferOrDefault(def, taken.map(v => v.type), attrs, arity) || fallback;
+    return new Operation(def.name, taken, results, attrs, regions);
+  };
+
+  it('prints and parses back every op the registry knows', () => {
+    const t = f32([2, 2]);
+    const defs = registry.allOps();
+    expect(defs.length).toBeGreaterThan(60);
+
+    for (const def of defs) {
+      const func = new GraphFunction(`op_${def.name}`, [t, t, t], []);
+      const op = syntheticOp(def, func.args);
+      func.entryBlock.pushOp(op);
+      if (!def.isTerminator) func.entryBlock.pushOp(new Operation('return', [], [], null, []));
+
+      const printed = printFunction(func);
+      const parsed = parseFunction(printed);
+      expect(printFunction(parsed), `${def.name} did not reprint the same`).toBe(printed);
+
+      const copy = parsed.findOp(o => o.opName === def.name);
+      expect(copy, `${def.name} did not survive`).toBeTruthy();
+      expect(copy.numOperands).toBe(op.numOperands);
+      expect(copy.numResults).toBe(op.numResults);
+      expect(copy.numRegions).toBe(op.numRegions);
+      for (const [key, value] of op.attributes) {
+        expect([def.name, key, copy.getAttr(key)]).toEqual([def.name, key, value]);
+      }
+    }
+  });
+});
+
+describe('the spellings MLIR prints and mlfw does not', () => {
+  // mlfw writes one name per result and one scope per function, so none of
+  // these appear in its own output. They all appear in tera-opt's, which is
+  // what the reverse half of the bridge has to read.
+  const parseAndRun = (text) => {
+    const module = parseModule(text);
+    expect(verifyModule(module).map(e => e.message)).toEqual([]);
+    return module;
+  };
+
+  it('reads a result group and the uses that index into it', () => {
+    const module = parseAndRun(`module @m {
+  func.func @grouped(%init: tensor<f32>, %xs: tensor<4xf32>) -> tensor<4xf32> {
+    %0:2 = tera.scan init(%init : tensor<f32>) xs(%xs : tensor<4xf32>) -> (tensor<f32>, tensor<4xf32>) {
+    ^bb0(%acc: tensor<f32>, %x: tensor<f32>):
+      %1 = tera.add %acc, %x : tensor<f32>
+      tera.yield %1, %1 : tensor<f32>, tensor<f32>
+    }
+    return %0#1 : tensor<4xf32>
+  }
+}`);
+    const scan = module.getFunction('grouped').findOp(o => o.opName === 'scan');
+    expect(scan.numResults).toBe(2);
+    const ret = module.getFunction('grouped').getReturnOp();
+    expect(ret.getOperand(0)).toBe(scan.getResult(1));
+  });
+
+  it('gives each region its own value names', () => {
+    // `%arg0` names a different value in each body, which one flat name table
+    // reads as the same value defined twice.
+    const module = parseAndRun(`module @m {
+  func.func @scoped(%p: tensor<i1>, %x: tensor<4xf32>) -> tensor<4xf32> {
+    %0 = tera.if %p, %x : (tensor<i1>, tensor<4xf32>) -> tensor<4xf32> {
+    ^bb0(%arg0: tensor<4xf32>):
+      %1 = tera.mul %arg0, %arg0 : tensor<4xf32>
+      tera.yield %1 : tensor<4xf32>
+    } else {
+    ^bb0(%arg0: tensor<4xf32>):
+      %1 = tera.neg %arg0 : tensor<4xf32>
+      tera.yield %1 : tensor<4xf32>
+    }
+    return %0 : tensor<4xf32>
+  }
+}`);
+    const branch = module.getFunction('scoped').findOp(o => o.opName === 'if');
+    const [thenBlock, elseBlock] = branch.regions.map(r => r.entryBlock);
+    expect(thenBlock.arguments[0]).not.toBe(elseBlock.arguments[0]);
+    expect(thenBlock.opsArray()[0].getOperand(0)).toBe(thenBlock.arguments[0]);
+    expect(elseBlock.opsArray()[0].getOperand(0)).toBe(elseBlock.arguments[0]);
+  });
+
+  it('reads a single result type without parentheses', () => {
+    const module = parseAndRun(`module @m {
+  func.func @bare(%x: tensor<4xf32>) -> tensor<4xf32> {
+    return %x : tensor<4xf32>
+  }
+}`);
+    expect(module.getFunction('bare').outputTypes.length).toBe(1);
+  });
+
+  it('reads an exponent with a negative sign', () => {
+    // mlfw prints small floats the same way -- `String(5e-7)` is `5e-7` -- so
+    // this was its own round trip failing, not only tera-opt's spelling.
+    const module = parseAndRun(`module @m {
+  func.func @small() -> (tensor<f32>) {
+    %0 = tera.constant dense<5.000000e-01> : tensor<f32>
+    return %0 : tensor<f32>
+  }
+}`);
+    const constant = module.getFunction('small').findOp(o => o.opName === 'constant');
+    expect(constant.getAttr('value')).toBe(0.5);
+  });
+
+  it('round-trips a constant whose printed form needs an exponent', () => {
+    const func = buildFunction('tiny', [], [f32([])], (b) => {
+      b.returnOp([b.scalarConstant(5e-7, 'f32').getResult(0)]);
+    });
+    const parsed = expectStable(moduleOf(func)).getFunction('tiny');
+    expect(parsed.findOp(o => o.opName === 'constant').getAttr('value')).toBe(5e-7);
+  });
+});
+
+describe('function attributes survive the round trip', () => {
+  it('prints a true attribute as MLIR\'s unit attribute and reads it back', () => {
+    const t = f32([4]);
+    const func = buildFunction('marked', [t], [t], (b, args) => {
+      b.returnOp([b.neg(args[0]).getResult(0)]);
+    });
+    func.setAttr('tera.differentiable', true);
+    func.setAttr('tera.rank', 2);
+
+    const printed = printModule(moduleOf(func));
+    expect(printed).toContain('attributes {tera.differentiable, tera.rank = 2}');
+
+    const parsed = parseModule(printed).getFunction('marked');
+    expect(parsed.getAttr('tera.differentiable')).toBe(true);
+    expect(parsed.getAttr('tera.rank')).toBe(2);
+    expect(printModule(moduleOf(parsed))).toBe(printed);
   });
 });

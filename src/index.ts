@@ -29,6 +29,11 @@ export { SymbolicTensor } from './tracing/symbolic_tensor.js';
 export { TraceLevel } from './compiler/support/trace.js';
 export { printModule, printFunction } from './compiler/ir/graph/printer.js';
 export { parseModule, parseFunction, IRParseError } from './compiler/ir/graph/parser.js';
+export { ExplicitBroadcastPass } from './compiler/passes/normalize/explicit_broadcast.js';
+export { IsolateRegionsPass } from './compiler/passes/normalize/isolate_regions.js';
+export { MaterializeShapesPass } from './compiler/passes/normalize/materialize_shapes.js';
+export { ShapeRefinementPass } from './compiler/passes/normalize/refine_shapes.js';
+export { DecompositionPass } from './compiler/passes/decompose/decomposition_pass.js';
 export {
   LocationKind, FileLocation, NameLocation, CallSiteLocation, FusedLocation,
   fileLocation, nameLocation, callSiteLocation, fuseLocations,
@@ -111,8 +116,11 @@ export * as optim from './optim/index.js';
 
 export { trace, compile } from './tracing/compile.js';
 export { scan } from './tracing/scan.js';
+export { cond } from './tracing/cond.js';
 export { compileWithBackward } from './tracing/compile_backward.js';
 export { CPUTarget, CUDATarget, WasmTarget, WebGPUTarget } from './compiler/support/target.js';
+export { TeracTarget, TeracRuntimeModule, emitTeraModule } from './backend/terac/index.js';
+export type { TeracTargetOptions } from './backend/terac/index.js';
 
 export {
   LightningModule, Trainer, Callback,

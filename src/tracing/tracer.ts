@@ -117,32 +117,91 @@ export class Tracer {
     return results.length === 1 ? results[0] : results;
   }
 
-  scan(
-    xsValues: readonly TensorOutput[],
-    carryValues: readonly TensorOutput[],
-    stepFn: (carry: SymbolicTensor[], xs: SymbolicTensor[]) => [SymbolicTensor[], SymbolicTensor[]]
-  ): [SymbolicTensor[], SymbolicTensor[]] {
+  private _symShapeOf(value: TensorOutput): SymbolicShape {
+    return value instanceof SymbolicTensor
+      ? value.symbolicShape
+      : [...value.shape] as unknown as SymbolicShape;
+  }
+
+  private _regionResult(rv: IRValueLike, symbolicShape: SymbolicShape): SymbolicTensor {
+    rv.symbolicShape = symbolicShape;
+    return new SymbolicTensor(rv, rv.type.shape as readonly number[], rv.type.dtype, this, symbolicShape);
+  }
+
+  cond(
+    predicate: TensorOutput,
+    onTrue: () => TensorOutput | TensorOutput[],
+    onFalse: () => TensorOutput | TensorOutput[]
+  ): TensorOutput | TensorOutput[] {
     const toIr = (s: TensorOutput) => s instanceof SymbolicTensor ? s.irValue : this.captureConstant(s).irValue;
-    const xsIr = xsValues.map(toIr);
-    const carryIr = carryValues.map(toIr);
     const builder = this._requireBuilder();
-    const op = builder.scanOp(xsIr, carryIr, (bb: IRBuilderLike, xtArgs: IRValueLike[], carryArgs: IRValueLike[]) => {
+    let manyResults = false;
+    let yieldedSymShapes: SymbolicShape[] = [];
+    const branch = (body: () => TensorOutput | TensorOutput[], recordShapes: boolean) => (bb: IRBuilderLike) => {
       const saved = this._requireBuilder();
       this._builder = bb;
       try {
-        const wrap = (v: IRValueLike) => new SymbolicTensor(v, v.type.shape as readonly number[], v.type.dtype, this, [...v.type.shape]);
-        const [newCarry, ys] = stepFn(carryArgs.map(wrap), xtArgs.map(wrap));
+        const yielded = body();
+        const isArray = Array.isArray(yielded);
+        const values = isArray ? yielded as TensorOutput[] : [yielded as TensorOutput];
+        if (recordShapes) {
+          manyResults = isArray;
+          yieldedSymShapes = values.map((v) => this._symShapeOf(v));
+        } else if (manyResults !== isArray || values.length !== yieldedSymShapes.length) {
+          throw new Error('cond branches must return the same tensor structure');
+        }
+        bb.yieldOp(values.map(toIr));
+      } finally {
+        this._builder = saved;
+      }
+    };
+    const op = builder.ifOp(toIr(predicate), null, branch(onTrue, true), branch(onFalse, false));
+    const results: SymbolicTensor[] = [];
+    for (let i = 0; i < op.numResults; i++) {
+      results.push(this._regionResult(op.getResult(i), yieldedSymShapes[i]));
+    }
+    return manyResults ? results : results[0];
+  }
+
+  scan(
+    carryValues: readonly TensorOutput[],
+    xsValues: readonly TensorOutput[],
+    stepFn: (carry: SymbolicTensor[], xs: SymbolicTensor[]) => [SymbolicTensor[], SymbolicTensor[]]
+  ): [SymbolicTensor[], SymbolicTensor[]] {
+    const toIr = (s: TensorOutput) => s instanceof SymbolicTensor ? s.irValue : this.captureConstant(s).irValue;
+    const carryIr = carryValues.map(toIr);
+    const xsIr = xsValues.map(toIr);
+    const carrySymShapes = carryValues.map((v) => this._symShapeOf(v));
+    const stepSymShapes = xsValues.map((v) => this._symShapeOf(v).slice(1));
+    const builder = this._requireBuilder();
+    let carryOutSymShapes: SymbolicShape[] = carrySymShapes;
+    let ysStepSymShapes: SymbolicShape[] = [];
+    const op = builder.scanOp(carryIr, xsIr, (bb: IRBuilderLike, carryArgs: IRValueLike[], xtArgs: IRValueLike[]) => {
+      const saved = this._requireBuilder();
+      this._builder = bb;
+      try {
+        const wrap = (v: IRValueLike, symbolicShape: SymbolicShape) => {
+          v.symbolicShape = symbolicShape;
+          return new SymbolicTensor(v, v.type.shape as readonly number[], v.type.dtype, this, symbolicShape);
+        };
+        const [newCarry, ys] = stepFn(
+          carryArgs.map((v, i) => wrap(v, carrySymShapes[i])),
+          xtArgs.map((v, i) => wrap(v, stepSymShapes[i])));
+        carryOutSymShapes = newCarry.map((s) => s.symbolicShape);
+        ysStepSymShapes = ys.map((s) => s.symbolicShape);
         return [newCarry.map(s => s.irValue), ys.map(s => s.irValue)];
       } finally {
         this._builder = saved;
       }
     });
+    const steps = this._symShapeOf(xsValues[0])[0];
     const numCarry = carryValues.length;
     const carryOut = [];
     const ysOut = [];
     for (let i = 0; i < op.numResults; i++) {
-      const rv = op.getResult(i);
-      const sym = new SymbolicTensor(rv, rv.type.shape as readonly number[], rv.type.dtype, this, [...rv.type.shape]);
+      const sym = i < numCarry
+        ? this._regionResult(op.getResult(i), carryOutSymShapes[i])
+        : this._regionResult(op.getResult(i), [steps, ...ysStepSymShapes[i - numCarry]]);
       if (i < numCarry) carryOut.push(sym); else ysOut.push(sym);
     }
     return [carryOut, ysOut];
@@ -154,7 +213,9 @@ export class Tracer {
 
     if (tensor.shape.length === 0 && tensor.data) {
       const value = tensor.data[0];
-      const op = this._requireBuilder().scalarConstant(value, tensor.dtype);
+      const constants = new IRBuilder(this._requireFunc() as unknown as GraphFunction);
+      constants.setInsertionPoint(constants.block.firstOp);
+      const op = (constants as unknown as IRBuilderLike).scalarConstant(value, tensor.dtype);
       const irValue = op.getResult(0);
       const sym = new SymbolicTensor(irValue, [], tensor.dtype, this, []);
       this._capturedParams.set(tensor, sym);

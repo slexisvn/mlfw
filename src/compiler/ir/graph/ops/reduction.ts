@@ -5,7 +5,15 @@ import { LayoutPreference } from '../layout_pref.js';
 import type { Operation } from '../operation.js';
 import type { IRType } from '../types.js';
 
-const VALID_REDUCE_TYPES = new Set(['sum', 'max', 'min', 'prod', 'mean', 'and', 'or']);
+const REDUCE_IDENTITIES: Readonly<Record<string, number>> = {
+  sum: 0, mean: 0, or: 0, prod: 1, and: 1, max: -Infinity, min: Infinity
+};
+
+const VALID_REDUCE_TYPES = new Set(Object.keys(REDUCE_IDENTITIES));
+
+export function reduceIdentity(reduceType: string): number | undefined {
+  return REDUCE_IDENTITIES[reduceType];
+}
 
 function reduceLayout(op: Operation): LayoutPreference | null {
   const outType = op.getResult(0).type as TensorType;

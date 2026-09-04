@@ -238,13 +238,12 @@ node docs/part2/ch09-object-model/labs/02-what-a-region-sees.mjs
 The lab compiles the running example, grabs the post-fusion graph, and inspects the `fusion` operation:
 
 ```
-    %7 = fusion(%5, %2, %6) {fusion_kind = "kElementwise"} : tensor<2x8xf32>
-    {
-      ^bb(%8: tensor<2x8xf32>, %9: tensor<8xf32>, %10: tensor<2x8xf32>):
-      %11 = add(%8, %9) : tensor<2x8xf32>
-      %12 = maximum(%11, %10) : tensor<2x8xf32>
-      yield(%12)
-    }
+    %7 = "tera.fusion"(%5, %2, %6) ({
+      ^bb0(%8: tensor<2x8xf32>, %9: tensor<8xf32>, %10: tensor<2x8xf32>):
+        %11 = "tera.add"(%8, %9) : (tensor<2x8xf32>, tensor<8xf32>) -> tensor<2x8xf32>
+        %12 = tera.maximum %11, %10 : tensor<2x8xf32>
+        tera.yield %12 : tensor<2x8xf32>
+    }) {fusion_kind = "kElementwise"} : (tensor<2x8xf32>, tensor<8xf32>, tensor<2x8xf32>) -> tensor<2x8xf32>
 ```
 
 ```

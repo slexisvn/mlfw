@@ -208,16 +208,17 @@ The running example, traced:
   captured tensors 8x16, 16, 16x4, 4
   function arity   5 = 1 user + 4 captured
 
-  func @mlp(%0: tensor<2x8xf32>, %1: tensor<8x16xf32>, %2: tensor<16xf32>, %3: tensor<16x4xf32>, %4: tensor<4xf32>) -> (tensor<2x4xf32>) {
-    %5 = dot(%0, %1) {lhs_batch = [], lhs_contracting = [1], rhs_batch = [], rhs_contracting = [0]} : tensor<2x16xf32>
-    %6 = add(%5, %2) : tensor<2x16xf32>
-    %7 = constant() {tensor_type = tensor<f32>, value = 0} : tensor<f32>
-    %8 = broadcast_in_dim(%7) {broadcast_dimensions = [], result_shape = [2, 16]} : tensor<2x16xf32>
-    %9 = maximum(%6, %8) : tensor<2x16xf32>
-    %10 = dot(%9, %3) {lhs_batch = [], lhs_contracting = [1], rhs_batch = [], rhs_contracting = [0]} : tensor<2x4xf32>
-    %11 = add(%10, %4) : tensor<2x4xf32>
-    return(%11)
+  func.func @mlp(%0: tensor<2x8xf32>, %1: tensor<8x16xf32>, %2: tensor<16xf32>, %3: tensor<16x4xf32>, %4: tensor<4xf32>) -> (tensor<2x4xf32>) {
+    %5 = tera.dot %0, %1 {lhs_batch = array<i64>, lhs_contracting = array<i64: 1>, rhs_batch = array<i64>, rhs_contracting = array<i64: 0>} : (tensor<2x8xf32>, tensor<8x16xf32>) -> tensor<2x16xf32>
+    %6 = "tera.add"(%5, %2) : (tensor<2x16xf32>, tensor<16xf32>) -> tensor<2x16xf32>
+    %7 = tera.constant dense<0.0> : tensor<f32>
+    %8 = tera.broadcast_in_dim %7 {broadcast_dimensions = array<i64>} : tensor<f32> -> tensor<2x16xf32>
+    %9 = tera.maximum %6, %8 : tensor<2x16xf32>
+    %10 = tera.dot %9, %3 {lhs_batch = array<i64>, lhs_contracting = array<i64: 1>, rhs_batch = array<i64>, rhs_contracting = array<i64: 0>} : (tensor<2x16xf32>, tensor<16x4xf32>) -> tensor<2x4xf32>
+    %11 = "tera.add"(%10, %4) : (tensor<2x4xf32>, tensor<4xf32>) -> tensor<2x4xf32>
+    return %11 : tensor<2x4xf32>
   }
+
 ```
 
 This is the picture [Chapter 1](../../part0/ch01-what-this-book-is/README.md) promised and every part since has transformed. Two things in it are the tracer's doing rather than the user's. Four closure variables became parameters `%1`–`%4`. And `relu` is not there: it decomposed into a zero constant, a broadcast and a `maximum`, because the eager `relu` is written that way and the trace records what dispatched.

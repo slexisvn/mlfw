@@ -226,15 +226,15 @@ and eight come out:
 
 ```
 module @Wasteful {
-  func @Wasteful(%0: tensor<2x2xf32>) -> (tensor<2x2xf32>) {
-    %1 = constant() {tensor_type = tensor<f32>, value = 2} : tensor<f32>
-    %2 = mul(%0, %1) : tensor<2x2xf32>
-    %3 = constant() {tensor_type = tensor<f32>, value = 1} : tensor<f32>
-    %4 = add(%2, %3) : tensor<2x2xf32>
-    %5 = constant() {tensor_type = tensor<2x2xf32>, value = 0} : tensor<2x2xf32>
-    %6 = maximum(%4, %5) : tensor<2x2xf32>
-    %7 = add(%6, %6) : tensor<2x2xf32>
-    return(%7)
+  func.func @Wasteful(%0: tensor<2x2xf32>) -> (tensor<2x2xf32>) {
+    %1 = tera.constant dense<2.0> : tensor<f32>
+    %2 = "tera.mul"(%0, %1) : (tensor<2x2xf32>, tensor<f32>) -> tensor<2x2xf32>
+    %3 = tera.constant dense<1.0> : tensor<f32>
+    %4 = "tera.add"(%2, %3) : (tensor<2x2xf32>, tensor<f32>) -> tensor<2x2xf32>
+    %5 = tera.constant dense<0.0> : tensor<2x2xf32>
+    %6 = tera.maximum %4, %5 : tensor<2x2xf32>
+    %7 = tera.add %6, %6 : tensor<2x2xf32>
+    return %7 : tensor<2x2xf32>
   }
 }
 ```
@@ -271,10 +271,10 @@ class DeadPureChain extends Module {
 traced: exp, log, constant, mul, constant, add, constant, add, return
 dce erased 6 operation(s)
 module @DeadPureChain {
-  func @DeadPureChain(%0: tensor<2x2xf32>) -> (tensor<2x2xf32>) {
-    %1 = constant() {tensor_type = tensor<f32>, value = 1} : tensor<f32>
-    %2 = add(%0, %1) : tensor<2x2xf32>
-    return(%2)
+  func.func @DeadPureChain(%0: tensor<2x2xf32>) -> (tensor<2x2xf32>) {
+    %1 = tera.constant dense<1.0> : tensor<f32>
+    %2 = "tera.add"(%0, %1) : (tensor<2x2xf32>, tensor<f32>) -> tensor<2x2xf32>
+    return %2 : tensor<2x2xf32>
   }
 }
 ```

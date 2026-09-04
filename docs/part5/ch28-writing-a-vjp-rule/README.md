@@ -195,25 +195,23 @@ Six operations, each differentiated on its own with fusion switched off so the e
 
 ```
 === d/dx  exp ===
-  forward  @Object(%0: tensor<1x2xf32>) -> (tensor<f32>) {
-  backward @backward_Object(%0: tensor<f32>, %1: tensor<1x2xf32>, %2: tensor<f32>) -> (tensor<1x2xf32>) {
-    %3 = exp(%1) : tensor<1x2xf32>
-    %4 = reshape(%0) {new_shape = [1, 1]} : tensor<1x1xf32>
-    %5 = broadcast_in_dim(%4) {broadcast_dimensions = [0, 1], result_shape = [1, 2]} : tensor<1x2xf32>
-    %6 = mul(%5, %3) : tensor<1x2xf32>
-    return(%6)
+  forward  func.func @Object(%0: tensor<1x2xf32>) -> (tensor<f32>) {
+  backward func.func @backward_Object(%0: tensor<f32>, %1: tensor<1x2xf32>, %2: tensor<f32>) -> (tensor<1x2xf32>) {
+    %3 = tera.exp %1 : tensor<1x2xf32>
+    %4 = tera.reshape %0 : tensor<f32> -> tensor<1x1xf32>
+    %5 = tera.broadcast_in_dim %4 {broadcast_dimensions = array<i64: 0, 1>} : tensor<1x1xf32> -> tensor<1x2xf32>
+    %6 = tera.mul %5, %3 : tensor<1x2xf32>
   grad at x = [0.5, 2.0]: [1.6487212181091309,7.389056205749512]
 
 === d/dx  log ===
-  backward @backward_Object(%0: tensor<f32>, %1: tensor<1x2xf32>, %2: tensor<f32>) -> (tensor<1x2xf32>) {
-    %3 = reshape(%0) {new_shape = [1, 1]} : tensor<1x1xf32>
-    %4 = broadcast_in_dim(%3) {broadcast_dimensions = [0, 1], result_shape = [1, 2]} : tensor<1x2xf32>
-    %5 = div(%4, %1) : tensor<1x2xf32>
-    return(%5)
+  backward func.func @backward_Object(%0: tensor<f32>, %1: tensor<1x2xf32>, %2: tensor<f32>) -> (tensor<1x2xf32>) {
+    %3 = tera.reshape %0 : tensor<f32> -> tensor<1x1xf32>
+    %4 = tera.broadcast_in_dim %3 {broadcast_dimensions = array<i64: 0, 1>} : tensor<1x1xf32> -> tensor<1x2xf32>
+    %5 = tera.div %4, %1 : tensor<1x2xf32>
   grad at x = [0.5, 2.0]: [2,0.5]
 ```
 
-Read `exp` first. The rule asked for `ctx.results[0]` — and the backward function *does not receive it*. Instead the first line of the body is `%3 = exp(%1)`: the value was **recomputed from the saved input** rather than saved. That is the remat policy of Chapter 30 making a decision on the reader's behalf, and it is why `exp` and `log` end up with the same three-argument signature despite reading different things.
+Read `exp` first. The rule asked for `ctx.results[0]` — and the backward function *does not receive it*. Instead the first line of the body is `%3 = tera.exp %1`: the value was **recomputed from the saved input** rather than saved. That is the remat policy of Chapter 30 making a decision on the reader's behalf, and it is why `exp` and `log` end up with the same three-argument signature despite reading different things.
 
 > **Which means `ctx` is not a request, and reading it is not what decides the saved set.** The natural reading of the three rule shapes above is that a rule *declares its dependencies* — `add` touches neither list so nothing is saved, `mul` touches `operands` so the operands are saved, `exp` touches `results` so the result is saved. That is a good way to *write* a rule and it is not how the builder works. Every operand and every result is resolved before the rule is called at all ([`backward_builder.ts:73`](../../../src/compiler/ad/backward_builder.ts)):
 >
@@ -241,12 +239,12 @@ Read `exp` first. The rule asked for `ctx.results[0]` — and the backward funct
 
 ```
 === d/dx  tanh ===
-    %3 = tanh(%1) : tensor<1x2xf32>
+    %3 = "tera.tanh"(%1) : (tensor<1x2xf32>) -> tensor<1x2xf32>
     ...
-    %6 = mul(%3, %3) : tensor<1x2xf32>
-    %7 = constant() {tensor_type = tensor<1x2xf32>, value = 1} : tensor<1x2xf32>
-    %8 = sub(%7, %6) : tensor<1x2xf32>
-    %9 = mul(%5, %8) : tensor<1x2xf32>
+    %6 = tera.mul %3, %3 : tensor<1x2xf32>
+    %7 = tera.constant dense<1.0> : tensor<1x2xf32>
+    %8 = tera.sub %7, %6 : tensor<1x2xf32>
+    %9 = tera.mul %5, %8 : tensor<1x2xf32>
 ```
 
 `1 − y²`, written with the `full(1, …)` helper, then multiplied by the incoming gradient. Four operations for one derivative, all of them elementwise and all of them fusible — which is why the chapter can afford to switch fusion off for legibility and the real pipeline can afford the rule.
@@ -255,11 +253,11 @@ Two more are worth reading carefully.
 
 ```
 === d/dx  relu  (traces to maximum) ===
-  forward  @Object(%0: tensor<1x2xf32>) -> (tensor<f32>, tensor<1x2xf32>) {
-  backward @backward_Object(%0: tensor<f32>, %1: tensor<1x2xf32>, %2: tensor<1x2xf32>, %3: tensor<f32>) -> (tensor<1x2xf32>) {
+  forward  func.func @Object(%0: tensor<1x2xf32>) -> (tensor<f32>, tensor<1x2xf32>) {
+  backward func.func @backward_Object(%0: tensor<f32>, %1: tensor<1x2xf32>, %2: tensor<1x2xf32>, %3: tensor<f32>) -> (tensor<1x2xf32>) {
     ...
-    %7 = compare(%2, %1) {direction = "ge"} : tensor<1x2xbool>
-    %8 = select(%7, %5, %6) : tensor<1x2xf32>
+    %7 = tera.compare ge, %2, %1 : tensor<1x2xf32> -> tensor<1x2xi1>
+    %8 = tera.select %7, %5, %6 : tensor<1x2xi1>, tensor<1x2xf32>
 ```
 
 **The rule that fired is not the one named `relu`.** `x.relu()` traces to `maximum(x, zeros)` (Part II), so the differentiator reached `maximum`'s rule ([`arithmetic.ts:26`](../../../src/compiler/ad/vjp_rules/arithmetic.ts)) — a comparison and a `select`, routing the gradient to whichever operand won. `relu` has a rule of its own ([`unary.ts:41`](../../../src/compiler/ad/vjp_rules/unary.ts)) and it never fires on this path. This is Chapter 21's lesson arriving from the other side: **a rule is keyed to the operation in the graph, not to the method the user called**, and the set of rules that ever run is decided by what tracing and decomposition leave behind.
@@ -268,8 +266,8 @@ Note also the forward signature: `-> (tensor<f32>, tensor<1x2xf32>)`. The forwar
 
 ```
 === d/dx  mul(x, x) ===
-    %5 = mul(%4, %1) : tensor<1x2xf32>
-    %6 = add(%5, %5) : tensor<1x2xf32>
+    %5 = tera.mul %4, %1 : tensor<1x2xf32>
+    %6 = tera.add %5, %5 : tensor<1x2xf32>
   grad at x = [0.5, 2.0]: [1,4]
 ```
 
@@ -287,19 +285,17 @@ node docs/part5/ch28-writing-a-vjp-rule/labs/02-the-shape-fix-up.mjs
 
 ```
 === backward ===
-  func @backward_Object(%0: tensor<f32>, %1: tensor<2x3xf32>, %2: tensor<3xf32>, %3: tensor<2x3xf32>, %4: tensor<f32>) -> (tensor<2x3xf32>, tensor<3xf32>) {
-  %5 = constant() {tensor_type = tensor<f32>, value = 0} : tensor<f32>
-  %6 = reshape(%0) {new_shape = [1, 1]} : tensor<1x1xf32>
-  %7 = broadcast_in_dim(%6) {broadcast_dimensions = [0, 1], result_shape = [2, 3]} : tensor<2x3xf32>
-  %8 = reduce(%7, %5) {dimensions = [0], reduce_type = "sum"} : tensor<3xf32>
-  return(%7, %8)
+  func.func @backward_Object(%0: tensor<f32>, %1: tensor<2x3xf32>, %2: tensor<3xf32>, %3: tensor<2x3xf32>, %4: tensor<f32>) -> (tensor<2x3xf32>, tensor<3xf32>) {
+  %5 = tera.reshape %0 : tensor<f32> -> tensor<1x1xf32>
+  %6 = tera.broadcast_in_dim %5 {broadcast_dimensions = array<i64: 0, 1>} : tensor<1x1xf32> -> tensor<2x3xf32>
+  %7 = tera.reduce sum, %6 {dimensions = array<i64: 0>} : tensor<2x3xf32> -> tensor<3xf32>
 
 === the two gradients ===
   d/dx shape [2,3]  = [[1,1,1],[1,1,1]]
   d/db shape [3]  = [2,2,2]
 ```
 
-One value, `%7`, returned twice — once as itself and once through `%8 = reduce(%7, dimensions = [0], sum)`. That `reduce` appears in no rule. `add`'s rule is two lines and returns `[grad, grad]`; the sum was inserted by `reduceGradToOperandShape` because the second operand's shape is `[3]` and the gradient's is `[2, 3]`.
+One value, `%6`, returned twice — once as itself and once through `%7 = tera.reduce sum, %6 {dimensions = array<i64: 0>}`. That `reduce` appears in no rule. `add`'s rule is two lines and returns `[grad, grad]`; the sum was inserted by `reduceGradToOperandShape` because the second operand's shape is `[3]` and the gradient's is `[2, 3]`.
 
 And the numbers say what the sum means. Each element of `b` was copied into two rows of the result, so each element of `b` influences the loss twice as much as each element of `x` does — `d/db = 2` against `d/dx = 1`. **The adjoint of a copy is a sum**, and if the driver did not insert it, `d/db` would be the right shape only by accident and the wrong magnitude always.
 

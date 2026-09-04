@@ -1,13 +1,13 @@
 import { readdirSync, existsSync } from 'fs';
-import { join, delimiter } from 'path';
+import { join } from 'path';
+
+import { SEARCH_ENV, prependSearchPath } from '../search_path.js';
 
 type LibVariant = { pattern: RegExp; fallback: string; extraDirs?: () => string[] };
 
 export type LibSpec = { win: LibVariant; linux: LibVariant };
 
 const isWin = process.platform === 'win32';
-
-const SEARCH_ENV = isWin ? 'PATH' : 'LD_LIBRARY_PATH';
 
 function envRoots(): string[] {
   const roots: string[] = [];
@@ -55,13 +55,6 @@ function compareVersion(a: string, b: string): number {
     if (d !== 0) return d;
   }
   return 0;
-}
-
-function prependSearchPath(dir: string): void {
-  const cur = process.env[SEARCH_ENV] || '';
-  if (!cur.split(delimiter).includes(dir)) {
-    process.env[SEARCH_ENV] = cur ? dir + delimiter + cur : dir;
-  }
 }
 
 export function loadCudaLib(spec: LibSpec): string {

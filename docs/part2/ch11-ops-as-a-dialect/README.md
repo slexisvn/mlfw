@@ -205,26 +205,26 @@ The lab writes the same shape of program twice, once with `add` and once with `s
 ```
 === add(a, b) and add(b, a) ===
 module @traced {
-  func @traced(%0: tensor<2x2xf32>, %1: tensor<2x2xf32>) -> (tensor<2x2xf32>) {
-    %2 = add(%0, %1) : tensor<2x2xf32>
-    %3 = add(%1, %0) : tensor<2x2xf32>
-    %4 = mul(%2, %3) : tensor<2x2xf32>
-    return(%4)
+  func.func @traced(%0: tensor<2x2xf32>, %1: tensor<2x2xf32>) -> (tensor<2x2xf32>) {
+    %2 = tera.add %0, %1 : tensor<2x2xf32>
+    %3 = tera.add %1, %0 : tensor<2x2xf32>
+    %4 = tera.mul %2, %3 : tensor<2x2xf32>
+    return %4 : tensor<2x2xf32>
   }
 }
 passes that changed something: cse: 4 -> 3, PriorityFusionPass: 3 -> 2
 module @Commutative {
-  func @Commutative(%0: tensor<2x2xf32>, %1: tensor<2x2xf32>) -> (tensor<2x2xf32>) {
-    %2 = fusion(%0, %1) {fusion_kind = "kElementwise"} : tensor<2x2xf32>
-    {
-      ^bb(%3: tensor<2x2xf32>, %4: tensor<2x2xf32>):
-      %5 = add(%3, %4) : tensor<2x2xf32>
-      %6 = mul(%5, %5) : tensor<2x2xf32>
-      yield(%6)
-    }
-    return(%2)
+  func.func @Commutative(%0: tensor<2x2xf32>, %1: tensor<2x2xf32>) -> (tensor<2x2xf32>) {
+    %2 = "tera.fusion"(%0, %1) ({
+      ^bb0(%3: tensor<2x2xf32>, %4: tensor<2x2xf32>):
+        %5 = tera.add %3, %4 : tensor<2x2xf32>
+        %6 = tera.mul %5, %5 : tensor<2x2xf32>
+        tera.yield %6 : tensor<2x2xf32>
+    }) {fusion_kind = "kElementwise"} : (tensor<2x2xf32>, tensor<2x2xf32>) -> tensor<2x2xf32>
+    return %2 : tensor<2x2xf32>
   }
 }
+
 ```
 
 Two `add`s went in; one came out. Look at the fused body: `mul(%5, %5)` — the same value, used twice. CSE recognized `add(%0, %1)` and `add(%1, %0)` as the same computation and rewired the second's users onto the first, using the `replaceAllUsesWith` from Chapter 8.
@@ -235,16 +235,15 @@ Now the counterexample, which is the half that proves the mechanism is real:
 === sub(a, b) and sub(b, a) ===
 passes that changed something: PriorityFusionPass: 4 -> 2
 module @NotCommutative {
-  func @NotCommutative(%0: tensor<2x2xf32>, %1: tensor<2x2xf32>) -> (tensor<2x2xf32>) {
-    %2 = fusion(%0, %1) {fusion_kind = "kElementwise"} : tensor<2x2xf32>
-    {
-      ^bb(%3: tensor<2x2xf32>, %4: tensor<2x2xf32>):
-      %5 = sub(%3, %4) : tensor<2x2xf32>
-      %6 = sub(%4, %3) : tensor<2x2xf32>
-      %7 = mul(%5, %6) : tensor<2x2xf32>
-      yield(%7)
-    }
-    return(%2)
+  func.func @NotCommutative(%0: tensor<2x2xf32>, %1: tensor<2x2xf32>) -> (tensor<2x2xf32>) {
+    %2 = "tera.fusion"(%0, %1) ({
+      ^bb0(%3: tensor<2x2xf32>, %4: tensor<2x2xf32>):
+        %5 = tera.sub %3, %4 : tensor<2x2xf32>
+        %6 = tera.sub %4, %3 : tensor<2x2xf32>
+        %7 = tera.mul %5, %6 : tensor<2x2xf32>
+        tera.yield %7 : tensor<2x2xf32>
+    }) {fusion_kind = "kElementwise"} : (tensor<2x2xf32>, tensor<2x2xf32>) -> tensor<2x2xf32>
+    return %2 : tensor<2x2xf32>
   }
 }
 ```
@@ -285,19 +284,19 @@ node docs/part2/ch11-ops-as-a-dialect/labs/02-fold-and-canonicalize.mjs
 
 ```
 traced:
-    %1 = constant() {tensor_type = tensor<f32>, value = 0} : tensor<f32>
-    %2 = add(%0, %1) : tensor<2x2xf32>
-    %3 = constant() {tensor_type = tensor<f32>, value = 1} : tensor<f32>
-    %4 = mul(%2, %3) : tensor<2x2xf32>
-    return(%4)
+    %1 = tera.constant dense<0.0> : tensor<f32>
+    %2 = "tera.add"(%0, %1) : (tensor<2x2xf32>, tensor<f32>) -> tensor<2x2xf32>
+    %3 = tera.constant dense<1.0> : tensor<f32>
+    %4 = "tera.mul"(%2, %3) : (tensor<2x2xf32>, tensor<f32>) -> tensor<2x2xf32>
+    return %4 : tensor<2x2xf32>
 
 passes: canonicalize: 5 -> 4, dce: 4 -> 3
 after graph passes:
 module @Identity {
-  func @Identity(%0: tensor<2x2xf32>) -> (tensor<2x2xf32>) {
-    %1 = constant() {tensor_type = tensor<f32>, value = 0} : tensor<f32>
-    %2 = add(%0, %1) : tensor<2x2xf32>
-    return(%2)
+  func.func @Identity(%0: tensor<2x2xf32>) -> (tensor<2x2xf32>) {
+    %1 = tera.constant dense<0.0> : tensor<f32>
+    %2 = "tera.add"(%0, %1) : (tensor<2x2xf32>, tensor<f32>) -> tensor<2x2xf32>
+    return %2 : tensor<2x2xf32>
   }
 }
 ```
@@ -308,18 +307,18 @@ That asymmetry is the whole point of the example, and it is not about traits. Bo
 
 Chapter 20 is where that distinction gets its name and its four counterexamples. What Chapter 11 shows is the mechanism underneath it: a canonicalization pattern is not a syntactic rewrite that always applies, it is a rewrite *plus a condition*, and the condition can consult the type the registry attached to the value. Change the dtype to an integer and the same `AddZero` fires, because two's complement has one zero.
 
-**Try this.** Re-run the lab with `optimization: { fastMath: true }` in the compile options and watch the graph collapse to `return(%0)` — that is the licence being granted, nine chapters early.
+**Try this.** Re-run the lab with `optimization: { fastMath: true }` in the compile options and watch the graph collapse to `return %0` — that is the licence being granted, nine chapters early.
 
 **Second, the transpose you have been watching since Chapter 1.** A `Linear` layer traces as `transpose` then `dot`:
 
 ```
 traced:
-    %3 = transpose(%1) {permutation = [1, 0]} : tensor<2x3xf32>
-    %4 = dot(%0, %3) {lhs_batch = [], lhs_contracting = [1], rhs_batch = [], rhs_contracting = [0]} : tensor<2x3xf32>
+    %3 = tera.transpose %1 {permutation = array<i64: 1, 0>} : tensor<3x2xf32> -> tensor<2x3xf32>
+    %4 = tera.dot %0, %3 {lhs_batch = array<i64>, lhs_contracting = array<i64: 1>, rhs_batch = array<i64>, rhs_contracting = array<i64: 0>} : (tensor<2x2xf32>, tensor<2x3xf32>) -> tensor<2x3xf32>
 
 passes: canonicalize: 4 -> 4, dce: 4 -> 3
 after graph passes:
-    %3 = dot(%0, %1) {lhs_batch = [], lhs_contracting = [1], rhs_batch = [], rhs_contracting = [1]} : tensor<2x3xf32>
+    %3 = tera.dot %0, %1 {lhs_batch = array<i64>, lhs_contracting = array<i64: 1>, rhs_batch = array<i64>, rhs_contracting = array<i64: 1>} : (tensor<2x2xf32>, tensor<3x2xf32>) -> tensor<2x3xf32>
 ```
 
 `rhs_contracting` went from `[0]` to `[1]` and the `transpose` disappeared. The pattern did not delete anything — note `canonicalize: 4 -> 4` — it rewrote one attribute so that the `dot` reads the untransposed weight along the other axis, leaving the `transpose` with no users for DCE to collect.
@@ -330,10 +329,10 @@ This is the concrete answer to a question Chapter 2 raised and deferred: *why is
 
 ```
 traced:
-    %1 = constant() {tensor_type = tensor<f32>, value = 6} : tensor<f32>
-    %2 = mul(%0, %1) : tensor<2x2xf32>
-    %3 = constant() {tensor_type = tensor<f32>, value = 6} : tensor<f32>
-    %4 = add(%2, %3) : tensor<2x2xf32>
+    %1 = tera.constant dense<6.0> : tensor<f32>
+    %2 = "tera.mul"(%0, %1) : (tensor<2x2xf32>, tensor<f32>) -> tensor<2x2xf32>
+    %3 = tera.constant dense<6.0> : tensor<f32>
+    %4 = "tera.add"(%2, %3) : (tensor<2x2xf32>, tensor<f32>) -> tensor<2x2xf32>
 
 passes: cse: 5 -> 4, PriorityFusionPass: 4 -> 3
 ```

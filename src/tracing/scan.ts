@@ -45,6 +45,6 @@ export function scan(fn: ScanFn, initCarry: StepValue, xs: StepValue): [StepValu
       (yIsArr ? y : [y]) as TensorOutput[],
     ];
   };
-  const [finalCarryArr, ysArr] = tracer.scan(xsArr, carryArr, step as Parameters<typeof tracer.scan>[2]);
+  const [finalCarryArr, ysArr] = tracer.scan(carryArr, xsArr, step as Parameters<typeof tracer.scan>[2]);
   return [carryIsArr ? finalCarryArr : finalCarryArr[0], yIsArr ? ysArr : ysArr[0]];
 }

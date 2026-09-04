@@ -176,13 +176,13 @@ A view reshapes; it does not reinterpret bytes. Declaring `VIEW` on an operation
 
 And `IDEMPOTENT` ([`trait_verifier.ts:132`](../../../src/compiler/ir/graph/trait_verifier.ts)) carries its own justification in the message text — `so folding f(x, x) -> x would not preserve types` — which is exactly the right way to write a verifier message: it names the optimization that would break.
 
-## 12.4 Lab — Break it seven ways
+## 12.4 Lab — Break it eight ways
 
 ```bash
-node docs/part2/ch12-valid-ir/labs/01-break-it-seven-ways.mjs
+node docs/part2/ch12-valid-ir/labs/01-break-it-eight-ways.mjs
 ```
 
-The lab takes a valid two-operation module, damages it seven different ways, and hands each to the two checkers a user can reach.
+The lab takes a valid two-operation module, damages it eight different ways, and hands each to the two checkers a user can reach.
 
 ```
 the valid module round-trips: true
@@ -196,7 +196,10 @@ one name, two definitions
 a dependency cycle
   parser        : rejected -- line 3: 'add' participates in a value dependency cycle
 
-an operation nobody registered
+a mnemonic the dialect does not have
+  parser        : rejected -- line 3: unknown operation 'tera.frobnicate'
+
+an operation nobody registered, spelt generically
   parser        : accepted
   module.verify(): no complaints
 
@@ -221,13 +224,23 @@ Line those up against §12.1's four invariants and the division of labour is exa
 | 1. Each name defined once | the parser |
 | 2. No cycles | the parser |
 | 3. Operation matches its declaration | **`verifyModule` only** — neither checker here |
+| 3. …spelt in the dialect's own form | the parser, since Chapter 13's format |
 | 4. Boundary matches signature | `module.verify()` |
 
-The three that fall through are exactly invariant 3, and they are exactly what `verifyModule` checks: `Unknown op 'frobnicate'`, `'add' expects 2 operands, got 1`, and a result-type mismatch. They are not unchecked by the compiler — they are checked four times per compilation, at the phase boundaries from Chapter 3 — but they are not checked by anything a user can call from the package's public surface.
+Note the split inside invariant 3. A misspelt mnemonic in the dialect's custom
+form — `tera.frobnicate %0, %1` — is now a *parse* error, because the parser
+consults the same table of operation syntaxes the printer does and there is no
+row for it. Spell the same operation in the generic form and it parses cleanly,
+because the generic form describes itself: operands, attributes and a full
+functional type, no table needed. That is the boundary the two forms draw, and
+it is worth knowing which side of it an error lands on before you go looking for
+the checker that should have caught it.
+
+The three that still fall through are invariant 3 proper, and they are exactly what `verifyModule` checks: `Unknown op 'frobnicate'`, `'add' expects 2 operands, got 1`, and a result-type mismatch. They are not unchecked by the compiler — they are checked four times per compilation, at the phase boundaries from Chapter 3 — but they are not checked by anything a user can call from the package's public surface.
 
 That is worth stating plainly rather than glossing: **if you build a module by hand and want it fully checked, you must run it through the compiler.** `module.verify()` is a signature check with a name that promises more than it delivers.
 
-**Try this.** Take the "wrong number of operands" case and pass the resulting module through `printModule`. It prints happily — `%2 = add(%0) : tensor<2x2xf32>` — and re-parses. The printer and parser are faithful to the structure, not to the semantics, and nothing between them notices that `add` takes two operands. Then look at the message `verifyModule` produces for the same input in [`tests/compiler/ir/graph/verifier.test.js`](../../../tests/compiler/ir/graph/verifier.test.js), and note it names both the expected and the actual count. Chapter 64 is about why that phrasing matters at 2 a.m.
+**Try this.** Take the "wrong number of operands" case and pass the resulting module through `printModule`. It prints happily — `%2 = tera.add %0 : tensor<2x2xf32>` — and re-parses. The printer and parser are faithful to the structure, not to the semantics, and nothing between them notices that `add` takes two operands. Then look at the message `verifyModule` produces for the same input in [`tests/compiler/ir/graph/verifier.test.js`](../../../tests/compiler/ir/graph/verifier.test.js), and note it names both the expected and the actual count. Chapter 64 is about why that phrasing matters at 2 a.m.
 
 ## 12.5 Errors carry their location
 

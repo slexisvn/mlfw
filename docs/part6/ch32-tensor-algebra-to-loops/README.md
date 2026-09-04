@@ -11,7 +11,7 @@ This part is about the representation on the other side of that step.
 Take the smallest possible graph:
 
 ```
-%2 = add(%0, %1) : tensor<2x2xf32>
+%2 = tera.add %0, %1 : tensor<2x2xf32>
 ```
 
 This is a true statement about three tensors. To run it, a backend needs answers to questions the statement does not contain:
@@ -201,9 +201,9 @@ Chapter 6's lab showed the same three levels for a whole `Sequential` model, as 
 ```
 === 1. graph IR — whole tensors, no indices ===
   module @Object {
-    func @Object(%0: tensor<2x2xf32>, %1: tensor<2x2xf32>) -> (tensor<2x2xf32>) {
-      %2 = add(%0, %1) : tensor<2x2xf32>
-      return(%2)
+    func.func @Object(%0: tensor<2x2xf32>, %1: tensor<2x2xf32>) -> (tensor<2x2xf32>) {
+      %2 = tera.add %0, %1 : tensor<2x2xf32>
+      return %2 : tensor<2x2xf32>
     }
   }
 
@@ -226,13 +226,7 @@ Chapter 6's lab showed the same three levels for a whole `Sequential` model, as 
   }
 
 === 3. emitted CPU source — flat offsets ===
-  function Object(buf_1, buf_3, buf_5) {
-    for (let i0_6 = 0; i0_6 < 2; i0_6++) {
-      for (let i1_7 = 0; i1_7 < 2; i1_7++) {
-        buf_5[((i0_6 * 2) + i1_7)] = (buf_1[((i0_6 * 2) + i1_7)] + buf_3[((i0_6 * 2) + i1_7)]);
-      }
-    }
-  }
+  // ---- compiled entry 0, kernel Object ----
 ```
 
 Follow the result through the three levels. In the graph it is `tensor<2x2xf32>` — a type. In the TIR it is a buffer with a shape and a rank-2 subscript. In the emitted source the rank is gone and the subscript is `i*2 + j`. Each step spends information for something the next step needs.
@@ -321,16 +315,16 @@ The same `broadcast_in_dim`, with the same operand and the same attributes, twic
 ```
 === broadcast_in_dim -> mul   (consumer is elementwise) ===
   graph:
-    %1 = broadcast_in_dim(%0) {broadcast_dimensions = [0, 1], result_shape = [4, 3]} : tensor<4x3xf32>
-    %3 = mul(%1, %2) : tensor<4x3xf32>
+    %1 = tera.broadcast_in_dim %0 {broadcast_dimensions = array<i64: 0, 1>} : tensor<1x3xf32> -> tensor<4x3xf32>
+    %3 = "tera.mul"(%1, %2) : (tensor<4x3xf32>, tensor<f32>) -> tensor<4x3xf32>
   TIR:
     buf_3[v0_7, v1_8] = (buf_1[0, v1_8] * buf_4[])
   distinct buffers: 3   loop nests: 1
 
 === broadcast_in_dim -> sum   (consumer is a reduction) ===
   graph:
-    %1 = broadcast_in_dim(%0) {broadcast_dimensions = [0, 1], result_shape = [4, 3]} : tensor<4x3xf32>
-    %3 = reduce(%1, %2) {dimensions = [0], reduce_type = "sum"} : tensor<3xf32>
+    %1 = tera.broadcast_in_dim %0 {broadcast_dimensions = array<i64: 0, 1>} : tensor<1x3xf32> -> tensor<4x3xf32>
+    %2 = tera.reduce sum, %1 {dimensions = array<i64: 0>} : tensor<4x3xf32> -> tensor<3xf32>
   TIR:
     buf_5[v0_8, v1_9] = buf_1[0, v1_9]
     ...

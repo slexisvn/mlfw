@@ -1,6 +1,7 @@
 import { registry } from './ops.js';
 import { OpTrait } from './op_registry.js';
 import { TensorType, dimEquals, typeToString } from './types.js';
+import { sizesOperandSpan } from './mlir_format.js';
 import type { Dim, Shape } from './types.js';
 import type { Operation } from './operation.js';
 import type { OpTraitValue } from './op_registry.js';
@@ -157,7 +158,8 @@ registerTraitVerifier(OpTrait.TERMINATOR, (op) => {
 
 registerTraitVerifier(OpTrait.VIEW, (op) => {
   const errors: string[] = [];
-  if (op.numOperands !== 1) errors.push(`a view op reads exactly 1 operand, got ${op.numOperands}`);
+  const dataOperands = sizesOperandSpan(op)?.start ?? op.numOperands;
+  if (dataOperands !== 1) errors.push(`a view op reads exactly 1 operand, got ${dataOperands}`);
   if (op.numResults !== 1) errors.push(`a view op produces exactly 1 result, got ${op.numResults}`);
   if (errors.length > 0) return errors;
   const operand = op.getOperand(0).type;

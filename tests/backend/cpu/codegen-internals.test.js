@@ -28,6 +28,26 @@ function makePrimFunc(name, params, body, bufferMap, shapeParams = []) {
 }
 
 describe('CPUCodegen._exprToJS', () => {
+  it.each(['i32', 'ui8', 'i64', 'f32'])('evaluates division as %s before subsequent arithmetic', (dtype) => {
+    const a = new VariableNode('a', dtype);
+    const b = new VariableNode('b', dtype);
+    const quotient = new MathOpNode('/', a, b);
+    const remainder = new MathOpNode('-', a, new MathOpNode('*', quotient, b));
+    const run = new Function('a', 'b', 'return ' + exprToJS(remainder));
+    if (dtype === 'i64') {
+      expect(run(-7n, 3n)).toBe(-1n);
+      expect(run(9007199254740995n, 2n)).toBe(1n);
+    } else if (dtype === 'f32') {
+      expect(run(7, 3)).toBeCloseTo(0, 6);
+    } else {
+      expect(run(7, 3)).toBe(1);
+      if (dtype === 'i32') {
+        expect(run(-7, 3)).toBe(-1);
+        expect(run(7, -3)).toBe(1);
+      }
+    }
+  });
+
   function exprToJS(node) {
     const cg = makeCodegen();
     cg._zeroBuffers = new Set();

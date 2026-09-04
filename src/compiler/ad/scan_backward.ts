@@ -2,6 +2,7 @@ import { GradAccumulator } from './grad_accumulator.js';
 import { requireVJPRuleOrBarrier, registerRegionVJP, getRegionVJP } from './vjp_registry.js';
 import { reduceGradToOperandShape } from './backward_builder.js';
 import { regionFreeVars } from '../ir/graph/graph_algorithms.js';
+import { scanGroups } from '../ir/graph/ops/control_flow.js';
 
 export { regionFreeVars };
 import { REGION_CONTROL_FLOW } from './control_flow_ops.js';
@@ -38,7 +39,7 @@ registerRegionVJP('if', ((op: Operation, ctx: RegionVJPCtx) => buildCondBackward
 
 function zeroLike(builder: IRBuilder, val: Value): Value {
   const z = builder.scalarConstant(0, (val.type as TensorType).dtype).getResult(0);
-  return builder.broadcast(z, (val.type as TensorType).shape, []).getResult(0);
+  return builder.broadcast(z, (val.type as TensorType).shape, [], [], val).getResult(0);
 }
 
 function sliceStep(builder: IRBuilder, v: Value, t: number): Value {
@@ -168,10 +169,27 @@ export function buildCondBackward(ifOp: Operation, accumulator: GradAccumulator,
   const thenMap = new Map(thenFree.map(v => [v.id, materialize(v)]));
   const elseMap = new Map(elseFree.map(v => [v.id, materialize(v)]));
 
-  const { gradFree: gThen } = diffBodyStep(builder, thenBlock, [], thenMap, gradResults, false, new Map(), thenFree);
-  const { gradFree: gElse } = diffBodyStep(builder, elseBlock, [], elseMap, gradResults, false, new Map(), elseFree);
-  const gThenMap = gThen as Map<number, Value | null>;
-  const gElseMap = gElse as Map<number, Value | null>;
+  const inputOps = ifOp.operands.slice(1);
+  const inputVals = inputOps.map(materialize);
+
+  const thenStep = diffBodyStep(builder, thenBlock, inputVals, thenMap, gradResults, false, new Map(), thenFree);
+  const elseStep = diffBodyStep(builder, elseBlock, inputVals, elseMap, gradResults, false, new Map(), elseFree);
+  const gThenMap = thenStep.gradFree as Map<number, Value | null>;
+  const gElseMap = elseStep.gradFree as Map<number, Value | null>;
+  const gThenArgs = thenStep.gradArgs as (Value | null)[];
+  const gElseArgs = elseStep.gradArgs as (Value | null)[];
+
+  const selectBranch = (target: Value, gt: Value | null | undefined, ge: Value | null | undefined): void => {
+    if (!gt && !ge) return;
+    const zero = zeroLike(builder, target);
+    const predBr = builder.broadcast(pred, (target.type as TensorType).shape, []).getResult(0);
+    accumulator.accumulate(target.id, builder.select(predBr, gt ?? zero, ge ?? zero).getResult(0));
+  };
+
+  for (let i = 0; i < inputOps.length; i++) {
+    if (!needsGrad.has(inputOps[i].id)) continue;
+    selectBranch(inputOps[i], gThenArgs[i], gElseArgs[i]);
+  }
 
   const allVars = new Map<number, Value>();
   for (const v of thenFree) allVars.set(v.id, v);
@@ -179,12 +197,7 @@ export function buildCondBackward(ifOp: Operation, accumulator: GradAccumulator,
 
   for (const [id, val] of allVars) {
     if (!needsGrad.has(id)) continue;
-    const gt = gThenMap.get(id);
-    const ge = gElseMap.get(id);
-    if (!gt && !ge) continue;
-    const zero = zeroLike(builder, val);
-    const predBr = builder.broadcast(pred, (val.type as TensorType).shape, []).getResult(0);
-    accumulator.accumulate(id, builder.select(predBr, gt ?? zero, ge ?? zero).getResult(0));
+    selectBranch(val, gThenMap.get(id), gElseMap.get(id));
   }
 }
 
@@ -204,21 +217,19 @@ export function buildScanBackward(scanOp: Operation, accumulator: GradAccumulato
   const numXs = scanOp.getAttr<number>('num_xs') as number;
   const numYs = scanOp.numResults - numCarry;
 
-  const xsOps: Value[] = [];
-  for (let i = 0; i < numXs; i++) xsOps.push(scanOp.getOperand(i));
-  const carryOps: Value[] = [];
-  for (let i = 0; i < numCarry; i++) carryOps.push(scanOp.getOperand(numXs + i));
+  const { carries: carryOps, xs: xsOps, consts: constOps } = scanGroups(scanOp);
   const T = (xsOps[0].type as TensorType).shape[0] as number;
 
   const freeVars = regionFreeVars(bodyBlock);
   const xsB = xsOps.map(materialize);
   const initCarryB = carryOps.map(materialize);
+  const constB = constOps.map(materialize);
   const freeVarMap = new Map<number, Value>(freeVars.map(v => [v.id, materialize(v)]));
   const bodyConstCache = new Map<number, Value>();
 
   const sliceX = (t: number): Value[] => xsB.map(v => sliceStep(builder, v, t));
   const stepForward = (xt: readonly Value[], c: readonly Value[]): Value[] =>
-    diffBodyStep(builder, bodyBlock, [...xt, ...c], freeVarMap, null, true, bodyConstCache, freeVars).forwardYields.slice(0, numCarry);
+    diffBodyStep(builder, bodyBlock, [...c, ...xt, ...constB], freeVarMap, null, true, bodyConstCache, freeVars).forwardYields.slice(0, numCarry);
 
   const gYs: (Value | null)[] = [];
   for (let i = 0; i < numYs; i++) gYs.push(accumulator.get(scanOp.getResult(numCarry + i).id));
@@ -229,19 +240,26 @@ export function buildScanBackward(scanOp: Operation, accumulator: GradAccumulato
   }
 
   const gFree = new Map<number, Value>();
+  const gConst: (Value | null)[] = constOps.map(() => null);
   const gXsSteps: Value[][] = xsB.map(() => new Array<Value>(T));
 
   const backwardStep = (t: number, xt: readonly Value[], carryIn: readonly Value[]): void => {
-    const argVals = [...xt, ...carryIn];
+    const argVals = [...carryIn, ...xt, ...constB];
     const gY_t = gYs.map(g => (g === null ? null : sliceStep(builder, g, t)));
     const gradYields = [...gCarry, ...gY_t];
     const { gradArgs: rawGradArgs, gradFree: rawGradFree } = diffBodyStep(builder, bodyBlock, argVals, freeVarMap, gradYields, false, bodyConstCache, freeVars);
     const gradArgs = rawGradArgs as (Value | null)[];
     const gradFree = rawGradFree as Map<number, Value | null>;
 
-    for (let i = 0; i < numXs; i++) gXsSteps[i][t] = gradArgs[i] ?? zeroLike(builder, xt[i]);
+    for (let i = 0; i < numXs; i++) gXsSteps[i][t] = gradArgs[numCarry + i] ?? zeroLike(builder, xt[i]);
     gCarry = [];
-    for (let i = 0; i < numCarry; i++) gCarry.push(gradArgs[numXs + i] ?? zeroLike(builder, carryIn[i]));
+    for (let i = 0; i < numCarry; i++) gCarry.push(gradArgs[i] ?? zeroLike(builder, carryIn[i]));
+    for (let i = 0; i < constOps.length; i++) {
+      const g = gradArgs[numCarry + numXs + i];
+      if (!g) continue;
+      const prev = gConst[i];
+      gConst[i] = prev ? builder.add(prev, g).getResult(0) : g;
+    }
     for (const [id, g] of gradFree) {
       if (!g) continue;
       const prev = gFree.get(id);
@@ -294,6 +312,10 @@ export function buildScanBackward(scanOp: Operation, accumulator: GradAccumulato
   }
   for (let i = 0; i < numCarry; i++) {
     if (needsGrad.has(carryOps[i].id)) accumulator.accumulate(carryOps[i].id, gCarry[i]);
+  }
+  for (let i = 0; i < constOps.length; i++) {
+    const g = gConst[i];
+    if (g && needsGrad.has(constOps[i].id)) accumulator.accumulate(constOps[i].id, g);
   }
   for (const [id, g] of gFree) {
     if (g && needsGrad.has(id)) accumulator.accumulate(id, g);

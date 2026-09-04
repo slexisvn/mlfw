@@ -46,8 +46,9 @@ async function study(label, fusionConfig) {
 
   console.log(`=== ${label} ===`);
   for (const e of explains) console.log(`  cost model: ${e.subject} -> ${e.decision}${e.reason ? `: ${e.reason}` : ''}`);
-  const inside = ir.split('\n').filter(l => /^      %/.test(l));
-  console.log(`  ${(ir.match(/= fusion\(/g) || []).length} fusion region(s) holding: ${inside.map(l => l.trim().split(' = ')[1].split('(')[0]).join(', ') || '(nothing)'}`);
+  const inside = ir.split('\n').filter(l => /^ {8}%/.test(l));
+  const held = inside.map(l => (l.match(/= "?tera\.(\w+)/) || [, '?'])[1]);
+  console.log(`  ${(ir.match(/= "tera\.fusion"\(/g) || []).length} fusion region(s) holding: ${held.join(', ') || '(nothing)'}`);
   console.log(`  ${ms.toFixed(3)} ms\n`);
 }
 

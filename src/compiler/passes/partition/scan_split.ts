@@ -5,6 +5,7 @@ import { materializePartition, isConstantOp, splitGraphForNative, topoSortOps } 
 import { isTerminatorOp } from '../../ir/graph/op_traits.js';
 import { dtypeBytes } from '../../../util/dtype_map.js';
 import { shapeProduct } from '../../ir/graph/types.js';
+import { scanGroups } from '../../ir/graph/ops/control_flow.js';
 import type { Shape, TensorType } from '../../ir/graph/types.js';
 import type { Block, Region } from '../../ir/graph/block.js';
 import type { Value } from '../../ir/graph/value.js';
@@ -57,7 +58,7 @@ function isScanOversized(scanOp: Operation, region: Region, target: CompileTarge
   const numXs = scanOp.getAttr<number>('num_xs') as number;
   let carryBytes = 0;
   for (let i = 0; i < numCarry; i++) {
-    const t = scanOp.getOperand(numXs + i).type as TensorType;
+    const t = scanOp.getOperand(i).type as TensorType;
     const n = t && t.shape ? numel(t.shape) : -1;
     if (n > 0) carryBytes += n * dtypeBytes(t.dtype);
   }
@@ -163,10 +164,11 @@ function emitScanLoop(scanOp: Operation, name: string, ctx: SplitCtx): boolean {
   const bodySplit = splitGraphForNative(bodyModule, 2);
   const bodyPlan = bodySplit ? bodySplit.plan : null;
 
+  const numConsts = scanGroups(scanOp).consts.length;
   const carryShapes: Shape[] = [], carryDtypes: string[] = [];
-  for (let i = 0; i < numCarry; i++) { const t = scanOp.getOperand(numXs + i).type as TensorType; carryShapes.push(t.shape); carryDtypes.push(t.dtype); }
+  for (let i = 0; i < numCarry; i++) { const t = scanOp.getOperand(i).type as TensorType; carryShapes.push(t.shape); carryDtypes.push(t.dtype); }
   const xtShapes: Shape[] = [], xtDtypes: string[] = [];
-  for (let i = 0; i < numXs; i++) { const t = scanOp.getOperand(i).type as TensorType; xtShapes.push(t.shape.slice(1)); xtDtypes.push(t.dtype); }
+  for (let i = 0; i < numXs; i++) { const t = scanOp.getOperand(numCarry + i).type as TensorType; xtShapes.push(t.shape.slice(1)); xtDtypes.push(t.dtype); }
   const ytShapes: Shape[] = [], ytDtypes: string[] = [];
   for (let i = 0; i < numYs; i++) { const t = scanOp.getResult(numCarry + i).type as TensorType; ytShapes.push(t.shape.slice(1)); ytDtypes.push(t.dtype); }
 
@@ -176,27 +178,28 @@ function emitScanLoop(scanOp: Operation, name: string, ctx: SplitCtx): boolean {
   let ytSlots: number[] = [];
 
   const carryInitSlots: number[] = [], carryFinalSlots: number[] = [], invariantSlots: number[] = [];
-  for (let i = 0; i < numCarry; i++) carryInitSlots.push(getSlot(scanOp.getOperand(numXs + i)));
+  for (let i = 0; i < numCarry; i++) carryInitSlots.push(getSlot(scanOp.getOperand(i)));
   for (let i = 0; i < numCarry; i++) carryFinalSlots.push(getSlot(scanOp.getResult(i)));
+  for (let i = 0; i < numConsts; i++) invariantSlots.push(getSlot(scanOp.getOperand(numCarry + numXs + i)));
   for (const v of captured) invariantSlots.push(getSlot(v));
   const xsSlots: number[] = [], ysSlots: number[] = [];
-  for (let i = 0; i < numXs; i++) xsSlots.push(getSlot(scanOp.getOperand(i)));
+  for (let i = 0; i < numXs; i++) xsSlots.push(getSlot(scanOp.getOperand(numCarry + i)));
   for (let i = 0; i < numYs; i++) ysSlots.push(getSlot(scanOp.getResult(numCarry + i)));
 
   const loopStart = steps.length;
   if (!bodyPlan) {
     ytSlots = ytShapes.map((sh, i) => newSlot(sh, ytDtypes[i]));
-    steps.push({ name: bodyFunc.name, inputSlots: [...xtSlots, ...carryA, ...invariantSlots], outputSlots: [...carryB, ...ytSlots] });
+    steps.push({ name: bodyFunc.name, inputSlots: [...carryA, ...xtSlots, ...invariantSlots], outputSlots: [...carryB, ...ytSlots] });
     addedFuncs.push(bodyFunc);
   } else {
-    const nargs = numXs + numCarry + captured.length;
+    const nargs = numCarry + numXs + invariantSlots.length;
     const fixMap = new Map<number, number>();
     for (const fx of (bodyPlan.returnFixups || [])) { if (fx.kind !== 'copy') return false; fixMap.set(fx.pos, fx.srcSlot as number); }
     const bodyReturnSlot = (retIdx: number): number => { const pos = nargs + retIdx; return fixMap.has(pos) ? fixMap.get(pos) as number : bodyPlan.argSlots[pos]; };
     const remap = new Map<number, number>();
-    for (let i = 0; i < numXs; i++) remap.set(bodyPlan.argSlots[i], xtSlots[i]);
-    for (let i = 0; i < numCarry; i++) remap.set(bodyPlan.argSlots[numXs + i], carryA[i]);
-    for (let i = 0; i < captured.length; i++) remap.set(bodyPlan.argSlots[numXs + numCarry + i], invariantSlots[i]);
+    for (let i = 0; i < numCarry; i++) remap.set(bodyPlan.argSlots[i], carryA[i]);
+    for (let i = 0; i < numXs; i++) remap.set(bodyPlan.argSlots[numCarry + i], xtSlots[i]);
+    for (let i = 0; i < invariantSlots.length; i++) remap.set(bodyPlan.argSlots[numCarry + numXs + i], invariantSlots[i]);
     for (const it of bodyPlan.intermediates) remap.set(it.slot, newSlot(it.shape, it.dtype));
     for (let i = 0; i < numCarry; i++) { const rs = bodyReturnSlot(i); if (!remap.has(rs)) remap.set(rs, carryB[i]); }
     for (let i = 0; i < numYs; i++) {
@@ -215,7 +218,7 @@ function emitScanLoop(scanOp: Operation, name: string, ctx: SplitCtx): boolean {
   }
   const loopEnd = steps.length;
 
-  const T = (scanOp.getOperand(0).type as TensorType).shape[0];
+  const T = (scanOp.getOperand(numCarry).type as TensorType).shape[0];
   if (typeof T !== 'number' || T < 0) return false;
 
   scanLoops.push({

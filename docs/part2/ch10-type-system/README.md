@@ -243,13 +243,13 @@ The lab traces one small model three ways.
 
 ```
 === every dimension known ===
-  func @traced(%0: tensor<4x3xf32>, %1: tensor<2x3xf32>, %2: tensor<2xf32>) -> (tensor<4x2xf32>) {
+  func.func @traced(%0: tensor<4x3xf32>, %1: tensor<2x3xf32>, %2: tensor<2xf32>) -> (tensor<4x2xf32>) {
     ...
   input  isFullyStatic true  hasDynamic false numel 12  sizeInBytes 48
   output isFullyStatic true  hasDynamic false numel 8  sizeInBytes 32
 
 === dimension 0 dynamic ===
-  func @traced(%0: tensor<?x3xf32>, %1: tensor<2x3xf32>, %2: tensor<2xf32>) -> (tensor<?x2xf32>) {
+  func.func @traced(%0: tensor<?x3xf32>, %1: tensor<2x3xf32>, %2: tensor<2xf32>) -> (tensor<?x2xf32>) {
     ...
   input  isFullyStatic false hasDynamic true  numel -1  sizeInBytes -1
   output isFullyStatic false hasDynamic true  numel -1  sizeInBytes -1

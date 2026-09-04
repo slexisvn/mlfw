@@ -62,11 +62,19 @@ export type GraphModuleLike = {
 
 export type IRBuilderLike = {
   returnOp(values: readonly IRValueLike[]): IROperationLike;
+  yieldOp(values: readonly IRValueLike[]): IROperationLike;
   scalarConstant(value: number | bigint, dtype: DType): IROperationLike;
+  ifOp(
+    predicate: IRValueLike,
+    resultTypes: readonly TensorType[] | null,
+    thenBuilder: ((builder: IRBuilderLike, args: IRValueLike[]) => void) | null,
+    elseBuilder: ((builder: IRBuilderLike, args: IRValueLike[]) => void) | null
+  ): IROperationLike;
   scanOp(
-    xs: readonly IRValueLike[],
     carry: readonly IRValueLike[],
-    body: (builder: IRBuilderLike, xs: IRValueLike[], carry: IRValueLike[]) => [IRValueLike[], IRValueLike[]]
+    xs: readonly IRValueLike[],
+    body: (builder: IRBuilderLike, carry: IRValueLike[], xs: IRValueLike[], consts: IRValueLike[]) => [IRValueLike[], IRValueLike[]],
+    consts?: readonly IRValueLike[]
   ): IROperationLike;
 };
 

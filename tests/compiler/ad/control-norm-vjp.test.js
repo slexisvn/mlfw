@@ -4,6 +4,7 @@ import { ScalarType } from '../../../src/compiler/ir/graph/types.js';
 import { BackwardGraphBuilder } from '../../../src/compiler/ad/backward_builder.js';
 import { compileGraph } from '../../../src/compiler/pipeline/compiler.js';
 import { CPUTarget } from '../../../src/compiler/support/target.js';
+import { IsolateRegionsPass } from '../../../src/compiler/passes/normalize/isolate_regions.js';
 import '../../../src/compiler/ad/index.js';
 import { F32, T as t } from '../../_utils/ir_fixture.js';
 
@@ -117,7 +118,7 @@ describe('scan VJP (compiled RNN backward, incl. captured weights)', () => {
   it('grads for xs, init carry, and free-variable weights match finite differences', () => {
     const T = 4, D = 3;
     const mk = () => buildFunction('rnn', [t([T, D]), t([D]), t([D]), t([D])], [t([D]), t([T, D])], (b, [xs, init, Wx, Wc]) => {
-      const s = b.scanOp([xs], [init], (bb, xt, cy) => {
+      const s = b.scanOp([init], [xs], (bb, cy, xt) => {
         const term = bb.add(bb.mul(cy[0], Wc).getResult(0), bb.mul(xt[0], Wx).getResult(0)).getResult(0);
         const nc = bb.tanh(term).getResult(0);
         return [[nc], [nc]];
@@ -242,17 +243,22 @@ describe('cond/if VJP routes gradient to the taken branch', () => {
     b.returnOp([ifop.getResult(0)]);
   });
 
-  function runGrads(sVal) {
+  function runGrads(sVal, isolate = false) {
+    const makeGraph = () => {
+      const func = mk();
+      if (isolate) new IsolateRegionsPass().run(func);
+      return func;
+    };
     const arrs = [
       Float32Array.from({ length: D }, (_, i) => 0.5 + 0.2 * i),
       Float32Array.from({ length: D }, (_, i) => 1 + 0.1 * i),
       Float32Array.from({ length: D }, (_, i) => 2 - 0.1 * i),
       new Float32Array([sVal]),
     ];
-    const cf = compileGraph(mk(), CPUTarget());
+    const cf = compileGraph(makeGraph(), CPUTarget());
     const fk = cf.listKernels()[0];
     const loss = (a) => { const o = new Float32Array(D); cf.run(fk, ...a, o); let s = 0; for (const e of o) s += e; return s; };
-    const fb = mk();
+    const fb = makeGraph();
     const r = new BackwardGraphBuilder().build(fb);
     const argId = new Map(fb.args.map((a, i) => [a.id, i]));
     const savedSrc = r.savedValues.map(sv => (argId.has(sv.id) ? argId.get(sv.id) : -1));
@@ -284,6 +290,20 @@ describe('cond/if VJP routes gradient to the taken branch', () => {
       expect(e / (sc + 1e-9)).toBeLessThan(1e-2);
       if (idx === 2) for (const v of an) expect(Math.abs(v)).toBeLessThan(1e-6);
     }
+  });
+
+  it.each([1, -1])('routes explicit branch operand gradients for predicate input %s', (sVal) => {
+    const { analytic, gradInputIndices } = runGrads(sVal, true);
+    const gradients = new Map(gradInputIndices.map((index, i) => [index, analytic[i]]));
+    const expectedX = sVal > 0 ? [1, 1.1, 1.2] : [2, 1.9, 1.8];
+    const takenWeight = sVal > 0 ? 1 : 2;
+    const untakenWeight = sVal > 0 ? 2 : 1;
+    for (let i = 0; i < D; i++) {
+      expect(gradients.get(0)[i]).toBeCloseTo(expectedX[i], 6);
+      expect(gradients.get(takenWeight)[i]).toBeCloseTo(0.5 + 0.2 * i, 6);
+      expect(gradients.get(untakenWeight)[i]).toBe(0);
+    }
+    expect(gradInputIndices).toEqual([0, 1, 2]);
   });
 });
 

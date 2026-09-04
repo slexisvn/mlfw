@@ -202,27 +202,26 @@ Same operations, same shapes, same dataflow between `add` and `mul`. And opposit
 ```
 === q depends on p: fusing p with its consumer would create a cycle ===
 module @CycleCreating {
-  func @CycleCreating(%0: tensor<4x4xf32>, %1: tensor<4x4xf32>, %2: tensor<4x4xf32>) -> (tensor<4x4xf32>) {
-    %3 = add(%0, %1) : tensor<4x4xf32>
-    %4 = dot(%3, %2) {lhs_batch = [], lhs_contracting = [1], rhs_batch = [], rhs_contracting = [0]} : tensor<4x4xf32>
-    %5 = mul(%3, %4) : tensor<4x4xf32>
-    return(%5)
+  func.func @CycleCreating(%0: tensor<4x4xf32>, %1: tensor<4x4xf32>, %2: tensor<4x4xf32>) -> (tensor<4x4xf32>) {
+    %3 = tera.add %0, %1 : tensor<4x4xf32>
+    %4 = tera.dot %3, %2 {lhs_batch = array<i64>, lhs_contracting = array<i64: 1>, rhs_batch = array<i64>, rhs_contracting = array<i64: 0>} : (tensor<4x4xf32>, tensor<4x4xf32>) -> tensor<4x4xf32>
+    %5 = tera.mul %3, %4 : tensor<4x4xf32>
+    return %5 : tensor<4x4xf32>
   }
 }
 fusion regions: 0
 
 === q does not depend on p: the same two operations fuse ===
 module @NoCycle {
-  func @NoCycle(%0: tensor<4x4xf32>, %1: tensor<4x4xf32>, %2: tensor<4x4xf32>) -> (tensor<4x4xf32>) {
-    %3 = dot(%2, %2) {lhs_batch = [], lhs_contracting = [1], rhs_batch = [], rhs_contracting = [0]} : tensor<4x4xf32>
-    %4 = fusion(%0, %1, %3) {fusion_kind = "kElementwise"} : tensor<4x4xf32>
-    {
-      ^bb(%5: tensor<4x4xf32>, %6: tensor<4x4xf32>, %7: tensor<4x4xf32>):
-      %8 = add(%5, %6) : tensor<4x4xf32>
-      %9 = mul(%8, %7) : tensor<4x4xf32>
-      yield(%9)
-    }
-    return(%4)
+  func.func @NoCycle(%0: tensor<4x4xf32>, %1: tensor<4x4xf32>, %2: tensor<4x4xf32>) -> (tensor<4x4xf32>) {
+    %3 = tera.dot %2, %2 {lhs_batch = array<i64>, lhs_contracting = array<i64: 1>, rhs_batch = array<i64>, rhs_contracting = array<i64: 0>} : (tensor<4x4xf32>, tensor<4x4xf32>) -> tensor<4x4xf32>
+    %4 = "tera.fusion"(%0, %1, %3) ({
+      ^bb0(%5: tensor<4x4xf32>, %6: tensor<4x4xf32>, %7: tensor<4x4xf32>):
+        %8 = tera.add %5, %6 : tensor<4x4xf32>
+        %9 = tera.mul %8, %7 : tensor<4x4xf32>
+        tera.yield %9 : tensor<4x4xf32>
+    }) {fusion_kind = "kElementwise"} : (tensor<4x4xf32>, tensor<4x4xf32>, tensor<4x4xf32>) -> tensor<4x4xf32>
+    return %4 : tensor<4x4xf32>
   }
 }
 fusion regions: 1

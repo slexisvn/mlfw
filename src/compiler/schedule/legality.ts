@@ -156,11 +156,6 @@ function collectLetBoundVars(node: TirNode | null | undefined, out: Set<string>)
   }
 }
 
-/**
- * Loop vars that carry a reduction, so a schedule may not run their iterations in parallel.
- * A declared CommReduce axis is authoritative; the write-index heuristic only classifies axes
- * the block did not label, and cannot see past a block that writes at more than one rank.
- */
 export function reductionLoopVars(block: BlockNode): Set<string> {
   const writeIdx = new Set<string>();
   collectWriteIndexVars(block, writeIdx);

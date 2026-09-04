@@ -1,0 +1,15 @@
+add_mlir_dialect(TeraOps tera)
+add_mlir_doc(TeraDialect TeraDialect Tera/ -gen-dialect-doc)
+add_mlir_doc(TeraOps TeraOps Tera/ -gen-op-doc)
+
+set(LLVM_TARGET_DEFINITIONS TeraInterfaces.td)
+mlir_tablegen(TeraInterfaces.h.inc -gen-op-interface-decls)
+mlir_tablegen(TeraInterfaces.cpp.inc -gen-op-interface-defs)
+add_public_tablegen_target(MLIRTeraInterfacesIncGen)
+
+set(LLVM_TARGET_DEFINITIONS TeraEnums.td)
+mlir_tablegen(TeraEnums.h.inc -gen-enum-decls)
+mlir_tablegen(TeraEnums.cpp.inc -gen-enum-defs)
+mlir_tablegen(TeraEnumAttrs.h.inc -gen-attrdef-decls -attrdefs-dialect=tera)
+mlir_tablegen(TeraEnumAttrs.cpp.inc -gen-attrdef-defs -attrdefs-dialect=tera)
+add_mlir_dialect_tablegen_target(MLIRTeraEnumsIncGen)

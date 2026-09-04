@@ -248,6 +248,15 @@ export class Layout {
     return strides;
   }
 
+  dropDim(dim: number): Layout {
+    const order: number[] = [];
+    for (const axis of this.order) {
+      if (axis === dim) continue;
+      order.push(axis > dim ? axis - 1 : axis);
+    }
+    return new Layout(order);
+  }
+
   equals(other: unknown): boolean {
     if (this === other) return true;
     if (!(other instanceof Layout)) return false;
@@ -315,6 +324,11 @@ export class TensorType {
   }
 
   withShape(s: Shape): TensorType { return new TensorType(s, this.dtype, this.layout); }
+
+  dropLeadingAxis(): TensorType {
+    return new TensorType(this.shape.slice(1), this.dtype, this.layout.dropDim(0));
+  }
+
   withDtype(d: ScalarDType): TensorType { return new TensorType(this.shape, d, this.layout); }
   withLayout(l: Layout): TensorType { return new TensorType(this.shape, this.dtype, l); }
 
@@ -447,11 +461,26 @@ export function dimToString(dim: Dim): string {
   return `[${String(dim)}]`;
 }
 
+const MLIR_DTYPE_SPELLING: Readonly<Partial<Record<ScalarDType, string>>> = { [ScalarType.BOOL]: 'i1' };
+
+const DTYPE_BY_SPELLING = new Map<string, ScalarDType>();
+for (const dtype of Object.values(ScalarType)) {
+  DTYPE_BY_SPELLING.set(MLIR_DTYPE_SPELLING[dtype] ?? dtype, dtype);
+}
+
+export function dtypeToString(dtype: ScalarDType): string {
+  return MLIR_DTYPE_SPELLING[dtype] ?? dtype;
+}
+
+export function dtypeFromString(text: string): ScalarDType | undefined {
+  return DTYPE_BY_SPELLING.get(text);
+}
+
 export function typeToString(type: IRType): string {
   if (type instanceof TensorType) {
     const dims = type.shape.map((dim) => `${dimToString(dim)}x`).join('');
     const layout = type.layout.isIdentity() ? '' : `, [${type.layout.order.join(', ')}]`;
-    return `tensor<${dims}${type.dtype}${layout}>`;
+    return `tensor<${dims}${dtypeToString(type.dtype)}${layout}>`;
   }
   if (type instanceof TupleType) {
     return `tuple<${type.elements.map(typeToString).join(', ')}>`;

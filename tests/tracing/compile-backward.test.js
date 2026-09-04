@@ -113,3 +113,103 @@ describe('compiled backward returns the same gradient set in both modes', () => 
     }, 30000);
   }
 });
+
+describe('a compiled backward with a dynamic leading extent', () => {
+  it.each(MODES)('%s: reuses saved intermediates and nonuniform upstream gradients across widths', (mode) => {
+    const input = (width) => tensor([
+      Array.from({ length: width }, (_, i) => (i - 2) / 4),
+      Array.from({ length: width }, (_, i) => (i + 1) / 8),
+    ]);
+    const model = { forward: (x) => x.mul(x).tanh() };
+    const compiled = compileWithBackward(model, [input(3)], {
+      target: CPUTarget(), mode, dynamicShapes: [new Set([1])],
+    });
+    for (const width of [3, 5, 2]) {
+      const x = input(width);
+      const output = compiled(x);
+      const seed = tensor([
+        Array.from({ length: width }, (_, i) => i + 1),
+        Array.from({ length: width }, (_, i) => -i - 2),
+      ]);
+      const [grad] = compiled.backward(seed);
+      expect(output.shape).toEqual([2, width]);
+      expect(grad.shape).toEqual([2, width]);
+      const values = flat(x);
+      const upstream = flat(seed);
+      const actual = flat(grad);
+      const forward = flat(output);
+      for (let i = 0; i < values.length; i++) {
+        const y = Math.tanh(values[i] * values[i]);
+        expect(forward[i]).toBeCloseTo(y, 6);
+        expect(actual[i], 'width ' + width + ', element ' + i)
+          .toBeCloseTo(upstream[i] * 2 * values[i] * (1 - y * y), 5);
+      }
+    }
+    expect(compiled.compiledUnits()).toHaveLength(mode === 'joint' ? 1 : 2);
+  });
+
+  const BATCHES = [3, 5, 8];
+  const cols = 4;
+
+  function rows(n, phase) {
+    const data = [];
+    for (let i = 0; i < n; i++) {
+      const r = [];
+      for (let d = 0; d < cols; d++) r.push(Math.sin(i * 0.7 + d * 0.4 + phase) * 0.5 + 0.07);
+      data.push(r);
+    }
+    return tensor(data);
+  }
+
+  const weight = grid(cols, 3, 0.9);
+  const model = { forward: (x) => (x.matmul(weight)).relu().tanh().sum() };
+  const dynamicShapes = [new Set([0])];
+
+  async function run(mode, dynamic, batch) {
+    const cf = compileWithBackward(model, [rows(BATCHES[0], 0.2)],
+      { target: CPUTarget(), mode, ...(dynamic ? { dynamicShapes } : {}) });
+    let out = cf(rows(batch, 0.2));
+    if (out && out.then) out = await out;
+    let grads = cf.backward(ones(out.shape));
+    if (grads && grads.then) grads = await grads;
+    return { value: flat(out)[0], grads };
+  }
+
+  for (const mode of MODES) {
+    it(`${mode}: the batch the call passes drives the kernel, not a guessed extent`, async () => {
+      for (const batch of BATCHES) {
+        const dynamic = await run(mode, true, batch);
+        const staticRun = await run(mode, false, batch);
+
+        expect(dynamic.value, `forward at batch ${batch}`).toBeCloseTo(staticRun.value, 6);
+        expect(dynamic.grads.length).toBe(staticRun.grads.length);
+        for (let i = 0; i < dynamic.grads.length; i++) {
+          expect(dynamic.grads[i].shape, `gradient ${i} shape at batch ${batch}`)
+            .toEqual(staticRun.grads[i].shape);
+          const a = flat(dynamic.grads[i]);
+          const b = flat(staticRun.grads[i]);
+          for (let k = 0; k < a.length; k++) {
+            expect(a[k], `gradient ${i}[${k}] at batch ${batch}`).toBeCloseTo(b[k], 6);
+          }
+        }
+        expect(flat(dynamic.grads[0]).some((v) => v !== 0),
+          `the input gradient at batch ${batch} is not uniformly zero`).toBe(true);
+      }
+    }, 30000);
+  }
+
+  it('one compiled program serves every batch it is called with', async () => {
+    const cf = compileWithBackward(model, [rows(BATCHES[0], 0.2)],
+      { target: CPUTarget(), mode: 'separate', dynamicShapes });
+    for (const batch of BATCHES) {
+      const input = rows(batch, 0.2);
+      const out = cf(input);
+      expect(flat(out)[0], `the forward at batch ${batch} matches eager`)
+        .toBeCloseTo(flat(model.forward(input))[0], 5);
+      expect(cf.backward(ones(out.shape))[0].shape[0], `the gradient covers all ${batch} rows`)
+        .toBe(batch);
+    }
+    expect(cf.compiledUnits().length, 'a dynamic program compiles once for the forward and once for the backward')
+      .toBe(2);
+  }, 30000);
+});

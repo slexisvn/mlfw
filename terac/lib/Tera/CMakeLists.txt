@@ -1,0 +1,5 @@
+add_subdirectory(IR)
+add_subdirectory(Transforms)
+add_subdirectory(Conversion)
+add_subdirectory(Execution)
+add_subdirectory(CAPI)

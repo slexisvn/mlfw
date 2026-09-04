@@ -1,7 +1,10 @@
 import { OpAttrKey, OpDef, SideEffectKind, OpTrait } from '../op_registry.js';
 import type { OpRegistry } from '../op_registry.js';
+import { TensorType } from '../types.js';
+import { sizesClauseErrors } from '../mlir_format.js';
 import type { IRType } from '../types.js';
 import type { Operation } from '../operation.js';
+import type { Value } from '../value.js';
 import type { GraphFunction } from '../function.js';
 
 export function owningFunctionOf(op: Operation): GraphFunction | null {
@@ -18,6 +21,48 @@ function typesMatch(a: IRType | null | undefined, b: IRType | null | undefined):
   if (a === b) return true;
   if (!a || !b) return false;
   return typeof a.equals === 'function' ? a.equals(b) : false;
+}
+
+export function scanGroups(op: Operation): {
+  carries: Value[]; xs: Value[]; consts: Value[]; sizes: Value[];
+} {
+  const numCarry = op.getAttr<number>('num_carry') as number;
+  const numXs = op.getAttr<number>('num_xs') as number;
+  const numConsts = op.getAttr<number>('num_consts') as number;
+  return {
+    carries: op.operands.slice(0, numCarry),
+    xs: op.operands.slice(numCarry, numCarry + numXs),
+    consts: op.operands.slice(numCarry + numXs, numCarry + numXs + numConsts),
+    sizes: op.operands.slice(numCarry + numXs + numConsts),
+  };
+}
+
+function yieldedTypes(op: Operation, regionIndex: number): readonly IRType[] | null {
+  const region = op.regions[regionIndex];
+  const block = region ? region.entryBlock : null;
+  const terminator = block ? block.lastOp : null;
+  if (!terminator || !terminator.isTerminator()) return null;
+  return terminator.operands.map((v) => v.type);
+}
+
+function verifyRegionArgs(op: Operation, label: string): string[] {
+  const want = op.def!.inferRegionArgTypes!(op);
+  const errs: string[] = [];
+  for (let r = 0; r < op.regions.length; r++) {
+    const block = op.regions[r].entryBlock;
+    if (!block) continue;
+    const expected = want[r];
+    if (block.arguments.length !== expected.length) {
+      errs.push(`${label} body takes ${block.arguments.length} arguments but the op provides ${expected.length}`);
+      continue;
+    }
+    for (let i = 0; i < expected.length; i++) {
+      if (!typesMatch(block.arguments[i].type, expected[i])) {
+        errs.push(`${label} body argument ${i} has type ${block.arguments[i].type} but the op provides ${expected[i]}`);
+      }
+    }
+  }
+  return errs;
 }
 
 export function register(registry: OpRegistry) {
@@ -37,11 +82,23 @@ export function register(registry: OpRegistry) {
 
   registry.register(new OpDef({
     name: 'if',
-    numOperands: 1,
+    numOperands: -1,
     numResults: -1,
+    opAttrs: { [OpAttrKey.ISOLATED_REGIONS]: true },
     hasRegions: true,
     numRegions: 2,
     traits: [OpTrait.RECURSIVE_MEMORY_EFFECTS],
+    inferRegionArgTypes(op) {
+      const inputTypes = op.operands.slice(1).map(v => v.type);
+      return op.regions.map(() => inputTypes);
+    },
+    inferResultTypesFromRegions(op) {
+      return yieldedTypes(op, 0);
+    },
+    verify(op) {
+      if (op.numOperands < 1) return ['if requires a predicate operand'];
+      return verifyRegionArgs(op, 'if');
+    },
     inferResultTypes(operandTypes, attrs, resultTypes) {
       return resultTypes || null;
     }
@@ -55,6 +112,10 @@ export function register(registry: OpRegistry) {
     hasRegions: true,
     numRegions: 2,
     traits: [OpTrait.RECURSIVE_MEMORY_EFFECTS],
+    inferRegionArgTypes(op) {
+      const carried = op.operands.map(v => v.type);
+      return op.regions.map(() => carried);
+    },
     inferResultTypes(operandTypes) {
       return [...operandTypes];
     }
@@ -64,14 +125,45 @@ export function register(registry: OpRegistry) {
     name: 'scan',
     numOperands: -1,
     numResults: -1,
-    opAttrs: { [OpAttrKey.SEQUENTIAL_REGION]: true },
+    opAttrs: { [OpAttrKey.SEQUENTIAL_REGION]: true, [OpAttrKey.ISOLATED_REGIONS]: true },
     hasRegions: true,
     numRegions: 1,
     traits: [OpTrait.RECURSIVE_MEMORY_EFFECTS],
     attrs: [
       { name: 'num_carry', type: 'number', required: true },
-      { name: 'num_xs', type: 'number', required: true }
+      { name: 'num_xs', type: 'number', required: true },
+      { name: 'num_consts', type: 'number', required: true }
     ],
+    inferRegionArgTypes(op) {
+      const groups = scanGroups(op);
+      return [[
+        ...groups.carries.map(v => v.type),
+        ...groups.xs.map(v => (v.type as TensorType).dropLeadingAxis()),
+        ...groups.consts.map(v => v.type)
+      ]];
+    },
+    inferResultTypesFromRegions(op) {
+      const yielded = yieldedTypes(op, 0);
+      if (!yielded) return null;
+      const numCarry = op.getAttr<number>('num_carry') as number;
+      const xs = op.getOperand(numCarry);
+      if (!xs || !(xs.type instanceof TensorType)) return null;
+      const steps = xs.type.shape[0];
+      return yielded.map((type, i) => (
+        i < numCarry || !(type instanceof TensorType)
+          ? type
+          : new TensorType([steps, ...type.shape], type.dtype)
+      ));
+    },
+    verify(op) {
+      const numCarry = op.getAttr<number>('num_carry') as number;
+      const numXs = op.getAttr<number>('num_xs') as number;
+      if (numXs < 1) return ['scan requires at least one xs input to take its trip count from'];
+      if (numCarry + numXs > op.numOperands) {
+        return [`scan declares ${numCarry} carries and ${numXs} inputs but has ${op.numOperands} operands`];
+      }
+      return [...sizesClauseErrors(op), ...verifyRegionArgs(op, 'scan')];
+    },
     inferResultTypes(operandTypes, attrs, resultTypes) {
       return resultTypes || null;
     }

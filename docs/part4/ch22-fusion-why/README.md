@@ -154,17 +154,16 @@ The compiler fuses all four into one region:
 
 ```
 module @Chain {
-  func @Chain(%0: tensor<1048576xf32>, %1: tensor<1048576xf32>) -> (tensor<1048576xf32>) {
-    %2 = fusion(%0, %1) {fusion_kind = "kElementwise"} : tensor<1048576xf32>
-    {
-      ^bb(%3: tensor<1048576xf32>, %4: tensor<1048576xf32>):
-      %5 = add(%3, %4) : tensor<1048576xf32>
-      %6 = mul(%5, %3) : tensor<1048576xf32>
-      %7 = sub(%6, %4) : tensor<1048576xf32>
-      %8 = add(%7, %3) : tensor<1048576xf32>
-      yield(%8)
-    }
-    return(%2)
+  func.func @Chain(%0: tensor<1048576xf32>, %1: tensor<1048576xf32>) -> (tensor<1048576xf32>) {
+    %2 = "tera.fusion"(%0, %1) ({
+      ^bb0(%3: tensor<1048576xf32>, %4: tensor<1048576xf32>):
+        %5 = tera.add %3, %4 : tensor<1048576xf32>
+        %6 = tera.mul %5, %3 : tensor<1048576xf32>
+        %7 = tera.sub %6, %4 : tensor<1048576xf32>
+        %8 = tera.add %7, %3 : tensor<1048576xf32>
+        tera.yield %8 : tensor<1048576xf32>
+    }) {fusion_kind = "kElementwise"} : (tensor<1048576xf32>, tensor<1048576xf32>) -> tensor<1048576xf32>
+    return %2 : tensor<1048576xf32>
   }
 }
 ```

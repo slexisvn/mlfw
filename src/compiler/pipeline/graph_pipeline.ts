@@ -38,7 +38,7 @@ export function buildGraphPipeline(config: CompilerConfig, target: GraphPipeline
   for (const p of passesForPhase('pre')) passes.push(p);
 
   passes.push(new CallInlinerPass());
-  passes.push(new DecompositionPass(target as unknown as null));
+  passes.push(new DecompositionPass(target));
 
   const fastMath = !!config.optimization.fastMath;
   const canonicalize = new CanonicalizePass({ fastMath });

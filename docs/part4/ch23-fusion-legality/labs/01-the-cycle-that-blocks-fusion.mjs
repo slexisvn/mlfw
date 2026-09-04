@@ -36,7 +36,7 @@ async function show(label, Klass) {
     },
   });
   await compiled._ready;
-  const fusions = (ir.match(/= fusion\(/g) || []).length;
+  const fusions = (ir.match(/= "tera\.fusion"\(/g) || []).length;
   console.log(`=== ${label} ===`);
   console.log(ir);
   console.log(`fusion regions: ${fusions}\n`);

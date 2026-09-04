@@ -349,32 +349,37 @@ export class RuntimeModule {
         i++;
       }
     }
-    const seen = new Map<string, true>();
-    const result: number[] = [];
+    const keysByVar = new Map<string, string[]>();
     for (const [key, varNode] of shapeParamMap) {
-      if (seen.has(varNode.name)) continue;
-      seen.set(varNode.name, true);
-      const sepIdx = key.lastIndexOf(':');
-      const bufferName = key.substring(0, sepIdx);
-      const dimIdx = parseInt(key.substring(sepIdx + 1), 10);
-      let resolved = null;
-      if (bufferIndex.has(bufferName)) {
-        const shape = tensorShapes.get(bufferIndex.get(bufferName)!);
-        if (shape && dimIdx < shape.length && shape[dimIdx] > 0) {
-          resolved = shape[dimIdx];
-        }
-      }
-      if (resolved === null) {
-        for (const [, shape] of tensorShapes) {
-          if (dimIdx < shape.length && shape[dimIdx] > 0) {
-            resolved = shape[dimIdx];
-            break;
-          }
-        }
-      }
-      result.push(resolved !== null ? resolved : 1);
+      const keys = keysByVar.get(varNode.name);
+      if (keys) keys.push(key);
+      else keysByVar.set(varNode.name, [key]);
+    }
+    const result: number[] = [];
+    for (const [name, keys] of keysByVar) {
+      result.push(RuntimeModule._resolveExtent(name, keys, bufferIndex, tensorShapes));
     }
     return result;
+  }
+
+  static _resolveExtent(name: string, keys: readonly string[], bufferIndex: Map<string, number>, tensorShapes: Map<number, number[]>): number {
+    for (const key of keys) {
+      const sepIdx = key.lastIndexOf(':');
+      const argIdx = bufferIndex.get(key.substring(0, sepIdx));
+      if (argIdx === undefined) continue;
+      const dimIdx = parseInt(key.substring(sepIdx + 1), 10);
+      const shape = tensorShapes.get(argIdx);
+      if (shape && dimIdx < shape.length && shape[dimIdx] > 0) return shape[dimIdx];
+    }
+    for (const key of keys) {
+      const dimIdx = parseInt(key.substring(key.lastIndexOf(':') + 1), 10);
+      for (const [, shape] of tensorShapes) {
+        if (dimIdx < shape.length && shape[dimIdx] > 0) return shape[dimIdx];
+      }
+    }
+    throw new Error(
+      `dynamic extent '${name}' cannot be resolved: no argument carries a shape for ${keys.join(', ')}`
+    );
   }
 
   getKernelSource(name: string): string | null {

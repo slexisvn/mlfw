@@ -625,8 +625,6 @@ export class CUDACodegen extends GpuCodegenBase {
       const blockThreads = this._blockDim[0] * this._blockDim[1] * this._blockDim[2];
       const crossThread = threadSharedIntermediates(profile);
       if (blockThreads * gridThreads > 1 && crossThread.size > 0) {
-        // Shared memory is per block, so a buffer written under a blockIdx binding can only
-        // live there when the grid is a single block.
         const sharedIsVisibleToEveryWriter = gridThreads === 1 || !storedUnderBlockBinding(profile, crossThread);
         if (sharedIsVisibleToEveryWriter && this._promoteCrossThreadToShared(func, crossThread)) {
           this._needsBarriers = true;

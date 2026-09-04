@@ -33,7 +33,7 @@ function buildCumsum(T, D) {
   const carryT = new TensorType([D], F32);
   const ysT = new TensorType([T, D], F32);
   return buildFunction('sc', [xsT, carryT], [carryT, ysT], (b, args) => {
-    const sc = b.scanOp([args[0]], [args[1]], (bb, xt, carry) => {
+    const sc = b.scanOp([args[1]], [args[0]], (bb, carry, xt) => {
       const next = bb.add(carry[0], xt[0]).getResult(0);
       return [[next], [next]];
     });
@@ -82,7 +82,7 @@ describe('scan builder validation', () => {
   it('rejects xs inputs with mismatched leading lengths', () => {
     const ty = (s) => new TensorType(s, ScalarType.F32);
     expect(() => buildFunction('s', [ty([3, 2]), ty([4, 2]), ty([2])], [ty([2])], (b, [xs1, xs2, init]) => {
-      const s = b.scanOp([xs1, xs2], [init], (bb, xt, cy) => {
+      const s = b.scanOp([init], [xs1, xs2], (bb, cy, xt) => {
         const nc = bb.add(cy[0], xt[0]).getResult(0);
         return [[nc], [nc]];
       });

@@ -2,6 +2,7 @@ import { defineConfig } from 'vitest/config';
 
 const CUDA = 'tests/**/*.cuda.test.js';
 const WEBGPU = 'tests/**/*.webgpu.test.js';
+const TERAC = 'tests/**/*.terac.test.js';
 const SCRATCH = 'tests/**/_*.test.js';
 const PERF = 'tests/perf/**';
 const STRESS = 'tests/stress/**';
@@ -13,7 +14,7 @@ export default defineConfig({
         test: {
           name: 'unit',
           include: ['tests/**/*.test.js'],
-          exclude: ['tests/e2e/**', STRESS, PERF, CUDA, WEBGPU, SCRATCH],
+          exclude: ['tests/e2e/**', STRESS, PERF, CUDA, WEBGPU, TERAC, SCRATCH],
           testTimeout: 5000,
         },
       },
@@ -21,7 +22,15 @@ export default defineConfig({
         test: {
           name: 'e2e',
           include: ['tests/e2e/**/*.test.js'],
-          exclude: [CUDA, WEBGPU, SCRATCH],
+          exclude: [CUDA, WEBGPU, TERAC, SCRATCH],
+          testTimeout: 60000,
+        },
+      },
+      {
+        test: {
+          name: 'terac',
+          include: [TERAC],
+          exclude: [PERF, SCRATCH],
           testTimeout: 60000,
         },
       },

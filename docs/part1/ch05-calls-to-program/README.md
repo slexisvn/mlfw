@@ -93,17 +93,17 @@ class DeadBranch extends Module {
 Tracing records all of it — the wasted matmul, the wasted bias, the wasted `relu`, the wasted `tanh`:
 
 ```
-    %5 = transpose(%1) {permutation = [1, 0]} : tensor<2x8xf32>
-    %6 = dot(%0, %5) ... : tensor<2x8xf32>
-    %7 = add(%6, %2) : tensor<2x8xf32>
-    %8 = constant() {tensor_type = tensor<f32>, value = 0} : tensor<f32>
-    %9 = broadcast_in_dim(%8) ... : tensor<2x8xf32>
-    %10 = maximum(%7, %9) : tensor<2x8xf32>
-    %11 = tanh(%10) : tensor<2x8xf32>
-    %12 = transpose(%3) {permutation = [1, 0]} : tensor<2x2xf32>
-    %13 = dot(%0, %12) ... : tensor<2x2xf32>
-    %14 = add(%13, %4) : tensor<2x2xf32>
-    return(%14)
+    %5 = tera.transpose %1 {permutation = array<i64: 1, 0>} : tensor<8x2xf32> -> tensor<2x8xf32>
+    %6 = tera.dot %0, %5 ... : (tensor<2x2xf32>, tensor<2x8xf32>) -> tensor<2x8xf32>
+    %7 = "tera.add"(%6, %2) : (tensor<2x8xf32>, tensor<8xf32>) -> tensor<2x8xf32>
+    %8 = tera.constant dense<0.0> : tensor<f32>
+    %9 = tera.broadcast_in_dim %8 ... : tensor<f32> -> tensor<2x8xf32>
+    %10 = tera.maximum %7, %9 : tensor<2x8xf32>
+    %11 = "tera.tanh"(%10) : (tensor<2x8xf32>) -> tensor<2x8xf32>
+    %12 = tera.transpose %3 {permutation = array<i64: 1, 0>} : tensor<2x2xf32> -> tensor<2x2xf32>
+    %13 = tera.dot %0, %12 ... : (tensor<2x2xf32>, tensor<2x2xf32>) -> tensor<2x2xf32>
+    %14 = "tera.add"(%13, %4) : (tensor<2x2xf32>, tensor<2xf32>) -> tensor<2x2xf32>
+    return %14 : tensor<2x2xf32>
 ```
 
 **The tracer is not clever, and it is important that it is not.** It records; it does not judge. The model performed ten tensor operations and the tracer wrote down ten, seven of which cannot affect the result.
@@ -310,24 +310,23 @@ and the loop appears in the IR:
 
 ```
 module @traced {
-  func @traced(%0: tensor<4x3xf32>, %1: tensor<3xf32>) -> (tensor<4x3xf32>) {
-    %2, %3 = scan(%0, %1) {num_carry = 1, num_xs = 1} : tensor<3xf32>, tensor<4x3xf32>
-    {
-      ^bb(%4: tensor<3xf32>, %5: tensor<3xf32>):
-      %6 = constant() {tensor_type = tensor<f32>, value = 0.8999999761581421} : tensor<f32>
-      %7 = mul(%5, %6) : tensor<3xf32>
-      %8 = add(%7, %4) : tensor<3xf32>
-      %9 = tanh(%8) : tensor<3xf32>
-      yield(%9, %9)
-    }
-    return(%3)
+  func.func @traced(%0: tensor<4x3xf32>, %1: tensor<3xf32>) -> (tensor<4x3xf32>) {
+    %2, %3 = "tera.scan"(%0, %1) ({
+      ^bb0(%4: tensor<3xf32>, %5: tensor<3xf32>):
+        %6 = tera.constant dense<0.8999999761581421> : tensor<f32>
+        %7 = "tera.mul"(%5, %6) : (tensor<3xf32>, tensor<f32>) -> tensor<3xf32>
+        %8 = tera.add %7, %4 : tensor<3xf32>
+        %9 = "tera.tanh"(%8) : (tensor<3xf32>) -> tensor<3xf32>
+        tera.yield %9, %9 : tensor<3xf32>, tensor<3xf32>
+    }) {num_carry = 1, num_xs = 1} : (tensor<4x3xf32>, tensor<3xf32>) -> (tensor<3xf32>, tensor<4x3xf32>)
+    return %3 : tensor<4x3xf32>
   }
 }
 ```
 
 Notice what did **not** happen: the loop body was not unrolled four times. There is one `scan` operation carrying a *region* — the indented block — that holds the body once.
 
-**The block's arguments are (element of `xs`, carry) — the reverse of the JavaScript callback's `(carry, x_t)`, and this trips everyone once.** You can confirm it from the printout without trusting anyone: `%7 = mul(%5, %6)` with `%6 = 0.9`, and the source multiplies the *carry* by 0.9, so `%5` is the carry and `%4` is the element. The order is set by [`builder.ts:471`](../../../src/compiler/ir/graph/builder.ts), which lays the block out as `[...xtTypes, ...carryTypes]` to match the operand list `[...xs, ...initCarry]` position for position — the `scan` operation takes its data inputs first and its loop-carried state second, and the region mirrors the operation, not the user-facing API. The user-facing `scan(fn, initCarry, xs)` puts the carry first because that is how `jax.lax.scan` reads. Two conventions, one adapter between them, and `num_carry` / `num_xs` are the attributes that record where the split falls.
+**The block's arguments are (element of `xs`, carry) — the reverse of the JavaScript callback's `(carry, x_t)`, and this trips everyone once.** You can confirm it from the printout without trusting anyone: `%7 = "tera.mul"(%5, %6)` with `%6 = 0.9`, and the source multiplies the *carry* by 0.9, so `%5` is the carry and `%4` is the element. The order is set by [`builder.ts:471`](../../../src/compiler/ir/graph/builder.ts), which lays the block out as `[...xtTypes, ...carryTypes]` to match the operand list `[...xs, ...initCarry]` position for position — the `scan` operation takes its data inputs first and its loop-carried state second, and the region mirrors the operation, not the user-facing API. The user-facing `scan(fn, initCarry, xs)` puts the carry first because that is how `jax.lax.scan` reads. Two conventions, one adapter between them, and `num_carry` / `num_xs` are the attributes that record where the split falls.
 
 This is worth pausing on, because it is the first real payoff of the IR design. A region lets one operation contain a program. The graph stays small regardless of sequence length; the body can be optimized once; and — the reason this matters most — the body can be *differentiated* once, which is what makes backpropagation through a recurrence tractable (Chapter 31).
 

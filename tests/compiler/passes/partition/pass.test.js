@@ -188,7 +188,7 @@ describe('GraphPartitionPass topo sort and insertion ordering', () => {
     let producer, scanOp;
     buildFunction('cap', [T([3, 2]), T([2])], [T([2])], (b, args) => {
       producer = b.neg(args[1]);
-      scanOp = b.scanOp([args[0]], [producer.getResult(0)], (rb, xs, carry) => {
+      scanOp = b.scanOp([producer.getResult(0)], [args[0]], (rb, carry, xs) => {
         const acc = rb.add(rb.add(carry[0], xs[0]).getResult(0), producer.getResult(0));
         return [[acc.getResult(0)], []];
       });

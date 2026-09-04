@@ -1,0 +1,52 @@
+//===- TeraOpsConstant.cpp - Value-producing tera ops -----------*- C++ -*-===//
+//
+// This file is licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+
+#include "Tera/IR/TeraOps.h"
+
+#include "mlir/IR/BuiltinTypes.h"
+
+using namespace mlir;
+using namespace mlir::tera;
+
+//===----------------------------------------------------------------------===//
+// ConstantOp
+//===----------------------------------------------------------------------===//
+
+OpFoldResult ConstantOp::fold(FoldAdaptor) { return getValue(); }
+
+//===----------------------------------------------------------------------===//
+// IotaOp
+//===----------------------------------------------------------------------===//
+
+LogicalResult IotaOp::verify() {
+  if (failed(verifySizesClause(*this, getSizes())))
+    return failure();
+  auto resultType = dyn_cast<RankedTensorType>(getResult().getType());
+  if (!resultType)
+    return success();
+  int64_t dimension = getIotaDimension();
+  if (dimension < 0 || dimension >= resultType.getRank())
+    return emitOpError() << "iota dimension " << dimension
+                         << " is out of range for rank "
+                         << resultType.getRank();
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// Vector-Jacobian products
+//===----------------------------------------------------------------------===//
+
+LogicalResult ConstantOp::buildVjp(OpBuilder &, ValueRange,
+                                   SmallVectorImpl<Value> &) {
+  return success();
+}
+
+LogicalResult IotaOp::buildVjp(OpBuilder &, ValueRange,
+                               SmallVectorImpl<Value> &) {
+  return success();
+}

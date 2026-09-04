@@ -3,6 +3,8 @@ import { buildFunction } from '../../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../../src/compiler/ir/graph/types.js';
 import { DecompositionPass } from '../../../../src/compiler/passes/decompose/decomposition_pass.js';
 import { PassResult } from '../../../../src/compiler/passes/pass.js';
+import { compileGraph } from '../../../../src/compiler/pipeline/compiler.js';
+import { CPUTarget } from '../../../../src/compiler/support/target.js';
 
 function run(func) {
   return new DecompositionPass().run(func);
@@ -11,6 +13,35 @@ function run(func) {
 function retVal(func) {
   return func.getReturnOp().getOperand(0);
 }
+
+describe('attention decomposition reaches a fixed point', () => {
+  it.each([false, true])('fully lowers attention including its new softmax and computes causal=%s correctly', (causal) => {
+    const qType = new TensorType([1, 2, 2], 'f32');
+    const kvType = new TensorType([1, 3, 2], 'f32');
+    const func = buildFunction('attention', [qType, kvType, kvType], [qType], (b, [q, k, v]) => {
+      b.returnOp(b.scaledDotProductAttention(q, k, v, 0.5, causal).results);
+    });
+    expect(run(func)).toBe(PassResult.CHANGED);
+    expect(func.findOp((op) => op.opName === 'scaled_dot_product_attention' || op.opName === 'softmax')).toBeNull();
+    expect(run(func)).toBe(PassResult.UNCHANGED);
+    const q = new Float32Array([1, 0, 0, 1]);
+    const k = new Float32Array([2, 0, 0, 2, 1, 1]);
+    const v = new Float32Array([1, 2, 3, 4, 10, 20]);
+    const expected = [];
+    for (let row = 0; row < 2; row++) {
+      const scores = [];
+      for (let col = 0; col < 3; col++) {
+        const allowed = !causal || col <= row + 1;
+        scores.push(allowed ? Math.exp(0.5 * (q[row * 2] * k[col * 2] + q[row * 2 + 1] * k[col * 2 + 1])) : 0);
+      }
+      const total = scores.reduce((sum, x) => sum + x, 0);
+      for (let dim = 0; dim < 2; dim++) expected.push(scores.reduce((sum, score, col) => sum + score * v[col * 2 + dim], 0) / total);
+    }
+    const output = new Float32Array(4);
+    compileGraph(func, CPUTarget()).run('attention', q, k, v, output);
+    for (let i = 0; i < output.length; i++) expect(output[i]).toBeCloseTo(expected[i], 5);
+  });
+});
 
 describe('layer_norm decomposition', () => {
   it('computes mean from input (has reduce ops), unlike batch_norm', () => {

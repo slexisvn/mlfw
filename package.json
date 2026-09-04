@@ -39,6 +39,10 @@
     "#io/cuda/*": {
       "browser": "./src/runtime/browser/cuda/*.ts",
       "default": "./src/runtime/node/cuda/*.ts"
+    },
+    "#io/terac": {
+      "browser": "./src/runtime/browser/terac.ts",
+      "default": "./src/runtime/node/terac.ts"
     }
   },
   "scripts": {
@@ -49,6 +53,7 @@
     "test:e2e": "vitest run --project e2e",
     "test:webgpu": "vitest run --project webgpu",
     "test:cuda": "vitest run --project cuda",
+    "test:terac": "vitest run --project terac",
     "test:stress": "vitest run --project stress",
     "test:perf": "vitest run --project perf"
   },

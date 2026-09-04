@@ -7,6 +7,7 @@ import { BackendPipeline } from '../backend/pipeline.js';
 import { RuntimeModule } from '../runtime/runtime.js';
 import { PassManager } from '../compiler/passes/pass_manager.js';
 import { DecompositionPass } from '../compiler/passes/decompose/decomposition_pass.js';
+import type { AttributedTarget } from '../compiler/support/target_attrs.js';
 import { CanonicalizePass } from '../compiler/passes/canonicalize/canonicalize.js';
 import { DCEPass } from '../compiler/passes/simplify/dce.js';
 import { Schedule } from '../compiler/schedule/schedule.js';
@@ -23,7 +24,7 @@ type TensorLike = {
   dtype: DType;
 };
 
-export type TargetLike = {
+export type TargetLike = AttributedTarget & {
   name: string;
   isGPU?: () => boolean;
   isWebGPU: () => boolean;
@@ -165,7 +166,7 @@ export function jitCompile(opName: string, tensorArgs: readonly TensorLike[], sc
   const mod = new GraphModule(opName + '_jit_mod');
   mod.addFunction(func as unknown as IRGraphFunction);
   const pm = new PassManager();
-  pm.addPass(new DecompositionPass());
+  pm.addPass(new DecompositionPass(target));
   pm.addPass(new CanonicalizePass());
   pm.addPass(new DCEPass());
   pm.run(mod);

@@ -96,7 +96,16 @@ export function backpropOps(orderedOps: readonly Operation[], { accumulator, bui
     const resultValues = new Array<Value>(op.numResults);
     for (let r = 0; r < op.numResults; r++) resultValues[r] = resolveValue(op.getResult(r));
 
-    const full = (value: number, type: TensorType) => builder.broadcast(builder.scalarConstant(value, type.dtype).getResult(0), type.shape, []).getResult(0) as TensorValue;
+    const symbolSources = [...operandValues, ...resultValues].filter((v) => v && v.symbolicShape);
+    const symbolSource = (type: TensorType): Value | null => {
+      for (const value of symbolSources) {
+        if (type.equals(value.type)) return value;
+      }
+      return null;
+    };
+    const full = (value: number, type: TensorType) => builder.broadcast(
+      builder.scalarConstant(value, type.dtype).getResult(0), type.shape, [],
+      [], symbolSource(type)).getResult(0) as TensorValue;
     builder.withLocation(gradientLocation(op.loc), () => {
       const gradInputs = rule({ builder, op, operands: operandValues as TensorValue[], results: resultValues as TensorValue[], gradOutputs: gradOuts as (TensorValue | null)[], attrs: op.attributes, full });
       if (!gradInputs) return;
@@ -174,6 +183,12 @@ export function reduceGradToOperandShape(builder: IRBuilder, grad: Value, target
   return g;
 }
 
+function carrySymbols(args: readonly Value[], sources: readonly Value[]): void {
+  for (let i = 0; i < args.length && i < sources.length; i++) {
+    if (sources[i].symbolicShape) args[i].symbolicShape = sources[i].symbolicShape;
+  }
+}
+
 export class BackwardGraphBuilder {
   private _rematPolicy: RematPolicy | null;
   private _checkpointPolicy: CheckpointPolicy | null;
@@ -225,6 +240,8 @@ export class BackwardGraphBuilder {
 
     const gradOutputArgs = bwdArgs.slice(0, gradOutputTypes.length);
     const savedArgs = bwdArgs.slice(gradOutputTypes.length);
+    carrySymbols(gradOutputArgs, forwardOutputs);
+    carrySymbols(savedArgs, savedValues);
 
     const valueMap = new Map<number, Value>();
     for (let i = 0; i < savedValues.length; i++) {
@@ -345,11 +362,6 @@ export class BackwardGraphBuilder {
       }
     }
 
-    // A non-saved op consumed by the backward is rematerialized, which recurses
-    // through its operands until it hits a saved value or a block-arg. Any forward
-    // INPUT block-arg reached this way (e.g. index_select's indices come from
-    // select(din)) would otherwise be referenced as a free variable that the graph
-    // partitioner cannot map. Save those inputs so the backward func declares them.
     const savedIds = new Set(savedValueIndices.keys());
     const inputById = new Map<number, Value>(forwardInputs.map(v => [v.id, v]));
     const seen = new Set<number>();
@@ -494,6 +506,8 @@ export class BackwardGraphBuilder {
 
     const gradOutputArgs = bwdArgs.slice(0, gradOutputTypes.length);
     const savedArgs = bwdArgs.slice(gradOutputTypes.length);
+    carrySymbols(gradOutputArgs, forwardOutputs);
+    carrySymbols(savedArgs, savedValues);
 
     const savedValueMap = new Map<number, Value>();
     for (let i = 0; i < savedValues.length; i++) {

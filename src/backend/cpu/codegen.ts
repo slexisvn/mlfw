@@ -390,7 +390,6 @@ export class CPUCodegen extends CodegenBase {
     this._visitNode(node.body);
   }
 
-
   _visitIfThenElseStmt(node: IfThenElseNode): void {
     this._emit(`if (${this._exprToJS(node.condition)}) {`);
     this._indent++;
@@ -487,6 +486,9 @@ export class CPUCodegen extends CodegenBase {
               else if (node.op === '*' && a === '1') { vals.push(b as string); }
               else if (foldsZero && node.op === '+') { vals.push((b === '0' ? a : b) as string); }
               else if (foldsZero && node.op === '*') { vals.push(this._zeroLit(dtype)); }
+              else if (node.op === '/' && isDtypeInt(dtype)) {
+                vals.push(dtype === 'i64' ? `(${a} / ${b})` : `Math.trunc(${a} / ${b})`);
+              }
               else if (node.op === '%') vals.push(`((${a} % ${b} + ${b}) % ${b})`);
               else if (node.op === '//') vals.push(`Math.floor(${a} / ${b})`);
               else if (node.op === 'tmod') vals.push(`(${a} % ${b})`);
@@ -571,7 +573,7 @@ export class CPUCodegen extends CodegenBase {
 
     const out: string[] = [];
     for (let i = 0; i < lines.length; i++) {
-      if (allocName[i] !== null && counts.get(allocName[i] as string) === 1) continue; // dead alloc
+      if (allocName[i] !== null && counts.get(allocName[i] as string) === 1) continue;
       const line = lines[i];
       if (/^\s*\}\s*$/.test(line) && out.length > 0 && /^\s*for\s*\(.*\{\s*$/.test(out[out.length - 1])) {
         out.pop();

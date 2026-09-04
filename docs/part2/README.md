@@ -105,7 +105,7 @@ node docs/part2/ch10-type-system/labs/01-what-a-type-knows.mjs
 node docs/part2/ch10-type-system/labs/02-static-dynamic-symbolic.mjs
 node docs/part2/ch11-ops-as-a-dialect/labs/01-a-trait-is-data.mjs
 node docs/part2/ch11-ops-as-a-dialect/labs/02-fold-and-canonicalize.mjs
-node docs/part2/ch12-valid-ir/labs/01-break-it-seven-ways.mjs
+node docs/part2/ch12-valid-ir/labs/01-break-it-eight-ways.mjs
 node docs/part2/ch13-ir-as-text/labs/01-round-trip.mjs
 node docs/part2/ch13-ir-as-text/labs/02-edit-by-hand.mjs
 ```

@@ -267,19 +267,19 @@ The lab compiles the same MLP three times: everything on, dead-code elimination 
 With everything on, the graph is six operations, one of them a fused elementwise region:
 
 ```
-    %5 = dot(%0, %1) {lhs_batch = [], lhs_contracting = [1], rhs_batch = [], rhs_contracting = [1]} : tensor<2x8xf32>
-    %6 = constant() {tensor_type = tensor<2x8xf32>, value = 0} : tensor<2x8xf32>
-    %7 = fusion(%5, %2, %6) {fusion_kind = "kElementwise"} : tensor<2x8xf32>
+    %5 = tera.dot %0, %1 {lhs_batch = array<i64>, lhs_contracting = array<i64: 1>, rhs_batch = array<i64>, rhs_contracting = array<i64: 1>} : (tensor<2x2xf32>, tensor<8x2xf32>) -> tensor<2x8xf32>
+    %6 = tera.constant dense<0.0> : tensor<2x8xf32>
+    %7 = "tera.fusion"(%5, %2, %6) ({
     ...
 ```
 
 With DCE off, two transposes nobody uses survive to the end:
 
 ```
-    %5 = transpose(%1) {permutation = [1, 0]} : tensor<2x8xf32>
-    %6 = dot(%0, %1) {lhs_batch = [], lhs_contracting = [1], rhs_batch = [], rhs_contracting = [1]} : tensor<2x8xf32>
+    %5 = tera.transpose %1 {permutation = array<i64: 1, 0>} : tensor<8x2xf32> -> tensor<2x8xf32>
+    %6 = tera.dot %0, %1 {lhs_batch = array<i64>, lhs_contracting = array<i64: 1>, rhs_batch = array<i64>, rhs_contracting = array<i64: 1>} : (tensor<2x2xf32>, tensor<8x2xf32>) -> tensor<2x8xf32>
     ...
-    %15 = transpose(%3) {permutation = [1, 0]} : tensor<8x1xf32>
+    %15 = tera.transpose %3 {permutation = array<i64: 1, 0>} : tensor<1x8xf32> -> tensor<8x1xf32>
 ```
 
 `%5` has no users. Neither does `%15`. They are the transposes canonicalization made redundant and DCE would have swept. And they are not free: the generated kernel goes from 38 lines to 48, because **nothing downstream of the graph passes decides not to emit an operation that is in the graph.** Lowering lowers what it is given. Dead code elimination is not tidiness; it is the only thing standing between a dead operation and a real pass over memory at run time.
@@ -287,15 +287,14 @@ With DCE off, two transposes nobody uses survive to the end:
 With every simplification off, the transposes are not even dead — the `dot` still contracts dimension 0 of a transposed weight, so the transposes are load-bearing, and the fused region additionally contains a `broadcast_in_dim` that constant folding would have removed:
 
 ```
-    %6 = dot(%0, %5) {lhs_batch = [], lhs_contracting = [1], rhs_batch = [], rhs_contracting = [0]} : tensor<2x8xf32>
-    %8 = fusion(%6, %2, %7) {fusion_kind = "kBroadcast"} : tensor<2x8xf32>
-    {
-      ^bb(%9: tensor<2x8xf32>, %10: tensor<8xf32>, %11: tensor<f32>):
-      %12 = add(%9, %10) : tensor<2x8xf32>
-      %13 = broadcast_in_dim(%11) {broadcast_dimensions = [], result_shape = [2, 8]} : tensor<2x8xf32>
-      %14 = maximum(%12, %13) : tensor<2x8xf32>
-      yield(%14)
-    }
+    %6 = tera.dot %0, %5 {lhs_batch = array<i64>, lhs_contracting = array<i64: 1>, rhs_batch = array<i64>, rhs_contracting = array<i64: 0>} : (tensor<2x2xf32>, tensor<2x8xf32>) -> tensor<2x8xf32>
+    %7 = tera.constant dense<0.0> : tensor<f32>
+    %8 = "tera.fusion"(%6, %2, %7) ({
+      ^bb0(%9: tensor<2x8xf32>, %10: tensor<8xf32>, %11: tensor<f32>):
+        %12 = "tera.add"(%9, %10) : (tensor<2x8xf32>, tensor<8xf32>) -> tensor<2x8xf32>
+        %13 = tera.broadcast_in_dim %11 {broadcast_dimensions = array<i64>} : tensor<f32> -> tensor<2x8xf32>
+        %14 = tera.maximum %12, %13 : tensor<2x8xf32>
+        tera.yield %14 : tensor<2x8xf32>
 ```
 
 Three programs, one answer, three different amounts of work. This is what a pass pipeline buys, and being able to switch one element of it off from the outside is what lets you find out which element bought what.

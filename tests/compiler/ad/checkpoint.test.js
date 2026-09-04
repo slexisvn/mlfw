@@ -257,7 +257,7 @@ describe('AD differentiates region control-flow in every builder mode', () => {
   function buildScanModel() {
     const T = 3, D = 2;
     return buildFunction('scan_fwd', [t([T, D]), t([D])], [t([D])], (b, [xs, init]) => {
-      const s = b.scanOp([xs], [init], (bb, xt, cy) => {
+      const s = b.scanOp([init], [xs], (bb, cy, xt) => {
         const nc = bb.add(cy[0], xt[0]).getResult(0);
         return [[nc], [nc]];
       });
@@ -296,7 +296,7 @@ describe('AD differentiates region control-flow in every builder mode', () => {
 describe('scan carry checkpointing (O(sqrt T) backward)', () => {
   function buildScanModelT(T, D) {
     return buildFunction('scan_ck_fwd', [t([T, D]), t([D])], [t([D])], (b, [xs, init]) => {
-      const s = b.scanOp([xs], [init], (bb, xt, cy) => {
+      const s = b.scanOp([init], [xs], (bb, cy, xt) => {
         const m = bb.mul(cy[0], xt[0]).getResult(0);
         const nc = bb.add(m, xt[0]).getResult(0);
         return [[nc], [nc]];

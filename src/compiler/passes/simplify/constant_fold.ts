@@ -3,9 +3,9 @@ import { IRBuilder } from '../../ir/graph/builder.js';
 import { registry } from '../../ir/graph/ops.js';
 import { explainer } from '../explain.js';
 import { TraceLevel } from '../../support/trace.js';
-import { isIntType } from '../../ir/graph/types.js';
+import { isIntType, TensorType } from '../../ir/graph/types.js';
 import { roundToDtype } from '../../../tensor/utils/half.js';
-import type { AttrValue, ScalarDType, TensorType } from '../../ir/graph/types.js';
+import type { AttrValue, ScalarDType } from '../../ir/graph/types.js';
 import type { GraphFunction } from '../../ir/graph/function.js';
 import type { Operation } from '../../ir/graph/operation.js';
 import type { Value } from '../../ir/graph/value.js';
@@ -93,6 +93,8 @@ export class ConstantFoldPass extends FunctionPass {
       if (def.getMemoryEffects && def.getMemoryEffects(op).length > 0) continue;
       if (!def.fold) continue;
       if (op.numOperands === 0) continue;
+      const resultType = op.getResult(0).type;
+      if (resultType instanceof TensorType && resultType.hasDynamic) continue;
 
       const constValues: AttrValue[] = new Array(op.numOperands);
       const constOps: (Operation | null)[] = new Array(op.numOperands);

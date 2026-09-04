@@ -2,15 +2,19 @@ import { Block, Region } from './block.js';
 import { Operation } from './operation.js';
 import { GraphFunction } from './function.js';
 import { GraphModule } from './module.js';
-import { TensorType, TupleType, TokenType, FunctionType, Layout, ScalarType, DYNAMIC } from './types.js';
+import { TensorType, TupleType, TokenType, FunctionType, Layout, DYNAMIC, dtypeFromString, isFloatType } from './types.js';
 import { SymInt } from '../sym_int.js';
 import { jsTypedArray } from '../../../util/dtype_map.js';
+import {
+  GENERIC_REGIONS, combinerScalarType, derivedAttrValue, isNumberArray, mlirFormOfMnemonic,
+  nestPairs, parseFloatLiteral, seedConstantAttrs,
+  unqualify,
+} from './mlir_format.js';
+import type { MlirOpForm, MlirRegionForm } from './mlir_format.js';
 import type { AttrValue, Dim, IRType, ScalarDType } from './types.js';
 import type { Value } from './value.js';
 import { parseLocation } from '../location.js';
 import type { Location } from '../location.js';
-
-const SCALAR_TYPES = new Set<string>(Object.values(ScalarType));
 
 const TYPED_ARRAY_BY_NAME: Record<string, new (values: number[]) => ArrayBufferView> = {
   Float32Array, Float64Array, Int8Array, Int16Array, Int32Array, Uint8Array, Uint16Array, Uint32Array,
@@ -84,7 +88,10 @@ class Scanner {
       const ch = this.text[this.pos];
       if (ch === '"') {
         this.pos++;
-        while (this.pos < this.text.length && this.text[this.pos] !== '"') this.pos++;
+        while (this.pos < this.text.length && this.text[this.pos] !== '"') {
+          if (this.text[this.pos] === '\\') this.pos++;
+          this.pos++;
+        }
       } else if (ch === open) {
         depth++;
       } else if (ch === close) {
@@ -100,11 +107,28 @@ class Scanner {
     this.fail(`unbalanced '${open}'`);
   }
 
+  readString(): string {
+    this.expect('"');
+    const start = this.pos - 1;
+    while (this.pos < this.text.length && this.text[this.pos] !== '"') {
+      if (this.text[this.pos] === '\\') this.pos++;
+      this.pos++;
+    }
+    this.expect('"');
+    return JSON.parse(this.text.slice(start, this.pos)) as string;
+  }
+
   identifier(): string {
     this.skipSpace();
     const name = this.readWhile((ch) => /[A-Za-z0-9_.$]/.test(ch));
     if (name === '') this.fail('expected an identifier');
     return name;
+  }
+
+  valueName(): string {
+    this.expect('%');
+    const name = this.identifier();
+    return this.eat('#') ? `%${name}#${this.identifier()}` : `%${name}`;
   }
 }
 
@@ -116,7 +140,8 @@ function splitTopLevel(text: string, separator: string): string[] {
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
     if (inString) {
-      if (ch === '"') inString = false;
+      if (ch === '\\') i++;
+      else if (ch === '"') inString = false;
       continue;
     }
     if (ch === '"') inString = true;
@@ -180,9 +205,10 @@ function parseDim(text: string, line: number): Dim {
 function parseTensorBody(inner: string, line: number): TensorType {
   const parts = splitTopLevel(inner, ',');
   const segments = splitTopLevel(parts[0], 'x');
-  const dtype = segments[segments.length - 1].trim();
-  if (!SCALAR_TYPES.has(dtype)) {
-    throw new IRParseError(`'tensor<${inner}>' does not end in a known dtype (got '${dtype}')`, line);
+  const spelling = segments[segments.length - 1].trim();
+  const dtype = dtypeFromString(spelling);
+  if (!dtype) {
+    throw new IRParseError(`'tensor<${inner}>' does not end in a known dtype (got '${spelling}')`, line);
   }
   const dimParts = segments.slice(0, -1);
   if (dimParts.length === 1 && dimParts[0].trim() === '') dimParts.pop();
@@ -192,7 +218,7 @@ function parseTensorBody(inner: string, line: number): TensorType {
     const order = parts[1].trim();
     layout = new Layout(order.slice(1, -1).split(',').map((v) => Number(v.trim())));
   }
-  return new TensorType(shape, dtype as ScalarDType, layout);
+  return new TensorType(shape, dtype, layout);
 }
 
 function parseType(sc: Scanner): IRType {
@@ -221,30 +247,87 @@ function parseTypeList(text: string, line: number): IRType[] {
   return splitTopLevel(text, ',').map((part) => parseType(new Scanner(part, line)));
 }
 
+function parseGroupedTypes(sc: Scanner): IRType[] {
+  if (sc.peek() === '(') return parseTypeList(sc.readGroup('(', ')'), sc.line);
+  return [parseType(sc)];
+}
+
+function readNumericLiteral(sc: Scanner): string {
+  sc.skipSpace();
+  const sign = sc.eat('-') ? '-' : '';
+  if (sc.text.startsWith('0x', sc.pos) || sc.text.startsWith('0X', sc.pos)) {
+    sc.pos += 2;
+    return `${sign}0x${sc.readWhile((ch) => /[0-9a-fA-F]/.test(ch))}`;
+  }
+  const digits = sc.readWhile((ch) => /[0-9.]/.test(ch));
+  const mark = sc.pos;
+  if (!sc.eat('e') && !sc.eat('E')) return sign + digits;
+  const exponentSign = sc.eat('-') ? '-' : (sc.eat('+') ? '+' : '');
+  const exponent = sc.readWhile((ch) => /[0-9]/.test(ch));
+  if (exponent === '') {
+    sc.pos = mark;
+    return sign + digits;
+  }
+  return `${sign}${digits}e${exponentSign}${exponent}`;
+}
+
+function parseScalarLiteral(sc: Scanner, dtype: ScalarDType | null): number {
+  if (sc.eat('true')) return 1;
+  if (sc.eat('false')) return 0;
+  const text = readNumericLiteral(sc);
+  if (text === '') sc.fail('expected a numeric literal');
+  const typed = sc.eat(':') ? dtypeFromString(sc.identifier()) : null;
+  const effective = typed || dtype;
+  if (effective && isFloatType(effective)) return parseFloatLiteral(text, effective);
+  if (text.includes('0x')) return parseFloatLiteral(text, 'f64');
+  return Number(text);
+}
+
+function parseDenseBody(text: string, type: TensorType, line: number): AttrValue {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith('[')) {
+    return parseScalarLiteral(new Scanner(trimmed, line), type.dtype);
+  }
+  const values: number[] = [];
+  const collect = (body: string): void => {
+    const inner = body.trim();
+    if (!inner.startsWith('[')) {
+      values.push(parseScalarLiteral(new Scanner(inner, line), type.dtype));
+      return;
+    }
+    const stripped = inner.slice(1, -1);
+    if (stripped.trim() === '') return;
+    for (const part of splitTopLevel(stripped, ',')) collect(part);
+  };
+  collect(trimmed);
+  const Ctor = TYPED_ARRAY_BY_NAME[jsTypedArray(type.dtype)];
+  if (!Ctor) throw new IRParseError(`no typed array for dtype '${type.dtype}'`, line);
+  return new Ctor(values) as unknown as AttrValue;
+}
+
+function parseDenseAttr(sc: Scanner): { value: AttrValue; type: TensorType } {
+  sc.expect('dense');
+  const body = sc.readGroup('<', '>');
+  sc.expect(':');
+  const type = parseType(sc);
+  if (!(type instanceof TensorType)) sc.fail('dense attribute needs a tensor type');
+  return { value: parseDenseBody(body, type, sc.line), type };
+}
+
 function parseAttrValue(sc: Scanner): AttrValue {
   sc.skipSpace();
-  if (sc.eat('null')) return null;
+  if (sc.eat('unit')) return null;
   if (sc.eat('true')) return true;
   if (sc.eat('false')) return false;
-  if (sc.eat('-inf')) return -Infinity;
-  if (sc.eat('inf')) return Infinity;
-  if (sc.eat('nan')) return NaN;
-  if (sc.peek() === '"') {
-    sc.expect('"');
-    const value = sc.readWhile((ch) => ch !== '"');
-    sc.expect('"');
-    return value;
+  if (sc.peek() === '"') return sc.readString();
+  if (sc.text.startsWith('array<', sc.pos)) {
+    sc.expect('array');
+    const body = sc.readGroup('<', '>');
+    const colon = body.indexOf(':');
+    if (colon < 0) return [];
+    return splitTopLevel(body.slice(colon + 1), ',').map((v) => Number(v.trim()));
   }
-  if (sc.eat('dense<')) {
-    sc.pos -= 'dense<'.length;
-    sc.expect('dense');
-    const dtype = sc.readGroup('<', '>').trim();
-    const body = sc.readGroup('[', ']');
-    const values = body.trim() === '' ? [] : splitTopLevel(body, ',').map((v) => Number(parseAttrValue(new Scanner(v, sc.line))));
-    const Ctor = TYPED_ARRAY_BY_NAME[jsTypedArray(dtype)];
-    if (!Ctor) sc.fail(`no typed array for dtype '${dtype}'`);
-    return new Ctor(values) as unknown as AttrValue;
-  }
+  if (sc.text.startsWith('dense<', sc.pos)) return parseDenseAttr(sc).value;
   if (sc.peek() === '[') {
     const body = sc.readGroup('[', ']');
     if (body.trim() === '') return [];
@@ -253,33 +336,30 @@ function parseAttrValue(sc: Scanner): AttrValue {
   if (sc.peek() === '{') {
     const body = sc.readGroup('{', '}');
     const record: Record<string, AttrValue> = {};
-    if (body.trim() !== '') {
-      for (const entry of splitTopLevel(body, ',')) {
-        const idx = entry.indexOf(':');
-        if (idx < 0) throw new IRParseError(`malformed attribute record entry '${entry.trim()}'`, sc.line);
-        record[entry.slice(0, idx).trim()] = parseAttrValue(new Scanner(entry.slice(idx + 1), sc.line));
-      }
-    }
+    for (const [key, value] of attrEntries(body, sc.line)) record[key] = value;
     return record as unknown as AttrValue;
   }
   if (sc.text.startsWith('tensor<', sc.pos) || sc.text.startsWith('tuple<', sc.pos) || sc.text.startsWith('token', sc.pos)) {
     return parseType(sc) as unknown as AttrValue;
   }
-  const numeric = sc.readWhile((ch) => /[-+0-9.eE]/.test(ch));
-  if (numeric === '') sc.fail('expected an attribute value');
-  const value = Number(numeric);
-  if (Number.isNaN(value)) sc.fail(`invalid number '${numeric}'`);
-  return value;
+  return parseScalarLiteral(sc, null);
+}
+
+function* attrEntries(body: string, line: number): Generator<[string, AttrValue]> {
+  if (body.trim() === '') return;
+  for (const entry of splitTopLevel(body, ',')) {
+    const idx = entry.indexOf('=');
+    if (idx < 0) {
+      yield [entry.trim(), true];
+      continue;
+    }
+    yield [entry.slice(0, idx).trim(), parseAttrValue(new Scanner(entry.slice(idx + 1), line))];
+  }
 }
 
 function parseAttrs(body: string, line: number): Map<string, AttrValue> {
   const attrs = new Map<string, AttrValue>();
-  if (body.trim() === '') return attrs;
-  for (const entry of splitTopLevel(body, ',')) {
-    const idx = entry.indexOf('=');
-    if (idx < 0) throw new IRParseError(`malformed attribute '${entry.trim()}'`, line);
-    attrs.set(entry.slice(0, idx).trim(), parseAttrValue(new Scanner(entry.slice(idx + 1), line)));
-  }
+  for (const [key, value] of attrEntries(body, line)) attrs.set(key, value);
   return attrs;
 }
 
@@ -289,6 +369,7 @@ type BlockRecord = { argNames: string[]; argTypes: IRType[]; ops: OpRecord[] };
 type OpRecord = {
   line: Line;
   opName: string;
+  form: MlirOpForm | null;
   resultNames: string[];
   resultTypes: IRType[];
   attrs: Map<string, AttrValue>;
@@ -299,6 +380,8 @@ type OpRecord = {
 };
 
 const LOCATION_MARKER = ' loc(';
+const FUNCTION_KEYWORD = 'func.func';
+const FUNCTION_ATTRIBUTES = 'attributes';
 
 export function splitTrailingLocation(text: string): { body: string; loc: string | null } {
   let depth = 0;
@@ -321,18 +404,38 @@ export function splitTrailingLocation(text: string): { body: string; loc: string
 }
 
 function readBlockArgs(sc: Scanner, line: number): { names: string[]; types: IRType[] } {
-  const inner = sc.readGroup('(', ')');
   const names: string[] = [];
   const types: IRType[] = [];
+  if (sc.peek() !== '(') return { names, types };
+  const inner = sc.readGroup('(', ')');
   if (inner.trim() === '') return { names, types };
   for (const part of splitTopLevel(inner, ',')) {
     const argSc = new Scanner(part, line);
-    argSc.expect('%');
-    names.push(`%${argSc.identifier()}`);
+    names.push(argSc.valueName());
     argSc.expect(':');
     types.push(parseType(argSc));
   }
   return { names, types };
+}
+
+const CUSTOM_REGION_OPEN = ' {';
+
+function leadingMnemonic(text: string): string {
+  const assign = text.indexOf(' = ');
+  const head = (assign < 0 ? text : text.slice(assign + ' = '.length)).trimStart();
+  const end = head.search(/[^A-Za-z0-9_.]/);
+  return end < 0 ? head : head.slice(0, end);
+}
+
+function openingRegionForm(line: Line): MlirRegionForm | null {
+  if (line.text.endsWith(GENERIC_REGIONS.open)) return GENERIC_REGIONS;
+  if (!line.text.endsWith(CUSTOM_REGION_OPEN)) return null;
+  const mnemonic = leadingMnemonic(line.text);
+  const form = mlirFormOfMnemonic(mnemonic);
+  if (!form || !form.regions) {
+    throw new IRParseError(`'${mnemonic}' opens a body but its assembly has none`, line.no);
+  }
+  return form.regions;
 }
 
 class RecordReader {
@@ -348,74 +451,226 @@ class RecordReader {
     return this.index < this.lines.length ? this.lines[this.index] : null;
   }
 
-  readBlocks(indent: number): BlockRecord[] {
+  readBlocks(minIndent: number, closerIndent = -1): BlockRecord[] {
     const blocks: BlockRecord[] = [];
     for (;;) {
       const line = this.current;
-      if (!line || line.indent < indent) break;
-      if (line.text.startsWith('^bb')) {
-        const sc = new Scanner(line.text.slice('^bb'.length), line.no);
+      if (!line || line.indent < minIndent) break;
+      if (line.indent <= closerIndent && line.text.startsWith('}')) break;
+      if (line.text.startsWith('^')) {
+        const sc = new Scanner(line.text, line.no);
+        sc.expect('^');
+        sc.identifier();
         const { names, types } = readBlockArgs(sc, line.no);
+        sc.expect(':');
         blocks.push({ argNames: names, argTypes: types, ops: [] });
         this.index++;
         continue;
       }
       if (blocks.length === 0) blocks.push({ argNames: [], argTypes: [], ops: [] });
-      blocks[blocks.length - 1].ops.push(this.readOp(indent));
+      blocks[blocks.length - 1].ops.push(this.readOp());
     }
     if (blocks.length === 0) blocks.push({ argNames: [], argTypes: [], ops: [] });
     return blocks;
   }
 
-  readOp(indent: number): OpRecord {
+  readOp(): OpRecord {
     const source = this.current as Line;
     this.index++;
-    const { body, loc: locText } = splitTrailingLocation(source.text);
-    const line: Line = body === source.text ? source : { text: body, indent: source.indent, no: source.no };
-    const loc = locText === null ? null : parseLocation(locText);
-    const sc = new Scanner(line.text, line.no);
-
-    const resultNames: string[] = [];
-    const assign = line.text.indexOf(' = ');
-    if (assign >= 0 && line.text.startsWith('%')) {
-      for (const part of splitTopLevel(line.text.slice(0, assign), ',')) {
-        const nameSc = new Scanner(part, line.no);
-        nameSc.expect('%');
-        resultNames.push(`%${nameSc.identifier()}`);
-      }
-      sc.pos = assign + ' = '.length;
-    }
-
-    const opName = sc.identifier();
-    const operandBody = sc.readGroup('(', ')');
-    const operandNames = operandBody.trim() === ''
-      ? []
-      : splitTopLevel(operandBody, ',').map((part) => {
-        const opSc = new Scanner(part, line.no);
-        opSc.expect('%');
-        return `%${opSc.identifier()}`;
-      });
-
-    const attrs = sc.peek() === '{' ? parseAttrs(sc.readGroup('{', '}'), line.no) : new Map<string, AttrValue>();
-    const resultTypes = sc.eat(':') ? parseTypeList(sc.text.slice(sc.pos), line.no) : [];
-    if (resultTypes.length !== resultNames.length) {
-      throw new IRParseError(`'${opName}' names ${resultNames.length} results but declares ${resultTypes.length} result types`, line.no);
-    }
-
     const regions: BlockRecord[][] = [];
-    while (this.current && this.current.indent === indent && this.current.text === '{') {
-      this.index++;
-      regions.push(this.readBlocks(indent + 1));
-      const closer = this.current;
-      if (!closer || closer.indent !== indent || closer.text !== '}') {
-        throw new IRParseError(`unterminated region for '${opName}'`, closer ? closer.no : line.no);
+    let text = source.text;
+    const regionForm = openingRegionForm(source);
+    if (regionForm) {
+      text = text.slice(0, -regionForm.open.length);
+      for (let i = 0; ; i++) {
+        regions.push(this.readBlocks(source.indent, source.indent));
+        const closer = this.current;
+        if (!closer || closer.indent !== source.indent || !closer.text.startsWith('}')) {
+          throw new IRParseError(`unterminated region on '${source.text}'`, closer ? closer.no : source.no);
+        }
+        this.index++;
+        const separator = regionForm.repeat ? regionForm.separators[0] : regionForm.separators[i];
+        if (separator !== undefined && closer.text === separator) continue;
+        if (!closer.text.startsWith(regionForm.close)) {
+          throw new IRParseError(`unterminated region on '${source.text}'`, closer.no);
+        }
+        text += closer.text.slice(regionForm.close.length);
+        break;
       }
-      this.index++;
     }
+    const { body, loc: locText } = splitTrailingLocation(text);
+    const line: Line = { text: body, indent: source.indent, no: source.no };
+    const record = parseOpBody(line, regions);
+    record.loc = locText === null ? null : parseLocation(locText);
+    for (const region of regions) collectRegionDeps(region, record.deps);
+    return record;
+  }
+}
 
-    const deps = new Set<string>(operandNames);
-    for (const region of regions) collectRegionDeps(region, deps);
-    return { line, opName, resultNames, resultTypes, attrs, operandNames, regions, deps, loc };
+function readResultNames(sc: Scanner, line: Line): string[] {
+  const names: string[] = [];
+  if (!line.text.startsWith('%')) return names;
+  const assign = line.text.indexOf(' = ');
+  if (assign < 0) return names;
+  for (const part of splitTopLevel(line.text.slice(0, assign), ',')) {
+    const partSc = new Scanner(part, line.no);
+    const name = partSc.valueName();
+    if (!partSc.eat(':')) {
+      names.push(name);
+      continue;
+    }
+    const count = Number(partSc.identifier());
+    if (!Number.isInteger(count) || count < 1) {
+      throw new IRParseError(`'${name}' declares a result group of ${count}`, line.no);
+    }
+    for (let i = 0; i < count; i++) names.push(`${name}#${i}`);
+  }
+  sc.pos = assign + ' = '.length;
+  return names;
+}
+
+function parseOpBody(line: Line, regions: BlockRecord[][]): OpRecord {
+  const sc = new Scanner(line.text, line.no);
+  const resultNames = readResultNames(sc, line);
+  const record: OpRecord = {
+    line, opName: '', form: null, resultNames, resultTypes: [], attrs: new Map(),
+    operandNames: [], regions, deps: new Set(), loc: null,
+  };
+  if (sc.peek() === '"') parseGenericOp(sc, record);
+  else parseCustomOp(sc, record);
+  if (record.resultTypes.length !== resultNames.length) {
+    throw new IRParseError(
+      `'${record.opName}' names ${resultNames.length} results but declares ${record.resultTypes.length} result types`,
+      line.no);
+  }
+  for (const name of record.operandNames) record.deps.add(name);
+  return record;
+}
+
+function parseGenericOp(sc: Scanner, record: OpRecord): void {
+  record.opName = unqualify(sc.readString());
+  const operandBody = sc.readGroup('(', ')');
+  if (operandBody.trim() !== '') {
+    for (const part of splitTopLevel(operandBody, ',')) {
+      record.operandNames.push(new Scanner(part, record.line.no).valueName());
+    }
+  }
+  if (sc.peek() === '{') record.attrs = parseAttrs(sc.readGroup('{', '}'), record.line.no);
+  sc.expect(':');
+  parseTypeList(sc.readGroup('(', ')'), record.line.no);
+  sc.expect('->');
+  record.resultTypes = parseGroupedTypes(sc);
+}
+
+function parseCustomOp(sc: Scanner, record: OpRecord): void {
+  const mnemonic = sc.identifier();
+  const form = mlirFormOfMnemonic(mnemonic);
+  if (!form) throw new IRParseError(`unknown operation '${mnemonic}'`, record.line.no);
+  record.opName = form.opName;
+  record.form = form;
+
+  if (form.keyword) {
+    const spelling = sc.identifier();
+    const irKind = form.keyword.toIr.get(spelling);
+    if (irKind === undefined) throw new IRParseError(`'${mnemonic}' has no kind '${spelling}'`, record.line.no);
+    record.attrs.set(form.keyword.ir, irKind);
+    sc.expect(',');
+  }
+  if (form.groups) parseOperandGroups(sc, form, record);
+  else {
+    while (sc.peek() === '%') {
+      record.operandNames.push(sc.valueName());
+      if (!sc.eat(',')) break;
+    }
+  }
+  if (sc.peek() === '{') {
+    for (const [key, value] of attrEntries(sc.readGroup('{', '}'), record.line.no)) {
+      const binding = form.attrByMlir.get(key);
+      record.attrs.set(binding ? binding.ir : key,
+                       binding && binding.kind === 'i64pairs' && isNumberArray(value)
+                         ? nestPairs(value) as unknown as AttrValue
+                         : value);
+    }
+  }
+  for (const entry of form.fixed) record.attrs.set(entry.ir, entry.value);
+  if (form.types === 'elements') {
+    const dense = parseDenseAttr(sc);
+    record.attrs.set('value', dense.value);
+    record.resultTypes = [dense.type];
+  } else if (form.types === 'resultList') {
+    sc.expect('->');
+    record.resultTypes = parseTypeList(sc.readGroup('(', ')'), record.line.no);
+  } else if (sc.eat(':')) {
+    record.resultTypes = parseCustomTypes(sc, form);
+  }
+  for (const entry of form.derived) {
+    const value = derivedAttrValue(entry.from, record.resultTypes[0]);
+    if (value !== undefined) record.attrs.set(entry.ir, value);
+  }
+}
+
+function parseOperandGroups(sc: Scanner, form: MlirOpForm, record: OpRecord): void {
+  const groups = form.groups as NonNullable<MlirOpForm['groups']>;
+  for (const group of groups) {
+    if (group.keyword === null) {
+      const count = group.size.kind === 'fixed' ? group.size.count : 0;
+      for (let i = 0; i < count; i++) {
+        record.operandNames.push(sc.valueName());
+        if (i + 1 < count) sc.expect(',');
+      }
+      continue;
+    }
+    if (!sc.eat(group.keyword)) {
+      if (group.optional) {
+        if (group.size.kind === 'attr') record.attrs.set(group.size.attr, 0);
+        continue;
+      }
+      sc.fail(`expected '${group.keyword}'`);
+    }
+    const body = sc.readGroup('(', ')');
+    const split = group.types ? splitTopLevel(body, ':') : [body];
+    const names = split[0] && split[0].trim() !== ''
+      ? splitTopLevel(split[0], ',').map((part) => new Scanner(part, record.line.no).valueName())
+      : [];
+    if (group.types) {
+      const types = split.length > 1 ? parseTypeList(split.slice(1).join(':'), record.line.no) : [];
+      if (types.length !== names.length) {
+        throw new IRParseError(
+          `'${form.mnemonic}' clause '${group.keyword}' names ${names.length} operands but declares ${types.length} types`,
+          record.line.no);
+      }
+    }
+    for (const name of names) record.operandNames.push(name);
+    if (group.size.kind === 'attr') record.attrs.set(group.size.attr, names.length);
+  }
+}
+
+function parseCustomTypes(sc: Scanner, form: MlirOpForm): IRType[] {
+  switch (form.types) {
+    case 'result':
+      return [parseType(sc)];
+    case 'functional': {
+      parseTypeList(sc.readGroup('(', ')'), sc.line);
+      sc.expect('->');
+      return parseGroupedTypes(sc);
+    }
+    case 'operandToResult':
+    case 'operandsToResult': {
+      const rest = sc.text.slice(sc.pos);
+      const arrow = rest.indexOf('->');
+      if (arrow < 0) sc.fail("expected '->'");
+      parseTypeList(rest.slice(0, arrow), sc.line);
+      sc.pos += arrow + '->'.length;
+      return [parseType(sc)];
+    }
+    case 'firstAndResult': {
+      parseType(sc);
+      sc.expect(',');
+      return [parseType(sc)];
+    }
+    default:
+      parseTypeList(sc.text.slice(sc.pos), sc.line);
+      return [];
   }
 }
 
@@ -450,36 +705,46 @@ function dependencyOrder(ops: readonly OpRecord[]): OpRecord[] {
   return ordered;
 }
 
+type BuiltOp = { op: Operation; seed: Operation | null };
+
 class Materializer {
-  values: Map<string, Value>;
+  scopes: Map<string, Value>[];
 
   constructor(values: Map<string, Value>) {
-    this.values = values;
+    this.scopes = [values];
   }
 
   bind(name: string, value: Value, line: number): void {
-    if (this.values.has(name)) throw new IRParseError(`value '${name}' is defined twice`, line);
-    this.values.set(name, value);
+    const scope = this.scopes[this.scopes.length - 1];
+    if (scope.has(name)) throw new IRParseError(`value '${name}' is defined twice`, line);
+    scope.set(name, value);
   }
 
   resolve(name: string, line: number): Value {
-    const value = this.values.get(name);
-    if (!value) throw new IRParseError(`use of undefined value '${name}'`, line);
-    return value;
+    for (let i = this.scopes.length - 1; i >= 0; i--) {
+      const value = this.scopes[i].get(name);
+      if (value) return value;
+    }
+    throw new IRParseError(`use of undefined value '${name}'`, line);
   }
 
   fillBlock(block: Block, record: BlockRecord): void {
-    const built = new Map<OpRecord, Operation>();
+    const built = new Map<OpRecord, BuiltOp>();
     for (const record0 of dependencyOrder(record.ops)) {
       built.set(record0, this.buildOp(record0));
     }
-    for (const op of record.ops) block.pushOp(built.get(op) as Operation);
+    for (const op of record.ops) {
+      const entry = built.get(op) as BuiltOp;
+      if (entry.seed) block.pushOp(entry.seed);
+      block.pushOp(entry.op);
+    }
   }
 
-  buildOp(record: OpRecord): Operation {
+  buildOp(record: OpRecord): BuiltOp {
     const operands = record.operandNames.map((name) => this.resolve(name, record.line.no));
     const regions = record.regions.map((blocks) => {
       const region = new Region();
+      this.scopes.push(new Map());
       for (const blockRecord of blocks) {
         const block = new Block(blockRecord.argTypes);
         region.addBlock(block);
@@ -488,14 +753,37 @@ class Materializer {
         }
         this.fillBlock(block, blockRecord);
       }
+      this.scopes.pop();
       return region;
     });
+    const seed = this.buildElided(record, operands, regions);
     const op = new Operation(record.opName, operands, record.resultTypes, record.attrs, regions);
     op.loc = record.loc;
     for (let i = 0; i < record.resultNames.length; i++) {
       this.bind(record.resultNames[i], op.getResult(i), record.line.no);
     }
-    return op;
+    return { op, seed };
+  }
+
+  buildElided(record: OpRecord, operands: Value[], regions: Region[]): Operation | null {
+    const form = record.form;
+    if (!form || !form.combiner || operands.length === 0) return null;
+    const scalarType = combinerScalarType(operands[0].type);
+    if (!scalarType) throw new IRParseError(`'${record.opName}' accumulates into a non-tensor`, record.line.no);
+
+    let seed: Operation | null = null;
+    if (form.seedOperand >= 0) {
+      const irKind = record.attrs.get(form.keyword!.ir) as string;
+      const seedSpec = seedConstantAttrs(irKind, operands[0].type);
+      if (!seedSpec) throw new IRParseError(`'${record.opName}' has no accumulator seed`, record.line.no);
+      seed = new Operation('constant', [], [seedSpec.type], seedSpec.attrs, []);
+      operands.splice(form.seedOperand, 0, seed.getResult(0));
+    }
+
+    const combiner = new Region();
+    combiner.addBlock(new Block([scalarType, scalarType]));
+    regions.push(combiner);
+    return seed;
   }
 }
 
@@ -511,9 +799,9 @@ function toLines(text: string, indentWidth: number): Line[] {
   return lines;
 }
 
-function parseSignature(line: Line): { name: string; inputTypes: IRType[]; outputTypes: IRType[]; argNames: string[] } {
+function parseSignature(line: Line): { name: string; inputTypes: IRType[]; outputTypes: IRType[]; argNames: string[]; attrs: Map<string, AttrValue> } {
   const sc = new Scanner(line.text, line.no);
-  sc.expect('func');
+  sc.expect(FUNCTION_KEYWORD);
   sc.expect('@');
   const name = sc.identifier();
   const argBody = sc.readGroup('(', ')');
@@ -522,22 +810,24 @@ function parseSignature(line: Line): { name: string; inputTypes: IRType[]; outpu
   if (argBody.trim() !== '') {
     for (const part of splitTopLevel(argBody, ',')) {
       const argSc = new Scanner(part, line.no);
-      argSc.expect('%');
-      argNames.push(`%${argSc.identifier()}`);
+      argNames.push(argSc.valueName());
       argSc.expect(':');
       inputTypes.push(parseType(argSc));
     }
   }
-  sc.expect('->');
-  const outputTypes = parseTypeList(sc.readGroup('(', ')'), line.no);
+  const outputTypes = sc.eat('->') ? parseGroupedTypes(sc) : [];
+  const attrs = sc.eat(FUNCTION_ATTRIBUTES)
+    ? parseAttrs(sc.readGroup('{', '}'), line.no)
+    : new Map<string, AttrValue>();
   sc.expect('{');
-  return { name, inputTypes, outputTypes, argNames };
+  return { name, inputTypes, outputTypes, argNames, attrs };
 }
 
 function buildFunctionFrom(lines: Line[], start: number, indentWidth: number): { func: GraphFunction; next: number } {
   const header = lines[start];
-  const { name, inputTypes, outputTypes, argNames } = parseSignature(header);
+  const { name, inputTypes, outputTypes, argNames, attrs } = parseSignature(header);
   const func = new GraphFunction(name, inputTypes, outputTypes);
+  for (const [key, value] of attrs) func.setAttr(key, value);
 
   const bodyIndent = header.indent + 1;
   let end = start + 1;
@@ -573,7 +863,9 @@ export function parseModule(text: string, { indentWidth = 2 }: ParseOptions = {}
 
   let i = 1;
   while (i < lines.length && !(lines[i].indent === 0 && lines[i].text === '}')) {
-    if (!lines[i].text.startsWith('func')) throw new IRParseError(`expected a function, got '${lines[i].text}'`, lines[i].no);
+    if (!lines[i].text.startsWith(FUNCTION_KEYWORD)) {
+      throw new IRParseError(`expected a function, got '${lines[i].text}'`, lines[i].no);
+    }
     const { func, next } = buildFunctionFrom(lines, i, indentWidth);
     module.addFunction(func);
     i = next;
@@ -584,6 +876,8 @@ export function parseModule(text: string, { indentWidth = 2 }: ParseOptions = {}
 export function parseFunction(text: string, { indentWidth = 2 }: ParseOptions = {}): GraphFunction {
   const lines = toLines(text, indentWidth);
   if (lines.length === 0) throw new IRParseError('empty input', -1);
-  if (!lines[0].text.startsWith('func')) throw new IRParseError(`expected a function, got '${lines[0].text}'`, lines[0].no);
+  if (!lines[0].text.startsWith(FUNCTION_KEYWORD)) {
+    throw new IRParseError(`expected a function, got '${lines[0].text}'`, lines[0].no);
+  }
   return buildFunctionFrom(lines, 0, indentWidth).func;
 }

@@ -179,12 +179,12 @@ The extreme case is worth reading in full, because it shows what "recompute" act
 
 ```
 === what "recompute everything" put in the backward function ===
-  func @backward_Object(%0: tensor<f32>, %1: tensor<1x4xf32>) -> (tensor<1x4xf32>) {
-  %2 = exp(%1) : tensor<1x4xf32>
-  %3 = tanh(%2) : tensor<1x4xf32>
-  %4 = mul(%3, %1) : tensor<1x4xf32>
-  %5 = sqrt(%4) : tensor<1x4xf32>
-  %6 = reshape(%0) {new_shape = [1, 1]} : tensor<1x1xf32>
+  func.func @backward_Object(%0: tensor<f32>, %1: tensor<1x4xf32>) -> (tensor<1x4xf32>) {
+  %2 = tera.exp %1 : tensor<1x4xf32>
+  %3 = "tera.tanh"(%2) : (tensor<1x4xf32>) -> tensor<1x4xf32>
+  %4 = tera.mul %3, %1 : tensor<1x4xf32>
+  %5 = "tera.sqrt"(%4) : (tensor<1x4xf32>) -> tensor<1x4xf32>
+  %6 = tera.reshape %0 : tensor<f32> -> tensor<1x1xf32>
   ...
 ```
 

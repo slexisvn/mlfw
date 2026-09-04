@@ -2,6 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { buildFunction } from '../../../../src/compiler/ir/graph/builder.js';
 import { TensorType, ScalarType } from '../../../../src/compiler/ir/graph/types.js';
 import { lowerGraphToPrimFunc } from '../../../../src/compiler/passes/lowering/graph_to_tensor.js';
+import { compileGraph } from '../../../../src/compiler/pipeline/compiler.js';
+import { CPUTarget } from '../../../../src/compiler/support/target.js';
+import { RuntimeTensor } from '../../../../src/runtime/runtime.js';
 import {
   ForNode, BlockNode, BufferStoreNode, BufferLoadNode,
   MathOpNode, IntImmNode, SeqNode, CastNode, IfThenElseNode, CompareNode
@@ -70,6 +73,38 @@ describe('transpose lowering', () => {
     });
 
     expect(getLoopExtents(pf.body)).toEqual([4, 2, 3]);
+  });
+});
+
+describe('dynamic shape execution', () => {
+  it('reads a non-leading dimension from the current runtime tensor as i64', () => {
+    const func = buildFunction('dimension', [new TensorType([2, -1], 'f32')], [new TensorType([], 'i64')], (b, [x]) => {
+      x.symbolicShape = [2, 'width'];
+      b.returnOp(b.dim(x, 1).results);
+    });
+    const compiled = compileGraph(func, CPUTarget());
+    for (const width of [3, 7]) {
+      const output = new BigInt64Array(1);
+      compiled.run('dimension', new RuntimeTensor(new Float32Array(2 * width), [2, width], 'f32'), output);
+      expect(output[0]).toBe(BigInt(width));
+    }
+  });
+
+  it('reshapes a dynamic middle axis without changing element order or recompiling', () => {
+    const func = buildFunction('reshape_middle', [new TensorType([2, -1, 2], 'f32')], [new TensorType([-1, 4], 'f32')], (b, [x]) => {
+      x.symbolicShape = [2, 'width', 2];
+      const reshaped = b.reshape(x, [-1, 4]);
+      reshaped.getResult(0).symbolicShape = ['width', 4];
+      b.returnOp(reshaped.results);
+    });
+    const compiled = compileGraph(func, CPUTarget());
+    for (const width of [3, 5, 2]) {
+      const input = Float32Array.from({ length: width * 4 }, (_, i) => i - 7);
+      const output = new Float32Array(width * 4).fill(NaN);
+      compiled.run('reshape_middle',
+        new RuntimeTensor(input, [2, width, 2], 'f32'), new RuntimeTensor(output, [width, 4], 'f32'));
+      expect([...output]).toEqual([...input]);
+    }
   });
 });
 

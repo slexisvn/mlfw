@@ -12,7 +12,7 @@ const T = 4;
 function ifInScan(name) {
   return buildFunction(name, [t([T]), t([T])], [t([])], (b, [x, pred]) => {
     const init = b.scalarConstant(0, 'f32').getResult(0);
-    const scan = b.scanOp([x, pred], [init], (bb, [xt, pt], [acc]) => {
+    const scan = b.scanOp([init], [x, pred], (bb, [acc], [xt, pt]) => {
       const zero = bb.scalarConstant(0, 'f32').getResult(0);
       const cmp = bb.compare(pt, zero, 'gt').getResult(0);
       const res = bb.ifOp(cmp, [t([])],

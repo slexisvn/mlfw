@@ -113,6 +113,32 @@ export class Operation {
     if (this.parentBlock) this.parentBlock._notifyMutation();
   }
 
+  appendOperand(value: Value): number {
+    if (!(value instanceof Value)) {
+      throw new Error(`appendOperand: new operand for '${this.opName}' is not a Value`);
+    }
+    const index = this.operands.length;
+    const link = new UseLink(this, index);
+    value.addUse(link);
+    this.operands.push(value);
+    this._operandLinks.push(link);
+    if (this.parentBlock) this.parentBlock._notifyMutation();
+    return index;
+  }
+
+  truncateOperands(count: number): void {
+    if (count < 0 || count > this.operands.length) {
+      throw new Error(`truncateOperands: ${count} is out of range for '${this.opName}' (${this.operands.length} operands)`);
+    }
+    if (count === this.operands.length) return;
+    for (let i = count; i < this.operands.length; i++) {
+      this.operands[i].removeUse(this._operandLinks[i]);
+    }
+    this.operands.length = count;
+    this._operandLinks.length = count;
+    if (this.parentBlock) this.parentBlock._notifyMutation();
+  }
+
   dropAllOperands(): void {
     const had = this.operands.length > 0;
     for (let i = 0; i < this.operands.length; i++) {

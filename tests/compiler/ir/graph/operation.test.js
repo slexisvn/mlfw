@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { GraphFunction } from '../../../../src/compiler/ir/graph/function.js';
 import { Operation } from '../../../../src/compiler/ir/graph/operation.js';
 import { Block, Region } from '../../../../src/compiler/ir/graph/block.js';
 import { TensorType, ScalarType } from '../../../../src/compiler/ir/graph/types.js';
@@ -205,5 +206,48 @@ describe('structural identity is what CSE compares', () => {
     const a = new Operation('fusion', [], [t], null, [region()]);
     const b = new Operation('fusion', [], [t], null, [region()]);
     expect(a.structuralEquals(b)).toBe(false);
+  });
+});
+
+describe('operand list mutation', () => {
+  it('maintains use indices and invalidates the owning function on append and truncate', () => {
+    const t = new TensorType([2], 'f32');
+    const func = new GraphFunction('f', [t, t], []);
+    const [x, y] = func.args;
+    const op = new Operation('add', [x], [t]);
+    func.entryBlock.pushOp(op);
+    const version = func.version;
+    expect(op.appendOperand(x)).toBe(1);
+    expect(op.appendOperand(y)).toBe(2);
+    expect(x.useCount).toBe(2);
+    expect(y.useCount).toBe(1);
+    expect([...x.uses()].map((u) => u.operandIndex).sort()).toEqual([0, 1]);
+    expect(func.version).toBeGreaterThan(version);
+    const afterAppend = func.version;
+    op.truncateOperands(1);
+    expect(func.version).toBeGreaterThan(afterAppend);
+    expect(op.operands).toEqual([x]);
+    expect(x.useCount).toBe(1);
+    expect(y.useCount).toBe(0);
+    expect(op.appendOperand(y)).toBe(1);
+    op.replaceOperand(1, x);
+    expect(y.useCount).toBe(0);
+    expect(x.useCount).toBe(2);
+    op.dropAllOperands();
+    expect(x.useCount).toBe(0);
+  });
+
+  it('leaves the operation unchanged for invalid mutations and no-op truncation', () => {
+    const t = new TensorType([2], 'f32');
+    const func = new GraphFunction('f', [t], []);
+    const op = new Operation('neg', func.args, [t]);
+    func.entryBlock.pushOp(op);
+    const version = func.version;
+    expect(() => op.appendOperand({})).toThrow(/not a Value/);
+    expect(() => op.truncateOperands(-1)).toThrow(/out of range/);
+    expect(() => op.truncateOperands(2)).toThrow(/out of range/);
+    op.truncateOperands(1);
+    expect(func.version).toBe(version);
+    expect(func.args[0].useCount).toBe(1);
   });
 });

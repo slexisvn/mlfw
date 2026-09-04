@@ -23,7 +23,7 @@ async function study(label, quantization, foldWeights = false) {
   });
   await compiled._ready;
   const out = (await compiled(x)).toArray().flat();
-  const ops = (ir.match(/= (\w+)\(/g) || []).map(s => s.slice(2, -1));
+  const ops = [...ir.matchAll(/= "?tera\.(\w+)/g)].map(m => m[1]);
   console.log(`=== ${label} ===`);
   console.log(`  ${ops.length} operations: ${ops.join(', ')}`);
   return out;

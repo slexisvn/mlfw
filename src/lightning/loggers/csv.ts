@@ -124,7 +124,7 @@ export class CSVLogger extends Logger {
           if (v > maxVer) maxVer = v;
         }
       }
-    } catch { /* empty */ }
+    } catch {}
     this._version = maxVer + 1;
     return this._version;
   }

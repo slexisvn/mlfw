@@ -1,6 +1,7 @@
 import { OpDef, OpTrait } from '../op_registry.js';
 import type { OpAttrRecord, OpDefConfig, OpRegistry } from '../op_registry.js';
 import { TensorType, TupleType, ScalarType } from '../types.js';
+import { sizesClauseErrors } from '../mlir_format.js';
 import type { IRType } from '../types.js';
 import type { ScalarDType } from '../types.js';
 
@@ -25,12 +26,17 @@ export function register(registry: OpRegistry) {
 
   registry.register(new OpDef({
     name: 'iota',
-    numOperands: 0,
+    numOperands: -1,
     numResults: 1,
     attrs: [
       { name: 'iota_dimension', type: 'number', required: true },
       { name: 'tensor_type', type: 'object', required: true }
     ],
+    verify(op) {
+      const type = op.getAttr('tensor_type') as unknown as IRType | undefined;
+      if (!(type instanceof TensorType)) return ['iota missing tensor_type'];
+      return sizesClauseErrors(op);
+    },
     inferResultTypes(operandTypes, attrs) {
       const tt = (attrs.get ? attrs.get('tensor_type') : (attrs as unknown as OpAttrRecord).tensor_type) as IRType | undefined;
       return tt ? [tt] : null;
@@ -59,6 +65,24 @@ export function register(registry: OpRegistry) {
       const idx = (attrs.get ? attrs.get('index') : (attrs as unknown as OpAttrRecord).index) as number;
       if (idx === undefined || idx < 0 || idx >= tupleType.elements.length) return null;
       return [tupleType.elements[idx]];
+    }
+  }));
+
+  registry.register(new OpDef({
+    name: 'dim',
+    numOperands: 1,
+    numResults: 1,
+    attrs: [{ name: 'dimension', type: 'number', required: true }],
+    verify(op) {
+      const type = op.getOperand(0).type as TensorType;
+      const axis = op.getAttr<number>('dimension') as number;
+      if (!Number.isInteger(axis) || axis < 0 || axis >= type.shape.length) {
+        return [`dim axis ${axis} is out of range for rank ${type.shape.length}`];
+      }
+      return [];
+    },
+    inferResultTypes() {
+      return [new TensorType([], 'i64')];
     }
   }));
 

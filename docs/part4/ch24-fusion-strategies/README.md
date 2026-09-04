@@ -244,33 +244,32 @@ node docs/part4/ch24-fusion-strategies/labs/02-epilogue-fusion.mjs
 Two `Linear` layers with ReLU. With the CPU default:
 
 ```
-    %5 = dot(%0, %1) {lhs_batch = [], lhs_contracting = [1], rhs_batch = [], rhs_contracting = [1]} : tensor<64x256xf32>
-    %6 = constant() {tensor_type = tensor<64x256xf32>, value = 0} : tensor<64x256xf32>
-    %7 = fusion(%5, %2, %6) {fusion_kind = "kElementwise"} : tensor<64x256xf32>
-    {
-      ^bb(%8: tensor<64x256xf32>, %9: tensor<256xf32>, %10: tensor<64x256xf32>):
-      %11 = add(%8, %9) : tensor<64x256xf32>
-      %12 = maximum(%11, %10) : tensor<64x256xf32>
-      yield(%12)
-    }
-    %13 = dot(%7, %3) {lhs_batch = [], lhs_contracting = [1], rhs_batch = [], rhs_contracting = [1]} : tensor<64x128xf32>
-    %14 = constant() {tensor_type = tensor<64x128xf32>, value = 0} : tensor<64x128xf32>
-    %15 = fusion(%13, %4, %14) {fusion_kind = "kElementwise"} : tensor<64x128xf32>
-    {
-      ^bb(%16: tensor<64x128xf32>, %17: tensor<128xf32>, %18: tensor<64x128xf32>):
-      %19 = add(%16, %17) : tensor<64x128xf32>
-      %20 = maximum(%19, %18) : tensor<64x128xf32>
-      yield(%20)
-    }
-    return(%15)
+    %5 = tera.dot %0, %1 {lhs_batch = array<i64>, lhs_contracting = array<i64: 1>, rhs_batch = array<i64>, rhs_contracting = array<i64: 1>} : (tensor<64x128xf32>, tensor<256x128xf32>) -> tensor<64x256xf32>
+    %6 = tera.constant dense<0.0> : tensor<64x256xf32>
+    %7 = "tera.fusion"(%5, %2, %6) ({
+      ^bb0(%8: tensor<64x256xf32>, %9: tensor<256xf32>, %10: tensor<64x256xf32>):
+        %11 = "tera.add"(%8, %9) : (tensor<64x256xf32>, tensor<256xf32>) -> tensor<64x256xf32>
+        %12 = tera.maximum %11, %10 : tensor<64x256xf32>
+        tera.yield %12 : tensor<64x256xf32>
+    }) {fusion_kind = "kElementwise"} : (tensor<64x256xf32>, tensor<256xf32>, tensor<64x256xf32>) -> tensor<64x256xf32>
+    %13 = tera.dot %7, %3 {lhs_batch = array<i64>, lhs_contracting = array<i64: 1>, rhs_batch = array<i64>, rhs_contracting = array<i64: 1>} : (tensor<64x256xf32>, tensor<128x256xf32>) -> tensor<64x128xf32>
+    %14 = tera.constant dense<0.0> : tensor<64x128xf32>
+    %15 = "tera.fusion"(%13, %4, %14) ({
+      ^bb0(%16: tensor<64x128xf32>, %17: tensor<128xf32>, %18: tensor<64x128xf32>):
+        %19 = "tera.add"(%16, %17) : (tensor<64x128xf32>, tensor<128xf32>) -> tensor<64x128xf32>
+        %20 = tera.maximum %19, %18 : tensor<64x128xf32>
+        tera.yield %20 : tensor<64x128xf32>
+    }) {fusion_kind = "kElementwise"} : (tensor<64x128xf32>, tensor<128xf32>, tensor<64x128xf32>) -> tensor<64x128xf32>
+    return %15 : tensor<64x128xf32>
+  }
 ```
 
 Four kernels: matmul, bias+relu, matmul, bias+relu. Turning on `enableEpilogueFusion` — the flag CUDA sets and CPU does not — gives:
 
 ```
-    %5 = fused_dot_epilogue(%0, %1, %2) {epilogue_ops = ["add", "constant", "maximum"], epilogue_tags = ["bias", "relu"], lhs_batch = [], lhs_contracting = [1], num_dot_operands = 2, num_extra_inputs = 1, rhs_batch = [], rhs_contracting = [1]} : tensor<64x256xf32>
-    %6 = fused_dot_epilogue(%5, %3, %4) {epilogue_ops = ["add", "constant", "maximum"], epilogue_tags = ["bias", "relu"], lhs_batch = [], lhs_contracting = [1], num_dot_operands = 2, num_extra_inputs = 1, rhs_batch = [], rhs_contracting = [1]} : tensor<64x128xf32>
-    return(%6)
+    %5 = "tera.fused_dot_epilogue"(%0, %1, %2) {epilogue_ops = ["add", "constant", "maximum"], epilogue_tags = ["bias", "relu"], lhs_batch = [], lhs_contracting = [1], num_dot_operands = 2, num_extra_inputs = 1, rhs_batch = [], rhs_contracting = [1]} : (tensor<64x128xf32>, tensor<256x128xf32>, tensor<256xf32>) -> tensor<64x256xf32>
+    %6 = "tera.fused_dot_epilogue"(%5, %3, %4) {epilogue_ops = ["add", "constant", "maximum"], epilogue_tags = ["bias", "relu"], lhs_batch = [], lhs_contracting = [1], num_dot_operands = 2, num_extra_inputs = 1, rhs_batch = [], rhs_contracting = [1]} : (tensor<64x256xf32>, tensor<128x256xf32>, tensor<128xf32>) -> tensor<64x128xf32>
+    return %6 : tensor<64x128xf32>
 ```
 
 Eleven operations become three. The first listing holds two `dot`s, two zero constants, two `fusion` regions, the four elementwise operations inside those regions and the `return`; all ten of the non-terminators collapse into two `fused_dot_epilogue`s. Each `Linear` + `ReLU` is now a single operation carrying its epilogue as an attribute, tagged `["bias", "relu"]` so a backend can recognize the shape without re-deriving it.

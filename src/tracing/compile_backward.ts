@@ -2,6 +2,7 @@ import { _traceCore, resolveDynamicShapes, inputSignatureOf, signatureMatches, i
 import { Compiler } from '../compiler/pipeline/compiler.js';
 import { CPUTarget } from '../compiler/support/target.js';
 import { GraphModule } from '../compiler/ir/graph/module.js';
+import { RuntimeTensor } from '../runtime/runtime.js';
 import { BackwardGraphBuilder } from '../compiler/ad/backward_builder.js';
 import { IRBuilder } from '../compiler/ir/graph/builder.js';
 import { JointGraphBuilder } from '../compiler/ad/joint_builder.js';
@@ -34,6 +35,7 @@ type SeparateMeta = {
   backwardFunc: GraphFunctionLike;
   savedValues: IRValueLike[];
   savedSources: SavedSource[];
+  savedSymShapes: (SymbolicShape | null)[];
   numRealOutputs: number;
   gradInputIndices: number[];
   capturedParams: Tensor[];
@@ -66,6 +68,7 @@ type SeparateForwardContext = {
   inputArrays: NumericTypedArray[];
   paramArrays: NumericTypedArray[];
   outputArrays: NumericTypedArray[];
+  outputShapes: number[][];
   argSpecs: ArgSpec[];
   device: Device;
 };
@@ -158,6 +161,9 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
       ]);
     }
 
+    const savedSymShapes = extraSaved.map(
+      (sv: IRValueLike) => (sv.symbolicShape as SymbolicShape | undefined) ?? null);
+
     const savedSources: SavedSource[] = savedValues.map((sv: IRValueLike) => {
       if (argIndexById.has(sv.id)) return { kind: 'arg', index: argIndexById.get(sv.id) };
       if (outputIndexById.has(sv.id)) return { kind: 'output', index: outputIndexById.get(sv.id) };
@@ -180,6 +186,7 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
       backwardFunc,
       savedValues,
       savedSources,
+      savedSymShapes,
       numRealOutputs,
       gradInputIndices,
       capturedParams: traced.capturedParams,
@@ -224,6 +231,12 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
     return [...compiled.outputTypes[i].shape as readonly number[]];
   }
 
+  function _resolveSavedShape(compiled: SeparateMeta, k: number, type: TensorType): number[] {
+    const symbolic = compiled.savedSymShapes[k];
+    if (symbolic && compiled.shapeEnv) return compiled.shapeEnv.resolveSymbolicShape(symbolic);
+    return [...type.shape as readonly number[]];
+  }
+
   function _kernelIsAsync(result: CompiledResult, funcName: string): boolean {
     const mod = result.module || result;
     return !!mod.executionPlan || result.isAsync(funcName);
@@ -240,16 +253,30 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
       : result.runAsync(funcName, ...allArgs);
   }
 
-  function _allocOutputs(types: readonly TensorType[]): { arrays: NumericTypedArray[]; shapes: number[][] } {
+  function _bind(arrays: readonly NumericTypedArray[], shapes: readonly (readonly number[])[], dtypes: readonly DType[]): RuntimeArg[] {
+    const bound = new Array<RuntimeArg>(arrays.length);
+    for (let i = 0; i < arrays.length; i++) bound[i] = new RuntimeTensor(arrays[i], shapes[i], dtypes[i]);
+    return bound;
+  }
+
+  function _allocOutputs(types: readonly TensorType[], shapes: readonly (readonly number[])[]): NumericTypedArray[] {
     const arrays = new Array<NumericTypedArray>(types.length);
+    for (let i = 0; i < types.length; i++) {
+      const Ctor = typedArrayCtor(types[i].dtype);
+      arrays[i] = new Ctor(Math.max(computeNumel(shapes[i]), 1));
+    }
+    return arrays;
+  }
+
+  function _jointOutputShapes(compiled: JointMeta, argSpecs: readonly ArgSpec[]): number[][] {
+    const types = compiled.jointFunc.outputTypes;
     const shapes = new Array<number[]>(types.length);
     for (let i = 0; i < types.length; i++) {
-      const shape = [...types[i].shape as readonly number[]];
-      const Ctor = typedArrayCtor(types[i].dtype);
-      arrays[i] = new Ctor(Math.max(computeNumel(shape), 1));
-      shapes[i] = shape;
+      shapes[i] = i < compiled.numForwardOutputs
+        ? _resolveOutputShape(compiled, i)
+        : [...argSpecs[i - compiled.numForwardOutputs].shape];
     }
-    return { arrays, shapes };
+    return shapes;
   }
 
   function _executeSeparateForward(compiled: SeparateMeta, inputs: readonly Tensor[]): MaybePromise<SeparateForwardContext> {
@@ -266,7 +293,9 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
     const outputArrays = new Array<NumericTypedArray>(allOutputTypes.length);
     const outputShapes = new Array<number[]>(allOutputTypes.length);
     for (let i = 0; i < allOutputTypes.length; i++) {
-      const shape = i < numRealOutputs ? _resolveOutputShape(compiled, i) : [...allOutputTypes[i].shape as readonly number[]];
+      const shape = i < numRealOutputs
+        ? _resolveOutputShape(compiled, i)
+        : _resolveSavedShape(compiled, i - numRealOutputs, allOutputTypes[i]);
       const dtype = allOutputTypes[i].dtype;
       const numel = computeNumel(shape);
       const Ctor = typedArrayCtor(dtype);
@@ -276,12 +305,15 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
 
     const argSpecs: ArgSpec[] = [...inputs, ...params].map((t: Tensor) => ({ shape: [...t.shape], dtype: t.dtype }));
 
-    const allArgs: RuntimeArg[] = [...inputArrays, ...paramArrays, ...outputArrays];
+    const allArgs: RuntimeArg[] = [
+      ..._bind([...inputArrays, ...paramArrays], argSpecs.map(a => a.shape), argSpecs.map(a => a.dtype)),
+      ..._bind(outputArrays, outputShapes, allOutputTypes.map(t => t.dtype)),
+    ];
     const build = () => {
       const results = numRealOutputs === 1
         ? wrapResult(outputArrays[0], outputShapes[0], allOutputTypes[0].dtype, device)
         : Array.from({ length: numRealOutputs }, (_, i) => wrapResult(outputArrays[i], outputShapes[i], allOutputTypes[i].dtype, device));
-      return { results, inputArrays, paramArrays, outputArrays, argSpecs, device };
+      return { results, inputArrays, paramArrays, outputArrays, outputShapes, argSpecs, device };
     };
     const pending = _runK(compiled.fwdResult, funcName, allArgs);
     return pending ? pending.then(build) : build();
@@ -296,10 +328,16 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
     const savedValues = compiled.savedValues;
     const savedSources = compiled.savedSources;
     const argBuffers = [...savedContext.inputArrays, ...savedContext.paramArrays];
-    const savedArrays = new Array(savedValues.length);
+    const fwdOutputTypes = compiled.forwardFunc.outputTypes;
+    const savedArrays = new Array<NumericTypedArray>(savedValues.length);
+    const savedShapes = new Array<readonly number[]>(savedValues.length);
+    const savedDtypes = new Array<DType>(savedValues.length);
     for (let i = 0; i < savedValues.length; i++) {
       const src = savedSources[i];
-      savedArrays[i] = src.kind === 'arg' ? argBuffers[src.index] : savedContext.outputArrays[src.index];
+      const fromArg = src.kind === 'arg';
+      savedArrays[i] = fromArg ? argBuffers[src.index] : savedContext.outputArrays[src.index];
+      savedShapes[i] = fromArg ? savedContext.argSpecs[src.index].shape : savedContext.outputShapes[src.index];
+      savedDtypes[i] = fromArg ? savedContext.argSpecs[src.index].dtype : fwdOutputTypes[src.index].dtype;
     }
 
     const bwdFunc = compiled.backwardFunc;
@@ -307,7 +345,9 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
     const gradInputArrays = new Array<NumericTypedArray>(numGradOutputs);
     const gradInputShapes = new Array<number[]>(numGradOutputs);
     for (let i = 0; i < numGradOutputs; i++) {
-      const shape = [...bwdFunc.outputTypes[i].shape as readonly number[]];
+      const argShape = savedContext.argSpecs[compiled.gradInputIndices[i]].shape;
+      const shape = (bwdFunc.outputTypes[i].shape as readonly number[])
+        .map((extent, axis) => (extent >= 0 ? extent : argShape[axis]));
       const dtype = bwdFunc.outputTypes[i].dtype;
       const numel = computeNumel(shape);
       const Ctor = typedArrayCtor(dtype);
@@ -315,7 +355,11 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
       gradInputShapes[i] = shape;
     }
 
-    const allArgs: RuntimeArg[] = [...gradArrays, ...savedArrays, ...gradInputArrays];
+    const allArgs: RuntimeArg[] = [
+      ..._bind(gradArrays, gradOutputs.map((t: Tensor) => t.shape), gradOutputs.map((t: Tensor) => t.dtype)),
+      ..._bind(savedArrays, savedShapes, savedDtypes),
+      ..._bind(gradInputArrays, gradInputShapes, bwdFunc.outputTypes.map(t => t.dtype)),
+    ];
     const build = () => {
       const gradInputs = new Array<TensorOutput>(savedContext.argSpecs.length);
       for (let i = 0; i < numGradOutputs; i++) {
@@ -389,15 +433,23 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
     const params = compiled.capturedParams;
     const paramArrays = params.map((t: Tensor) => tensorToContiguous(t));
 
+    const argSpecs: ArgSpec[] = [...inputs, ...params].map((t: Tensor) => ({ shape: [...t.shape], dtype: t.dtype }));
+
     const jointFunc = compiled.jointFunc;
-    const { arrays: outputArrays, shapes: outputShapes } = _allocOutputs(jointFunc.outputTypes);
-    const gradOutputArrays = _allocOutputs(compiled.outputTypes.slice(0, compiled.numForwardOutputs)).arrays;
+    const outputShapes = _jointOutputShapes(compiled, argSpecs);
+    const outputArrays = _allocOutputs(jointFunc.outputTypes, outputShapes);
+    const fwdOutputTypes = compiled.outputTypes.slice(0, compiled.numForwardOutputs);
+    const gradOutputArrays = _allocOutputs(fwdOutputTypes, outputShapes);
+
+    const argArgs = _bind([...inputArrays, ...paramArrays], argSpecs.map(a => a.shape), argSpecs.map(a => a.dtype));
+    const gradDtypes = fwdOutputTypes.map(t => t.dtype);
+    const outDtypes = jointFunc.outputTypes.map(t => t.dtype);
 
     const ctx: JointSavedContext = {
       inputArrays, paramArrays, gradOutputArrays, outputArrays, outputShapes, device, compiled,
       runJoint: (gradArrays, outBufs) => _runK(
         compiled.result, funcName,
-        [...inputArrays, ...paramArrays, ...gradArrays, ...outBufs],
+        [...argArgs, ..._bind(gradArrays, outputShapes, gradDtypes), ..._bind(outBufs, outputShapes, outDtypes)],
       ),
       pending: !_kernelIsAsync(compiled.result, funcName),
     };
@@ -468,7 +520,8 @@ export function compileWithBackward(model: CompilableModel, exampleInputs?: Tens
 
     const jointFunc = compiled.jointFunc;
     const gradInputTypes = jointFunc.outputTypes.slice(compiled.numForwardOutputs);
-    const { arrays: gradInputArrays, shapes: gradInputShapes } = _allocOutputs(gradInputTypes);
+    const gradInputShapes = savedCtx.outputShapes.slice(compiled.numForwardOutputs);
+    const gradInputArrays = _allocOutputs(gradInputTypes, gradInputShapes);
     const outBufs = [...outputArrays.slice(0, compiled.numForwardOutputs), ...gradInputArrays];
 
     const build = () => gradInputArrays.map(

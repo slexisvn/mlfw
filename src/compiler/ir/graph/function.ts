@@ -1,6 +1,6 @@
 import { Block, Region } from './block.js';
 import { topoSortByOperands } from './graph_algorithms.js';
-import type { IRType } from './types.js';
+import type { AttrValue, IRType } from './types.js';
 import type { Operation } from './operation.js';
 import type { Value } from './value.js';
 import type { BlockArgument } from './value.js';
@@ -35,6 +35,7 @@ export class GraphFunction {
   inputTypes: readonly IRType[];
   outputTypes: readonly IRType[];
   body: Region;
+  attributes: Map<string, AttrValue>;
   _version: number;
 
   constructor(name: string, inputTypes: readonly IRType[], outputTypes: readonly IRType[]) {
@@ -42,10 +43,22 @@ export class GraphFunction {
     this.inputTypes = Object.freeze([...inputTypes]);
     this.outputTypes = Object.freeze([...outputTypes]);
     this.body = new Region();
+    this.attributes = new Map();
     const entryBlock = new Block(inputTypes);
     entryBlock._parentFunction = this;
     this.body.addBlock(entryBlock);
     this._version = 0;
+  }
+
+  getAttr<T extends AttrValue = AttrValue>(name: string): T | undefined {
+    return this.attributes.get(name) as T | undefined;
+  }
+
+  hasAttr(name: string): boolean { return this.attributes.has(name); }
+
+  setAttr(name: string, value: AttrValue): this {
+    this.attributes.set(name, value);
+    return this;
   }
 
   get entryBlock(): Block { return this.body.entryBlock as Block; }
@@ -145,6 +158,7 @@ function topoOrderTopLevel(block: Block): Operation[] {
 
 export function cloneGraphFunction(func: GraphFunction): GraphFunction {
   const clone = new GraphFunction(func.name, func.inputTypes, func.outputTypes);
+  clone.attributes = new Map(func.attributes);
   const valueMap = new Map<Value, Value>();
   const srcBlock = func.entryBlock;
   const dstBlock = clone.entryBlock;

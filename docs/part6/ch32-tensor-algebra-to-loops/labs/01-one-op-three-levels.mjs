@@ -43,7 +43,7 @@ console.log(indent(run.tir));
 console.log('\n\n=== the same program, counted at each level ===\n');
 
 const counts = (r) => ({
-  ops: (r.graph.match(/%\d+ = [a-z_0-9]+\(/g) || []).length,
+  ops: (r.graph.match(/%\d+ = "?tera\./g) || []).length,
   loops: (r.tir.match(/for \w+ in/g) || []).length,
   blocks: (r.tir.match(/block \w+ \{/g) || []).length,
   tirLines: r.tir.split('\n').length,

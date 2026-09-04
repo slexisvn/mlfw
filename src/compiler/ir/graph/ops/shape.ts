@@ -3,6 +3,7 @@ import type { OpAttrRecord, OpRegistry, SymbolicDim } from '../op_registry.js';
 import { TensorType, DYNAMIC, resolveInferredDims, shapeProduct } from '../types.js';
 import { SymInt } from '../../sym_int.js';
 import type { AttrValue, Dim, Shape } from '../types.js';
+import { sizesClauseErrors } from '../mlir_format.js';
 import * as pat from '../patterns.js';
 
 function namedDimToSym(dim: SymbolicDim): Dim {
@@ -48,7 +49,7 @@ export function register(registry: OpRegistry) {
 
   registry.register(new OpDef({
     name: 'broadcast_in_dim',
-    numOperands: 1,
+    numOperands: -1,
     numResults: 1,
     traits: [OpTrait.BROADCAST],
     attrs: [
@@ -56,7 +57,7 @@ export function register(registry: OpRegistry) {
       { name: 'result_shape', type: 'array', required: true }
     ],
     inferResultTypes(operandTypes, attrs) {
-      if (operandTypes.length !== 1) return null;
+      if (operandTypes.length < 1) return null;
       const inp = operandTypes[0];
       if (!(inp instanceof TensorType)) return null;
       const shape = (attrs.get ? attrs.get('result_shape') : (attrs as unknown as OpAttrRecord).result_shape) as readonly number[];
@@ -87,7 +88,8 @@ export function register(registry: OpRegistry) {
       const errs = [];
       if (!op.hasAttr('broadcast_dimensions')) errs.push('broadcast_in_dim missing broadcast_dimensions');
       if (!op.hasAttr('result_shape')) errs.push('broadcast_in_dim missing result_shape');
-      if (op.numOperands !== 1) errs.push('broadcast_in_dim expects 1 operand');
+      if (op.numOperands < 1) errs.push('broadcast_in_dim expects an operand');
+      else errs.push(...sizesClauseErrors(op));
       if (errs.length === 0) {
         const dims = op.getAttr<readonly number[]>('broadcast_dimensions')!;
         const resultShape = op.getAttr<readonly number[]>('result_shape')!;
@@ -114,12 +116,12 @@ export function register(registry: OpRegistry) {
 
   registry.register(new OpDef({
     name: 'reshape',
-    numOperands: 1,
+    numOperands: -1,
     numResults: 1,
     traits: [OpTrait.VIEW],
     attrs: [{ name: 'new_shape', type: 'array', required: true }],
     inferResultTypes(operandTypes, attrs) {
-      if (operandTypes.length !== 1) return null;
+      if (operandTypes.length < 1) return null;
       const inp = operandTypes[0];
       if (!(inp instanceof TensorType)) return null;
       const shape = (attrs.get ? attrs.get('new_shape') : (attrs as unknown as OpAttrRecord).new_shape) as Shape;
@@ -129,7 +131,8 @@ export function register(registry: OpRegistry) {
     verify(op) {
       const errs = [];
       if (!op.hasAttr('new_shape')) errs.push('reshape missing new_shape');
-      if (op.numOperands !== 1) errs.push('reshape expects 1 operand');
+      if (op.numOperands < 1) errs.push('reshape expects an operand');
+      else errs.push(...sizesClauseErrors(op));
       if (errs.length === 0) {
         const inp = op.getOperand(0).type;
         const newShape = op.getAttr<Shape>('new_shape')!;

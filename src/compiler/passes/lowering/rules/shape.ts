@@ -14,6 +14,16 @@ export function register(): void {
   registerLoweringRule('broadcast_in_dim', lowerBroadcast);
   registerLoweringRule('broadcast', lowerBroadcast);
 
+  registerLoweringRule('dim', (ctx, op, inputs, outputs) => {
+    const axis = op.getAttr<number>('dimension') as number;
+    const inBuf = inputs[0];
+    const outBuf = outputs[0];
+    const store = new BufferStoreNode(
+      outBuf, [], ctx.extentNode(inBuf.shape[axis], inBuf, axis));
+    return new BlockNode(
+      ctx.blockName('dim_block'), [], [{ buffer: inBuf }], [{ buffer: outBuf }], store);
+  });
+
   registerLoweringRule('transpose', (ctx, op, inputs, outputs) => {
     const perm = op.getAttr<readonly number[]>('permutation') as readonly number[];
     const inBuf = inputs[0];
@@ -54,21 +64,20 @@ export function register(): void {
     if (isIdentity) {
       inIndices = outIndices;
     } else {
-      for (let i = 1; i < inBuf.shape.length; i++) if (typeof inBuf.shape[i] !== 'number' || (inBuf.shape[i] as number) < 0) throw new Error('reshape lowering requires static non-leading input dims');
-      for (let i = 1; i < outBuf.shape.length; i++) if (typeof outBuf.shape[i] !== 'number' || (outBuf.shape[i] as number) < 0) throw new Error('reshape lowering requires static non-leading output dims');
+      const inExtents = ctx.extentNodes(inBuf.shape, inBuf);
       let flatIndex: TirNode = outIndices[outBuf.shape.length - 1];
-      let stride = 1;
+      let stride: TirNode = new IntImmNode(1);
       for (let i = outBuf.shape.length - 2; i >= 0; i--) {
-        stride *= outBuf.shape[i + 1] as number;
-        flatIndex = mathOp('+', flatIndex, mathOp('*', outIndices[i], new IntImmNode(stride)));
+        stride = mathOp('*', stride, (extentNodes as TirNode[])[i + 1]);
+        flatIndex = mathOp('+', flatIndex, mathOp('*', outIndices[i], stride));
       }
       inIndices = new Array(inBuf.shape.length);
       let cur: TirNode = flatIndex;
       for (let i = inBuf.shape.length - 1; i >= 0; i--) {
         if (i === 0) { inIndices[i] = cur; }
         else {
-          inIndices[i] = mathOp('%', cur, new IntImmNode(inBuf.shape[i] as number));
-          cur = mathOp('//', cur, new IntImmNode(inBuf.shape[i] as number));
+          inIndices[i] = mathOp('%', cur, inExtents[i]);
+          cur = mathOp('//', cur, inExtents[i]);
         }
       }
     }

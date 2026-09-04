@@ -12,10 +12,10 @@ A machine learning compiler is not one translation. It is a sequence of represen
   user code            model.forward(x)
        │  tracing
        ▼
-  Graph IR             %6 = dot(%0, %5) ; %7 = add(%6, %2) ; %10 = maximum(%7, %9)
+  Graph IR             %6 = tera.dot %0, %5 ; %10 = tera.maximum %7, %9
        │  graph passes  (fusion, folding, layout, ...)
        ▼
-  Graph IR (optimized) %7 = fusion(%5, %2, %6)   ← fewer, bigger operations
+  Graph IR (optimized) %7 = "tera.fusion"(%5, %2, %6)   ← fewer, bigger operations
        │  lowering
        ▼
   TIR                  for i, j: C[i,j] = max(A[i,j] + b[j], 0)
@@ -205,19 +205,18 @@ node docs/part0/ch03-map-of-the-codebase/labs/02-see-the-optimized-graph.mjs
 
 ```
 module @Sequential {
-  func @Sequential(%0: tensor<2x2xf32>, %1: tensor<8x2xf32>, %2: tensor<8xf32>, %3: tensor<1x8xf32>, %4: tensor<1xf32>) -> (tensor<2x1xf32>) {
-    %5 = dot(%0, %1) {lhs_batch = [], lhs_contracting = [1], rhs_batch = [], rhs_contracting = [1]} : tensor<2x8xf32>
-    %6 = constant() {tensor_type = tensor<2x8xf32>, value = 0} : tensor<2x8xf32>
-    %7 = fusion(%5, %2, %6) {fusion_kind = "kElementwise"} : tensor<2x8xf32>
-    {
-      ^bb(%8: tensor<2x8xf32>, %9: tensor<8xf32>, %10: tensor<2x8xf32>):
-      %11 = add(%8, %9) : tensor<2x8xf32>
-      %12 = maximum(%11, %10) : tensor<2x8xf32>
-      yield(%12)
-    }
-    %13 = dot(%7, %3) {lhs_batch = [], lhs_contracting = [1], rhs_batch = [], rhs_contracting = [1]} : tensor<2x1xf32>
-    %14 = add(%13, %4) : tensor<2x1xf32>
-    return(%14)
+  func.func @Sequential(%0: tensor<2x2xf32>, %1: tensor<8x2xf32>, %2: tensor<8xf32>, %3: tensor<1x8xf32>, %4: tensor<1xf32>) -> (tensor<2x1xf32>) {
+    %5 = tera.dot %0, %1 {lhs_batch = array<i64>, lhs_contracting = array<i64: 1>, rhs_batch = array<i64>, rhs_contracting = array<i64: 1>} : (tensor<2x2xf32>, tensor<8x2xf32>) -> tensor<2x8xf32>
+    %6 = tera.constant dense<0.0> : tensor<2x8xf32>
+    %7 = "tera.fusion"(%5, %2, %6) ({
+      ^bb0(%8: tensor<2x8xf32>, %9: tensor<8xf32>, %10: tensor<2x8xf32>):
+        %11 = "tera.add"(%8, %9) : (tensor<2x8xf32>, tensor<8xf32>) -> tensor<2x8xf32>
+        %12 = tera.maximum %11, %10 : tensor<2x8xf32>
+        tera.yield %12 : tensor<2x8xf32>
+    }) {fusion_kind = "kElementwise"} : (tensor<2x8xf32>, tensor<8xf32>, tensor<2x8xf32>) -> tensor<2x8xf32>
+    %13 = tera.dot %7, %3 {lhs_batch = array<i64>, lhs_contracting = array<i64: 1>, rhs_batch = array<i64>, rhs_contracting = array<i64: 1>} : (tensor<2x8xf32>, tensor<1x8xf32>) -> tensor<2x1xf32>
+    %14 = "tera.add"(%13, %4) : (tensor<2x1xf32>, tensor<1xf32>) -> tensor<2x1xf32>
+    return %14 : tensor<2x1xf32>
   }
 }
 ```

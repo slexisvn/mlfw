@@ -41,7 +41,7 @@ Terms are grouped by what they describe: data, programs, transformations, execut
 
 **Operation** (op). One node of the graph: a name, operands, results, and attributes. `add`, `dot`, `reduce`, `fusion` are operations. Registered in [`src/compiler/ir/graph/ops/`](../../../src/compiler/ir/graph/ops/); 96 of them as of 2026-08-19.
 
-**Operand / result.** The inputs and outputs of an operation. In `%7 = add(%6, %2)`, the operands are `%6` and `%2` and the single result is `%7`.
+**Operand / result.** The inputs and outputs of an operation. In `%7 = "tera.add"(%6, %2)`, the operands are `%6` and `%2` and the single result is `%7`.
 
 **Attribute.** A compile-time constant attached to an operation, as opposed to data flowing through it. In `transpose(%1) {permutation = [1, 0]}`, the permutation is an attribute: it is part of what this operation *is*, and it cannot vary at runtime.
 

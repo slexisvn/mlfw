@@ -5,6 +5,7 @@ import { GraphFunction } from './function.js';
 import { GraphModule } from './module.js';
 import { registry } from './ops.js';
 import { unifiedOperandIndices } from './op_traits.js';
+import { learnDynamicExtents } from './symbolic_shape.js';
 import { currentLocation } from '../loc_source.js';
 import type { Location } from '../location.js';
 import type { AttrValue, Dim, IRType, ScalarDType, Shape } from './types.js';
@@ -12,25 +13,28 @@ import type { Value, BlockArgument } from './value.js';
 
 export type AttrRecord = Record<string, AttrValue>;
 
-export function propagateSymbolicShapes(op: Operation): void {
+export function propagateSymbolicShapes(op: Operation): boolean {
   const operandShapes = new Map<Value, Shape>();
   for (const operand of op.operands) {
     if (operand.symbolicShape) operandShapes.set(operand, operand.symbolicShape);
   }
-  if (operandShapes.size === 0) return;
+  if (operandShapes.size === 0) return false;
 
   const def = registry.get(op.opName);
   const propagated = def && def.propagateSymbolicShapes
     ? def.propagateSymbolicShapes(op, operandShapes as never) as unknown as (Shape | null)[] | null
     : null;
 
+  let learned = false;
   for (let i = 0; i < op.numResults; i++) {
     const result = op.getResult(i);
     const resultType = result.type;
     if (!(resultType instanceof TensorType)) continue;
     const fromRule = propagated ? propagated[i] : null;
-    result.symbolicShape = fromRule || alignSymbolicShape(resultType.shape, operandShapes);
+    const shape = fromRule || alignSymbolicShape(resultType.shape, operandShapes);
+    if (learnDynamicExtents(result, shape as readonly Dim[])) learned = true;
   }
+  return learned;
 }
 
 function alignSymbolicShape(resultShape: Shape, operandShapes: ReadonlyMap<Value, Shape>): Dim[] {
@@ -74,9 +78,9 @@ export type ScatterOpts = Readonly<{
 }>;
 
 export type FusionBodyBuilder = (builder: IRBuilder, args: BlockArgument[]) => void;
-export type BranchBuilder = (builder: IRBuilder) => void;
+export type BranchBuilder = (builder: IRBuilder, args: BlockArgument[]) => void;
 export type RegionBodyBuilder = (builder: IRBuilder, args: BlockArgument[]) => void;
-export type ScanBodyFn = (builder: IRBuilder, xs: BlockArgument[], carry: BlockArgument[]) => [Value[], Value[]];
+export type ScanBodyFn = (builder: IRBuilder, carry: BlockArgument[], xs: BlockArgument[], consts: BlockArgument[]) => [Value[], Value[]];
 export type FunctionBodyFn = (builder: IRBuilder, args: BlockArgument[]) => void;
 export type FunctionSpec = readonly [string, readonly IRType[], readonly IRType[], FunctionBodyFn];
 
@@ -126,12 +130,14 @@ export class IRBuilder {
   func: GraphFunction;
   block: Block;
   location: Location | null;
+  listener: ((op: Operation) => void) | null;
   private _insertionPoint: Operation | null;
 
   constructor(func: GraphFunction) {
     this.func = func;
     this.block = func.entryBlock;
     this.location = null;
+    this.listener = null;
     this._insertionPoint = null;
   }
 
@@ -160,6 +166,7 @@ export class IRBuilder {
     } else {
       this.block.pushOp(op);
     }
+    if (this.listener) this.listener(op);
     return op;
   }
 
@@ -229,6 +236,10 @@ export class IRBuilder {
     return this.constant(value, tt);
   }
 
+  splat(value: AttrValue, type: TensorType): Operation {
+    return this.broadcast(this.scalarConstant(value, type.dtype).getResult(0), type.shape, []);
+  }
+
   iota(dim: number, tensorType: TensorType): Operation {
     return this._buildOp('iota', [], [tensorType], {
       iota_dimension: dim,
@@ -291,11 +302,17 @@ export class IRBuilder {
     return this._inferAndBuild('clamp', [lo, x, hi]);
   }
 
-  broadcast(input: Value, resultShape: Shape, broadcastDimensions: readonly number[]): Operation {
-    return this._inferAndBuild('broadcast_in_dim', [input], {
+  broadcast(input: Value, resultShape: Shape, broadcastDimensions: readonly number[], sizes: readonly Value[] = [], onto: Value | null = null): Operation {
+    const op = this._inferAndBuild('broadcast_in_dim', [input, ...sizes], {
       result_shape: resultShape,
       broadcast_dimensions: broadcastDimensions
     });
+    if (onto && onto.symbolicShape) op.getResult(0).symbolicShape = [...onto.symbolicShape];
+    return op;
+  }
+
+  dim(input: Value, dimension: number): Operation {
+    return this._inferAndBuild('dim', [input], { dimension });
   }
 
   reshape(input: Value, newShape: Shape): Operation {
@@ -388,6 +405,24 @@ export class IRBuilder {
     return this.reshape(result.getResult(0), outShape.filter((_, i) => !drop.has(i)));
   }
 
+  attentionProbs(q: Value, k: Value, scale: number, causal: boolean): Operation {
+    const rank = tensorTypeOf(q).rank;
+    const kT = this.transpose(k, transposeLastTwo(rank)).getResult(0);
+    const scores = this.matmul(q, kT).getResult(0);
+    const scoreType = tensorTypeOf(scores);
+    let scaled = this.mul(scores, this.splat(scale, scoreType).getResult(0)).getResult(0);
+    if (causal) {
+      const indexType = new TensorType(scoreType.shape, ScalarType.I32);
+      const offset = (scoreType.shape[rank - 1] as number) - (scoreType.shape[rank - 2] as number);
+      const row = this.iota(rank - 2, indexType).getResult(0);
+      const col = this.iota(rank - 1, indexType).getResult(0);
+      const limit = this.add(row, this.splat(offset, indexType).getResult(0)).getResult(0);
+      const allowed = this.compare(col, limit, 'le').getResult(0);
+      scaled = this.select(allowed, scaled, this.splat(MASKED_SCORE, scoreType).getResult(0)).getResult(0);
+    }
+    return this.softmax(scaled, rank - 1);
+  }
+
   _broadcastBatch(value: Value, batch: Shape, targetBatch: Shape): Value {
     const matrixDims = tensorTypeOf(value).shape.slice(tensorTypeOf(value).rank - 2);
     const targetShape = [...targetBatch, ...matrixDims];
@@ -435,25 +470,31 @@ export class IRBuilder {
     return op;
   }
 
-  ifOp(predicate: Value, resultTypes: readonly IRType[], thenBuilder: BranchBuilder | null, elseBuilder: BranchBuilder | null): Operation {
-    const thenRegion = new Region();
-    const thenBlock = new Block([]);
-    thenRegion.addBlock(thenBlock);
-    const elseRegion = new Region();
-    const elseBlock = new Block([]);
-    elseRegion.addBlock(elseBlock);
-    const op = this._buildOp('if', [predicate], resultTypes, null, [thenRegion, elseRegion]);
-    if (thenBuilder) {
-      const tb = new IRBuilder(this.func);
-      tb.block = thenBlock;
-      thenBuilder(tb);
+  ifOp(predicate: Value, resultTypes: readonly IRType[] | null, thenBuilder: BranchBuilder | null, elseBuilder: BranchBuilder | null, inputValues: readonly Value[] = []): Operation {
+    const argTypes = inputValues.map(v => v.type);
+    const regions = [new Region(), new Region()];
+    const blocks = regions.map((region) => {
+      const block = new Block(argTypes);
+      region.addBlock(block);
+      return block;
+    });
+    const builders = [thenBuilder, elseBuilder];
+    for (let i = 0; i < builders.length; i++) {
+      const build = builders[i];
+      if (!build) continue;
+      const inner = new IRBuilder(this.func);
+      inner.block = blocks[i];
+      build(inner, blocks[i].arguments);
     }
-    if (elseBuilder) {
-      const eb = new IRBuilder(this.func);
-      eb.block = elseBlock;
-      elseBuilder(eb);
+    let types = resultTypes;
+    if (types === null) {
+      const terminator = blocks[0].lastOp;
+      if (!terminator || terminator.opName !== 'yield') {
+        throw new Error('ifOp without result types needs a then-branch that ends in a yield');
+      }
+      types = terminator.operands.map(v => v.type);
     }
-    return op;
+    return this._buildOp('if', [predicate, ...inputValues], types, null, regions);
   }
 
   whileOp(initValues: readonly Value[], condBuilder: RegionBodyBuilder | null, bodyBuilder: RegionBodyBuilder | null): Operation {
@@ -478,18 +519,7 @@ export class IRBuilder {
     return op;
   }
 
-  scanOp(xsValues: readonly Value[], initCarryValues: readonly Value[], bodyFn: ScanBodyFn): Operation {
-    const xtTypes = xsValues.map(v => tensorTypeOf(v).withShape(tensorTypeOf(v).shape.slice(1)));
-    const carryTypes = initCarryValues.map(v => v.type);
-    const bodyRegion = new Region();
-    const bodyBlock = new Block([...xtTypes, ...carryTypes]);
-    bodyRegion.addBlock(bodyBlock);
-    const bb = new IRBuilder(this.func);
-    bb.block = bodyBlock;
-    const xtArgs = bodyBlock.arguments.slice(0, xtTypes.length);
-    const carryArgs = bodyBlock.arguments.slice(xtTypes.length);
-    const [newCarry, ys] = bodyFn(bb, xtArgs, carryArgs);
-    bb.yieldOp([...newCarry, ...ys]);
+  scanOp(initCarryValues: readonly Value[], xsValues: readonly Value[], bodyFn: ScanBodyFn, constValues: readonly Value[] = []): Operation {
     if (xsValues.length === 0) throw new Error('scanOp requires at least one xs input');
     const length = tensorTypeOf(xsValues[0]).shape[0];
     if (typeof length !== 'number' || length < 0) {
@@ -500,10 +530,23 @@ export class IRBuilder {
         throw new Error('scanOp requires all xs inputs to share the same leading length');
       }
     }
+    const carryTypes = initCarryValues.map(v => v.type);
+    const xtTypes = xsValues.map(v => tensorTypeOf(v).dropLeadingAxis());
+    const constTypes = constValues.map(v => v.type);
+    const bodyRegion = new Region();
+    const bodyBlock = new Block([...carryTypes, ...xtTypes, ...constTypes]);
+    bodyRegion.addBlock(bodyBlock);
+    const bb = new IRBuilder(this.func);
+    bb.block = bodyBlock;
+    const carryArgs = bodyBlock.arguments.slice(0, carryTypes.length);
+    const xtArgs = bodyBlock.arguments.slice(carryTypes.length, carryTypes.length + xtTypes.length);
+    const constArgs = bodyBlock.arguments.slice(carryTypes.length + xtTypes.length);
+    const [newCarry, ys] = bodyFn(bb, carryArgs, xtArgs, constArgs);
+    bb.yieldOp([...newCarry, ...ys]);
     const yTypes = ys.map(v => tensorTypeOf(v).withShape([length, ...tensorTypeOf(v).shape]));
-    return this._buildOp('scan', [...xsValues, ...initCarryValues],
+    return this._buildOp('scan', [...initCarryValues, ...xsValues, ...constValues],
       [...carryTypes, ...yTypes],
-      { num_carry: initCarryValues.length, num_xs: xsValues.length },
+      { num_carry: initCarryValues.length, num_xs: xsValues.length, num_consts: constValues.length },
       [bodyRegion]);
   }
 
@@ -517,11 +560,7 @@ export class IRBuilder {
 
   relu(x: Value): Operation {
     const zero = this.scalarConstant(0, tensorTypeOf(x).dtype);
-    const broadcastZero = this.broadcast(
-      zero.getResult(0),
-      tensorTypeOf(x).shape,
-      []
-    );
+    const broadcastZero = this.broadcast(zero.getResult(0), tensorTypeOf(x).shape, [], [], x);
     return this.maximum(x, broadcastZero.getResult(0));
   }
 
@@ -693,6 +732,15 @@ export class IRBuilder {
       layout: opts.layout || 'NCHW',
     });
   }
+}
+
+export const MASKED_SCORE = -1e30;
+
+export function transposeLastTwo(rank: number): number[] {
+  const perm = Array.from({ length: rank }, (_, i) => i);
+  perm[rank - 2] = rank - 1;
+  perm[rank - 1] = rank - 2;
+  return perm;
 }
 
 export function broadcastDimsExcluding(rank: number, excludedDim: number): number[] {

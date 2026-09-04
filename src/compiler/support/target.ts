@@ -179,6 +179,8 @@ export class TargetFeatures {
   }
 }
 
+const NATIVE_OPS: ReadonlySet<string> = new Set(['scaled_dot_product_attention']);
+
 export const CPUTarget = (overrides: TargetOverrides = {}): TargetFeatures => new TargetFeatures({
   kind: TargetKind.CPU,
   name: 'cpu_generic',
@@ -193,6 +195,7 @@ export const CPUTarget = (overrides: TargetOverrides = {}): TargetFeatures => ne
   preferredBlockFactor: 8,
   supportsInt8: true,
   supportsConstBuffers: true,
+  attrs: { [TargetAttr.NATIVE_OPS]: NATIVE_OPS },
   ...overrides
 });
 
@@ -221,6 +224,7 @@ export const CUDATarget = (overrides: TargetOverrides = {}): TargetFeatures => n
   attrs: {
     [TargetAttr.GRAPH_SPLIT]: { matmul: 2, conv: 2, attention: 1 },
     [TargetAttr.SCHEDULING]: { gpuTiling: true },
+    [TargetAttr.NATIVE_OPS]: NATIVE_OPS,
   },
   ...overrides
 });
@@ -236,6 +240,7 @@ export const WasmTarget = (overrides: TargetOverrides = {}): TargetFeatures => n
   supportsInt8: true,
   supportsConstBuffers: true,
   simd: true,
+  attrs: { [TargetAttr.NATIVE_OPS]: NATIVE_OPS },
   ...overrides
 });
 
@@ -256,6 +261,6 @@ export const WebGPUTarget = (overrides: TargetOverrides = {}): TargetFeatures =>
   memoryBandwidthGBs: 400,
   computeTFLOPs: 8,
   supportsFloat16: true,
-  attrs: { [TargetAttr.SCHEDULING]: { enabled: true } },
+  attrs: { [TargetAttr.SCHEDULING]: { enabled: true }, [TargetAttr.NATIVE_OPS]: NATIVE_OPS },
   ...overrides
 });

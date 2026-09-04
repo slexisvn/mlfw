@@ -1,9 +1,7 @@
 import { registerVJPRule } from '../vjp_registry.js';
-import { broadcastDimsExcluding } from '../../ir/graph/builder.js';
-import { ScalarType, TensorType } from '../../ir/graph/types.js';
+import { broadcastDimsExcluding, transposeLastTwo } from '../../ir/graph/builder.js';
+import { TensorType } from '../../ir/graph/types.js';
 import type { Value } from '../../ir/graph/value.js';
-
-const MASKED_SCORE = -1e30;
 
 registerVJPRule('softmax', (ctx) => {
   const grad = ctx.gradOutputs[0]!;
@@ -90,29 +88,14 @@ registerVJPRule('layer_norm', (ctx) => {
 registerVJPRule('scaled_dot_product_attention', (ctx) => {
   const dO = ctx.gradOutputs[0]!;
   const [Q, K, V] = ctx.operands;
-  const scale = ctx.op.getAttr('scale');
+  const scale = ctx.op.getAttr<number>('scale')!;
   const causal = ctx.op.getAttr<boolean>('causal')!;
   const b = ctx.builder;
   const dtype = Q.type.dtype;
   const rank = Q.type.rank;
-  const perm: number[] = [];
-  for (let i = 0; i < rank; i++) perm.push(i);
-  perm[rank - 2] = rank - 1; perm[rank - 1] = rank - 2;
-  const lastT = (x: Value) => b.transpose(x, perm).getResult(0);
+  const lastT = (x: Value) => b.transpose(x, transposeLastTwo(rank)).getResult(0);
 
-  const s = b.matmul(Q, lastT(K)).getResult(0);
-  let ss = b.mul(s, ctx.full(scale as number, s.type as TensorType)).getResult(0);
-  if (causal) {
-    const scoreType = ss.type as TensorType;
-    const indexType = new TensorType(scoreType.shape, ScalarType.I32);
-    const rowIdx = b.iota(rank - 2, indexType).getResult(0);
-    const colIdx = b.iota(rank - 1, indexType).getResult(0);
-    const offset = (scoreType.shape[rank - 1] as number) - (scoreType.shape[rank - 2] as number);
-    const limit = b.add(rowIdx, b.broadcast(b.scalarConstant(offset, ScalarType.I32).getResult(0), scoreType.shape, []).getResult(0)).getResult(0);
-    const allowed = b.compare(colIdx, limit, 'le').getResult(0);
-    ss = b.select(allowed, ss, ctx.full(MASKED_SCORE, scoreType)).getResult(0);
-  }
-  const p = b.softmax(ss, rank - 1).getResult(0);
+  const p = b.attentionProbs(Q, K, scale, causal).getResult(0);
 
   const dV = b.matmul(lastT(p), dO).getResult(0);
   const dP = b.matmul(dO, lastT(V)).getResult(0);
@@ -124,7 +107,7 @@ registerVJPRule('scaled_dot_product_attention', (ctx) => {
   for (let i = 0; i < rank - 1; i++) bcastDims.push(i);
   const sumBr = b.broadcast(sumDPP, (p.type as TensorType).shape, bcastDims).getResult(0);
   const dS = b.mul(p, b.sub(dP, sumBr).getResult(0)).getResult(0);
-  const dSraw = b.mul(dS, ctx.full(scale as number, dS.type as TensorType)).getResult(0);
+  const dSraw = b.mul(dS, ctx.full(scale, dS.type as TensorType)).getResult(0);
 
   const dQ = b.matmul(dSraw, K).getResult(0);
   const dK = b.matmul(lastT(dSraw), Q).getResult(0);
