@@ -32,7 +32,9 @@ def Tera_IfOp : Tera_Op<"if",
                                    ["getEntrySuccessorOperands",
                                     "getSuccessorInputs",
                                     "getRegionInvocationBounds"]>,
-         DeclareOpInterfaceMethods<Tera_VjpOpInterface>, Tera_AcceptsDynamicShapes]> {
+         DeclareOpInterfaceMethods<Tera_VjpOpInterface>,
+         DeclareOpInterfaceMethods<Tera_JvpOpInterface, ["buildJvp"]>,
+         Tera_AcceptsDynamicShapes]> {
   let summary = "Runs one of two bodies on the same inputs";
   let description = [{
     `condition` is a rank-0 boolean tensor. Both bodies take the op's inputs as
@@ -72,7 +74,11 @@ def Tera_ScanOp : Tera_Op<"scan",
                                    ["getEntrySuccessorOperands",
                                     "getSuccessorInputs",
                                     "getRegionInvocationBounds"]>,
-         DeclareOpInterfaceMethods<Tera_VjpOpInterface>]> {
+         DeclareOpInterfaceMethods<Tera_VjpOpInterface>,
+         DeclareOpInterfaceMethods<Tera_JvpOpInterface, ["buildJvp"]>,
+         DeclareOpInterfaceMethods<Tera_LoweringOpInterface,
+                                   ["verifyLoweringToLinalg"]>,
+         Tera_AcceptsDynamicShapes]> {
   let summary = "Threads a carry through a sequence, collecting one output per step";
   let description = [{
     The body runs once per step. It takes the carry, then one slice of each

@@ -12,7 +12,8 @@
 include "Tera/IR/TeraOpsBase.td"
 
 def Tera_GatherOp
-    : Tera_InferredOp<"gather", [DeclareOpInterfaceMethods<Tera_VjpOpInterface>, Tera_AcceptsDynamicShapes]> {
+    : Tera_InferredOp<"gather", [DeclareOpInterfaceMethods<Tera_VjpOpInterface>,
+                                 Tera_AcceptsDynamicShapes, Tera_Linear]> {
   let summary = "Read a slice of the operand at every position the indices name";
   let description = [{
     An embedding, and every other lookup, written once. The op reads one slice
@@ -69,7 +70,8 @@ def Tera_GatherOp
 }
 
 def Tera_ScatterOp
-    : Tera_InferredOp<"scatter", [DeclareOpInterfaceMethods<Tera_VjpOpInterface>, Tera_AcceptsDynamicShapes]> {
+    : Tera_InferredOp<"scatter", [DeclareOpInterfaceMethods<Tera_VjpOpInterface>,
+                                  Tera_AcceptsDynamicShapes, Tera_Linear]> {
   let summary = "Add updates into the operand at every position the indices name";
   let description = [{
     The reverse of `tera.gather`, and the mirror of it in every attribute:

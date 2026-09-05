@@ -166,6 +166,42 @@ SmallVector<int64_t> Pool2dOp::getPaddingHigh() {
   return paddingSide(getPadding(), 1);
 }
 
+LogicalResult Pool2dOp::verifyLoweringToLinalg() {
+  auto operandType = cast<RankedTensorType>(getOperand().getType());
+  auto resultType = cast<RankedTensorType>(getType());
+  ArrayRef<int64_t> window = getKernelSize();
+  ArrayRef<int64_t> strides = getStrides();
+  SmallVector<int64_t> low = getPaddingLow();
+  SmallVector<int64_t> high = getPaddingHigh();
+  bool padded =
+      llvm::any_of(getPadding(), [](int64_t pad) { return pad != 0; });
+
+  if (padded && getKind() == PoolKind::Max)
+    return emitError() << "cannot be lowered with padding: a maximum has no "
+                          "value to read outside the input that a window made "
+                          "only of padding would not then answer with";
+  if (padded && !getCountIncludePad())
+    return emitError() << "cannot be lowered without counting the padding: "
+                          "each window would be divided by how much of it fell "
+                          "inside, which is a count per window rather than the "
+                          "one number the traversal divides by";
+
+  for (int64_t axis = 0; axis < 2; ++axis) {
+    int64_t extent = operandType.getDimSize(axis + 2);
+    int64_t count = resultType.getDimSize(axis + 2);
+    if (ShapedType::isDynamic(extent) || ShapedType::isDynamic(count))
+      continue;
+    if ((count - 1) * strides[axis] + window[axis] >
+        extent + low[axis] + high[axis])
+      return emitError() << "cannot be lowered with a window that hangs over "
+                            "axis "
+                         << axis
+                         << ": it reads past the end of the input, and what is "
+                            "there is padding the op does not carry";
+  }
+  return success();
+}
+
 LogicalResult
 Pool2dOp::inferReturnTypes(MLIRContext *, std::optional<Location> location,
                            Adaptor adaptor,
@@ -410,5 +446,63 @@ LogicalResult Pool2dOp::buildVjp(OpBuilder &builder, ValueRange adjoints,
   Value zero = createSplat(builder, loc, operandType, 0.0);
   operandAdjoints.assign(
       {SelectOp::create(builder, loc, chosen, shared, zero)});
+  return success();
+}
+
+LogicalResult Pool2dOp::buildJvp(OpBuilder &builder, ValueRange tangents,
+                                 SmallVectorImpl<Value> &resultTangents,
+                                 SmallVectorImpl<Value> &primalResults) {
+  Location loc = getLoc();
+  if (!tangents[0]) {
+    resultTangents.assign({Value()});
+    return success();
+  }
+
+  if (getKind() == PoolKind::Average) {
+    resultTangents.assign({Pool2dOp::create(
+        builder, loc, tangents[0], getKind(), getKernelSize(), getStrides(),
+        getPadding(), getCeilMode(), getCountIncludePad())});
+    return success();
+  }
+
+  if (llvm::any_of(getPadding(), [](int64_t pad) { return pad != 0; }) ||
+      getCeilMode())
+    return emitOpError() << "cannot be differentiated with padding or a window "
+                            "that hangs over the edge: a position with no "
+                            "element under it has nothing to take a share";
+
+  auto operandType = cast<RankedTensorType>(getOperand().getType());
+  auto resultType = cast<RankedTensorType>(getType());
+  ArrayRef<int64_t> window = getKernelSize();
+  ArrayRef<int64_t> strides = getStrides();
+
+  SmallVector<int64_t> split{operandType.getDimSize(0),
+                             operandType.getDimSize(1)};
+  SmallVector<int64_t> spread{0, 1};
+  SmallVector<int64_t> windowAxes;
+  for (int64_t axis = 0; axis < 2; ++axis) {
+    if (strides[axis] != window[axis])
+      return emitOpError() << "cannot be differentiated with windows that "
+                              "overlap or leave gaps: at axis "
+                           << axis << " the window is " << window[axis]
+                           << " wide and the stride is " << strides[axis];
+    spread.push_back(split.size());
+    split.push_back(resultType.getDimSize(axis + 2));
+    windowAxes.push_back(split.size());
+    split.push_back(window[axis]);
+  }
+
+  auto splitType = RankedTensorType::get(split, operandType.getElementType());
+  Value apart = BroadcastInDimOp::create(builder, loc, splitType, getResult(),
+                                         ValueRange{}, spread);
+  Value spreadResult =
+      ReshapeOp::create(builder, loc, operandType, apart);
+  Value chosen = CompareOp::create(builder, loc, getOperand(), spreadResult,
+                                   ComparisonDirection::Eq);
+  Value zero = createSplat(builder, loc, operandType, 0.0);
+  Value picked = SelectOp::create(builder, loc, chosen, tangents[0], zero);
+  Value gathered = ReshapeOp::create(builder, loc, splitType, picked);
+  resultTangents.assign({ReduceOp::create(builder, loc, gathered,
+                                          ReduceKind::Sum, windowAxes)});
   return success();
 }

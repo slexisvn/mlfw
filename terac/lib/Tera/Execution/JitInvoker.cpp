@@ -8,7 +8,6 @@
 
 #include "Tera/Execution/JitInvoker.h"
 
-#include "Tera/Conversion/Pipelines.h"
 #include "mlir/ExecutionEngine/OptUtils.h"
 #include "mlir/Pass/PassManager.h"
 #include "llvm/ADT/STLExtras.h"
@@ -20,19 +19,14 @@ using namespace mlir;
 using namespace mlir::tera;
 
 FailureOr<std::unique_ptr<JitInvoker>>
-JitInvoker::create(ModuleOp module, Target target, unsigned optLevel,
+JitInvoker::create(ModuleOp module, const TargetBackend &target,
+                   StringRef targetOptions, unsigned optLevel,
                    ArrayRef<std::string> sharedLibs) {
   PassManager pm(module.getContext());
   if (failed(applyPassManagerCLOptions(pm)))
     return failure();
-  switch (target) {
-  case Target::CPU:
-    buildTeraToLLVMPipeline(pm);
-    break;
-  case Target::CUDA:
-    buildTeraToNVVMPipeline(pm, TeraToNVVMOptions());
-    break;
-  }
+  if (failed(target.buildPipeline(pm, targetOptions, llvm::errs())))
+    return failure();
   if (failed(pm.run(module)))
     return failure();
 

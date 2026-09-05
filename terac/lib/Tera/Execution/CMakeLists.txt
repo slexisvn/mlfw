@@ -9,5 +9,5 @@ add_mlir_library(MLIRTeraExecution
         MLIRExecutionEngine
         MLIRIR
         MLIRPass
-        MLIRTeraConversion
+        MLIRTeraPipelines
         )

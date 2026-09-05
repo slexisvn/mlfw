@@ -29,3 +29,7 @@ target_link_libraries(tera-gradcheck PRIVATE
   )
 
 mlir_check_all_link_libraries(tera-gradcheck)
+
+install(TARGETS tera-gradcheck
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        COMPONENT tera-gradcheck)

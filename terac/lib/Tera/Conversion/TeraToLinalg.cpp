@@ -135,86 +135,23 @@ void populateTeraToLinalgPatterns(RewritePatternSet &patterns) {
 }
 
 namespace {
-bool acceptsDynamicShapes(Operation *op) {
-  if (auto scan = dyn_cast<ScanOp>(op))
-    return !ShapedType::isDynamic(scan.getTripCount());
-  if (auto reverse = dyn_cast<ReverseOp>(op)) {
-    auto type = cast<RankedTensorType>(reverse.getOperand().getType());
-    return llvm::none_of(reverse.getDimensions(), [&](int64_t axis) {
-      return ShapedType::isDynamic(type.getDimSize(axis));
-    });
-  }
-  return op->hasTrait<AcceptsDynamicShapes>();
-}
-
-LogicalResult rejectDynamicShapes(Operation *root) {
+LogicalResult rejectUnlowerable(Operation *root) {
   auto isDynamic = [](Type type) {
     auto shaped = dyn_cast<ShapedType>(type);
     return !shaped || !shaped.hasStaticShape();
   };
-  WalkResult walk = root->walk([&](Operation *op) {
-    if (!isa_and_present<TeraDialect>(op->getDialect()))
-      return WalkResult::advance();
+  WalkResult walk = root->walk([&](TeraLoweringOpInterface op) {
+    if (failed(op.verifyLoweringToLinalg()))
+      return WalkResult::interrupt();
     if (llvm::none_of(op->getOperandTypes(), isDynamic) &&
         llvm::none_of(op->getResultTypes(), isDynamic))
       return WalkResult::advance();
-    if (acceptsDynamicShapes(op))
+    if (op.acceptsDynamicShapes())
       return WalkResult::advance();
-    if (isa<ScanOp>(op)) {
-      op->emitError() << "cannot be lowered to linalg with a dynamic step "
-                         "axis: the trip count would have to be read at run "
-                         "time";
-      return WalkResult::interrupt();
-    }
     op->emitError() << "cannot be lowered to linalg with a dynamic shape: "
                        "this op materialises a destination from static "
                        "extents and no operand carries a dynamic one";
     return WalkResult::interrupt();
-  });
-  return failure(walk.wasInterrupted());
-}
-
-LogicalResult rejectUnlowerablePools(Operation *root) {
-  WalkResult walk = root->walk([&](Pool2dOp pool) {
-    auto operandType = cast<RankedTensorType>(pool.getOperand().getType());
-    auto resultType = cast<RankedTensorType>(pool.getType());
-    ArrayRef<int64_t> window = pool.getKernelSize();
-    ArrayRef<int64_t> strides = pool.getStrides();
-    SmallVector<int64_t> low = pool.getPaddingLow();
-    SmallVector<int64_t> high = pool.getPaddingHigh();
-    bool padded = llvm::any_of(pool.getPadding(),
-                               [](int64_t pad) { return pad != 0; });
-
-    if (padded && pool.getKind() == PoolKind::Max) {
-      pool.emitError() << "cannot be lowered with padding: a maximum has no "
-                          "value to read outside the input that a window made "
-                          "only of padding would not then answer with";
-      return WalkResult::interrupt();
-    }
-    if (padded && !pool.getCountIncludePad()) {
-      pool.emitError() << "cannot be lowered without counting the padding: "
-                          "each window would be divided by how much of it fell "
-                          "inside, which is a count per window rather than the "
-                          "one number the traversal divides by";
-      return WalkResult::interrupt();
-    }
-
-    for (int64_t axis = 0; axis < 2; ++axis) {
-      int64_t extent = operandType.getDimSize(axis + 2);
-      int64_t count = resultType.getDimSize(axis + 2);
-      if (ShapedType::isDynamic(extent) || ShapedType::isDynamic(count))
-        continue;
-      if ((count - 1) * strides[axis] + window[axis] >
-          extent + low[axis] + high[axis]) {
-        pool.emitError() << "cannot be lowered with a window that hangs over "
-                            "axis "
-                         << axis
-                         << ": it reads past the end of the input, and what is "
-                            "there is padding the op does not carry";
-        return WalkResult::interrupt();
-      }
-    }
-    return WalkResult::advance();
   });
   return failure(walk.wasInterrupted());
 }
@@ -225,8 +162,7 @@ struct ConvertTeraToLinalg
       ConvertTeraToLinalg>::ConvertTeraToLinalgBase;
 
   void runOnOperation() final {
-    if (failed(rejectDynamicShapes(getOperation())) ||
-        failed(rejectUnlowerablePools(getOperation())))
+    if (failed(rejectUnlowerable(getOperation())))
       return signalPassFailure();
 
     MLIRContext *context = &getContext();

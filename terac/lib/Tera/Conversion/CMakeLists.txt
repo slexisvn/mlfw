@@ -1,9 +1,10 @@
 add_mlir_dialect_library(MLIRTeraConversion
-        Pipelines.cpp
         StageGpuBuffers.cpp
         TeraToLinalg.cpp
         TileAndFuse.cpp
+        TileParallelLoops.cpp
         VectorizeLinalg.cpp
+        VerifyGpuMapping.cpp
         TeraToLinalgConstant.cpp
         TeraToLinalgElementwise.cpp
         TeraToLinalgShape.cpp
@@ -21,41 +22,28 @@ add_mlir_dialect_library(MLIRTeraConversion
 
         LINK_LIBS PUBLIC
         MLIRAffineDialect
-        MLIRAffineTransforms
         MLIRArithDialect
-        MLIRAffineToStandard
-        MLIRArithToLLVM
         MLIRArithUtils
         MLIRBufferizationDialect
-        MLIRBufferizationPipelines
-        MLIRBufferizationToMemRef
-        MLIRBufferizationTransforms
-        MLIRControlFlowToLLVM
-        MLIRFuncToLLVM
+        MLIRDialectUtils
+        MLIRFuncDialect
         MLIRGPUDialect
-        MLIRGPUPipelines
         MLIRGPUTransforms
         MLIRIndexingMapOpInterface
-        MLIRLLVMIRTransforms
         MLIRLinalgDialect
         MLIRLinalgTransforms
         MLIRMathDialect
-        MLIRMathToLLVM
-        MLIRMemRefToLLVM
-        MLIRMemRefTransforms
+        MLIRMemRefDialect
         MLIRPass
         MLIRSCFDialect
-        MLIRSCFToGPU
         MLIRSCFTransforms
-        MLIRReconcileUnrealizedCasts
-        MLIRSCFToControlFlow
+        MLIRSCFUtils
         MLIRTensorDialect
         MLIRTera
+        MLIRTeraAnalysis
         MLIRTilingInterface
         MLIRTransforms
-        MLIRUBToLLVM
         MLIRVectorDialect
-        MLIRVectorTransforms
-        MLIRVectorToLLVM
-        MLIRVectorToSCF
         )
+
+tera_check_layering(Conversion "Pipelines|Execution|CAPI")

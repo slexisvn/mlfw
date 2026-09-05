@@ -19,7 +19,8 @@ def Tera_SubOp : Tera_BinaryEwiseOp<"sub", [Tera_AcceptsDynamicShapes]> {
   let summary = "Elementwise subtraction";
 }
 
-def Tera_MulOp : Tera_BinaryEwiseOp<"mul", [Commutative, Tera_AcceptsDynamicShapes]> {
+def Tera_MulOp : Tera_BinaryEwiseOp<"mul", [Commutative, Tera_AcceptsDynamicShapes,
+                                            Tera_Multilinear]> {
   let summary = "Elementwise multiplication";
 }
 
@@ -39,11 +40,13 @@ def Tera_ExpOp : Tera_UnaryEwiseOp<"exp", Tera_FloatTensor, [Tera_AcceptsDynamic
   let summary = "Elementwise natural exponential";
 }
 
-def Tera_SqrtOp : Tera_UnaryEwiseOp<"sqrt", Tera_FloatTensor> {
+def Tera_SqrtOp : Tera_UnaryEwiseOp<"sqrt", Tera_FloatTensor,
+                              [Tera_AcceptsDynamicShapes]> {
   let summary = "Elementwise square root";
 }
 
-def Tera_RsqrtOp : Tera_UnaryEwiseOp<"rsqrt", Tera_FloatTensor> {
+def Tera_RsqrtOp : Tera_UnaryEwiseOp<"rsqrt", Tera_FloatTensor,
+                              [Tera_AcceptsDynamicShapes]> {
   let summary = "Elementwise reciprocal square root";
   let description = [{
     Its own op rather than `div` of a `sqrt`, because a normalisation divides by
@@ -51,7 +54,8 @@ def Tera_RsqrtOp : Tera_UnaryEwiseOp<"rsqrt", Tera_FloatTensor> {
   }];
 }
 
-def Tera_TanhOp : Tera_UnaryEwiseOp<"tanh", Tera_FloatTensor> {
+def Tera_TanhOp : Tera_UnaryEwiseOp<"tanh", Tera_FloatTensor,
+                              [Tera_AcceptsDynamicShapes]> {
   let summary = "Elementwise hyperbolic tangent";
 }
 
@@ -70,7 +74,8 @@ def Tera_SelectOp : Tera_Op<"select", [Pure, Elementwise,
                                        SameOperandsAndResultShape,
                                        AllTypesMatch<["on_true", "on_false",
                                                       "result"]>,
-                                       DeclareOpInterfaceMethods<Tera_VjpOpInterface>, Tera_AcceptsDynamicShapes]> {
+                                       DeclareOpInterfaceMethods<Tera_VjpOpInterface>,
+                                       Tera_AcceptsDynamicShapes, Tera_Linear]> {
   let summary = "Elementwise choice between two tensors";
 
   let arguments = (ins Tera_BoolTensor:$pred, Tera_Tensor:$on_true,
@@ -82,7 +87,8 @@ def Tera_SelectOp : Tera_Op<"select", [Pure, Elementwise,
 
 def Tera_ConvertOp : Tera_Op<"convert", [Pure, Elementwise,
                                          SameOperandsAndResultShape,
-                                         DeclareOpInterfaceMethods<Tera_VjpOpInterface>, Tera_AcceptsDynamicShapes]> {
+                                         DeclareOpInterfaceMethods<Tera_VjpOpInterface>,
+                                         Tera_AcceptsDynamicShapes, Tera_Linear]> {
   let summary = "Elementwise element type conversion";
   let description = [{
     The target element type is given by the result type, not derived, so this op

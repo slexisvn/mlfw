@@ -74,6 +74,7 @@ llvm::cl::list<std::string> sharedLibs(
 struct Model {
   std::string primal;
   std::string vjp;
+  std::string jvp;
   SmallVector<RankedTensorType> inputs;
   RankedTensorType output;
   SmallVector<int64_t> arguments;
@@ -100,6 +101,10 @@ FailureOr<Model> readModel(func::FuncOp func) {
            << "does not say which arguments it differentiates";
   model.arguments.assign(arguments.asArrayRef().begin(),
                          arguments.asArrayRef().end());
+
+  if (auto jvp = func->getAttrOfType<FlatSymbolRefAttr>(
+          TeraDialect::kJvpAttrName))
+    model.jvp = jvp.getValue().str();
 
   for (Type type : func.getArgumentTypes()) {
     auto tensorType = dyn_cast<RankedTensorType>(type);
@@ -132,6 +137,57 @@ FailureOr<double> project(JitInvoker &invoker, const Model &model,
   return total;
 }
 
+LogicalResult checkForwardMode(JitInvoker &invoker, const Model &model,
+                               ArrayRef<TensorBuffer> inputs,
+                               ArrayRef<TensorBuffer> tangents,
+                               const TensorBuffer &cotangent,
+                               ArrayRef<TensorBuffer> reverse) {
+  auto like = [](const TensorBuffer &source, RankedTensorType type) {
+    TensorBuffer copy(type);
+    for (int64_t index = 0; index < source.getNumElements(); ++index)
+      copy.setElement(index, source.getElement(index));
+    return copy;
+  };
+
+  SmallVector<TensorBuffer> given;
+  for (auto [type, input] : llvm::zip_equal(model.inputs, inputs))
+    given.push_back(like(input, type));
+  for (auto [slot, position] : llvm::enumerate(model.arguments))
+    given.push_back(like(tangents[slot], model.inputs[position]));
+
+  SmallVector<TensorBuffer> produced;
+  produced.push_back(TensorBuffer::forResult(model.output));
+  produced.push_back(TensorBuffer::forResult(model.output));
+  if (failed(invoker.invoke(model.jvp, given, produced)))
+    return failure();
+
+  double forward = 0.0;
+  for (int64_t index = 0; index < produced[1].getNumElements(); ++index)
+    forward += produced[1].getElement(index) * cotangent.getElement(index);
+
+  double backward = 0.0;
+  for (auto [slot, position] : llvm::enumerate(model.arguments))
+    for (int64_t index = 0; index < reverse[slot].getNumElements(); ++index)
+      backward +=
+          tangents[slot].getElement(index) * reverse[slot].getElement(index);
+
+  double error = std::abs(forward - backward) /
+                 std::max({1.0, std::abs(forward), std::abs(backward)});
+  llvm::outs() << "tera-gradcheck: " << model.primal
+               << ": forward and reverse agree to "
+               << llvm::format("%.3g", error) << "\n";
+  if (error <= tolerance)
+    return success();
+
+  llvm::errs() << "tera-gradcheck: " << model.primal
+               << ": the forward derivative projected onto the cotangent is "
+               << llvm::format("%.12g", forward)
+               << ", but the reverse one projected onto the tangent is "
+               << llvm::format("%.12g", backward)
+               << "; one of the two directions is wrong\n";
+  return failure();
+}
+
 LogicalResult checkModel(JitInvoker &invoker, const Model &model) {
   std::mt19937_64 generator(seedOption);
 
@@ -160,6 +216,17 @@ LogicalResult checkModel(JitInvoker &invoker, const Model &model) {
 
   if (failed(invoker.invoke(model.vjp, vjpInputs, analytic)))
     return failure();
+
+  if (!model.jvp.empty()) {
+    SmallVector<TensorBuffer> tangents;
+    for (int64_t position : model.arguments) {
+      tangents.emplace_back(model.inputs[position]);
+      tangents.back().fill(generator, spreadOption);
+    }
+    if (failed(checkForwardMode(invoker, model, inputs, tangents, cotangent,
+                                analytic)))
+      return failure();
+  }
 
   int64_t checked = 0;
   unsigned reported = 0;
@@ -208,6 +275,7 @@ LogicalResult checkModel(JitInvoker &invoker, const Model &model) {
 LogicalResult run(ModuleOp module) {
   PassManager pm(module.getContext());
   pm.addPass(createTeraAutodiff());
+  pm.addPass(createTeraForwardMode());
   if (failed(pm.run(module)))
     return failure();
 
@@ -228,8 +296,15 @@ LogicalResult run(ModuleOp module) {
     return failure();
   }
 
+  const TargetBackend *host = lookupTargetBackend("cpu");
+  if (!host) {
+    llvm::errs() << "tera-gradcheck: this build has no host target to run "
+                    "the finite differences on\n";
+    return failure();
+  }
+
   FailureOr<std::unique_ptr<JitInvoker>> invoker =
-      JitInvoker::create(module, Target::CPU, optLevel, sharedLibs);
+      JitInvoker::create(module, *host, "", optLevel, sharedLibs);
   if (failed(invoker))
     return failure();
 
@@ -247,6 +322,7 @@ int main(int argc, char **argv) {
   llvm::InitializeNativeTarget();
   llvm::InitializeNativeTargetAsmPrinter();
   registerPassManagerCLOptions();
+  registerTeraTargets();
   llvm::cl::ParseCommandLineOptions(argc, argv,
                                     "Tera finite-difference gradient check\n");
 

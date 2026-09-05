@@ -13,16 +13,23 @@
 
 namespace mlir::tera {
 void cloneBlock(OpBuilder &builder, Block &block, ValueRange arguments,
-                SmallVectorImpl<Value> &forward);
+                SmallVectorImpl<Value> &forward,
+                SmallVectorImpl<Operation *> *cloned = nullptr);
 
-LogicalResult differentiateBlock(OpBuilder &builder, Block &block,
-                                 ValueRange arguments,
-                                 ValueRange resultAdjoints,
-                                 SmallVectorImpl<Value> &forward,
-                                 SmallVectorImpl<Value> &argumentAdjoints);
+LogicalResult differentiateBlock(
+    OpBuilder &builder, Block &block, ValueRange arguments,
+    ValueRange resultAdjoints, SmallVectorImpl<Value> &forward,
+    SmallVectorImpl<Value> &argumentAdjoints,
+    function_ref<bool(Operation *)> isActive = nullptr,
+    SmallVectorImpl<Operation *> *clonedForward = nullptr);
 
 SmallVector<Value> fillMissingWithZero(OpBuilder &builder, Location loc,
                                        ValueRange values, ValueRange like);
+
+LogicalResult jvpBlock(OpBuilder &builder, Block &block, ValueRange arguments,
+                       ValueRange argumentTangents,
+                       SmallVectorImpl<Value> &forward,
+                       SmallVectorImpl<Value> &forwardTangents);
 
 }
 

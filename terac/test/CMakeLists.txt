@@ -8,12 +8,17 @@ configure_lit_site_cfg(
 add_subdirectory(CAPI)
 
 set(TERA_TEST_DEPENDS
-        FileCheck count not
         tera-capi-test
         tera-gradcheck
         tera-opt
         tera-runner
         )
+
+foreach(tool IN ITEMS FileCheck count not)
+  if(TARGET ${tool})
+    list(APPEND TERA_TEST_DEPENDS ${tool})
+  endif()
+endforeach()
 
 add_lit_testsuite(check-tera "Running the tera regression tests"
         ${CMAKE_CURRENT_BINARY_DIR}

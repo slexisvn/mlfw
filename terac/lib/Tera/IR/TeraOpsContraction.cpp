@@ -209,3 +209,43 @@ LogicalResult ReduceOp::buildVjp(OpBuilder &builder, ValueRange adjoints,
   }
   return failure();
 }
+
+LogicalResult ReduceOp::buildJvp(OpBuilder &builder, ValueRange tangents,
+                                 SmallVectorImpl<Value> &resultTangents,
+                                 SmallVectorImpl<Value> &primalResults) {
+  Location loc = getLoc();
+  if (!tangents[0]) {
+    resultTangents.assign({Value()});
+    return success();
+  }
+
+  if (getKind() == ReduceKind::Sum || getKind() == ReduceKind::Mean) {
+    resultTangents.assign({ReduceOp::create(builder, loc, tangents[0],
+                                            getKind(), getDimensions())});
+    return success();
+  }
+
+  auto operandType = cast<RankedTensorType>(getOperand().getType());
+  llvm::SmallBitVector reduced(operandType.getRank());
+  for (int64_t axis : getDimensions())
+    reduced.set(axis);
+  SmallVector<int64_t> surviving = freeAxes(reduced, operandType.getRank());
+  SmallVector<Value> sizes = dynamicExtentsOf(builder, loc, getOperand());
+  Value spread = BroadcastInDimOp::create(builder, loc, operandType,
+                                          getResult(), sizes, surviving);
+
+  Value share;
+  if (getKind() == ReduceKind::Product) {
+    Value ratio = DivOp::create(builder, loc, spread, getOperand());
+    share = MulOp::create(builder, loc, ratio, tangents[0]);
+  } else {
+    Value extremum = CompareOp::create(builder, loc, getOperand(), spread,
+                                       ComparisonDirection::Eq);
+    Value zero = createSplat(builder, loc, operandType, 0.0, getOperand());
+    share = SelectOp::create(builder, loc, extremum, tangents[0], zero);
+  }
+
+  resultTangents.assign({ReduceOp::create(builder, loc, share, ReduceKind::Sum,
+                                          getDimensions())});
+  return success();
+}

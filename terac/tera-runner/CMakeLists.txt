@@ -28,3 +28,7 @@ target_link_libraries(tera-runner PRIVATE
   )
 
 mlir_check_all_link_libraries(tera-runner)
+
+install(TARGETS tera-runner
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        COMPONENT tera-runner)

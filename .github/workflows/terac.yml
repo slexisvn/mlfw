@@ -1,0 +1,94 @@
+name: terac
+
+# terac is an out-of-tree MLIR project built against llvm-project trunk, not
+# against a release. No apt or release tarball carries the MLIR it needs, so
+# the job builds LLVM itself and caches the result under the pinned commit.
+# The first run on a new pin costs about two hours; every run after it restores
+# the cache and costs the terac build alone, a couple of minutes.
+#
+# Change LLVM_COMMIT when you move your own llvm-project checkout, or the build
+# will fail on an API that has since moved.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'terac/**'
+      - '.github/workflows/terac.yml'
+  pull_request:
+    paths:
+      - 'terac/**'
+      - '.github/workflows/terac.yml'
+  workflow_dispatch:
+
+env:
+  LLVM_COMMIT: 187d01ef84d2
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build clang lld
+
+      - name: Restore the MLIR build
+        id: llvm-cache
+        uses: actions/cache@v4
+        with:
+          path: llvm-install
+          key: llvm-${{ env.LLVM_COMMIT }}-${{ runner.os }}
+
+      - name: Build MLIR
+        if: steps.llvm-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --filter=blob:none https://github.com/llvm/llvm-project.git
+          git -C llvm-project checkout "${LLVM_COMMIT}"
+          cmake -G Ninja -S llvm-project/llvm -B llvm-build \
+            -DLLVM_ENABLE_PROJECTS=mlir \
+            -DLLVM_TARGETS_TO_BUILD="host;NVPTX" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_ENABLE_ASSERTIONS=ON \
+            -DLLVM_INSTALL_UTILS=ON \
+            -DLLVM_BUILD_EXAMPLES=OFF \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DLLVM_ENABLE_LLD=ON \
+            -DCMAKE_INSTALL_PREFIX="${PWD}/llvm-install"
+          cmake --build llvm-build --target install
+
+      - name: Configure terac
+        working-directory: terac
+        env:
+          MLIR_DIR: ${{ github.workspace }}/llvm-install/lib/cmake/mlir
+        run: scripts/configure.sh
+
+      - name: Build terac
+        working-directory: terac
+        env:
+          MLIR_DIR: ${{ github.workspace }}/llvm-install/lib/cmake/mlir
+        run: scripts/build.sh
+
+      # The GPU splits are gated on nvidia-smi and the differential ones on a
+      # built mlfw beside the checkout; a runner has neither, so lit reports
+      # them unsupported rather than failing.
+      - name: Test terac
+        working-directory: terac
+        env:
+          MLIR_DIR: ${{ github.workspace }}/llvm-install/lib/cmake/mlir
+        run: scripts/test.sh
+
+      - name: Generate the dialect documentation
+        working-directory: terac
+        env:
+          MLIR_DIR: ${{ github.workspace }}/llvm-install/lib/cmake/mlir
+        run: scripts/docs.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tera-dialect-docs
+          path: terac/build/docs/Tera/*.md

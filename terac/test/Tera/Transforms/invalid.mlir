@@ -79,3 +79,27 @@ func.func @branching(%a: tensor<4xf32>) -> tensor<4xf32>
   %0 = tera.exp %a : tensor<4xf32>
   return %0 : tensor<4xf32>
 }
+
+// -----
+
+// A function that names the arguments it wants gradients for is taken at its
+// word, so a position it does not have is a mistake worth reporting rather
+// than an index to clamp.
+// expected-error@+1 {{asks for the gradient of argument 3, which it does not take}}
+func.func @out_of_range(%a: tensor<4xf32>) -> tensor<4xf32>
+    attributes {tera.differentiable, tera.diff_args = array<i64: 3>} {
+  %0 = tera.exp %a : tensor<4xf32>
+  return %0 : tensor<4xf32>
+}
+
+// -----
+
+// Same for an argument that is there but carries no gradient: an integer
+// tensor has no derivative to return, and returning a zero of it would answer
+// a question that was not asked.
+// expected-error@+1 {{asks for the gradient of argument 0, which is 'tensor<4xi32>' and carries none}}
+func.func @not_a_gradient(%i: tensor<4xi32>, %a: tensor<4xf32>) -> tensor<4xf32>
+    attributes {tera.differentiable, tera.diff_args = array<i64: 0>} {
+  %0 = tera.exp %a : tensor<4xf32>
+  return %0 : tensor<4xf32>
+}

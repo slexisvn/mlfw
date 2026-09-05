@@ -65,6 +65,75 @@ def StageGpuBuffers
   ];
 }
 
+def TileParallelLoops
+    : Pass<"tera-tile-parallel-loops", "::mlir::func::FuncOp"> {
+  let summary = "Cut every parallel loop into the thread block it becomes.";
+  let description = [{
+    `convert-parallel-loops-to-gpu` turns a two-level parallel nest into a grid
+    of blocks over a block of threads, so the inner level's extents are the
+    thread block. This pass makes that inner level, and it picks the extents
+    per loop from the loop's own trip counts rather than from one number given
+    for the whole module.
+
+    Each dimension is cut to the largest divisor of its trip count that the
+    remaining thread budget and the hardware's limit on that axis allow, the
+    dimension that becomes `thread_x` preferring a multiple of `warp-size`
+    because that is the axis a warp runs along. A divisor is used rather than a
+    round number so the inner loop keeps a constant bound: a tile that does not
+    divide its loop still lowers, but every thread then carries a bounds test
+    the block shape could have made unnecessary.
+
+    Which dimension that is comes from `gpu-map-parallel-loops`, which this
+    pass is written against at `mapping-policy=innermost-first`: the innermost
+    of the first three loops takes `x`, so it is the innermost that is given
+    the budget first. That policy is the one where the axis a warp runs along
+    is also the axis a row is contiguous in.
+
+    `tile-sizes` overrides the choice for every loop, which is what a schedule
+    written by hand wants; a dimension whose trip count is not a constant is
+    left at one, because a block extent has to be known to be one.
+  }];
+
+  let options = [
+    Option<"threadsPerBlock", "threads-per-block", "int64_t", "256",
+           "Threads a block is aimed at, before the divisors it must use.">,
+    Option<"maxThreadsPerBlock", "max-threads-per-block", "int64_t", "1024",
+           "Threads a block may not exceed.">,
+    Option<"warpSize", "warp-size", "int64_t", "32",
+           "Threads that run in lockstep, which the first dimension prefers "
+           "to be a multiple of.">,
+    ListOption<"tileSizes", "tile-sizes", "int64_t",
+               "Thread-block extents to use for every loop instead of the "
+               "ones derived from its trip counts.">,
+  ];
+
+  let dependentDialects = [
+    "::mlir::affine::AffineDialect",
+    "::mlir::arith::ArithDialect",
+    "::mlir::scf::SCFDialect",
+  ];
+}
+
+def VerifyGpuMapping
+    : Pass<"tera-verify-gpu-mapping", "::mlir::func::FuncOp"> {
+  let summary = "Report a parallel loop the GPU conversion left on the host.";
+  let description = [{
+    `convert-parallel-loops-to-gpu` marks a loop legal as soon as its pattern
+    has been tried, whether or not the pattern succeeded, so a loop it cannot
+    map is not an error there: the loop is simply still an `scf.parallel`
+    afterwards, and everything below lowers it to a sequential host loop. A
+    program compiled for the device then runs that part on one core, correctly,
+    with nothing said. This pass says it.
+
+    A loop the conversion took is gone by now, so what is left to look for is a
+    loop still carrying the `mapping` attribute that `gpu-map-parallel-loops`
+    put on it: it was asked for a processor and did not get one. A loop with no
+    mapping was never a candidate and is left alone.
+  }];
+
+  let dependentDialects = ["::mlir::gpu::GPUDialect"];
+}
+
 def TileAndFuse
     : Pass<"tera-tile-and-fuse", "::mlir::func::FuncOp"> {
   let summary = "Cut every linalg op into tiles and fold its producers into them.";

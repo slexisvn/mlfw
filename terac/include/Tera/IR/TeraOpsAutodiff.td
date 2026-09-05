@@ -13,7 +13,9 @@ include "Tera/IR/TeraOpsBase.td"
 
 def Tera_StopGradientOp : Tera_Op<"stop_gradient",
                                   [Pure, Elementwise, SameOperandsAndResultType,
-                                   DeclareOpInterfaceMethods<Tera_VjpOpInterface>, Tera_AcceptsDynamicShapes]> {
+                                   DeclareOpInterfaceMethods<Tera_VjpOpInterface>,
+                                   DeclareOpInterfaceMethods<Tera_JvpOpInterface, ["buildJvp"]>,
+                                   Tera_AcceptsDynamicShapes]> {
   let summary = "The identity forwards; a wall to the reverse pass";
   let description = [{
     Forwards its operand unchanged, and reports no gradient for it, so

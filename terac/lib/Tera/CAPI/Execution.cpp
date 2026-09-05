@@ -35,6 +35,28 @@ using namespace mlir::tera;
 
 namespace {
 thread_local std::string lastError;
+thread_local std::string lastTargets;
+
+void startUp() {
+  static std::once_flag initialised;
+  std::call_once(initialised, [] {
+    llvm::InitializeNativeTarget();
+    llvm::InitializeNativeTargetAsmPrinter();
+    registerPassManagerCLOptions();
+    registerTeraTargets();
+  });
+}
+
+std::string registeredTargets() {
+  startUp();
+  std::string names;
+  for (StringRef name : getTargetBackendNames()) {
+    if (!names.empty())
+      names += ",";
+    names += name.str();
+  }
+  return names;
+}
 
 struct Signature {
   SmallVector<RankedTensorType> inputs;
@@ -68,20 +90,28 @@ struct TeraModule {
   llvm::StringMap<Signature> signatures;
 };
 
-TeraModule *teraCompile(const char *mlir, int target, unsigned optLevel,
-                        const char *const *sharedLibs, size_t numSharedLibs) {
+TeraModule *teraCompileFor(const char *mlir, const char *target,
+                           const char *targetOptions, unsigned optLevel,
+                           const char *const *sharedLibs,
+                           size_t numSharedLibs) {
   lastError.clear();
   if (!mlir) {
     lastError = "teraCompile: no module text";
     return nullptr;
   }
+  if (!target) {
+    lastError = "teraCompile: no target name";
+    return nullptr;
+  }
 
-  static std::once_flag initialised;
-  std::call_once(initialised, [] {
-    llvm::InitializeNativeTarget();
-    llvm::InitializeNativeTargetAsmPrinter();
-    registerPassManagerCLOptions();
-  });
+  startUp();
+
+  const TargetBackend *backend = lookupTargetBackend(target);
+  if (!backend) {
+    lastError = std::string("teraCompile: no target named '") + target +
+                "'; this build has " + registeredTargets();
+    return nullptr;
+  }
 
   DialectRegistry registry;
   registerAllDialects(registry);
@@ -146,14 +176,49 @@ TeraModule *teraCompile(const char *mlir, int target, unsigned optLevel,
   for (size_t index = 0; index < numSharedLibs; index++)
     libraries.push_back(sharedLibs[index]);
 
-  FailureOr<std::unique_ptr<JitInvoker>> invoker = JitInvoker::create(
-      *handle->module, target == TERA_TARGET_CUDA ? Target::CUDA : Target::CPU,
-      optLevel, libraries);
+  FailureOr<std::unique_ptr<JitInvoker>> invoker =
+      JitInvoker::create(*handle->module, *backend,
+                         targetOptions ? targetOptions : "", optLevel,
+                         libraries);
   if (failed(invoker))
     return fail("teraCompile: the module does not lower");
   handle->invoker = std::move(*invoker);
 
   return handle.release();
+}
+
+TeraModule *teraCompile(const char *mlir, int target, unsigned optLevel,
+                        const char *const *sharedLibs, size_t numSharedLibs) {
+  static const char *const legacy[] = {"cpu", "cuda"};
+  if (target < 0 || target >= static_cast<int>(std::size(legacy))) {
+    lastError = "teraCompile: no target numbered " + std::to_string(target);
+    return nullptr;
+  }
+  return teraCompileFor(mlir, legacy[target], "", optLevel, sharedLibs,
+                        numSharedLibs);
+}
+
+const char *teraTargets(void) {
+  lastTargets = registeredTargets();
+  return lastTargets.c_str();
+}
+
+const char *teraTargetRuntimeLibraries(const char *target) {
+  lastError.clear();
+  lastTargets.clear();
+  startUp();
+  const TargetBackend *backend = target ? lookupTargetBackend(target) : nullptr;
+  if (!backend) {
+    lastError = "teraTargetRuntimeLibraries: no target named '" +
+                std::string(target ? target : "") + "'";
+    return nullptr;
+  }
+  for (StringRef library : backend->getRuntimeLibraries()) {
+    if (!lastTargets.empty())
+      lastTargets += ",";
+    lastTargets += library.str();
+  }
+  return lastTargets.c_str();
 }
 
 void teraRelease(TeraModule *module) { delete module; }

@@ -92,3 +92,15 @@ func.func @pool_hangs_over(%x: tensor<1x1x5x5xf32>) -> tensor<1x1x3x3xf32> {
       : tensor<1x1x5x5xf32> -> tensor<1x1x3x3xf32>
   return %0 : tensor<1x1x3x3xf32>
 }
+
+// -----
+
+// Reading an axis from the far end needs to know where the far end is. A `?`
+// on an axis `tera.reverse` names is that extent, and the lowering has no way
+// to read it back.
+func.func @reverse_dynamic_axis(%x: tensor<?x4xf32>) -> tensor<?x4xf32> {
+  // expected-error @+1 {{cannot be lowered to linalg with a dynamic shape}}
+  %0 = tera.reverse %x {dimensions = array<i64: 0>}
+      : tensor<?x4xf32> -> tensor<?x4xf32>
+  return %0 : tensor<?x4xf32>
+}

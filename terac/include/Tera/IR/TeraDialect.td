@@ -9,6 +9,7 @@
 #ifndef TERA_DIALECT
 #define TERA_DIALECT
 
+include "Tera/IR/TeraInterfaces.td"
 include "mlir/IR/OpBase.td"
 
 def Tera_Dialect : Dialect {
@@ -41,6 +42,19 @@ def Tera_Dialect : Dialect {
         /// finds the derivative without reconstructing its name.
         static constexpr ::llvm::StringLiteral kVjpAttrName = "tera.vjp";
 
+        /// On a differentiated function, names the function computing its
+        /// result together with the values its derivative reads back, so a
+        /// caller wanting both pays for the forward pass once.
+        static constexpr ::llvm::StringLiteral kFwdAttrName = "tera.fwd";
+
+        /// On a differentiated function, names the function computing its
+        /// result together with the direction that result moves in.
+        static constexpr ::llvm::StringLiteral kJvpAttrName = "tera.jvp";
+
+        /// On a differentiated function, names the function taking those
+        /// saved values and a seed and answering with the gradients.
+        static constexpr ::llvm::StringLiteral kBwdAttrName = "tera.bwd";
+
         /// On a derivative function, the argument positions of the original
         /// function that its results are gradients for, in result order.
         static constexpr ::llvm::StringLiteral kDiffArgsAttrName =
@@ -49,6 +63,7 @@ def Tera_Dialect : Dialect {
 }
 
 class Tera_Op<string mnemonic, list<Trait> traits = []> :
-        Op<Tera_Dialect, mnemonic, traits>;
+        Op<Tera_Dialect, mnemonic,
+           traits # [Tera_LoweringOpInterface, Tera_JvpOpInterface]>;
 
 #endif

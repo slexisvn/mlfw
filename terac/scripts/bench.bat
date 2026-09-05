@@ -18,7 +18,8 @@ if not exist "%RUNNER%" (
 )
 
 for %%M in (mlp attention rnn) do (
-  set "MODEL=%TERAC%\test\bench\%%M.mlir"
+  set "MODEL=%TERAC%\test\Integration\bench\%%M.mlir"
   "%RUNNER%" "!MODEL!" --entry=%%M --benchmark=%RUNS% --shared-libs=%LIBS% || exit /b 1
-  "%OPT%" "!MODEL!" --tera-autodiff | "%RUNNER%" - --entry=%%M_vjp --benchmark=%RUNS% --shared-libs=%LIBS% || exit /b 1
+  "%OPT%" "!MODEL!" --tera-autodiff -o "%TERAC%\build\%%M.vjp.mlir" || exit /b 1
+  "%RUNNER%" "%TERAC%\build\%%M.vjp.mlir" --entry=%%M_vjp --benchmark=%RUNS% --shared-libs=%LIBS% || exit /b 1
 )

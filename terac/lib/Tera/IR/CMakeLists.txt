@@ -27,4 +27,7 @@ add_mlir_dialect_library(MLIRTera
         MLIRDialectUtils
         MLIRInferTypeOpInterface
         MLIRSideEffectInterfaces
+        MLIRTransformUtils
         )
+
+tera_check_layering(IR "Analysis|Conversion|Transforms|Execution|CAPI")

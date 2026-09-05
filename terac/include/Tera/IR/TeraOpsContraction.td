@@ -11,7 +11,9 @@
 
 include "Tera/IR/TeraOpsBase.td"
 
-def Tera_DotOp : Tera_InferredOp<"dot", [DeclareOpInterfaceMethods<Tera_VjpOpInterface>, Tera_AcceptsDynamicShapes]> {
+def Tera_DotOp : Tera_InferredOp<"dot", [DeclareOpInterfaceMethods<Tera_VjpOpInterface>,
+                                         Tera_AcceptsDynamicShapes,
+                                         Tera_Multilinear]> {
   let summary = "General contraction of two tensors";
   let description = [{
     Generalises matmul: any set of axes may be contracted, and any set may be
@@ -49,7 +51,9 @@ def Tera_DotOp : Tera_InferredOp<"dot", [DeclareOpInterfaceMethods<Tera_VjpOpInt
   }];
 }
 
-def Tera_ReduceOp : Tera_InferredOp<"reduce", [DeclareOpInterfaceMethods<Tera_VjpOpInterface>, Tera_AcceptsDynamicShapes]> {
+def Tera_ReduceOp : Tera_InferredOp<"reduce", [DeclareOpInterfaceMethods<Tera_VjpOpInterface>,
+                                              DeclareOpInterfaceMethods<Tera_JvpOpInterface, ["buildJvp"]>,
+                                              Tera_AcceptsDynamicShapes]> {
   let summary = "Reduce a tensor over a set of axes with an associative combiner";
   let description = [{
     The combiner is an enum rather than a region. A closed enum keeps the VJP

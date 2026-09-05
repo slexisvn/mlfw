@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "Tera/Conversion/Pipelines.h"
+#include "Tera/Pipelines/Pipelines.h"
 
 #include "Tera/Conversion/Passes.h"
 #include "mlir/Conversion/Passes.h"
@@ -28,6 +28,7 @@
 using namespace mlir;
 
 static void buildTeraToLinalg(OpPassManager &pm) {
+  pm.addPass(createInlinerPass());
   pm.addPass(createCanonicalizerPass());
   pm.addPass(tera::createConvertTeraToLinalg());
 }
@@ -49,16 +50,24 @@ static void buildCleanup(OpPassManager &pm) {
   pm.addPass(createCSEPass());
 }
 
-void tera::buildTeraToLLVMPipeline(OpPassManager &pm) {
+void tera::buildTeraToLLVMPipeline(OpPassManager &pm,
+                                   const TeraToLLVMOptions &options) {
   buildTeraToLinalg(pm);
+  buildCleanup(pm);
 
   pm.addPass(createLinalgElementwiseOpFusionPass());
   buildCleanup(pm);
 
-  pm.nest<func::FuncOp>().addPass(tera::createTileAndFuse());
-  buildCleanup(pm);
+  if (options.tile) {
+    TileAndFuseOptions tiling;
+    tiling.vectorWidth = options.vectorWidth;
+    pm.nest<func::FuncOp>().addPass(tera::createTileAndFuse(tiling));
+    buildCleanup(pm);
+  }
 
-  pm.nest<func::FuncOp>().addPass(tera::createVectorizeLinalg());
+  VectorizeLinalgOptions vectorizing;
+  vectorizing.maxVectorElements = options.maxVectorElements;
+  pm.nest<func::FuncOp>().addPass(tera::createVectorizeLinalg(vectorizing));
   buildCleanup(pm);
 
   buildBufferize(pm);
@@ -94,16 +103,19 @@ void tera::buildTeraToNVVMPipeline(OpPassManager &pm,
 
   pm.addPass(memref::createFoldMemRefAliasOpsPass());
 
-  SmallVector<int64_t> tileSizes(options.tileSizes.begin(),
-                                 options.tileSizes.end());
-  if (tileSizes.empty())
-    tileSizes = {2, 2};
-  pm.addPass(createParallelLoopTilingPass(tileSizes));
+  TileParallelLoopsOptions tiling;
+  tiling.tileSizes = SmallVector<int64_t>(options.tileSizes.begin(),
+                                          options.tileSizes.end());
+  tiling.threadsPerBlock = options.threadsPerBlock;
+  pm.nest<func::FuncOp>().addPass(tera::createTileParallelLoops(tiling));
+
+  GpuMapParallelLoopsPassOptions mapping;
+  mapping.mappingPolicyStr = "innermost-first";
+  pm.nest<func::FuncOp>().addPass(createGpuMapParallelLoopsPass(mapping));
+  pm.addPass(createConvertParallelLoopToGpuPass());
+  pm.nest<func::FuncOp>().addPass(tera::createVerifyGpuMapping());
 
   pm.addPass(createCanonicalizerPass());
-
-  pm.nest<func::FuncOp>().addPass(createGpuMapParallelLoopsPass());
-  pm.addPass(createConvertParallelLoopToGpuPass());
 
   pm.addPass(createGpuKernelOutliningPass());
 
@@ -122,7 +134,7 @@ void tera::buildTeraToNVVMPipeline(OpPassManager &pm,
 }
 
 void tera::registerTeraPipelines() {
-  PassPipelineRegistration<>(
+  PassPipelineRegistration<TeraToLLVMOptions>(
       "tera-to-llvm",
       "Lower a tera module all the way to the LLVM dialect, ready to JIT.",
       buildTeraToLLVMPipeline);

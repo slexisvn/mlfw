@@ -16,3 +16,10 @@ LogicalResult StopGradientOp::buildVjp(OpBuilder &, ValueRange,
   operandAdjoints.assign({Value()});
   return success();
 }
+
+LogicalResult StopGradientOp::buildJvp(OpBuilder &, ValueRange,
+                                       SmallVectorImpl<Value> &resultTangents,
+                                       SmallVectorImpl<Value> &) {
+  resultTangents.assign({Value()});
+  return success();
+}

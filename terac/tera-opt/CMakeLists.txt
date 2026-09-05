@@ -5,6 +5,7 @@ set(LIBS
     MLIRRegisterAllPasses
     MLIRTera
     MLIRTeraConversion
+    MLIRTeraPipelines
     MLIRTeraTransforms
     MLIRToLLVMIRTranslationRegistration
   )
@@ -14,3 +15,7 @@ llvm_update_compile_flags(tera-opt)
 target_link_libraries(tera-opt PRIVATE ${LIBS})
 
 mlir_check_all_link_libraries(tera-opt)
+
+install(TARGETS tera-opt
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        COMPONENT tera-opt)

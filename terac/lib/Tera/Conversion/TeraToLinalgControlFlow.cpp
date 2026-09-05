@@ -130,8 +130,6 @@ struct ScanOpLowering : public OpConversionPattern<ScanOp> {
                   ConversionPatternRewriter &rewriter) const override {
     Location loc = op.getLoc();
     int64_t steps = op.getTripCount();
-    if (ShapedType::isDynamic(steps))
-      return rewriter.notifyMatchFailure(op, "needs a static trip count");
     size_t carries = adaptor.getInits().size();
 
     Value first = arith::ConstantIndexOp::create(rewriter, loc, 0);

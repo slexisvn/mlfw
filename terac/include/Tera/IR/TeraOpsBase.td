@@ -33,6 +33,14 @@ def Tera_AcceptsDynamicShapes : NativeOpTrait<"AcceptsDynamicShapes"> {
   let cppNamespace = "::mlir::tera";
 }
 
+def Tera_Linear : NativeOpTrait<"LinearOperands"> {
+  let cppNamespace = "::mlir::tera";
+}
+
+def Tera_Multilinear : NativeOpTrait<"MultilinearOperands"> {
+  let cppNamespace = "::mlir::tera";
+}
+
 class Tera_InferredOp<string mnemonic, list<Trait> traits = []>
     : Tera_Op<mnemonic, traits # [Pure, InferTypeOpAdaptor]>;
 

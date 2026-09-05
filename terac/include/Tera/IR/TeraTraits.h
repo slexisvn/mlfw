@@ -16,6 +16,14 @@ template <typename ConcreteType>
 class AcceptsDynamicShapes
     : public OpTrait::TraitBase<ConcreteType, AcceptsDynamicShapes> {};
 
+template <typename ConcreteType>
+class LinearOperands : public OpTrait::TraitBase<ConcreteType, LinearOperands> {
+};
+
+template <typename ConcreteType>
+class MultilinearOperands
+    : public OpTrait::TraitBase<ConcreteType, MultilinearOperands> {};
+
 }
 
 #endif

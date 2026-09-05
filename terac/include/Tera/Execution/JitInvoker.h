@@ -9,7 +9,7 @@
 #ifndef TERA_EXECUTION_JITINVOKER_H
 #define TERA_EXECUTION_JITINVOKER_H
 
-#include "Tera/Conversion/Pipelines.h"
+#include "Tera/Pipelines/TargetBackend.h"
 #include "Tera/Execution/TensorBuffer.h"
 
 #include "mlir/ExecutionEngine/ExecutionEngine.h"
@@ -23,8 +23,8 @@ namespace mlir::tera {
 class JitInvoker {
 public:
   static FailureOr<std::unique_ptr<JitInvoker>>
-  create(ModuleOp module, Target target, unsigned optLevel,
-         ArrayRef<std::string> sharedLibs);
+  create(ModuleOp module, const TargetBackend &target, StringRef targetOptions,
+         unsigned optLevel, ArrayRef<std::string> sharedLibs);
 
   LogicalResult invoke(StringRef name, MutableArrayRef<TensorBuffer> inputs,
                        MutableArrayRef<TensorBuffer> results);

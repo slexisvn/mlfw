@@ -1,6 +1,9 @@
 add_mlir_dialect(TeraOps tera)
-add_mlir_doc(TeraDialect TeraDialect Tera/ -gen-dialect-doc)
-add_mlir_doc(TeraOps TeraOps Tera/ -gen-op-doc)
+add_mlir_doc(TeraOps TeraDialect Tera/ -gen-dialect-doc -dialect=tera)
+add_mlir_doc(TeraOps TeraOps Tera/ -gen-op-doc -dialect=tera)
+add_mlir_doc(TeraInterfaces TeraInterfaces Tera/ -gen-op-interface-docs)
+add_mlir_doc(TeraEnums TeraAttrs Tera/ -gen-attrdef-doc -dialect=tera)
+add_mlir_doc(TeraEnums TeraEnums Tera/ -gen-enum-doc)
 
 set(LLVM_TARGET_DEFINITIONS TeraInterfaces.td)
 mlir_tablegen(TeraInterfaces.h.inc -gen-op-interface-decls)

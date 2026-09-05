@@ -56,9 +56,13 @@
 
 // The pass writes the derivative and points the original at it. The argument
 // list is the original's plus the seed; the results are the two gradients, in
-// argument order, which is the order the record lists them in.
-// VJP-DAG: func.func @demo({{.*}}) -> tensor<f32> attributes {tera.differentiable, tera.vjp = @demo_vjp}
+// argument order, which is the order the record lists them in. The forward and
+// backward halves it splits that derivative into are named beside it, and the
+// derivative is what calls them.
+// VJP-DAG: func.func @demo({{.*}}) -> tensor<f32> attributes {tera.bwd = @demo_bwd, tera.differentiable, tera.fwd = @demo_fwd, tera.vjp = @demo_vjp}
 // VJP-DAG: func.func @demo_vjp(%{{.*}}: tensor<2x4xf32>, %{{.*}}: tensor<4x2xf32>, %{{.*}}: tensor<f32>) -> (tensor<2x4xf32>, tensor<4x2xf32>) attributes {tera.diff_args = array<i64: 0, 1>}
+// VJP-DAG: call @demo_fwd
+// VJP-DAG: call @demo_bwd
 
 // `rnn` and `branch` are here because a derivative through a region is where
 // two reverse passes are most likely to differ and least likely to be caught by

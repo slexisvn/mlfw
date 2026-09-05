@@ -8,6 +8,7 @@
 
 #include "Tera/Conversion/Passes.h"
 
+#include "Tera/Analysis/VectorTiles.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
@@ -15,7 +16,6 @@
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
 #include "mlir/IR/PatternMatch.h"
-#include "mlir/Interfaces/IndexingMapOpInterface.h"
 #include "mlir/Interfaces/TilingInterface.h"
 #include "llvm/ADT/DenseSet.h"
 
@@ -24,83 +24,6 @@ namespace mlir::tera {
 #include "Tera/Conversion/Passes.h.inc"
 
 namespace {
-bool positiveCoefficients(AffineExpr expr) {
-  auto binary = dyn_cast<AffineBinaryOpExpr>(expr);
-  if (!binary)
-    return true;
-  if (binary.getKind() == AffineExprKind::Mul) {
-    auto coefficient = dyn_cast<AffineConstantExpr>(binary.getRHS());
-    if (!coefficient || coefficient.getValue() <= 0)
-      return false;
-  }
-  return positiveCoefficients(binary.getLHS()) &&
-         positiveCoefficients(binary.getRHS());
-}
-
-bool tilable(IndexingMapOpInterface op) {
-  return llvm::all_of(op.getIndexingMapsArray(), [](AffineMap map) {
-    return llvm::all_of(map.getResults(), positiveCoefficients);
-  });
-}
-
-SmallVector<int64_t> sizedDimensions(ArrayRef<int64_t> extents,
-                                     ArrayRef<utils::IteratorType> iterators,
-                                     utils::IteratorType wanted) {
-  SmallVector<int64_t> dimensions;
-  for (auto [dimension, kind] : llvm::enumerate(iterators))
-    if (kind == wanted && !ShapedType::isDynamic(extents[dimension]))
-      dimensions.push_back(dimension);
-  return dimensions;
-}
-
-SmallVector<int64_t> chooseTile(linalg::LinalgOp op, int64_t vectorWidth) {
-  auto indexed = dyn_cast<IndexingMapOpInterface>(op.getOperation());
-  if (!indexed || !tilable(indexed))
-    return {};
-
-  SmallVector<int64_t> extents = indexed.getStaticLoopRanges();
-  SmallVector<utils::IteratorType> iterators = op.getIteratorTypesArray();
-  if (extents.size() != iterators.size())
-    return {};
-
-  SmallVector<int64_t> parallel =
-      sizedDimensions(extents, iterators, utils::IteratorType::parallel);
-  if (parallel.empty())
-    return {};
-
-  SmallVector<int64_t> sizes(extents.size(), 0);
-  for (int64_t dimension : ArrayRef<int64_t>(parallel).drop_back())
-    if (extents[dimension] > 1)
-      sizes[dimension] = 1;
-  if (extents[parallel.back()] > vectorWidth)
-    sizes[parallel.back()] = vectorWidth;
-
-  if (llvm::all_of(sizes, [](int64_t size) { return size == 0; }))
-    return {};
-  return sizes;
-}
-
-SmallVector<int64_t> chooseReductionTile(linalg::LinalgOp op) {
-  auto indexed = dyn_cast<IndexingMapOpInterface>(op.getOperation());
-  if (!indexed || !tilable(indexed))
-    return {};
-
-  SmallVector<int64_t> extents = indexed.getStaticLoopRanges();
-  SmallVector<utils::IteratorType> iterators = op.getIteratorTypesArray();
-  if (extents.size() != iterators.size())
-    return {};
-
-  SmallVector<int64_t> sizes(extents.size(), 0);
-  for (int64_t dimension :
-       sizedDimensions(extents, iterators, utils::IteratorType::reduction))
-    if (extents[dimension] > 1)
-      sizes[dimension] = 1;
-
-  if (llvm::all_of(sizes, [](int64_t size) { return size == 0; }))
-    return {};
-  return sizes;
-}
-
 std::optional<scf::SCFTileAndFuseOptions::ControlFnResult>
 fuseSingleUse(tensor::ExtractSliceOp, OpResult producer, bool destination) {
   if (!destination && !producer.hasOneUse())
@@ -112,11 +35,13 @@ struct TileAndFuse : public impl::TileAndFuseBase<TileAndFuse> {
   using impl::TileAndFuseBase<TileAndFuse>::TileAndFuseBase;
 
   void runOnOperation() final {
-    tileParallelAndFuse();
+    HostTargetModel model;
+    model.vectorLanes = vectorWidth;
+    tileParallelAndFuse(model);
     tileReductions();
   }
 
-  void tileParallelAndFuse() {
+  void tileParallelAndFuse(const HostTargetModel &model) {
     SmallVector<linalg::LinalgOp> roots;
     getOperation().walk([&](linalg::LinalgOp op) { roots.push_back(op); });
 
@@ -126,7 +51,7 @@ struct TileAndFuse : public impl::TileAndFuseBase<TileAndFuse> {
     for (linalg::LinalgOp op : llvm::reverse(roots)) {
       if (handled.contains(op.getOperation()))
         continue;
-      SmallVector<int64_t> sizes = chooseTile(op, vectorWidth);
+      SmallVector<int64_t> sizes = chooseVectorTile(op, model);
       if (sizes.empty())
         continue;
 

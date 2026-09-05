@@ -44,6 +44,7 @@ endif()
 
 set(TERA_SOURCE_DIR ${PROJECT_SOURCE_DIR})
 set(TERA_BINARY_DIR ${PROJECT_BINARY_DIR})
+include(${TERA_SOURCE_DIR}/cmake/AddTera.cmake)
 include_directories(${LLVM_INCLUDE_DIRS})
 include_directories(${MLIR_INCLUDE_DIRS})
 include_directories(${TERA_SOURCE_DIR}/include)
@@ -59,3 +60,36 @@ endif()
 add_subdirectory(tera-gradcheck)
 add_subdirectory(tera-opt)
 add_subdirectory(tera-runner)
+
+include(GNUInstallDirs)
+
+install(DIRECTORY ${TERA_SOURCE_DIR}/include/Tera
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        COMPONENT tera-headers
+        FILES_MATCHING
+        PATTERN "*.h"
+        PATTERN "*.td"
+        )
+
+install(DIRECTORY ${TERA_BINARY_DIR}/include/Tera
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        COMPONENT tera-headers
+        FILES_MATCHING
+        PATTERN "*.inc"
+        PATTERN "CMakeFiles" EXCLUDE
+        )
+
+include(CMakePackageConfigHelpers)
+configure_package_config_file(
+        ${TERA_SOURCE_DIR}/cmake/TeraConfig.cmake.in
+        ${TERA_BINARY_DIR}/cmake/TeraConfig.cmake
+        INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/tera)
+
+install(EXPORT MLIRTargets
+        FILE TeraTargets.cmake
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/tera
+        COMPONENT tera-cmake-exports)
+
+install(FILES ${TERA_BINARY_DIR}/cmake/TeraConfig.cmake
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/tera
+        COMPONENT tera-cmake-exports)

@@ -38,6 +38,16 @@ TERA_CAPI TeraModule *teraCompile(const char *mlir, int target,
                                   const char *const *sharedLibs,
                                   size_t numSharedLibs);
 
+TERA_CAPI TeraModule *teraCompileFor(const char *mlir, const char *target,
+                                     const char *targetOptions,
+                                     unsigned optLevel,
+                                     const char *const *sharedLibs,
+                                     size_t numSharedLibs);
+
+TERA_CAPI const char *teraTargets(void);
+
+TERA_CAPI const char *teraTargetRuntimeLibraries(const char *target);
+
 TERA_CAPI void teraRelease(TeraModule *module);
 
 TERA_CAPI const char *teraLastError(void);

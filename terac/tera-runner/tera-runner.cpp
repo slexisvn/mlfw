@@ -61,13 +61,14 @@ llvm::cl::opt<double> tolerance(
 llvm::cl::opt<unsigned> optLevel("O", llvm::cl::desc("JIT optimisation level"),
                                  llvm::cl::init(3));
 
-llvm::cl::opt<Target> target(
+llvm::cl::opt<std::string> targetName(
     "target", llvm::cl::desc("Machine to lower the module for"),
-    llvm::cl::values(
-        clEnumValN(Target::CPU, "cpu", "Lower to the LLVM dialect and JIT it"),
-        clEnumValN(Target::CUDA, "cuda",
-                   "Lower to NVVM, serialise the kernels, and JIT the host")),
-    llvm::cl::init(Target::CPU));
+    llvm::cl::init("cpu"));
+
+llvm::cl::opt<std::string> targetOptions(
+    "target-options",
+    llvm::cl::desc("Options for the target's pipeline, as name=value pairs"),
+    llvm::cl::init(""));
 
 llvm::cl::opt<unsigned> benchmarkRuns(
     "benchmark",
@@ -374,9 +375,19 @@ LogicalResult run(ModuleOp module) {
         return failure();
   }
 
+  const TargetBackend *target = lookupTargetBackend(targetName);
+  if (!target) {
+    llvm::errs() << "tera-runner: no target named " << targetName << "; this "
+                 << "build has";
+    for (StringRef name : getTargetBackendNames())
+      llvm::errs() << " " << name;
+    llvm::errs() << "\n";
+    return failure();
+  }
+
   Clock::time_point started = Clock::now();
   FailureOr<std::unique_ptr<JitInvoker>> invoker =
-      JitInvoker::create(module, target, optLevel, sharedLibs);
+      JitInvoker::create(module, *target, targetOptions, optLevel, sharedLibs);
   if (failed(invoker))
     return failure();
   double compiled =
@@ -426,6 +437,7 @@ int main(int argc, char **argv) {
   llvm::InitializeNativeTarget();
   llvm::InitializeNativeTargetAsmPrinter();
   registerPassManagerCLOptions();
+  registerTeraTargets();
   llvm::cl::ParseCommandLineOptions(argc, argv, "Tera JIT runner\n");
 
   DialectRegistry registry;

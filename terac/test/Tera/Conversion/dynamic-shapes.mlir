@@ -149,3 +149,34 @@ func.func @if_dynamic(%p: tensor<i1>, %x: tensor<?x2xf32>) -> tensor<?x2xf32> {
   }
   return %0 : tensor<?x2xf32>
 }
+
+// -----
+
+// A `?` on an axis `tera.reverse` does NOT name is not its problem: the axes
+// it reverses are all static, and the dynamic one is carried through by the
+// destination the conversion builds from the operand.
+
+// CHECK-LABEL: func @reverse_static_axis
+// CHECK: linalg.generic
+func.func @reverse_static_axis(%x: tensor<?x4xf32>) -> tensor<?x4xf32> {
+  %0 = tera.reverse %x {dimensions = array<i64: 1>}
+      : tensor<?x4xf32> -> tensor<?x4xf32>
+  return %0 : tensor<?x4xf32>
+}
+
+// -----
+
+// `sqrt`, `rsqrt` and `tanh` lower through the same map as `exp` and `neg`,
+// which take a dynamic extent; they were refused one only because the trait
+// saying so had not been written on them.
+
+// CHECK-LABEL: func @dynamic_unary
+// CHECK: linalg.map { math.sqrt }
+// CHECK: linalg.map { math.rsqrt }
+// CHECK: linalg.map { math.tanh }
+func.func @dynamic_unary(%x: tensor<?xf32>) -> tensor<?xf32> {
+  %0 = tera.sqrt %x : tensor<?xf32>
+  %1 = tera.rsqrt %0 : tensor<?xf32>
+  %2 = tera.tanh %1 : tensor<?xf32>
+  return %2 : tensor<?xf32>
+}

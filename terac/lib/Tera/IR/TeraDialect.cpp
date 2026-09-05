@@ -11,17 +11,34 @@
 #include "Tera/IR/TeraOps.h"
 
 #include "mlir/Interfaces/FunctionInterfaces.h"
+#include "mlir/Transforms/InliningUtils.h"
 
 using namespace mlir;
 using namespace mlir::tera;
 
 #include "Tera/IR/TeraOpsDialect.cpp.inc"
 
+namespace {
+struct TeraInlinerInterface : public DialectInlinerInterface {
+  using DialectInlinerInterface::DialectInlinerInterface;
+
+  bool isLegalToInline(Operation *, Region *, bool, IRMapping &) const final {
+    return true;
+  }
+
+  bool isLegalToInline(Region *, Region *, bool, IRMapping &) const final {
+    return true;
+  }
+};
+
+}
+
 void TeraDialect::initialize() {
   addOperations<
 #define GET_OP_LIST
 #include "Tera/IR/TeraOps.cpp.inc"
       >();
+  addInterfaces<TeraInlinerInterface>();
   registerAttributes();
 }
 
@@ -52,7 +69,8 @@ LogicalResult TeraDialect::verifyOperationAttribute(Operation *op,
     return belongsHere();
   }
 
-  if (name == kVjpAttrName) {
+  if (name == kVjpAttrName || name == kFwdAttrName ||
+      name == kBwdAttrName || name == kJvpAttrName) {
     if (!isa<FlatSymbolRefAttr>(value))
       return op->emitError()
              << "'" << name << "' must name the derivative, as @symbol";

@@ -52,4 +52,47 @@ def TeraAutodiff : Pass<"tera-autodiff", "::mlir::ModuleOp"> {
   ];
 }
 
+def TeraForwardMode : Pass<"tera-forward-mode", "::mlir::ModuleOp"> {
+  let summary = "Emit the forward-mode derivative of every differentiable function.";
+  let description = [{
+    For each `func.func` carrying `tera.differentiable`, adds a function
+    computing its result together with the direction that result moves in,
+    given a direction for each argument named by `tera.diff_args`. Given
+
+    ```mlir
+    func.func @f(%x: tensor<4xf32>, %w: tensor<4xf32>) -> tensor<f32>
+        attributes {tera.differentiable}
+    ```
+
+    the pass adds
+
+    ```mlir
+    func.func @f_jvp(%x: tensor<4xf32>, %w: tensor<4xf32>,
+                     %dx: tensor<4xf32>, %dw: tensor<4xf32>)
+        -> (tensor<f32>, tensor<f32>)
+        attributes {tera.diff_args = array<i64: 0, 1>}
+    ```
+
+    and writes `tera.jvp = @f_jvp` back onto the original. Both the result and
+    its tangent come back, because computing them together is the only reason
+    to run forwards at all: the primal values a rule needs are already there.
+
+    Nothing is walked backwards, so there is no adjoint to accumulate and
+    nothing to save between two halves. One pass over the body answers it.
+
+    Almost no op needs a rule of its own here. An op that is linear in its
+    operands moves the way it maps, an op linear in each operand separately
+    sums one term per operand, and an elementwise op has a diagonal Jacobian,
+    which is its own transpose -- so its `buildVjp` already computes the
+    forward direction and is reused rather than restated. What is left is
+    `tera.reduce` over a maximum, `tera.pool2d` over a maximum,
+    `tera.stop_gradient`, and the two region ops.
+  }];
+
+  let dependentDialects = [
+    "::mlir::func::FuncDialect",
+    "::mlir::tera::TeraDialect",
+  ];
+}
+
 #endif

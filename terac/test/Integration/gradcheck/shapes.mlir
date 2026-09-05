@@ -43,3 +43,21 @@ func.func @stretch(%a: tensor<3x1xf64>, %b: tensor<2x3x4xf64>) -> tensor<3xf64>
       : tensor<2x3x4xf64> -> tensor<3xf64>
   return %2 : tensor<3xf64>
 }
+
+// `pad` takes a gradient through both its operands, and the second one is the
+// reason this function exists: the value that fills the border and the holes
+// contributes wherever it landed, which is everything the adjoint holds minus
+// what the operand took back. Reporting no gradient for it and letting the
+// pass fill in a zero is the failure this catches, and it is silent -- the
+// shapes are right and only the number is wrong.
+
+func.func @padding(%x: tensor<3xf64>, %v: tensor<f64>) -> tensor<f64>
+    attributes {tera.differentiable} {
+  %0 = tera.pad %x, %v {low = array<i64: 1>, high = array<i64: 2>,
+                        interior = array<i64: 1>}
+      : (tensor<3xf64>, tensor<f64>) -> tensor<8xf64>
+  %1 = tera.mul %0, %0 : tensor<8xf64>
+  %2 = tera.reduce sum, %1 {dimensions = array<i64: 0>}
+      : tensor<8xf64> -> tensor<f64>
+  return %2 : tensor<f64>
+}

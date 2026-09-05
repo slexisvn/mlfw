@@ -14,6 +14,8 @@
 #include "mlir/IR/PatternMatch.h"
 #include "llvm/ADT/STLExtras.h"
 
+#include <numeric>
+
 using namespace mlir;
 using namespace mlir::tera;
 using namespace mlir::tera::detail;
@@ -459,6 +461,13 @@ LogicalResult SliceOp::buildVjp(OpBuilder &builder, ValueRange adjoints,
   return success();
 }
 
+bool ReverseOp::acceptsDynamicShapes() {
+  auto type = cast<RankedTensorType>(getOperand().getType());
+  return llvm::none_of(getDimensions(), [&](int64_t axis) {
+    return ShapedType::isDynamic(type.getDimSize(axis));
+  });
+}
+
 LogicalResult ReverseOp::buildVjp(OpBuilder &builder, ValueRange adjoints,
                                   SmallVectorImpl<Value> &operandAdjoints) {
   operandAdjoints.assign(
@@ -478,9 +487,18 @@ LogicalResult PadOp::buildVjp(OpBuilder &builder, ValueRange adjoints,
     limits[axis] =
         low[axis] + (operandType.getDimSize(axis) - 1) * strides[axis] + 1;
 
-  operandAdjoints.assign({SliceOp::create(builder, getLoc(), adjoints[0], low,
-                                          limits, strides),
-                          Value()});
+  Value taken =
+      SliceOp::create(builder, getLoc(), adjoints[0], low, limits, strides);
+
+  SmallVector<int64_t> everyAxis(rank);
+  std::iota(everyAxis.begin(), everyAxis.end(), 0);
+  Value whole = ReduceOp::create(builder, getLoc(), adjoints[0],
+                                 ReduceKind::Sum, everyAxis);
+  Value inside =
+      ReduceOp::create(builder, getLoc(), taken, ReduceKind::Sum, everyAxis);
+
+  operandAdjoints.assign(
+      {taken, SubOp::create(builder, getLoc(), whole, inside)});
   return success();
 }
 

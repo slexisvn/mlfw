@@ -35,6 +35,7 @@ LogicalResult ConstantOp::buildVjp(OpBuilder &, ValueRange,
 }
 
 LogicalResult IotaOp::buildVjp(OpBuilder &, ValueRange,
-                               SmallVectorImpl<Value> &) {
+                               SmallVectorImpl<Value> &operandAdjoints) {
+  operandAdjoints.assign(getSizes().size(), Value());
   return success();
 }

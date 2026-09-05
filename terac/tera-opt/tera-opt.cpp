@@ -13,7 +13,7 @@
 #include "mlir/Tools/mlir-opt/MlirOptMain.h"
 
 #include "Tera/Conversion/Passes.h"
-#include "Tera/Conversion/Pipelines.h"
+#include "Tera/Pipelines/Pipelines.h"
 #include "Tera/IR/TeraDialect.h"
 #include "Tera/Transforms/Passes.h"
 

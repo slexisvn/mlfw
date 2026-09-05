@@ -71,6 +71,14 @@ int64_t ScanOp::getTripCount() {
   return cast<RankedTensorType>(getInputs().front().getType()).getDimSize(0);
 }
 
+LogicalResult ScanOp::verifyLoweringToLinalg() {
+  if (ShapedType::isDynamic(getTripCount()))
+    return emitError() << "cannot be lowered to linalg with a dynamic step "
+                          "axis: the trip count would have to be read at run "
+                          "time";
+  return success();
+}
+
 SmallVector<Type> ScanOp::getBodyArgumentTypes() {
   SmallVector<Type> arguments(getInits().getTypes());
   for (Value input : getInputs())
@@ -528,5 +536,150 @@ LogicalResult ScanOp::buildVjp(OpBuilder &builder, ValueRange adjoints,
   operandAdjoints.resize(carries + inputs + constants + getSizes().size());
   for (auto [slot, index] : llvm::enumerate(tracked))
     operandAdjoints[carries + inputs + index] = constantGradients[slot];
+  return success();
+}
+
+LogicalResult IfOp::buildJvp(OpBuilder &builder, ValueRange tangents,
+                             SmallVectorImpl<Value> &resultTangents,
+                             SmallVectorImpl<Value> &primalResults) {
+  Location loc = getLoc();
+  ValueRange inputs = getInputs();
+  ValueRange inputTangents = tangents.drop_front();
+
+  SmallVector<Value> moving;
+  SmallVector<int64_t> carried;
+  for (auto [index, tangent] : llvm::enumerate(inputTangents))
+    if (tangent) {
+      carried.push_back(index);
+      moving.push_back(tangent);
+    }
+
+  SmallVector<Value> forwardInputs(inputs);
+  llvm::append_range(forwardInputs, moving);
+  SmallVector<Type> bodyTypes(inputs.getTypes());
+  for (Value tangent : moving)
+    bodyTypes.push_back(tangent.getType());
+
+  SmallVector<Type> results(getResultTypes());
+  llvm::append_range(results, getResultTypes());
+  auto forward =
+      IfOp::create(builder, loc, results, getCondition(), forwardInputs);
+
+  OpBuilder::InsertionGuard guard(builder);
+  for (auto [from, into] : {std::pair{&getThenBody(), &forward.getThenBody()},
+                            std::pair{&getElseBody(), &forward.getElseBody()}}) {
+    Block *body = openBody(builder, *into, bodyTypes, loc);
+    ValueRange arguments = body->getArguments();
+    ValueRange visible = arguments.take_front(inputs.size());
+
+    SmallVector<Value> argumentTangents(inputs.size());
+    for (auto [slot, index] : llvm::enumerate(carried))
+      argumentTangents[index] = arguments[inputs.size() + slot];
+
+    SmallVector<Value> yielded, yieldedTangents;
+    if (failed(jvpBlock(builder, from->front(), visible, argumentTangents,
+                        yielded, yieldedTangents)))
+      return failure();
+    SmallVector<Value> both(yielded);
+    llvm::append_range(both, fillMissingWithZero(builder, loc, yieldedTangents,
+                                                 yielded));
+    YieldOp::create(builder, loc, both);
+  }
+
+  size_t count = getNumResults();
+  ValueRange produced = forward.getResults();
+  llvm::append_range(primalResults, produced.take_front(count));
+  llvm::append_range(resultTangents, produced.drop_front(count));
+  return success();
+}
+
+LogicalResult ScanOp::buildJvp(OpBuilder &builder, ValueRange tangents,
+                               SmallVectorImpl<Value> &resultTangents,
+                               SmallVectorImpl<Value> &primalResults) {
+  Location loc = getLoc();
+  size_t carries = getInits().size();
+  size_t inputs = getInputs().size();
+  size_t constants = getConstants().size();
+
+  ValueRange initTangents = tangents.take_front(carries);
+  ValueRange inputTangents = tangents.slice(carries, inputs);
+  ValueRange constantTangents = tangents.slice(carries + inputs, constants);
+
+  SmallVector<Value> movedInits =
+      fillMissingWithZero(builder, loc, initTangents, getInits());
+  SmallVector<Value> movedInputs =
+      fillMissingWithZero(builder, loc, inputTangents, getInputs());
+  SmallVector<Value> movedConstants =
+      fillMissingWithZero(builder, loc, constantTangents, getConstants());
+
+  SmallVector<Value> forwardInits(getInits());
+  llvm::append_range(forwardInits, movedInits);
+  SmallVector<Value> forwardInputs(getInputs());
+  llvm::append_range(forwardInputs, movedInputs);
+  SmallVector<Value> forwardConstants(getConstants());
+  llvm::append_range(forwardConstants, movedConstants);
+
+  SmallVector<Type> results(getCarries().getTypes());
+  for (Value init : movedInits)
+    results.push_back(init.getType());
+  for (Value output : getOutputs())
+    results.push_back(output.getType());
+  for (Value output : getOutputs())
+    results.push_back(output.getType());
+
+  SmallVector<std::pair<Value, int64_t>> sources = shapedAfter(forwardInits);
+  for (auto &entry : shapedAfter(getOutputs()))
+    sources.push_back(entry);
+  for (auto &entry : shapedAfter(getOutputs()))
+    sources.push_back(entry);
+
+  auto forward = createScan(builder, loc, results, forwardInits, forwardInputs,
+                            forwardConstants,
+                            sizesLike(builder, loc, results, sources),
+                            getReverse());
+
+  {
+    OpBuilder::InsertionGuard guard(builder);
+    Block *block = openBody(
+        builder, forward.getBody(),
+        stepTypes(forwardInits, forwardInputs, forwardConstants), loc);
+    ValueRange arguments = block->getArguments();
+
+    SmallVector<Value> visible(arguments.take_front(carries));
+    llvm::append_range(visible, arguments.slice(2 * carries, inputs));
+    llvm::append_range(
+        visible, arguments.slice(2 * carries + 2 * inputs, constants));
+
+    SmallVector<Value> visibleTangents(arguments.slice(carries, carries));
+    llvm::append_range(visibleTangents,
+                       arguments.slice(2 * carries + inputs, inputs));
+    llvm::append_range(visibleTangents, arguments.take_back(constants));
+
+    SmallVector<Value> yielded, yieldedTangents;
+    if (failed(jvpBlock(builder, getBody().front(), visible, visibleTangents,
+                        yielded, yieldedTangents)))
+      return failure();
+
+    SmallVector<Value> filled =
+        fillMissingWithZero(builder, loc, yieldedTangents, yielded);
+    SmallVector<Value> next(yielded.begin(), yielded.begin() + carries);
+    next.append(filled.begin(), filled.begin() + carries);
+    next.append(yielded.begin() + carries, yielded.end());
+    next.append(filled.begin() + carries, filled.end());
+    YieldOp::create(builder, loc, next);
+  }
+
+  ValueRange produced = forward.getResults();
+  size_t outputs = getOutputs().size();
+
+  SmallVector<Value> primal(produced.begin(), produced.begin() + carries);
+  primal.append(produced.begin() + 2 * carries,
+                produced.begin() + 2 * carries + outputs);
+  llvm::append_range(primalResults, primal);
+
+  resultTangents.append(produced.begin() + carries,
+                        produced.begin() + 2 * carries);
+  resultTangents.append(produced.begin() + 2 * carries + outputs,
+                        produced.end());
   return success();
 }

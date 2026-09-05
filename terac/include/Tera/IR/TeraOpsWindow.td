@@ -12,7 +12,8 @@
 include "Tera/IR/TeraOpsBase.td"
 
 def Tera_ConvOp
-    : Tera_InferredOp<"conv", [DeclareOpInterfaceMethods<Tera_VjpOpInterface>]> {
+    : Tera_InferredOp<"conv", [DeclareOpInterfaceMethods<Tera_VjpOpInterface>,
+                               Tera_Multilinear]> {
   let summary = "Slide a kernel over a batch of feature maps";
   let description = [{
     The input is laid out batch, channel, then spatial axes; the kernel is
@@ -72,7 +73,11 @@ def Tera_ConvOp
 }
 
 def Tera_Pool2dOp
-    : Tera_InferredOp<"pool2d", [DeclareOpInterfaceMethods<Tera_VjpOpInterface>]> {
+    : Tera_InferredOp<"pool2d",
+                      [DeclareOpInterfaceMethods<Tera_VjpOpInterface>,
+                       DeclareOpInterfaceMethods<Tera_JvpOpInterface, ["buildJvp"]>,
+                       DeclareOpInterfaceMethods<Tera_LoweringOpInterface,
+                                                 ["verifyLoweringToLinalg"]>]> {
   let summary = "Reduce each window of a batch of feature maps";
   let description = [{
     The traversal `tera.conv` makes, reading a reduction out of each window
@@ -86,9 +91,11 @@ def Tera_Pool2dOp
     An average counts the whole window, padding included, only when
     `count_include_pad` is set; without it a window hanging over the edge
     averages the elements actually inside. A maximum has no such question,
-    because the dialect refuses a max pool whose window reaches outside the
+    because the lowering refuses a max pool whose window reaches outside the
     input at all -- there is no value to put there that is not either wrong or
-    an infinity the forward pass would have to carry.
+    an infinity the forward pass would have to carry. It is the lowering and
+    not the verifier that refuses, so a bridge may still build one and be told
+    where it goes wrong rather than what it may not write.
 
     `ceil_mode` rounds the window count up rather than down, which lets the
     last window hang over the high edge.
