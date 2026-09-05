@@ -8,7 +8,9 @@
 
 #include "Tera/Execution/JitInvoker.h"
 
+#include "Tera/IR/TeraDialect.h"
 #include "mlir/ExecutionEngine/OptUtils.h"
+#include "mlir/Interfaces/FunctionInterfaces.h"
 #include "mlir/Pass/PassManager.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/raw_ostream.h"
@@ -18,10 +20,37 @@
 using namespace mlir;
 using namespace mlir::tera;
 
+/// A buffer can only be left somewhere there is a device to leave it on. The
+/// question is asked here, where the module first meets the target it is being
+/// built for, so the answer names both rather than arriving as a type error
+/// from the bottom of the lowering.
+static LogicalResult checkResidence(ModuleOp module,
+                                    const TargetBackend &target) {
+  if (target.hasDeviceMemory())
+    return success();
+
+  WalkResult walked = module.walk([&](FunctionOpInterface function) {
+    for (unsigned index = 0; index < function.getNumArguments(); ++index) {
+      if (!function.getArgAttr(index, TeraDialect::kDeviceResidentAttrName))
+        continue;
+      function.emitError() << "argument " << index << " is marked '"
+                           << TeraDialect::kDeviceResidentAttrName
+                           << "', and target '" << target.getName()
+                           << "' has no device to leave it on";
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+  return failure(walked.wasInterrupted());
+}
+
 FailureOr<std::unique_ptr<JitInvoker>>
 JitInvoker::create(ModuleOp module, const TargetBackend &target,
                    StringRef targetOptions, unsigned optLevel,
                    ArrayRef<std::string> sharedLibs) {
+  if (failed(checkResidence(module, target)))
+    return failure();
+
   PassManager pm(module.getContext());
   if (failed(applyPassManagerCLOptions(pm)))
     return failure();
@@ -43,7 +72,17 @@ JitInvoker::create(ModuleOp module, const TargetBackend &target,
     return failure();
   }
   (*engine)->initialize();
-  return std::unique_ptr<JitInvoker>(new JitInvoker(std::move(*engine)));
+  return std::unique_ptr<JitInvoker>(
+      new JitInvoker(std::move(*engine), target.hasDeviceMemory()));
+}
+
+DeviceMemory *JitInvoker::getDeviceMemory() {
+  if (!deviceResolved) {
+    if (onADevice)
+      device = DeviceMemory::resolve(*engine);
+    deviceResolved = true;
+  }
+  return device.get();
 }
 
 void JitInvoker::releaseAllocation(void *pointer) {

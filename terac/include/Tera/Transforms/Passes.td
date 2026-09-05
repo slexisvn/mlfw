@@ -29,11 +29,18 @@ def TeraAutodiff : Pass<"tera-autodiff", "::mlir::ModuleOp"> {
         -> (tensor<4xf32>, tensor<4xf32>) attributes {tera.diff_args = array<i64: 0, 1>}
     ```
 
-    The trailing argument is the gradient of the result, so a function whose
-    result is not a scalar needs no loss wrapped around it. Results are the
-    gradients of the arguments named by `tera.diff_args`, which is every
+    The trailing arguments are the gradients of the results, one each, so a
+    function whose result is not a scalar needs no loss wrapped around it and a
+    function with more than one result needs no wrapper joining them. Results
+    are the gradients of the arguments named by `tera.diff_args`, which is every
     argument with a floating-point element type; the pass writes
     `tera.vjp = @f_vjp` back onto the original.
+
+    A derivative is an ordinary function, and taking more than one seed is what
+    lets it be differentiated in turn: `-tera-autodiff -inline` leaves `@f_vjp`
+    as tera ops with no call in it, and marking that one differentiable gives
+    `@f_vjp_vjp`, which is the second derivative contracted with two vectors --
+    a Hessian-vector product.
 
     The body is the original's, cloned so the forward values a rule needs are
     in scope, walked in reverse. Each op is asked for its own contribution
@@ -44,6 +51,11 @@ def TeraAutodiff : Pass<"tera-autodiff", "::mlir::ModuleOp"> {
 
     `tera.stop_gradient` reports no gradient for its operand, which is how the
     walk is stopped short of part of the graph.
+
+    An argument the caller left on the device is still on it in the derivative,
+    whose leading arguments are the primal's own, so `tera.device_resident`
+    carries across to all three functions. The gradients do not inherit it:
+    they are results, and a result comes back.
   }];
 
   let dependentDialects = [

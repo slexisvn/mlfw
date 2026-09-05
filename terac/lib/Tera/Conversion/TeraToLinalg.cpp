@@ -12,6 +12,7 @@
 #include "Tera/IR/TeraOps.h"
 #include "TeraToLinalgDetail.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Arith/Utils/Utils.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
@@ -41,24 +42,42 @@ Value detail::filledTensor(OpBuilder &builder, Location loc,
       .getResult(0);
 }
 
-SmallVector<Value> detail::dynamicExtents(
-    OpBuilder &builder, Location loc, RankedTensorType type,
-    function_ref<std::pair<Value, int64_t>(int64_t)> source) {
-  SmallVector<Value> extents;
-  for (auto [axis, extent] : llvm::enumerate(type.getShape())) {
-    if (!ShapedType::isDynamic(extent))
-      continue;
-    auto [value, dimension] = source(axis);
-    extents.push_back(tensor::DimOp::create(builder, loc, value, dimension));
+SmallVector<OpFoldResult> detail::resultShape(OpBuilder &builder, Location loc,
+                                              Operation *op) {
+  auto type = cast<RankedTensorType>(op->getResult(0).getType());
+  if (type.hasStaticShape()) {
+    SmallVector<OpFoldResult> shape;
+    for (int64_t extent : type.getShape())
+      shape.push_back(builder.getIndexAttr(extent));
+    return shape;
   }
-  return extents;
+
+  ReifiedRankedShapedTypeDims reified;
+  LogicalResult answered =
+      cast<ReifyRankedShapedTypeOpInterface>(op).reifyResultShapes(builder,
+                                                                   reified);
+  assert(succeeded(answered) &&
+         "an op whose destination is materialised has to reify its own "
+         "result shapes; the ops that cannot -- the region ones, whose "
+         "extents are only known inside the region -- take their results "
+         "from the region rather than from a destination");
+  (void)answered;
+  return reified[0];
 }
 
-SmallVector<Value> detail::extentsLike(OpBuilder &builder, Location loc,
-                                       RankedTensorType type, Value operand) {
-  return dynamicExtents(builder, loc, type, [&](int64_t axis) {
-    return std::pair<Value, int64_t>{operand, axis};
-  });
+SmallVector<Value> detail::resultExtents(OpBuilder &builder, Location loc,
+                                         Operation *op) {
+  auto type = cast<RankedTensorType>(op->getResult(0).getType());
+  if (type.hasStaticShape())
+    return {};
+
+  SmallVector<OpFoldResult> shape = resultShape(builder, loc, op);
+  SmallVector<Value> extents;
+  for (auto [axis, extent] : llvm::enumerate(type.getShape()))
+    if (ShapedType::isDynamic(extent))
+      extents.push_back(
+          getValueOrCreateConstantIndexOp(builder, loc, shape[axis]));
+  return extents;
 }
 
 Value detail::spreadInto(OpBuilder &builder, Location loc,

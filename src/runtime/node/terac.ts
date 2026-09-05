@@ -13,7 +13,10 @@ export type TeracLocation = {
 };
 
 type TeracBinding = {
-  compile(mlir: string, target: number, optLevel: number, sharedLibs: string[], numSharedLibs: number): unknown;
+  compile(
+    mlir: string, target: string, targetOptions: string, optLevel: number,
+    sharedLibs: string[], numSharedLibs: number,
+  ): unknown;
   release(handle: unknown): void;
   lastError(): string;
   invoke(
@@ -28,17 +31,18 @@ const SHLIB_EXT = process.platform === 'win32' ? '.dll' : process.platform === '
 const LIT_SITE_CONFIG = 'test/lit.site.cfg.py';
 const LLVM_TOOLS_DIR = /config\.llvm_tools_dir\s*=\s*lit_config\.substitute\("([^"]+)"\)/;
 
-type DeviceSpec = Readonly<{ target: number; runtimeLibs: readonly string[] }>;
-
-const DEVICES: Readonly<Record<string, DeviceSpec>> = {
-  cpu: { target: 0, runtimeLibs: ['mlir_c_runner_utils'] },
-  cuda: { target: 1, runtimeLibs: ['mlir_c_runner_utils', 'mlir_cuda_runtime'] },
+// A device is a terac target name, passed through as one. The libraries are
+// here because they have to be found on disk before the module is compiled,
+// which is before there is a module to ask.
+const DEVICES: Readonly<Record<string, readonly string[]>> = {
+  cpu: ['mlir_c_runner_utils'],
+  cuda: ['mlir_c_runner_utils', 'mlir_cuda_runtime'],
 };
 
-function deviceSpec(device: string): DeviceSpec {
-  const spec = DEVICES[device];
-  if (!spec) throw new Error(`terac: unknown device '${device}'`);
-  return spec;
+function deviceLibs(device: string): readonly string[] {
+  const libs = DEVICES[device];
+  if (!libs) throw new Error(`terac: unknown device '${device}'`);
+  return libs;
 }
 
 let binding: TeracBinding | null = null;
@@ -75,7 +79,7 @@ function llvmToolsDir(location: TeracLocation): string {
 export function teracRuntimeLibs(device: string, location: TeracLocation): string[] {
   const bin = llvmToolsDir(location);
   prependSearchPath(bin);
-  return deviceSpec(device).runtimeLibs.map((stem) => firstExisting(
+  return deviceLibs(device).map((stem) => firstExisting(
     [bin, join(dirname(bin), 'lib')].flatMap((dir) => [stem, `lib${stem}`].map((name) => join(dir, name + SHLIB_EXT))),
     stem,
   ));
@@ -87,7 +91,7 @@ function load(location: TeracLocation): TeracBinding {
   prependSearchPath(dirname(path));
   const lib = koffi.load(path);
   binding = {
-    compile: lib.func('void *teraCompile(str mlir, int target, uint optLevel, const char **sharedLibs, size_t numSharedLibs)'),
+    compile: lib.func('void *teraCompileFor(str mlir, str target, str targetOptions, uint optLevel, const char **sharedLibs, size_t numSharedLibs)'),
     release: lib.func('void teraRelease(void *module)'),
     lastError: lib.func('str teraLastError()'),
     invoke: lib.func('int teraInvoke(void *module, str entry, void **inputs, int64 *inputShapes, int64 numInputs, void **results, int64 *resultShapes, int64 numResults)'),
@@ -105,11 +109,13 @@ export function teracAvailable(location: TeracLocation = {}): boolean {
   }
 }
 
-export function teracCompile(mlir: string, device: string, optLevel: number, location: TeracLocation): TeracHandle {
+export function teracCompile(
+  mlir: string, device: string, optLevel: number, location: TeracLocation,
+  targetOptions = '',
+): TeracHandle {
   const api = load(location);
-  const target = deviceSpec(device).target;
   const libs = teracRuntimeLibs(device, location);
-  const nativeHandle = api.compile(mlir, target, optLevel, libs, libs.length);
+  const nativeHandle = api.compile(mlir, device, targetOptions, optLevel, libs, libs.length);
   if (!nativeHandle) throw new Error(api.lastError() || 'terac: the module did not compile');
   return { nativeHandle, api };
 }

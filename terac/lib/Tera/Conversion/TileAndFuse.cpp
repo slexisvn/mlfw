@@ -13,6 +13,7 @@
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/SCF/Transforms/TileUsingInterface.h"
+#include "mlir/Dialect/SCF/Transforms/Transforms.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
 #include "mlir/IR/PatternMatch.h"
@@ -39,6 +40,7 @@ struct TileAndFuse : public impl::TileAndFuseBase<TileAndFuse> {
     model.vectorLanes = vectorWidth;
     tileParallelAndFuse(model);
     tileReductions();
+    peelPartialTiles();
   }
 
   void tileParallelAndFuse(const HostTargetModel &model) {
@@ -77,6 +79,33 @@ struct TileAndFuse : public impl::TileAndFuseBase<TileAndFuse> {
         if (original->use_empty())
           rewriter.eraseOp(original);
       }
+    }
+  }
+
+  /// Splits every loop whose last tile may be short into a loop of whole
+  /// tiles and one iteration for the remainder.
+  ///
+  /// A loop over a `?` is cut to a tile the same way a loop over a known
+  /// extent is, but nothing can say the tile divides it, so every slice taken
+  /// inside carries an `affine.min` against what is left. That min is what
+  /// makes the tile's own shape dynamic, and a dynamic shape is one the
+  /// vectorizer has no vector for -- so without this the tiling buys the loop
+  /// overhead and none of the vectors it was for. Peeled, the loop that runs
+  /// nearly every iteration has a static tile and the leftover one keeps the
+  /// scalar code it needs.
+  void peelPartialTiles() {
+    SmallVector<scf::ForOp> loops;
+    getOperation().walk([&](scf::ForOp loop) {
+      // A loop stepping by one has no partial tile to separate, and peeling
+      // one would duplicate its body for nothing.
+      if (getConstantIntValue(loop.getStep()) != std::optional<int64_t>(1))
+        loops.push_back(loop);
+    });
+
+    IRRewriter rewriter(&getContext());
+    for (scf::ForOp loop : loops) {
+      scf::ForOp remainder;
+      (void)scf::peelForLoopAndSimplifyBounds(rewriter, loop, remainder);
     }
   }
 

@@ -24,6 +24,12 @@ struct VerifyGpuMapping
 
   void runOnOperation() final {
     WalkResult walked = getOperation().walk([](scf::ParallelOp loop) {
+      if (loop->getParentOfType<gpu::LaunchOp>()) {
+        loop.emitError()
+            << "is inside a kernel and is still a loop, so every one of its "
+               "iterations runs on the one thread that reached it";
+        return WalkResult::interrupt();
+      }
       if (!loop->hasAttr(gpu::getMappingAttrName()))
         return WalkResult::advance();
       loop.emitError() << "carries a processor mapping but is still a loop, "

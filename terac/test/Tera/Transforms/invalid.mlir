@@ -23,11 +23,13 @@ func.func @foreign_but_dead(%a: tensor<4xf32>) -> tensor<4xf32>
 
 // -----
 
-// expected-error@+1 {{must return exactly one tensor to be differentiated, not 2}}
-func.func @two_results(%a: tensor<4xf32>) -> (tensor<4xf32>, tensor<4xf32>)
-    attributes {tera.differentiable} {
+// A function returning nothing has nothing to seed the walk backwards with.
+// Returning more than one thing is fine: each result takes a seed of its own.
+
+// expected-error@+1 {{returns nothing to seed the reverse pass with}}
+func.func @no_results(%a: tensor<4xf32>) attributes {tera.differentiable} {
   %0 = tera.exp %a : tensor<4xf32>
-  return %0, %0 : tensor<4xf32>, tensor<4xf32>
+  return
 }
 
 // -----

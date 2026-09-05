@@ -36,7 +36,7 @@ def Tera_DimOp : Tera_Op<"dim", [Pure, Tera_AcceptsDynamicShapes]> {
 def Tera_BroadcastInDimOp
     : Tera_Op<"broadcast_in_dim",
               [Pure, DeclareOpInterfaceMethods<Tera_VjpOpInterface>,
-               Tera_AcceptsDynamicShapes, Tera_Linear]> {
+               Tera_Reifies, Tera_AcceptsDynamicShapes, Tera_Linear]> {
   let summary = "Broadcast a tensor into a larger shape";
   let description = [{
     `broadcast_dimensions` maps each axis of the operand to the result axis it
@@ -70,9 +70,11 @@ def Tera_BroadcastInDimOp
   let assemblyFormat =
       "$operand (`sizes` `(` $sizes^ `)`)? attr-dict `:` type($operand) `->` type($result)";
   let hasVerifier = 1;
+  let hasFolder = 1;
+  let hasCanonicalizer = 1;
 }
 
-def Tera_TransposeOp : Tera_InferredOp<"transpose", [DeclareOpInterfaceMethods<Tera_VjpOpInterface>, Tera_AcceptsDynamicShapes, Tera_Linear]> {
+def Tera_TransposeOp : Tera_InferredOp<"transpose", [DeclareOpInterfaceMethods<Tera_VjpOpInterface>, Tera_Reifies, Tera_AcceptsDynamicShapes, Tera_Linear]> {
   let summary = "Permute the axes of a tensor";
   let description = [{
     `permutation[i]` is the operand axis that becomes result axis `i`.
@@ -89,6 +91,7 @@ def Tera_TransposeOp : Tera_InferredOp<"transpose", [DeclareOpInterfaceMethods<T
 def Tera_ReshapeOp : Tera_Op<"reshape",
                              [Pure,
                               DeclareOpInterfaceMethods<Tera_VjpOpInterface>,
+                              Tera_Reifies,
                               Tera_AcceptsDynamicShapes, Tera_Linear]> {
   let summary = "Reinterpret a tensor with a new shape and the same element count";
   let description = [{
@@ -111,7 +114,12 @@ def Tera_ReshapeOp : Tera_Op<"reshape",
   let hasCanonicalizer = 1;
 }
 
-def Tera_SliceOp : Tera_InferredOp<"slice", [DeclareOpInterfaceMethods<Tera_VjpOpInterface>, Tera_Linear]> {
+def Tera_SliceOp
+    : Tera_InferredOp<"slice",
+                      [DeclareOpInterfaceMethods<Tera_VjpOpInterface>,
+                       DeclareOpInterfaceMethods<Tera_LoweringOpInterface,
+                                                 ["acceptsDynamicShapes"]>,
+                       Tera_Linear]> {
   let summary = "Extract a strided rectangular region";
   let description = [{
     Half-open on the high end: axis `i` yields indices
@@ -133,7 +141,7 @@ def Tera_ReverseOp
                       [DeclareOpInterfaceMethods<Tera_VjpOpInterface>,
                        DeclareOpInterfaceMethods<Tera_LoweringOpInterface,
                                                  ["acceptsDynamicShapes"]>,
-                       Tera_Linear]> {
+                       Tera_Reifies, Tera_Linear]> {
   let summary = "Read an axis from the far end";
   let description = [{
     `dimensions` names the axes to reverse; the shape does not change.
@@ -145,13 +153,16 @@ def Tera_ReverseOp
 
   let arguments = (ins Tera_Tensor:$operand, DenseI64ArrayAttr:$dimensions);
   let results = (outs Tera_Tensor:$result);
+  let extraClassDefinition = Tera_ReifyLikeFirstOperand;
   let assemblyFormat =
       "$operand attr-dict `:` type($operand) `->` type($result)";
   let hasFolder = 1;
+  let hasCanonicalizer = 1;
 }
 
 def Tera_PadOp
     : Tera_InferredOp<"pad", [DeclareOpInterfaceMethods<Tera_VjpOpInterface>,
+                              Tera_Reifies,
                               Tera_AcceptsDynamicShapes, Tera_Linear]> {
   let summary = "Surround a tensor with a value, and space its elements out";
   let description = [{
@@ -193,13 +204,14 @@ def Tera_PadOp
   }];
 }
 
-def Tera_ConcatOp : Tera_InferredOp<"concat", [DeclareOpInterfaceMethods<Tera_VjpOpInterface>, Tera_AcceptsDynamicShapes, Tera_Linear]> {
+def Tera_ConcatOp : Tera_InferredOp<"concat", [DeclareOpInterfaceMethods<Tera_VjpOpInterface>, Tera_Reifies, Tera_AcceptsDynamicShapes, Tera_Linear]> {
   let summary = "Join tensors along one axis";
 
   let arguments = (ins Variadic<Tera_Tensor>:$inputs, I64Attr:$dimension);
   let results = (outs Tera_Tensor:$result);
   let assemblyFormat =
       "$inputs attr-dict `:` type($inputs) `->` type($result)";
+  let hasFolder = 1;
 }
 
 #endif

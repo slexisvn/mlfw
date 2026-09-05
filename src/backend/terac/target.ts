@@ -21,7 +21,8 @@ export function compileWithTerac(module: GraphModule, config: CompilerConfig): R
 
 export function TeracTarget(options: TeracTargetOptions = {}): TargetFeatures {
   const {
-    device, optLevel, build = null, library = null, llvmBin = null, ...overrides
+    device, optLevel, targetOptions,
+    build = null, library = null, llvmBin = null, ...overrides
   } = { ...TERAC_DEFAULTS, ...options };
   return new TargetFeatures({
     kind: device === 'cuda' ? TargetKind.CUDA : TargetKind.CPU,
@@ -30,7 +31,7 @@ export function TeracTarget(options: TeracTargetOptions = {}): TargetFeatures {
     attrs: {
       [TargetAttr.FUSION]: { enabled: false },
       [TargetAttr.EXTERNAL_COMPILER]: compileWithTerac,
-      [TERAC_OPTIONS]: { device, optLevel, build, library, llvmBin },
+      [TERAC_OPTIONS]: { device, optLevel, targetOptions, build, library, llvmBin },
       ...(overrides.attrs || {}),
     },
   });

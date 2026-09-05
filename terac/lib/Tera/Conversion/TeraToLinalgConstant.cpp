@@ -50,13 +50,7 @@ struct IotaOpLowering : public OpConversionPattern<IotaOp> {
     SmallVector<utils::IteratorType> iterators(rank,
                                                utils::IteratorType::parallel);
 
-    SmallVector<Value> sizes;
-    for (Value extent : adaptor.getSizes()) {
-      Value scalar =
-          tensor::ExtractOp::create(rewriter, loc, extent, ValueRange{});
-      sizes.push_back(arith::IndexCastOp::create(
-          rewriter, loc, rewriter.getIndexType(), scalar));
-    }
+    SmallVector<Value> sizes = resultExtents(rewriter, loc, op);
 
     rewriter.replaceOpWithNewOp<linalg::GenericOp>(
         op, TypeRange{resultType}, ValueRange{},

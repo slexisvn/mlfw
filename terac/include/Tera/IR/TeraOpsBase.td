@@ -33,6 +33,31 @@ def Tera_AcceptsDynamicShapes : NativeOpTrait<"AcceptsDynamicShapes"> {
   let cppNamespace = "::mlir::tera";
 }
 
+// The extents of a result carrying the shape of the op's first operand.
+// Every elementwise op answers this way, and so does every op that only moves
+// elements around, so the answer is written once rather than on each of them.
+// It is a definition rather than a declaration because the helper it calls is
+// private to the dialect library, which the generated header is not.
+defvar Tera_ReifyLikeFirstOperand = [{
+  ::llvm::LogicalResult $cppClass::reifyResultShapes(
+      ::mlir::OpBuilder &builder,
+      ::mlir::ReifiedRankedShapedTypeDims &reified) {
+    reified.emplace_back(::mlir::tera::detail::reifyExtentsLike(
+        builder, getLoc(),
+        ::llvm::cast<::mlir::RankedTensorType>(
+            (*this)->getResult(0).getType()),
+        (*this)->getOperand(0)));
+    return ::mlir::success();
+  }
+}];
+
+// The interface's own default answers `failure()` -- the shape cannot be
+// computed -- so the method has to be named to override it rather than
+// inherited.
+def Tera_Reifies
+    : DeclareOpInterfaceMethods<ReifyRankedShapedTypeOpInterface,
+                                ["reifyResultShapes"]>;
+
 def Tera_Linear : NativeOpTrait<"LinearOperands"> {
   let cppNamespace = "::mlir::tera";
 }
@@ -46,19 +71,23 @@ class Tera_InferredOp<string mnemonic, list<Trait> traits = []>
 
 class Tera_BinaryEwiseOp<string mnemonic, list<Trait> traits = []>
     : Tera_Op<mnemonic, traits # [Pure, Elementwise, SameOperandsAndResultType,
+                                  Tera_Reifies,
                                   DeclareOpInterfaceMethods<Tera_VjpOpInterface>]> {
   let arguments = (ins Tera_Tensor:$lhs, Tera_Tensor:$rhs);
   let results = (outs Tera_Tensor:$result);
   let assemblyFormat = "$lhs `,` $rhs attr-dict `:` type($result)";
+  let extraClassDefinition = Tera_ReifyLikeFirstOperand;
 }
 
 class Tera_UnaryEwiseOp<string mnemonic, Type operandType = Tera_Tensor,
                         list<Trait> traits = []>
     : Tera_Op<mnemonic, traits # [Pure, Elementwise, SameOperandsAndResultType,
+                                 Tera_Reifies,
                                  DeclareOpInterfaceMethods<Tera_VjpOpInterface>]> {
   let arguments = (ins operandType:$operand);
   let results = (outs operandType:$result);
   let assemblyFormat = "$operand attr-dict `:` type($result)";
+  let extraClassDefinition = Tera_ReifyLikeFirstOperand;
 }
 
 #endif

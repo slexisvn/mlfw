@@ -9,8 +9,9 @@
 #ifndef TERA_EXECUTION_JITINVOKER_H
 #define TERA_EXECUTION_JITINVOKER_H
 
-#include "Tera/Pipelines/TargetBackend.h"
+#include "Tera/Execution/DeviceMemory.h"
 #include "Tera/Execution/TensorBuffer.h"
+#include "Tera/Pipelines/TargetBackend.h"
 
 #include "mlir/ExecutionEngine/ExecutionEngine.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -35,13 +36,23 @@ public:
 
   void releaseAllocation(void *pointer);
 
+  /// The device memory behind this module, or null for a target that has
+  /// none. Resolved on the first ask, because a host-only module never asks.
+  DeviceMemory *getDeviceMemory();
+
 private:
-  explicit JitInvoker(std::unique_ptr<ExecutionEngine> engine)
-      : engine(std::move(engine)) {}
+  JitInvoker(std::unique_ptr<ExecutionEngine> engine, bool onADevice)
+      : engine(std::move(engine)), onADevice(onADevice) {}
 
   llvm::StringMap<void (*)(void **)> resolved;
   void (*deallocate)(void *) = nullptr;
   std::unique_ptr<ExecutionEngine> engine;
+
+  /// After `engine`, so the stream it holds is destroyed while the library
+  /// that made it is still loaded.
+  std::unique_ptr<DeviceMemory> device;
+  bool onADevice = false;
+  bool deviceResolved = false;
 };
 
 }

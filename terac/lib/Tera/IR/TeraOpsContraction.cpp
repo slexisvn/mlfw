@@ -9,7 +9,11 @@
 #include "Tera/IR/TeraOps.h"
 
 #include "TeraOpsDetail.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/PatternMatch.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallBitVector.h"
 
 using namespace mlir;
 using namespace mlir::tera;
@@ -86,6 +90,80 @@ SmallVector<int64_t> DotOp::getRhsFreeAxes() {
   return freeAxes(claimedAxes(getRhsBatch(), getRhsContracting(), rank), rank);
 }
 
+namespace {
+/// A transpose in front of a `dot` renames axes the dot is already told about
+/// by name, so it can be absorbed into those names instead of materialising a
+/// tensor. What it cannot be allowed to do is reorder the free axes: their
+/// order in the operand is the order the result inherits, so a permutation
+/// that shuffles them changes the answer rather than only the reading of it.
+struct FoldTransposeIntoDot : public OpRewritePattern<DotOp> {
+  using OpRewritePattern<DotOp>::OpRewritePattern;
+
+  /// The operand behind a transpose, with the named axes mapped through it, or
+  /// nothing when there is no transpose or absorbing it would reorder a free
+  /// axis.
+  static Value absorb(Value operand, ArrayRef<int64_t> batch,
+                      ArrayRef<int64_t> contracting,
+                      SmallVector<int64_t> &mappedBatch,
+                      SmallVector<int64_t> &mappedContracting) {
+    auto producer = operand.getDefiningOp<TransposeOp>();
+    if (!producer)
+      return {};
+    ArrayRef<int64_t> permutation = producer.getPermutation();
+    int64_t rank = permutation.size();
+
+    llvm::SmallBitVector claimed(rank);
+    for (int64_t axis : batch)
+      claimed.set(axis);
+    for (int64_t axis : contracting)
+      claimed.set(axis);
+
+    int64_t previous = -1;
+    for (int64_t axis = 0; axis < rank; ++axis) {
+      if (claimed.test(axis))
+        continue;
+      if (permutation[axis] <= previous)
+        return {};
+      previous = permutation[axis];
+    }
+
+    auto through = [&](int64_t axis) { return permutation[axis]; };
+    mappedBatch = llvm::map_to_vector(batch, through);
+    mappedContracting = llvm::map_to_vector(contracting, through);
+    return producer.getOperand();
+  }
+
+  LogicalResult matchAndRewrite(DotOp op,
+                                PatternRewriter &rewriter) const override {
+    SmallVector<int64_t> lhsBatch(op.getLhsBatch());
+    SmallVector<int64_t> lhsContracting(op.getLhsContracting());
+    SmallVector<int64_t> rhsBatch(op.getRhsBatch());
+    SmallVector<int64_t> rhsContracting(op.getRhsContracting());
+
+    Value lhs = absorb(op.getLhs(), op.getLhsBatch(), op.getLhsContracting(),
+                       lhsBatch, lhsContracting);
+    Value rhs = absorb(op.getRhs(), op.getRhsBatch(), op.getRhsContracting(),
+                       rhsBatch, rhsContracting);
+    if (!lhs && !rhs)
+      return failure();
+
+    rewriter.replaceOpWithNewOp<DotOp>(
+        op, op.getResult().getType(), lhs ? lhs : op.getLhs(),
+        rhs ? rhs : op.getRhs(), rewriter.getDenseI64ArrayAttr(lhsBatch),
+        rewriter.getDenseI64ArrayAttr(lhsContracting),
+        rewriter.getDenseI64ArrayAttr(rhsBatch),
+        rewriter.getDenseI64ArrayAttr(rhsContracting));
+    return success();
+  }
+};
+
+}
+
+void DotOp::getCanonicalizationPatterns(RewritePatternSet &results,
+                                        MLIRContext *context) {
+  results.add<FoldTransposeIntoDot>(context);
+}
+
 LogicalResult
 ReduceOp::inferReturnTypes(MLIRContext *, std::optional<Location> location,
                            Adaptor adaptor,
@@ -106,6 +184,50 @@ ReduceOp::inferReturnTypes(MLIRContext *, std::optional<Location> location,
 
   inferredReturnTypes.push_back(
       RankedTensorType::get(shape, operandType.getElementType()));
+  return success();
+}
+
+LogicalResult DotOp::reifyResultShapes(OpBuilder &builder,
+                                       ReifiedRankedShapedTypeDims &reified) {
+  // The result reads its batch axes and its leading free axes off the lhs and
+  // the trailing ones off the rhs, in exactly the order `inferReturnTypes`
+  // builds them.
+  SmallVector<std::pair<Value, int64_t>> sources;
+  for (int64_t axis : getLhsBatch())
+    sources.emplace_back(getLhs(), axis);
+  for (int64_t axis : getLhsFreeAxes())
+    sources.emplace_back(getLhs(), axis);
+  for (int64_t axis : getRhsFreeAxes())
+    sources.emplace_back(getRhs(), axis);
+
+  Location loc = getLoc();
+  SmallVector<OpFoldResult> extents;
+  for (auto [axis, extent] :
+       llvm::enumerate(cast<RankedTensorType>(getType()).getShape())) {
+    if (!ShapedType::isDynamic(extent)) {
+      extents.push_back(builder.getIndexAttr(extent));
+      continue;
+    }
+    auto [source, from] = sources[axis];
+    extents.push_back(
+        tensor::DimOp::create(builder, loc, source, from).getResult());
+  }
+  reified.push_back(std::move(extents));
+  return success();
+}
+
+LogicalResult
+ReduceOp::reifyResultShapes(OpBuilder &builder,
+                            ReifiedRankedShapedTypeDims &reified) {
+  int64_t rank = cast<RankedTensorType>(getOperand().getType()).getRank();
+  llvm::SmallBitVector reduced(rank);
+  for (int64_t axis : getDimensions())
+    reduced.set(axis);
+  SmallVector<int64_t> surviving = freeAxes(reduced, rank);
+
+  reified.emplace_back(reifyExtents(
+      builder, getLoc(), cast<RankedTensorType>(getType()), getOperand(),
+      [&](int64_t axis) { return surviving[axis]; }));
   return success();
 }
 

@@ -15,6 +15,7 @@ def Tera_StopGradientOp : Tera_Op<"stop_gradient",
                                   [Pure, Elementwise, SameOperandsAndResultType,
                                    DeclareOpInterfaceMethods<Tera_VjpOpInterface>,
                                    DeclareOpInterfaceMethods<Tera_JvpOpInterface, ["buildJvp"]>,
+                                   Tera_Reifies,
                                    Tera_AcceptsDynamicShapes]> {
   let summary = "The identity forwards; a wall to the reverse pass";
   let description = [{
@@ -36,6 +37,7 @@ def Tera_StopGradientOp : Tera_Op<"stop_gradient",
 
   let arguments = (ins Tera_Tensor:$operand);
   let results = (outs Tera_Tensor:$result);
+  let extraClassDefinition = Tera_ReifyLikeFirstOperand;
   let assemblyFormat = "$operand attr-dict `:` type($result)";
 }
 

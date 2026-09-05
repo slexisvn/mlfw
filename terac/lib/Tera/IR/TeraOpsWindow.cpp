@@ -9,6 +9,8 @@
 #include "Tera/IR/TeraOps.h"
 
 #include "TeraOpsDetail.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "llvm/ADT/STLExtras.h"
 
@@ -27,6 +29,31 @@ int64_t windowCount(int64_t extent, int64_t low, int64_t high, int64_t reach,
   if (span < 0)
     return 0;
   return (ceilMode ? (span + stride - 1) / stride : span / stride) + 1;
+}
+
+/// The number of windows an axis of extent `extent` yields, as a value. It is
+/// `windowCount` with the extent no longer a constant: the same arithmetic,
+/// including the answer of no windows at all when the reach is wider than the
+/// padded axis, which a `?` cannot be asked about at compile time.
+Value reifyWindowCount(OpBuilder &builder, Location loc, Value extent,
+                       int64_t low, int64_t high, int64_t reach, int64_t stride,
+                       bool ceilMode) {
+  auto constant = [&](int64_t value) {
+    return arith::ConstantIndexOp::create(builder, loc, value).getResult();
+  };
+  Value span =
+      arith::AddIOp::create(builder, loc, extent, constant(low + high - reach));
+  Value counted = ceilMode
+                      ? arith::CeilDivSIOp::create(builder, loc, span,
+                                                   constant(stride))
+                            .getResult()
+                      : arith::DivSIOp::create(builder, loc, span,
+                                               constant(stride))
+                            .getResult();
+  Value windows = arith::AddIOp::create(builder, loc, counted, constant(1));
+  Value empty = arith::CmpIOp::create(builder, loc, arith::CmpIPredicate::slt,
+                                      span, constant(0));
+  return arith::SelectOp::create(builder, loc, empty, constant(0), windows);
 }
 
 SmallVector<int64_t> paddingSide(ArrayRef<int64_t> padding, int64_t side) {
@@ -68,6 +95,18 @@ LogicalResult verifyWindow(std::optional<Location> location,
 
 }
 
+/// The batch is the one axis a window op carries through unchanged, so it is
+/// the one the destination can be given from the input by reading the same
+/// axis back off it. A `?` on a spatial axis is a window count the lowering
+/// would have to compute, and a `?` on a channel axis is an extent that comes
+/// from the kernel; neither is materialised here, so neither is accepted.
+bool ConvOp::acceptsDynamicShapes() {
+  if (!cast<RankedTensorType>(getKernel().getType()).hasStaticShape())
+    return false;
+  return !ShapedType::isDynamic(
+      cast<RankedTensorType>(getInput().getType()).getDimSize(1));
+}
+
 int64_t ConvOp::getSpatialRank() { return getStrides().size(); }
 
 static int64_t dilatedReach(int64_t width, int64_t dilation) {
@@ -90,6 +129,41 @@ SmallVector<int64_t> ConvOp::getPaddingLow() {
 
 SmallVector<int64_t> ConvOp::getPaddingHigh() {
   return paddingSide(getPadding(), 1);
+}
+
+LogicalResult ConvOp::reifyResultShapes(OpBuilder &builder,
+                                        ReifiedRankedShapedTypeDims &reified) {
+  Location loc = getLoc();
+  auto type = cast<RankedTensorType>(getType());
+  auto inputType = cast<RankedTensorType>(getInput().getType());
+  ArrayRef<int64_t> strides = getStrides();
+  ArrayRef<int64_t> padding = getPadding();
+  SmallVector<int64_t> reach = getReach();
+
+  SmallVector<OpFoldResult> extents;
+  for (auto [axis, extent] : llvm::enumerate(type.getShape())) {
+    if (!ShapedType::isDynamic(extent)) {
+      extents.push_back(builder.getIndexAttr(extent));
+      continue;
+    }
+    if (axis == 0) {
+      extents.push_back(
+          tensor::DimOp::create(builder, loc, getInput(), 0).getResult());
+      continue;
+    }
+    if (axis == 1) {
+      extents.push_back(
+          tensor::DimOp::create(builder, loc, getKernel(), 0).getResult());
+      continue;
+    }
+    int64_t spatial = axis - kLeadingAxes;
+    Value width = tensor::DimOp::create(builder, loc, getInput(), axis);
+    extents.push_back(reifyWindowCount(
+        builder, loc, width, padding[spatial * 2], padding[spatial * 2 + 1],
+        reach[spatial], strides[spatial], /*ceilMode=*/false));
+  }
+  reified.push_back(std::move(extents));
+  return success();
 }
 
 LogicalResult
@@ -199,6 +273,37 @@ LogicalResult Pool2dOp::verifyLoweringToLinalg() {
                          << ": it reads past the end of the input, and what is "
                             "there is padding the op does not carry";
   }
+  return success();
+}
+
+LogicalResult
+Pool2dOp::reifyResultShapes(OpBuilder &builder,
+                            ReifiedRankedShapedTypeDims &reified) {
+  Location loc = getLoc();
+  auto type = cast<RankedTensorType>(getType());
+  ArrayRef<int64_t> window = getKernelSize();
+  ArrayRef<int64_t> strides = getStrides();
+  ArrayRef<int64_t> padding = getPadding();
+  bool ceilMode = getCeilMode();
+
+  SmallVector<OpFoldResult> extents;
+  for (auto [axis, extent] : llvm::enumerate(type.getShape())) {
+    if (!ShapedType::isDynamic(extent)) {
+      extents.push_back(builder.getIndexAttr(extent));
+      continue;
+    }
+    if (axis < kLeadingAxes) {
+      extents.push_back(
+          tensor::DimOp::create(builder, loc, getOperand(), axis).getResult());
+      continue;
+    }
+    int64_t spatial = axis - kLeadingAxes;
+    Value width = tensor::DimOp::create(builder, loc, getOperand(), axis);
+    extents.push_back(reifyWindowCount(
+        builder, loc, width, padding[spatial * 2], padding[spatial * 2 + 1],
+        window[spatial], strides[spatial], ceilMode));
+  }
+  reified.push_back(std::move(extents));
   return success();
 }
 

@@ -96,11 +96,11 @@ TeraModule *teraCompileFor(const char *mlir, const char *target,
                            size_t numSharedLibs) {
   lastError.clear();
   if (!mlir) {
-    lastError = "teraCompile: no module text";
+    lastError = "teraCompileFor: no module text";
     return nullptr;
   }
   if (!target) {
-    lastError = "teraCompile: no target name";
+    lastError = "teraCompileFor: no target name";
     return nullptr;
   }
 
@@ -108,7 +108,7 @@ TeraModule *teraCompileFor(const char *mlir, const char *target,
 
   const TargetBackend *backend = lookupTargetBackend(target);
   if (!backend) {
-    lastError = std::string("teraCompile: no target named '") + target +
+    lastError = std::string("teraCompileFor: no target named '") + target +
                 "'; this build has " + registeredTargets();
     return nullptr;
   }
@@ -139,7 +139,7 @@ TeraModule *teraCompileFor(const char *mlir, const char *target,
 
   handle->module = parseSourceString<ModuleOp>(mlir, handle->context.get());
   if (!handle->module)
-    return fail("teraCompile: the module does not parse");
+    return fail("teraCompileFor: the module does not parse");
 
   for (auto function : handle->module->getOps<func::FuncOp>()) {
     if (function.isExternal())
@@ -168,7 +168,7 @@ TeraModule *teraCompileFor(const char *mlir, const char *target,
                       signature.inputs)) ||
         failed(record(function.getFunctionType().getResults(), "result",
                       signature.results)))
-      return fail("teraCompile: " + name + " cannot be called from here");
+      return fail("teraCompileFor: " + name + " cannot be called from here");
     handle->signatures[name] = std::move(signature);
   }
 
@@ -181,21 +181,10 @@ TeraModule *teraCompileFor(const char *mlir, const char *target,
                          targetOptions ? targetOptions : "", optLevel,
                          libraries);
   if (failed(invoker))
-    return fail("teraCompile: the module does not lower");
+    return fail("teraCompileFor: the module does not lower");
   handle->invoker = std::move(*invoker);
 
   return handle.release();
-}
-
-TeraModule *teraCompile(const char *mlir, int target, unsigned optLevel,
-                        const char *const *sharedLibs, size_t numSharedLibs) {
-  static const char *const legacy[] = {"cpu", "cuda"};
-  if (target < 0 || target >= static_cast<int>(std::size(legacy))) {
-    lastError = "teraCompile: no target numbered " + std::to_string(target);
-    return nullptr;
-  }
-  return teraCompileFor(mlir, legacy[target], "", optLevel, sharedLibs,
-                        numSharedLibs);
 }
 
 const char *teraTargets(void) {
@@ -222,6 +211,64 @@ const char *teraTargetRuntimeLibraries(const char *target) {
 }
 
 void teraRelease(TeraModule *module) { delete module; }
+
+namespace {
+DeviceMemory *deviceMemoryOf(TeraModule *module, const char *what) {
+  lastError.clear();
+  if (!module) {
+    lastError = std::string(what) + ": no module";
+    return nullptr;
+  }
+  DeviceMemory *memory = module->invoker->getDeviceMemory();
+  if (!memory)
+    lastError = std::string(what) +
+                ": this module was built for a target with no device memory";
+  return memory;
+}
+
+}
+
+void *teraDeviceAlloc(TeraModule *module, size_t bytes) {
+  DeviceMemory *memory = deviceMemoryOf(module, "teraDeviceAlloc");
+  if (!memory)
+    return nullptr;
+  void *pointer = memory->allocate(bytes);
+  if (!pointer)
+    lastError = "teraDeviceAlloc: the device has no room for " +
+                std::to_string(bytes) + " bytes";
+  return pointer;
+}
+
+void teraDeviceFree(TeraModule *module, void *pointer) {
+  if (DeviceMemory *memory = deviceMemoryOf(module, "teraDeviceFree"))
+    memory->release(pointer);
+}
+
+int teraDeviceUpload(TeraModule *module, void *device, const void *host,
+                     size_t bytes) {
+  DeviceMemory *memory = deviceMemoryOf(module, "teraDeviceUpload");
+  if (!memory)
+    return -1;
+  if (!device || !host) {
+    lastError = "teraDeviceUpload: no buffer to copy between";
+    return -1;
+  }
+  memory->upload(device, host, bytes);
+  return 0;
+}
+
+int teraDeviceDownload(TeraModule *module, void *host, const void *device,
+                       size_t bytes) {
+  DeviceMemory *memory = deviceMemoryOf(module, "teraDeviceDownload");
+  if (!memory)
+    return -1;
+  if (!device || !host) {
+    lastError = "teraDeviceDownload: no buffer to copy between";
+    return -1;
+  }
+  memory->download(host, device, bytes);
+  return 0;
+}
 
 const char *teraLastError(void) { return lastError.c_str(); }
 

@@ -10,12 +10,14 @@
 #define TERA_LIB_IR_TERAOPSDETAIL_H
 
 #include "mlir/IR/Builders.h"
+#include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/Location.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallBitVector.h"
+#include "llvm/ADT/STLFunctionalExtras.h"
 
 #include <numeric>
 #include <optional>
@@ -77,6 +79,25 @@ inline SmallVector<int64_t> axisRange(int64_t begin, int64_t end) {
 
 SmallVector<Value> dynamicExtentsOf(OpBuilder &builder, Location loc,
                                     Value source);
+
+/// The extents of `type` in the form `reifyResultShapes` wants them: an
+/// attribute wherever the type already gives the extent, and a `tensor.dim`
+/// on `source` wherever it does not, result axis `i` reading `source` axis
+/// `axisOf(i)`. Answering a static extent as an attribute rather than a
+/// `tensor.dim` keeps the caller from having to fold one to learn what the
+/// type says.
+SmallVector<OpFoldResult> reifyExtents(OpBuilder &builder, Location loc,
+                                       RankedTensorType type, Value source,
+                                       function_ref<int64_t(int64_t)> axisOf);
+
+/// `reifyExtents` for a result carrying the shape of `source`.
+SmallVector<OpFoldResult> reifyExtentsLike(OpBuilder &builder, Location loc,
+                                           RankedTensorType type, Value source);
+
+/// The extent an op's `sizes` clause holds at `index`, as an index. The clause
+/// carries a 0-D `i64` tensor per dynamic result axis, because that is what an
+/// extent is at this level; below here it has to be a number.
+Value sizeAsIndex(OpBuilder &builder, Location loc, Value size);
 
 }
 

@@ -60,7 +60,7 @@ def Tera_TanhOp : Tera_UnaryEwiseOp<"tanh", Tera_FloatTensor,
 }
 
 def Tera_CompareOp
-    : Tera_InferredOp<"compare", [Elementwise, SameTypeOperands, DeclareOpInterfaceMethods<Tera_VjpOpInterface>, Tera_AcceptsDynamicShapes]> {
+    : Tera_InferredOp<"compare", [Elementwise, SameTypeOperands, DeclareOpInterfaceMethods<Tera_VjpOpInterface>, Tera_Reifies, Tera_AcceptsDynamicShapes]> {
   let summary = "Elementwise comparison producing a boolean tensor";
 
   let arguments = (ins Tera_Tensor:$lhs, Tera_Tensor:$rhs,
@@ -68,6 +68,7 @@ def Tera_CompareOp
   let results = (outs Tera_BoolTensor:$result);
   let assemblyFormat =
       "$direction `,` $lhs `,` $rhs attr-dict `:` type($lhs) `->` type($result)";
+  let extraClassDefinition = Tera_ReifyLikeFirstOperand;
 }
 
 def Tera_SelectOp : Tera_Op<"select", [Pure, Elementwise,
@@ -75,6 +76,7 @@ def Tera_SelectOp : Tera_Op<"select", [Pure, Elementwise,
                                        AllTypesMatch<["on_true", "on_false",
                                                       "result"]>,
                                        DeclareOpInterfaceMethods<Tera_VjpOpInterface>,
+                                       Tera_Reifies,
                                        Tera_AcceptsDynamicShapes, Tera_Linear]> {
   let summary = "Elementwise choice between two tensors";
 
@@ -83,11 +85,14 @@ def Tera_SelectOp : Tera_Op<"select", [Pure, Elementwise,
   let results = (outs Tera_Tensor:$result);
   let assemblyFormat =
       "$pred `,` $on_true `,` $on_false attr-dict `:` type($pred) `,` type($result)";
+  let hasFolder = 1;
+  let extraClassDefinition = Tera_ReifyLikeFirstOperand;
 }
 
 def Tera_ConvertOp : Tera_Op<"convert", [Pure, Elementwise,
                                          SameOperandsAndResultShape,
                                          DeclareOpInterfaceMethods<Tera_VjpOpInterface>,
+                                         Tera_Reifies,
                                          Tera_AcceptsDynamicShapes, Tera_Linear]> {
   let summary = "Elementwise element type conversion";
   let description = [{
@@ -100,6 +105,7 @@ def Tera_ConvertOp : Tera_Op<"convert", [Pure, Elementwise,
   let assemblyFormat =
       "$operand attr-dict `:` type($operand) `->` type($result)";
   let hasFolder = 1;
+  let extraClassDefinition = Tera_ReifyLikeFirstOperand;
 }
 
 #endif

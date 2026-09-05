@@ -23,12 +23,6 @@ using namespace mlir::tera;
 using namespace mlir::tera::detail;
 
 namespace {
-Value extentAsIndex(OpBuilder &builder, Location loc, Value extent) {
-  Value scalar = tensor::ExtractOp::create(builder, loc, extent, ValueRange{});
-  return arith::IndexCastOp::create(builder, loc, builder.getIndexType(),
-                                    scalar);
-}
-
 struct DimOpLowering : public OpConversionPattern<DimOp> {
   using OpConversionPattern<DimOp>::OpConversionPattern;
 
@@ -67,9 +61,7 @@ struct BroadcastInDimOpLowering
                                 : getAffineDimExpr(target, context));
     }
 
-    SmallVector<Value> sizes;
-    for (Value extent : adaptor.getSizes())
-      sizes.push_back(extentAsIndex(rewriter, loc, extent));
+    SmallVector<Value> sizes = resultExtents(rewriter, loc, op);
 
     SmallVector<AffineMap> maps = {
         AffineMap::get(rank, 0, reads, context),
@@ -96,11 +88,7 @@ struct TransposeOpLowering : public OpConversionPattern<TransposeOp> {
                   ConversionPatternRewriter &rewriter) const override {
     auto resultType = cast<RankedTensorType>(op.getType());
     ArrayRef<int64_t> permutation = op.getPermutation();
-    SmallVector<Value> sizes = dynamicExtents(
-        rewriter, op.getLoc(), resultType, [&](int64_t axis) {
-          return std::pair<Value, int64_t>{adaptor.getOperand(),
-                                          permutation[axis]};
-        });
+    SmallVector<Value> sizes = resultExtents(rewriter, op.getLoc(), op);
     rewriter.replaceOpWithNewOp<linalg::TransposeOp>(
         op, adaptor.getOperand(),
         emptyTensor(rewriter, op.getLoc(), resultType, sizes), permutation);
@@ -118,14 +106,7 @@ struct ReshapeOpLowering : public OpConversionPattern<ReshapeOp> {
     auto operandType = cast<RankedTensorType>(adaptor.getOperand().getType());
     auto resultType = cast<RankedTensorType>(op.getType());
 
-    SmallVector<OpFoldResult> extents;
-    size_t at = 0;
-    for (int64_t extent : resultType.getShape())
-      extents.push_back(
-          ShapedType::isDynamic(extent)
-              ? OpFoldResult(
-                    extentAsIndex(rewriter, loc, adaptor.getSizes()[at++]))
-              : OpFoldResult(rewriter.getIndexAttr(extent)));
+    SmallVector<OpFoldResult> extents = resultShape(rewriter, loc, op);
 
     if (operandType.getRank() != resultType.getRank()) {
       bool collapsing = resultType.getRank() < operandType.getRank();
@@ -217,9 +198,8 @@ struct ReverseOpLowering : public OpConversionPattern<ReverseOp> {
 
     rewriter.replaceOpWithNewOp<linalg::GenericOp>(
         op, TypeRange{resultType}, ValueRange{adaptor.getOperand()},
-        ValueRange{emptyTensor(
-            rewriter, loc, resultType,
-            extentsLike(rewriter, loc, resultType, adaptor.getOperand()))},
+        ValueRange{emptyTensor(rewriter, loc, resultType,
+                               resultExtents(rewriter, loc, op))},
         maps, iterators,
         [](OpBuilder &builder, Location bodyLoc, ValueRange args) {
           linalg::YieldOp::create(builder, bodyLoc, args[0]);
@@ -274,26 +254,8 @@ struct ConcatOpLowering : public OpConversionPattern<ConcatOp> {
     int64_t rank = resultType.getRank();
     int64_t dimension = op.getDimension();
 
-    SmallVector<Value> extents;
-    for (auto [axis, extent] : llvm::enumerate(resultType.getShape())) {
-      if (!ShapedType::isDynamic(extent))
-        continue;
-      if (static_cast<int64_t>(axis) != dimension) {
-        extents.push_back(tensor::DimOp::create(rewriter, loc,
-                                                adaptor.getInputs().front(),
-                                                axis));
-        continue;
-      }
-      Value total;
-      for (Value input : adaptor.getInputs()) {
-        Value band = tensor::DimOp::create(rewriter, loc, input, axis);
-        total = total ? arith::AddIOp::create(rewriter, loc, total, band)
-                      : band;
-      }
-      extents.push_back(total);
-    }
-
-    Value destination = emptyTensor(rewriter, loc, resultType, extents);
+    Value destination = emptyTensor(rewriter, loc, resultType,
+                                    resultExtents(rewriter, loc, op));
     SmallVector<OpFoldResult> offsets(rank, rewriter.getIndexAttr(0));
     SmallVector<OpFoldResult> strides(rank, rewriter.getIndexAttr(1));
 

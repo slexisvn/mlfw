@@ -20,6 +20,7 @@
 // wrong.
 //
 // RUN: tera-capi-test %mlir_c_runner_utils 2>&1 | FileCheck %s
+// RUN: %if cuda %{ tera-capi-test %mlir_c_runner_utils %mlir_cuda_runtime 2>&1 | FileCheck %s --check-prefix=CUDA %}
 //
 //===----------------------------------------------------------------------===//
 
@@ -44,6 +45,18 @@ static const char *kModule =
     " -> tensor<?x3xf32> {\n"
     "    %r = tera.add %a, %b : tensor<?x3xf32>\n"
     "    return %r : tensor<?x3xf32>\n"
+    "  }\n"
+    "}\n";
+
+/// A weight that stays on the device and a batch that does not, which is the
+/// shape of every step of training and of inference: one argument uploaded
+/// once and read every call, one arriving fresh each time.
+static const char *kResidentModule =
+    "module @resident {\n"
+    "  func.func @scale(%w: tensor<2x3xf32> {tera.device_resident},"
+    " %x: tensor<2x3xf32>) -> tensor<2x3xf32> {\n"
+    "    %r = tera.mul %w, %x : tensor<2x3xf32>\n"
+    "    return %r : tensor<2x3xf32>\n"
     "  }\n"
     "}\n";
 
@@ -79,16 +92,68 @@ static void expectFailure(const char *label, int status) {
   printf("%s: %s\n", label, teraLastError());
 }
 
-int main(int argc, char **argv) {
-  const char *libraries[1];
-  size_t numLibraries = 0;
-  if (argc > 1) {
-    libraries[0] = argv[1];
-    numLibraries = 1;
+/// The device half of the API, which only a build with a device can run. The
+/// caller allocates once, uploads once, and then calls with a pointer the host
+/// cannot dereference -- so if the weight did not really stay there, the second
+/// answer is wrong rather than merely slow.
+static int deviceResident(const char *const *libraries, size_t numLibraries) {
+  TeraModule *module =
+      teraCompileFor(kResidentModule, "cuda", "", 3, libraries, numLibraries);
+  if (!module) {
+    printf("resident compile failed: %s\n", teraLastError());
+    return 1;
   }
 
+  void *weights = teraDeviceAlloc(module, sizeof(kA));
+  if (!weights) {
+    printf("device alloc failed: %s\n", teraLastError());
+    return 1;
+  }
+  if (teraDeviceUpload(module, weights, kA, sizeof(kA)) != 0) {
+    printf("upload failed: %s\n", teraLastError());
+    return 1;
+  }
+
+  float scaled[6] = {0};
+  int64_t shapes[4] = {2, 3, 2, 3};
+  int64_t resultShapes[2] = {2, 3};
+  for (int call = 0; call < 2; call++) {
+    void *inputs[2] = {weights, call == 0 ? (void *)kB : (void *)kA};
+    void *results[1] = {scaled};
+    if (teraInvoke(module, "scale", inputs, shapes, 2, results, resultShapes,
+                   1) != 0) {
+      printf("scale failed: %s\n", teraLastError());
+      return 1;
+    }
+    print(call == 0 ? "resident first" : "resident second", scaled, 6);
+  }
+  // CUDA: resident first: 0.125 -0.125 -0.015625 -0.1875 0.046875 -0.125
+  // CUDA: resident second: 0.25 0.0625 0.015625 0.5625 0.140625 0.25
+
+  // The weights are still where they were put, which is the whole claim.
+  float readBack[6] = {0};
+  if (teraDeviceDownload(module, readBack, weights, sizeof(kA)) != 0) {
+    printf("download failed: %s\n", teraLastError());
+    return 1;
+  }
+  print("resident weights", readBack, 6);
+  // CUDA: resident weights: 0.5 -0.25 0.125 0.75 0.375 -0.5
+
+  teraDeviceFree(module, weights);
+  teraRelease(module);
+  printf("resident released\n");
+  // CUDA: resident released
+  return 0;
+}
+
+int main(int argc, char **argv) {
+  const char *libraries[2];
+  size_t numLibraries = 0;
+  for (int index = 1; index < argc && numLibraries < 2; index++)
+    libraries[numLibraries++] = argv[index];
+
   TeraModule *module =
-      teraCompile(kModule, TERA_TARGET_CPU, 3, libraries, numLibraries);
+      teraCompileFor(kModule, "cpu", "", 3, libraries, numLibraries);
   if (!module) {
     printf("compile failed: %s\n", teraLastError());
     return 1;
@@ -206,18 +271,19 @@ int main(int argc, char **argv) {
 
   // Refused where it can still be explained, rather than at a call that has
   // already been handed the memory.
-  if (teraCompile(kNarrowModule, TERA_TARGET_CPU, 3, libraries, numLibraries)) {
+  if (teraCompileFor(kNarrowModule, "cpu", "", 3, libraries,
+                     numLibraries)) {
     printf("a narrow element type compiled, which it should not have\n");
     return 1;
   }
   printf("narrow element type: %s\n", teraLastError());
   // CHECK: narrow element type: {{.*}}keep cannot be called from here
-  // CHECK-NEXT: keep argument 0 has element type i8; only f32, f64, i32 and i64 cross the JIT boundary
+  // CHECK-NEXT: keep argument 0 has element type i8; only a float of at most 64 bits, i32 and i64 cross the JIT boundary
 
   // A second module open beside the first, to say that a handle is a handle and
   // not a name for global state.
   TeraModule *second =
-      teraCompile(kModule, TERA_TARGET_CPU, 3, libraries, numLibraries);
+      teraCompileFor(kModule, "cpu", "", 3, libraries, numLibraries);
   if (!second) {
     printf("second compile failed: %s\n", teraLastError());
     return 1;
@@ -235,8 +301,20 @@ int main(int argc, char **argv) {
   // CHECK: second module: 0.75 0.25 0 0.5 0.5 -0.25
   teraRelease(second);
 
+  // The host target has no device memory to hand out, and says so rather than
+  // answering with a pointer that faults on the first read.
+  if (teraDeviceAlloc(module, sizeof(kA))) {
+    printf("the host target handed out device memory\n");
+    return 1;
+  }
+  printf("no device memory: %s\n", teraLastError());
+  // CHECK: no device memory: {{.*}}target with no device memory
+
   teraRelease(module);
   printf("released\n");
   // CHECK: released
+
+  if (numLibraries > 1)
+    return deviceResident(libraries, numLibraries);
   return 0;
 }

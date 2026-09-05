@@ -85,17 +85,7 @@ struct DotOpLowering : public OpConversionPattern<DotOp> {
         AffineMap::get(space.count, 0, space.rhs, context),
         AffineMap::get(space.count, 0, space.result, context)};
 
-    SmallVector<Value> sizes = dynamicExtents(
-        rewriter, loc, resultType, [&](int64_t axis) {
-          AffineExpr wanted = space.result[axis];
-          for (auto [operand, exprs] :
-               {std::pair{adaptor.getLhs(), ArrayRef<AffineExpr>(space.lhs)},
-                std::pair{adaptor.getRhs(), ArrayRef<AffineExpr>(space.rhs)}})
-            for (auto [position, expr] : llvm::enumerate(exprs))
-              if (expr == wanted)
-                return std::pair<Value, int64_t>{operand, position};
-          llvm_unreachable("a free result axis came from neither operand");
-        });
+    SmallVector<Value> sizes = resultExtents(rewriter, loc, op);
 
     Value accumulator = filledTensor(rewriter, loc, resultType,
                                      zeroAttr(elementType), sizes);
@@ -200,20 +190,7 @@ struct ReduceOpLowering : public OpConversionPattern<ReduceOp> {
     llvm::sort(dimensions);
 
     auto operandType = cast<RankedTensorType>(adaptor.getOperand().getType());
-    llvm::SmallBitVector reduced(operandType.getRank());
-    for (int64_t axis : dimensions)
-      reduced.set(axis);
-    SmallVector<int64_t> surviving;
-    for (int64_t axis = 0; axis < operandType.getRank(); ++axis)
-      if (!reduced.test(axis))
-        surviving.push_back(axis);
-
-    SmallVector<Value> sizes =
-        dynamicExtents(rewriter, loc, resultType, [&](int64_t axis) {
-          return std::pair<Value, int64_t>{adaptor.getOperand(),
-                                          surviving[axis]};
-        });
-
+    SmallVector<Value> sizes = resultExtents(rewriter, loc, op);
     Value accumulator =
         filledTensor(rewriter, loc, resultType,
                      identityAttr(kind, resultType.getElementType()), sizes);

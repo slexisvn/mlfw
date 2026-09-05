@@ -1,4 +1,5 @@
 add_mlir_library(MLIRTeraExecution
+        DeviceMemory.cpp
         JitInvoker.cpp
         TensorBuffer.cpp
 

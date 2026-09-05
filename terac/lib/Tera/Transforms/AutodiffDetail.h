@@ -19,6 +19,8 @@ DenseSet<Operation *> deadOperations(Block &block);
 
 void eraseDeadOperations(Block &block);
 
+void inheritResidence(func::FuncOp primal, func::FuncOp derived);
+
 }
 
 #endif

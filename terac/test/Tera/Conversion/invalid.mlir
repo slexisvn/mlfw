@@ -22,7 +22,9 @@ func.func @constant_holds_a_count() -> tensor<?x3xf32> {
 
 // `tera.slice` computes its result extents from static bounds, so a `?` there
 // is a range its attributes cannot name. Its own shape inference says so
-// before the lowering sees it.
+// before the lowering sees it. A `?` on the *operand* is a different question
+// and is allowed: the slice is taken at extents the attributes give whatever
+// the operand turns out to be.
 func.func @slice_cannot_name_a_dynamic_range(%a: tensor<?x4xf32>) -> tensor<?x2xf32> {
   // expected-error @+2 {{are incompatible with return type}}
   // expected-error @+1 {{failed to infer returned types}}
@@ -104,3 +106,22 @@ func.func @reverse_dynamic_axis(%x: tensor<?x4xf32>) -> tensor<?x4xf32> {
       : tensor<?x4xf32> -> tensor<?x4xf32>
   return %0 : tensor<?x4xf32>
 }
+
+// -----
+
+// A `?` in the kernel is the reach of every window and the size of the
+// reduction at once, and neither is something the result can be told by an
+// operand it has not read. The window counts a spatial `?` yields are
+// arithmetic the op does for itself -- see test/Integration/dynamic-spatial.mlir
+// -- but that arithmetic needs the reach as a number.
+func.func @conv_dynamic_kernel(%x: tensor<1x1x4x4xf32>,
+                               %k: tensor<?x1x2x2xf32>)
+    -> tensor<1x?x3x3xf32> {
+  // expected-error @+1 {{cannot be lowered to linalg with a dynamic shape}}
+  %0 = tera.conv %x, %k {strides = array<i64: 1, 1>,
+                         padding = array<i64: 0, 0, 0, 0>,
+                         dilation = array<i64: 1, 1>, groups = 1 : i64}
+      : (tensor<1x1x4x4xf32>, tensor<?x1x2x2xf32>) -> tensor<1x?x3x3xf32>
+  return %0 : tensor<1x?x3x3xf32>
+}
+

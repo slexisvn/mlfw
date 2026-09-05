@@ -23,11 +23,21 @@ def Tera_Dialect : Dialect {
     }];
     let cppNamespace = "::mlir::tera";
 
+    // An op answering for its own extents builds `tensor.dim` and the
+    // arithmetic around it, so both dialects are loaded wherever tera is
+    // rather than wherever someone remembered to ask for them.
+    let dependentDialects = [
+      "::mlir::arith::ArithDialect",
+      "::mlir::tensor::TensorDialect",
+    ];
+
     let useDefaultAttributePrinterParser = 1;
 
     let hasConstantMaterializer = 1;
 
     let hasOperationAttrVerify = 1;
+
+    let hasRegionArgAttrVerify = 1;
 
     let extraClassDeclaration = [{
         void registerAttributes();
@@ -59,6 +69,13 @@ def Tera_Dialect : Dialect {
         /// function that its results are gradients for, in result order.
         static constexpr ::llvm::StringLiteral kDiffArgsAttrName =
             "tera.diff_args";
+
+        /// On a `func.func` argument, says the pointer the caller passes
+        /// already points at memory on the device, so the kernels are handed
+        /// it as it stands rather than a copy of it being staged each call.
+        /// A weight is what this is for: uploaded once, read every step.
+        static constexpr ::llvm::StringLiteral kDeviceResidentAttrName =
+            "tera.device_resident";
     }];
 }
 

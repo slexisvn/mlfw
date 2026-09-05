@@ -22,12 +22,23 @@ Value emptyTensor(OpBuilder &builder, Location loc, RankedTensorType type,
 Value filledTensor(OpBuilder &builder, Location loc, RankedTensorType type,
                    TypedAttr init, ValueRange dynamicSizes = {});
 
-SmallVector<Value>
-dynamicExtents(OpBuilder &builder, Location loc, RankedTensorType type,
-               function_ref<std::pair<Value, int64_t>(int64_t)> source);
+/// The extents of `op`'s result that its type leaves as `?`, in axis order,
+/// which is the form `tensor.empty` and `linalg.fill` want them in.
+///
+/// The conversion materialises a destination before the op that fills it, so
+/// it needs those extents as values before there is a result to read them
+/// off. Where they come from is the op's own question -- a window counts them,
+/// a contraction takes them from either operand, an elementwise op copies
+/// them -- and it is asked through `ReifyRankedShapedTypeOpInterface` rather
+/// than answered again here per pattern.
+SmallVector<Value> resultExtents(OpBuilder &builder, Location loc,
+                                 Operation *op);
 
-SmallVector<Value> extentsLike(OpBuilder &builder, Location loc,
-                               RankedTensorType type, Value operand);
+/// Every extent of `op`'s result and not only the ones its type leaves as
+/// `?`, which is what an op taking a whole shape wants. A static extent comes
+/// back as an attribute, so nothing is built for what the type already says.
+SmallVector<OpFoldResult> resultShape(OpBuilder &builder, Location loc,
+                                      Operation *op);
 
 TypedAttr zeroAttr(Type elementType);
 

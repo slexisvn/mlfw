@@ -13,6 +13,7 @@ include "Tera/IR/TeraOpsBase.td"
 
 def Tera_GatherOp
     : Tera_InferredOp<"gather", [DeclareOpInterfaceMethods<Tera_VjpOpInterface>,
+                                 Tera_Reifies,
                                  Tera_AcceptsDynamicShapes, Tera_Linear]> {
   let summary = "Read a slice of the operand at every position the indices name";
   let description = [{
@@ -71,6 +72,7 @@ def Tera_GatherOp
 
 def Tera_ScatterOp
     : Tera_InferredOp<"scatter", [DeclareOpInterfaceMethods<Tera_VjpOpInterface>,
+                                  Tera_Reifies,
                                   Tera_AcceptsDynamicShapes, Tera_Linear]> {
   let summary = "Add updates into the operand at every position the indices name";
   let description = [{
@@ -111,6 +113,7 @@ def Tera_ScatterOp
                        DenseI64ArrayAttr:$scatter_dims_to_operand_dims,
                        I64Attr:$index_vector_dim);
   let results = (outs Tera_Tensor:$result);
+  let extraClassDefinition = Tera_ReifyLikeFirstOperand;
   let assemblyFormat =
       "$operand `,` $indices `,` $updates attr-dict `:` functional-type(operands, results)";
 

@@ -1,4 +1,5 @@
 // RUN: tera-opt %s --tera-tile-and-fuse --split-input-file | FileCheck %s
+// RUN: tera-opt %s --tera-tile-and-fuse --canonicalize --cse --split-input-file | FileCheck %s --check-prefix=FOLDED --allow-unused-prefixes
 
 #identity = affine_map<(d0) -> (d0)>
 
@@ -74,7 +75,13 @@ func.func @negative_coefficient_is_left_alone(%a: tensor<64xf32>)
 
 #identity = affine_map<(d0) -> (d0)>
 
-func.func @dynamic_extent_is_left_alone(%a: tensor<?xf32>, %n: index)
+// A loop over a `?` is cut to a vector the same way a loop over a known extent
+// is. Nothing can say the tile divides it, so the loop is then split in two:
+// one over as many whole tiles as fit, whose slices are `16` and not
+// `min(16, n - i)`, and one iteration for whatever is left over. The first is
+// what the vectorizer can take, and it is where nearly every element goes.
+
+func.func @dynamic_extent_is_peeled(%a: tensor<?xf32>, %n: index)
     -> tensor<?xf32> {
   %empty = tensor.empty(%n) : tensor<?xf32>
   %squared = linalg.generic {indexing_maps = [#identity, #identity],
@@ -87,9 +94,16 @@ func.func @dynamic_extent_is_left_alone(%a: tensor<?xf32>, %n: index)
   return %squared : tensor<?xf32>
 }
 
-// CHECK-LABEL: func.func @dynamic_extent_is_left_alone
-// CHECK-NOT:     scf.for
-// CHECK:         linalg.generic
+// FOLDED-DAG:  #[[WHOLE:.*]] = affine_map<()[s0] -> ((s0 floordiv 16) * 16)>
+// FOLDED-LABEL: func.func @dynamic_extent_is_peeled
+// FOLDED:         %[[BOUND:.*]] = affine.apply #[[WHOLE]]()
+// FOLDED:         scf.for %{{.*}} = %{{.*}} to %[[BOUND]] step %{{.*}}
+// FOLDED:           tensor.extract_slice %{{.*}}[%{{.*}}] [16] [1]
+// FOLDED:           linalg.generic
+// FOLDED:           } -> tensor<16xf32>
+// FOLDED:         scf.for %{{.*}} = %[[BOUND]] to
+// FOLDED:           linalg.generic
+// FOLDED:           } -> tensor<?xf32>
 
 // -----
 

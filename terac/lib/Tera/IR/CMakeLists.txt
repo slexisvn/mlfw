@@ -21,12 +21,14 @@ add_mlir_dialect_library(MLIRTera
         MLIRTeraEnumsIncGen
 
         LINK_LIBS PUBLIC
+        MLIRArithDialect
         MLIRControlFlowInterfaces
         MLIRFunctionInterfaces
         MLIRIR
         MLIRDialectUtils
         MLIRInferTypeOpInterface
         MLIRSideEffectInterfaces
+        MLIRTensorDialect
         MLIRTransformUtils
         )
 

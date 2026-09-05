@@ -62,14 +62,6 @@ AffineExpr windowRead(MLIRContext *context, int64_t windowDim,
          getAffineDimExpr(positionDim, context) * dilation;
 }
 
-SmallVector<Value> destinationExtents(OpBuilder &builder, Location loc,
-                                      RankedTensorType type, Value source,
-                                      function_ref<int64_t(int64_t)> from) {
-  return dynamicExtents(builder, loc, type, [&](int64_t axis) {
-    return std::pair<Value, int64_t>{source, from(axis)};
-  });
-}
-
 struct ConvOpLowering : public OpConversionPattern<ConvOp> {
   using OpConversionPattern<ConvOp>::OpConversionPattern;
 
@@ -134,10 +126,12 @@ struct ConvOpLowering : public OpConversionPattern<ConvOp> {
       destinationType = groupedType(resultType, 1, groups);
     }
 
-    Value destination =
-        filledTensor(rewriter, loc, destinationType,
-                     zeroAttr(resultType.getElementType()),
-                     extentsLike(rewriter, loc, destinationType, input));
+    // Grouping inserts the group axis and divides the channel one, both
+    // static, so the extents still to be given are the result's own and in
+    // its order.
+    Value destination = filledTensor(rewriter, loc, destinationType,
+                                     zeroAttr(resultType.getElementType()),
+                                     resultExtents(rewriter, loc, op));
 
     SmallVector<AffineMap> maps = {AffineMap::get(loops, 0, reads, context),
                                    AffineMap::get(loops, 0, taps, context),
@@ -244,8 +238,7 @@ struct Pool2dOpLowering : public OpConversionPattern<Pool2dOp> {
                         APFloat::getInf(
                             cast<FloatType>(elementType).getFloatSemantics(),
                             /*Negative=*/true)));
-    SmallVector<Value> extents = destinationExtents(
-        rewriter, loc, resultType, operand, [](int64_t axis) { return axis; });
+    SmallVector<Value> extents = resultExtents(rewriter, loc, op);
     Value destination =
         filledTensor(rewriter, loc, resultType, identity, extents);
 

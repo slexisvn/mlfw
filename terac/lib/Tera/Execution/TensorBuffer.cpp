@@ -8,8 +8,12 @@
 
 #include "Tera/Execution/TensorBuffer.h"
 
+#include "llvm/ADT/APFloat.h"
+#include "llvm/ADT/APInt.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/raw_ostream.h"
+
+#include <cstring>
 
 using namespace mlir;
 using namespace mlir::tera;
@@ -58,32 +62,37 @@ void TensorBuffer::adoptDescriptorShape() {
   type = RankedTensorType::get(shape, type.getElementType());
 }
 
-enum class ElementKind { F32, F64, I32, I64 };
-
-static std::optional<ElementKind> classifyElementType(Type elementType) {
-  if (elementType.isF32())
-    return ElementKind::F32;
-  if (elementType.isF64())
-    return ElementKind::F64;
-  if (elementType.isSignlessInteger(32))
-    return ElementKind::I32;
-  if (elementType.isSignlessInteger(64))
-    return ElementKind::I64;
-  return std::nullopt;
+/// Every float is carried the same way, through the semantics its type
+/// declares, so a narrow one is not a case to add here: f16 and bf16 differ
+/// from f32 only in what `APFloat` is told, and rounding a `double` into them
+/// is the same call. What an element cannot be is a float wider than 64 bits,
+/// which would not fit back through this interface, or an integer of a width
+/// nothing on either side of the boundary uses.
+static bool isCarriable(Type elementType) {
+  if (auto floatType = dyn_cast<FloatType>(elementType))
+    return floatType.getWidth() <= 64;
+  return elementType.isSignlessInteger(32) ||
+         elementType.isSignlessInteger(64);
 }
 
-static ElementKind checkedKind(Type elementType) {
-  std::optional<ElementKind> kind = classifyElementType(elementType);
-  assert(kind && "element type checked when the buffer was created");
-  return *kind;
+/// The raw bits of one element, read as the little-endian integer they are.
+static uint64_t readBits(const char *slot, unsigned bytes) {
+  uint64_t bits = 0;
+  std::memcpy(&bits, slot, bytes);
+  return bits;
+}
+
+static void writeBits(char *slot, unsigned bytes, uint64_t bits) {
+  std::memcpy(slot, &bits, bytes);
 }
 
 LogicalResult TensorBuffer::checkElementType(Type elementType, StringRef what,
                                              raw_ostream &os) {
-  if (classifyElementType(elementType))
+  if (isCarriable(elementType))
     return success();
   os << what << " has element type " << elementType
-     << "; only f32, f64, i32 and i64 cross the JIT boundary\n";
+     << "; only a float of at most 64 bits, i32 and i64 cross the JIT "
+        "boundary\n";
   return failure();
 }
 
@@ -103,35 +112,37 @@ void TensorBuffer::fill(std::mt19937_64 &generator, double spread) {
 }
 
 double TensorBuffer::getElement(int64_t index) const {
-  const char *slot = getData() + index * getElementByteSize();
-  switch (checkedKind(type.getElementType())) {
-  case ElementKind::F32:
-    return *reinterpret_cast<const float *>(slot);
-  case ElementKind::F64:
-    return *reinterpret_cast<const double *>(slot);
-  case ElementKind::I32:
-    return *reinterpret_cast<const int32_t *>(slot);
-  case ElementKind::I64:
-    return static_cast<double>(*reinterpret_cast<const int64_t *>(slot));
+  Type elementType = type.getElementType();
+  assert(isCarriable(elementType) && "checked when the buffer was created");
+  unsigned bytes = getElementByteSize();
+  const char *slot = getData() + index * bytes;
+
+  if (auto floatType = dyn_cast<FloatType>(elementType)) {
+    APFloat held(floatType.getFloatSemantics(),
+                 APInt(floatType.getWidth(), readBits(slot, bytes)));
+    return held.convertToDouble();
   }
-  llvm_unreachable("every element kind is handled");
+  if (elementType.isSignlessInteger(32))
+    return *reinterpret_cast<const int32_t *>(slot);
+  return static_cast<double>(*reinterpret_cast<const int64_t *>(slot));
 }
 
 void TensorBuffer::setElement(int64_t index, double value) {
-  char *slot = getData() + index * getElementByteSize();
-  switch (checkedKind(type.getElementType())) {
-  case ElementKind::F32:
-    *reinterpret_cast<float *>(slot) = static_cast<float>(value);
-    return;
-  case ElementKind::F64:
-    *reinterpret_cast<double *>(slot) = value;
-    return;
-  case ElementKind::I32:
-    *reinterpret_cast<int32_t *>(slot) = static_cast<int32_t>(value);
-    return;
-  case ElementKind::I64:
-    *reinterpret_cast<int64_t *>(slot) = static_cast<int64_t>(value);
+  Type elementType = type.getElementType();
+  assert(isCarriable(elementType) && "checked when the buffer was created");
+  unsigned bytes = getElementByteSize();
+  char *slot = getData() + index * bytes;
+
+  if (auto floatType = dyn_cast<FloatType>(elementType)) {
+    APFloat rounded(value);
+    bool lost = false;
+    rounded.convert(floatType.getFloatSemantics(),
+                    APFloat::rmNearestTiesToEven, &lost);
+    writeBits(slot, bytes, rounded.bitcastToAPInt().getZExtValue());
     return;
   }
-  llvm_unreachable("every element kind is handled");
+  if (elementType.isSignlessInteger(32))
+    *reinterpret_cast<int32_t *>(slot) = static_cast<int32_t>(value);
+  else
+    *reinterpret_cast<int64_t *>(slot) = static_cast<int64_t>(value);
 }

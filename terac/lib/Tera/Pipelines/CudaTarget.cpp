@@ -31,6 +31,8 @@ struct CudaTarget : TargetBackend {
     return success();
   }
 
+  bool hasDeviceMemory() const override { return true; }
+
   ArrayRef<StringRef> getRuntimeLibraries() const override {
     static const StringRef libraries[] = {"mlir_c_runner_utils",
                                           "mlir_cuda_runtime"};

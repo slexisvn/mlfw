@@ -27,14 +27,20 @@ bool positiveCoefficients(AffineExpr expr) {
          positiveCoefficients(binary.getRHS());
 }
 
-SmallVector<int64_t> sizedDimensions(ArrayRef<int64_t> extents,
-                                     ArrayRef<utils::IteratorType> iterators,
-                                     utils::IteratorType wanted) {
+SmallVector<int64_t> dimensionsOfKind(ArrayRef<utils::IteratorType> iterators,
+                                      utils::IteratorType wanted) {
   SmallVector<int64_t> dimensions;
   for (auto [dimension, kind] : llvm::enumerate(iterators))
-    if (kind == wanted && !ShapedType::isDynamic(extents[dimension]))
+    if (kind == wanted)
       dimensions.push_back(dimension);
   return dimensions;
+}
+
+/// Whether a loop of this extent is worth cutting to `tile`. A `?` is: the
+/// extent it turns out to be is the one the tile was chosen for as often as
+/// not, and a loop left whole because nobody knew is one that stays scalar.
+bool worthTiling(int64_t extent, int64_t tile) {
+  return ShapedType::isDynamic(extent) || extent > tile;
 }
 
 bool readIterationSpace(linalg::LinalgOp op, SmallVectorImpl<int64_t> &extents,
@@ -66,15 +72,15 @@ SmallVector<int64_t> mlir::tera::chooseVectorTile(linalg::LinalgOp op,
     return {};
 
   SmallVector<int64_t> parallel =
-      sizedDimensions(extents, iterators, utils::IteratorType::parallel);
+      dimensionsOfKind(iterators, utils::IteratorType::parallel);
   if (parallel.empty())
     return {};
 
   SmallVector<int64_t> sizes(extents.size(), 0);
   for (int64_t dimension : ArrayRef<int64_t>(parallel).drop_back())
-    if (extents[dimension] > 1)
+    if (worthTiling(extents[dimension], 1))
       sizes[dimension] = 1;
-  if (extents[parallel.back()] > model.vectorLanes)
+  if (worthTiling(extents[parallel.back()], model.vectorLanes))
     sizes[parallel.back()] = model.vectorLanes;
 
   if (llvm::all_of(sizes, [](int64_t size) { return size == 0; }))
@@ -90,8 +96,8 @@ SmallVector<int64_t> mlir::tera::chooseReductionTile(linalg::LinalgOp op) {
 
   SmallVector<int64_t> sizes(extents.size(), 0);
   for (int64_t dimension :
-       sizedDimensions(extents, iterators, utils::IteratorType::reduction))
-    if (extents[dimension] > 1)
+       dimensionsOfKind(iterators, utils::IteratorType::reduction))
+    if (worthTiling(extents[dimension], 1))
       sizes[dimension] = 1;
 
   if (llvm::all_of(sizes, [](int64_t size) { return size == 0; }))

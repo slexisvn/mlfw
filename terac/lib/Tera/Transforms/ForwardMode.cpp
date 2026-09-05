@@ -76,6 +76,7 @@ LogicalResult linearize(func::FuncOp func, llvm::StringSet<> &taken) {
                                                    forwardTangents, forward));
   func::ReturnOp::create(builder, loc, returned);
   eraseDeadOperations(*body);
+  inheritResidence(func, jvp);
 
   func->setAttr(TeraDialect::kJvpAttrName,
                 FlatSymbolRefAttr::get(builder.getContext(), name));

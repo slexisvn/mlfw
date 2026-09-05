@@ -11,6 +11,7 @@
 #include "Tera/Conversion/Passes.h"
 #include "mlir/Conversion/Passes.h"
 #include "mlir/Dialect/Affine/Transforms/Passes.h"
+#include "mlir/Dialect/Arith/Transforms/Passes.h"
 #include "mlir/Dialect/Bufferization/Pipelines/Passes.h"
 #include "mlir/Dialect/Bufferization/Transforms/Passes.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -18,6 +19,7 @@
 #include "mlir/Dialect/GPU/Transforms/Passes.h"
 #include "mlir/Dialect/LLVMIR/Transforms/Passes.h"
 #include "mlir/Dialect/Linalg/Passes.h"
+#include "mlir/Dialect/Math/Transforms/Passes.h"
 #include "mlir/Dialect/MemRef/Transforms/Passes.h"
 #include "mlir/Dialect/SCF/Transforms/Passes.h"
 #include "mlir/Dialect/Vector/Transforms/Passes.h"
@@ -50,13 +52,38 @@ static void buildCleanup(OpPassManager &pm) {
   pm.addPass(createCSEPass());
 }
 
+/// Nothing below here computes in bfloat16, and no machine has a `tanh` for a
+/// float narrower than f32. Both are promoted to f32 and rounded back after
+/// every operation, which is what the narrow arithmetic meant anyway; what is
+/// left is the pair of conversions, and bfloat16's are expanded into the
+/// integer shifts they are rather than left as a call to a compiler-rt builtin
+/// the JIT has no library to find it in.
+static void buildNarrowFloats(OpPassManager &pm) {
+  math::MathExtendToSupportedTypesOptions widening;
+  widening.targetTypeStr = "f32";
+  pm.addPass(math::createMathExtendToSupportedTypes(widening));
+
+  arith::ArithEmulateUnsupportedFloatsOptions promoting;
+  promoting.sourceTypeStrs = {"bf16"};
+  promoting.targetTypeStr = "f32";
+  pm.addPass(arith::createArithEmulateUnsupportedFloats(promoting));
+
+  arith::ArithExpandOpsPassOptions expanding;
+  expanding.includeBf16 = true;
+  pm.addPass(arith::createArithExpandOpsPass(expanding));
+}
+
+static void buildFuseOnTensors(OpPassManager &pm) {
+  pm.addPass(createLinalgGeneralizeNamedOpsPass());
+  pm.addPass(createLinalgElementwiseOpFusionPass());
+  buildCleanup(pm);
+}
+
 void tera::buildTeraToLLVMPipeline(OpPassManager &pm,
                                    const TeraToLLVMOptions &options) {
   buildTeraToLinalg(pm);
   buildCleanup(pm);
-
-  pm.addPass(createLinalgElementwiseOpFusionPass());
-  buildCleanup(pm);
+  buildFuseOnTensors(pm);
 
   if (options.tile) {
     TileAndFuseOptions tiling;
@@ -84,6 +111,8 @@ void tera::buildTeraToLLVMPipeline(OpPassManager &pm,
   pm.addPass(createLowerAffinePass());
   pm.nest<func::FuncOp>().addPass(LLVM::createLLVMRequestCWrappersPass());
 
+  buildNarrowFloats(pm);
+
   pm.addPass(createConvertVectorToLLVMPass());
   pm.addPass(createUBToLLVMConversionPass());
   pm.addPass(createFinalizeMemRefToLLVMConversionPass());
@@ -97,6 +126,8 @@ void tera::buildTeraToLLVMPipeline(OpPassManager &pm,
 void tera::buildTeraToNVVMPipeline(OpPassManager &pm,
                                    const TeraToNVVMOptions &options) {
   buildTeraToLinalg(pm);
+  buildCleanup(pm);
+  buildFuseOnTensors(pm);
   buildBufferize(pm);
 
   pm.addPass(createConvertLinalgToParallelLoopsPass());
@@ -119,13 +150,15 @@ void tera::buildTeraToNVVMPipeline(OpPassManager &pm,
 
   pm.addPass(createGpuKernelOutliningPass());
 
-  pm.nest<func::FuncOp>().addPass(tera::createStageGpuBuffers());
+  pm.addPass(tera::createStageGpuBuffers());
 
   pm.nest<func::FuncOp>().addPass(createGpuAsyncRegionPass());
 
   pm.nest<func::FuncOp>().addPass(LLVM::createLLVMRequestCWrappersPass());
 
   pm.addPass(memref::createExpandStridedMetadataPass());
+
+  buildNarrowFloats(pm);
 
   gpu::GPUToNVVMPipelineOptions nvvmOptions;
   nvvmOptions.cubinChip = options.chip;

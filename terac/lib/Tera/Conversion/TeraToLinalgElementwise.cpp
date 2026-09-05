@@ -35,8 +35,7 @@ struct MapOpLowering : public OpConversionPattern<SourceOp> {
     ScalarBuilder scalarBuilder = scalar;
     Operation *source = op;
 
-    SmallVector<Value> sizes =
-        extentsLike(rewriter, loc, resultType, adaptor.getOperands().front());
+    SmallVector<Value> sizes = resultExtents(rewriter, loc, op);
     rewriter.replaceOpWithNewOp<linalg::MapOp>(
         op, adaptor.getOperands(),
         emptyTensor(rewriter, loc, resultType, sizes),

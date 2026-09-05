@@ -10,6 +10,8 @@
 #include "Tera/IR/TeraEnums.h"
 #include "Tera/IR/TeraOps.h"
 
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Interfaces/FunctionInterfaces.h"
 #include "mlir/Transforms/InliningUtils.h"
 
@@ -92,6 +94,35 @@ LogicalResult TeraDialect::verifyOperationAttribute(Operation *op,
     return belongsHere();
   }
 
+  if (name == kDeviceResidentAttrName)
+    return op->emitError() << "'" << name
+                           << "' belongs on a function argument, not here";
+
   return op->emitError() << "'" << name
                          << "' is not an attribute of the tera dialect";
+}
+
+LogicalResult TeraDialect::verifyRegionArgAttribute(Operation *op, unsigned,
+                                                    unsigned argIndex,
+                                                    NamedAttribute attribute) {
+  StringRef name = attribute.getName();
+  if (name != kDeviceResidentAttrName)
+    return op->emitError() << "'" << name
+                           << "' is not an argument attribute of the tera "
+                              "dialect";
+
+  if (!isa<UnitAttr>(attribute.getValue()))
+    return op->emitError() << "'" << name << "' must be a unit attribute";
+
+  auto function = dyn_cast<FunctionOpInterface>(op);
+  if (!function)
+    return op->emitError() << "'" << name
+                           << "' belongs on a function argument";
+
+  if (!isa<ShapedType>(function.getArgumentTypes()[argIndex]))
+    return op->emitError()
+           << "'" << name << "' is on argument " << argIndex << ", which is "
+           << function.getArgumentTypes()[argIndex]
+           << " and holds no buffer to leave on the device";
+  return success();
 }

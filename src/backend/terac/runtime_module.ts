@@ -8,11 +8,13 @@ export type TeracEntry = { name: string; inputs: number; outputs: number };
 export type TeracOptions = TeracLocation & {
   device?: string;
   optLevel?: number;
+  targetOptions?: string;
 };
 
-export const TERAC_DEFAULTS: Required<Pick<TeracOptions, 'device' | 'optLevel'>> = {
+export const TERAC_DEFAULTS: Required<Pick<TeracOptions, 'device' | 'optLevel' | 'targetOptions'>> = {
   device: 'cpu',
   optLevel: 3,
+  targetOptions: '',
 };
 
 type TensorArg = { data: unknown; shape: readonly number[]; dtype: string };
@@ -27,11 +29,11 @@ export class TeracRuntimeModule implements RuntimeModuleLike {
   executionPlan?: unknown;
 
   constructor(mlir: string, entries: readonly TeracEntry[], options: TeracOptions = {}) {
-    const { device, optLevel } = { ...TERAC_DEFAULTS, ...options };
+    const { device, optLevel, targetOptions } = { ...TERAC_DEFAULTS, ...options };
     this.mlir = mlir;
     this.device = device;
     this.entries = new Map(entries.map((entry) => [entry.name, entry]));
-    this.handle = teracCompile(mlir, device, optLevel, options);
+    this.handle = teracCompile(mlir, device, optLevel, options, targetOptions);
     finalizer.register(this, this.handle, this);
   }
 

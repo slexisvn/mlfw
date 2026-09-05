@@ -8,6 +8,7 @@
 
 #include "Tera/IR/TeraOps.h"
 
+#include "TeraOpsDetail.h"
 #include "mlir/IR/BuiltinTypes.h"
 
 using namespace mlir;
@@ -37,5 +38,22 @@ LogicalResult ConstantOp::buildVjp(OpBuilder &, ValueRange,
 LogicalResult IotaOp::buildVjp(OpBuilder &, ValueRange,
                                SmallVectorImpl<Value> &operandAdjoints) {
   operandAdjoints.assign(getSizes().size(), Value());
+  return success();
+}
+
+LogicalResult IotaOp::reifyResultShapes(OpBuilder &builder,
+                                        ReifiedRankedShapedTypeDims &reified) {
+  auto type = cast<RankedTensorType>(getType());
+  SmallVector<OpFoldResult> extents;
+  ValueRange sizes = getSizes();
+  for (int64_t extent : type.getShape()) {
+    if (!ShapedType::isDynamic(extent)) {
+      extents.push_back(builder.getIndexAttr(extent));
+      continue;
+    }
+    extents.push_back(detail::sizeAsIndex(builder, getLoc(), sizes.front()));
+    sizes = sizes.drop_front();
+  }
+  reified.push_back(std::move(extents));
   return success();
 }

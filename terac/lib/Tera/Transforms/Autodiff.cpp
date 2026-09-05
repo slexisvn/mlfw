@@ -75,6 +75,13 @@ void eraseDeadOperations(Block &block) {
       op.erase();
 }
 
+void inheritResidence(func::FuncOp primal, func::FuncOp derived) {
+  for (unsigned index = 0; index < primal.getNumArguments(); ++index)
+    if (Attribute mark = primal.getArgAttr(
+            index, TeraDialect::kDeviceResidentAttrName))
+      derived.setArgAttr(index, TeraDialect::kDeviceResidentAttrName, mark);
+}
+
 namespace {
 struct ForwardSplit {
   DenseSet<Operation *> redone;
@@ -158,9 +165,9 @@ func::FuncOp buildForward(OpBuilder &builder, func::FuncOp primal,
 
 void makeBackward(func::FuncOp scratch, StringRef name,
                   ArrayRef<Operation *> forward, const ForwardSplit &split,
-                  const DenseSet<Operation *> &dead) {
+                  const DenseSet<Operation *> &dead, unsigned seeds) {
   Block &body = scratch.getBody().front();
-  unsigned seed = body.getNumArguments() - 1;
+  unsigned seed = body.getNumArguments() - seeds;
 
   for (Operation &op : llvm::make_early_inc_range(llvm::reverse(body)))
     if (dead.contains(&op))
@@ -191,19 +198,20 @@ void makeBackward(func::FuncOp scratch, StringRef name,
 
 func::FuncOp buildWrapper(OpBuilder &builder, func::FuncOp primal,
                           StringRef name, func::FuncOp fwd, func::FuncOp bwd,
-                          size_t residuals) {
+                          unsigned seeds, size_t residuals) {
   SmallVector<Type> inputs(primal.getArgumentTypes());
-  inputs.push_back(primal.getResultTypes().front());
+  llvm::append_range(inputs, primal.getResultTypes());
 
   func::FuncOp vjp =
       openFunction(builder, primal, name, inputs, bwd.getResultTypes());
   Location loc = vjp.getLoc();
   ValueRange arguments = vjp.getBody().front().getArguments();
 
-  auto forward = func::CallOp::create(builder, loc, fwd, arguments.drop_back());
-  SmallVector<Value> given(arguments.drop_back());
+  auto forward =
+      func::CallOp::create(builder, loc, fwd, arguments.drop_back(seeds));
+  SmallVector<Value> given(arguments.drop_back(seeds));
   llvm::append_range(given, forward.getResults().take_back(residuals));
-  given.push_back(arguments.back());
+  llvm::append_range(given, arguments.take_back(seeds));
 
   auto backward = func::CallOp::create(builder, loc, bwd, given);
   func::ReturnOp::create(builder, loc, backward.getResults());
@@ -217,16 +225,17 @@ LogicalResult differentiate(func::FuncOp func, llvm::StringSet<> &taken) {
     return func.emitError()
            << "has control flow between blocks, which -tera-autodiff does not "
               "handle; use tera.if or tera.scan";
-  if (func.getNumResults() != 1)
-    return func.emitError()
-           << "must return exactly one tensor to be differentiated, not "
-           << func.getNumResults();
+  if (func.getNumResults() == 0)
+    return func.emitError() << "returns nothing to seed the reverse pass with";
 
-  auto resultType = dyn_cast<RankedTensorType>(func.getResultTypes().front());
-  if (!resultType || !isa<FloatType>(resultType.getElementType()))
-    return func.emitError()
-           << "returns " << func.getResultTypes().front()
-           << ", which carries no gradient to seed the reverse pass with";
+  for (Type type : func.getResultTypes()) {
+    auto tensorType = dyn_cast<RankedTensorType>(type);
+    if (!tensorType || !isa<FloatType>(tensorType.getElementType()))
+      return func.emitError()
+             << "returns " << type
+             << ", which carries no gradient to seed the reverse pass with";
+  }
+  unsigned seeds = func.getNumResults();
 
   FailureOr<SmallVector<int64_t>> asked = differentiableArguments(func);
   if (failed(asked))
@@ -245,7 +254,7 @@ LogicalResult differentiate(func::FuncOp func, llvm::StringSet<> &taken) {
   }
 
   SmallVector<Type> inputs(func.getArgumentTypes());
-  inputs.push_back(resultType);
+  llvm::append_range(inputs, func.getResultTypes());
   SmallVector<Type> results;
   for (int64_t position : arguments)
     results.push_back(func.getArgumentTypes()[position]);
@@ -254,7 +263,7 @@ LogicalResult differentiate(func::FuncOp func, llvm::StringSet<> &taken) {
   OpBuilder builder(func->getContext());
   func::FuncOp bwd = openFunction(builder, func, names[2], inputs, results);
   Block &body = bwd.getBody().front();
-  Value seed = body.getArguments().back();
+  ValueRange seed = body.getArguments().take_back(seeds);
 
   DenseSet<Operation *> active =
       activeOperations(func.getBody().front(), arguments);
@@ -263,7 +272,7 @@ LogicalResult differentiate(func::FuncOp func, llvm::StringSet<> &taken) {
   SmallVector<Value> forward, argumentAdjoints;
   SmallVector<Operation *> cloned;
   if (failed(differentiateBlock(builder, func.getBody().front(),
-                                body.getArguments().drop_back(), {seed},
+                                body.getArguments().drop_back(seeds), seed,
                                 forward, argumentAdjoints, reachesAGradient,
                                 &cloned))) {
     bwd.erase();
@@ -285,9 +294,12 @@ LogicalResult differentiate(func::FuncOp func, llvm::StringSet<> &taken) {
   ForwardSplit split = splitForward(body, cloned, dead);
   func::FuncOp fwd =
       buildForward(builder, func, names[1], cloned, split.saved);
-  makeBackward(bwd, names[2], cloned, split, dead);
-  func::FuncOp vjp =
-      buildWrapper(builder, func, names[0], fwd, bwd, split.saved.size());
+  makeBackward(bwd, names[2], cloned, split, dead, seeds);
+  func::FuncOp vjp = buildWrapper(builder, func, names[0], fwd, bwd, seeds,
+                                 split.saved.size());
+
+  for (func::FuncOp derived : {fwd, bwd, vjp})
+    inheritResidence(func, derived);
 
   auto positions = builder.getDenseI64ArrayAttr(arguments);
   bwd->setAttr(TeraDialect::kDiffArgsAttrName, positions);

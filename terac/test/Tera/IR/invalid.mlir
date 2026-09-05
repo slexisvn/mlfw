@@ -395,6 +395,33 @@ func.func @marker_on_an_operation(%x: tensor<4xf32>) -> tensor<4xf32> {
 
 // -----
 
+func.func @residence_on_an_operation(%x: tensor<4xf32>) -> tensor<4xf32> {
+  // expected-error @+1 {{'tera.device_resident' belongs on a function argument, not here}}
+  %0 = tera.exp %x {tera.device_resident} : tensor<4xf32>
+  return %0 : tensor<4xf32>
+}
+
+// -----
+
+// Where the argument holds no buffer there is nothing to leave anywhere, and a
+// promise about it would be read by the staging and mean nothing.
+
+// expected-error @+1 {{'tera.device_resident' is on argument 1, which is 'i1' and holds no buffer}}
+func.func @residence_on_a_scalar(%x: tensor<4xf32>, %p: i1 {tera.device_resident})
+    -> tensor<4xf32> {
+  return %x : tensor<4xf32>
+}
+
+// -----
+
+// expected-error @+1 {{'tera.differentiable' is not an argument attribute of the tera dialect}}
+func.func @marker_on_an_argument(%x: tensor<4xf32> {tera.differentiable})
+    -> tensor<4xf32> {
+  return %x : tensor<4xf32>
+}
+
+// -----
+
 func.func @gather_wrong_slice_arity(%t: tensor<10x4xf32>, %i: tensor<2xi32>) -> tensor<2x4xf32> {
   // expected-error @+2 {{expects one slice size per operand axis: 2 expected, 1 given}}
   // expected-error @+1 {{failed to infer returned types}}

@@ -34,7 +34,7 @@ def ConvertTeraToLinalg : Pass<"convert-tera-to-linalg"> {
 }
 
 def StageGpuBuffers
-    : Pass<"tera-stage-gpu-buffers", "::mlir::func::FuncOp"> {
+    : Pass<"tera-stage-gpu-buffers", "::mlir::ModuleOp"> {
   let summary = "Give every kernel operand a buffer that lives on the device.";
   let description = [{
     A `gpu.launch_func` is otherwise handed the pointer the host allocated, and
@@ -46,17 +46,40 @@ def StageGpuBuffers
     model a registered host pointer is still not valid on the device, so the
     kernel faults exactly as before. Copying is what is left.
 
-    So each buffer a kernel reads gets a `gpu.alloc` beside it, a copy in
-    before the launches and a copy back after the last one. Both directions,
-    unconditionally: which kernel writes which operand is knowable, but not
-    from the launch, and guessing it wrong is a silently wrong answer rather
-    than a slow one.
+    So each buffer a kernel touches gets a `gpu.alloc` beside it, and the
+    copies between the two are placed where the current contents move. The
+    pass walks the block the buffer lives in carrying one of four states --
+    the contents are nowhere yet, on the host, on the device, or the same on
+    both -- and emits a copy only at a transition: in before a kernel touches
+    what the host last wrote, back before the host reads what a kernel last
+    wrote. A freshly allocated buffer holds nothing worth copying in, and one
+    whose last writer is a kernel nothing goes on to read is not copied back.
 
-    The copies sit around the launches rather than at the function boundary,
-    which is only correct while the host does not touch the buffer in between.
-    That holds because every computation is in a kernel by this point, and the
-    pass checks it rather than trusting it: a host reader other than the
-    terminator or a deallocation is an error.
+    A kernel that writes gets the copy in as well as one that reads, because
+    what a kernel writes is not always all of it, and the elements it leaves
+    alone are the ones the host put there.
+
+    Which direction a kernel moves a buffer is read off the outlined
+    `gpu.func` rather than assumed, through the memory effects of the ops that
+    reach the matching argument. That is the question the earlier form of this
+    pass could not answer from the launch alone, and it is why it had to copy
+    both ways every time and forbid the host from touching a staged buffer
+    between two launches. Both restrictions are gone: a host read between two
+    kernels is a copy back and a copy in, which is what it means.
+
+    An argument carrying `tera.device_resident` is skipped: the caller has
+    already put it on the device and hands the kernels that pointer, which is
+    what a weight read every step wants rather than an upload per call. The
+    host cannot address it, so a host access to one is an error. The attribute
+    is taken off the argument once it has been honoured: below here a memref
+    is a pointer, and a promise about a pointer is one nothing can check.
+
+    An op holding regions stands for everything inside it, because a copy
+    placed in there would run once per execution of the region rather than
+    once. So a buffer a loop's kernels use crosses once, before the loop and
+    after it. The one case left over is a region that holds both a kernel and
+    a host access to the same buffer: the order between them is not visible
+    from outside, and that is an error rather than a guess.
   }];
 
   let dependentDialects = [
@@ -128,7 +151,20 @@ def VerifyGpuMapping
     A loop the conversion took is gone by now, so what is left to look for is a
     loop still carrying the `mapping` attribute that `gpu-map-parallel-loops`
     put on it: it was asked for a processor and did not get one. A loop with no
-    mapping was never a candidate and is left alone.
+    mapping was never a candidate, and on the host it is left alone -- a
+    reduction over every axis never becomes a loop the mapper walks.
+
+    Inside a `gpu.launch` the same loop means something else, and worse. The
+    conversion builds the launch from the outermost mapped loop and then walks
+    its body, but it only descends into a nested `scf.parallel`: every other
+    op, `scf.for` included, is cloned whole. A parallel loop under a sequential
+    one is therefore never reached, never mapped, and never even annotated --
+    so the mapping attribute this pass was written to look for is not there to
+    find. What is emitted is a launch whose thread block is one thread wide,
+    running the loop's every iteration in sequence. It is the same failure as
+    the host case and it is quieter, because nothing upstream reports it and
+    the numbers still come out right. A parallel loop that survives into a
+    kernel is that, whatever it carries.
   }];
 
   let dependentDialects = ["::mlir::gpu::GPUDialect"];
@@ -158,6 +194,23 @@ def TileAndFuse
     An op whose indexing maps carry a non-positive coefficient is left alone.
     Slicing one means reasoning about an index that runs backwards, which the
     upstream tiling utilities assert against rather than answer.
+
+    A loop over a `?` is cut the same way one over a known extent is, and then
+    peeled: the tile cannot be shown to divide the extent, so every slice taken
+    inside carries an `affine.min` against what is left of it, and a tile whose
+    own shape is dynamic is one `-tera-vectorize-linalg` has no vector for.
+    Peeling separates the whole tiles from the short last one, and the loop
+    holding nearly every element then has a static tile and is vectorized;
+    the one iteration left over keeps the scalar code it needs. Without it the
+    tiling would buy the loop overhead and none of the vectors it is for, which
+    is why the dynamic case was skipped entirely before.
+
+    Peeling is what this needs and not `ValueBoundsOpInterface`. Bounds would
+    answer how large the extent can be, and that is a question with no answer
+    here: a `?` arrives as a function argument and there is no fact anywhere in
+    the module that constrains it. What the tiling actually wanted was not the
+    extent but a tile whose shape is known, and peeling gives that without
+    knowing the extent at all.
   }];
 
   let options = [

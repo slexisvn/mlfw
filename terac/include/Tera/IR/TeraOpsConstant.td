@@ -31,7 +31,7 @@ def Tera_ConstantOp : Tera_Op<"constant", [ConstantLike, Pure,
   let hasFolder = 1;
 }
 
-def Tera_IotaOp : Tera_Op<"iota", [Pure, DeclareOpInterfaceMethods<Tera_VjpOpInterface>, Tera_AcceptsDynamicShapes]> {
+def Tera_IotaOp : Tera_Op<"iota", [Pure, DeclareOpInterfaceMethods<Tera_VjpOpInterface>, Tera_Reifies, Tera_AcceptsDynamicShapes]> {
   let summary = "A tensor counting up along one axis";
   let description = [{
     Element `[i0, ..., in]` holds `i[iota_dimension]`.

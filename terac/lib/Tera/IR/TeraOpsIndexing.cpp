@@ -9,6 +9,7 @@
 #include "Tera/IR/TeraOps.h"
 
 #include "TeraOpsDetail.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "llvm/ADT/STLExtras.h"
 
@@ -59,6 +60,36 @@ LogicalResult verifyIndexing(std::optional<Location> location,
 SmallVector<int64_t> GatherOp::getBatchAxes() {
   return indexBatchAxes(cast<RankedTensorType>(getIndices().getType()),
                         getIndexVectorDim());
+}
+
+LogicalResult
+GatherOp::reifyResultShapes(OpBuilder &builder,
+                            ReifiedRankedShapedTypeDims &reified) {
+  // An offset axis takes its extent from `slice_sizes`, which is an attribute
+  // and so never a `?`; a batch axis takes it from the indices, which may be
+  // one. So every dynamic result axis is a batch axis, in the order the batch
+  // axes appear.
+  int64_t rank = cast<RankedTensorType>(getType()).getRank();
+  llvm::SmallBitVector isOffset(rank);
+  for (int64_t axis : getOffsetDims())
+    isOffset.set(axis);
+  SmallVector<int64_t> batchAxes = getBatchAxes();
+
+  Location loc = getLoc();
+  SmallVector<OpFoldResult> extents;
+  size_t nextBatch = 0;
+  for (auto [axis, extent] :
+       llvm::enumerate(cast<RankedTensorType>(getType()).getShape())) {
+    int64_t source = isOffset.test(axis) ? -1 : batchAxes[nextBatch++];
+    if (!ShapedType::isDynamic(extent)) {
+      extents.push_back(builder.getIndexAttr(extent));
+      continue;
+    }
+    extents.push_back(
+        tensor::DimOp::create(builder, loc, getIndices(), source).getResult());
+  }
+  reified.push_back(std::move(extents));
+  return success();
 }
 
 LogicalResult

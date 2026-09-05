@@ -97,18 +97,6 @@ struct GatherOpLowering : public OpConversionPattern<GatherOp> {
     int64_t rank = resultType.getRank();
 
     llvm::SmallBitVector isOffset = axisMask(op.getOffsetDims(), rank);
-    SmallVector<int64_t> batchAxes = op.getBatchAxes();
-    SmallVector<Value> sizes;
-    size_t nextBatch = 0;
-    for (int64_t axis = 0; axis < rank; ++axis) {
-      if (isOffset.test(axis))
-        continue;
-      int64_t source = batchAxes[nextBatch++];
-      if (ShapedType::isDynamic(resultType.getDimSize(axis)))
-        sizes.push_back(tensor::DimOp::create(rewriter, loc,
-                                              adaptor.getIndices(), source));
-    }
-
     llvm::SmallBitVector collapsed =
         axisMask(op.getCollapsedSliceDims(),
                  cast<RankedTensorType>(op.getOperand().getType()).getRank());
@@ -124,7 +112,8 @@ struct GatherOpLowering : public OpConversionPattern<GatherOp> {
 
     rewriter.replaceOpWithNewOp<linalg::GenericOp>(
         op, TypeRange{resultType}, ValueRange{},
-        ValueRange{emptyTensor(rewriter, loc, resultType, sizes)},
+        ValueRange{emptyTensor(rewriter, loc, resultType,
+                               resultExtents(rewriter, loc, op))},
         ArrayRef<AffineMap>{identity}, iterators,
         [&](OpBuilder &builder, Location bodyLoc, ValueRange) {
           SmallVector<Value> at;
@@ -154,8 +143,7 @@ struct ScatterOpLowering : public OpConversionPattern<ScatterOp> {
     int64_t updatesRank = updatesType.getRank();
 
     Value written = bufferization::AllocTensorOp::create(
-        rewriter, loc, resultType,
-        extentsLike(rewriter, loc, resultType, adaptor.getOperand()),
+        rewriter, loc, resultType, resultExtents(rewriter, loc, op),
         adaptor.getOperand());
 
     Value zero = arith::ConstantIndexOp::create(rewriter, loc, 0);

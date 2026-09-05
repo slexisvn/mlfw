@@ -23,7 +23,7 @@ function fixture(path, contents = '') {
 
 function ffiLibrary(binding) {
   return { func(signature) {
-    if (signature.includes('teraCompile(')) return binding.compile;
+    if (signature.includes('teraCompileFor(')) return binding.compile;
     if (signature.includes('teraInvoke(')) return binding.invoke;
     if (signature.includes('teraRelease(')) return binding.release;
     if (signature.includes('teraLastError(')) return binding.lastError;
@@ -81,12 +81,19 @@ describe('native Terac library resolution and FFI contract', () => {
   });
 
   it.each([
-    ['cpu', 0, ['mlir_c_runner_utils']],
-    ['cuda', 1, ['mlir_c_runner_utils', 'mlir_cuda_runtime']],
-  ])('loads the actual runtime paths required by %s', (device, target, stems) => {
+    ['cpu', ['mlir_c_runner_utils']],
+    ['cuda', ['mlir_c_runner_utils', 'mlir_cuda_runtime']],
+  ])('names %s as the terac target and loads the runtime paths it requires', (device, stems) => {
     api.teracCompile('module {}', device, 2, location);
     const libraries = stems.map((stem) => join(location.llvmBin, stem + ext));
-    expect(native.compile).toHaveBeenCalledWith('module {}', target, 2, libraries, libraries.length);
+    expect(native.compile).toHaveBeenCalledWith('module {}', device, '', 2, libraries, libraries.length);
+  });
+
+  it('passes the target its own options', () => {
+    api.teracCompile('module {}', 'cuda', 3, location, 'chip=sm_90');
+    expect(native.compile).toHaveBeenCalledWith(
+      'module {}', 'cuda', 'chip=sm_90', 3, expect.anything(), 2,
+    );
   });
 
   it('respects explicit library precedence, reuses a loaded binding, and reloads another library', () => {
@@ -107,7 +114,7 @@ describe('native Terac library resolution and FFI contract', () => {
     const runtime = fixture(join(root, 'other-llvm/lib/libmlir_c_runner_utils' + ext));
     api.teracCompile('module {}', 'cpu', 3, { build, llvmBin });
     expect(native.load).toHaveBeenCalledWith(library);
-    expect(native.compile).toHaveBeenCalledWith('module {}', 0, 3, [runtime], 1);
+    expect(native.compile).toHaveBeenCalledWith('module {}', 'cpu', '', 3, [runtime], 1);
   });
 
   it('discovers LLVM from the build config and gives an explicit location precedence', () => {

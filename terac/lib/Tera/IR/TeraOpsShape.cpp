@@ -9,6 +9,8 @@
 #include "Tera/IR/TeraOps.h"
 
 #include "TeraOpsDetail.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/Utils/IndexingUtils.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/PatternMatch.h"
@@ -20,6 +22,36 @@ using namespace mlir;
 using namespace mlir::tera;
 using namespace mlir::tera::detail;
 
+SmallVector<OpFoldResult>
+mlir::tera::detail::reifyExtents(OpBuilder &builder, Location loc,
+                                 RankedTensorType type, Value source,
+                                 function_ref<int64_t(int64_t)> axisOf) {
+  SmallVector<OpFoldResult> extents;
+  for (auto [axis, extent] : llvm::enumerate(type.getShape())) {
+    if (!ShapedType::isDynamic(extent)) {
+      extents.push_back(builder.getIndexAttr(extent));
+      continue;
+    }
+    extents.push_back(
+        tensor::DimOp::create(builder, loc, source, axisOf(axis)).getResult());
+  }
+  return extents;
+}
+
+SmallVector<OpFoldResult>
+mlir::tera::detail::reifyExtentsLike(OpBuilder &builder, Location loc,
+                                     RankedTensorType type, Value source) {
+  return reifyExtents(builder, loc, type, source,
+                      [](int64_t axis) { return axis; });
+}
+
+Value mlir::tera::detail::sizeAsIndex(OpBuilder &builder, Location loc,
+                                      Value size) {
+  Value scalar = tensor::ExtractOp::create(builder, loc, size, ValueRange{});
+  return arith::IndexCastOp::create(builder, loc, builder.getIndexType(),
+                                    scalar);
+}
+
 SmallVector<Value> mlir::tera::detail::dynamicExtentsOf(OpBuilder &builder,
                                                         Location loc,
                                                         Value source) {
@@ -29,6 +61,117 @@ SmallVector<Value> mlir::tera::detail::dynamicExtentsOf(OpBuilder &builder,
     if (ShapedType::isDynamic(extent))
       extents.push_back(DimOp::create(builder, loc, source, axis));
   return extents;
+}
+
+LogicalResult
+BroadcastInDimOp::reifyResultShapes(OpBuilder &builder,
+                                    ReifiedRankedShapedTypeDims &reified) {
+  auto type = cast<RankedTensorType>(getType());
+  SmallVector<OpFoldResult> extents;
+  ValueRange sizes = getSizes();
+  for (int64_t extent : type.getShape()) {
+    if (!ShapedType::isDynamic(extent)) {
+      extents.push_back(builder.getIndexAttr(extent));
+      continue;
+    }
+    extents.push_back(sizeAsIndex(builder, getLoc(), sizes.front()));
+    sizes = sizes.drop_front();
+  }
+  reified.push_back(std::move(extents));
+  return success();
+}
+
+LogicalResult
+ReshapeOp::reifyResultShapes(OpBuilder &builder,
+                             ReifiedRankedShapedTypeDims &reified) {
+  auto type = cast<RankedTensorType>(getType());
+  SmallVector<OpFoldResult> extents;
+  ValueRange sizes = getSizes();
+  for (int64_t extent : type.getShape()) {
+    if (!ShapedType::isDynamic(extent)) {
+      extents.push_back(builder.getIndexAttr(extent));
+      continue;
+    }
+    extents.push_back(sizeAsIndex(builder, getLoc(), sizes.front()));
+    sizes = sizes.drop_front();
+  }
+  reified.push_back(std::move(extents));
+  return success();
+}
+
+LogicalResult
+TransposeOp::reifyResultShapes(OpBuilder &builder,
+                               ReifiedRankedShapedTypeDims &reified) {
+  ArrayRef<int64_t> permutation = getPermutation();
+  reified.emplace_back(reifyExtents(
+      builder, getLoc(), cast<RankedTensorType>(getType()), getOperand(),
+      [&](int64_t axis) { return permutation[axis]; }));
+  return success();
+}
+
+LogicalResult PadOp::reifyResultShapes(OpBuilder &builder,
+                                       ReifiedRankedShapedTypeDims &reified) {
+  Location loc = getLoc();
+  auto type = cast<RankedTensorType>(getType());
+  ArrayRef<int64_t> low = getLow();
+  ArrayRef<int64_t> high = getHigh();
+  SmallVector<int64_t> spacing = getSpacing();
+
+  SmallVector<OpFoldResult> extents;
+  for (auto [axis, extent] : llvm::enumerate(type.getShape())) {
+    if (!ShapedType::isDynamic(extent)) {
+      extents.push_back(builder.getIndexAttr(extent));
+      continue;
+    }
+    // low + n + (n - 1) * interior + high, which is
+    // (n - 1) * spacing + 1 + low + high once the holes are counted with the
+    // elements they follow.
+    Value width = tensor::DimOp::create(builder, loc, getOperand(), axis);
+    Value one = arith::ConstantIndexOp::create(builder, loc, 1);
+    Value inner = arith::SubIOp::create(builder, loc, width, one);
+    inner = arith::MulIOp::create(
+        builder, loc, inner,
+        arith::ConstantIndexOp::create(builder, loc, spacing[axis]));
+    Value border = arith::ConstantIndexOp::create(builder, loc,
+                                                  low[axis] + high[axis] + 1);
+    extents.push_back(
+        arith::AddIOp::create(builder, loc, inner, border).getResult());
+  }
+  reified.push_back(std::move(extents));
+  return success();
+}
+
+LogicalResult ConcatOp::reifyResultShapes(OpBuilder &builder,
+                                          ReifiedRankedShapedTypeDims &reified) {
+  Location loc = getLoc();
+  auto type = cast<RankedTensorType>(getType());
+  int64_t joined = getDimension();
+
+  SmallVector<OpFoldResult> extents;
+  for (auto [axis, extent] : llvm::enumerate(type.getShape())) {
+    if (!ShapedType::isDynamic(extent)) {
+      extents.push_back(builder.getIndexAttr(extent));
+      continue;
+    }
+    if (static_cast<int64_t>(axis) != joined) {
+      // Every input agrees on an axis that is not the joined one, so the first
+      // is as good an answer as any.
+      extents.push_back(
+          tensor::DimOp::create(builder, loc, getInputs().front(), axis)
+              .getResult());
+      continue;
+    }
+    Value total;
+    for (Value input : getInputs()) {
+      Value width = tensor::DimOp::create(builder, loc, input, axis);
+      total = total ? arith::AddIOp::create(builder, loc, total, width)
+                          .getResult()
+                    : width;
+    }
+    extents.push_back(total);
+  }
+  reified.push_back(std::move(extents));
+  return success();
 }
 
 LogicalResult DimOp::verify() {
@@ -115,6 +258,48 @@ LogicalResult TransposeOp::inferReturnTypes(
   inferredReturnTypes.push_back(
       RankedTensorType::get(shape, operandType.getElementType()));
   return success();
+}
+
+/// Every axis in place and nothing widened is not a broadcast at all.
+OpFoldResult BroadcastInDimOp::fold(FoldAdaptor) {
+  ArrayRef<int64_t> dimensions = getBroadcastDimensions();
+  if (getOperand().getType() != getResult().getType())
+    return {};
+  for (auto [axis, target] : llvm::enumerate(dimensions))
+    if (static_cast<int64_t>(axis) != target)
+      return {};
+  return getOperand();
+}
+
+namespace {
+/// One broadcast through another is one broadcast: each maps operand axes to
+/// result axes strictly increasingly, so following one by the other does too.
+struct ComposeBroadcasts : public OpRewritePattern<BroadcastInDimOp> {
+  using OpRewritePattern<BroadcastInDimOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(BroadcastInDimOp op,
+                                PatternRewriter &rewriter) const override {
+    auto producer = op.getOperand().getDefiningOp<BroadcastInDimOp>();
+    if (!producer)
+      return failure();
+
+    ArrayRef<int64_t> outer = op.getBroadcastDimensions();
+    SmallVector<int64_t> composed = llvm::map_to_vector(
+        producer.getBroadcastDimensions(),
+        [&](int64_t axis) { return outer[axis]; });
+
+    rewriter.replaceOpWithNewOp<BroadcastInDimOp>(
+        op, op.getResult().getType(), producer.getOperand(), op.getSizes(),
+        rewriter.getDenseI64ArrayAttr(composed));
+    return success();
+  }
+};
+
+}
+
+void BroadcastInDimOp::getCanonicalizationPatterns(RewritePatternSet &results,
+                                                   MLIRContext *context) {
+  results.add<ComposeBroadcasts>(context);
 }
 
 OpFoldResult TransposeOp::fold(FoldAdaptor) {
@@ -461,11 +646,55 @@ LogicalResult SliceOp::buildVjp(OpBuilder &builder, ValueRange adjoints,
   return success();
 }
 
+/// The slice is taken at extents the attributes give, so the result is static
+/// whatever the operand is and no destination has to be materialised. What a
+/// `?` on the operand costs is the verifier's bounds check, which cannot be
+/// made against an extent that is not there.
+bool SliceOp::acceptsDynamicShapes() { return getType().hasStaticShape(); }
+
 bool ReverseOp::acceptsDynamicShapes() {
   auto type = cast<RankedTensorType>(getOperand().getType());
   return llvm::none_of(getDimensions(), [&](int64_t axis) {
     return ShapedType::isDynamic(type.getDimSize(axis));
   });
+}
+
+namespace {
+/// Reading an axis from the far end twice reads it from the near end again, so
+/// two reversals leave the axes each names once: their symmetric difference.
+struct ComposeReverses : public OpRewritePattern<ReverseOp> {
+  using OpRewritePattern<ReverseOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(ReverseOp op,
+                                PatternRewriter &rewriter) const override {
+    auto producer = op.getOperand().getDefiningOp<ReverseOp>();
+    if (!producer)
+      return failure();
+
+    int64_t rank = cast<RankedTensorType>(op.getType()).getRank();
+    llvm::SmallBitVector once(rank);
+    for (int64_t axis : producer.getDimensions())
+      once.flip(axis);
+    for (int64_t axis : op.getDimensions())
+      once.flip(axis);
+
+    SmallVector<int64_t> remaining;
+    for (int64_t axis = 0; axis < rank; ++axis)
+      if (once.test(axis))
+        remaining.push_back(axis);
+
+    rewriter.replaceOpWithNewOp<ReverseOp>(
+        op, op.getResult().getType(), producer.getOperand(),
+        rewriter.getDenseI64ArrayAttr(remaining));
+    return success();
+  }
+};
+
+}
+
+void ReverseOp::getCanonicalizationPatterns(RewritePatternSet &results,
+                                            MLIRContext *context) {
+  results.add<ComposeReverses>(context);
 }
 
 LogicalResult ReverseOp::buildVjp(OpBuilder &builder, ValueRange adjoints,
@@ -500,6 +729,13 @@ LogicalResult PadOp::buildVjp(OpBuilder &builder, ValueRange adjoints,
   operandAdjoints.assign(
       {taken, SubOp::create(builder, getLoc(), whole, inside)});
   return success();
+}
+
+/// Joining one tensor to nothing is that tensor.
+OpFoldResult ConcatOp::fold(FoldAdaptor) {
+  if (getInputs().size() == 1)
+    return getInputs().front();
+  return {};
 }
 
 LogicalResult ConcatOp::buildVjp(OpBuilder &builder, ValueRange adjoints,

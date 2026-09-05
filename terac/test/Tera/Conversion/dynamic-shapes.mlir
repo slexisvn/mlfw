@@ -180,3 +180,47 @@ func.func @dynamic_unary(%x: tensor<?xf32>) -> tensor<?xf32> {
   %2 = tera.tanh %1 : tensor<?xf32>
   return %2 : tensor<?xf32>
 }
+
+// -----
+
+// The window count the destination is built from, in the IR. The extent it
+// starts from is read off the input rather than taken from the type, and what
+// is added to it is `pad_low + pad_high - reach` -- here 0 + 0 - 2, one less
+// than the extent because the divisor is one and the trailing `+ 1` folds in
+// with it. The select is `windowCount` answering no windows at all when the
+// reach is wider than the padded axis, which is the one case a static extent
+// settles at compile time and a `?` cannot.
+
+// CHECK-LABEL: func @conv_dynamic_spatial_axis
+// CHECK: %[[WIDTH:.*]] = tensor.dim %{{.*}}, %{{.*}} : tensor<1x1x?x4xf32>
+// CHECK: %[[SPAN:.*]] = arith.addi %[[WIDTH]], %{{.*}}
+// CHECK: arith.cmpi slt, %[[SPAN]]
+// CHECK: %[[COUNT:.*]] = arith.select
+// CHECK: tensor.empty(%[[COUNT]]) : tensor<1x2x?x3xf32>
+// CHECK: linalg.generic
+func.func @conv_dynamic_spatial_axis(%x: tensor<1x1x?x4xf32>,
+                                     %k: tensor<2x1x2x2xf32>)
+    -> tensor<1x2x?x3xf32> {
+  %0 = tera.conv %x, %k {strides = array<i64: 1, 1>,
+                         padding = array<i64: 0, 0, 0, 0>,
+                         dilation = array<i64: 1, 1>, groups = 1 : i64}
+      : (tensor<1x1x?x4xf32>, tensor<2x1x2x2xf32>) -> tensor<1x2x?x3xf32>
+  return %0 : tensor<1x2x?x3xf32>
+}
+
+// -----
+
+// Pooling reaches every axis now: the batch and channel ones it copies off the
+// operand, the spatial ones it counts.
+
+// CHECK-LABEL: func @pool_dynamic_everywhere
+// CHECK: linalg.generic
+func.func @pool_dynamic_everywhere(%x: tensor<?x?x?x?xf32>)
+    -> tensor<?x?x?x?xf32> {
+  %0 = tera.pool2d max, %x {kernel_size = array<i64: 2, 2>,
+                            strides = array<i64: 1, 1>,
+                            padding = array<i64: 0, 0, 0, 0>,
+                            ceil_mode = false, count_include_pad = true}
+      : tensor<?x?x?x?xf32> -> tensor<?x?x?x?xf32>
+  return %0 : tensor<?x?x?x?xf32>
+}

@@ -13,7 +13,9 @@ include "Tera/IR/TeraOpsBase.td"
 
 def Tera_ConvOp
     : Tera_InferredOp<"conv", [DeclareOpInterfaceMethods<Tera_VjpOpInterface>,
-                               Tera_Multilinear]> {
+                               DeclareOpInterfaceMethods<Tera_LoweringOpInterface,
+                                                         ["acceptsDynamicShapes"]>,
+                               Tera_Reifies, Tera_Multilinear]> {
   let summary = "Slide a kernel over a batch of feature maps";
   let description = [{
     The input is laid out batch, channel, then spatial axes; the kernel is
@@ -34,6 +36,16 @@ def Tera_ConvOp
     A window is only ever taken where it fits, so an axis of extent `n` yields
     `floor((n + pad_low + pad_high - ((k - 1) * dilation + 1)) / stride) + 1`
     windows.
+
+    The batch axis and the spatial axes may be dynamic: the op counts its own
+    windows through `ReifyRankedShapedTypeOpInterface`, so a spatial `?` is an
+    extent the destination can be told rather than one it has to be given.
+
+    Two `?` are still refused. One anywhere in the kernel sets the reach of
+    every window and the size of the reduction, neither of which the result can
+    be told from an operand it has not read; and one on the input's channel
+    axis is what `groups` cuts into equal parts, which is a division rather
+    than a copy and has no answer when the number being divided is not known.
 
     Example:
 
@@ -77,7 +89,8 @@ def Tera_Pool2dOp
                       [DeclareOpInterfaceMethods<Tera_VjpOpInterface>,
                        DeclareOpInterfaceMethods<Tera_JvpOpInterface, ["buildJvp"]>,
                        DeclareOpInterfaceMethods<Tera_LoweringOpInterface,
-                                                 ["verifyLoweringToLinalg"]>]> {
+                                                 ["verifyLoweringToLinalg"]>,
+                       Tera_Reifies, Tera_AcceptsDynamicShapes]> {
   let summary = "Reduce each window of a batch of feature maps";
   let description = [{
     The traversal `tera.conv` makes, reading a reduction out of each window
@@ -99,6 +112,14 @@ def Tera_Pool2dOp
 
     `ceil_mode` rounds the window count up rather than down, which lets the
     last window hang over the high edge.
+
+    Any axis may be dynamic. The batch and channel axes the result copies from
+    the operand, and the spatial ones it counts the same way it counts them
+    from a static extent, so there is no `?` here it cannot reach. What it
+    still refuses is a window that hangs off the input, and that is a question
+    about the window rather than about the extent -- so an axis it cannot see
+    is not one it can refuse, and a program that pads a dynamic axis too far
+    is one the check lets through.
   }];
 
   let arguments = (ins Tera_Tensor:$operand,

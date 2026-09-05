@@ -163,3 +163,56 @@ func.func @ordinary(%a: tensor<4xf32>) -> tensor<4xf32> {
   %0 = tera.exp %a : tensor<4xf32>
   return %0 : tensor<4xf32>
 }
+
+// -----
+
+// A weight the caller left on the device is still there when the derivative
+// runs, and the derivative's leading arguments are the primal's own -- so the
+// mark carries across to all three. `_bwd` is the one that could go wrong: it
+// takes the values the forward pass saved between the arguments and the seed,
+// and the mark has to stay on the argument rather than follow the position.
+//
+// The gradients do not inherit it. They are results, and a result comes back.
+
+// CHECK-LABEL: func @weighted(
+// CHECK-SAME:    %{{.*}}: tensor<4xf32>, %{{.*}}: tensor<4xf32> {tera.device_resident})
+// CHECK-LABEL: func @weighted_vjp(
+// CHECK-SAME:    %{{.*}}: tensor<4xf32>, %{{.*}}: tensor<4xf32> {tera.device_resident},
+// CHECK-SAME:    %{{.*}}: tensor<f32>)
+// CHECK-LABEL: func @weighted_fwd(
+// CHECK-SAME:    %{{.*}}: tensor<4xf32>, %{{.*}}: tensor<4xf32> {tera.device_resident})
+// CHECK-LABEL: func @weighted_bwd(
+// CHECK-SAME:    %{{.*}}: tensor<4xf32>, %{{.*}}: tensor<4xf32> {tera.device_resident},
+// CHECK-SAME:    %{{.*}}: tensor<4xf32>, %{{.*}}: tensor<f32>)
+func.func @weighted(%x: tensor<4xf32>, %w: tensor<4xf32> {tera.device_resident})
+    -> tensor<f32> attributes {tera.differentiable} {
+  %0 = tera.mul %x, %w : tensor<4xf32>
+  %1 = tera.tanh %0 : tensor<4xf32>
+  %2 = tera.mul %1, %1 : tensor<4xf32>
+  %3 = tera.reduce sum, %2 {dimensions = array<i64: 0>}
+      : tensor<4xf32> -> tensor<f32>
+  return %3 : tensor<f32>
+}
+
+// -----
+
+// A function with more than one result takes a seed for each, in result order,
+// and still gives one gradient per differentiable argument: the contributions
+// meet where the two results share a value. Nothing joins them into a scalar
+// first, so no loss has to be invented to differentiate a function that
+// answers with several things.
+
+// Two results, so `_vjp` takes the two arguments and then a seed for each,
+// and `_fwd` answers with both results before any residual.
+
+// CHECK-LABEL: func @two(
+// CHECK: func @two_vjp(%{{.*}}: tensor<3xf32>, %{{.*}}: tensor<3xf32>, %{{.*}}: tensor<3xf32>, %{{.*}}: tensor<3xf32>) -> (tensor<3xf32>, tensor<3xf32>)
+// CHECK: func @two_fwd(%{{.*}}: tensor<3xf32>, %{{.*}}: tensor<3xf32>) -> (tensor<3xf32>, tensor<3xf32>,
+// CHECK: func @two_bwd({{.*}}) -> (tensor<3xf32>, tensor<3xf32>)
+func.func @two(%x: tensor<3xf32>, %w: tensor<3xf32>)
+    -> (tensor<3xf32>, tensor<3xf32>) attributes {tera.differentiable} {
+  %0 = tera.mul %x, %w : tensor<3xf32>
+  %1 = tera.tanh %0 : tensor<3xf32>
+  %2 = tera.add %x, %w : tensor<3xf32>
+  return %1, %2 : tensor<3xf32>, tensor<3xf32>
+}

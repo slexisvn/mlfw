@@ -12,6 +12,7 @@
 include "Tera/IR/TeraOpsBase.td"
 
 def Tera_DotOp : Tera_InferredOp<"dot", [DeclareOpInterfaceMethods<Tera_VjpOpInterface>,
+                                         Tera_Reifies,
                                          Tera_AcceptsDynamicShapes,
                                          Tera_Multilinear]> {
   let summary = "General contraction of two tensors";
@@ -40,6 +41,8 @@ def Tera_DotOp : Tera_InferredOp<"dot", [DeclareOpInterfaceMethods<Tera_VjpOpInt
   let assemblyFormat =
       "$lhs `,` $rhs attr-dict `:` functional-type(operands, results)";
 
+  let hasCanonicalizer = 1;
+
   let extraClassDeclaration = [{
     /// The lhs axes that are neither batch nor contracting, in order. They are
     /// the result axes that follow the batch axes.
@@ -53,6 +56,7 @@ def Tera_DotOp : Tera_InferredOp<"dot", [DeclareOpInterfaceMethods<Tera_VjpOpInt
 
 def Tera_ReduceOp : Tera_InferredOp<"reduce", [DeclareOpInterfaceMethods<Tera_VjpOpInterface>,
                                               DeclareOpInterfaceMethods<Tera_JvpOpInterface, ["buildJvp"]>,
+                                              Tera_Reifies,
                                               Tera_AcceptsDynamicShapes]> {
   let summary = "Reduce a tensor over a set of axes with an associative combiner";
   let description = [{

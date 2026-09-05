@@ -25,6 +25,14 @@ LogicalResult CompareOp::inferReturnTypes(
   return success();
 }
 
+/// A predicate that is the same everywhere chooses the same side everywhere.
+OpFoldResult SelectOp::fold(FoldAdaptor adaptor) {
+  auto predicate = dyn_cast_or_null<DenseIntElementsAttr>(adaptor.getPred());
+  if (!predicate || !predicate.isSplat())
+    return {};
+  return predicate.getSplatValue<bool>() ? getOnTrue() : getOnFalse();
+}
+
 OpFoldResult ConvertOp::fold(FoldAdaptor) {
   if (getOperand().getType() == getResult().getType())
     return getOperand();

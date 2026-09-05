@@ -288,6 +288,65 @@ FailureOr<SmallVector<int64_t>> recordedShape(const llvm::json::Array *given,
   return extents;
 }
 
+/// The arguments the entry asks to have left on the device, uploaded once and
+/// pointed at for every run. What a call is handed for one of these is a device
+/// pointer in place of the host one, which is the whole of the calling
+/// convention `tera.device_resident` names.
+class ResidentInputs {
+public:
+  ResidentInputs() = default;
+  ResidentInputs(const ResidentInputs &) = delete;
+  ResidentInputs &operator=(const ResidentInputs &) = delete;
+
+  ~ResidentInputs() {
+    for (void *pointer : owned)
+      memory->release(pointer);
+  }
+
+  LogicalResult place(ArrayRef<unsigned> positions, JitInvoker &invoker,
+                      MutableArrayRef<TensorBuffer> inputs) {
+    if (positions.empty())
+      return success();
+
+    memory = invoker.getDeviceMemory();
+    if (!memory) {
+      llvm::errs() << "tera-runner: this target has no device memory to leave "
+                      "an argument on\n";
+      return failure();
+    }
+
+    for (unsigned position : positions) {
+      TensorBuffer &input = inputs[position];
+      size_t bytes = static_cast<size_t>(input.getNumElements()) *
+                     input.getElementByteSize();
+      void *pointer = memory->allocate(bytes);
+      if (!pointer) {
+        llvm::errs() << "tera-runner: the device has no room for argument "
+                     << position << "\n";
+        return failure();
+      }
+      owned.push_back(pointer);
+
+      MutableArrayRef<uint64_t> descriptor = input.getDescriptor();
+      memory->upload(pointer, reinterpret_cast<void *>(descriptor[1]), bytes);
+      descriptor[0] = descriptor[1] = reinterpret_cast<uint64_t>(pointer);
+    }
+    return success();
+  }
+
+private:
+  DeviceMemory *memory = nullptr;
+  SmallVector<void *> owned;
+};
+
+SmallVector<unsigned> residentArguments(func::FuncOp entry) {
+  SmallVector<unsigned> positions;
+  for (unsigned index = 0; index < entry.getNumArguments(); ++index)
+    if (entry.getArgAttr(index, TeraDialect::kDeviceResidentAttrName))
+      positions.push_back(index);
+  return positions;
+}
+
 LogicalResult readSignature(TypeRange types, StringRef what,
                             SmallVectorImpl<RankedTensorType> &tensors) {
   for (Type type : types) {
@@ -385,6 +444,8 @@ LogicalResult run(ModuleOp module) {
     return failure();
   }
 
+  SmallVector<unsigned> resident = residentArguments(entry);
+
   Clock::time_point started = Clock::now();
   FailureOr<std::unique_ptr<JitInvoker>> invoker =
       JitInvoker::create(module, *target, targetOptions, optLevel, sharedLibs);
@@ -392,6 +453,10 @@ LogicalResult run(ModuleOp module) {
     return failure();
   double compiled =
       std::chrono::duration<double, std::milli>(Clock::now() - started).count();
+
+  ResidentInputs onTheDevice;
+  if (failed(onTheDevice.place(resident, **invoker, inputs)))
+    return failure();
 
   if (failed((*invoker)->invoke(entryName, inputs, results)))
     return failure();

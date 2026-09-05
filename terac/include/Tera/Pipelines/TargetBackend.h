@@ -33,6 +33,12 @@ public:
                                       raw_ostream &errorStream) const = 0;
 
   virtual ArrayRef<StringRef> getRuntimeLibraries() const { return {}; }
+
+  /// Whether a buffer can be left on this target's device between calls. It
+  /// is the target that answers rather than whichever runtime libraries the
+  /// JIT happens to have loaded: a module built for the host runs on the host
+  /// even when a device runtime is loaded beside it.
+  virtual bool hasDeviceMemory() const { return false; }
 };
 
 void registerTargetBackend(std::unique_ptr<TargetBackend> backend);
