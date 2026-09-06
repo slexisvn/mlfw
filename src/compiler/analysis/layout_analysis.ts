@@ -115,7 +115,6 @@ export class LayoutAnalysis {
 
         const fromLayout = toPlainLayout(producerLayout);
         const toLayout = toPlainLayout(expectedLayout);
-        if (!fromLayout || !toLayout) continue;
         if (fromLayout.equals(toLayout)) continue;
 
         conversions.push({
@@ -168,14 +167,9 @@ export function layoutEquals(a: LayoutLike | null | undefined, b: LayoutLike | n
   return false;
 }
 
-function toPlainLayout(layout: LayoutLike | null | undefined): Layout | null {
+function toPlainLayout(layout: LayoutLike): Layout {
   if (layout instanceof Layout) return layout;
-  if (layout && typeof layout.toLayout === 'function') {
-    try { return layout.toLayout(); } catch {}
-  }
-  if (layout && layout.baseOrder && !layout.isBlocked?.()) {
-    return new Layout(layout.baseOrder as readonly number[]);
-  }
-  if (layout && layout.order) return new Layout(layout.order);
-  return null;
+  if (typeof layout.toLayout === 'function') return layout.toLayout();
+  if (layout.order) return new Layout(layout.order);
+  throw new Error(`a layout rule produced ${JSON.stringify(layout)}, which is not a Layout; return a Layout from the rule`);
 }

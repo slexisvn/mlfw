@@ -54,7 +54,7 @@ The middle case is the one this implementation improved. `item()` on a symbolic 
 
 > **Proposition 61.7 (Folding is not free).** **(stated here)** Folding a parameter of *k* elements adds *k* elements of data to the compiled artifact and removes one argument from every call. It is profitable when the weight is small relative to the per-call argument cost, or when the target links constants into the kernel rather than passing them.
 >
-> *Consequence.* The predicate must depend on the target. It does: the element cap is `Infinity` when the target reports `supportsConstBuffers` or when quantization is enabled ([`compile.ts:337`](../../../src/tracing/compile.ts)), and `MAX_FOLDABLE_ELEMENTS` otherwise.
+> *Consequence.* The predicate must depend on the target. It does: the element cap is `Infinity` when the target reports `supportsConstBuffers` or when quantization is enabled ([`compile.ts:234`](../../../src/tracing/compile.ts)), and `MAX_FOLDABLE_ELEMENTS` otherwise.
 
 > **Definition 61.8 (Optimization gate).** **(stated here)** Given a set of candidate configurations, the *gate* compiles each, runs each on the example inputs, discards any whose output differs from the baseline's beyond a tolerance, and adopts the fastest survivor only if it beats the baseline by at least a minimum gain factor.
 
@@ -162,7 +162,7 @@ The predicate is a closure over the target:
   const foldPredicate = weightPredicate(linksConstants ? Infinity : MAX_FOLDABLE_ELEMENTS);
 ```
 
-([`compile.ts:336`](../../../src/tracing/compile.ts).) Proposition 61.7's consequence, three lines. On a target that links constant buffers into the kernel there is no per-call argument to save and no cap is needed; on one that does not, a weight over 1,024 elements stays a parameter.
+([`compile.ts:235`](../../../src/tracing/compile.ts).) Proposition 61.7's consequence, three lines. On a target that links constant buffers into the kernel there is no per-call argument to save and no cap is needed; on one that does not, a weight over 1,024 elements stays a parameter.
 
 ### Around the compiler: the gate
 
@@ -178,7 +178,7 @@ The predicate is a closure over the target:
       const timed = _timeEntry(entry, exampleInputs!);
 ```
 
-([`compile.ts:402`](../../../src/tracing/compile.ts).) Baseline first, then each candidate; a candidate that fails to compile is recorded as incorrect rather than throwing. `_timeEntry` warms twice and takes the median of seven ([`:260`](../../../src/tracing/compile.ts)), and refuses asynchronous runtimes outright — so **the gate does not run on CUDA or WebGPU**, the two targets whose candidate lists are non-empty when tensor cores are present.
+([`compile.ts:307`](../../../src/tracing/compile.ts).) Baseline first, then each candidate; a candidate that fails to compile is recorded as incorrect rather than throwing. `_timeEntry` warms twice and takes the median of seven ([`:260`](../../../src/tracing/compile.ts)), and refuses asynchronous runtimes outright — so **the gate does not run on CUDA or WebGPU**, the two targets whose candidate lists are non-empty when tensor cores are present.
 
 The selection rule is nine lines:
 
@@ -312,28 +312,30 @@ Three of the four shipped targets offer nothing, so the gate is a no-op on them.
   an incorrect baseline   optimization gate: the baseline configuration must be measured and correct …
 ```
 
-Now Proposition 61.9, measured. The lab runs the gate eight times on a CPU target, each round with a slightly different input width so the decision cache cannot answer, and then compiles the two configurations separately and compares their emitted source:
+Proposition 61.9 turns on one quantity — this apparatus's noise — so measure that. The lab runs the gate eight times on a CPU target, each round with a slightly different input width so the decision cache cannot answer, and then compiles the two configurations separately and compares their emitted source:
 
 ```
       N   baseline     layout    gain  winner
-    128      1.361      1.309   1.000  baseline
-    129      1.263      1.238   1.000  baseline
-    130      1.236      1.242   1.000  baseline
-    131      1.313      1.269   1.000  baseline
-    132      1.267      1.230   1.000  baseline
-    133      1.475      1.270   1.161  layout
-    134      1.276      1.487   1.000  baseline
-    135      1.307      1.342   1.000  baseline
+    128      1.384      1.513   1.000  baseline
+    129      1.496      1.149   1.302  layout
+    130      1.370      1.163   1.178  layout
+    131      1.581      1.263   1.252  layout
+    132      1.433      1.388   1.000  baseline
+    133      1.589      1.390   1.143  layout
+    134      1.304      1.255   1.000  baseline
+    135      1.385      1.323   1.000  baseline
 
-  the two configurations emit byte-identical source (877 vs 877 characters)
-  and the gate still preferred 'layout' in 1 of 8 rounds.
+  the two configurations emit different source (877 vs 1098 characters)
+  and the gate still preferred 'layout' in 4 of 8 rounds.
 ```
 
-**The two configurations compile to the same 877 characters**, because — as [Chapter 25](../../part4/ch25-layout/README.md) found — `layoutAwareOps` is empty for every shipped target, so the layout pass proposes conversions and discards all of them. The gate is therefore measuring one program against itself, and on this machine it reports a 1.16× "gain" often enough to adopt the "winner" in one round of eight. Repeated runs of the lab land between one and four.
+**The two configurations are two different programs**, 877 characters against 1,098: the `dot` in this model has a CPU layout preference for its right-hand operand ([Chapter 25](../../part4/ch25-layout/README.md)), the pass accepts it, and a transpose appears. There is a real difference to find, and where the gate finds it, it measures it at 1.14× to 1.30×.
 
-Nothing goes wrong here, because the two programs are the same program. The finding is about the floor: **1.05 is below this apparatus's noise**, so the gate as configured cannot distinguish a 5% improvement from a quiet machine. §61.7 says what would fix it.
+The column to read is the first one. **The baseline's own timing runs from 1.304 to 1.589 — a spread of 22%, against a floor of 1.05.** The eight rounds are eight slightly different programs — `N` walks from 128 to 135, so the last round does about 5% more arithmetic than the first — and that accounts for five of those twenty-two points. The rest is the machine: the minimum lands at `N = 134` and the maximum at `N = 133`, which is not what a workload trend looks like. So a real 1.1×–1.3× improvement is being measured through noise several times its own size, and the gate misses it in half the rounds — four adoptions out of eight, on a difference that is there every time. Repeated runs of the lab land anywhere between three and eight.
 
-**Try this.** Raise the floor by passing a larger `minGain` to `selectWinner` on the recorded measurements and watch the spurious adoptions disappear; then lower `GATE_REPEAT` from 7 to 1 in [`compile.ts:232`](../../../src/tracing/compile.ts) and watch them multiply. The median of seven is doing real work, and it is not doing enough of it.
+Proposition 61.9 bounds the spurious adoptions a floor this low will wave through; this table is the same fact seen from the other side, where the noise is large enough to hide a genuine win instead of manufacturing a fake one. One floor cannot fix both — a higher one rejects more real gains, a lower one admits more noise — which is why §61.7 asks for more measurements rather than a better threshold.
+
+**Try this.** Raise the floor by passing a larger `minGain` to `selectWinner` on the recorded measurements: the marginal rounds stop adopting, and here that means losing wins that were real. Then lower `GATE_REPEAT` from 7 to 1 in [`compile.ts:141`](../../../src/tracing/compile.ts) and watch the whole column become unstable in both directions. The median of seven is doing real work, and it is not doing enough of it.
 
 ## 61.6 What tracing hands to the rest of the framework
 
@@ -349,7 +351,7 @@ Nothing goes wrong here, because the two programs are the same program. The find
 
 ### The active tracer is a module-global, and nesting is not detected
 
-`_activeTracer` is a single module-level variable; `activate()` overwrites it and `deactivate()` clears it only if the tracer is still the active one ([`tracer.ts:213`](../../../src/tracing/tracer.ts)). Tracing a model whose `forward` itself calls `compile()` — or `trace()` — replaces the active tracer, and the inner `deactivate()` restores `null` rather than the outer tracer. The outer trace then continues with the guard's `TRACING` key still set and no tracer, and every subsequent operation throws `TRACING dispatch key active but no tracer is set`. The failure is loud, which is the good half; the message names the operation rather than the nesting, which is the other half.
+`_activeTracer` is a single module-level variable; `activate()` overwrites it and `deactivate()` clears it only if the tracer is still the active one ([`tracer.ts:274`](../../../src/tracing/tracer.ts)). Tracing a model whose `forward` itself calls `compile()` — or `trace()` — replaces the active tracer, and the inner `deactivate()` restores `null` rather than the outer tracer. The outer trace then continues with the guard's `TRACING` key still set and no tracer, and every subsequent operation throws `TRACING dispatch key active but no tracer is set`. The failure is loud, which is the good half; the message names the operation rather than the nesting, which is the other half.
 
 ### The trace records what dispatched, and the user's operation may not be it
 
@@ -365,13 +367,13 @@ Two mechanisms, one consequence. Eleven operations are traced by redispatching t
 
 ### The gate's floor is below its own noise, and its cache outlives the measurement
 
-§61.5 measures the first half. The second: `_gateDecisions` is a module-global `Map` keyed by graph signature, target name and candidate list ([`compile.ts:229`](../../../src/tracing/compile.ts)), and `clearOptimizationGateCache` exists but is not exported from [`src/index.ts`](../../../src/index.ts). So a spurious decision taken once — on a machine that was briefly busy — is reused for every subsequent compilation of a graph with the same operation names and input shapes, for the lifetime of the process, with no way for a caller to invalidate it.
+§61.5 measures the first half. The second: `_gateDecisions` is a module-global `Map` keyed by graph signature, target name and candidate list ([`compile.ts:138`](../../../src/tracing/compile.ts)), and `clearOptimizationGateCache` exists but is not exported from [`src/index.ts`](../../../src/index.ts). So a spurious decision taken once — on a machine that was briefly busy — is reused for every subsequent compilation of a graph with the same operation names and input shapes, for the lifetime of the process, with no way for a caller to invalidate it.
 
 The signature is `opNames.join(',') + '#' + shapes.join(';')` ([`opt_gate.ts:85`](../../../src/compiler/pipeline/opt_gate.ts)), so it does not include dtypes, attributes, or the captured weights' shapes. Two models with the same operation sequence and the same *input* shapes but different hidden widths share a cached decision.
 
 ### The gate cannot run on the targets that have candidates
 
-`_timeEntry` returns `null` when execution is asynchronous, and the gate then abandons ([`compile.ts:412`](../../../src/tracing/compile.ts)). CUDA and WebGPU both execute asynchronously ([Chapter 59 §59.5](../ch59-the-runtime-module/README.md)), and they are the only targets that can offer `tensorize`. So the gate measures candidates on the target where the only candidate is a no-op, and declines to measure on the targets where the candidates are real. The recorded reason is honest — `'runtime is asynchronous; the gate only measures synchronous runtimes'` — and it is recorded in a measurement object the caller sees only via `tuningReport()`.
+`_timeEntry` returns `null` when execution is asynchronous, and the gate then abandons ([`compile.ts:309`](../../../src/tracing/compile.ts)). CUDA and WebGPU both execute asynchronously ([Chapter 59 §59.5](../ch59-the-runtime-module/README.md)), and they are the only targets that can offer `tensorize`. So the gate measures on the one target whose single candidate it can time, and declines to measure on the two targets that also offer `tensorize`. The recorded reason is honest — `'runtime is asynchronous; the gate only measures synchronous runtimes'` — and it is recorded in a measurement object the caller sees only via `tuningReport()`.
 
 ### `_bucketInputs` fabricates tensors
 
@@ -381,11 +383,11 @@ The signature is `opNames.join(',') + '#' + shapes.join(';')` ([`opt_gate.ts:85`
   }
 ```
 
-([`compile.ts:452`](../../../src/tracing/compile.ts).) `shapeBuckets` pre-compiles for a list of shapes by tracing with objects that have a `shape` and a `dtype` and are not tensors. That works because tracing reads only those two fields from its example inputs — but it is an undocumented dependency between two files, and any future use of an example input's `device` or `data` during tracing will fail here and nowhere else. The cast to `Tensor` is where the type system was told to stop looking.
+([`compile.ts:349`](../../../src/tracing/compile.ts).) `shapeBuckets` pre-compiles for a list of shapes by tracing with objects that have a `shape` and a `dtype` and are not tensors. That works because tracing reads only those two fields from its example inputs — but it is an undocumented dependency between two files, and any future use of an example input's `device` or `data` during tracing will fail here and nowhere else. The cast to `Tensor` is where the type system was told to stop looking.
 
 ### Errors carry a repro record that nothing reads
 
-`_attachRepro` attaches `{ name, phase, target, inputs, config }` to any error thrown during compilation or execution ([`compile.ts:304`](../../../src/tracing/compile.ts)). It is a good idea — [Chapter 67](../../OUTLINE.md) will want exactly this — and there is no consumer: nothing in `src/` reads `error.repro`, no formatter prints it, and it does not appear in the error's `message`. A user who hits it sees the original message and has to know to inspect a non-standard property.
+`_attachRepro` attaches `{ name, phase, target, inputs, config }` to any error thrown during compilation or execution ([`compile.ts:201`](../../../src/tracing/compile.ts)). It is a good idea — [Chapter 67](../../OUTLINE.md) will want exactly this — and there is no consumer: nothing in `src/` reads `error.repro`, no formatter prints it, and it does not appear in the error's `message`. A user who hits it sees the original message and has to know to inspect a non-standard property.
 
 ## 61.8 Read the tests
 

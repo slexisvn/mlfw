@@ -55,7 +55,7 @@ format makes about itself, because a second implementation checks it.
 
 Three design decisions are visible in that table.
 
-**Nesting is by indentation and braces, not by a flat encoding.** A region prints as a `{ ... }` block below its operation, and the parser reconstructs depth from the indent width. That makes the format readable at the cost of making it whitespace-sensitive — `parseModule` takes an `indentWidth` option defaulting to 2 ([`parser.ts:753`](../../../src/compiler/ir/graph/parser.ts)) because it has to.
+**Nesting is by indentation and braces, not by a flat encoding.** A region prints as a `{ ... }` block below its operation, and the parser reconstructs depth from the indent width. That makes the format readable at the cost of making it whitespace-sensitive — `parseModule` takes an `indentWidth` option defaulting to 2 ([`parser.ts:851`](../../../src/compiler/ir/graph/parser.ts)) because it has to.
 
 **Every operation has two spellings, and the printer picks the narrower one it can justify.** The *custom form* is the one the dialect defines for that operation — `tera.add %0, %1 : tensor<2x2xf32>` prints one type because `tera.add`'s operands and result must share it. The *generic form* spells the operation name as a string and lists every type — `"tera.add"(%0, %1) : (tensor<2x8xf32>, tensor<8xf32>) -> tensor<2x8xf32>`. That second line is not a formatting choice: mlfw's `add` broadcasts its operands and `tera.add` does not, so the custom form would be claiming the bias has a shape it does not have. The rule is [`mlir_format.ts:236`](../../../src/compiler/ir/graph/mlir_format.ts): print the custom form only when it carries enough to reconstruct the operation, and fall back to the generic form — which is always lossless — when it does not. Anything the dialect does not define at all goes generic too, which is why `"tera.fusion"` appears that way above.
 
@@ -63,7 +63,7 @@ Three design decisions are visible in that table.
 
 ## 13.3 In mlfw: printing
 
-[`printer.ts:90`](../../../src/compiler/ir/graph/printer.ts) is where the choice of spelling is made, and it is two lines long:
+[`printer.ts:274`](../../../src/compiler/ir/graph/printer.ts) is where the choice of spelling is made, and it is two lines long:
 
 ```ts
     const form = this._formOf(op);
@@ -85,7 +85,7 @@ An operation's attributes live in a `Map`, which preserves insertion order. Two 
 
 **Values are numbered by the printer, from zero, per function** ([`printer.ts:271`](../../../src/compiler/ir/graph/printer.ts)) — Chapter 8 §8.6 covered why. The consequence for round-tripping is that `%n` is not data to be preserved; it is a label regenerated on each print, and the second print of a re-parsed module reproduces it exactly because the walk order is the same.
 
-**Non-finite floats print as their bit pattern** ([`mlir_format.ts:304`](../../../src/compiler/ir/graph/mlir_format.ts)):
+**Non-finite floats print as their bit pattern** ([`mlir_format.ts:551`](../../../src/compiler/ir/graph/mlir_format.ts)):
 
 ```ts
 export function formatFloatLiteral(value: number, dtype: ScalarDType): string {
@@ -109,7 +109,7 @@ But an `Operation` cannot be constructed without its operands: look back at [`op
 
 So the parser cannot build in reading order, and it splits in two.
 
-**Phase one — read the text into records.** `RecordReader` ([`parser.ts:408`](../../../src/compiler/ir/graph/parser.ts)) turns each line into an `OpRecord`: the operation name, result names as *strings*, result types, attributes, operand names as *strings*, and nested region records. No `Operation` is constructed, and nothing is resolved. A record also carries its dependency set, gathered from its own operands and, recursively, from everything its regions reference ([`parser.ts:591`](../../../src/compiler/ir/graph/parser.ts)):
+**Phase one — read the text into records.** `RecordReader` ([`parser.ts:438`](../../../src/compiler/ir/graph/parser.ts)) turns each line into an `OpRecord`: the operation name, result names as *strings*, result types, attributes, operand names as *strings*, and nested region records. No `Operation` is constructed, and nothing is resolved. A record also carries its dependency set, gathered from its own operands and, recursively, from everything its regions reference ([`parser.ts:674`](../../../src/compiler/ir/graph/parser.ts)):
 
 ```ts
 function collectRegionDeps(blocks: readonly BlockRecord[], deps: Set<string>): void {
@@ -123,7 +123,7 @@ function collectRegionDeps(blocks: readonly BlockRecord[], deps: Set<string>): v
 
 That recursion matters: an operation with a region depends on everything the region's body reads, so a `fusion` must be built after the producers its body refers to — the same fact `capturedValues` computes for the topological sort in Chapter 9.
 
-**Phase two — order by dependency, then materialize.** [`parser.ts:599`](../../../src/compiler/ir/graph/parser.ts):
+**Phase two — order by dependency, then materialize.** [`parser.ts:682`](../../../src/compiler/ir/graph/parser.ts):
 
 ```ts
 function dependencyOrder(ops: readonly OpRecord[]): OpRecord[] {
@@ -255,9 +255,9 @@ with the line number of the edit. That is Chapter 12's invariant 1, enforced at 
 
 ## 13.7 Traps and limits
 
-- **Indentation is significant, and the width is a parameter.** `toLines` divides leading spaces by `indentWidth` ([`parser.ts:474`](../../../src/compiler/ir/graph/parser.ts)). Text indented with tabs, or with three spaces, will not parse as the nesting you see. When hand-writing, copy a printout and edit it rather than typing from scratch.
+- **Indentation is significant, and the width is a parameter.** `toLines` divides leading spaces by `indentWidth` ([`parser.ts:794`](../../../src/compiler/ir/graph/parser.ts)). Text indented with tabs, or with three spaces, will not parse as the nesting you see. When hand-writing, copy a printout and edit it rather than typing from scratch.
 - **The parser is more permissive than the verifier, and "it parsed" is not "it is valid".** The parser enforces the SSA core and the syntax: every name resolves, no name is bound twice, no dependency cycle. It does not check arity, unknown operations, types, traits, or **operation ordering**. §13.6's "Try this" is one demonstration; Chapter 8's Lab 2 is the sharper one, because it looks like a success. Reversing a printed function moves `return` to the top, the parser accepts it happily — it builds operations in dependency order rather than reading order, so a terminator appearing first is not a problem *for parsing* — and the resulting module then fails `verifyModule` with `a terminator must be the last operation in its block`. The parser will construct block structures the verifier rejects, which is the right division of labour (the parser's job is to read what the printer wrote) but a trap if you take acceptance as a verdict. Anything hand-written or hand-permuted should go through `verifyModule` before you trust it.
-- **A function may have only one top-level block, and the entry block may not be labelled** ([`parser.ts:523`](../../../src/compiler/ir/graph/parser.ts) and [`parser.ts:526`](../../../src/compiler/ir/graph/parser.ts)). The data structure permits more; the format does not, because nothing generates it.
+- **A function may have only one top-level block, and the entry block may not be labelled** ([`parser.ts:839`](../../../src/compiler/ir/graph/parser.ts) and [`parser.ts:842`](../../../src/compiler/ir/graph/parser.ts)). The data structure permits more; the format does not, because nothing generates it.
 - **Round-tripping is a property of what the printer prints, not of the object.** `Q(P(m))` is a *different module* from `m` — new objects, new internal ids, and any field the printer does not emit is gone. Attributes the printer cannot represent fall through `formatAttrValue`'s final `String(val)` and come back as a string. If you attach an exotic attribute to an operation, check that it survives before relying on the text.
 - **`%n` numbering is per function and per print.** Two printouts of the same function agree; a printout of a function and a printout of the module containing it also agree, because `printFunction` resets the counter. But value labels are not stable identifiers across edits — insert one operation near the top and every number below it shifts, which makes textual diffs of IR noisier than they look.
 

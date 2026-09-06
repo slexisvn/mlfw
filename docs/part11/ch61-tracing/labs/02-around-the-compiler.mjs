@@ -63,7 +63,7 @@ catch (e) { console.log(`  ${'an incorrect baseline'.padEnd(23)} ${e.message}`);
 console.log(`\n  cache key: ${gateCacheKey(graphSignature(['dot', 'add', 'maximum'], [[64, 128]]), 'cuda_generic', optimizationCandidates(CUDATarget({ supportsTensorCore: true })))}`);
 console.log(`  candidateByName(..., 'layout') on a CPU target -> ${JSON.stringify(candidateByName(optimizationCandidates(CPUTarget()), 'layout'))}`);
 
-console.log('\n=== the gate, run for real, eight times over identical code ===\n');
+console.log('\n=== the gate, run for real, eight times ===\n');
 console.log('  Each round uses a fresh input width so the decision cache does not answer for it.\n');
 console.log(`  ${'N'.padStart(5)} ${'baseline'.padStart(10)} ${'layout'.padStart(10)} ${'gain'.padStart(7)}  winner`);
 let picks = 0;

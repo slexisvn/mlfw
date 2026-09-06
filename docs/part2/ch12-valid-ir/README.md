@@ -43,7 +43,7 @@ The surprise on first reading this codebase is that there is not one verifier. T
 
 ### The parser — structure, at read time
 
-Chapter 13 covers it properly, but note now that reading IR text enforces invariants 1 and 2 by construction. The parser resolves operand names against a symbol table ([`parser.ts:438`](../../../src/compiler/ir/graph/parser.ts)):
+Chapter 13 covers it properly, but note now that reading IR text enforces invariants 1 and 2 by construction. The parser resolves operand names against a symbol table ([`parser.ts:720`](../../../src/compiler/ir/graph/parser.ts)):
 
 ```ts
   resolve(name: string, line: number): Value {
@@ -53,11 +53,11 @@ Chapter 13 covers it properly, but note now that reading IR text enforces invari
   }
 ```
 
-and refuses a name bound twice ([`parser.ts:433`](../../../src/compiler/ir/graph/parser.ts)), and detects cycles while ordering ([`parser.ts:413`](../../../src/compiler/ir/graph/parser.ts)). Text that violates the SSA core never becomes a module at all.
+and refuses a name bound twice ([`parser.ts:716`](../../../src/compiler/ir/graph/parser.ts)), and detects cycles while ordering ([`parser.ts:692`](../../../src/compiler/ir/graph/parser.ts)). Text that violates the SSA core never becomes a module at all.
 
 ### `verify()` — the signature, cheaply, on demand
 
-`GraphModule.verify()` and `GraphFunction.verify()` are instance methods, available to anyone holding a module ([`function.ts:121`](../../../src/compiler/ir/graph/function.ts)):
+`GraphModule.verify()` and `GraphFunction.verify()` are instance methods, available to anyone holding a module ([`function.ts:134`](../../../src/compiler/ir/graph/function.ts)):
 
 ```ts
   verify(): string[] {
@@ -126,7 +126,7 @@ This is the strongest check in the file. It says: *the type this value claims mu
 
 ### Traits verify themselves
 
-`verifyTraits` ([`trait_verifier.ts:29`](../../../src/compiler/ir/graph/trait_verifier.ts)) is a second small registry:
+`verifyTraits` ([`trait_verifier.ts:30`](../../../src/compiler/ir/graph/trait_verifier.ts)) is a second small registry:
 
 ```ts
 export function verifyTraits(op: Operation): string[] {
@@ -142,7 +142,7 @@ export function verifyTraits(op: Operation): string[] {
 }
 ```
 
-Eight traits have verifiers, and reading them is the fastest way to learn what each trait actually promises. `TERMINATOR` ([`trait_verifier.ts:151`](../../../src/compiler/ir/graph/trait_verifier.ts)):
+Eight traits have verifiers, and reading them is the fastest way to learn what each trait actually promises. `TERMINATOR` ([`trait_verifier.ts:152`](../../../src/compiler/ir/graph/trait_verifier.ts)):
 
 ```ts
 registerTraitVerifier(OpTrait.TERMINATOR, (op) => {
@@ -155,7 +155,7 @@ registerTraitVerifier(OpTrait.TERMINATOR, (op) => {
 
 That is the invariant Chapter 8 discovered by accident when `getReturnOp()` returned `null` on a reversed module. It is real, it is enforced, and it is the one place textual order carries meaning.
 
-`VIEW` is the one to read for the flavour of the rest ([`trait_verifier.ts:158`](../../../src/compiler/ir/graph/trait_verifier.ts)):
+`VIEW` is the one to read for the flavour of the rest ([`trait_verifier.ts:159`](../../../src/compiler/ir/graph/trait_verifier.ts)):
 
 ```ts
 registerTraitVerifier(OpTrait.VIEW, (op) => {
@@ -174,7 +174,7 @@ registerTraitVerifier(OpTrait.VIEW, (op) => {
 
 A view reshapes; it does not reinterpret bytes. Declaring `VIEW` on an operation that changes dtype is now an error rather than a miscompile in whichever pass trusted the trait.
 
-And `IDEMPOTENT` ([`trait_verifier.ts:132`](../../../src/compiler/ir/graph/trait_verifier.ts)) carries its own justification in the message text — `so folding f(x, x) -> x would not preserve types` — which is exactly the right way to write a verifier message: it names the optimization that would break.
+And `IDEMPOTENT` ([`trait_verifier.ts:133`](../../../src/compiler/ir/graph/trait_verifier.ts)) carries its own justification in the message text — `so folding f(x, x) -> x would not preserve types` — which is exactly the right way to write a verifier message: it names the optimization that would break.
 
 ## 12.4 Lab — Break it eight ways
 

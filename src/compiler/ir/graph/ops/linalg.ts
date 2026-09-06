@@ -6,20 +6,46 @@ type LinalgInferOpts = Readonly<{ allowMixedDtype?: boolean; outputDtype?: Scala
 type LinalgInferExtra = readonly IRType[] | LinalgInferOpts | null;
 import { TensorType, DYNAMIC, Layout } from '../types.js';
 import { LayoutPreference } from '../layout_pref.js';
+import { validateGraphProfile } from '../../layout/profiles.js';
 import type { LayoutTarget } from '../layout_pref.js';
 import type { Operation } from '../operation.js';
 import type { ScalarDType } from '../types.js';
+import type { SymExpr } from '../../sym_int.js';
 import * as pat from '../patterns.js';
 import * as qpat from '../quantization_patterns.js';
 
 const NHWC_RANK = 4;
 
+function blockDivides(input: TensorType | null, block: Readonly<{ dim: number; factor: number }>): boolean {
+  if (!input) return false;
+  const extent = input.shape[block.dim];
+  return typeof extent === 'number' && extent > 0 && extent % block.factor === 0;
+}
+
 function convLayout(op: Operation, target: LayoutTarget): LayoutPreference | null {
   const input = op.getOperand(0).type as TensorType;
   const rank = input ? input.rank : NHWC_RANK;
-  if (target.preferredConvLayout) {
-    const preferred = target.preferredConvLayout as unknown as Layout;
-    return new LayoutPreference([preferred, null], [preferred]);
+  const spec = target.preferredConvLayout;
+  if (spec && spec.order.length === rank) {
+    if (!spec.block) {
+      const preferred = new Layout(spec.order);
+      return new LayoutPreference([preferred, null], [preferred]);
+    }
+    const kernel = op.getOperand(1).type as TensorType;
+    const channelDim = (op.getAttr<string>('input_layout') || '').indexOf('C');
+    const kernelChannelDim = (op.getAttr<string>('kernel_layout') || '').indexOf('I');
+    const block = { dim: kernelChannelDim, factor: spec.block.factor };
+    if ((op.getAttr<number>('groups') || 1) === 1
+      && channelDim === spec.block.dim && kernelChannelDim >= 0
+      && blockDivides(input, spec.block) && blockDivides(kernel, block)) {
+      const preferred = Layout.blocked(spec.order, spec.block.dim, spec.block.factor);
+      const kernelLayout = Layout.blocked(spec.order, block.dim, block.factor);
+      const admits = (layout: Layout, t: TensorType) =>
+        validateGraphProfile(layout.bind(t.shape), t.shape as readonly SymExpr[]).length === 0;
+      if (admits(preferred, input) && admits(kernelLayout, kernel)) {
+        return new LayoutPreference([preferred, kernelLayout], [preferred]);
+      }
+    }
   }
   if (rank !== NHWC_RANK || !(target.isGPU() || target.isCPU())) return null;
   const nhwc = new Layout([0, 2, 3, 1]);

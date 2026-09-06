@@ -54,6 +54,11 @@ struct TileParallelLoops
     for (scf::ParallelOp loop : loops) {
       if (loop.getNumReductions() != 0)
         continue;
+      // A parallel loop under another one is already a thread level: cutting
+      // it again would make a third level, which is one more than a launch
+      // has processors to map.
+      if (loop->getParentOfType<scf::ParallelOp>())
+        continue;
       SmallVector<int64_t> tile =
           given.empty() ? chooseBlockTile(loop, model) : given;
       if (tile.empty())

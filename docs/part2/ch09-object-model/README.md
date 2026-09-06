@@ -108,11 +108,11 @@ export class GraphFunction {
 
 The signature is `Object.freeze`d. That is an invariant expressed in the type system rather than in a comment: a pass may rewrite everything inside a function, but it may not change what the function *is* to its callers. When Chapter 5's dead-branch model kept two unused parameters, this is why — the interface is not a pass's to edit.
 
-Note also that the entry block is constructed *from* `inputTypes`, so the parameters and the block arguments are the same objects by construction. The verifier checks the correspondence anyway ([`verifier.ts:47`](../../../src/compiler/ir/graph/verifier.ts)), because a pass could add an argument later.
+Note also that the entry block is constructed *from* `inputTypes`, so the parameters and the block arguments are the same objects by construction. The verifier checks the correspondence anyway ([`verifier.ts:60`](../../../src/compiler/ir/graph/verifier.ts)), because a pass could add an argument later.
 
 ### Module — a map from name to function
 
-[`module.ts:4`](../../../src/compiler/ir/graph/module.ts):
+[`module.ts:5`](../../../src/compiler/ir/graph/module.ts):
 
 ```ts
 export class GraphModule {
@@ -138,7 +138,7 @@ The module is the least interesting container and the shortest file, which is as
 
 That counter is the foundation of Chapter 16's analysis caching: an analysis result computed at version 7 is known to be stale at version 8, without comparing anything.
 
-**Attributes count as edits.** An attribute is not decoration: a `dot`'s `lhs_contracting` decides which axes are summed, and a comparison's `direction` decides whether the test is `<` or `>`. Changing one changes what the program computes, and passes do change them in place — [`patterns.ts:162`](../../../src/compiler/ir/graph/patterns.ts) inverts a comparison's `direction` during canonicalization, [`partition_pass.ts:59`](../../../src/compiler/passes/partition/partition_pass.ts) stamps `partition_id` onto existing operations. So the attribute mutators notify too ([`operation.ts:88`](../../../src/compiler/ir/graph/operation.ts)):
+**Attributes count as edits.** An attribute is not decoration: a `dot`'s `lhs_contracting` decides which axes are summed, and a comparison's `direction` decides whether the test is `<` or `>`. Changing one changes what the program computes, and passes do change them in place — [`patterns.ts:186`](../../../src/compiler/ir/graph/patterns.ts) inverts a comparison's `direction` during canonicalization, [`partition_pass.ts:59`](../../../src/compiler/passes/partition/partition_pass.ts) stamps `partition_id` onto existing operations. So the attribute mutators notify too ([`operation.ts:88`](../../../src/compiler/ir/graph/operation.ts)):
 
 ```ts
   setAttr(name: string, value: AttrValue): void {
@@ -193,7 +193,7 @@ That last fact is worth dwelling on, because it changes how you must count:
   blocksRecursive()                    : 2
 ```
 
-Two, or seven, depending on which question you asked. This distinction is a standing hazard: a pass that uses `ops()` when it meant `opsRecursive()` will silently skip everything inside every fusion and every loop. The two generators are [`function.ts:57`](../../../src/compiler/ir/graph/function.ts) and [`function.ts:63`](../../../src/compiler/ir/graph/function.ts):
+Two, or seven, depending on which question you asked. This distinction is a standing hazard: a pass that uses `ops()` when it meant `opsRecursive()` will silently skip everything inside every fusion and every loop. The two generators are [`function.ts:57`](../../../src/compiler/ir/graph/function.ts) and [`function.ts:76`](../../../src/compiler/ir/graph/function.ts):
 
 ```ts
   *opsRecursive(): Generator<Operation, void, undefined> {
@@ -269,13 +269,13 @@ That is the **region scope contract**, and it is the design decision this chapte
 
 Isolation is a choice, not a necessity. MLIR supports both isolated and non-isolated regions, and a non-isolated region — one that can close over enclosing values — is more convenient to build. What isolation buys is that **the boundary is complete**: to know what a `fusion` reads you read its operand list, and to know what it produces you read its result list. No pass has to search inside it to discover a hidden dependency. Every fusion legality check in Part IV, every liveness computation in Part IX, and the buffer plumbing in every backend depend on that being true.
 
-The lab computes the capture set the hard way — every value used inside, minus everything defined inside — and gets zero. The compiler has a function for this, `capturedValues` at [`graph_algorithms.ts:22`](../../../src/compiler/ir/graph/graph_algorithms.ts), used by the topological sort so that an operation with a region is ordered after everything its *contents* read. It exists precisely because isolation is enforced by convention and construction rather than by the verifier, which is the honest version of this story — see §9.9.
+The lab computes the capture set the hard way — every value used inside, minus everything defined inside — and gets zero. The compiler has a function for this, `capturedValues` at [`graph_algorithms.ts:24`](../../../src/compiler/ir/graph/graph_algorithms.ts), used by the topological sort so that an operation with a region is ordered after everything its *contents* read. It exists precisely because isolation is enforced by convention and construction rather than by the verifier, which is the honest version of this story — see §9.9.
 
 **Try this.** Run the lab against the `scan` model from Lab 1 instead. `scan` also takes 2 operands and its block also takes 2 arguments, and they still correspond position for position — operands are `(xs, h0)`, block arguments are `(element of xs, carry)`. What changes is that the correspondence is no longer type-preserving: operand 0 is the whole `tensor<4x3xf32>` stack while block argument 0 is one `tensor<3xf32>` slice of it, because the loop hands the body one timestep at a time. Only the carry passes through unchanged. Region operations get to define their own calling convention this way, and `num_carry` / `num_xs` are the attributes that record where the split falls; Chapter 5 §5.7 works through how to read it off a printout.
 
 ## 9.8 Cloning, and why it is harder than it looks
 
-One operation on this structure is worth reading in full, because it is where all six nouns interact: cloning a region ([`operation.ts:300`](../../../src/compiler/ir/graph/operation.ts)):
+One operation on this structure is worth reading in full, because it is where all six nouns interact: cloning a region ([`operation.ts:326`](../../../src/compiler/ir/graph/operation.ts)):
 
 ```ts
 export function cloneRegion(region: Region, valueMap: Map<Value, Value> = new Map()): Region {
@@ -306,7 +306,7 @@ Then look at the two loops. Operations are **cloned** in `topoSortByOperands` or
 
 - **`ops()` versus `opsRecursive()` is a real bug source.** They differ by everything inside every region. When you read a pass in Part IV, check which one it uses; when you write one, decide deliberately.
 - **Region isolation is a contract, not a checked invariant.** The verifier in Chapter 12 checks that operands are defined *somewhere in the function's scope set*, which is deliberately permissive: it does not reject a region operation whose body reads an enclosing value. Isolation is upheld by the passes that build regions and is pinned by [`tests/compiler/ir/graph/region-scope-contract.test.js`](../../../tests/compiler/ir/graph/region-scope-contract.test.js) rather than by the verifier. Chapter 12 returns to why that boundary was drawn there.
-- **A region here almost always has exactly one block.** The structure permits several, and `Region.blocks` is an array. But with no branch operation there is nothing to make a second block reachable, so multi-block regions are unused. The parser refuses more than one top-level block in a function outright ([`parser.ts:523`](../../../src/compiler/ir/graph/parser.ts)).
+- **A region here almost always has exactly one block.** The structure permits several, and `Region.blocks` is an array. But with no branch operation there is nothing to make a second block reachable, so multi-block regions are unused. The parser refuses more than one top-level block in a function outright ([`parser.ts:839`](../../../src/compiler/ir/graph/parser.ts)).
 - **Encapsulation is a naming convention, and it does not cover the containers.** Every mutating *method* notifies (§9.4), but the underscore convention is the whole of the enforcement, and `Operation.attributes`, `.operands`, `.results` and `.regions` are all public, mutable and reachable. `op.attributes.set('direction', 'gt')` compiles, runs, changes what the program computes, and leaves the version untouched — by a route that is not even nominally private. Only `Block`'s intrusive list is underscore-protected. So "there is exactly one path by which the IR can be edited" describes an intention rather than a property of the code: the version counter is sound for every edit made through the API and cannot see one made around it. Freezing the containers, or hiding them behind accessors, is what would close the remaining gap.
 - **`Object.freeze` on the signature is shallow.** `inputTypes` cannot be reassigned or resized; the `TensorType` objects inside it are immutable by their own construction rather than by the freeze. Chapter 10 makes that immutability explicit.
 

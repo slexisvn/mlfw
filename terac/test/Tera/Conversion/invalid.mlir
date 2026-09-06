@@ -72,7 +72,7 @@ func.func @pool_max_padded(%x: tensor<1x1x5x5xf32>) -> tensor<1x1x3x3xf32> {
 // An average that leaves the padding out of its count divides each window by
 // how much of it fell inside, and that is a different number per window.
 func.func @pool_average_excludes_pad(%x: tensor<1x1x5x5xf32>) -> tensor<1x1x3x3xf32> {
-  // expected-error @+1 {{cannot be lowered without counting the padding}}
+  // expected-error @+1 {{cannot be lowered with padding unless the padding is counted}}
   %0 = tera.pool2d average, %x {kernel_size = array<i64: 2, 2>,
                                 strides = array<i64: 2, 2>,
                                 padding = array<i64: 1, 0, 1, 0>}
@@ -82,17 +82,50 @@ func.func @pool_average_excludes_pad(%x: tensor<1x1x5x5xf32>) -> tensor<1x1x3x3x
 
 // -----
 
-// `ceil_mode` takes one more window than fits, and what it reads past the end
-// is padding the op was never told about.
-func.func @pool_hangs_over(%x: tensor<1x1x5x5xf32>) -> tensor<1x1x3x3xf32> {
-  // expected-error @+1 {{cannot be lowered with a window that hangs over axis 0}}
+// The window `ceil_mode` adds hangs over the high edge, and what it reads
+// there is padding whatever the op said about padding. So it is refused for
+// the same two kinds of pool declared padding is refused for, and the message
+// says which of the two it found. Where the two lowerings agree -- a stride
+// that divides -- there is no overhanging window and nothing to refuse; the
+// case that does hang over is executed in Integration/pool-ceil-mode.mlir.
+func.func @pool_max_hangs_over(%x: tensor<1x1x5x5xf32>) -> tensor<1x1x3x3xf32> {
+  // expected-error @+1 {{cannot be lowered with a window hanging over the edge, which is padding: a maximum has no value to read outside the input}}
+  %0 = tera.pool2d max, %x {kernel_size = array<i64: 2, 2>,
+                            strides = array<i64: 2, 2>,
+                            padding = array<i64: 0, 0, 0, 0>,
+                            ceil_mode = true}
+      : tensor<1x1x5x5xf32> -> tensor<1x1x3x3xf32>
+  return %0 : tensor<1x1x3x3xf32>
+}
+
+// -----
+
+func.func @pool_hanging_average_excludes_pad(%x: tensor<1x1x5x5xf32>)
+    -> tensor<1x1x3x3xf32> {
+  // expected-error @+1 {{cannot be lowered with a window hanging over the edge, which is padding unless the padding is counted}}
+  %0 = tera.pool2d average, %x {kernel_size = array<i64: 2, 2>,
+                                strides = array<i64: 2, 2>,
+                                padding = array<i64: 0, 0, 0, 0>,
+                                ceil_mode = true}
+      : tensor<1x1x5x5xf32> -> tensor<1x1x3x3xf32>
+  return %0 : tensor<1x1x3x3xf32>
+}
+
+// -----
+
+// How far the last window hangs over is what the stride leaves of the extent,
+// so `ceil_mode` is the one thing about this op that needs the extent itself
+// rather than the shape. Everything else here reads a `?` back off the
+// operand, and this cannot.
+func.func @pool_ceil_over_dynamic(%x: tensor<1x1x?x5xf32>) -> tensor<1x1x?x3xf32> {
+  // expected-error @+1 {{cannot be lowered with ceil_mode over the dynamic axis 0}}
   %0 = tera.pool2d average, %x {kernel_size = array<i64: 2, 2>,
                                 strides = array<i64: 2, 2>,
                                 padding = array<i64: 0, 0, 0, 0>,
                                 ceil_mode = true,
                                 count_include_pad = true}
-      : tensor<1x1x5x5xf32> -> tensor<1x1x3x3xf32>
-  return %0 : tensor<1x1x3x3xf32>
+      : tensor<1x1x?x5xf32> -> tensor<1x1x?x3xf32>
+  return %0 : tensor<1x1x?x3xf32>
 }
 
 // -----

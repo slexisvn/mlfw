@@ -11,6 +11,8 @@
 
 #include "mlir/Pass/PassOptions.h"
 
+#include <string>
+
 namespace mlir {
 class OpPassManager;
 
@@ -30,6 +32,12 @@ struct TeraToLLVMOptions : public PassPipelineOptions<TeraToLLVMOptions> {
       *this, "tile",
       llvm::cl::desc("Cut the linalg ops into tiles before vectorising them"),
       llvm::cl::init(true)};
+
+  Option<std::string> schedule{
+      *this, "schedule",
+      llvm::cl::desc("Path to a transform module scheduling the module, "
+                     "instead of the passes that would have"),
+      llvm::cl::init("")};
 };
 
 struct TeraToNVVMOptions : public PassPipelineOptions<TeraToNVVMOptions> {
@@ -47,6 +55,18 @@ struct TeraToNVVMOptions : public PassPipelineOptions<TeraToNVVMOptions> {
       *this, "threads-per-block",
       llvm::cl::desc("Threads a derived thread block is aimed at"),
       llvm::cl::init(256)};
+
+  Option<bool> sharedTiles{
+      *this, "shared-tiles",
+      llvm::cl::desc("Cut every contraction into blocks that stage their "
+                     "operands in shared memory"),
+      llvm::cl::init(true)};
+
+  Option<std::string> schedule{
+      *this, "schedule",
+      llvm::cl::desc("Path to a transform module scheduling the module, "
+                     "instead of the passes that would have"),
+      llvm::cl::init("")};
 };
 
 void buildTeraToLLVMPipeline(OpPassManager &pm,

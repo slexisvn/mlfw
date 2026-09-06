@@ -145,6 +145,33 @@ func.func @pool_average(%x: tensor<1x1x8x8xf32>) -> tensor<1x1x4x2xf32> {
 
 // -----
 
+// `ceil_mode` takes a third window along each axis where two and a bit fit,
+// and the operand is widened from 5 to 6 for it -- one short of a stride,
+// which is the most the extra window can reach past the end. The divisor is
+// still the whole window, so nothing about the traversal knows that the last
+// window is half padding.
+// CHECK-LABEL: func @pool_ceil_mode
+// CHECK: %[[BORDER:.*]] = arith.constant 0.000000e+00 : f32
+// CHECK: %[[WIDE:.*]] = tensor.empty() : tensor<1x1x6x6xf32>
+// CHECK: %[[PADDED:.*]] = linalg.generic
+// CHECK-SAME: outs(%[[WIDE]]
+// CHECK: %[[EITHER:.*]] = arith.select %{{.*}}, %{{.*}}, %[[BORDER]]
+// CHECK: linalg.generic
+// CHECK-SAME: ins(%[[PADDED]]
+// CHECK: %[[SHARE:.*]] = arith.constant 2.500000e-01 : f32
+// CHECK: arith.mulf %in, %[[SHARE]]
+func.func @pool_ceil_mode(%x: tensor<1x1x5x5xf32>) -> tensor<1x1x3x3xf32> {
+  %0 = tera.pool2d average, %x {kernel_size = array<i64: 2, 2>,
+                                strides = array<i64: 2, 2>,
+                                padding = array<i64: 0, 0, 0, 0>,
+                                ceil_mode = true,
+                                count_include_pad = true}
+      : tensor<1x1x5x5xf32> -> tensor<1x1x3x3xf32>
+  return %0 : tensor<1x1x3x3xf32>
+}
+
+// -----
+
 // An axis read from the far end is an indexing map like any other.
 // CHECK: #[[BACK:.*]] = affine_map<(d0, d1) -> (d0, -d1 + 3)>
 // CHECK: #[[FORWARD:.*]] = affine_map<(d0, d1) -> (d0, d1)>

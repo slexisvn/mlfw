@@ -110,16 +110,30 @@ def Tera_Pool2dOp
     not the verifier that refuses, so a bridge may still build one and be told
     where it goes wrong rather than what it may not write.
 
-    `ceil_mode` rounds the window count up rather than down, which lets the
-    last window hang over the high edge.
+    `ceil_mode` rounds the window count up rather than down, which takes one
+    more window along an axis the stride does not divide, and that last window
+    hangs over the high edge. What it hangs over is padding: the op is lowered
+    with the high edge extended far enough for it, by however much less than a
+    stride is missing, and the extension is padding the same way declared
+    padding is. So `ceil_mode` is not a separate question from `padding` but
+    the same one arrived at differently, and it is answered the same way --
+    counted by an average that counts its padding, refused for an average that
+    does not and for a maximum, which has nothing to read there.
+
+    That is a choice and not the only one. Frameworks exist that keep the
+    overhang out of the divisor, so that the last window of a row is divided
+    by how much of it was inside; that is a divisor per window rather than the
+    one number the traversal multiplies by, which is the same reason
+    `count_include_pad` is required wherever there is padding at all. Here the
+    padding is counted, and mlfw's own pooling agrees.
 
     Any axis may be dynamic. The batch and channel axes the result copies from
     the operand, and the spatial ones it counts the same way it counts them
-    from a static extent, so there is no `?` here it cannot reach. What it
-    still refuses is a window that hangs off the input, and that is a question
-    about the window rather than about the extent -- so an axis it cannot see
-    is not one it can refuse, and a program that pads a dynamic axis too far
-    is one the check lets through.
+    from a static extent, so there is no `?` here the shape cannot reach.
+    `ceil_mode` over one is refused, though, and this is the one place the op
+    needs the extent rather than the shape: how far the last window hangs over
+    is what is left of the extent after the stride has divided it, so the
+    padding to write depends on a number that is not here.
   }];
 
   let arguments = (ins Tera_Tensor:$operand,
@@ -137,6 +151,12 @@ def Tera_Pool2dOp
     /// The padding before each spatial axis, then the padding after.
     ::llvm::SmallVector<int64_t> getPaddingLow();
     ::llvm::SmallVector<int64_t> getPaddingHigh();
+
+    /// How far past the padded input the last window reaches on each spatial
+    /// axis, which is what `ceil_mode` buys and what the lowering has to
+    /// materialise as more padding. Zero on an axis whose extent is not
+    /// known, which is an axis the lowering refuses rather than guesses at.
+    ::llvm::SmallVector<int64_t> getWindowOverhang();
   }];
 }
 

@@ -85,7 +85,12 @@ void tera::buildTeraToLLVMPipeline(OpPassManager &pm,
   buildCleanup(pm);
   buildFuseOnTensors(pm);
 
-  if (options.tile) {
+  if (!options.schedule.empty()) {
+    ApplyScheduleOptions scheduling;
+    scheduling.schedule = options.schedule;
+    pm.addPass(tera::createApplySchedule(scheduling));
+    buildCleanup(pm);
+  } else if (options.tile) {
     TileAndFuseOptions tiling;
     tiling.vectorWidth = options.vectorWidth;
     pm.nest<func::FuncOp>().addPass(tera::createTileAndFuse(tiling));
@@ -128,26 +133,56 @@ void tera::buildTeraToNVVMPipeline(OpPassManager &pm,
   buildTeraToLinalg(pm);
   buildCleanup(pm);
   buildFuseOnTensors(pm);
+
   buildBufferize(pm);
 
-  pm.addPass(createConvertLinalgToParallelLoopsPass());
+  // What a script stands in for here is not one step but the whole run from
+  // the tiling to the launch: it cuts the loops and maps them to processors
+  // itself, through the GPU transform ops, where the passes below do the first
+  // half and leave the second to `convert-parallel-loops-to-gpu`. Either way
+  // what is left underneath is the same, which is what makes the two
+  // interchangeable rather than two pipelines.
+  //
+  // Both run below bufferization, unlike the host pipeline's, because that is
+  // where a shared tile can exist at all: it is written by every thread of a
+  // block and read by every thread, and a value in SSA has one producer.
+  if (!options.schedule.empty()) {
+    ApplyScheduleOptions scheduling;
+    scheduling.schedule = options.schedule;
+    pm.addPass(tera::createApplySchedule(scheduling));
+  } else {
+    if (options.sharedTiles)
+      pm.nest<func::FuncOp>().addPass(tera::createTileContractionToShared());
 
-  pm.addPass(memref::createFoldMemRefAliasOpsPass());
+    pm.addPass(createConvertLinalgToParallelLoopsPass());
 
-  TileParallelLoopsOptions tiling;
-  tiling.tileSizes = SmallVector<int64_t>(options.tileSizes.begin(),
-                                          options.tileSizes.end());
-  tiling.threadsPerBlock = options.threadsPerBlock;
-  pm.nest<func::FuncOp>().addPass(tera::createTileParallelLoops(tiling));
+    pm.addPass(memref::createFoldMemRefAliasOpsPass());
 
-  GpuMapParallelLoopsPassOptions mapping;
-  mapping.mappingPolicyStr = "innermost-first";
-  pm.nest<func::FuncOp>().addPass(createGpuMapParallelLoopsPass(mapping));
-  pm.addPass(createConvertParallelLoopToGpuPass());
+    TileParallelLoopsOptions tiling;
+    tiling.tileSizes = SmallVector<int64_t>(options.tileSizes.begin(),
+                                            options.tileSizes.end());
+    tiling.threadsPerBlock = options.threadsPerBlock;
+    pm.nest<func::FuncOp>().addPass(tera::createTileParallelLoops(tiling));
+
+    GpuMapParallelLoopsPassOptions mapping;
+    mapping.mappingPolicyStr = "innermost-first";
+    pm.nest<func::FuncOp>().addPass(createGpuMapParallelLoopsPass(mapping));
+    pm.addPass(createConvertParallelLoopToGpuPass());
+  }
+  pm.addPass(createConvertLinalgToLoopsPass());
   pm.nest<func::FuncOp>().addPass(tera::createVerifyGpuMapping());
 
   pm.addPass(createCanonicalizerPass());
 
+  pm.addPass(tera::createAttachWorkgroupMemory());
+
+  // Outlining hands the kernel everything the launch body read from around it
+  // as an argument, and this pass copies the constants among them inside
+  // first. What that decides is whether a loop bound reaches the device as a
+  // number or as an argument, and a trip count nothing can read is one nothing
+  // unrolls: the loop over a staged tile counts to the tile, which is small
+  // enough that the branch and the induction variable are most of it.
+  pm.addPass(createGpuLaunchSinkIndexComputationsPass());
   pm.addPass(createGpuKernelOutliningPass());
 
   pm.addPass(tera::createStageGpuBuffers());

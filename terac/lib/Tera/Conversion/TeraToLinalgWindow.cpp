@@ -205,9 +205,19 @@ struct Pool2dOpLowering : public OpConversionPattern<Pool2dOp> {
     ArrayRef<int64_t> strides = op.getStrides();
     bool averaging = op.getKind() == PoolKind::Average;
 
-    Value operand =
-        bordered(rewriter, loc, adaptor.getOperand(), op.getPaddingLow(),
-                 op.getPaddingHigh(), zeroAttr(elementType));
+    // What `ceil_mode` bought is one more window than fits, and the elements
+    // it reads past the high edge are padding the op did not spell out. They
+    // are materialised here with the padding that was spelt out, because by
+    // the time the traversal reads them there is no difference between the
+    // two: the verifier has already refused the kinds of pool that would have
+    // to tell them apart.
+    SmallVector<int64_t> high = op.getPaddingHigh();
+    SmallVector<int64_t> overhang = op.getWindowOverhang();
+    for (auto [axis, extra] : llvm::enumerate(overhang))
+      high[axis] += extra;
+
+    Value operand = bordered(rewriter, loc, adaptor.getOperand(),
+                             op.getPaddingLow(), high, zeroAttr(elementType));
 
     int64_t batchDim = 0, channelDim = 1, firstWindow = 2;
     int64_t firstPosition = firstWindow + 2;

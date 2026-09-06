@@ -1,3 +1,5 @@
+import { Layout } from '../../compiler/ir/graph/types.js';
+
 export type CudaIntrinInfo = { M: number; N: number; K: number; a: string; b: string; c: string; tile?: number };
 
 export type CudaIntrinEmitTarget = {
@@ -9,13 +11,25 @@ export type CudaIntrinEmitTarget = {
 
 export type CudaIntrinEmitter = (cg: CudaIntrinEmitTarget, info: CudaIntrinInfo) => void;
 
-const CUDA_INTRINSICS = new Map<string, CudaIntrinEmitter>();
+export type CudaIntrinShape = Readonly<{ m: number; n: number; k: number }>;
 
-export function registerCudaIntrin(name: string, emit: CudaIntrinEmitter): void {
-  CUDA_INTRINSICS.set(name, emit);
+export type CudaIntrinSpec = Readonly<{
+  emit: CudaIntrinEmitter;
+  shape: CudaIntrinShape | null;
+  operandLayout: Layout | null;
+}>;
+
+const CUDA_INTRINSICS = new Map<string, CudaIntrinSpec>();
+
+export function registerCudaIntrin(name: string, emit: CudaIntrinEmitter, shape: CudaIntrinShape | null = null, operandLayout: Layout | null = null): void {
+  CUDA_INTRINSICS.set(name, { emit, shape, operandLayout });
 }
 
 export function getCudaIntrin(name: string): CudaIntrinEmitter | null {
+  return CUDA_INTRINSICS.get(name)?.emit || null;
+}
+
+export function getCudaIntrinSpec(name: string): CudaIntrinSpec | null {
   return CUDA_INTRINSICS.get(name) || null;
 }
 
@@ -37,7 +51,7 @@ registerCudaIntrin('wmma_16x16x16_f16f16f32', (cg, info) => {
   cg._indent--;
   cg._emit('}');
   cg._emit(`store_matrix_sync(${c} + warpM * 16 * ${N} + warpN * 16, cf, ${N}, mem_row_major);`);
-});
+}, { m: 16, n: 16, k: 16 }, Layout.rowMajor(2));
 
 registerCudaIntrin('gemm_pipelined_f32', (cg, info) => {
   const { M, N, K, a, b, c, tile = 16 } = info;

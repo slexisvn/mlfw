@@ -94,6 +94,23 @@ LogicalResult TeraDialect::verifyOperationAttribute(Operation *op,
     return belongsHere();
   }
 
+  if (name == kScheduleAttrName) {
+    if (!isa<StringAttr>(value))
+      return op->emitError() << "'" << name
+                             << "' must name the op it schedules, as a string";
+    // This one is the opposite of the others: it belongs on the ops a tera op
+    // was lowered into, and never on a tera op itself, which the conversion
+    // names through its location instead.
+    if (isa<FunctionOpInterface>(op) ||
+        op->getDialect() ==
+            op->getContext()->getLoadedDialect<TeraDialect>())
+      return op->emitError()
+             << "'" << name
+             << "' names what a tera op became, so it belongs on the lowered "
+                "op rather than here";
+    return success();
+  }
+
   if (name == kDeviceResidentAttrName)
     return op->emitError() << "'" << name
                            << "' belongs on a function argument, not here";

@@ -73,6 +73,30 @@ SmallVector<int64_t> mlir::tera::chooseBlockTile(scf::ParallelOp loop,
   return tile;
 }
 
+int64_t mlir::tera::chooseContractionTile(int64_t m, int64_t n, int64_t k,
+                                          int64_t lhsBytes, int64_t rhsBytes,
+                                          const GpuTargetModel &model) {
+  if (model.warpSize < 1 || model.maxThreadsPerBlock < 1 ||
+      model.sharedMemoryPerBlock < 1)
+    return 0;
+  if (ShapedType::isDynamic(m) || ShapedType::isDynamic(n) ||
+      ShapedType::isDynamic(k))
+    return 0;
+
+  int64_t chosen = 0;
+  for (int64_t tile = model.warpSize;
+       tile * tile <= model.maxThreadsPerBlock &&
+       tile <= model.maxBlockExtents[0] && tile <= model.maxBlockExtents[1];
+       tile += model.warpSize) {
+    if (m % tile != 0 || n % tile != 0 || k % tile != 0)
+      continue;
+    if (tile * tile * (lhsBytes + rhsBytes) > model.sharedMemoryPerBlock)
+      continue;
+    chosen = tile;
+  }
+  return chosen;
+}
+
 bool mlir::tera::isExactTile(ArrayRef<int64_t> tripCounts,
                              ArrayRef<int64_t> tile) {
   for (auto [dimension, size] : llvm::enumerate(tile)) {

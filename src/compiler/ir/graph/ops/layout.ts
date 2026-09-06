@@ -11,15 +11,20 @@ export function register(registry: OpRegistry) {
     traits: [OpTrait.VIEW],
     attrs: [
       { name: 'src_layout', type: 'array', required: true },
-      { name: 'dst_layout', type: 'array', required: true }
+      { name: 'dst_layout', type: 'array', required: true },
+      { name: 'src_block', type: 'array', required: false },
+      { name: 'dst_block', type: 'array', required: false }
     ],
     inferResultTypes(operandTypes, attrs) {
       if (operandTypes.length !== 1) return null;
       const inp = operandTypes[0];
       if (!(inp instanceof TensorType)) return null;
-      const dstOrder = (attrs.get ? attrs.get('dst_layout') : (attrs as unknown as OpAttrRecord).dst_layout) as readonly number[];
+      const read = (name: string) => (attrs.get ? attrs.get(name) : (attrs as unknown as OpAttrRecord)[name]) as readonly number[] | undefined;
+      const dstOrder = read('dst_layout');
       if (!dstOrder) return null;
-      return [new TensorType(inp.shape, inp.dtype, new Layout(dstOrder))];
+      const dstBlock = read('dst_block');
+      const layout = dstBlock ? Layout.blocked(dstOrder, dstBlock[0], dstBlock[1]) : new Layout(dstOrder);
+      return [new TensorType(inp.shape, inp.dtype, layout)];
     },
     verify(op) {
       const errs = [];

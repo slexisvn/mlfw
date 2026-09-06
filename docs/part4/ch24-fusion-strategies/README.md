@@ -54,7 +54,7 @@ This is a lazy-deletion priority queue, and it is the standard way to avoid the 
 
 ## 24.4 In mlfw: five passes
 
-[`buildGraphPipeline`](../../../src/compiler/pipeline/graph_pipeline.ts) selects between them on a config string ([`graph_pipeline.ts:80`](../../../src/compiler/pipeline/graph_pipeline.ts)):
+[`buildGraphPipeline`](../../../src/compiler/pipeline/graph_pipeline.ts) selects between them on a config string ([`graph_pipeline.ts:93`](../../../src/compiler/pipeline/graph_pipeline.ts)):
 
 ```ts
   if (config.fusion.enabled) {
@@ -87,7 +87,7 @@ Note the `else` branch has no guard: any string that is not `'dominator'` or `'p
 
 ### The priority engine
 
-Three data structures ([`priority_fusion.ts:87`](../../../src/compiler/passes/fusion/priority_fusion.ts)):
+Three data structures ([`priority_fusion.ts:100`](../../../src/compiler/passes/fusion/priority_fusion.ts)):
 
 ```ts
     const cycles = new GraphCycles(n, edges);
@@ -114,7 +114,7 @@ A dimensionally sound version is not hard to write and is worth knowing as the t
 
 Two consequences follow from the unit-free form. The weights cannot be transferred between machines, because a ratio between a time and a byte count is a property of a machine's bandwidth and launch latency, and nothing records which machine these were tuned on. And they cannot be transferred between backends: §22.3 showed `launchOverheadUs` is a target-independent constant, so on the CPU the first term contributes a large fixed bonus for a saving that is not there. Chapter 46 rebuilds this idea properly, with a model whose output is a predicted *time* and which is graded against measured times.
 
-The main loop is Definition 24.5 in practice ([`priority_fusion.ts:189`](../../../src/compiler/passes/fusion/priority_fusion.ts)):
+The main loop is Definition 24.5 in practice ([`priority_fusion.ts:191`](../../../src/compiler/passes/fusion/priority_fusion.ts)):
 
 ```ts
     while (!heap.isEmpty()) {
@@ -127,7 +127,7 @@ The main loop is Definition 24.5 in practice ([`priority_fusion.ts:189`](../../.
 
 Already merged, or either endpoint's version has moved: discard and take the next. Then the three checks in Chapter 23's order, the merge, and a re-evaluation of every edge the new group touches.
 
-One detail in the merge is worth noticing ([`priority_fusion.ts:204`](../../../src/compiler/passes/fusion/priority_fusion.ts)):
+One detail in the merge is worth noticing ([`priority_fusion.ts:206`](../../../src/compiler/passes/fusion/priority_fusion.ts)):
 
 ```ts
       const big = ga.size >= gb.size ? ga : gb;
@@ -276,13 +276,13 @@ Eleven operations become three. The first listing holds two `dot`s, two zero con
 
 And the measurement: 3.444 ms with the flag off, 3.511 ms with it on. **No improvement.** That is the honest result and it explains the flag. On CPU the epilogue was *already* one fused kernel, so folding it into the matmul saves one pass over a 64×256 tensor — 64 KiB — against a matmul that moves far more than that and is compute-bound anyway. The change is real and the benefit is below the noise.
 
-On a GPU the arithmetic is different: the matmul's output sits in registers at the end of the kernel, and writing it out, launching a second kernel, and reading it back costs a full round trip plus a launch at GPU launch latencies. That is why `enableEpilogueFusion` is `true` for CUDA and `false` for CPU ([`target.ts:220`](../../../src/compiler/support/target.ts)) — not because the transformation is invalid on CPU, but because it is not worth the code path there.
+On a GPU the arithmetic is different: the matmul's output sits in registers at the end of the kernel, and writing it out, launching a second kernel, and reading it back costs a full round trip plus a launch at GPU launch latencies. That is why `enableEpilogueFusion` is `true` for CUDA and `false` for CPU ([`target.ts:230`](../../../src/compiler/support/target.ts)) — not because the transformation is invalid on CPU, but because it is not worth the code path there.
 
 This is the clearest example in Part IV of an optimization whose value is entirely a property of the target, and it is the reason the flag exists rather than a heuristic: the cost model has no term that would have discovered it.
 
 ## 24.7 Traps and limits
 
-**Where §24.5's 2.3× came from.** `CPUTarget` does not mention `sharedMemoryBytes`, and the base constructor turns that silence into a number — `config.sharedMemoryBytes || 0` ([`target.ts:114`](../../../src/compiler/support/target.ts)). The cost model then read that number as `config.maxSharedMemory || 49152` ([`fusion_cost.ts:62`](../../../src/compiler/passes/fusion/fusion_cost.ts)). **Zero is falsy**, so "I have no shared memory" and "I did not say" collapsed to the same value twice over, and the second `||` read it as the latter — falling back to the GPU default. `CUDATarget` sets `48 * 1024` explicitly and was unaffected; CPU and WASM, which say nothing, inherited a budget for a resource they do not have. `maxRegistersPerThread` had the same shape, `|| 255` handing them a GPU register file too.
+**Where §24.5's 2.3× came from.** `CPUTarget` does not mention `sharedMemoryBytes`, and the base constructor turns that silence into a number — `config.sharedMemoryBytes || 0` ([`target.ts:120`](../../../src/compiler/support/target.ts)). The cost model then read that number as `config.maxSharedMemory || 49152` ([`fusion_cost.ts:62`](../../../src/compiler/passes/fusion/fusion_cost.ts)). **Zero is falsy**, so "I have no shared memory" and "I did not say" collapsed to the same value twice over, and the second `||` read it as the latter — falling back to the GPU default. `CUDATarget` sets `48 * 1024` explicitly and was unaffected; CPU and WASM, which say nothing, inherited a budget for a resource they do not have. `maxRegistersPerThread` had the same shape, `|| 255` handing them a GPU register file too.
 
 Writing `??` for `||` is not enough on its own: `??` faithfully propagates the CPU's zero, and a *limit* of zero refuses the fusion even harder. A device reporting no scratchpad does not mean a budget of zero bytes; it means the budget does not apply, because a fused intermediate on a CPU lives in ordinary memory and nothing on-chip bounds it. So the resolution has three cases, not two ([`fusion_cost.ts:43`](../../../src/compiler/passes/fusion/fusion_cost.ts)):
 
@@ -297,7 +297,7 @@ That class of defect is worth dwelling on because of where it landed: it produce
 
 - **A per-thread resource budget of `0` means "no such budget", which is a convention and not a type.** The residual trap is that a real device with genuinely zero usable shared memory cannot be expressed, because `0` is spoken for. No target in the tree is in that position, and the alternative — an explicit `null` for "not applicable" — would have to be threaded through `TargetFeatures`, three fusion passes and the cost model to be worth anything.
 - **The launch weight is 1000 and is not target-derived.** [`fusion_cost.ts:38`](../../../src/compiler/passes/fusion/fusion_cost.ts) fixes `{ memory: 1, launch: 1000 }` for every target, so a saved launch is worth 5,000 bytes of traffic everywhere. A target may override it through the `fusionBenefitWeights` attribute ([`priority_fusion.ts:55`](../../../src/compiler/passes/fusion/priority_fusion.ts)); none does.
-- **The strategy string has no validation.** Anything that is not `'dominator'` or `'priority'` silently selects `FusionPass` ([`graph_pipeline.ts:88`](../../../src/compiler/pipeline/graph_pipeline.ts)). A typo in a config becomes a different fusion engine rather than an error.
+- **The strategy string has no validation.** Anything that is not `'dominator'` or `'priority'` silently selects `FusionPass` ([`graph_pipeline.ts:98`](../../../src/compiler/pipeline/graph_pipeline.ts)). A typo in a config becomes a different fusion engine rather than an error.
 - **`edgeBenefit` scores the edge, not the merge.** The heap is ordered by the bytes on one dataflow edge plus a launch constant, while the accept/reject decision uses the full group cost. So the *ordering* and the *decision* use different models, and a candidate can be at the top of the heap and then rejected — which is fine, and means the heap ordering is a heuristic on a heuristic.
 - **Priority fusion explains only its successes.** Chapter 18's finding, and §24.5 is why it matters: while the budget was wrong, the default strategy's refused merge produced no event at all, and the refusal was visible only by switching to a strategy you were not going to use. The finding cost more than a factor of two and the mechanism that should have reported it stayed silent, which is a stronger argument for explaining refusals than any of Chapter 18's.
 - **`FusionMergerPass` runs only with the `greedy` strategy.** It exists to merge two already-formed groups, which is the step the priority engine performs inline. Under `dominator` neither pass runs, so a dominator-based compilation has no mechanism at all for combining two regions after the fact.

@@ -217,6 +217,10 @@ const LAYOUT_METAMORPHIC = [
   { name: 'conv', inTypes: [[1, 4, 7, 7], [4, 4, 3, 3]], build: (b, a) => b.conv(a[0], a[1], [1, 1], [[0, 0], [0, 0]]) },
   { name: 'conv_groups', inTypes: [[1, 4, 7, 7], [4, 2, 3, 3]], build: (b, a) => b.conv(a[0], a[1], [1, 1], [[1, 1], [1, 1]], { groups: 2 }) },
   { name: 'conv_relu_pool', inTypes: [[1, 3, 8, 8], [4, 3, 3, 3]], build: (b, a) => b.pool2d(b.relu(b.conv(a[0], a[1], [1, 1], [[0, 0], [0, 0]]).getResult(0)).getResult(0), 'max', [2, 2], [2, 2], [[0, 0], [0, 0]]) },
+  { name: 'blocked_conv', inTypes: [[1, 8, 7, 7], [8, 8, 3, 3]], build: (b, a) => b.conv(a[0], a[1], [1, 1], [[0, 0], [0, 0]]) },
+  { name: 'blocked_conv_strided_pad', inTypes: [[2, 16, 9, 9], [8, 16, 3, 3]], build: (b, a) => b.conv(a[0], a[1], [2, 2], [[1, 1], [1, 1]]) },
+  { name: 'blocked_conv_groups', inTypes: [[1, 16, 7, 7], [16, 8, 3, 3]], build: (b, a) => b.conv(a[0], a[1], [1, 1], [[1, 1], [1, 1]], { groups: 2 }) },
+  { name: 'blocked_conv_relu_pool', inTypes: [[1, 8, 8, 8], [8, 8, 3, 3]], build: (b, a) => b.pool2d(b.relu(b.conv(a[0], a[1], [1, 1], [[0, 0], [0, 0]]).getResult(0)).getResult(0), 'max', [2, 2], [2, 2], [[0, 0], [0, 0]]) },
 ];
 
 describe('layout optimization is semantics-preserving: layout ON == layout OFF (cpu+wasm)', () => {

@@ -141,7 +141,7 @@ A rank-0 buffer is its base offset. A stride of 1 needs no multiply. An index th
 
 ### Accumulator detection
 
-`detectAccumulator` ([`accumulator.ts:14`](../../../src/compiler/passes/lowering/accumulator.ts)) walks Definition 53.4's clauses in order, cheapest first. The body must be one `BufferStoreNode`; its value must be a `MathOpNode` whose operator is in `ACCUMULATOR_OPS` (`+`, `*`, `max`, `min`); one side must be a load of the buffer being stored; and then:
+`detectAccumulator` ([`accumulator.ts:59`](../../../src/compiler/passes/lowering/accumulator.ts)) walks Definition 53.4's clauses in order, cheapest first. The body must be one `BufferStoreNode`; its value must be a `MathOpNode` whose operator is in `ACCUMULATOR_OPS` (`+`, `*`, `max`, `min`); one side must be a load of the buffer being stored; and then:
 
 ```ts
   const storeKey = indicesKey(store.indices);
@@ -184,7 +184,7 @@ Then `verify:lir` runs `verifyLIR` ([`verifier.ts:30`](../../../src/compiler/ir/
 
 Everything from here to the end of Part X is five implementations of one interface, so it is worth stating the interface once.
 
-> **Definition 53.7 (The backend contract).** **(invariant)** A backend is a function from an `LIRFunc` and a `TargetFeatures` to a `CompiledKernel`: a **name**, a **source** string, the **target**, and a **metadata** object. `BackendPipeline.compile` ([`pipeline.ts:36`](../../../src/backend/pipeline.ts)) selects the backend by `target.kind` from a registry, and every consumer downstream — the runtime, the executor plan, the trace — sees only that four-field object.
+> **Definition 53.7 (The backend contract).** **(invariant)** A backend is a function from an `LIRFunc` and a `TargetFeatures` to a `CompiledKernel`: a **name**, a **source** string, the **target**, and a **metadata** object. `BackendPipeline.compile` ([`pipeline.ts:14`](../../../src/backend/pipeline.ts)) selects the backend by `target.kind` from a registry, and every consumer downstream — the runtime, the executor plan, the trace — sees only that four-field object.
 
 The name and the target are bookkeeping. The other two fields are where the five implementations differ, and they differ in different ways.
 

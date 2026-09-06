@@ -96,7 +96,7 @@ export class Pattern {
 
 Three fields, two methods, and every one of the 27 pattern classes in [`patterns.ts`](../../../src/compiler/ir/graph/patterns.ts) is a subclass. `rootOpName` is an index key — a pattern that only ever matches `add` says so, and never gets asked about anything else. `benefit` is the priority when several match.
 
-The split between `match` and `rewrite` is not decoration, and `AddZero` shows why ([`patterns.ts:190`](../../../src/compiler/ir/graph/patterns.ts)):
+The split between `match` and `rewrite` is not decoration, and `AddZero` shows why ([`patterns.ts:191`](../../../src/compiler/ir/graph/patterns.ts)):
 
 ```ts
 export class AddZero extends Pattern {
@@ -122,7 +122,7 @@ export class AddZero extends Pattern {
 
 ### The set
 
-[`ir/rewrite/pattern.ts:19`](../../../src/compiler/ir/rewrite/pattern.ts). A `PatternSet` keeps two collections — patterns indexed by `rootOpName`, and generic ones with no root — and merges them on demand ([`pattern.ts:61`](../../../src/compiler/ir/rewrite/pattern.ts)):
+[`ir/rewrite/pattern.ts:21`](../../../src/compiler/ir/rewrite/pattern.ts). A `PatternSet` keeps two collections — patterns indexed by `rootOpName`, and generic ones with no root — and merges them on demand ([`pattern.ts:64`](../../../src/compiler/ir/rewrite/pattern.ts)):
 
 ```ts
   getForOp(opName: string): Pattern[] {
@@ -199,7 +199,7 @@ This is the same shape as Chapter 15's `max-iter` line, at a different level of 
 
 ### Where the canonicalizer's rules come from
 
-[`passes/canonicalize/canonicalize.ts:15`](../../../src/compiler/passes/canonicalize/canonicalize.ts) builds its set from the op registry rather than from a list:
+[`passes/canonicalize/canonicalize.ts:16`](../../../src/compiler/passes/canonicalize/canonicalize.ts) builds its set from the op registry rather than from a list:
 
 ```ts
 function traitPatternsFor(def: OpDef, fastMath: boolean): Pattern[] {
@@ -217,7 +217,7 @@ This is Chapter 11's argument arriving at its destination. Nobody wrote "`maximu
 
 Ignore the second parameter for now. It is there because one of the three traits consulted above is not true for every dtype the operation accepts, and a *generated* pattern has no other route by which that could reach it; §17.7 is the whole of that argument.
 
-The other pattern pass builds its set from an explicit list instead ([`simplify/algebraic.ts:9`](../../../src/compiler/passes/simplify/algebraic.ts)), 13 patterns, plus three more when `fastMath` is on.
+The other pattern pass builds its set from an explicit list instead ([`simplify/algebraic.ts:15`](../../../src/compiler/passes/simplify/algebraic.ts)), 13 patterns, plus three more when `fastMath` is on.
 
 The tempting story is that the division of labour is by *licence* — that `algebraic_simplify` holds the rules needing an assumption the user opts into (Chapter 20) and `canonicalize` holds the unconditional ones. Print both sets and that story does not survive:
 
@@ -242,7 +242,7 @@ export const alt = (...patterns: DFPattern[]): DFPattern => new AltPattern(patte
 export const capture = (name: string, inner: DFPattern = new AnyPattern()): DFPattern => new CapturePattern(name, inner);
 ```
 
-so `exp(log(x))` is `isOp('exp', isOp('log', wildcard()))`, and `matchPattern` returns a bindings object or `null`. `OpPattern.match` walks `op.getOperand(i).definingOp` ([`dfpattern.ts:23`](../../../src/compiler/ir/rewrite/dfpattern.ts)) — it matches *up the dataflow graph*, which is the direction Chapter 8's use-def edges point, and the reason this is a data-flow pattern rather than a tree pattern. Five patterns use it, and all five are the same two-deep shape ([`patterns.ts:10`](../../../src/compiler/ir/graph/patterns.ts)):
+so `exp(log(x))` is `isOp('exp', isOp('log', wildcard()))`, and `matchPattern` returns a bindings object or `null`. `OpPattern.match` walks `op.getOperand(i).definingOp` ([`dfpattern.ts:23`](../../../src/compiler/ir/rewrite/dfpattern.ts)) — it matches *up the dataflow graph*, which is the direction Chapter 8's use-def edges point, and the reason this is a data-flow pattern rather than a tree pattern. Five patterns use it, and all five are the same two-deep shape ([`patterns.ts:11`](../../../src/compiler/ir/graph/patterns.ts)):
 
 ```ts
 const TRANSPOSE_TRANSPOSE_PAT = isOp('transpose', isOp('transpose', wildcard()));
@@ -293,7 +293,7 @@ module @LongWayRound {
 
 **Two rewrites in one run of canonicalize.** That is the cascade: `AddZero` fired on `%4`, which re-enqueued its user `%6`, on which `MulOne` then fired. The fixed-point group did not run twice to achieve that; the worklist did it inside a single pass, which is precisely the work §17.1 said a plain forward loop would waste.
 
-**One rewrite in algebraic simplification, and the op count does not move** (`5 -> 5`). `TransposeTranspose` deletes nothing: it composes the two permutations into a *new* transpose — here `[1, 0]` after `[1, 0]`, which is the identity `[0, 1]` — and erases the outer one ([`patterns.ts:67`](../../../src/compiler/ir/graph/patterns.ts)). One operation created, one erased, and the inner transpose left with no users for DCE to collect. Same phenomenon as Chapter 15's `CHANGED 4 -> 4`, seen from the pattern's side.
+**One rewrite in algebraic simplification, and the op count does not move** (`5 -> 5`). `TransposeTranspose` deletes nothing: it composes the two permutations into a *new* transpose — here `[1, 0]` after `[1, 0]`, which is the identity `[0, 1]` — and erases the outer one ([`patterns.ts:96`](../../../src/compiler/ir/graph/patterns.ts)). One operation created, one erased, and the inner transpose left with no users for DCE to collect. Same phenomenon as Chapter 15's `CHANGED 4 -> 4`, seen from the pattern's side.
 
 **And then round 2 needs canonicalize again**, because the identity transpose that algebraic simplification *produced* is folded away by `FoldTrivialTranspose`, which lives in canonicalize's set and had already run. No worklist can fix that: the two rules are in different passes, so the only mechanism that connects them is the fixed-point group. Chapters 15 and 17 are two halves of one design — the worklist reaches a local fixed point inside a pass, the group reaches a global one across passes, and both are needed because the rule set is split across passes for reasons of licence.
 
@@ -356,7 +356,7 @@ That gap is real, and it is the difference between a canonicalizer you can test 
 
 - **A trait-derived pattern inherits the trait's mistakes.** §17.4's `traitPatternsFor` builds patterns from declarations: any commutative operation gets `CommutativeConstantRight`, and any commutative *and associative* one that can fold gets `AssociativeConstantReassoc` ([`canonicalize.ts:19`](../../../src/compiler/passes/canonicalize/canonicalize.ts)). That is the design working — no operation names anywhere. It is also the design's exposure: a generated pattern is exactly as sound as the trait behind it, and Chapter 11 §11.3 shows `ASSOCIATIVE` is declared unconditionally on `add` and `mul`, including on floats where it is false.
 
-  A hand-written pattern can compensate by testing the dtype at match time, as `AddZero` does ([`patterns.ts:171`](../../../src/compiler/ir/graph/patterns.ts)). A pattern *generated from a trait* has only the trait to consult, so the generator has to hand it the missing context:
+  A hand-written pattern can compensate by testing the dtype at match time, as `AddZero` does ([`patterns.ts:194`](../../../src/compiler/ir/graph/patterns.ts)). A pattern *generated from a trait* has only the trait to consult, so the generator has to hand it the missing context:
 
   ```ts
     if (def.isCommutative) {
@@ -368,12 +368,12 @@ That gap is real, and it is the difference between a canonicalizer you can test 
   That is why `CanonicalizePass` takes a fast-math option and caches one pattern set per setting, the same shape `AlgebraicSimplificationPass` has. The general point: deriving patterns from declarations is the right architecture, and the price is that **a declaration's accuracy becomes load-bearing in a way a `switch` statement never made it** — and that a generated pattern needs a route by which context can reach it.
 
 - **Neither termination nor confluence is checked.** Both are bounded or assumed. A pattern whose rewrite re-creates its own match will burn the safety budget on every compile — with one `INFO`-level line to say so — and a pair of patterns that disagree will produce whichever form the benefit ordering favours, silently. When you add a pattern, the question to ask is not "does it fire" but "can it fire on its own output".
-- **Benefit ties are broken by insertion order.** `_ensureSorted` uses `Array.prototype.sort` on `b.benefit - a.benefit` ([`pattern.ts:47`](../../../src/compiler/ir/rewrite/pattern.ts)). The sort is stable in modern JavaScript engines, so equal-benefit patterns fire in registration order — which for canonicalize means op-registry iteration order. Deterministic, and not a designed guarantee.
+- **Benefit ties are broken by insertion order.** `_ensureSorted` uses `Array.prototype.sort` on `b.benefit - a.benefit` ([`pattern.ts:49`](../../../src/compiler/ir/rewrite/pattern.ts)). The sort is stable in modern JavaScript engines, so equal-benefit patterns fire in registration order — which for canonicalize means op-registry iteration order. Deterministic, and not a designed guarantee.
 - **`match` is called before every `rewrite` and both may walk the graph.** There is no shared state between them: `AddZero` tests `isConstantVal` in `match` and again in `rewrite`. For cheap predicates this is fine and it keeps `match` side-effect free, which is what makes trying patterns in benefit order safe. For an expensive match, it is a doubling.
 - **The applicator does not recurse into regions during rewriting, only during collection.** The worklist is seeded from `opsRecursive()`, so operations inside a `fusion` or `scan` region *are* visited; but the re-enqueue walk after a rewrite uses `block._head`/`_next` within one block. A rewrite that changes something in a sibling region will not re-enqueue across the boundary.
 - **`maxIterations` is passed to the applicator and is not an iteration count.** `applyPatterns(func, 10, trace)` uses the argument only to size the safety budget ([`pattern.ts:30`](../../../src/compiler/passes/rewrite/pattern.ts)). There is no outer loop over the worklist; the worklist *is* the loop. The parameter name is a leftover from an earlier design and the tests still describe rounds in its terms.
 - **Which set a rule lives in is not always principled, and eight rules are in both.** §17.4 has the table. The clearest single case: `reshape` declares both of its rules — `FoldTrivialReshape` and `ReshapeReshape` — as canonicalization patterns ([`ops/shape.ts:158`](../../../src/compiler/ir/graph/ops/shape.ts)), while `transpose` declares only `FoldTrivialTranspose` ([`ops/shape.ts:184`](../../../src/compiler/ir/graph/ops/shape.ts)) and leaves the structurally identical `TransposeTranspose` to the algebraic pass. Both rules are unconditionally valid; there is no licence argument separating them. The observable consequence is in Chapter 15's lab: `transpose(transpose(x))` takes three rounds of the fixed-point group to disappear, and `reshape(reshape(x))` takes two — the transpose pair has to bounce between two passes, the reshape pair does not. The eight duplicated rules are the mirror-image cost: each is tried twice per round, in two different passes, and whichever runs first is the one that ever fires.
-- **Half the combinator language has no users.** `isOp` and `wildcard` build the five two-deep matchers above; `capture`, `alt` and `hasAttr` are implemented and tested and called from nowhere in `src/`. And every pattern that needs to *read* what it matched — including `FoldTransposeIntoDot`, the most valuable one in the set ([`patterns.ts:413`](../../../src/compiler/ir/graph/patterns.ts)) — walks `definingOp` by hand instead, because a `match` that returns a boolean cannot hand its bindings to `rewrite`. That is the missing piece: the matcher language can bind, and the `Pattern` interface has nowhere to put a binding.
+- **Half the combinator language has no users.** `isOp` and `wildcard` build the five two-deep matchers above; `capture`, `alt` and `hasAttr` are implemented and tested and called from nowhere in `src/`. And every pattern that needs to *read* what it matched — including `FoldTransposeIntoDot`, the most valuable one in the set ([`patterns.ts:482`](../../../src/compiler/ir/graph/patterns.ts)) — walks `definingOp` by hand instead, because a `match` that returns a boolean cannot hand its bindings to `rewrite`. That is the missing piece: the matcher language can bind, and the `Pattern` interface has nowhere to put a binding.
 
 ## 17.8 Read the tests
 

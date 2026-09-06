@@ -175,6 +175,61 @@ LogicalResult rejectUnlowerable(Operation *root) {
   return failure(walk.wasInterrupted());
 }
 
+/// Names every tera op, so that what it becomes can be found again after the
+/// conversion has replaced it.
+///
+/// The name goes in the location and not in an attribute, because a location
+/// is the one thing a rewrite carries from the op it replaces to the ops it
+/// replaces it with: every pattern below builds at `op.getLoc()`. An attribute
+/// would have to be copied by each of the fifty patterns, and the one that
+/// forgot would be a schedule silently addressing nothing.
+///
+/// The name replaces whatever name was there, so that uniqueness is this
+/// pass's to guarantee rather than the emitter's; the location under it is
+/// kept, so a diagnostic still points where it did. It is `<function>.<op>.<n>`
+/// counted per mnemonic per function, which is stable under everything but a
+/// change to the program itself -- an op inserted elsewhere in the function
+/// does not renumber a dot, and that is the whole point of not calling it the
+/// third generic.
+void nameTeraOps(Operation *root) {
+  root->walk([](func::FuncOp function) {
+    llvm::StringMap<int64_t> counts;
+    function.walk([&](Operation *op) {
+      if (op->getDialect() != op->getContext()->getLoadedDialect<TeraDialect>())
+        return;
+      StringRef mnemonic = op->getName().stripDialect();
+      SmallString<64> name;
+      (function.getName() + "." + mnemonic + "." + Twine(counts[mnemonic]++))
+          .toVector(name);
+      Location inner = op->getLoc();
+      if (auto named = dyn_cast<NameLoc>(inner))
+        inner = named.getChildLoc();
+      op->setLoc(NameLoc::get(StringAttr::get(op->getContext(), name), inner));
+    });
+  });
+}
+
+/// Copies those names onto the linalg ops the conversion produced, which is
+/// where a transform script can match them: `transform.structured.match` takes
+/// an attribute dictionary and does not take a location.
+///
+/// A `linalg.fill` is skipped. One tera op becomes several linalg ops and the
+/// name says which op they all came from rather than which of them to
+/// schedule, so a script narrows the match the way it narrows any other; but a
+/// fill is never the answer to that question. It is the destination a lowering
+/// materialises before the op that accumulates into it, and every schedule
+/// worth writing folds it into that op's tile rather than giving it a loop
+/// nest of its own.
+void tagSchedules(Operation *root) {
+  root->walk([](linalg::LinalgOp op) {
+    if (isa<linalg::FillOp>(op.getOperation()))
+      return;
+    auto named = dyn_cast<NameLoc>(op->getLoc());
+    if (named && !op->hasAttr(TeraDialect::kScheduleAttrName))
+      op->setAttr(TeraDialect::kScheduleAttrName, named.getName());
+  });
+}
+
 struct ConvertTeraToLinalg
     : public impl::ConvertTeraToLinalgBase<ConvertTeraToLinalg> {
   using impl::ConvertTeraToLinalgBase<
@@ -183,6 +238,8 @@ struct ConvertTeraToLinalg
   void runOnOperation() final {
     if (failed(rejectUnlowerable(getOperation())))
       return signalPassFailure();
+
+    nameTeraOps(getOperation());
 
     MLIRContext *context = &getContext();
     ConversionTarget target(*context);
@@ -201,7 +258,9 @@ struct ConvertTeraToLinalg
 
     if (failed(
             applyFullConversion(getOperation(), target, std::move(patterns))))
-      signalPassFailure();
+      return signalPassFailure();
+
+    tagSchedules(getOperation());
   }
 };
 

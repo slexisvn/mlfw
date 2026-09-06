@@ -29,7 +29,7 @@ describe('LayoutPolicy conv rule', () => {
     expect(pref.outputs[0].equals(nhwc)).toBe(true);
   });
 
-  it('CPU conv also prefers NHWC for rank-4', () => {
+  it('CPU conv falls back to NHWC when the block factor does not divide the channels', () => {
     const inp = new TensorType([1, 3, 32, 32], ScalarType.F32);
     const ker = new TensorType([16, 3, 3, 3], ScalarType.F32);
     const out = new TensorType([1, 16, 30, 30], ScalarType.F32);
@@ -40,6 +40,19 @@ describe('LayoutPolicy conv rule', () => {
     const policy = new LayoutPolicy(CPUTarget());
     const pref = policy.getPreference(ops(func)[0]);
     expect(pref.inputs[0].equals(new Layout([0, 2, 3, 1]))).toBe(true);
+  });
+
+  it('CPU conv prefers NCHW8c when the block factor divides the channels', () => {
+    const inp = new TensorType([1, 16, 32, 32], ScalarType.F32);
+    const ker = new TensorType([16, 16, 3, 3], ScalarType.F32);
+    const out = new TensorType([1, 16, 30, 30], ScalarType.F32);
+    const func = buildFunction('f', [inp, ker], [out], (b, args) => {
+      b.returnOp([b.conv(args[0], args[1], [1, 1], [0, 0, 0, 0]).getResult(0)]);
+    });
+
+    const policy = new LayoutPolicy(CPUTarget());
+    const pref = policy.getPreference(ops(func)[0]);
+    expect(pref.inputs[0].equals(Layout.blocked([0, 1, 2, 3], 1, 8))).toBe(true);
   });
 
   it('preferredConvLayout overrides default NHWC', () => {

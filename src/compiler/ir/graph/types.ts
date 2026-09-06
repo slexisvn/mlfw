@@ -1,4 +1,7 @@
 import { SymInt } from '../sym_int.js';
+import { AxeAxis, AxeLayout, iter } from '../layout/axe.js';
+import type { SymExpr } from '../sym_int.js';
+import type { Iter } from '../layout/axe.js';
 
 export type SymIntValue = InstanceType<typeof SymInt>;
 export type Dim = number | SymIntValue;
@@ -185,13 +188,62 @@ export function promoteDtype(a: ScalarDType, b: ScalarDType): ScalarDType | null
   return null;
 }
 
+const DIM_VARS: SymIntValue[] = [];
+
+function dimVar(index: number): SymIntValue {
+  while (DIM_VARS.length <= index) DIM_VARS.push(SymInt.var(`_d${DIM_VARS.length}`));
+  return DIM_VARS[index];
+}
+
+function asDim(expr: SymExpr): Dim {
+  return typeof expr === 'number' ? expr : DYNAMIC;
+}
+
+function stridesInStorageOrder(extents: readonly SymExpr[]): SymExpr[] {
+  const strides: SymExpr[] = new Array(extents.length);
+  let stride: SymExpr = 1;
+  for (let i = extents.length - 1; i >= 0; i--) {
+    strides[i] = stride;
+    stride = SymInt.mul(stride, extents[i]);
+  }
+  return strides;
+}
+
+export type LayoutBlock = Readonly<{ dim: number; factor: number }>;
+
 export class Layout {
+  readonly axe: AxeLayout;
+  readonly dims: readonly number[];
   readonly order: readonly number[];
+  readonly block: LayoutBlock | null;
   private _hash: number | null;
 
-  constructor(order: readonly number[]) {
+  constructor(order: readonly number[], block: LayoutBlock | null = null) {
     this.order = Object.freeze([...order]);
+    this.block = block;
     this._hash = null;
+
+    const storageDims = block ? [...order, block.dim] : [...order];
+    const extents = storageDims.map((dim, i) =>
+      !block || dim !== block.dim ? dimVar(dim)
+        : (i === storageDims.length - 1 ? block.factor : SymInt.div(dimVar(dim), block.factor)));
+    const strides = stridesInStorageOrder(extents);
+
+    const shard: Iter[] = [];
+    const dims: number[] = [];
+    for (let dim = 0; dim < order.length; dim++) {
+      for (let i = 0; i < storageDims.length; i++) {
+        if (storageDims[i] !== dim) continue;
+        shard.push(iter(extents[i], strides[i], AxeAxis.MEM));
+        dims.push(dim);
+      }
+    }
+    this.axe = new AxeLayout(shard);
+    this.dims = Object.freeze(dims);
+  }
+
+  get rank(): number {
+    return this.order.length;
   }
 
   static rowMajor(rank: number): Layout {
@@ -206,46 +258,66 @@ export class Layout {
     return new Layout(order);
   }
 
-  get rank() { return this.order.length; }
-
-  isIdentity() {
-    for (let i = 0; i < this.order.length; i++) {
-      if (this.order[i] !== i) return false;
+  static blocked(order: readonly number[], splitDim: number, factor: number): Layout {
+    if (!Number.isInteger(factor) || factor <= 1) {
+      throw new Error(`Layout.blocked: the split factor must be an integer above 1, got ${factor}`);
     }
-    return true;
+    if (!order.includes(splitDim)) {
+      throw new Error(`Layout.blocked: dimension ${splitDim} is not part of order [${order.join(', ')}]`);
+    }
+    return new Layout(order, { dim: splitDim, factor });
   }
 
-  inverse() {
-    const inv = new Array(this.order.length);
-    for (let i = 0; i < this.order.length; i++) inv[this.order[i]] = i;
-    return new Layout(inv);
+  isBlocked(): boolean {
+    return this.block !== null;
   }
 
-  compose(other: Layout): Layout {
-    if (this.order.length !== other.order.length) {
-      throw new Error('Cannot compose layouts of different ranks');
+  isIdentity(): boolean {
+    return !this.isBlocked() && this.axe.isIdentity();
+  }
+
+  toLayout(): Layout {
+    return this;
+  }
+
+  bind(shape: Shape): AxeLayout {
+    let bound = this.axe;
+    for (let dim = 0; dim < this.rank; dim++) {
+      const value = shape[dim] === DYNAMIC ? SymInt.var(`_dyn${dim}`) : (shape[dim] as SymExpr);
+      bound = substituteExtents(bound, dimVar(dim), value);
     }
-    const result = new Array<number>(this.order.length);
-    for (let i = 0; i < this.order.length; i++) {
-      result[i] = this.order[other.order[i]];
-    }
-    return new Layout(result);
+    return bound;
   }
 
   computeStrides(shape: Shape): number[] {
-    const n = shape.length;
-    const strides = new Array(n);
-    let stride = 1;
-    for (let i = n - 1; i >= 0; i--) {
-      const dim = this.order[i];
-      strides[dim] = stride;
-      if (shape[dim] === DYNAMIC || shape[dim] instanceof SymInt) {
-        stride = DYNAMIC;
-      } else if (stride !== DYNAMIC) {
-        stride *= shape[dim] as number;
-      }
+    if (this.isBlocked()) {
+      throw new Error('Layout.computeStrides: a blocked layout has no single stride per dimension; use Layout.storage');
     }
-    return strides;
+    return this.storage(shape).strides as number[];
+  }
+
+  storage(shape: Shape): { shape: Shape; strides: Dim[] } {
+    if (this.rank !== shape.length) return Layout.rowMajor(shape.length).storage(shape);
+    const bound = this.bind(shape);
+    const extents: Dim[] = [...shape];
+    const strides: Dim[] = new Array(this.rank);
+    const placed = new Set<number>();
+    let inner: Iter | null = null;
+    for (let i = 0; i < bound.shard.length; i++) {
+      const dim = this.dims[i];
+      if (placed.has(dim)) {
+        inner = bound.shard[i];
+        continue;
+      }
+      placed.add(dim);
+      strides[dim] = asDim(bound.shard[i].stride);
+      if (this.block && dim === this.block.dim) extents[dim] = asDim(bound.shard[i].extent);
+    }
+    if (inner) {
+      extents.push(asDim(inner.extent));
+      strides.push(asDim(inner.stride));
+    }
+    return { shape: extents, strides };
   }
 
   dropDim(dim: number): Layout {
@@ -260,7 +332,8 @@ export class Layout {
   equals(other: unknown): boolean {
     if (this === other) return true;
     if (!(other instanceof Layout)) return false;
-    if (this.order.length !== other.order.length) return false;
+    if (this.rank !== other.rank) return false;
+    if (this.block?.dim !== other.block?.dim || this.block?.factor !== other.block?.factor) return false;
     for (let i = 0; i < this.order.length; i++) {
       if (this.order[i] !== other.order[i]) return false;
     }
@@ -270,12 +343,21 @@ export class Layout {
   hash(): number {
     if (this._hash !== null) return this._hash;
     let h = 0x811c9dc5;
-    for (let i = 0; i < this.order.length; i++) {
-      h = ((h ^ this.order[i]) * 0x01000193) & 0x7fffffff;
-    }
+    for (const dim of this.order) h = ((h ^ dim) * 0x01000193) & 0x7fffffff;
+    if (this.block) h = ((h ^ (this.block.dim << 8) ^ this.block.factor) * 0x01000193) & 0x7fffffff;
     this._hash = h;
     return h;
   }
+}
+
+function substituteExtents(layout: AxeLayout, variable: SymIntValue, value: SymExpr): AxeLayout {
+  const name = variable.name as string;
+  const swap = (expr: SymExpr) => SymInt.substitute(expr, name, value);
+  return new AxeLayout(
+    layout.shard.map(it => iter(swap(it.extent), swap(it.stride), it.axis)),
+    layout.replica.map(it => iter(swap(it.extent), swap(it.stride), it.axis)),
+    new Map([...layout.offset].map(([axis, v]) => [axis, swap(v)]))
+  );
 }
 
 export function broadcastDim(a: Dim, b: Dim): Dim | null {
@@ -316,21 +398,30 @@ export class TensorType {
 
   sizeInBytes(): number {
     const n = this.numel();
-    return n === DYNAMIC ? DYNAMIC : n * SCALAR_BYTES[this.dtype];
+    if (n === DYNAMIC) return DYNAMIC;
+    return this.footprint() * SCALAR_BYTES[this.dtype];
+  }
+
+  footprint(): number {
+    const n = this.numel();
+    if (!this.layout.isBlocked() || n === DYNAMIC) return n;
+    const spanned = this.layout.bind(this.shape).footprint();
+    return spanned < 0 ? n : spanned;
   }
 
   strides(): number[] {
     return this.layout.computeStrides(this.shape);
   }
 
-  withShape(s: Shape): TensorType { return new TensorType(s, this.dtype, this.layout); }
+  withShape(s: Shape): TensorType {
+    return new TensorType(s, this.dtype, this.layout.rank === s.length ? this.layout : null);
+  }
 
   dropLeadingAxis(): TensorType {
     return new TensorType(this.shape.slice(1), this.dtype, this.layout.dropDim(0));
   }
 
   withDtype(d: ScalarDType): TensorType { return new TensorType(this.shape, d, this.layout); }
-  withLayout(l: Layout): TensorType { return new TensorType(this.shape, this.dtype, l); }
 
   equals(other: unknown): boolean {
     if (this === other) return true;
@@ -373,6 +464,7 @@ export class TensorType {
       h = ((h ^ d) * 0x01000193) & 0x7fffffff;
     }
     h = ((h ^ this.dtype.charCodeAt(0)) * 0x01000193) & 0x7fffffff;
+    h = ((h ^ this.layout.hash()) * 0x01000193) & 0x7fffffff;
     this._hash = h;
     return h;
   }
@@ -476,10 +568,23 @@ export function dtypeFromString(text: string): ScalarDType | undefined {
   return DTYPE_BY_SPELLING.get(text);
 }
 
+export function layoutToString(layout: Layout): string {
+  const order = `[${layout.order.join(', ')}]`;
+  return layout.block ? `${order}:${layout.block.dim}/${layout.block.factor}` : order;
+}
+
+export function layoutFromString(text: string): Layout {
+  const [orderText, blockText] = text.split(':');
+  const order = orderText.trim().slice(1, -1).split(',').map(v => Number(v.trim()));
+  if (blockText === undefined) return new Layout(order);
+  const [dim, factor] = blockText.split('/').map(v => Number(v.trim()));
+  return Layout.blocked(order, dim, factor);
+}
+
 export function typeToString(type: IRType): string {
   if (type instanceof TensorType) {
     const dims = type.shape.map((dim) => `${dimToString(dim)}x`).join('');
-    const layout = type.layout.isIdentity() ? '' : `, [${type.layout.order.join(', ')}]`;
+    const layout = type.layout.isIdentity() ? '' : `, ${layoutToString(type.layout)}`;
     return `tensor<${dims}${dtypeToString(type.dtype)}${layout}>`;
   }
   if (type instanceof TupleType) {

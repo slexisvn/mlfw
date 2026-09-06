@@ -70,7 +70,7 @@ export function registerTargetLoweringRule(opName: string, targetKind: string, r
 }
 ```
 
-with `GENERIC_PLEVEL = 10` and `TARGET_PLEVEL = 20` ([`lowering_registry.ts:61`](../../../src/compiler/passes/lowering/lowering_registry.ts)). A target-specific rule outranks a generic one by construction, and the two-level scheme is the whole priority policy.
+with `GENERIC_PLEVEL = 10` and `TARGET_PLEVEL = 20` ([`lowering_registry.ts:70`](../../../src/compiler/passes/lowering/lowering_registry.ts)). A target-specific rule outranks a generic one by construction, and the two-level scheme is the whole priority policy.
 
 Registration happens once, at module load, from eleven `register()` functions called at the top of [`graph_to_tensor.ts:57`](../../../src/compiler/passes/lowering/graph_to_tensor.ts). Importing the driver registers the rules; there is no explicit initialisation step and no way to compile without them.
 
@@ -91,7 +91,7 @@ and `best()` is a linear scan for the maximum priority ([`op_strategy.ts:40`](..
 
 ### The two overrides
 
-`getLoweringRule` consults the compiler context before the registry ([`lowering_registry.ts:81`](../../../src/compiler/passes/lowering/lowering_registry.ts)):
+`getLoweringRule` consults the compiler context before the registry ([`lowering_registry.ts:92`](../../../src/compiler/passes/lowering/lowering_registry.ts)):
 
 ```ts
 export function getLoweringRule(opName: string, target?: OpStrategyTarget, context: CompilerContext | null = null): LoweringRuleFn | undefined {
@@ -112,13 +112,15 @@ Five shared constructors carry most of those rules.
 
 | Skeleton | Line | Used by |
 |---|---|---|
-| `makeLoopNest` + `wrapInLoops` | [`lowering_registry.ts:222`](../../../src/compiler/passes/lowering/lowering_registry.ts) | every rule with a nest over the output shape |
-| `lowerPointwise` | [`lowering_registry.ts:445`](../../../src/compiler/passes/lowering/lowering_registry.ts) | all 38 elementwise-shaped rules |
-| `buildSpatialNest` | [`lowering_registry.ts:384`](../../../src/compiler/passes/lowering/lowering_registry.ts) | reductions, contractions, pooling |
-| `buildDotGeometry` + `emitMatmulInitAcc` | [`lowering_registry.ts:529`](../../../src/compiler/passes/lowering/lowering_registry.ts) | `dot`, `fused_dot_epilogue`, `quantized_dot` |
-| `buildConvNest` | [`lowering_registry.ts:280`](../../../src/compiler/passes/lowering/lowering_registry.ts) | `conv`, `quantized_conv` |
+| `makeLoopNest` + `wrapInLoops` | [`lowering_registry.ts:277`](../../../src/compiler/passes/lowering/lowering_registry.ts) | every rule with a nest over the output shape |
+| `lowerPointwise` | [`lowering_registry.ts:564`](../../../src/compiler/passes/lowering/lowering_registry.ts) | all 38 elementwise-shaped rules |
+| `buildSpatialNest` | [`lowering_registry.ts:451`](../../../src/compiler/passes/lowering/lowering_registry.ts) | reductions, contractions, pooling |
+| `buildDotGeometry` + `emitMatmulInitAcc` | [`lowering_registry.ts:648`](../../../src/compiler/passes/lowering/lowering_registry.ts) | `dot`, `fused_dot_epilogue`, `quantized_dot` |
+| `buildConvNest` | [`lowering_registry.ts:335`](../../../src/compiler/passes/lowering/lowering_registry.ts) | `conv`, `quantized_conv` |
 
-`lowerPointwise` is Definition 34.5 at its purest ([`lowering_registry.ts:508`](../../../src/compiler/passes/lowering/lowering_registry.ts)):
+A rule may assume its buffers have the same rank as the values they hold, with one exception it must not assume away: under Chapter 25's blocked layouts a rank-`N` tensor gets a rank-`(N+1)` buffer, and a rule that indexes such a buffer has to split one logical index into a quotient and a remainder. Two rules do — `layout_transform` and `buildConvNest` — and both split through `storageIndices` ([`lowering_registry.ts:266`](../../../src/compiler/passes/lowering/lowering_registry.ts)) rather than open-coding the arithmetic. The convolution has a second way in: when it emits the channel-block loop of Chapter 25 §25.4 the split index *is* a loop variable, so it appends that variable instead of dividing ([`lowering_registry.ts:418`](../../../src/compiler/passes/lowering/lowering_registry.ts)). Same buffer, same rank, no division in the inner loop. The layout comes from the operand's `TensorType`, so the buffer stays what Definition 33.1 says it is and the rule that does not care never finds out. The trap that follows from this is that a rule building indices from `buf.shape` rather than from the value's shape is right for every operation until the day one of its operands is blocked.
+
+`lowerPointwise` is Definition 34.5 at its purest ([`lowering_registry.ts:564`](../../../src/compiler/passes/lowering/lowering_registry.ts)):
 
 ```ts
 export function lowerPointwise(ctx: LoweringContext, op: Operation, inputs: readonly Buffer[], outputs: readonly Buffer[], exprBuilder: PointwiseExprBuilder): TirNode {
@@ -136,7 +138,7 @@ export function lowerPointwise(ctx: LoweringContext, op: Operation, inputs: read
 }
 ```
 
-Eleven lines, and every elementwise operation in the compiler is that function plus one callback. Note `computeBroadcastIndices` ([`lowering_registry.ts:402`](../../../src/compiler/passes/lowering/lowering_registry.ts)): broadcasting is handled here, in the skeleton, for every operation at once, by reading a size-1 axis with a literal `0`.
+Eleven lines, and every elementwise operation in the compiler is that function plus one callback. Note `computeBroadcastIndices` ([`lowering_registry.ts:521`](../../../src/compiler/passes/lowering/lowering_registry.ts)): broadcasting is handled here, in the skeleton, for every operation at once, by reading a size-1 axis with a literal `0`.
 
 The callbacks themselves come from a table ([`rules/elementwise.ts:22`](../../../src/compiler/passes/lowering/rules/elementwise.ts)):
 
@@ -155,9 +157,9 @@ const ELEMENTWISE_SCALAR_OPS: Record<string, string> = {
 
 `canLowerAsElementwiseFusion` ([`rules/fusion.ts:219`](../../../src/compiler/passes/lowering/rules/fusion.ts)) asks whether every operation inside the region has an *inline builder* — a function producing an expression rather than a statement — and whether all results share a shape. If so, `lowerFusion` emits **one** nest whose leaf is the whole region's expression tree. If not, `lowerFusionAsIndividualOps` walks the region and lowers each inner operation with its ordinary rule, materialising every intermediate.
 
-41 registered operations have an inline builder ([`rules/fusion.ts:32`](../../../src/compiler/passes/lowering/rules/fusion.ts)): the 33 elementwise ones, plus `compare`, `select`, `clamp`, `convert`, `broadcast_in_dim`, `iota`, `quantize` and `dequantize`. The bound on what Chapter 24 can profitably fuse is this list, not the fusion pass's own rules.
+41 registered operations have an inline builder ([`rules/fusion.ts:23`](../../../src/compiler/passes/lowering/rules/fusion.ts)): the 33 elementwise ones, plus `compare`, `select`, `clamp`, `convert`, `broadcast_in_dim`, `iota`, `quantize` and `dequantize`. The bound on what Chapter 24 can profitably fuse is this list, not the fusion pass's own rules.
 
-`iota`'s entry is a placeholder that throws if it is ever called ([`rules/fusion.ts:58`](../../../src/compiler/passes/lowering/rules/fusion.ts)) — it exists so that `canLowerAsElementwiseFusion` says yes, and `lowerFusion`'s index-aware path substitutes the loop variable directly instead of building an expression from operands. An `iota` inside a fusion is the one inner operation whose value depends on *where* it is, not on what it read.
+`iota`'s entry is a placeholder that throws if it is ever called ([`rules/fusion.ts:63`](../../../src/compiler/passes/lowering/rules/fusion.ts)) — it exists so that `canLowerAsElementwiseFusion` says yes, and `lowerFusion`'s index-aware path substitutes the loop variable directly instead of building an expression from operands. An `iota` inside a fusion is the one inner operation whose value depends on *where* it is, not on what it read.
 
 ## 34.5 Where the rules live
 
@@ -174,7 +176,7 @@ const ELEMENTWISE_SCALAR_OPS: Record<string, string> = {
 | [`rules/layout.ts`](../../../src/compiler/passes/lowering/rules/layout.ts) | 1 | `layout_transform` |
 | [`rules/attention.ts`](../../../src/compiler/passes/lowering/rules/attention.ts) | 1 + 1 | `scaled_dot_product_attention`, generic and CUDA |
 
-**That table lists 66 operations and the next one says 68, so reconcile them before reading on.** `constant` and `scalar_constant` have no entry in the strategy registry and are nonetheless lowerable: the driver handles them itself, in its third walk over the graph (§32.4), because a constant does not always become a statement. `hasLoweringRule` reports that honestly — it asks the registry *and* falls back to `isConstantOp` ([`lowering_registry.ts:68`](../../../src/compiler/passes/lowering/lowering_registry.ts)) — so the predicate says 68 while the files above hold 66. Both numbers are right about different things, and the one Definition 34.6 partitions on is the predicate.
+**That table lists 66 operations and the next one says 68, so reconcile them before reading on.** `constant` and `scalar_constant` have no entry in the strategy registry and are nonetheless lowerable: the driver handles them itself, in its third walk over the graph (§32.4), because a constant does not always become a statement. `hasLoweringRule` reports that honestly — it asks the registry *and* falls back to `isConstantOp` ([`lowering_registry.ts:77`](../../../src/compiler/passes/lowering/lowering_registry.ts)) — so the predicate says 68 while the files above hold 66. Both numbers are right about different things, and the one Definition 34.6 partitions on is the predicate.
 
 ### The taxonomy, stated once
 
@@ -314,7 +316,7 @@ A literal `0` in the broadcast axis, and a rank-0 subscript for the scalar. Chap
 - **Selection ignores shape.** Definition 34.2 picks by priority alone. An implementation that is better for large inputs and worse for small ones cannot be expressed as two implementations; it has to be one rule with a branch inside, which is what the CUDA attention rule does ([`rules/attention.ts:204`](../../../src/compiler/passes/lowering/rules/attention.ts)) — it computes a threads-per-block figure from the target's shared-memory budget and falls back to the naive builder when it comes out below eight.
 - **There is exactly one target-specific rule in the whole compiler.** The mechanism is general; its single user is attention on CUDA. Everything else that varies by backend varies in codegen (Part X) rather than in lowering.
 - **Priority is a two-value scale.** `GENERIC_PLEVEL` and `TARGET_PLEVEL`, 10 and 20. Nothing uses an intermediate value, so "several generic rules ranked by quality" is expressible and unused, and a tie falls to registration order silently.
-- **Registration is a module side effect.** The eleven `register()` calls run at import time of `graph_to_tensor.ts` ([`graph_to_tensor.ts:57`](../../../src/compiler/passes/lowering/graph_to_tensor.ts)), and `elementwise.ts` also writes an attribute onto the shared op registry at module scope ([`rules/elementwise.ts:35`](../../../src/compiler/passes/lowering/rules/elementwise.ts)). Import order is therefore load-bearing, and a test that imports the registry without the driver sees an op registry with no `elementwiseScalarOp` attributes on it.
+- **Registration is a module side effect.** The eleven `register()` calls run at import time of `graph_to_tensor.ts` ([`graph_to_tensor.ts:63`](../../../src/compiler/passes/lowering/graph_to_tensor.ts)), and `elementwise.ts` also writes an attribute onto the shared op registry at module scope ([`rules/elementwise.ts:35`](../../../src/compiler/passes/lowering/rules/elementwise.ts)). Import order is therefore load-bearing, and a test that imports the registry without the driver sees an op registry with no `elementwiseScalarOp` attributes on it.
 - **A fusion region containing one unsupported operation loses the whole fusion.** `canLowerAsElementwiseFusion` is all-or-nothing ([`rules/fusion.ts:219`](../../../src/compiler/passes/lowering/rules/fusion.ts)): one inner operation without an inline builder sends the entire region down `lowerFusionAsIndividualOps`, materialising every intermediate. The fusion pass that formed the group does not consult the inline-builder list, so a group can be formed that lowering will then take apart, and nothing reports it.
 - **Non-elementwise fusion is a lowering-time decision with no trace event.** The choice between the two modes emits nothing to the trace stream of Chapter 18, so a program whose fusion silently degraded looks, in the trace, exactly like one whose fusion worked.
 

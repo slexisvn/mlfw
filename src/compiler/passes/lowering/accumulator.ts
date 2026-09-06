@@ -1,5 +1,5 @@
 import { SeqNode, LetStmtNode } from '../../ir/tensor/nodes.js';
-import { walk as irWalk } from '../../ir/ir_visitor.js';
+import { walk as irWalk, transform as irTransform } from '../../ir/ir_visitor.js';
 import type { Buffer } from '../../ir/tensor/buffer.js';
 import type { IRNode } from '../../ir/ir_visitor.js';
 import type { BlockNode, BufferLoadNode, BufferStoreNode, ForNode, IntImmNode, MathOpNode, TirNode, VariableNode } from '../../ir/tensor/nodes.js';
@@ -85,15 +85,15 @@ export function detectAccumulator(forNode: ForNode): AccumulatorInfo | null {
   if (storeKey !== loadKey) return null;
   if (storeKey.includes('?')) return null;
 
-  const outerIndices: TirNode[] = store.indices.map((idx: TirNode) => {
-    if (idx.type !== 'VariableNode') return idx;
-    for (const bind of block.iterVars) {
-      if (bind.iterVar && bind.iterVar.name === (idx as VariableNode).name && bind.binding) {
-        return bind.binding;
-      }
-    }
-    return idx;
-  });
+  const bindings = new Map<string, TirNode>();
+  for (const bind of block.iterVars) {
+    if (bind.iterVar && bind.binding) bindings.set(bind.iterVar.name, bind.binding);
+  }
+  const resolveVar = (node: IRNode): IRNode | null =>
+    node.type === 'VariableNode' ? (bindings.get((node as unknown as VariableNode).name) as unknown as IRNode) ?? null : null;
+  const outerIndices: TirNode[] = store.indices.map(
+    (idx: TirNode) => irTransform(idx as unknown as IRNode, resolveVar) as unknown as TirNode
+  );
 
   const loopVarName = forNode.loopVar.name;
   const resolvedKey = indicesKey(outerIndices);

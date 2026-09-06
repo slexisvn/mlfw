@@ -403,6 +403,35 @@ func.func @residence_on_an_operation(%x: tensor<4xf32>) -> tensor<4xf32> {
 
 // -----
 
+// The schedule name is the one attribute here that goes the other way: it says
+// what a tera op became, so it belongs on what it became. On the tera op it
+// would be a name for the op naming it, which is nothing a schedule can match.
+func.func @schedule_on_a_tera_op(%x: tensor<4xf32>) -> tensor<4xf32> {
+  // expected-error @+1 {{'tera.schedule' names what a tera op became, so it belongs on the lowered op rather than here}}
+  %0 = tera.exp %x {tera.schedule = "here.exp.0"} : tensor<4xf32>
+  return %0 : tensor<4xf32>
+}
+
+// -----
+
+// expected-error @+1 {{'tera.schedule' names what a tera op became, so it belongs on the lowered op rather than here}}
+func.func @schedule_on_a_function(%x: tensor<4xf32>) -> tensor<4xf32>
+    attributes {tera.schedule = "whole.function.0"} {
+  %0 = tera.exp %x : tensor<4xf32>
+  return %0 : tensor<4xf32>
+}
+
+// -----
+
+func.func @schedule_is_a_name(%x: tensor<4xf32>) -> tensor<4xf32> {
+  %0 = tera.exp %x : tensor<4xf32>
+  // expected-error @+1 {{'tera.schedule' must name the op it schedules, as a string}}
+  %1 = math.absf %0 {tera.schedule = 3 : i64} : tensor<4xf32>
+  return %1 : tensor<4xf32>
+}
+
+// -----
+
 // Where the argument holds no buffer there is nothing to leave anywhere, and a
 // promise about it would be read by the staging and mean nothing.
 

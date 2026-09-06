@@ -1,14 +1,23 @@
 import { isDtypeHalf } from '../../../util/dtype_map.js';
+import { getCudaIntrinSpec } from '../../../backend/cuda/tensor_intrin.js';
 import { PrimFuncPass } from '../tir_pass.js';
 import { Schedule } from '../../schedule/schedule.js';
 import { FuncAttr } from '../../ir/func_attrs.js';
+import type { Layout } from '../../ir/graph/types.js';
+import type { Buffer } from '../../ir/tensor/buffer.js';
 import type { BlockNode, NodeSlots, PrimFunc, TirNode } from '../../ir/tensor/nodes.js';
 import type { TirPassCtx } from '../tir_pass.js';
 import type { CompilerConfig, CompileTarget } from '../../support/config_types.js';
 
 export type WmmaMatmulInfo = { M: number; N: number; K: number; a: string; b: string; c: string };
 
-const WMMA_TILE = 16;
+export const WMMA_INTRIN = 'wmma_16x16x16_f16f16f32';
+
+function operandMatchesRequiredLayout(buffer: Buffer, required: Layout): boolean {
+  if (required.rank !== buffer.rank) return false;
+  const expected = required.computeStrides(buffer.shape);
+  return expected.every((stride, i) => stride === buffer.strides[i]);
+}
 
 function findMatmulBlock(primFunc: PrimFunc): BlockNode | null {
   const blocks: BlockNode[] = [];
@@ -33,13 +42,17 @@ function findMatmulBlock(primFunc: PrimFunc): BlockNode | null {
 }
 
 export function detectWmmaMatmul(primFunc: PrimFunc): WmmaMatmulInfo | null {
+  const spec = getCudaIntrinSpec(WMMA_INTRIN);
+  if (!spec || !spec.shape || !spec.operandLayout) return null;
   const matmul = findMatmulBlock(primFunc);
   if (!matmul) return null;
   const A = matmul.reads[0].buffer, B = matmul.reads[1].buffer, C = matmul.writes[0].buffer;
   if (!isDtypeHalf(A.dtype) || !isDtypeHalf(B.dtype) || C.dtype !== 'f32') return null;
   if (A.shape.length !== 2 || B.shape.length !== 2 || C.shape.length !== 2) return null;
+  if (![A, B, C].every(buf => operandMatchesRequiredLayout(buf, spec.operandLayout as Layout))) return null;
   const M = C.shape[0] as number, N = C.shape[1] as number, K = A.shape[1] as number;
-  if (![M, N, K].every(d => typeof d === 'number' && d > 0 && d % WMMA_TILE === 0)) return null;
+  const tiles = [spec.shape.m, spec.shape.n, spec.shape.k];
+  if (![M, N, K].every((d, i) => typeof d === 'number' && d > 0 && d % tiles[i] === 0)) return null;
   const names = new Set<string>();
   for (const [, buf] of primFunc.bufferMap) names.add(buf.name);
   if (!names.has(A.name) || !names.has(B.name) || !names.has(C.name)) return null;
@@ -61,9 +74,9 @@ export class AutoTensorizePass extends PrimFuncPass {
     if (!this.target || !this.target.isGPU()) return;
     const info = detectWmmaMatmul(pf);
     if (!info) return;
-    new Schedule(pf).tensorize('wmma_16x16x16_f16f16f32', info as never);
+    new Schedule(pf).tensorize(WMMA_INTRIN, info as never);
     if (ctx && ctx.trace && ctx.trace.explainsEnabled) {
-      ctx.trace.explain('tensorize', pf.name, 'wmma_16x16x16_f16f16f32',
+      ctx.trace.explain('tensorize', pf.name, WMMA_INTRIN,
         `auto-tensorized ${info.M}x${info.N}x${info.K} f16 GEMM`, { target: (this.target as CompileTarget).name });
     }
   }

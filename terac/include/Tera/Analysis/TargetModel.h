@@ -24,6 +24,7 @@ struct GpuTargetModel {
   int64_t warpSize = 32;
   int64_t maxThreadsPerBlock = 1024;
   int64_t preferredThreadsPerBlock = 256;
+  int64_t sharedMemoryPerBlock = 48 * 1024;
   SmallVector<int64_t, 3> maxBlockExtents = {1024, 1024, 64};
 };
 

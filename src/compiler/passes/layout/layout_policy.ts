@@ -16,6 +16,11 @@ export type LayoutRuleFn = (op: Operation, target: LayoutPolicyTarget) => Layout
 const DEFAULT_CACHE_LINE_BYTES = 64;
 const BYTES_PER_F32 = 4;
 
+function contiguousDimOf(layout: Layout, tensorType: TensorType): number {
+  if (layout.isBlocked()) return -1;
+  return layout.computeStrides(tensorType.shape).indexOf(1);
+}
+
 export class LayoutPolicy {
   target: LayoutPolicyTarget;
   private _overrides: Map<string, LayoutRuleFn>;
@@ -42,7 +47,8 @@ export class LayoutPolicy {
     if (layoutEquals(fromLayout, toLayout)) return 0;
     const numEl = tensorType.numel();
     if (numEl < 0) return 1024;
-    return numEl * 2;
+    if (!fromLayout || !toLayout) return numEl * 2;
+    return numEl * (contiguousDimOf(fromLayout, tensorType) === contiguousDimOf(toLayout, tensorType) ? 1 : 2);
   }
 
   estimateBenefit(consumer: Operation, tensorType: IRType, useCount: number): number {

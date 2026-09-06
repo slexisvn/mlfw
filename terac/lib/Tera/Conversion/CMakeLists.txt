@@ -1,7 +1,10 @@
 add_mlir_dialect_library(MLIRTeraConversion
+        ApplySchedule.cpp
+        AttachWorkgroupMemory.cpp
         StageGpuBuffers.cpp
         TeraToLinalg.cpp
         TileAndFuse.cpp
+        TileContractionToShared.cpp
         TileParallelLoops.cpp
         VectorizeLinalg.cpp
         VerifyGpuMapping.cpp
@@ -42,6 +45,8 @@ add_mlir_dialect_library(MLIRTeraConversion
         MLIRTera
         MLIRTeraAnalysis
         MLIRTilingInterface
+        MLIRTransformDialect
+        MLIRTransformDialectTransforms
         MLIRTransforms
         MLIRVectorDialect
         )

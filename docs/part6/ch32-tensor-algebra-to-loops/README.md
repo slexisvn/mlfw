@@ -96,7 +96,7 @@ Note what Definition 32.6 does **not** take: the rest of the program. A rule see
 
 A function that returns its own input compiles to a copy loop, emitted at the end. That is the first thing no rule could have done: it is a fact about the function's signature, not about any operation.
 
-**Three — constants first.** Constant operations are lowered ahead of everything else, in graph order, and skipped when the main loop reaches them. They are separated because `lowerConstant` ([`lowering_registry.ts:476`](../../../src/compiler/passes/lowering/lowering_registry.ts)) does not always emit a statement: a weight folded into the graph becomes a `constBuffer` attached to the function rather than a store, and a *scalar* constant is given a rank-matched size-1 buffer tagged for broadcast, which its consumers then read with a literal `0` in every axis. Both need the buffer registered before any rule asks for it.
+**Three — constants first.** Constant operations are lowered ahead of everything else, in graph order, and skipped when the main loop reaches them. They are separated because `lowerConstant` ([`lowering_registry.ts:595`](../../../src/compiler/passes/lowering/lowering_registry.ts)) does not always emit a statement: a weight folded into the graph becomes a `constBuffer` attached to the function rather than a store, and a *scalar* constant is given a rank-matched size-1 buffer tagged for broadcast, which its consumers then read with a literal `0` in every axis. Both need the buffer registered before any rule asks for it.
 
 **Four — the main loop**, in topological order ([`graph_to_tensor.ts:154`](../../../src/compiler/passes/lowering/graph_to_tensor.ts)):
 
@@ -165,7 +165,7 @@ A broadcast whose every consumer can absorb it becomes **no statement at all**: 
 
 ### Where it is called from
 
-[`compiler.ts:471`](../../../src/compiler/pipeline/compiler.ts), one function at a time, into a fresh `TirModule`:
+[`compiler.ts:499`](../../../src/compiler/pipeline/compiler.ts), one function at a time, into a fresh `TirModule`:
 
 ```ts
     this._eachFunc(graphModule, 'lowering', trace, errors, failed, resilient, (func) => {
@@ -177,7 +177,7 @@ and immediately afterwards the TIR pipeline of [`tir_pipeline.ts:13`](../../../s
 
 ## 32.5 The language, in one table
 
-`TirNode` ([`ir/tensor/nodes.ts:426`](../../../src/compiler/ir/tensor/nodes.ts)) is a union of 21 classes. That is the entire second IR.
+`TirNode` ([`ir/tensor/nodes.ts:430`](../../../src/compiler/ir/tensor/nodes.ts)) is a union of 21 classes. That is the entire second IR.
 
 | Group | Nodes | What they say |
 |---|---|---|
@@ -351,11 +351,11 @@ A one-operation graph and a two-operation graph produce character-identical outp
 ## 32.8 Traps and limits
 
 - **Lowering is a phase, not a pass.** It runs outside the pass manager of Chapter 15, so it has no CHANGED/UNCHANGED verdict, no analysis invalidation, and no per-pass verification. `_eachFunc` catches its exceptions and records a `CompilationError` ([`compiler.ts:452`](../../../src/compiler/pipeline/compiler.ts)); that is the whole error contract.
-- **A missing rule is a runtime throw, not a diagnostic.** [`graph_to_tensor.ts:155`](../../../src/compiler/passes/lowering/graph_to_tensor.ts) throws when `getLoweringRule` returns nothing, so a module with three unlowerable operations reports one. There is a `hasLoweringRule` predicate ([`lowering_registry.ts:68`](../../../src/compiler/passes/lowering/lowering_registry.ts)) that could check a whole module up front and name all three; nothing uses it that way. The same shape as Chapter 31's `findUnsupportedGradOps`.
+- **A missing rule is a runtime throw, not a diagnostic.** [`graph_to_tensor.ts:188`](../../../src/compiler/passes/lowering/graph_to_tensor.ts) throws when `getLoweringRule` returns nothing, so a module with three unlowerable operations reports one. There is a `hasLoweringRule` predicate ([`lowering_registry.ts:68`](../../../src/compiler/passes/lowering/lowering_registry.ts)) that could check a whole module up front and name all three; nothing uses it that way. The same shape as Chapter 31's `findUnsupportedGradOps`.
 - **The order of `stmts` is the order of execution, and it is fixed here.** Topological order is *an* order; nothing later reorders whole statements except `MemorySchedulePass` (Chapter 52). Every scheduling primitive in Part VII works inside one nest.
 - **There is no parser.** Chapter 13's round-trip property — print, edit by hand, parse, get the same module — has no analogue here. `ir/tensor/` contains a printer and no parser, so the text form is a report, not a format, and every TIR test constructs nodes directly.
-- **The printer is not total.** `TensorIRPrinter` dispatches on the node's type name and falls back to `[UnknownNode: ...]` ([`printer.ts:36`](../../../src/compiler/ir/tensor/printer.ts)). It implements 17 visitors for 21 node kinds; `WhileNode`, `SyncThreadsNode` and `VecCopyNode` have none, so any function containing a barrier — every lowered `scan`, for one — prints with a hole in it. `BlockRealizeNode` is the fourth missing visitor and is not a gap: `visitBlockNode` prints it inline.
-- **A unary operator prints as nothing.** `visitMathOpNode` emits the operator only when the node has a second operand ([`printer.ts:181`](../../../src/compiler/ir/tensor/printer.ts)), so `neg` prints as `(x)` and so does `logical_not`. The node is correct and the backends read the node, so this costs nothing at runtime and costs a reader of §34.7's table a double take.
+- **The printer is not total.** `TensorIRPrinter` dispatches on the node's type name and falls back to `[UnknownNode: ...]` ([`printer.ts:63`](../../../src/compiler/ir/tensor/printer.ts)). It implements 17 visitors for 21 node kinds; `WhileNode`, `SyncThreadsNode` and `VecCopyNode` have none, so any function containing a barrier — every lowered `scan`, for one — prints with a hole in it. `BlockRealizeNode` is the fourth missing visitor and is not a gap: `visitBlockNode` prints it inline.
+- **A unary operator prints as nothing.** `visitMathOpNode` emits the operator only when the node has a second operand ([`printer.ts:206`](../../../src/compiler/ir/tensor/printer.ts)), so `neg` prints as `(x)` and so does `logical_not`. The node is correct and the backends read the node, so this costs nothing at runtime and costs a reader of §34.7's table a double take.
 - **`target` and `context` are passed through untyped.** `lowerGraphToPrimFunc(func, this.config.target as unknown as null, this.context as unknown as null)` ([`compiler.ts:473`](../../../src/compiler/pipeline/compiler.ts)) casts two real arguments to `null` to satisfy a signature that declares them nullable with a narrower type. The values arrive intact; the cast means the type checker is not checking this call.
 
 ## 32.9 Read the tests

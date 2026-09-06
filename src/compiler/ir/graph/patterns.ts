@@ -3,6 +3,7 @@ import { TensorType, isValuePreservingCast } from './types.js';
 import { isDtypeInt, isDtypeFloat } from '../../../util/dtype_map.js';
 import { isOp, wildcard, matchPattern } from '../rewrite/dfpattern.js';
 import type { AttrValue, ScalarDType } from './types.js';
+import type { AttrRecord } from './builder.js';
 import type { Value } from './value.js';
 import type { Operation } from './operation.js';
 import type { IRBuilder } from './builder.js';
@@ -430,6 +431,11 @@ export class DoubleConvert extends Pattern {
   }
 }
 
+function sameBlock(a: readonly number[] | null | undefined, b: readonly number[] | null | undefined): boolean {
+  if (!a || !b) return !a && !b;
+  return a[0] === b[0] && a[1] === b[1];
+}
+
 export class LayoutTransformIdentity extends Pattern {
   constructor() { super('layout_transform_identity', 10, 'source and destination layouts are the same permutation, so nothing is rearranged'); this.rootOpName = 'layout_transform'; }
   override match(op: Operation): boolean {
@@ -439,7 +445,7 @@ export class LayoutTransformIdentity extends Pattern {
     for (let i = 0; i < src.length; i++) {
       if (src[i] !== dst[i]) return false;
     }
-    return true;
+    return sameBlock(op.getAttr<readonly number[]>('src_block'), op.getAttr<readonly number[]>('dst_block'));
   }
   override rewrite(op: Operation, builder: IRBuilder): boolean {
     op.replaceAllResultsWith([op.getOperand(0)]);
@@ -506,20 +512,23 @@ export class LayoutTransformCompose extends Pattern {
   constructor() { super('layout_transform_compose', 10, 'two layout changes compose into one permutation, so the middle layout never has to exist'); this.rootOpName = 'layout_transform'; }
   override match(op: Operation): boolean {
     const inputOp = op.getOperand(0).definingOp;
-    return (inputOp && inputOp.opName === 'layout_transform') as boolean;
+    if (!inputOp || inputOp.opName !== 'layout_transform') return false;
+    const mid = inputOp.getAttr<readonly number[]>('dst_layout');
+    const src = op.getAttr<readonly number[]>('src_layout');
+    if (!mid || !src || mid.length !== src.length || !mid.every((axis, i) => axis === src[i])) return false;
+    return sameBlock(inputOp.getAttr<readonly number[]>('dst_block'), op.getAttr<readonly number[]>('src_block'));
   }
   override rewrite(op: Operation, builder: IRBuilder): boolean {
     const innerOp = op.getOperand(0).definingOp;
     const srcLayout = innerOp!.getAttr<readonly number[]>('src_layout')!;
-    const midLayout = innerOp!.getAttr<readonly number[]>('dst_layout')!;
     const dstLayout = op.getAttr<readonly number[]>('dst_layout')!;
-    const composed = new Array(srcLayout.length);
-    for (let i = 0; i < dstLayout.length; i++) {
-      composed[i] = srcLayout[midLayout.indexOf(dstLayout[i])];
-    }
     const original = innerOp!.getOperand(0);
-    const newOp = builder._inferAndBuild('layout_transform', [original],
-      { src_layout: srcLayout, dst_layout: composed });
+    const attrs: AttrRecord = { src_layout: [...srcLayout], dst_layout: [...dstLayout] };
+    const srcBlock = innerOp!.getAttr<readonly number[]>('src_block');
+    const dstBlock = op.getAttr<readonly number[]>('dst_block');
+    if (srcBlock) attrs.src_block = [...srcBlock];
+    if (dstBlock) attrs.dst_block = [...dstBlock];
+    const newOp = builder._inferAndBuild('layout_transform', [original], attrs);
     op.replaceAllResultsWith([newOp.getResult(0)]);
     op.erase();
     return true;

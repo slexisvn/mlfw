@@ -156,11 +156,11 @@ The clause `concreteShape[i] > 1` is the one to notice. A dimension whose exampl
   }
 ```
 
-([`compile.ts:456`](../../../src/tracing/compile.ts).) Definition 62.6 in ten lines. Note the order: the cheap signature test first, the guard evaluation second, and `bindInputShapes` mutating the entry's environment as a side effect of *probing* it — which is fine single-threaded and is the kind of thing worth knowing.
+([`compile.ts:353`](../../../src/tracing/compile.ts).) Definition 62.6 in ten lines. Note the order: the cheap signature test first, the guard evaluation second, and `bindInputShapes` mutating the entry's environment as a side effect of *probing* it — which is fine single-threaded and is the kind of thing worth knowing.
 
 ### Resolving a symbol at launch
 
-The symbol has to reach the kernel. `bindInputShapes` fills the environment from the call's shapes ([`shape_env.ts:94`](../../../src/tracing/shape_env.ts)); the *output* buffer is sized by resolving the output's symbolic shape ([`compile.ts:165`](../../../src/tracing/compile.ts)); and the kernel's own trailing integer parameters are filled by [Chapter 59 §59.4](../ch59-the-runtime-module/README.md)'s `_extractShapeParams`, which reads each one off the shape of the tensor argument the compiler said it came from.
+The symbol has to reach the kernel. `bindInputShapes` fills the environment from the call's shapes ([`shape_env.ts:94`](../../../src/tracing/shape_env.ts)); the *output* buffer is sized by resolving the output's symbolic shape ([`compile.ts:75`](../../../src/tracing/compile.ts)); and the kernel's own trailing integer parameters are filled by [Chapter 59 §59.4](../ch59-the-runtime-module/README.md)'s `_extractShapeParams`, which reads each one off the shape of the tensor argument the compiler said it came from.
 
 ### The eager cache
 
@@ -180,7 +180,7 @@ function _cacheKey(opName: string, tensorArgs: readonly TensorLike[], scalarArgs
 }
 ```
 
-([`jit_cache.ts:80`](../../../src/dispatcher/jit_cache.ts).) Definition 62.7. This is the cache that stands behind every eager operation with no hand-written kernel — the compiler-generated kernels of [Chapter 60 §60.4](../ch60-a-pytorch-style-dispatcher/README.md) — so in an eager training loop it is consulted on the order of a hundred times per step and missed once per distinct shape.
+([`jit_cache.ts:91`](../../../src/dispatcher/jit_cache.ts).) Definition 62.7. This is the cache that stands behind every eager operation with no hand-written kernel — the compiler-generated kernels of [Chapter 60 §60.4](../ch60-a-pytorch-style-dispatcher/README.md) — so in an eager training loop it is consulted on the order of a hundred times per step and missed once per distinct shape.
 
 ## 62.5 Lab — symbols, guards, and the promise nobody made
 
@@ -333,11 +333,11 @@ Until then, `dynamic_shapes` is safe for a dimension no operation constrains —
 
 ### `evaluateGuards` reports the failure and nobody reads it
 
-`_findCachedEntry` destructures `{ passed }` and discards `failedGuard` ([`compile.ts:462`](../../../src/tracing/compile.ts)). So the mechanism knows precisely why it is recompiling — "`s1 eq 8` failed, you passed 16" — and the information is dropped at the only call site. A single `trace.explain` there would make the difference between a recompilation a user can reason about and one they discover by watching a profiler.
+`_findCachedEntry` destructures `{ passed }` and discards `failedGuard` ([`compile.ts:359`](../../../src/tracing/compile.ts)). So the mechanism knows precisely why it is recompiling — "`s1 eq 8` failed, you passed 16" — and the information is dropped at the only call site. A single `trace.explain` there would make the difference between a recompilation a user can reason about and one they discover by watching a profiler.
 
 ### The cache is linear, unbounded, and never evicts
 
-`_cacheEntries` is an array probed front to back, and every probe evaluates a guard list ([`compile.ts:458`](../../../src/tracing/compile.ts)). A serving workload with a hundred sequence lengths and static tracing accumulates a hundred entries, each holding a compiled runtime module, and the hundredth call evaluates ninety-nine guard lists first. There is no bound, no eviction, and no way to clear it. `shapeBuckets` exists to pre-compile a chosen set of shapes and does nothing to limit the set that accumulates afterwards.
+`_cacheEntries` is an array probed front to back, and every probe evaluates a guard list ([`compile.ts:355`](../../../src/tracing/compile.ts)). A serving workload with a hundred sequence lengths and static tracing accumulates a hundred entries, each holding a compiled runtime module, and the hundredth call evaluates ninety-nine guard lists first. There is no bound, no eviction, and no way to clear it. `shapeBuckets` exists to pre-compile a chosen set of shapes and does nothing to limit the set that accumulates afterwards.
 
 ### Divisibility guards can be recorded and are not
 
@@ -355,7 +355,7 @@ Until then, `dynamic_shapes` is safe for a dimension no operation constrains —
 
 `ShapeEnv._resolve` handles three representations — `number`, `string`, and `SymInt` ([`shape_env.ts:135`](../../../src/tracing/shape_env.ts)) — because the tracer names symbols with strings while the compiler's analysis layer uses `SymInt` expression trees. The two meet only in this function and in `hintOf`, which bridges them by building a fresh hint map out of `_symbols` on every call and handing it to `SymInt.evaluate` — an allocation and a full copy of the symbol table per hint query, on a path that runs once per dimension.
 
-The bridge is by name and by name only: `namedDimToSym` promotes a string dimension to `SymInt.var(dim)` and `symToNamedDim` demotes it back ([`ops/shape.ts:8`](../../../src/compiler/ir/graph/ops/shape.ts)). A `SymInt` naming `s3` and a tracer symbol named `s3` are the same dimension because the strings match, and for nothing else. Every `ShapeEnv` starts `_nextId` at zero, so two environments both name their first dynamic dimension `s0`; an expression built against one and resolved against another finds a binding and returns a number rather than complaining. Nothing records which environment allocated a `SymInt`'s free variables, which is what a symbol table with identity, rather than a shared string namespace, would give.
+The bridge is by name and by name only: `namedDimToSym` promotes a string dimension to `SymInt.var(dim)` and `symToNamedDim` demotes it back ([`ops/shape.ts:9`](../../../src/compiler/ir/graph/ops/shape.ts)). A `SymInt` naming `s3` and a tracer symbol named `s3` are the same dimension because the strings match, and for nothing else. Every `ShapeEnv` starts `_nextId` at zero, so two environments both name their first dynamic dimension `s0`; an expression built against one and resolved against another finds a binding and returns a number rather than complaining. Nothing records which environment allocated a `SymInt`'s free variables, which is what a symbol table with identity, rather than a shared string namespace, would give.
 
 ## 62.8 Read the tests
 

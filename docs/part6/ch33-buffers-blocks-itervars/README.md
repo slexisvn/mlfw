@@ -46,6 +46,8 @@ This is TVM's TensorIR design, and the reason to name the lineage is that the pa
 
 Strides are the whole of layout at this level. Chapter 25's NCHW-versus-NHWC choice arrives here as a permutation of `s`, and nothing downstream knows it was ever a choice.
 
+Note that `r`, the buffer's rank, is the rank of the *storage* and not necessarily of the value stored in it. A blocked layout — Chapter 25's NCHW8c — gives a rank-4 tensor a rank-5 buffer, with the channel dimension appearing twice: once as a count of blocks and once as a position within a block. The consumer supplies five subscripts for four loop indices by splitting one of them into a quotient and a remainder. Definition 33.1 needs no amendment for that, which is the point of it: whatever the graph decided, what arrives here is a dense buffer with a stride per dimension.
+
 > **Definition 33.2 (Block).** **(stated here)** A *block* is a name, a list of iteration variables `v₁,…,v_d` each with a *binding* — an expression over the enclosing loop variables — and a *kind*, together with a body and declared read and write sets. The block's iteration domain is the image of the enclosing loops' domain under the bindings.
 
 > **Definition 33.3 (Iteration variable kind).** **(invariant)** Every axis of a block carries one of two tags: `DataPar`, the *spatial* axes, and `CommReduce`, the *reducing* ones. The tag is data on the node; §33.4 shows where it is set and Definition 33.5 says what setting it asserts.
@@ -111,13 +113,13 @@ Read line 4 and line 5 together. A dependence was **found**, and the declaration
     }
 ```
 
-and the strides that *are* given come from the graph type's layout ([`lowering_registry.ts:124`](../../../src/compiler/passes/lowering/lowering_registry.ts)): `const strides = t.layout ? t.layout.computeStrides(shape) : null;`. One line, and Chapter 25 becomes arithmetic.
+and the shape and strides that *are* given come from the graph type's layout ([`lowering_registry.ts:148`](../../../src/compiler/passes/lowering/lowering_registry.ts)): `const storage = t.layout ? t.layout.storage(shape) : null;`. One line, and Chapter 25 becomes arithmetic. `storage` returns both, because for a blocked layout the shape is not the tensor's shape either.
 
-Beyond shape and strides the buffer carries: `scope`, from a four-member enumeration ([`tensor_types.ts:1`](../../../src/compiler/ir/tensor/tensor_types.ts)); `alignment`, default 64; `offset` and `poolByteOffset`, filled in by Chapter 50's allocator; `broadcastDims`, set by the alias path of §32.4; `symbolicShape`, for dynamic dimensions; and `storageAlign`, from the scheduling primitive of the same name.
+Beyond shape and strides the buffer carries: `scope`, from a four-member enumeration ([`tensor_types.ts:1`](../../../src/compiler/ir/tensor/tensor_types.ts)); `alignment`, default 64; `offset` and `poolByteOffset`, filled in by Chapter 50's allocator; `broadcastDims`, set by the alias path of §32.4; `symbolicShape`, for dynamic dimensions; and `storageAlign` ([`buffer.ts:17`](../../../src/compiler/ir/tensor/buffer.ts)), from the scheduling primitive of the same name.
 
 ### The block
 
-`BlockNode` ([`nodes.ts:126`](../../../src/compiler/ir/tensor/nodes.ts)) is six fields: `name`, `iterVars`, `reads`, `writes`, `body`, `initBody`. The iteration variables are `BlockRealizeNode`s ([`nodes.ts:154`](../../../src/compiler/ir/tensor/nodes.ts)) — three fields, and the third is Definition 33.3:
+`BlockNode` ([`nodes.ts:129`](../../../src/compiler/ir/tensor/nodes.ts)) is six fields: `name`, `iterVars`, `reads`, `writes`, `body`, `initBody`. The iteration variables are `BlockRealizeNode`s ([`nodes.ts:154`](../../../src/compiler/ir/tensor/nodes.ts)) — three fields, and the third is Definition 33.3:
 
 ```ts
 export class BlockRealizeNode extends TensorNode {
@@ -133,7 +135,7 @@ with
 export const IterVarKind = Object.freeze({ DATA_PAR: 'DataPar', COMM_REDUCE: 'CommReduce' });
 ```
 
-The default is `DATA_PAR`, so a rule that says nothing declares every axis parallel. Rules that produce a reduction opt in by calling `markCommReduce` ([`lowering_registry.ts:228`](../../../src/compiler/passes/lowering/lowering_registry.ts)):
+The default is `DATA_PAR`, so a rule that says nothing declares every axis parallel. Rules that produce a reduction opt in by calling `markCommReduce` ([`lowering_registry.ts:234`](../../../src/compiler/passes/lowering/lowering_registry.ts)):
 
 ```ts
 export function markCommReduce(ivs: BlockRealizeNode[]): BlockRealizeNode[] {
@@ -142,7 +144,7 @@ export function markCommReduce(ivs: BlockRealizeNode[]): BlockRealizeNode[] {
 }
 ```
 
-Five call sites, in the rules that emit an accumulation: `reduce` ([`rules/reduction.ts:53`](../../../src/compiler/passes/lowering/rules/reduction.ts)), `argmax` and `argmin` ([`rules/reduction.ts:129`](../../../src/compiler/passes/lowering/rules/reduction.ts)), the contraction axes of `dot` ([`lowering_registry.ts:557`](../../../src/compiler/passes/lowering/lowering_registry.ts)), the input-channel and kernel axes of `conv` ([`lowering_registry.ts:311`](../../../src/compiler/passes/lowering/lowering_registry.ts)), and the window axes of `pool2d` ([`rules/pooling.ts:64`](../../../src/compiler/passes/lowering/rules/pooling.ts)). Everything else in the compiler is spatial by omission.
+Five call sites, in the rules that emit an accumulation: `reduce` ([`rules/reduction.ts:53`](../../../src/compiler/passes/lowering/rules/reduction.ts)), `argmax` and `argmin` ([`rules/reduction.ts:97`](../../../src/compiler/passes/lowering/rules/reduction.ts)), the contraction axes of `dot` ([`lowering_registry.ts:676`](../../../src/compiler/passes/lowering/lowering_registry.ts)), the input-channel and kernel axes of `conv` ([`lowering_registry.ts:374`](../../../src/compiler/passes/lowering/lowering_registry.ts)), and the window axes of `pool2d` ([`rules/pooling.ts:64`](../../../src/compiler/passes/lowering/rules/pooling.ts)). Everything else in the compiler is spatial by omission.
 
 `initBody` is the second half of a reduction expressed inside one block: the statement that runs once per spatial point before the reduction axes begin. The lowering rules in this compiler do not use it — `reduce` emits an init block and an accumulation block as *siblings* — and Chapter 41's `decompose_reduction` is the primitive that converts between the two forms.
 
@@ -175,7 +177,7 @@ A one-element `local` buffer, allocated inside the spatial loop, holding the run
 
 ### The verifier
 
-[`ir/tensor/verifier.ts`](../../../src/compiler/ir/tensor/verifier.ts), 154 lines, run by `TirModule.verify` ([`module.ts:63`](../../../src/compiler/ir/tensor/module.ts)) and by the pass manager between TIR passes. It checks exactly four things:
+[`ir/tensor/verifier.ts`](../../../src/compiler/ir/tensor/verifier.ts), 154 lines, run by `TirModule.verify` ([`module.ts:17`](../../../src/compiler/ir/tensor/module.ts)) and by the pass manager between TIR passes. It checks exactly four things:
 
 | Check | Line |
 |---|---|
@@ -325,7 +327,7 @@ And the part of the block header that is decoration:
   reduce_acc_1    declared reads: {buf_1}  actually read: {buf_3, buf_1}  MISSING: buf_3
 ```
 
-Every accumulation block in this compiler reads its own output and does not declare it. `bufRefs(inputs)` ([`lowering_registry.ts:421`](../../../src/compiler/passes/lowering/lowering_registry.ts)) builds the read set from the *operation's operands*, and the accumulator is not an operand — it is the result. Nothing breaks today, because everything that must be right walks the body instead: `collectBufferAccesses` (Chapter 36) ignores the declaration entirely, and `buffer_liveness.ts:153` touches the declared sets *and then* walks the body. What consumes the declaration alone is the autotuner's workload key and block DAG (Chapters 45 and 47), where a missing buffer changes a cache key rather than a result.
+Every accumulation block in this compiler reads its own output and does not declare it. `bufRefs(inputs)` ([`lowering_registry.ts:540`](../../../src/compiler/passes/lowering/lowering_registry.ts)) builds the read set from the *operation's operands*, and the accumulator is not an operand — it is the result. Nothing breaks today, because everything that must be right walks the body instead: `collectBufferAccesses` (Chapter 36) ignores the declaration entirely, and `buffer_liveness.ts:153` touches the declared sets *and then* walks the body. What consumes the declaration alone is the autotuner's workload key and block DAG (Chapters 45 and 47), where a missing buffer changes a cache key rather than a result.
 
 **Try this.** Replace `x.sum(1)` with `x.matmul(y)` in the lab's last section and read the same column for `matmul_1`: it declares its two inputs and omits the accumulator, for the same reason.
 
@@ -334,9 +336,9 @@ Every accumulation block in this compiler reads its own output and does not decl
 - **Nothing checks the axis kinds.** Corollary 33.7 is a live exposure, not a hypothetical: `loopCarriedDependence` skips a real dependence when the kinds permit, and the verifier of §33.4 does not look at kinds at all. The protection is that the five call sites of `markCommReduce` are the five rules that build accumulations, and every other rule builds a genuinely elementwise store. A new rule that accumulates and forgets the call would produce a block whose reduction axis is declared parallel, and the first scheduler to parallelise it would be silently wrong.
 - **The declared read set is incomplete by construction.** §33.6. It also duplicates: an operation using one operand twice declares that buffer twice, because the set is built per operand rather than per buffer.
 - **The declared regions do not exist.** `BufferRegion` ([`buffer.ts:69`](../../../src/compiler/ir/tensor/buffer.ts)) is exported and never constructed anywhere in `src/` or `tests/`. The optional `min` and `extent` on `BufferRegionLike` are never set. Region-level reasoning is therefore always recomputed from the body — correct, and O(body) every time it is asked.
-- **`initBody` is unused by every lowering rule.** The field exists ([`nodes.ts:126`](../../../src/compiler/ir/tensor/nodes.ts)), the verifier visits it, the printer prints it, and no rule sets it. Reductions are emitted as two sibling blocks instead, which is the form `decompose_reduction` produces rather than the form it consumes.
+- **`initBody` is unused by every lowering rule.** The field exists ([`nodes.ts:137`](../../../src/compiler/ir/tensor/nodes.ts)), the verifier visits it, the printer prints it, and no rule sets it. Reductions are emitted as two sibling blocks instead, which is the form `decompose_reduction` produces rather than the form it consumes.
 - **`MemoryScope` is a constant object that the rules do not use.** `MemoryScope.GLOBAL` has four call sites; `SHARED`, `LOCAL` and `REGISTER` have none — the rules and sketches that want those scopes write `'shared'` and `'local'` as string literals, and `'register'` appears nowhere. The type is `string`, so nothing catches a typo.
-- **A block's name is a hint, not an identity.** `ctx.blockName('add_block')` appends a counter ([`lowering_registry.ts:110`](../../../src/compiler/passes/lowering/lowering_registry.ts)), and that name is what the scheduler's `explain` output, the autotuner's per-block cache and Part VIII's tuning database all key on. Two structurally identical functions produce the same names only because the counter is deterministic and the traversal order is fixed.
+- **A block's name is a hint, not an identity.** `ctx.blockName('add_block')` appends a counter ([`lowering_registry.ts:121`](../../../src/compiler/passes/lowering/lowering_registry.ts)), and that name is what the scheduler's `explain` output, the autotuner's per-block cache and Part VIII's tuning database all key on. Two structurally identical functions produce the same names only because the counter is deterministic and the traversal order is fixed.
 - **Buffer identity is the only aliasing information.** Two buffers either are the same object or are assumed disjoint. There is no partial-overlap representation, which is what makes §32.4's return-value copy necessary and what Chapter 51's in-place analysis has to work around.
 
 ## 33.8 Read the tests

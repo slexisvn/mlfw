@@ -63,7 +63,7 @@ Two things that are **not** licensed by any flag in this compiler, and are worth
 
 ## 20.4 In mlfw: the gate is a constructor argument
 
-[`simplify/algebraic.ts`](../../../src/compiler/passes/simplify/algebraic.ts) builds two pattern sets, once, at module load ([`algebraic.ts:9`](../../../src/compiler/passes/simplify/algebraic.ts)):
+[`simplify/algebraic.ts`](../../../src/compiler/passes/simplify/algebraic.ts) builds two pattern sets, once, at module load ([`algebraic.ts:44`](../../../src/compiler/passes/simplify/algebraic.ts)):
 
 ```ts
 function buildAlgebraicPatterns(fastMath: boolean): PatternSet {
@@ -90,7 +90,7 @@ function buildAlgebraicPatterns(fastMath: boolean): PatternSet {
 }
 ```
 
-Three of the sixteen are only *present* under fast-math; three more are present always and *decide for themselves*. `SubSelf` ([`patterns.ts:201`](../../../src/compiler/ir/graph/patterns.ts)):
+Three of the sixteen are only *present* under fast-math; three more are present always and *decide for themselves*. `SubSelf` ([`patterns.ts:225`](../../../src/compiler/ir/graph/patterns.ts)):
 
 ```ts
   override match(op: Operation): boolean {
@@ -99,7 +99,7 @@ Three of the sixteen are only *present* under fast-math; three more are present 
   }
 ```
 
-`x − x → 0` is applied unconditionally **for integers** — where it is simply true, there being no NaN and no signed zero in two's complement — and otherwise only under the licence. `MulZero` ([`patterns.ts:237`](../../../src/compiler/ir/graph/patterns.ts)) and `AddZero` are the same shape, the last of them only since §20.6. This is the right design: the licence is consulted per rule, and the dtype does half the work, so integer code gets the aggressive rewrites for free.
+`x − x → 0` is applied unconditionally **for integers** — where it is simply true, there being no NaN and no signed zero in two's complement — and otherwise only under the licence. `MulZero` ([`patterns.ts:261`](../../../src/compiler/ir/graph/patterns.ts)) and `AddZero` are the same shape, the last of them only since §20.6. This is the right design: the licence is consulted per rule, and the dtype does half the work, so integer code gets the aggressive rewrites for free.
 
 The flag reaches the pass from the compiler configuration, in one line of the pipeline builder ([`graph_pipeline.ts:43`](../../../src/compiler/pipeline/graph_pipeline.ts)):
 
@@ -172,7 +172,7 @@ kernel:
 
 Both operations survive every layer, and the kernel performs both. Read that as the target state, then read what each row used to say.
 
-**`x + 0` was a graph-level rewrite.** The graph after the passes read `return %0` — the add was gone, and the kernel was a copy. The pattern responsible is `AddZero` ([`patterns.ts:190`](../../../src/compiler/ir/graph/patterns.ts)), which took no `fastMath` argument and consulted no dtype, while `SubZero` immediately below it and `SubSelf` and `MulZero` below that all did. By Theorem 20.2 it needs one: `(−0) + (+0) = +0` and the rewrite yields `−0`. It now carries the same check its three neighbours already had:
+**`x + 0` was a graph-level rewrite.** The graph after the passes read `return %0` — the add was gone, and the kernel was a copy. The pattern responsible is `AddZero` ([`patterns.ts:191`](../../../src/compiler/ir/graph/patterns.ts)), which took no `fastMath` argument and consulted no dtype, while `SubZero` immediately below it and `SubSelf` and `MulZero` below that all did. By Theorem 20.2 it needs one: `(−0) + (+0) = +0` and the rewrite yields `−0`. It now carries the same check its three neighbours already had:
 
 ```ts
 export class AddZero extends Pattern {
@@ -186,7 +186,7 @@ export class AddZero extends Pattern {
 
 The default is the sound behaviour, integers only, which matters because `add`'s canonicalization list constructs the pattern with no arguments ([`ops/arithmetic.ts:29`](../../../src/compiler/ir/graph/ops/arithmetic.ts)) and canonicalize has no licence to pass it. The algebraic pass, which does, forwards its `fastMath` flag ([`simplify/algebraic.ts:11`](../../../src/compiler/passes/simplify/algebraic.ts)).
 
-**`x × 0` was never a graph-level rewrite at all.** The graph after every pass still contains `mul(%0, %1)` — `MulZero` was present, checked the dtype, found `f32`, found no licence, and correctly declined. Lowering keeps the multiply, and so does scheduling; the TensorIR reads `buf_3[v0_7, v1_8] = (buf_1[0, v1_8] * buf_4[])`. The multiply survived every layer the flag is visible in, and then the CPU code generator flattened it in the last one ([`backend/cpu/codegen.ts:470`](../../../src/backend/cpu/codegen.ts)):
+**`x × 0` was never a graph-level rewrite at all.** The graph after every pass still contains `mul(%0, %1)` — `MulZero` was present, checked the dtype, found `f32`, found no licence, and correctly declined. Lowering keeps the multiply, and so does scheduling; the TensorIR reads `buf_3[v0_7, v1_8] = (buf_1[0, v1_8] * buf_4[])`. The multiply survived every layer the flag is visible in, and then the CPU code generator flattened it in the last one ([`backend/cpu/codegen.ts:488`](../../../src/backend/cpu/codegen.ts)):
 
 ```ts
               else if (node.op === '*' && (a === '0' || b === '0')) { vals.push('0'); }
@@ -219,18 +219,18 @@ The two anomalies are different bugs with the same shape. An algebraic identity 
 | LIR simplification | [`flat_index_simplify.ts`](../../../src/compiler/passes/simplify/flat_index_simplify.ts) | index arithmetic only | no |
 | Backend text emission | `backend/*/codegen.ts` | no | no |
 
-Only the top row is in a position to be careful. The TIR folder is safe by construction — it folds only when an operand is an `IntImmNode`, an integer immediate from index arithmetic ([`nodes.ts:393`](../../../src/compiler/ir/tensor/nodes.ts)) — and that is not an accident, it is the same reasoning as `SubSelf`'s dtype check, applied structurally.
+Only the top row is in a position to be careful. The TIR folder is safe by construction — it folds only when an operand is an `IntImmNode`, an integer immediate from index arithmetic ([`nodes.ts:374`](../../../src/compiler/ir/tensor/nodes.ts)) — and that is not an accident, it is the same reasoning as `SubSelf`'s dtype check, applied structurally.
 
 The rule that falls out: **an algebraic rewrite belongs at the highest level that can see the types.** Every level below that is doing arithmetic on syntax, and syntax does not carry the information the rewrite needs.
 
 ## 20.8 Traps and limits
 
-- **An identity's soundness is a property of the dtype, and two of the six rules had lost track of it** ([`patterns.ts:167`](../../../src/compiler/ir/graph/patterns.ts), [`codegen.ts:470`](../../../src/backend/cpu/codegen.ts)). §20.6 is the account of both. Neither was a hard bug to fix once located, and neither was locatable without a test that feeds `−0` and `±∞`; the general trap is that a rule written for integers is one copy-paste away from a rule that fires on floats.
+- **An identity's soundness is a property of the dtype, and two of the six rules had lost track of it** ([`patterns.ts:168`](../../../src/compiler/ir/graph/patterns.ts), [`codegen.ts:488`](../../../src/backend/cpu/codegen.ts)). §20.6 is the account of both. Neither was a hard bug to fix once located, and neither was locatable without a test that feeds `−0` and `±∞`; the general trap is that a rule written for integers is one copy-paste away from a rule that fires on floats.
 - **The zero identities in the CPU backend are gated on an inferred dtype, not a declared one.** `inferDtype` walks a `MathOpNode` to its leaves and falls back to `'f32'` for any node kind it does not recognize ([`ir/lir/nodes.ts:190`](../../../src/compiler/ir/lir/nodes.ts)). The fallback is the safe direction — an unrecognized node is treated as float and the identity declines — but it means a new integer-valued LIR node kind silently loses the index-arithmetic folding until it is added to the switch.
 - **`fastMath` is one global flag.** There is no per-operation, per-function or per-region control, so a model with one numerically delicate layer either gives up fast-math everywhere or accepts it everywhere. This is the same limitation C compilers have, and the same workaround applies: compile the delicate part separately.
 - **The licence is asserted and never checked.** Nothing verifies finiteness, and nothing warns when a fast-math rewrite fires on a graph whose inputs the compiler has actually seen. The optimization gate (Chapter 61) *does* verify candidate optimizations numerically before keeping them — that machinery exists, and fast-math does not use it.
 - **Integer division is not simplified at all.** `DivSelf` is fast-math-only, so `x / x` for integers is left alone even though the only exception is `x = 0`, which is a trap on most hardware rather than a wrong value. Conservative, and inconsistent with `SubSelf`'s treatment of integers.
-- **Reassociation is gated in the pattern, not in the trait.** `ASSOCIATIVE` is declared unconditionally on `add` and `mul` (Chapter 11 §11.3), and canonicalization registers a reassociation pattern for every operation that is commutative, associative and foldable ([`canonicalize.ts:19`](../../../src/compiler/passes/canonicalize/canonicalize.ts)). `AssociativeConstantReassoc` ([`patterns.ts:493`](../../../src/compiler/ir/graph/patterns.ts)) rewrites `(x ⊕ c₁) ⊕ c₂` into `x ⊕ (c₁ ⊕ c₂)`. Both *constants* are constant, which is the sense in which the pattern is "about constants" — but `x` is a runtime value, and re-bracketing a three-term float expression around it is a reassociation whatever the operands are called.
+- **Reassociation is gated in the pattern, not in the trait.** `ASSOCIATIVE` is declared unconditionally on `add` and `mul` (Chapter 11 §11.3), and canonicalization registers a reassociation pattern for every operation that is commutative, associative and foldable ([`canonicalize.ts:19`](../../../src/compiler/passes/canonicalize/canonicalize.ts)). `AssociativeConstantReassoc` ([`patterns.ts:553`](../../../src/compiler/ir/graph/patterns.ts)) rewrites `(x ⊕ c₁) ⊕ c₂` into `x ⊕ (c₁ ⊕ c₂)`. Both *constants* are constant, which is the sense in which the pattern is "about constants" — but `x` is a runtime value, and re-bracketing a three-term float expression around it is a reassociation whatever the operands are called.
 
   So the pattern applies the same test `AddZero` does: integers unconditionally, floats only under a licence. Without it the rewrite fires at N1 and changes results:
 

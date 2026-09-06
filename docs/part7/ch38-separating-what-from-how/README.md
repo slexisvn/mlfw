@@ -94,7 +94,7 @@ An advisory annotation is sound for free: a backend that ignores it cannot be br
 
 Three modes, in increasing order of cost: a hand-written GPU template (`applyDeterministicGpuSchedule`, Chapter 43), a rule per block (`SchedulePolicy`, below), and a search (`Autotuner`, Part VIII). A function that already has an external kernel or a tensor intrinsic is skipped entirely — someone else has decided how it runs.
 
-The defaults are worth reading against that code. `CompilerConfig` starts from `{ enabled: false, autotune: false, gpuTiling: false }` ([`compiler.ts:143`](../../../src/compiler/pipeline/compiler.ts)) and overlays the target's declaration. Only two targets declare anything: CUDA says `{ gpuTiling: true }` ([`target.ts:225`](../../../src/compiler/support/target.ts)) and WebGPU says `{ enabled: true }` ([`target.ts:261`](../../../src/compiler/support/target.ts)). **So scheduling is off by default on CPU and on WASM, and on CUDA only the template path is on.** §38.6 shows what that costs.
+The defaults are worth reading against that code. `CompilerConfig` starts from `{ enabled: false, autotune: false, gpuTiling: false }` ([`compiler.ts:143`](../../../src/compiler/pipeline/compiler.ts)) and overlays the target's declaration. Only two targets declare anything: CUDA says `{ gpuTiling: true }` ([`target.ts:235`](../../../src/compiler/support/target.ts)) and WebGPU says `{ enabled: true }` ([`target.ts:273`](../../../src/compiler/support/target.ts)). **So scheduling is off by default on CPU and on WASM, and on CUDA only the template path is on.** §38.6 shows what that costs.
 
 ### The primitives
 
@@ -250,7 +250,7 @@ WASM is the other case, on the same two annotations:
       f32x4.replace_lane 1
 ```
 
-`_par_start` and `_par_end` are the parameters the worker pool passes in ([`backend/wasm/codegen.ts:151`](../../../src/backend/wasm/codegen.ts)), so `@parallel` has become a partition of the iteration space across threads, and `@vectorized` has become thirteen SIMD lines — ten `f32x4` opcodes and three mentioning the `v128` locals they work through. Same schedule, real effect.
+`_par_start` and `_par_end` are the parameters the worker pool passes in ([`backend/wasm/codegen.ts:140`](../../../src/backend/wasm/codegen.ts)), so `@parallel` has become a partition of the iteration space across threads, and `@vectorized` has become thirteen SIMD lines — ten `f32x4` opcodes and three mentioning the `v128` locals they work through. Same schedule, real effect.
 
 Then CUDA, and the finding this lab exists for:
 

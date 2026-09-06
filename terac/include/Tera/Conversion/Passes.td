@@ -21,6 +21,29 @@ def ConvertTeraToLinalg : Pass<"convert-tera-to-linalg"> {
 
     Destination tensors are materialised up front, so the conversion requires
     static shapes and rejects a dynamic extent rather than mislowering it.
+
+    Every op it produces carries `tera.schedule`, the name of the tera op it
+    came from, as `<function>.<op>.<n>` counted per mnemonic per function. A
+    schedule has to be able to say which op it schedules, and the alternative
+    -- the third generic in the function -- stops being the same op as soon as
+    anything else in the function changes, which is exactly when a cached
+    schedule would be applied to the wrong thing. The name is stable under
+    everything but a change to the program, and it is readable, so a tuned
+    schedule can be read and overridden by hand.
+
+    It is carried through the rewrite in the location rather than in an
+    attribute, because a location is what every pattern already passes from the
+    op it replaces to the ops it builds; an attribute would have to be copied
+    by each of them, and the one that forgot would leave a schedule silently
+    addressing nothing. What arrives at the far end is turned back into an
+    attribute, because that is what `transform.structured.match` can look at.
+
+    One tera op becomes several linalg ops and they all take the name, so a
+    name says which op they came from rather than which of them to schedule; a
+    script narrows the match the way it narrows any other. The exception is
+    `linalg.fill`, which is left unnamed: it is the destination materialised
+    before the op that accumulates into it, and every schedule worth writing
+    folds it into that op's tile rather than giving it a nest of its own.
   }];
 
   let dependentDialects = [
@@ -88,6 +111,160 @@ def StageGpuBuffers
   ];
 }
 
+def ApplySchedule : Pass<"tera-apply-schedule", "::mlir::ModuleOp"> {
+  let summary = "Schedule the module with a transform script instead of the "
+                "passes that would have.";
+  let description = [{
+    A schedule is a choice -- which tile, which thread block, which operand
+    worth staging -- and the choices terac makes are written in C++, one
+    heuristic per pass, with no way to try a different one but to rebuild. This
+    pass is the other way in: the schedule arrives as a transform script, which
+    is data, so something else can write it.
+
+    That something else is mlfw's autotuner, which already searches this space
+    and already measures what it finds. What it lacks is a way to say what it
+    found to a compiler that is not itself. A transform script is a way, and it
+    is the reason the schedule is a script rather than a table of tile sizes:
+    the search finds shapes of schedule, not just numbers in one.
+
+    The script names the ops it schedules by the `tera.schedule` attribute
+    `-convert-tera-to-linalg` leaves on them, which is what makes a script
+    outlive the compile that produced it.
+
+    Given no script this pass does nothing, and the pipeline runs the passes it
+    would have. That fallback is not a convenience. A schedule that arrives
+    from outside can be stale, can name an op that is no longer there, can be
+    for another machine; the answer to all of those has to be the compiler that
+    was there before, and it is the same rule as the autotuner's own floor of
+    never being worse than the default. A pipeline where the script is the only
+    schedule has nowhere to fall back to.
+
+    What it does refuse is a script it was given and could not use: a file that
+    does not parse, or one with no entry point of the name asked for. Those are
+    a schedule that was meant to be applied and was not, which is the one case
+    where carrying on quietly would hide the thing worth knowing.
+  }];
+
+  let options = [
+    Option<"schedule", "schedule", "std::string", "\"\"",
+           "Path to a transform module holding the schedule. Empty leaves the "
+           "module alone for the pipeline's own passes to schedule.">,
+    Option<"entryPoint", "entry-point", "std::string",
+           "\"__transform_main\"",
+           "Named sequence in that module to run over the payload.">,
+  ];
+
+  let dependentDialects = ["::mlir::transform::TransformDialect"];
+}
+
+def TileContractionToShared
+    : Pass<"tera-tile-contraction-to-shared", "::mlir::func::FuncOp"> {
+  let summary = "Cut every contraction into blocks that stage their operands "
+                "in shared memory.";
+  let description = [{
+    A contraction lowered straight to loops reads both operands from global
+    memory once per multiply-accumulate, and reads and writes the accumulator
+    there as well, because nothing tells the code below that the accumulator
+    cannot alias them. That is four global accesses for two flops, and it is
+    what a device is slowest at. This pass gives the block a copy of the tile
+    it is working on: each operand tile is read once from global memory by the
+    threads that will read it many times from shared, and the accumulator
+    stays in a register until the block is done with it.
+
+    It runs on buffers rather than tensors, and that is forced rather than
+    chosen. The tile a block shares is written by every thread and read by
+    every thread, and a value in SSA has one producer -- so a cross-thread
+    write into a block-shared buffer is not something a tensor can carry, and
+    no amount of tiling above bufferization reaches this shape.
+
+    The nest it builds is the one `convert-parallel-loops-to-gpu` can map.
+    That conversion walks the body of the outermost mapped loop with a
+    worklist which descends only into another `scf.parallel`: every other op,
+    `scf.for` included, is cloned whole. So the loop over the contracted axis
+    has to be inside the thread-level loop rather than around it, which is
+    also where the barriers separating the two phases have to be. Upstream's
+    `linalg::promoteSubViews` puts both outside, one undistributed whole-tile
+    `memref.copy` at block level, and the result is a launch of one thread per
+    block that computes the right answer slowly and says nothing.
+
+    Two barriers per tile, both inside the thread loop and both reached by
+    every thread of the block: one after the tiles are staged and before they
+    are read, and one after they are read and before the next tile overwrites
+    them. Neither is optional -- without the first a thread reads a tile
+    another thread has not written yet, and without the second a thread
+    overwrites a tile another thread is still reading. Both are races that
+    give the right answer nearly every time.
+
+    The shared buffers are `memref.alloc` in the workgroup address space, at
+    block level and never deallocated: a side effect after the thread loop
+    fails the conversion, and the storage is the kernel's rather than the
+    block's to free. `-tera-attach-workgroup-memory` turns them into the
+    kernel's own attributions once the launch exists.
+
+    A contraction is taken only when the tile divides all three of its
+    extents, so no thread carries a bounds test and no tile is partly
+    garbage; one that does not divide keeps the lowering it had. The same
+    goes for a dynamic extent, an operand indexed by anything but a
+    projected permutation, and more than one batch axis -- a grid has three
+    dimensions and the two the tile takes leave one.
+  }];
+
+  let options = [
+    Option<"maxThreadsPerBlock", "max-threads-per-block", "int64_t", "1024",
+           "Threads a block may not exceed, which bounds the tile at its "
+           "square root.">,
+    Option<"warpSize", "warp-size", "int64_t", "32",
+           "Threads that run in lockstep, which the tile is a multiple of so "
+           "that a row of the block is a whole warp.">,
+    Option<"sharedMemoryPerBlock", "shared-memory-per-block", "int64_t",
+           "49152", "Bytes of shared memory a block may hold, which the two "
+           "operand tiles have to fit in together.">,
+  ];
+
+  let dependentDialects = [
+    "::mlir::arith::ArithDialect",
+    "::mlir::gpu::GPUDialect",
+    "::mlir::linalg::LinalgDialect",
+    "::mlir::memref::MemRefDialect",
+    "::mlir::scf::SCFDialect",
+  ];
+}
+
+def AttachWorkgroupMemory
+    : Pass<"tera-attach-workgroup-memory", "::mlir::ModuleOp"> {
+  let summary = "Give each kernel the shared buffers its blocks allocate.";
+  let description = [{
+    Shared memory is not allocated, it is declared: the space a block gets is
+    part of the kernel's own description, reserved when the launch is
+    configured and gone when the block ends. MLIR spells that as an
+    attribution on `gpu.launch`, which `gpu-kernel-outlining` carries to the
+    `gpu.func` and the NVVM lowering turns into a global in the shared address
+    space.
+
+    An `scf.parallel` body has no way to say that, so `-tera-tile-contraction-
+    to-shared` writes the only thing it can -- a `memref.alloc` in the
+    workgroup address space, once per block -- and this pass rewrites it into
+    the attribution once the launch it belongs to exists. Left alone it
+    reaches `memref`-to-LLVM as a call to `malloc` returning a pointer into
+    the shared address space, which is meaningless, and the failure is a
+    legalisation error naming the allocation rather than anything about the
+    kernel.
+
+    The allocation has to sit directly in the launch's body: one nested in a
+    loop or a conditional would be several allocations, or none, and an
+    attribution is one buffer for the block's whole life. It has to have a
+    static shape, for the same reason -- the space is reserved before a block
+    starts, so there is no extent for it to depend on. A `memref.dealloc` of
+    one is refused rather than dropped: the storage does not outlive the
+    block and nothing frees it, so an attempt to is a mistake worth naming.
+  }];
+
+  let dependentDialects = [
+    "::mlir::gpu::GPUDialect",
+    "::mlir::memref::MemRefDialect",
+  ];
+}
+
 def TileParallelLoops
     : Pass<"tera-tile-parallel-loops", "::mlir::func::FuncOp"> {
   let summary = "Cut every parallel loop into the thread block it becomes.";
@@ -115,6 +292,11 @@ def TileParallelLoops
     `tile-sizes` overrides the choice for every loop, which is what a schedule
     written by hand wants; a dimension whose trip count is not a constant is
     left at one, because a block extent has to be known to be one.
+
+    A loop that already sits inside another parallel loop is left alone: it is
+    a thread level someone else made -- `-tera-tile-contraction-to-shared`
+    writes both levels itself -- and cutting it would make a third, which is
+    one more than the grid and the block between them can carry.
   }];
 
   let options = [
@@ -165,9 +347,15 @@ def VerifyGpuMapping
     the host case and it is quieter, because nothing upstream reports it and
     the numbers still come out right. A parallel loop that survives into a
     kernel is that, whatever it carries.
+
+    `scf.forall` is looked at on the same terms. It is the loop a schedule
+    written as a transform script tiles into, and the ops that distribute one
+    to processors can leave it behind the same way: a forall still a forall
+    inside a launch is one thread doing the whole block's work, and one that
+    kept its mapping outside a launch is a block that never reached the device.
   }];
 
-  let dependentDialects = ["::mlir::gpu::GPUDialect"];
+  let dependentDialects = ["::mlir::gpu::GPUDialect", "::mlir::scf::SCFDialect"];
 }
 
 def TileAndFuse

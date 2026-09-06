@@ -1,4 +1,4 @@
-import { DYNAMIC } from '../../ir/graph/types.js';
+import { DYNAMIC, TensorType } from '../../ir/graph/types.js';
 import { SymInt, symVarName } from '../../ir/sym_int.js';
 import { MemoryScope } from '../../ir/tensor/tensor_types.js';
 import { Buffer } from '../../ir/tensor/buffer.js';
@@ -9,7 +9,7 @@ import { numberedBlockName } from '../../ir/tensor/block_name.js';
 
 import { isConstantOp } from '../../ir/graph/op_traits.js';
 import { registerOpStrategy, getOpStrategy, selectImplementation } from './op_strategy.js';
-import type { Dim, IRType, Shape, SymIntValue, TensorType } from '../../ir/graph/types.js';
+import type { Dim, IRType, Layout, Shape, SymIntValue } from '../../ir/graph/types.js';
 import type { Operation } from '../../ir/graph/operation.js';
 import type { TirNode } from '../../ir/tensor/nodes.js';
 import type { BufferRegionLike } from '../../ir/tensor/buffer.js';
@@ -129,25 +129,31 @@ export class LoweringContext {
   getOrAllocBuffer(value: BufferOwner): Buffer {
     let buf = this.bufferMap.get(value);
     if (buf) return buf;
-    const t = value.type as TensorType;
-    const shape = t.shape || [];
-    const dtype = t.dtype || 'f32';
-    const strides = t.layout ? t.layout.computeStrides(shape) : null;
-    buf = new Buffer(`buf_${this.varCounter++}`, shape, dtype, MemoryScope.GLOBAL, strides);
-    if (value.symbolicShape) buf.symbolicShape = value.symbolicShape;
+    buf = this._makeBuffer(value);
     this.bufferMap.set(value, buf);
     this.declareBuffer(buf);
     return buf;
   }
 
   allocFreshBuffer(value: BufferOwner): Buffer {
+    const buf = this._makeBuffer(value);
+    this.declareBuffer(buf);
+    return buf;
+  }
+
+  _makeBuffer(value: BufferOwner): Buffer {
     const t = value.type as TensorType;
     const shape = t.shape || [];
     const dtype = t.dtype || 'f32';
-    const strides = t.layout ? t.layout.computeStrides(shape) : null;
-    const buf = new Buffer(`buf_${this.varCounter++}`, shape, dtype, MemoryScope.GLOBAL, strides);
-    if (value.symbolicShape) buf.symbolicShape = value.symbolicShape;
-    this.declareBuffer(buf);
+    const storage = t.layout ? t.layout.storage(shape) : null;
+    const buf = new Buffer(
+      `buf_${this.varCounter++}`,
+      storage ? storage.shape : shape,
+      dtype,
+      MemoryScope.GLOBAL,
+      storage ? (storage.strides as number[]) : null
+    );
+    if (value.symbolicShape && !(t.layout && t.layout.isBlocked())) buf.symbolicShape = value.symbolicShape;
     return buf;
   }
 
@@ -230,6 +236,44 @@ export function markCommReduce(ivs: BlockRealizeNode[]): BlockRealizeNode[] {
   return ivs;
 }
 
+export function layoutOf(value: { type: unknown }): Layout | null {
+  const t = value.type;
+  if (!(t instanceof TensorType) || !t.layout || !t.layout.isBlocked()) return null;
+  return t.layout;
+}
+
+export function logicalShape(value: { type: unknown }, buf: Buffer): Shape {
+  const t = value.type;
+  return t instanceof TensorType ? t.shape : buf.shape;
+}
+
+function contractionBlockFactor(
+  inLayout: Layout | null,
+  kerLayout: Layout | null,
+  inChannelDim: number,
+  kerChannelDim: number,
+  groups: number,
+  channelsPerGroup: Dim
+): number {
+  if (groups !== 1 || !inLayout || !kerLayout || !inLayout.block || !kerLayout.block) return 0;
+  if (inLayout.block.dim !== inChannelDim || kerLayout.block.dim !== kerChannelDim) return 0;
+  const factor = inLayout.block.factor;
+  if (factor !== kerLayout.block.factor) return 0;
+  if (typeof channelsPerGroup !== 'number' || channelsPerGroup % factor !== 0) return 0;
+  return factor;
+}
+
+export function storageIndices(indices: readonly TirNode[], layout: Layout | null): TirNode[] {
+  const block = layout ? layout.block : null;
+  if (!block) return [...indices];
+  const logical = indices[block.dim];
+  const factor = new IntImmNode(block.factor);
+  const out = [...indices];
+  out[block.dim] = mathOp('//', logical, factor);
+  out.push(mathOp('%', logical, factor));
+  return out;
+}
+
 export function makeLoopNest(ctx: LoweringContext, shape: Shape, buf: Buffer | null): LoopNest {
   const n = shape.length;
   const loopVars = ctx.allocVarArray('i', n);
@@ -296,13 +340,19 @@ export function buildConvNest(ctx: LoweringContext, op: Operation, inBuf: Buffer
   const iLayout = parseLayout(op.getAttr<string>('input_layout') as string);
   const kLayout = parseLayout(op.getAttr<string>('kernel_layout') as string);
   const spatialDims = strides.length;
-  const batch = inBuf.shape[iLayout['N']];
-  const outChannels = kerBuf.shape[kLayout['O']] as number;
-  const inChannelsPerGroup = kerBuf.shape[kLayout['I']];
-  const outShape = outBuf.shape;
+  const inLayout = layoutOf(op.getOperand(0));
+  const kerLayout = layoutOf(op.getOperand(1));
+  const outLayout = layoutOf(op.getResult(0));
+  const inShape = logicalShape(op.getOperand(0), inBuf);
+  const kerShape = logicalShape(op.getOperand(1), kerBuf);
+  const batch = inShape[iLayout['N']];
+  const outChannels = kerShape[kLayout['O']] as number;
+  const inChannelsPerGroup = kerShape[kLayout['I']];
+  const outShape = logicalShape(op.getResult(0), outBuf);
+  const channelBlock = contractionBlockFactor(inLayout, kerLayout, iLayout['C'], kLayout['I'], groups, inChannelsPerGroup);
 
   const initNest = buildSpatialNest(ctx, prefix + 'i', Array.from({ length: outShape.length }, (_, i) => i), outShape, outBuf);
-  const initStore = new BufferStoreNode(outBuf, initNest.indices, initVal());
+  const initStore = new BufferStoreNode(outBuf, storageIndices(initNest.indices, outLayout), initVal());
   const initBlock = new BlockNode(ctx.blockName(blockPrefix + '_init'), initNest.ivs, [], [{ buffer: outBuf }], initStore);
   const initBody = initNest.wrap(initBlock);
 
@@ -311,15 +361,17 @@ export function buildConvNest(ctx: LoweringContext, op: Operation, inBuf: Buffer
   const icVar = ctx.allocVar(prefix + 'ic');
   const spatialOutVars = ctx.allocVarArray(prefix + 'o', spatialDims);
   const spatialKerVars = ctx.allocVarArray(prefix + 'k', spatialDims);
-  const allVars = [nVar, ocVar, ...spatialOutVars, icVar, ...spatialKerVars];
+  const icInnerVar = channelBlock ? ctx.allocVar(prefix + 'ici') : null;
+  const allVars = [nVar, ocVar, ...spatialOutVars, icVar, ...spatialKerVars, ...(icInnerVar ? [icInnerVar] : [])];
   const allBinds = ctx.allocBindArray(prefix + 'v', allVars);
 
   const bv = allBinds[0].iterVar;
   const ocv = allBinds[1].iterVar;
   const soBinds = allBinds.slice(2, 2 + spatialDims);
   const icv = allBinds[2 + spatialDims].iterVar;
-  const skBinds = allBinds.slice(3 + spatialDims);
-  markCommReduce([allBinds[2 + spatialDims], ...skBinds]);
+  const skBinds = allBinds.slice(3 + spatialDims, 3 + 2 * spatialDims);
+  const iciv = icInnerVar ? allBinds[allBinds.length - 1].iterVar : null;
+  markCommReduce([allBinds[2 + spatialDims], ...skBinds, ...(icInnerVar ? [allBinds[allBinds.length - 1]] : [])]);
 
   const outIdx: TirNode[] = new Array(outShape.length);
   outIdx[iLayout['N']] = bv;
@@ -329,7 +381,7 @@ export function buildConvNest(ctx: LoweringContext, op: Operation, inBuf: Buffer
     outIdx[iLayout[spatialLayoutKeys[s]]] = soBinds[s].iterVar;
   }
 
-  const inIdx: TirNode[] = new Array(inBuf.shape.length);
+  const inIdx: TirNode[] = new Array(inShape.length);
   inIdx[iLayout['N']] = bv;
   const groupSize = Math.floor(outChannels / groups);
   if (groups > 1) {
@@ -338,7 +390,7 @@ export function buildConvNest(ctx: LoweringContext, op: Operation, inBuf: Buffer
     inIdx[iLayout['C']] = icv;
   }
 
-  const kerIdx: TirNode[] = new Array(kerBuf.shape.length);
+  const kerIdx: TirNode[] = new Array(kerShape.length);
   kerIdx[kLayout['O']] = ocv;
   kerIdx[kLayout['I']] = icv;
 
@@ -357,31 +409,35 @@ export function buildConvNest(ctx: LoweringContext, op: Operation, inBuf: Buffer
     kerIdx[kLayout[kKey]] = skBinds[s].iterVar;
     if (padding[s][0] !== 0 || padding[s][1] !== 0) {
       const ge = new CompareNode('ge', inSpatialIdx, new IntImmNode(0));
-      const lt = new CompareNode('lt', inSpatialIdx, new IntImmNode(inBuf.shape[iLayout[key]] as number));
+      const lt = new CompareNode('lt', inSpatialIdx, new IntImmNode(inShape[iLayout[key]] as number));
       const dimOk = new MathOpNode('*', ge, lt);
       inBoundsExpr = inBoundsExpr ? new MathOpNode('*', inBoundsExpr, dimOk) : dimOk;
     }
   }
 
-  const product = leafBuilder(inIdx, kerIdx);
+  const inAccess = iciv ? [...inIdx, iciv] : storageIndices(inIdx, inLayout);
+  const kerAccess = iciv ? [...kerIdx, iciv] : storageIndices(kerIdx, kerLayout);
+  const product = leafBuilder(inAccess, kerAccess);
   const guardedProduct = inBoundsExpr ? new IfThenElseNode(inBoundsExpr, product, guardFill()) : product;
-  const loadOut = new BufferLoadNode(outBuf, outIdx);
+  const loadOut = new BufferLoadNode(outBuf, storageIndices(outIdx, outLayout));
   const accExpr = new MathOpNode('+', loadOut, guardedProduct);
-  const accStore = new BufferStoreNode(outBuf, outIdx, accExpr);
+  const accStore = new BufferStoreNode(outBuf, storageIndices(outIdx, outLayout), accExpr);
   const accBlock = new BlockNode(ctx.blockName(blockPrefix + '_acc'), allBinds, [{ buffer: inBuf }, { buffer: kerBuf }], [{ buffer: outBuf }], accStore);
 
   const kerSpatialSizes: Dim[] = new Array(spatialDims);
   for (let s = 0; s < spatialDims; s++) {
     const kKey = spatialLayoutKeys[s].toUpperCase();
-    kerSpatialSizes[s] = kerBuf.shape[kLayout[kKey]];
+    kerSpatialSizes[s] = kerShape[kLayout[kKey]];
   }
 
   let accBody: TirNode = accBlock;
+  if (icInnerVar) accBody = new ForNode(icInnerVar, new IntImmNode(0), new IntImmNode(channelBlock), ForKind.SERIAL, accBody);
   for (let s = spatialDims - 1; s >= 0; s--) {
     const kKey = spatialLayoutKeys[s].toUpperCase();
     accBody = new ForNode(spatialKerVars[s], new IntImmNode(0), ctx.extentNode(kerSpatialSizes[s], kerBuf, kLayout[kKey]), ForKind.SERIAL, accBody);
   }
-  accBody = new ForNode(icVar, new IntImmNode(0), ctx.extentNode(inChannelsPerGroup, kerBuf, kLayout['I']), ForKind.SERIAL, accBody);
+  const icExtent = channelBlock ? (inChannelsPerGroup as number) / channelBlock : inChannelsPerGroup;
+  accBody = new ForNode(icVar, new IntImmNode(0), ctx.extentNode(icExtent, kerBuf, kLayout['I']), ForKind.SERIAL, accBody);
   for (let s = spatialDims - 1; s >= 0; s--) {
     const dimIdx = iLayout[spatialLayoutKeys[s]];
     accBody = new ForNode(spatialOutVars[s], new IntImmNode(0), ctx.extentNode(outShape[dimIdx], outBuf, dimIdx), ForKind.SERIAL, accBody);

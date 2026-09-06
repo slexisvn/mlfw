@@ -4,7 +4,7 @@ import type { Operation } from './operation.js';
 export type LayoutTarget = {
   isGPU(): boolean;
   isCPU(): boolean;
-  preferredConvLayout?: string | null;
+  preferredConvLayout?: Readonly<{ order: readonly number[]; block?: Readonly<{ dim: number; factor: number }> | null }> | null;
   cacheLineBytes?: number;
 };
 

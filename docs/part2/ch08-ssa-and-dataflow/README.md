@@ -206,7 +206,7 @@ Three conditions are doing real work there, and it is worth being clear about wh
 
 *Side-effect-free* is why the operations cannot communicate except through values — Chapter 19 returns to the operations for which this fails.
 
-*Acyclic* is what makes a topological order exist at all, and it is checked: [`verifier.ts:136`](../../../src/compiler/ir/graph/verifier.ts) contains a `detectCycles` pass over every block, reporting `participates in a value dependency cycle`.
+*Acyclic* is what makes a topological order exist at all, and it is checked: [`verifier.ts:149`](../../../src/compiler/ir/graph/verifier.ts) contains a `detectCycles` pass over every block, reporting `participates in a value dependency cycle`.
 
 *Terminator last* is the condition that is easy to forget, and the reason it is stated explicitly is that the very next lab appears to violate it. A block's terminator is not just conventionally final: it is required to be, by a trait the verifier enforces. A permutation that satisfies (a) but not (b) — dataflow-consistent, terminator moved — is a structure the parser will happily build and the verifier will reject. §8.6 runs exactly that case.
 
@@ -242,7 +242,7 @@ module @traced {
 the parser accepted it.
 ```
 
-Every single line now uses values that are defined *below* it. `return %13` comes first. Read as a sequence of instructions this is nonsense. Read as a set of edges it is the same graph, and the parser has no difficulty with it, because it builds operations in dependency order rather than in reading order — [`parser.ts:403`](../../../src/compiler/ir/graph/parser.ts), which Chapter 13 walks through.
+Every single line now uses values that are defined *below* it. `return %13` comes first. Read as a sequence of instructions this is nonsense. Read as a set of edges it is the same graph, and the parser has no difficulty with it, because it builds operations in dependency order rather than in reading order — [`parser.ts:682`](../../../src/compiler/ir/graph/parser.ts), which Chapter 13 walks through.
 
 > **This module is not valid IR, and that is Theorem 8.4's condition (b) showing its teeth.** Reversing the block moved the terminator to the top, and a terminator is required to be last. Run the result through the verifier and it says so:
 >
@@ -302,7 +302,7 @@ one accessor does care about textual order:
 
 `getReturnOp` finds the return by looking at the *last* operation, not by looking for an operation named `return`. On the reversed module it returns `null`, and every caller that trusts it — `getReturnValues`, the function verifier's output check — silently sees a function with no return.
 
-Is that a bug? Not quite. `return` is declared with the `TERMINATOR` trait, and terminators are required to be last: the trait verifier at [`trait_verifier.ts:151`](../../../src/compiler/ir/graph/trait_verifier.ts) enforces exactly that, and the block verifier enforces it again for region blocks. So in any IR that has passed verification, `lastOp` *is* the terminator and the accessor is correct.
+Is that a bug? Not quite. `return` is declared with the `TERMINATOR` trait, and terminators are required to be last: the trait verifier at [`trait_verifier.ts:152`](../../../src/compiler/ir/graph/trait_verifier.ts) enforces exactly that, and the block verifier enforces it again for region blocks. So in any IR that has passed verification, `lastOp` *is* the terminator and the accessor is correct.
 
 What the reversed module shows is that the parser will build IR the verifier would reject. The two components disagree about how much they check, which is Chapter 12's subject. Keep the distinction: **terminator-last is a real invariant of valid IR; the order of everything else is not.**
 

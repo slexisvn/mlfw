@@ -197,6 +197,18 @@ describe('the harder parts of the grammar survive the trip', () => {
     expect(parsed.inputTypes[0].layout.order).toEqual([1, 0]);
   });
 
+  it('round-trips a channel-blocked layout', () => {
+    const layout = Layout.blocked([0, 1, 2, 3], 1, 4);
+    const t = new TensorType([2, 8, 3, 5], ScalarType.F32, layout);
+    const func = buildFunction('blocked', [t], [t], (b, args) => {
+      b.returnOp([b.neg(args[0]).getResult(0)]);
+    });
+
+    const parsed = expectStable(moduleOf(func)).getFunction('blocked');
+    expect(parsed.inputTypes[0].layout.equals(layout)).toBe(true);
+    expect(parsed.inputTypes[0].layout.block).toEqual({ dim: 1, factor: 4 });
+  });
+
   it('round-trips array, string, boolean and infinite attribute values', () => {
     const t = f32([2, 3]);
     const out = f32([3, 2]);

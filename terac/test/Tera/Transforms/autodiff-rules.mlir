@@ -403,6 +403,29 @@ func.func @largest_window(%x: tensor<1x1x4x6xf32>) -> tensor<1x1x2x3xf32>
 
 // -----
 
+// What the reverse rule needs is that the windows tile the operand exactly:
+// it splits each spatial axis into a window index and a position within one,
+// and an element under no window has no axis to be split onto. `ceil_mode` is
+// not that question. Here the stride divides, so rounding the count up takes
+// the same two windows rounding it down does, there is nothing hanging over
+// anything, and the same rule applies as to the flag's absence.
+// CHECK-LABEL: func @ceil_window_bwd
+// CHECK: %[[SPLIT:.*]] = tera.broadcast_in_dim %arg1 {broadcast_dimensions = array<i64: 0, 1, 2, 4>}
+// CHECK-SAME: tensor<1x1x2x3xf32> -> tensor<1x1x2x2x3x2xf32>
+// CHECK: tera.reshape %[[SPLIT]] : tensor<1x1x2x2x3x2xf32> -> tensor<1x1x4x6xf32>
+func.func @ceil_window(%x: tensor<1x1x4x6xf32>) -> tensor<1x1x2x3xf32>
+    attributes {tera.differentiable} {
+  %0 = tera.pool2d average, %x {kernel_size = array<i64: 2, 2>,
+                                strides = array<i64: 2, 2>,
+                                padding = array<i64: 0, 0, 0, 0>,
+                                ceil_mode = true,
+                                count_include_pad = true}
+      : tensor<1x1x4x6xf32> -> tensor<1x1x2x3xf32>
+  return %0 : tensor<1x1x2x3xf32>
+}
+
+// -----
+
 // Reading an axis from the far end is its own inverse, and padding is undone
 // by reading back out the window the operand landed in -- which is the strided
 // slice `tera.slice` takes, so the two rules are each other's.

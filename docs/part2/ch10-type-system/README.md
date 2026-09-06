@@ -18,13 +18,13 @@ And it has to have an answer for the case where the honest answer is "not yet" �
 
 ## 10.2 In mlfw: four kinds of type, one of which matters
 
-[`types.ts:7`](../../../src/compiler/ir/graph/types.ts):
+[`types.ts:10`](../../../src/compiler/ir/graph/types.ts):
 
 ```ts
 export type IRType = TensorType | TupleType | TokenType | FunctionType;
 ```
 
-Three of those four are rare. `TupleType` groups results (`split` produces one); `TokenType` orders side effects without carrying data; `FunctionType` types a callee. Ninety-nine values in a hundred carry the remaining one, `TensorType` ([`types.ts:282`](../../../src/compiler/ir/graph/types.ts)):
+Three of those four are rare. `TupleType` groups results (`split` produces one); `TokenType` orders side effects without carrying data; `FunctionType` types a callee. Ninety-nine values in a hundred carry the remaining one, `TensorType` ([`types.ts:373`](../../../src/compiler/ir/graph/types.ts)):
 
 ```ts
 export class TensorType {
@@ -39,17 +39,17 @@ export class TensorType {
     this.layout = layout || Layout.rowMajor(shape.length);
 ```
 
-Three `readonly` fields and a frozen shape array. **Types are immutable**, and every "modification" is a new object — `withShape`, `withDtype`, `withLayout` at [`types.ts:279`](../../../src/compiler/ir/graph/types.ts) all construct rather than mutate. This is not fastidiousness: types are shared freely between values, and a mutable type would let a rewrite of one value silently retype another.
+Three `readonly` fields and a frozen shape array. **Types are immutable**, and every "modification" is a new object — `withShape` and `withDtype` at [`types.ts:416`](../../../src/compiler/ir/graph/types.ts) all construct rather than mutate. This is not fastidiousness: types are shared freely between values, and a mutable type would let a rewrite of one value silently retype another.
 
 ### Dimensions come in three kinds
 
-[`types.ts:4`](../../../src/compiler/ir/graph/types.ts):
+[`types.ts:7`](../../../src/compiler/ir/graph/types.ts):
 
 ```ts
 export type Dim = number | SymIntValue;
 ```
 
-and [`types.ts:63`](../../../src/compiler/ir/graph/types.ts):
+and [`types.ts:66`](../../../src/compiler/ir/graph/types.ts):
 
 ```ts
 export const DYNAMIC = -1;
@@ -67,7 +67,7 @@ The distinction between the last two is the whole reason `SymInt` exists. If a f
 
 ### Dtype, and the promotion lattice
 
-[`types.ts:173`](../../../src/compiler/ir/graph/types.ts) declares eleven scalar types, and [`types.ts:173`](../../../src/compiler/ir/graph/types.ts) says what happens when two meet:
+[`types.ts:35`](../../../src/compiler/ir/graph/types.ts) declares eleven scalar types, and [`types.ts:176`](../../../src/compiler/ir/graph/types.ts) says what happens when two meet:
 
 ```ts
 export function promoteDtype(a: ScalarDType, b: ScalarDType): ScalarDType | null {
@@ -88,30 +88,31 @@ export function promoteDtype(a: ScalarDType, b: ScalarDType): ScalarDType | null
 
 Read the rules: within a kind, wider wins; across kinds, float beats integer; and any *mixed* pair involving `bool` or `index` returns `null`, meaning "no promotion exists, this is an error" — identical dtypes short-circuit on the first line, so `bool` with `bool` is still `bool`. It is a small join semilattice with an explicit failure, and returning `null` rather than guessing is the right call — a silent bool-to-float promotion would hide a real mistake.
 
-### Layout is a permutation
+### Layout is an order, and sometimes a split
 
-[`types.ts:188`](../../../src/compiler/ir/graph/types.ts):
+[`types.ts:214`](../../../src/compiler/ir/graph/types.ts):
 
 ```ts
 export class Layout {
+  readonly axe: AxeLayout;
+  readonly dims: readonly number[];
   readonly order: readonly number[];
+  readonly block: LayoutBlock | null;
 ```
 
-`order` is the sequence in which dimensions vary from slowest to fastest. Row-major is `[0, 1, 2, ...]`; column-major is the reverse; NHWC against NCHW is a permutation of four. Its one job is [`types.ts:235`](../../../src/compiler/ir/graph/types.ts):
+`order` is the sequence in which dimensions vary from slowest to fastest. Row-major is `[0, 1, 2, ...]`; column-major is the reverse; NHWC against NCHW is a permutation of four. `block` is the part a permutation cannot say: `{ dim: 1, factor: 8 }` means dimension 1 is stored in groups of eight, so a rank-4 tensor occupies a rank-5 region of memory. [Chapter 25](../../part4/ch25-layout/README.md) is where both are chosen and where the underlying `AxeLayout` — a published algebra this class is a thin façade over — is defined.
+
+Its one job is [`types.ts:299`](../../../src/compiler/ir/graph/types.ts):
 
 ```ts
-  computeStrides(shape: Shape): number[] {
-    const n = shape.length;
-    const strides = new Array(n);
-    let stride = 1;
-    for (let i = n - 1; i >= 0; i--) {
-      const dim = this.order[i];
-      strides[dim] = stride;
-      if (shape[dim] === DYNAMIC || shape[dim] instanceof SymInt) {
-        stride = DYNAMIC;
+  storage(shape: Shape): { shape: Shape; strides: Dim[] } {
+    if (this.rank !== shape.length) return Layout.rowMajor(shape.length).storage(shape);
+    const bound = this.bind(shape);
 ```
 
-Note the propagation: once a dimension is unknown, every stride outside it is unknown too. That is correct and it is the practical cost of a dynamic dimension — Chapter 62's "generated code quality falls" is, concretely, this.
+`storage` answers with both a shape and a stride vector, because for a blocked layout the buffer's shape is not the tensor's shape either. `computeStrides` is the unblocked shorthand and refuses outright when the layout is blocked, which is the right failure: there is no single stride per dimension to return.
+
+Note what happens to an unknown dimension: once one is dynamic, every stride outside it is unknown too. That is correct and it is the practical cost of a dynamic dimension — Chapter 62's "generated code quality falls" is, concretely, this.
 
 ## 10.3 Lab 1 — What a type knows
 
@@ -150,12 +151,12 @@ Two rows repay a second look.
 Now the part that matters. There are three relations on types in this file, and they are not the same relation.
 
 ```ts
-  equals(other: unknown): boolean            // types.ts:283
-  shapeEquals(other: unknown): boolean       // types.ts:294
-  shapeCompatible(other: TensorType): boolean // types.ts:304
+  equals(other: unknown): boolean            // types.ts:426
+  shapeEquals(other: unknown): boolean       // types.ts:437
+  shapeCompatible(other: TensorType): boolean // types.ts:447
 ```
 
-`equals` compares dtype, every dimension, and layout. `shapeEquals` drops the layout requirement. `shapeCompatible` is the interesting one ([`types.ts:342`](../../../src/compiler/ir/graph/types.ts)):
+`equals` compares dtype, every dimension, and layout. `shapeEquals` drops the layout requirement. `shapeCompatible` is the interesting one ([`types.ts:447`](../../../src/compiler/ir/graph/types.ts)):
 
 ```ts
   shapeCompatible(other: TensorType): boolean {
@@ -203,11 +204,11 @@ Lab 2 prints exactly this, on real types:
   d.shapeCompatible(other) = true
 ```
 
-The consequence is a rule for using the function, and it is worth stating flatly: **`shapeCompatible` is a check of an actual against an expected, never a way to group types.** Because it is not transitive, you cannot use it to build equivalence classes, deduplicate a set of types, or key a cache. The compiler obeys this. The verifier calls it in exactly two places — result type against inferred type, and return operand against declared output ([`verifier.ts:100`](../../../src/compiler/ir/graph/verifier.ts) and [`verifier.ts:297`](../../../src/compiler/ir/graph/verifier.ts)) — and both are actual-against-expected. Caching and deduplication use `equals` and `hash`.
+The consequence is a rule for using the function, and it is worth stating flatly: **`shapeCompatible` is a check of an actual against an expected, never a way to group types.** Because it is not transitive, you cannot use it to build equivalence classes, deduplicate a set of types, or key a cache. The compiler obeys this. The verifier calls it in exactly two places — result type against inferred type, and return operand against declared output ([`verifier.ts:113`](../../../src/compiler/ir/graph/verifier.ts) and [`verifier.ts:310`](../../../src/compiler/ir/graph/verifier.ts)) — and both are actual-against-expected. Caching and deduplication use `equals` and `hash`.
 
 ## 10.5 Broadcasting is a different order
 
-Elementwise operations do not require compatible shapes; they require *broadcast-compatible* ones, and that is a second, independent relation ([`types.ts:272`](../../../src/compiler/ir/graph/types.ts)):
+Elementwise operations do not require compatible shapes; they require *broadcast-compatible* ones, and that is a second, independent relation ([`types.ts:363`](../../../src/compiler/ir/graph/types.ts)):
 
 ```ts
 export function broadcastDim(a: Dim, b: Dim): Dim | null {
@@ -223,7 +224,7 @@ export function broadcastDim(a: Dim, b: Dim): Dim | null {
 
 > **Definition 10.4 (Broadcast order).** **(stated here)** Write `d ⊴ e` when `d = 1` or `d = e`. **On known dimensions**, `broadcastDim` computes the least upper bound of `d` and `e` under ⊴ when one exists, and returns `null` when it does not. Its last three lines leave that order rather than extending it, and Counterexample 10.5 is what they do instead.
 
-So on known dimensions broadcasting is a join — a genuine one, in a lattice whose bottom is `1` rather than `?`. `TensorType.broadcastShape` ([`types.ts:328`](../../../src/compiler/ir/graph/types.ts)) lifts it to whole shapes, right-aligning ranks so that a `[8]` bias joins a `[2, 8]` activation. That is precisely what happened at `%7` in Lab 1: `add([2,8], [8]) : [2,8]`.
+So on known dimensions broadcasting is a join — a genuine one, in a lattice whose bottom is `1` rather than `?`. `TensorType.broadcastShape` ([`types.ts:472`](../../../src/compiler/ir/graph/types.ts)) lifts it to whole shapes, right-aligning ranks so that a `[8]` bias joins a `[2, 8]` activation. That is precisely what happened at `%7` in Lab 1: `add([2,8], [8]) : [2,8]`.
 
 Two orders, then, doing different jobs: **specificity** decides whether a type may be used where another was expected, and **broadcast** decides what shape an elementwise operation produces. `1` is special in one and not the other; `?` is special in the other and not the one. Conflating them produces a compiler that thinks `[1, 8]` and `[4, 8]` are interchangeable everywhere, which they are not.
 
@@ -269,7 +270,7 @@ Two smaller observations from the same run.
 
 **Nothing checks Counterexample 10.5's bet.** It is tempting to finish that counterexample with "…and the guard catches it at run time", because that is what Definition 5.5 exists for and it would make the design sound. It is not what happens, and the gap is the difference between *deferring* an obligation and *dropping* one.
 
-Here is the entire set of guards this framework ever records. A **static** dimension gets an equality — `produceShapeSpec` ([`shape_env.ts:53`](../../../src/tracing/shape_env.ts)) emits `sym == 4` for each dimension not marked dynamic. A **dynamic** dimension gets exactly one guard, `sym > 0`, added by `createInput` ([`tracer.ts:65`](../../../src/tracing/tracer.ts)). Beyond that, `specialize` pins a symbol to its hint when a later stage demands a concrete value, and `guardDivisible` exists but is called from nowhere outside its own file. That is the list — and **no step of type inference contributes to it.** `broadcastDim` is a pure function over `Dim`s in the IR's type layer; it holds no reference to the `ShapeEnv` and could not add a constraint if it wanted to. So when it decides a `?` is 4, that decision is recorded in the result *type* and nowhere in the *guard set*, which is what `evaluateGuards` consults on every call (§5.6).
+Here is the entire set of guards this framework ever records. A **static** dimension gets an equality — `produceShapeSpec` ([`shape_env.ts:53`](../../../src/tracing/shape_env.ts)) emits `sym == 4` for each dimension not marked dynamic. A **dynamic** dimension gets exactly one guard, `sym > 0`, added by `createInput` ([`tracer.ts:63`](../../../src/tracing/tracer.ts)). Beyond that, `specialize` pins a symbol to its hint when a later stage demands a concrete value, and `guardDivisible` exists but is called from nowhere outside its own file. That is the list — and **no step of type inference contributes to it.** `broadcastDim` is a pure function over `Dim`s in the IR's type layer; it holds no reference to the `ShapeEnv` and could not add a constraint if it wanted to. So when it decides a `?` is 4, that decision is recorded in the result *type* and nowhere in the *guard set*, which is what `evaluateGuards` consults on every call (§5.6).
 
 The honest statement of what dynamic shapes buy is consequently narrower than "one kernel, many shapes, checked at the boundary":
 
@@ -282,11 +283,11 @@ The honest statement of what dynamic shapes buy is consequently narrower than "o
 
 Only the third row is a defect, and it is a real one: the type system asserts something about run time that neither the type system nor the runtime verifies. Two designs would close it — have inference emit a `sym ∈ {1, k}` guard when it makes this choice, or propagate `?` and accept the loss of downstream information — and the compiler currently does neither. Until it does, treat "broadcasting a dynamic dimension against a known one" as an assertion *you* are making, and one the framework will not catch you getting wrong.
 
-- **`numel()` returns `-1` for "unknown", not `null`.** [`types.ts:262`](../../../src/compiler/ir/graph/types.ts) uses the same sentinel as `DYNAMIC`, so a caller that forgets to check will allocate a negative number of elements or, worse, silently compute a nonsensical byte count. `symbolicNumel()` is the version that keeps a `SymInt` instead of collapsing to the sentinel.
+- **`numel()` returns `-1` for "unknown", not `null`.** [`types.ts:391`](../../../src/compiler/ir/graph/types.ts) uses the same sentinel as `DYNAMIC`, so a caller that forgets to check will allocate a negative number of elements or, worse, silently compute a nonsensical byte count. `symbolicNumel()` is the version that keeps a `SymInt` instead of collapsing to the sentinel.
 - **A negative dimension that is not `-1` prints as itself.** `dimToString` maps `-1` to `?` and anything else through `String`, so a shape that acquires, say, `-3` through a bad inference prints as `tensor<-3xf32>`. That rendering is deliberate — it shows you the corrupt value instead of disguising it as "unknown" — and the verifier is what refuses to let such a shape cross a phase boundary: every result type and every declared input and output is checked for a negative extent other than `DYNAMIC` (Chapter 12). If you see a negative number other than `-1` in a printed type, you have found a shape-inference bug, not an unusual tensor.
 - **Layout is carried but rarely varied.** Every type in Lab 1 has the identity layout, because layout selection is an optional pass (Chapter 25) that is off by default on this target. The field exists so that the pass has somewhere to put its answer; do not read its presence as evidence that anything uses it yet.
 - **`equals` includes layout, `shapeEquals` does not.** Two types with the same shape and dtype but different layouts describe the same values in different memory arrangements. Which comparison a pass should use depends on whether it is about to touch memory, and getting it backwards produces either a missed optimization or a wrong answer.
-- **`hash()` is lossy on purpose.** [`types.ts:315`](../../../src/compiler/ir/graph/types.ts) folds each dimension to sixteen bits and hashes only the first character of the dtype. It is a hash, so collisions are fine — but it means two types that hash equal must still be compared with `equals`, and any code that treats the hash as an identity is wrong.
+- **`hash()` is lossy on purpose.** [`types.ts:458`](../../../src/compiler/ir/graph/types.ts) folds each dimension to sixteen bits and hashes only the first character of the dtype. It is a hash, so collisions are fine — but it means two types that hash equal must still be compared with `equals`, and any code that treats the hash as an identity is wrong.
 
 ## 10.8 Read the tests
 

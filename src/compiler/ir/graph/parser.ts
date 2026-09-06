@@ -2,7 +2,7 @@ import { Block, Region } from './block.js';
 import { Operation } from './operation.js';
 import { GraphFunction } from './function.js';
 import { GraphModule } from './module.js';
-import { TensorType, TupleType, TokenType, FunctionType, Layout, DYNAMIC, dtypeFromString, isFloatType } from './types.js';
+import { TensorType, TupleType, TokenType, FunctionType, Layout, DYNAMIC, dtypeFromString, isFloatType, layoutFromString } from './types.js';
 import { SymInt } from '../sym_int.js';
 import { jsTypedArray } from '../../../util/dtype_map.js';
 import {
@@ -214,10 +214,7 @@ function parseTensorBody(inner: string, line: number): TensorType {
   if (dimParts.length === 1 && dimParts[0].trim() === '') dimParts.pop();
   const shape: Dim[] = dimParts.map((d) => parseDim(d, line));
   let layout: Layout | null = null;
-  if (parts.length > 1) {
-    const order = parts[1].trim();
-    layout = new Layout(order.slice(1, -1).split(',').map((v) => Number(v.trim())));
-  }
+  if (parts.length > 1) layout = layoutFromString(parts[1].trim());
   return new TensorType(shape, dtype, layout);
 }
 

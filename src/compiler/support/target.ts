@@ -10,6 +10,13 @@ export const TargetKind = Object.freeze({
 
 export type TargetKindValue = (typeof TargetKind)[keyof typeof TargetKind];
 
+const LAYOUT_AWARE_OPS: ReadonlySet<string> = new Set(['dot', 'conv']);
+
+export type ConvLayoutSpec = Readonly<{
+  order: readonly number[];
+  block?: Readonly<{ dim: number; factor: number }> | null;
+}>;
+
 export type TargetFeaturesConfig = {
   kind: string;
   name: string;
@@ -36,7 +43,7 @@ export type TargetFeaturesConfig = {
   arch?: string | null;
   libraryClasses?: ReadonlySet<string>;
   enableEpilogueFusion?: boolean;
-  preferredConvLayout?: string | null;
+  preferredConvLayout?: ConvLayoutSpec | null;
   layoutAwareOps?: ReadonlySet<string> | Iterable<string>;
   preferredBlockFactor?: number;
   supportsBlockedLayout?: boolean;
@@ -88,7 +95,7 @@ export class TargetFeatures {
   arch: string | null;
   libraryClasses: ReadonlySet<string>;
   enableEpilogueFusion: boolean;
-  preferredConvLayout: string | null;
+  preferredConvLayout: ConvLayoutSpec | null;
   layoutAwareOps: ReadonlySet<string>;
   preferredBlockFactor: number;
   supportsBlockedLayout: boolean;
@@ -193,6 +200,8 @@ export const CPUTarget = (overrides: TargetOverrides = {}): TargetFeatures => ne
   computeTFLOPs: 0.5,
   supportsBlockedLayout: true,
   preferredBlockFactor: 8,
+  preferredConvLayout: { order: [0, 1, 2, 3], block: { dim: 1, factor: 8 } },
+  layoutAwareOps: LAYOUT_AWARE_OPS,
   supportsInt8: true,
   supportsConstBuffers: true,
   attrs: { [TargetAttr.NATIVE_OPS]: NATIVE_OPS },

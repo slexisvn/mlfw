@@ -240,39 +240,68 @@ SmallVector<int64_t> Pool2dOp::getPaddingHigh() {
   return paddingSide(getPadding(), 1);
 }
 
-LogicalResult Pool2dOp::verifyLoweringToLinalg() {
+SmallVector<int64_t> Pool2dOp::getWindowOverhang() {
   auto operandType = cast<RankedTensorType>(getOperand().getType());
   auto resultType = cast<RankedTensorType>(getType());
   ArrayRef<int64_t> window = getKernelSize();
   ArrayRef<int64_t> strides = getStrides();
   SmallVector<int64_t> low = getPaddingLow();
   SmallVector<int64_t> high = getPaddingHigh();
-  bool padded =
-      llvm::any_of(getPadding(), [](int64_t pad) { return pad != 0; });
 
-  if (padded && getKind() == PoolKind::Max)
-    return emitError() << "cannot be lowered with padding: a maximum has no "
-                          "value to read outside the input that a window made "
-                          "only of padding would not then answer with";
-  if (padded && !getCountIncludePad())
-    return emitError() << "cannot be lowered without counting the padding: "
-                          "each window would be divided by how much of it fell "
-                          "inside, which is a count per window rather than the "
-                          "one number the traversal divides by";
-
+  SmallVector<int64_t> overhang;
   for (int64_t axis = 0; axis < 2; ++axis) {
-    int64_t extent = operandType.getDimSize(axis + 2);
-    int64_t count = resultType.getDimSize(axis + 2);
-    if (ShapedType::isDynamic(extent) || ShapedType::isDynamic(count))
+    int64_t extent = operandType.getDimSize(axis + kLeadingAxes);
+    int64_t count = resultType.getDimSize(axis + kLeadingAxes);
+    // No windows at all is an empty result, which reads nothing and so hangs
+    // over nothing; the arithmetic below would answer a whole window.
+    if (ShapedType::isDynamic(extent) || ShapedType::isDynamic(count) ||
+        count == 0) {
+      overhang.push_back(0);
       continue;
-    if ((count - 1) * strides[axis] + window[axis] >
-        extent + low[axis] + high[axis])
-      return emitError() << "cannot be lowered with a window that hangs over "
-                            "axis "
-                         << axis
-                         << ": it reads past the end of the input, and what is "
-                            "there is padding the op does not carry";
+    }
+    overhang.push_back(std::max<int64_t>(
+        0, (count - 1) * strides[axis] + window[axis] -
+               (extent + low[axis] + high[axis])));
   }
+  return overhang;
+}
+
+LogicalResult Pool2dOp::verifyLoweringToLinalg() {
+  auto operandType = cast<RankedTensorType>(getOperand().getType());
+
+  if (getCeilMode())
+    for (int64_t axis = 0; axis < 2; ++axis)
+      if (ShapedType::isDynamic(operandType.getDimSize(axis + kLeadingAxes)))
+        return emitError() << "cannot be lowered with ceil_mode over the "
+                              "dynamic axis "
+                           << axis
+                           << ": how far the last window hangs over is what is "
+                              "left of the extent after the stride, so the "
+                              "padding to write is an extent this does not "
+                              "have";
+
+  SmallVector<int64_t> overhang = getWindowOverhang();
+  bool declared =
+      llvm::any_of(getPadding(), [](int64_t pad) { return pad != 0; });
+  bool hanging = llvm::any_of(overhang, [](int64_t pad) { return pad != 0; });
+  if (!declared && !hanging)
+    return success();
+
+  // Both are padding by the time the traversal reads them, but only one of
+  // them is in the op, so the error says which it found.
+  StringRef source = declared ? "padding" : "a window hanging over the edge, "
+                                            "which is padding";
+  if (getKind() == PoolKind::Max)
+    return emitError() << "cannot be lowered with " << source
+                       << ": a maximum has no value to read outside the input "
+                          "that a window made only of padding would not then "
+                          "answer with";
+  if (!getCountIncludePad())
+    return emitError() << "cannot be lowered with " << source
+                       << " unless the padding is counted: each window would "
+                          "be divided by how much of it fell inside, which is "
+                          "a count per window rather than the one number the "
+                          "traversal divides by";
   return success();
 }
 
@@ -511,7 +540,7 @@ LogicalResult Pool2dOp::buildVjp(OpBuilder &builder, ValueRange adjoints,
   ArrayRef<int64_t> strides = getStrides();
 
   if (llvm::any_of(getPadding(), [](int64_t pad) { return pad != 0; }) ||
-      getCeilMode())
+      llvm::any_of(getWindowOverhang(), [](int64_t pad) { return pad != 0; }))
     return emitOpError() << "cannot be differentiated with padding or a window "
                             "that hangs over the edge: a position with no "
                             "element under it has nothing to take a share";
@@ -571,7 +600,7 @@ LogicalResult Pool2dOp::buildJvp(OpBuilder &builder, ValueRange tangents,
   }
 
   if (llvm::any_of(getPadding(), [](int64_t pad) { return pad != 0; }) ||
-      getCeilMode())
+      llvm::any_of(getWindowOverhang(), [](int64_t pad) { return pad != 0; }))
     return emitOpError() << "cannot be differentiated with padding or a window "
                             "that hangs over the edge: a position with no "
                             "element under it has nothing to take a share";

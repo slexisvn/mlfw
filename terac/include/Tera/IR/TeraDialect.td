@@ -76,6 +76,14 @@ def Tera_Dialect : Dialect {
         /// A weight is what this is for: uploaded once, read every step.
         static constexpr ::llvm::StringLiteral kDeviceResidentAttrName =
             "tera.device_resident";
+
+        /// On a lowered op, the name of the tera op it came from, which is
+        /// what a schedule addresses it by. `-convert-tera-to-linalg` writes
+        /// it as `<function>.<op>.<n>`: readable, so a tuned schedule can be
+        /// read and overridden by hand, and stable under everything but a
+        /// change to the program, so that one keeps applying.
+        static constexpr ::llvm::StringLiteral kScheduleAttrName =
+            "tera.schedule";
     }];
 }
 

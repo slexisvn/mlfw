@@ -105,3 +105,22 @@ func.func @not_a_gradient(%i: tensor<4xi32>, %a: tensor<4xf32>) -> tensor<4xf32>
   %0 = tera.exp %a : tensor<4xf32>
   return %0 : tensor<4xf32>
 }
+
+// -----
+
+// A `ceil_mode` that does take the extra window is a different matter: the
+// last window along each axis reads padding, and padding is where the reverse
+// rule has nothing to give a share to. The refusal names what it found rather
+// than the flag, because the flag is not what decides it -- the same flag over
+// an axis the stride divides is differentiated in autodiff-rules.mlir.
+func.func @pool_hangs_over(%x: tensor<1x1x5x5xf32>) -> tensor<1x1x3x3xf32>
+    attributes {tera.differentiable} {
+  // expected-error@+1 {{cannot be differentiated with padding or a window that hangs over the edge}}
+  %0 = tera.pool2d average, %x {kernel_size = array<i64: 2, 2>,
+                                strides = array<i64: 2, 2>,
+                                padding = array<i64: 0, 0, 0, 0>,
+                                ceil_mode = true,
+                                count_include_pad = true}
+      : tensor<1x1x5x5xf32> -> tensor<1x1x3x3xf32>
+  return %0 : tensor<1x1x3x3xf32>
+}
